@@ -65,6 +65,14 @@ describe('la revisión del cierre en la tarjeta', () => {
     expect(h).toMatch(/class="rc-punto-null[^"]*"><span[^>]*>\?<\/span> No registró material/);
   });
 
+  it('si el Supervisor la quiso cerrar solo y no pudo, dice cuándo y por qué', () => {
+    const h = html(orden({
+      revision: revision({ supervisor_no_pudo: { hora: '14:10', detalle: 'NO_AUTORIZADA: B7_REQUERIDO: x' } })
+    }));
+    expect(h).toContain('El Supervisor la quiso cerrar solo a las 14:10 y el motor no lo dejó: NO_AUTORIZADA: B7_REQUERIDO: x');
+    expect(html(orden())).not.toContain('quiso cerrar solo');
+  });
+
   it('sin revisión no dibuja nada', () => {
     expect(html(orden({ revision: null }))).not.toContain('rc-');
   });

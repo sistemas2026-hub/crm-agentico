@@ -87,6 +87,31 @@
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
             <span class="snoc-label">Seguimiento de las cuadrillas</span>
             <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
+            {#if data.seguimiento}
+              <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Cerrar solo pasa
+                   por la puerta autónoma del motor: encenderlo acá no abre
+                   ninguna compuerta de seguridad. -->
+              <details>
+                <summary class="snoc-body-sm">Lo que el Supervisor hace solo</summary>
+                <form method="POST" action="?/seguimiento" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="recordar_al_tecnico" checked={data.seguimiento.recordar_al_tecnico} />
+                    Le recuerda al técnico, en su teléfono, la orden que pasa la ventana sin reporte
+                  </label>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="supervisor_cierra_solo" checked={data.seguimiento.supervisor_cierra_solo} />
+                    Aprueba y cierra solo, ticket del ISP incluido, lo que su revisión marca «Se puede cerrar»
+                  </label>
+                  <span class="snoc-body-sm snoc-secundario">
+                    Para cerrar solo, además, el motor tiene que tener abierta la Autonomía 2 y autorizada la herramienta de cierre. Si no, lo intenta y la tarjeta dice por qué no pudo.
+                  </span>
+                  <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                    <button class="snoc-btn" type="submit">Guardar</button>
+                    {#if form?.de === 'seguimiento'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
+                  </div>
+                </form>
+              </details>
+            {/if}
           </section>
         {/if}
 
@@ -171,8 +196,8 @@
                     {/each}
                     <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
                       <button class="snoc-btn" type="submit">Guardar</button>
-                      {#if form?.hecho}<span class="snoc-body-sm">{form.hecho}</span>{/if}
-                      {#if form?.error}<span class="snoc-body-sm snoc-error-txt">{form.error}</span>{/if}
+                      {#if form?.hecho && !form?.de}<span class="snoc-body-sm">{form.hecho}</span>{/if}
+                      {#if form?.error && !form?.de}<span class="snoc-body-sm snoc-error-txt">{form.error}</span>{/if}
                     </div>
                   </form>
                 </details>

@@ -28,6 +28,10 @@
   <section class="rc rc-{r.veredicto}" aria-label="Revisión del cierre">
     <p class="rc-titulo"><strong>El Supervisor revisó el cierre:</strong> {r.texto}</p>
     {#if r.solucion}<p class="rc-solucion">Qué hizo: «{r.solucion}»</p>{/if}
+    {#if r.supervisor_no_pudo}
+      <!-- La quiso cerrar solo y el motor no lo dejó: cuándo y qué compuerta. -->
+      <p class="rc-no-pudo">El Supervisor la quiso cerrar solo a las {r.supervisor_no_pudo.hora} y el motor no lo dejó: {r.supervisor_no_pudo.detalle}</p>
+    {/if}
     <ul class="rc-puntos">
       {#each r.puntos as p (p.clave)}
         <li class="rc-punto-{String(p.ok)}"><span aria-hidden="true">{marca[String(p.ok)]}</span> {p.texto}</li>
@@ -83,6 +87,7 @@
   .rc-no_cerrar { border-left-color: var(--snoc-error); background: var(--snoc-error-container); }
   .rc-titulo, .rc-solucion { margin: 0; overflow-wrap: anywhere; }
   .rc-solucion { font-style: italic; color: var(--snoc-on-surface-variant); }
+  .rc-no-pudo { margin: 0; font-size: 12px; color: #8a5300; overflow-wrap: anywhere; }
   .rc-puntos { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
   .rc-punto-false { color: var(--snoc-error); font-weight: 600; }
   .rc-punto-null { color: #8a5300; }

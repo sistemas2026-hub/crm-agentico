@@ -9,6 +9,11 @@ import {
 } from '$lib/server/v2/material-del-dia.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 import { aprobarYCerrar, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
+import {
+  cuerpoDeSeguimiento,
+  guardarConfiguracionDeSeguimiento,
+  leerConfiguracionDeSeguimiento
+} from '$lib/server/v2/configuracion-de-seguimiento.js';
 import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 
 /**
@@ -41,17 +46,18 @@ export async function load({ url, cookies, locals }) {
   if (!ROLES_GESTION.has(rol)) {
     return {
       puedeVer: false, dia: '', publicado: null, error: false,
-      material: null, errorMaterial: false, configuracion: null
+      material: null, errorMaterial: false, configuracion: null, seguimiento: null
     };
   }
 
   //  Hoy en el reloj de la EMPRESA, no en el del servidor (UTC).
   const pedido = (url.searchParams.get('dia') ?? '').trim();
   const dia = /^\d{4}-\d{2}-\d{2}$/.test(pedido) ? pedido : await hoyDeLaEmpresa(locals, cookies);
-  const [dp, mat, conf] = await Promise.all([
+  const [dp, mat, conf, seg] = await Promise.all([
     leerDiaPublicado({ cookies }, dia),
     leerMaterialDelDia({ cookies }, dia),
-    leerConfiguracionDeMaterial({ cookies })
+    leerConfiguracionDeMaterial({ cookies }),
+    leerConfiguracionDeSeguimiento({ cookies })
   ]);
   return {
     puedeVer: true,
@@ -60,7 +66,9 @@ export async function load({ url, cookies, locals }) {
     error: dp.error,
     material: mat.material,
     errorMaterial: mat.error,
-    configuracion: conf.configuracion
+    configuracion: conf.configuracion,
+    //  Lo que el Supervisor hace solo (30/10/2026): recordar y cerrar.
+    seguimiento: seg.configuracion
   };
 }
 
@@ -74,6 +82,24 @@ export const actions = {
       return { hecho: 'Quedó guardado de dónde y qué carga cada cuadrilla.' };
     } catch (e) {
       return fail(400, { error: mensajeDeError(e) });
+    }
+  },
+
+  //  LO QUE EL SUPERVISOR HACE SOLO (30/10/2026): recordarle al técnico y
+  //  cerrar solo lo que su revisión dio por bueno.
+  seguimiento: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'seguimiento', error: 'Esto es para quien gestiona.' });
+    try {
+      const r = await guardarConfiguracionDeSeguimiento({ cookies }, cuerpoDeSeguimiento(await request.formData()));
+      return {
+        de: 'seguimiento',
+        hecho: r?.supervisor_cierra_solo
+          ? 'Guardado. El Supervisor cierra solo lo que dé por bueno, si el motor lo deja.'
+          : 'Guardado. El Supervisor no cierra solo: una persona confirma.'
+      };
+    } catch (e) {
+      return fail(400, { de: 'seguimiento', error: mensajeDeError(e) });
     }
   },
 

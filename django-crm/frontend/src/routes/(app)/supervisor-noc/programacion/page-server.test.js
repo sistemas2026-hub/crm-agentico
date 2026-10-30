@@ -137,6 +137,46 @@ describe('Programación: la persona confirma lo que revisó el Supervisor (30/10
   });
 });
 
+describe('Programación: lo que el Supervisor hace solo (30/10/2026)', () => {
+  /** @param {string} rol @param {Record<string, string>} campos */
+  const pedido = (rol, campos) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) f.set(k, v);
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } }
+    });
+  };
+
+  it('una casilla marcada es sí; desmarcada (no llega) es no', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: false, supervisor_cierra_solo: true });
+
+    const r = /** @type {any} */ (await actions.seguimiento(pedido('ADMIN', { supervisor_cierra_solo: 'on' })));
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/seguimiento/configuracion/');
+    expect(apiRequest.mock.calls[0][1]).toEqual({
+      method: 'PUT', body: { recordar_al_tecnico: false, supervisor_cierra_solo: true }
+    });
+    expect(r.de).toBe('seguimiento');
+    expect(r.hecho).toContain('cierra solo');
+
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: true, supervisor_cierra_solo: false });
+    const apagado = /** @type {any} */ (await actions.seguimiento(pedido('ADMIN', { recordar_al_tecnico: 'on' })));
+    expect(apiRequest.mock.calls[0][1].body).toEqual({ recordar_al_tecnico: true, supervisor_cierra_solo: false });
+    expect(apagado.hecho).toContain('una persona confirma');
+  });
+
+  it('quien no gestiona no lo cambia', async () => {
+    apiRequest.mockReset();
+    const r = /** @type {any} */ (await actions.seguimiento(pedido('USER', { supervisor_cierra_solo: 'on' })));
+    expect(r.status).toBe(403);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+});
+
 const PUBLICADO = { fecha: '2026-10-28', cuadrillas: [], con_alguien_que_no_sale: [], esperan: [], cuentas: {} };
 
 /** @param {string} url @param {string} rol */
