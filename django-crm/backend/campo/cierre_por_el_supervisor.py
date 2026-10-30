@@ -181,6 +181,9 @@ def _aprobar_y_cerrar(orden, revision, ticket) -> bool:
                                                     OrdenTrabajo.REQUIERE_REVISION)
                 or fresca.vuelta != orden.vuelta):
             return False
+        from campo.revision_del_cierre import guardar_foto
+
+        guardar_foto(fresca, revision)
         fresca = aprobar(fresca, profile=None,
                          observacion=f"Aprobada por el Supervisor: {motivos}")
         fresca = cerrar_orden(fresca, profile=None,

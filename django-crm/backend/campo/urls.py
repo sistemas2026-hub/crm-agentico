@@ -96,6 +96,8 @@ urlpatterns = [
     #  Lo que quedo publicado un dia, con quien lo asigno (28/10/2026): la
     #  pantalla de Programacion. Ver campo/dia_publicado.py.
     path("dia-publicado/", dia_publicado_views.DiaPublicadoView.as_view(), name="dia_publicado"),
+    #  La pestaña Cerradas de Programacion (30/10/2026).
+    path("cerradas/", dia_publicado_views.CerradasView.as_view(), name="ordenes_cerradas"),
     path("material-del-dia/", material_del_dia_views.MaterialDelDiaView.as_view(),
          name="material_del_dia"),
     path("material-del-dia/configuracion/",

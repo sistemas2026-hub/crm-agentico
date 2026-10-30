@@ -556,8 +556,13 @@ def del_dia(org, fecha) -> dict:
                     fecha=fecha),
                 "novedades": [N.a_json(n, ahora) for n in novedades_de.get(j.id, [])],
                 "sin_reporte": sin_reporte,
+                #  SOLO LO ABIERTO (30/10/2026, el usuario: «es el historial
+                #  del ticket anterior, no tiene que salir»). Lo de una orden
+                #  terminada vive en su tarjeta, en la pestaña Cerradas.
                 "log": TD.log_del_dia(
-                    lista, fecha=fecha, zona=zona, tiempos=tiempos,
+                    [o for o in lista if o.estado_operativo not in
+                     (*TD.TERMINADAS, OrdenTrabajo.CANCELADA)],
+                    fecha=fecha, zona=zona, tiempos=tiempos,
                     novedades=novedades_de.get(j.id, []),
                     material=("", cargado.get(actas.get(j.id))) if actas else None,
                     sin_reporte=sin_reporte, ahora=ahora),

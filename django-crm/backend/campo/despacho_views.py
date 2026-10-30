@@ -274,10 +274,23 @@ class ValidarTrabajoView(APIView):
         s.is_valid(raise_exception=True)
         d = s.validated_data
 
+        #  LA FOTO DE LA REVISION (30/10/2026): lo que decia el Supervisor
+        #  ANTES de aprobar; despues ya no se revisa. Ver la pestaña Cerradas.
+        foto = None
+        if d["decision"] == "aprobar":
+            from campo.revision_del_cierre import revisar
+
+            try:
+                foto = revisar(orden)
+            except Exception:                                    # noqa: BLE001
+                foto = None
         try:
             if d["decision"] == "aprobar":
                 orden = aprobar(orden, profile=request.profile,
                                 observacion=d["observacion"])
+                from campo.revision_del_cierre import guardar_foto
+
+                guardar_foto(orden, foto, request.profile)
             else:
                 orden = requerir_correccion(
                     orden, requisitos=d["requisitos_a_corregir"],

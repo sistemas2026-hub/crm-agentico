@@ -130,6 +130,27 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     }
 
 
+#: La foto de la revision al aprobar (`guardar_foto`).
+FOTO = "revision_al_aprobar"
+
+
+def guardar_foto(orden, revision, profile=None) -> None:
+    """Deja en la bitacora de la orden lo que decia la revision al aprobarla
+    (30/10/2026, la pestaña Cerradas): despues de aprobada ya no se revisa, y
+    recalcularla diria otra cosa. Sin revision (una orden que no la tenia),
+    no se guarda nada."""
+    from campo.models import EventoTrabajo
+
+    if not revision:
+        return
+    EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo=FOTO, profile=profile,
+        datos={"veredicto": revision["veredicto"], "texto": revision["texto"],
+               "puntos": [{"clave": p["clave"], "ok": p["ok"], "texto": p["texto"]}
+                          for p in revision["puntos"]],
+               "solucion": revision.get("solucion", "")})
+
+
 def _punto(clave, ok, texto, **extra) -> dict:
     return {"clave": clave, "ok": ok, "texto": texto, **extra}
 

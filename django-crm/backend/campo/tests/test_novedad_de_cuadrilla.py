@@ -262,8 +262,11 @@ def test_p_programacion_dice_cuanto_lleva_cada_orden_y_el_dia_de_la_cuadrilla(
     assert (r["en_curso"]["numero"], r["en_curso"]["estado"]) == (ahora_en.numero, "en_sitio")
     assert c["novedades"][0]["tipo"] == "llanta"
     textos = [e["texto"] for e in c["log"]]
-    assert f"Llegó a OT #{hecha.numero} (23 min de camino)" in textos
-    assert f"Terminó OT #{hecha.numero} (40 min en sitio)" in textos
+    #  30/10/2026, el usuario: lo de una orden TERMINADA no sale en el log de
+    #  la cuadrilla («es el historial del ticket anterior»); vive en su
+    #  tarjeta, en la pestaña Cerradas (`ordenes_cerradas.historial_de`).
+    assert not any(f"#{hecha.numero}" in t for t in textos), textos
+    assert f"Llegó a OT #{ahora_en.numero} (10 min de camino)" in textos
     assert any(t.startswith("Avisó novedad: se pinchó una llanta") for t in textos)
     horas = [e["hora"] for e in c["log"]]
     assert horas == sorted(horas), "el log va en orden de hora"
@@ -301,9 +304,10 @@ def test_p2_lo_de_otro_dia_lleva_su_fecha_y_no_se_cuenta_en_minutos(
     c = D.del_dia(org, _hoy())["cuadrillas"][0]
     t = {f["numero"]: f for f in c["ordenes"]}[colgada.numero]["tiempos"]
     assert (t["traslado_min"], t["en_sitio_min"]) == (0, None)
+    #  Terminada, ya no sale en el log de la cuadrilla (30/10/2026): su
+    #  «había llegado el ...» va en su historial, en la pestaña Cerradas.
     textos = [e["texto"] for e in c["log"]]
-    assert (f"Terminó OT #{colgada.numero} (había llegado el {vieja.strftime('%d/%m %H:%M')})"
-            in textos), textos
+    assert not any(f"#{colgada.numero}" in t for t in textos), textos
     assert {f["numero"]: f for f in c["ordenes"]}[colgada.numero]["direccion"] == "Calle 1"
 
 
