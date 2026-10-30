@@ -1065,7 +1065,7 @@ class ConfirmarEvidenciaView(APIView):
 
 
 class SubirEvidenciaDirectoView(APIView):
-    """Recibe el binario de UNA evidencia. Solo backend local de desarrollo.
+    """Recibe el binario de UNA evidencia, en desarrollo Y en produccion.
 
     Cierra el circuito que quedaba cortado: 'descriptor_subida' prometia un PUT
     contra esta ruta y la ruta no existia, asi que la app registraba la
@@ -1077,18 +1077,27 @@ class SubirEvidenciaDirectoView(APIView):
     proponer, y el path traversal deja de ser un problema a resolver para pasar
     a ser imposible de plantear.
 
-    En produccion con S3/R2 esta vista no participa: 'descriptor_subida' emite
-    la URL prefirmada del proveedor y el cliente sube alli. De ahi que solo
-    exista en entorno de desarrollo -- con ENV_TYPE de produccion devuelve 404,
-    no 403: quien no deberia usarla tampoco tiene por que saber que existe.
+    30/10/2026: hasta hoy devolvia 404 fuera de desarrollo, suponiendo que
+    produccion tendria S3/R2 con URL prefirmada. Produccion guarda en disco
+    (`crm/server_settings.py`: «aqui no hay S3», volumen `media:/app/media`) y
+    `descriptor_subida` le da a la app ESTA ruta siempre: ninguna foto podia
+    subir, y como «completar» espera a que todas esten confirmadas, ninguna
+    orden con foto se cerraba desde la app. Visto en una OT real: el reporte de
+    cierre llegaba y la orden seguia en sitio con «5 cambios locales».
+
+    La regla que queda: si `descriptor_subida` promete esta ruta, esta ruta
+    responde. El dia que haya un proveedor con URL prefirmada, cambian los dos
+    juntos.
+
+    Y por eso mismo se acota como el registro (`_obtener_orden_o_404`): un
+    tecnico sube solo a las fotos de SUS ordenes; la gestion, a las de su
+    empresa. Antes alcanzaba con ser de la empresa, que en desarrollo daba
+    igual.
     """
 
     permission_classes = [IsCampoAuthenticated]
 
     def put(self, request, pk):
-        if not getattr(settings, "IS_DEV_ENV", False):
-            raise Http404
-
         org = getattr(request, "org", None)
         if not org:
             raise Http404
@@ -1099,6 +1108,9 @@ class SubirEvidenciaDirectoView(APIView):
         evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
         if not evidencia:
             raise Http404
+        # La misma puerta que el registro: un tecnico, solo en SUS ordenes.
+        # Tambien 404: la foto de una orden ajena no existe para el.
+        _obtener_orden_o_404(request, evidencia.orden_trabajo_id)
 
         # Una evidencia que ya esta en el servidor no se reemplaza. Es el mismo
         # criterio que el registro: el sha256 identifica la fila, no garantiza
