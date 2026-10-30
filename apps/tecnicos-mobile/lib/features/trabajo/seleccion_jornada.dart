@@ -1,4 +1,5 @@
 import 'estado_trabajo.dart';
+import 'orden_operativo.dart';
 import 'trabajo_vista.dart';
 
 /// Cómo se lee la jornada. Una sola vez, para las dos pantallas.
@@ -50,7 +51,7 @@ class SeleccionJornada {
   static bool hayVariosEnCurso(List<TrabajoVista> trabajos) =>
       enCurso(trabajos).length > 1;
 
-  /// Lo que viene después: sin empezar, con fecha, en orden cronológico.
+  /// Lo que viene después: sin empezar, con fecha, en el orden de Órdenes.
   ///
   /// Una orden sin fecha **no entra**: ponerla en una agenda le inventaría un
   /// momento. Sigue estando en Trabajo, que es donde se la ve completa — ver
@@ -63,10 +64,13 @@ class SeleccionJornada {
     final candidatos = trabajos
         .where((TrabajoVista t) => !t.estado.terminada && !t.estado.enMarcha)
         .where((TrabajoVista t) => t.compromiso != null)
-        .toList()
-      ..sort(_porCompromisoYNumero);
+        .toList();
 
-    return candidatos.take(cuantos).toList();
+    // EN EL ORDEN DE ÓRDENES (29/10/2026): el que arma el Supervisor, y sin
+    // él la regla de siempre (`OrdenOperativo`). Iba por hora y número de OT,
+    // y con las órdenes del Supervisor —todas a las 00:00, sin hora— eso era
+    // solo el número: Inicio decía un orden y Órdenes otro.
+    return OrdenOperativo.ordenar(candidatos, ahora: desde).take(cuantos).toList();
   }
 
   /// Trabajos que siguen pendientes y no tienen fecha de compromiso.

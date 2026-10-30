@@ -301,6 +301,9 @@ void main() {
         );
         expect(find.textContaining('Todavía no hay material entregado'),
             findsOneWidget);
+        // Sin material a su nombre no se le ofrece devolver nada (29/10/2026:
+        // el usuario preguntó si «kit por recibir» y «devolver» eran lo mismo).
+        expect(find.text('Preparar Devolución al Depósito'), findsNothing);
       }
     });
 

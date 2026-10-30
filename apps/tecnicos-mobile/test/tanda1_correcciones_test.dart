@@ -165,7 +165,7 @@ void main() {
       return ordenes;
     }
 
-    testWidgets('la lista sale en el orden de Inicio, y lo dice', (WidgetTester t) async {
+    testWidgets('la lista sale en el orden de Inicio, sin explicarlo', (WidgetTester t) async {
       _pantallaAlta(t);
       await montar(t, <Map<String, dynamic>>[
         _fila(id: 'a', numero: 1),
@@ -176,7 +176,9 @@ void main() {
       final double yAsignada = t.getTopLeft(find.text('Cliente 1')).dy;
       expect(yCamino, lessThan(yAsignada),
           reason: 'la OT #4 va en camino: va antes que la #1, aunque su número sea mayor');
-      expect(find.textContaining('Primero lo empezado'), findsOneWidget);
+      // La frase que lo explicaba se fue el 29/10/2026 (el usuario: «no le
+      // veo uso»): cada tarjeta trae su lugar del día y la que sigue.
+      expect(find.textContaining('Primero lo empezado'), findsNothing);
     });
 
     testWidgets('las detenidas tienen su filtro, con su número', (WidgetTester t) async {

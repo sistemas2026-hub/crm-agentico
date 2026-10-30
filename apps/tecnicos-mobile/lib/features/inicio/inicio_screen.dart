@@ -9,6 +9,7 @@ import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
+import '../../core/widgets/lista_con_scroll_propio.dart';
 import '../materiales/estado_de_jornada.dart';
 import '../notificaciones/notificaciones_screen.dart';
 import '../trabajo/estado_trabajo.dart';
@@ -163,9 +164,13 @@ class _InicioScreenState extends State<InicioScreen> {
       ahora: widget.ahora,
     );
 
+    // TODAS, no tres (29/10/2026): con el tope de tres, la quinta orden del
+    // día no aparecía en Inicio y el contador decía «3 pendientes». Ahora se
+    // ven tres y el resto en el recuadro con scroll (`_proximos`).
     final proximos = SeleccionJornada.proximos(
       trabajos,
       desde: widget.ahora ?? DateTime.now(),
+      cuantos: trabajos.length,
     ).where((TrabajoVista t) => t.id != resumen.siguiente?.id).toList();
     final sinFecha = SeleccionJornada.activosSinFecha(trabajos)
         .where((TrabajoVista t) => t.id != resumen.siguiente?.id)
@@ -718,17 +723,26 @@ class _InicioScreenState extends State<InicioScreen> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        for (final TrabajoVista trabajo in proximos)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: _ItemProximo(
-              trabajo: trabajo,
-              onVer: () async {
-                await widget.abrirTrabajo(context, trabajo);
-                await widget.ordenes.recargar();
-              },
-            ),
-          ),
+        // Se ven tres; con más, el resto en un recuadro con su propio scroll
+        // (29/10/2026, el usuario: «cuando salgan más de 3 tickets se va a
+        // alargar»). La misma pieza que Avisos.
+        ListaConScrollPropio(
+          visibles: 3,
+          claveDelRecuadro: const ValueKey<String>('despues-con-scroll'),
+          filas: <Widget>[
+            for (final TrabajoVista trabajo in proximos)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: _ItemProximo(
+                  trabajo: trabajo,
+                  onVer: () async {
+                    await widget.abrirTrabajo(context, trabajo);
+                    await widget.ordenes.recargar();
+                  },
+                ),
+              ),
+          ],
+        ),
         if (sinFecha.isNotEmpty)
           InkWell(
             onTap: widget.onVerTodos,

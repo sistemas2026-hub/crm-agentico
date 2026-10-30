@@ -7,6 +7,7 @@ import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_bloques.dart';
+import '../../core/widgets/lista_con_scroll_propio.dart';
 
 /// Lo que le avisaron al técnico mientras no estaba mirando.
 ///
@@ -85,16 +86,6 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
 
   StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
 
-  /// El scroll propio del recuadro, y lo que miden los primeros [visibles]:
-  /// la altura sale de lo dibujado, no de una estimación, porque una alerta
-  /// ocupa el doble que un aviso.
-  final ScrollController _scroll = ScrollController();
-  late final List<GlobalKey> _llaves = List<GlobalKey>.generate(
-    widget.visibles ?? 0,
-    (_) => GlobalKey(),
-  );
-  double? _altoMedido;
-
   @override
   void initState() {
     super.initState();
@@ -110,7 +101,6 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   @override
   void dispose() {
     _suscripcion?.cancel();
-    _scroll.dispose();
     super.dispose();
   }
 
@@ -191,7 +181,13 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
     ];
     final int? visibles = widget.visibles;
     if (visibles != null && filas.length > visibles) {
-      return _conScroll(filas, visibles);
+      return <Widget>[
+        ListaConScrollPropio(
+          filas: filas,
+          visibles: visibles,
+          claveDelRecuadro: const ValueKey<String>('avisos-con-scroll'),
+        ),
+      ];
     }
     if (filas.isNotEmpty) return filas;
     if (_cargando) {
@@ -212,55 +208,6 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
     }
 
     return filas;
-  }
-
-  /// Los primeros [visibles] a la vista y el resto en el mismo recuadro, con
-  /// su scroll. Debajo dice cuántos quedan: un scroll sin aviso es un aviso
-  /// que nadie ve.
-  List<Widget> _conScroll(List<Widget> filas, int visibles) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _medir(visibles));
-    final int mas = filas.length - visibles;
-    return <Widget>[
-      ConstrainedBox(
-        key: const ValueKey<String>('avisos-con-scroll'),
-        // Antes de medir, un alto razonable; en el cuadro siguiente, el real.
-        constraints: BoxConstraints(maxHeight: _altoMedido ?? 76.0 * visibles),
-        child: Scrollbar(
-          controller: _scroll,
-          thumbVisibility: true,
-          child: ListView(
-            controller: _scroll,
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(right: AppSpacing.sm),
-            children: <Widget>[
-              for (int i = 0; i < filas.length; i++)
-                i < visibles
-                    ? KeyedSubtree(key: _llaves[i], child: filas[i])
-                    : filas[i],
-            ],
-          ),
-        ),
-      ),
-      const SizedBox(height: AppSpacing.xs),
-      Text(
-        'Deslizá dentro del recuadro para ver ${mas == 1 ? 'el otro' : 'los otros $mas'}',
-        style: AppTypography.etiquetaChica,
-        textAlign: TextAlign.center,
-      ),
-    ];
-  }
-
-  void _medir(int visibles) {
-    if (!mounted) return;
-    double suma = 0;
-    for (int i = 0; i < visibles; i++) {
-      final RenderObject? r = _llaves[i].currentContext?.findRenderObject();
-      if (r is! RenderBox || !r.hasSize) return;
-      suma += r.size.height;
-    }
-    if (_altoMedido == null || (suma - _altoMedido!).abs() > 0.5) {
-      setState(() => _altoMedido = suma);
-    }
   }
 
   Widget _unAviso(Map<String, dynamic> fila) {

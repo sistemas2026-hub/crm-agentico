@@ -45,7 +45,30 @@ class TrabajoScreen extends StatefulWidget {
 
 class _TrabajoScreenState extends State<TrabajoScreen> {
   PestanaTrabajo _pestana = PestanaTrabajo.todos;
-  SegmentoEntidad _segmento = SegmentoEntidad.ordenes;
+  /// SOPORTE E INSTALACIONES, SEPARADAS (29/10/2026). El usuario: «quita
+  /// Órdenes» (tenía el mismo número que Tickets) y «si asignan soporte e
+  /// instalación, que no salgan revueltos: que salgan al presionar
+  /// Instalación, y a los otros cámbiale el nombre de Ticket a Soporte».
+  ///
+  /// Una de las dos está siempre elegida. Soporte se lleva todo lo que no es
+  /// instalación —también un mantenimiento—, así nada queda sin columna.
+  /// Hasta que el técnico toque una, se ve Soporte; salvo que no tenga
+  /// soporte y sí instalaciones: un instalador no tiene por qué abrir cada día
+  /// una lista vacía.
+  SegmentoEntidad? _elegido;
+
+  SegmentoEntidad get _segmento {
+    final SegmentoEntidad? elegido = _elegido;
+    if (elegido != null) return elegido;
+    final List<TrabajoVista> todos = widget.ordenes.trabajos;
+    final bool haySoporte = todos.any(SegmentoEntidad.soporte.incluye);
+    final bool hayInstalaciones = todos.any(SegmentoEntidad.instalaciones.incluye);
+    return !haySoporte && hayInstalaciones
+        ? SegmentoEntidad.instalaciones
+        : SegmentoEntidad.soporte;
+  }
+
+  bool _enElSegmento(TrabajoVista t) => _segmento.incluye(t);
 
   /// Lo que el técnico escribió en el buscador. Filtra de verdad, y sobre lo
   /// que ya está en el teléfono: sin señal también busca.
@@ -125,7 +148,9 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
           widget.ordenes.trabajos,
           ahora: ahora,
         )
-        .where(_segmento.incluye)
+        // Buscando, en las dos: quien escribe un cliente o escanea un
+        // equipo no sabe si es soporte o instalación.
+        .where((TrabajoVista t) => texto.isNotEmpty || _enElSegmento(t))
         .where((TrabajoVista t) =>
             perteneceA(_pestana, t.estado, t.compromiso, ahora: ahora))
         .where((TrabajoVista t) => texto.isEmpty || _coincide(t, texto))
@@ -351,16 +376,17 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                 : '$total órdenes asignadas para la jornada de hoy',
             style: AppTypography.cuerpoChico,
           ),
-          // Se dice en qué orden están: si no, el técnico no sabe si el primero
-          // es el más urgente o el de número más bajo.
-          Text(
-            _porCercania
-                ? 'Ordenadas por distancia en línea recta, no por tiempo de viaje'
-                : 'Primero lo empezado, después lo que vence antes y la prioridad',
-            style: AppTypography.etiquetaChica.copyWith(
-              color: AppColors.onSurfaceVariant,
+          // El orden de siempre ya no se explica (29/10/2026, el usuario: «eso
+          // para qué es, no le veo uso»): cada tarjeta trae su lugar del día y
+          // la que sigue va marcada. Se dice solo cuando el técnico pidió
+          // otro, el de la distancia, que no es el del Supervisor.
+          if (_porCercania)
+            Text(
+              'Ordenadas por distancia en línea recta, no por tiempo de viaje',
+              style: AppTypography.etiquetaChica.copyWith(
+                color: AppColors.onSurfaceVariant,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -452,7 +478,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                   colorContador: segmento == _segmento
                       ? AppColors.primary
                       : AppColors.surfaceContainerHighest,
-                  onTap: () => setState(() => _segmento = segmento),
+                  onTap: () => setState(() => _elegido = segmento),
                 ),
               ),
             ),
@@ -468,7 +494,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     int cuantos(PestanaTrabajo filtro) {
       final ahora = DateTime.now();
       return widget.ordenes.trabajos
-          .where(_segmento.incluye)
+          .where(_enElSegmento)
           .where((TrabajoVista t) =>
               perteneceA(filtro, t.estado, t.compromiso, ahora: ahora))
           .length;
@@ -564,7 +590,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
       return 'Sin resultados para "${_busqueda.text.trim()}"';
     }
     return switch (_pestana) {
-      PestanaTrabajo.todos => _segmento == SegmentoEntidad.ordenes
+      PestanaTrabajo.todos => widget.ordenes.trabajos.isEmpty
           ? 'No tenés trabajos asignados'
           : 'No hay ${_segmento.etiqueta.toLowerCase()} en tu jornada',
       PestanaTrabajo.pendientes => 'No tenés trabajos pendientes',
@@ -732,28 +758,25 @@ class _ChipFiltro extends StatelessWidget {
 }
 
 enum SegmentoEntidad {
-  ordenes('Órdenes'),
-  instalaciones('Instalaciones'),
-  tickets('Tickets');
+  soporte('Soporte'),
+  instalaciones('Instalaciones');
 
   const SegmentoEntidad(this.etiqueta);
 
   final String etiqueta;
 
   bool incluye(TrabajoVista trabajo) => switch (this) {
-        SegmentoEntidad.ordenes => true,
+        SegmentoEntidad.soporte => trabajo.familia != FamiliaTrabajo.instalacion,
         SegmentoEntidad.instalaciones =>
           trabajo.familia == FamiliaTrabajo.instalacion,
-        SegmentoEntidad.tickets => trabajo.familia == FamiliaTrabajo.incidencia,
       };
 
   String get explicacion => switch (this) {
-        SegmentoEntidad.ordenes =>
-          'OT = Orden de Trabajo asignada para ejecución física en terreno.',
+        SegmentoEntidad.soporte =>
+          'Soporte = lo que no es una instalación: reportes del cliente o del '
+              'NOC, mantenimientos y otros trabajos.',
         SegmentoEntidad.instalaciones =>
           'Instalación = alta nueva de servicio; genera la OT que se ejecuta.',
-        SegmentoEntidad.tickets =>
-          'Ticket = reporte del cliente o del NOC; puede derivar en una OT.',
       };
 }
 

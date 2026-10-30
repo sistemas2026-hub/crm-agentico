@@ -225,16 +225,26 @@ void main() {
       expect(SeleccionJornada.hayVariosEnCurso(trabajos), isTrue);
     });
 
-    test('4. Los proximos van en orden y excluyen los empezados', () {
+    test('4. Los proximos van en el orden de Órdenes y excluyen los empezados', () {
+      // Desde el 29/10/2026 el de Órdenes (`OrdenOperativo`): primero el
+      // lugar que le dio el Supervisor, aunque su hora sea más tarde.
+      final String dia =
+          '${ahora.year.toString().padLeft(4, '0')}-${ahora.month.toString().padLeft(2, '0')}-${ahora.day.toString().padLeft(2, '0')}';
+      TrabajoVista conLugar(String id, int numero, DateTime cuando, int lugar) =>
+          TrabajoVista.desdeOrden(<String, dynamic>{
+            ..._orden(id: id, numero: numero, estado: 'asignada', compromiso: cuando),
+            'orden_del_dia': lugar,
+            'orden_del_dia_fecha': dia,
+          });
       final trabajos = <TrabajoVista>[
-        _vista(id: 'b', numero: 2, estado: 'asignada', compromiso: enDosHoras),
-        _vista(id: 'a', numero: 1, estado: 'asignada', compromiso: enUnaHora),
+        conLugar('a', 1, enUnaHora, 2),
+        conLugar('b', 2, enDosHoras, 1),
         _vista(id: 'curso', numero: 3, estado: 'en_sitio', compromiso: ahora),
         _vista(id: 'listo', numero: 4, estado: 'cerrada', compromiso: enUnaHora),
       ];
 
       final proximos = SeleccionJornada.proximos(trabajos, desde: ahora);
-      expect(proximos.map((TrabajoVista t) => t.id).toList(), <String>['a', 'b']);
+      expect(proximos.map((TrabajoVista t) => t.id).toList(), <String>['b', 'a']);
     });
 
     test('5. Una orden activa sin fecha no entra en la agenda, pero se cuenta', () {
@@ -1061,6 +1071,42 @@ void main() {
 
       expect(find.textContaining('12:00 AM'), findsNothing);
       expect(find.text('00:00'), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  group('16. Después: todas, de a tres a la vista (29/10/2026)', () {
+    // El usuario: «cuando salgan más de 3 tickets se va a alargar; que tenga
+    // su propio scroll». Y hasta ese día se cortaba en tres: la quinta orden
+    // no aparecía en Inicio.
+    final DateTime ahora = DateTime(2026, 10, 29, 7);
+    Map<String, dynamic> a(int n) => _orden(
+        id: '$n',
+        numero: n,
+        estado: 'asignada',
+        compromiso: DateTime(2026, 10, 29, 8 + n));
+
+    testWidgets('seis órdenes: una sigue, cinco en Después, tres a la vista',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[for (int n = 1; n <= 6; n++) a(n)]);
+      await tester.pumpWidget(banco.app(ahora: ahora));
+      await tester.pumpAndSettle();
+
+      expect(find.text('5 pendientes'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('despues-con-scroll')), findsOneWidget);
+      expect(find.text('Deslizá dentro del recuadro para ver los otros 2'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('con tres o menos no hay recuadro', (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[for (int n = 1; n <= 4; n++) a(n)]);
+      await tester.pumpWidget(banco.app(ahora: ahora));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 pendientes'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('despues-con-scroll')), findsNothing);
       await banco.cerrar();
     });
   });
