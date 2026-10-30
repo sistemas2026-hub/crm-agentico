@@ -27,7 +27,11 @@ const POLL_INTERVAL_MS = 45_000;
 // Verbs that should fire an in-page toast in addition to bumping the badge.
 // Keep this conservative: too noisy and users mute the channel.
 // NOTE: `case.*` keys are backend wire-format strings. Do not rename.
-const TOAST_VERBS = new Set(['case.mentioned', 'case.assigned', 'case.sla_breached']);
+const TOAST_VERBS = new Set([
+  'case.mentioned', 'case.assigned', 'case.sla_breached',
+  // Una mención en una nota de la Bandeja: alguien pide ayuda (30/10/2026).
+  'conversacion.mencion'
+]);
 
 class NotificationsStore {
   notifications = $state([]);

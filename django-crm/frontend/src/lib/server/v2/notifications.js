@@ -27,7 +27,9 @@ export const PRODUCED_VERBS = [
   // El ciclo de la madrugada de campo: deja la jornada armada y avisa qué
   // quedó sin resolver. Sin el verbo acá, la fila se marca como "no producer"
   // y se muestra como un identificador crudo.
-  'reparto_de_la_madrugada'
+  'reparto_de_la_madrugada',
+  // Una mención (@usuario) en una nota interna de la Bandeja (30/10/2026).
+  'conversacion.mencion'
 ];
 
 /**
@@ -50,6 +52,11 @@ export function resolvedLink(link) {
   // fecha `AAAA-MM-DD` entra; cualquier otra cosa devuelve ''.
   const j = link.match(/^\/supervisor-noc\/cuadrillas\?dia=(\d{4}-\d{2}-\d{2})(?:&|$)/);
   if (j) return `/supervisor-noc/cuadrillas?dia=${j[1]}&reparto=1`;
+
+  // UNA CONVERSACIÓN DE LA BANDEJA (menciones, 30/10/2026). Solo un uuid, y
+  // el enlace se RECONSTRUYE con él: nada de la columna pasa tal cual.
+  const c = link.match(/^\/conversaciones\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i);
+  if (c) return `/conversaciones/${c[1].toLowerCase()}`;
 
   return '';
 }

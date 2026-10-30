@@ -56,6 +56,10 @@
     // Hasta cuándo (C22): '' sin hora, '1h', '4h', 'manana'. La página lo
     // convierte en una hora al enviar (lib/conversaciones/espera.js).
     esperaHasta = $bindable(''),
+    // BORRADOR DE LA IA (30/10/2026): a pedido, nunca envía. La página lo pide
+    // y llena el cuadro; «Deshacer» devuelve lo que había antes.
+    pidiendoBorrador = false, errorBorrador = '', puedeDeshacerBorrador = false,
+    onPedirBorrador = undefined, onDeshacerBorrador = undefined,
     modo = $bindable('responder'),
     campoTexto = $bindable(),
     adjuntarAbierto = $bindable(false),
@@ -578,7 +582,7 @@
           : bloqueadoPorVentana
           ? 'La ventana de WhatsApp está cerrada — usá una plantilla'
           : modo === 'nota'
-            ? 'Nota para el equipo — el cliente no la ve…'
+            ? 'Nota para el equipo — el cliente no la ve. Mencioná con @usuario (lo que va antes del @ del correo) para avisarle'
             : escalada
               ? 'Escribí tu respuesta…'
               : 'Continuar la conversación…'}
@@ -598,6 +602,24 @@
            como esperando algo -- que el cliente reinicie, que pase el técnico
            -- y la cola la muestra aparte. Responder sin marcarla la quita. Solo
            al responder como persona: en nota o devolviendo a la IA no aplica. -->
+      {#if escalada && modo === 'responder' && !bloqueadoPorVentana && !bloqueadoPorIA && onPedirBorrador}
+        <!-- La IA propone, la persona decide: el texto cae en el cuadro y no
+             sale hasta que alguien aprieta Enviar. -->
+        <div class="borrador">
+          <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet"
+            onclick={() => onPedirBorrador?.()} disabled={pidiendoBorrador || enviando}
+            aria-busy={pidiendoBorrador}
+            title="La IA propone una respuesta con lo que hay en la conversación. No se envía sola: la revisás y la mandás vos.">
+            {pidiendoBorrador ? 'Pensando…' : 'Sugerir respuesta'}
+          </button>
+          {#if puedeDeshacerBorrador}
+            <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet" onclick={() => onDeshacerBorrador?.()}>
+              Deshacer
+            </button>
+          {/if}
+          {#if errorBorrador}<span class="borrador-error">{errorBorrador}</span>{/if}
+        </div>
+      {/if}
       {#if escalada && modo === 'responder' && !bloqueadoPorVentana && !bloqueadoPorIA}
         <div class="espera" class:espera-activa={quedaEnEspera}>
           <label class="espera-marca">
@@ -1275,6 +1297,17 @@
   /* Igual que los modos: "Enviar y devolver" y su "Enviando y devolviendo…"
      son mas anchos que "Enviar", y el pie tambien lleva la pista del canal a
      la izquierda. Que baje en vez de apretarse. */
+  .borrador {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 11.5px;
+  }
+  .borrador-error {
+    color: var(--bandeja-texto-2);
+  }
+
   .espera {
     display: flex;
     align-items: center;

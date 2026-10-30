@@ -102,6 +102,29 @@ la base construida por el ledger), `tests/test_escalar_area_api.py`,
 `tests/test_cola_bandeja.py` (bandas nuevas), `escalar_area_render.test.js`,
 `escalar-area/escalar.test.js`, `espera.test.js`, `humano/espera.test.js`.
 
+## Fase C — lo construido (30/10/2026)
+
+- **4 · Borrador de la IA, a pedido.** `nucleo/seguimiento/borrador.py`:
+  el modelo recibe el hilo (las notas marcadas como contexto del equipo) y
+  NINGUNA herramienta; devuelve texto, no escribe ni envía. Pasa por el
+  normalizador de tratamiento de la empresa y por la guardia de salida (una
+  fuga NO se devuelve). Botón «Sugerir respuesta» en el compositor, con
+  «Deshacer». Medido con el modelo real y dos conversaciones inventadas:
+  breve, sin prometer, sin repetir la nota interna -- y con VOSEO para una
+  empresa que habla de tú, que el normalizador corrigió (el prompt solo no
+  alcanza: misma lección que tuteo.py, 15/08/2026). `cli/evaluar.py` NO
+  aplica: mide `motor.responder()` y el borrador no pasa por ahí.
+- **6 · Menciones.** `@usuario` en una nota interna avisa en la campanita
+  con enlace a la conversación. Reusa las reglas de los tickets
+  (`cases.notifications`: parte del correo antes de la @, misma empresa,
+  nunca a uno mismo, una vez por minuto). Vista nueva en Django
+  (`/api/notifications/mencion-conversacion/`); el aviso sale del servidor
+  del CRM DESPUÉS de guardar la nota, y si falla la nota queda igual. El
+  filtro de enlaces de notificaciones ahora acepta `/conversaciones/<uuid>`,
+  reconstruido. Probado contra Postgres real con un rol normal (RLS activo).
+
+Sin migración ni config nueva.
+
 ## Fuera de alcance, y por qué
 
 - Que la IA cierre o escale sola un caso ya tomado por una persona: es

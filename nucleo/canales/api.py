@@ -64,6 +64,7 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguimiento import borrador
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguimiento import cierre_por_validacion
 from nucleo.seguridad import interruptor
@@ -11812,6 +11813,50 @@ def conversaciones_reasignar(id_conversacion):
     return jsonify({"reasignada": True, "aplicada": r.aplicada, "relevo_version": r.version,
                     "asignada_a": (r.datos or {}).get("nuevo_nombre") if r.aplicada else None,
                     "reintento": r.motivo == "reintento"})
+
+
+@app.post("/conversaciones/<id_conversacion>/borrador")
+def conversaciones_borrador(id_conversacion):
+    """
+    Un borrador de respuesta para quien atiende (30/10/2026). A PEDIDO: lo
+    pide un botón, nunca sale solo. NO envía nada ni escribe en la base:
+    devuelve texto que la persona edita y manda ella (nucleo/seguimiento/
+    borrador.py).
+
+    Solo con la conversación abierta y en manos de personas: con la IA
+    atendiendo, la que contesta es la IA.
+
+      200  {borrador}
+      404  no existe
+      409  cerrada, o la atiende la IA
+      422  no hay borrador para mostrar (sin nada del cliente, fuga, vacío)
+      502  el modelo no respondió
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        resultado = persistencia.mensajes_de(tenant, id_conversacion)
+    except RuntimeError:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    except Exception as e:
+        registrar("borrador", "no se pudo leer la conversacion", error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    conv = (resultado or {}).get("conversacion")
+    if not conv:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if conv.get("estado") != "abierta" or control_efectivo(conv) != "humano":
+        return jsonify({"error": "El borrador es para quien atiende: esta conversacion esta "
+                                 "cerrada o la atiende la IA.", "codigo": "no_es_de_personas"}), 409
+    try:
+        texto = borrador.redactar(_config_de(tenant), rol=conv.get("rol_efectivo"),
+                                  mensajes=resultado.get("mensajes") or [])
+    except borrador.BorradorNoDisponible as e:
+        # El texto es nuestro (borrador.py), no de una biblioteca: se puede mostrar.
+        codigo = 502 if "no respondió" in str(e) else 422
+        return jsonify({"error": f"No hay sugerencia: {e}.", "codigo": "sin_borrador"}), codigo
+    return jsonify({"borrador": texto})
 
 
 def _hora_iso(crudo):

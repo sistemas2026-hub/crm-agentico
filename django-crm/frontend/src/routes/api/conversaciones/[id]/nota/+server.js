@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
+import { apiRequest } from '$lib/api-helpers.js';
 
 /**
  * Nota interna: queda en el hilo para el equipo y NO se le envía al cliente.
@@ -14,7 +15,7 @@ import { autorDeSesion, claveIdempotencia } from '$lib/server/v2/autor.js';
  *
  * @type {import('./$types').RequestHandler}
  */
-export async function POST({ params, locals, fetch, request }) {
+export async function POST({ params, locals, fetch, request, cookies }) {
   if (!locals.user) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
@@ -43,6 +44,20 @@ export async function POST({ params, locals, fetch, request }) {
       body: JSON.stringify({ tenant, mensaje, ...autorDeSesion(locals) })
     });
     const datos = await resp.json();
+    // MENCIONES (30/10/2026): «@luis mirá esta» le avisa a Luis en la
+    // campanita, con el enlace a la conversación. La nota vive en el motor y
+    // las notificaciones en el CRM, así que el aviso sale de acá, DESPUÉS de
+    // que la nota quedó guardada. Si falla, la nota ya está: no se tumba por
+    // un aviso, y se dice cuántos salieron para que la pantalla no prometa.
+    if (resp.ok && mensaje.includes('@')) {
+      try {
+        const r = await apiRequest('/notifications/mencion-conversacion/',
+          { method: 'POST', body: { conversation_id: params.id, texto: mensaje } }, { cookies });
+        datos.avisados = r?.avisados ?? 0;
+      } catch {
+        datos.avisados = null;
+      }
+    }
     return json(datos, { status: resp.status });
   } catch (/** @type {any} */ err) {
     return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
