@@ -176,6 +176,38 @@ describe('Programación: lo que el Supervisor hace solo (30/10/2026)', () => {
   });
 });
 
+describe('Programación: la pestaña Cerradas (30/10/2026)', () => {
+  /** @param {string} url @param {string} rol */
+  const ctxDe = (url, rol) =>
+    /** @type {any} */ ({ url: new URL(url), cookies: { get: () => 'token' }, locals: { org: { id: 'o' }, profile: { role: rol } } });
+
+  it('pide las cerradas del rango, contado desde el día que se mira', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ cuentas: { cerradas: 0 }, ordenes: [] });
+
+    const d = /** @type {any} */ (await load(ctxDe(
+      'http://x/supervisor-noc/programacion?dia=2026-10-30&vista=cerradas&rango=ayer', 'ADMIN')));
+
+    expect(d.vista).toBe('cerradas');
+    expect(apiRequest.mock.calls.map((c) => c[0])).toEqual(['/campo/cerradas/?desde=2026-10-29&hasta=2026-10-29']);
+    expect(d.cerradas).toEqual({ cuentas: { cerradas: 0 }, ordenes: [] });
+  });
+
+  it('un rango que no existe es hoy; y la vista Hoy no pide cerradas', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({});
+    const raro = /** @type {any} */ (await load(ctxDe('http://x/supervisor-noc/programacion?dia=2026-10-30&vista=cerradas&rango=x', 'ADMIN')));
+    expect(raro.rango).toBe('hoy');
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/cerradas/?desde=2026-10-30&hasta=2026-10-30');
+
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({});
+    const d = /** @type {any} */ (await load(ctxDe('http://x/supervisor-noc/programacion?dia=2026-10-30', 'ADMIN')));
+    expect(d.vista).toBe('hoy');
+    expect(apiRequest.mock.calls.some((c) => String(c[0]).includes('cerradas'))).toBe(false);
+  });
+});
+
 const PUBLICADO = { fecha: '2026-10-28', cuadrillas: [], con_alguien_que_no_sale: [], esperan: [], cuentas: {} };
 
 /** @param {string} url @param {string} rol */

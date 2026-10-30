@@ -8,7 +8,9 @@
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
+  import EsperanCuadrilla from '$lib/supervisor/EsperanCuadrilla.svelte';
   import FaltantesDelDia from '$lib/supervisor/FaltantesDelDia.svelte';
+  import OrdenCerrada from '$lib/supervisor/OrdenCerrada.svelte';
   import MaterialDeLaCuadrilla from '$lib/supervisor/MaterialDeLaCuadrilla.svelte';
   import NovedadesDeLaCuadrilla from '$lib/supervisor/NovedadesDeLaCuadrilla.svelte';
   import SeguimientoDeCuadrillas from '$lib/supervisor/SeguimientoDeCuadrillas.svelte';
@@ -19,7 +21,6 @@
     quienLaAsigno,
     textoDeLaSiguiente,
     textoDelDiaDeLaCuadrilla,
-    textoDePrioridad,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
   import { opcionDelSupervisor, tituloDelMaterial } from '$lib/supervisor/material-del-dia.js';
@@ -28,8 +29,62 @@
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
-  const publicado = $derived(data.publicado);
+  //  PROGRAMACIÓN VIVA (30/10/2026). El usuario: «estas tarjetas tienen que
+  //  estar vivas: si manda un reporte desde la app, que no se tenga que
+  //  recargar ni presionar un botón; solo y sin que se vea». Cada 15 s, con
+  //  la pestaña a la vista (y al volver a ella), se pide lo publicado del día
+  //  y se cambia en su lugar: las tarjetas se conservan por su id, así que un
+  //  log abierto sigue abierto. Sin respuesta, queda lo último que se vio.
+  let vivo = $state(/** @type {any} */ (null));
+  let vivoDe = $state('');
+  const publicado = $derived(vivo && vivoDe === data.dia ? vivo : data.publicado);
   const cuentas = $derived(publicado?.cuentas ?? {});
+
+  //  Un load nuevo (otro día, o después de aprobar o devolver) trae lo más
+  //  fresco: lo vivo de antes ya no manda.
+  $effect(() => {
+    data.publicado;
+    vivo = null;
+  });
+
+  $effect(() => {
+    if (!data.puedeVer || data.vista !== 'hoy') return;
+    const dia = data.dia;
+    let parado = false;
+    async function refrescar() {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const r = await fetch(`/supervisor-noc/programacion/vivo?dia=${encodeURIComponent(dia)}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!parado && d?.publicado) {
+          vivo = d.publicado;
+          vivoDe = dia;
+        }
+      } catch {
+        //  Sin red: queda lo último que se vio.
+      }
+    }
+    const intervalo = setInterval(refrescar, 15000);
+    document.addEventListener('visibilitychange', refrescar);
+    window.addEventListener('focus', refrescar);
+    return () => {
+      parado = true;
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', refrescar);
+      window.removeEventListener('focus', refrescar);
+    };
+  });
+
+  const enlaceDe = (/** @type {string} */ vista, /** @type {string} */ rango = 'hoy') =>
+    vista === 'cerradas'
+      ? `/supervisor-noc/programacion?dia=${data.dia}&vista=cerradas&rango=${rango}`
+      : `/supervisor-noc/programacion?dia=${data.dia}`;
+  const RANGOS = [
+    { clave: 'hoy', nombre: 'Hoy' },
+    { clave: 'ayer', nombre: 'Ayer' },
+    { clave: '7d', nombre: 'Últimos 7 días' }
+  ];
 
   //  EL MATERIAL DEL DÍA (28/10/2026): la propuesta, por jornada, para
   //  dibujarla dentro de la tarjeta de cada cuadrilla.
@@ -72,9 +127,52 @@
         </div>
       </section>
 
+      {#if data.puedeVer}
+        <!-- HOY / CERRADAS (30/10/2026): lo de hoy, y lo que ya se cerró. -->
+        <nav class="snoc-fila" aria-label="Vista" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+          <a class="snoc-pildora" class:snoc-pildora-activa={data.vista === 'hoy'}
+             aria-current={data.vista === 'hoy' ? 'page' : undefined} href={enlaceDe('hoy')}>Hoy</a>
+          <a class="snoc-pildora" class:snoc-pildora-activa={data.vista === 'cerradas'}
+             aria-current={data.vista === 'cerradas' ? 'page' : undefined} href={enlaceDe('cerradas')}>Cerradas</a>
+        </nav>
+      {/if}
+
       {#if !data.puedeVer}
         <section class="snoc-panel">
           <p class="snoc-body">Esta pantalla es para quien gestiona el trabajo de campo.</p>
+        </section>
+      {:else if data.vista === 'cerradas'}
+        <!-- ============ LAS CERRADAS (30/10/2026) ============ -->
+        <section class="snoc-panel" style="gap:var(--snoc-sm);">
+          <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+            <div class="snoc-fila" role="group" aria-label="Rango" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+              {#each RANGOS as r (r.clave)}
+                <a class="snoc-pildora" class:snoc-pildora-activa={data.rango === r.clave}
+                   aria-current={data.rango === r.clave ? 'page' : undefined} href={enlaceDe('cerradas', r.clave)}>{r.nombre}</a>
+              {/each}
+            </div>
+            {#if data.cerradas}
+              <p class="snoc-body-sm">
+                {data.cerradas.cuentas.cerradas} {data.cerradas.cuentas.cerradas === 1 ? 'cerrada' : 'cerradas'}
+                · {data.cerradas.cuentas.por_una_persona} por una persona
+                · {data.cerradas.cuentas.por_el_supervisor} por el Supervisor
+                {#if data.cerradas.cuentas.ticket_sin_cerrar}
+                  · <span class="snoc-error-txt">{data.cerradas.cuentas.ticket_sin_cerrar} con el ticket del ISP sin cerrar</span>
+                {/if}
+              </p>
+            {/if}
+          </div>
+          {#if data.errorCerradas}
+            <p class="snoc-aviso snoc-error-txt">No se pudieron leer las cerradas. No es que no haya: no se sabe.</p>
+          {:else if data.cerradas && !data.cerradas.ordenes.length}
+            <p class="snoc-body-sm snoc-secundario">No se cerró ninguna orden en estos días.</p>
+          {:else if data.cerradas}
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap:var(--snoc-sm); align-items:start;">
+              {#each data.cerradas.ordenes as o (o.id)}
+                <OrdenCerrada orden={o} />
+              {/each}
+            </div>
+          {/if}
         </section>
       {:else}
         <!-- ============ EL SEGUIMIENTO DE LAS CUADRILLAS (30/10/2026) ============
@@ -270,23 +368,8 @@
               {/each}
             {/if}
 
-            {#if publicado.esperan.length}
-              <span class="snoc-label">Esperan cuadrilla ({publicado.esperan.length})</span>
-              <p class="snoc-body-sm snoc-secundario">
-                Órdenes sin nadie. Cada una dice por qué, con la misma cuenta con la que publica el
-                Supervisor: la carga de cada cuadrilla, su tope, sus zonas y su labor.
-              </p>
-              {#each publicado.esperan as o (o.id)}
-                <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-xs);">
-                  <p class="snoc-body-sm">
-                    <span class="snoc-mono">#{o.numero}</span> {o.tipo} · {textoDePrioridad(o.prioridad)} · {o.barrio}
-                  </p>
-                  {#if o.por_que}
-                    <p class="snoc-body-sm snoc-secundario">{o.por_que}</p>
-                  {/if}
-                </div>
-              {/each}
-            {/if}
+            <!-- PLEGADAS Y POR MOTIVO (30/10/2026): «que se puedan contraer». -->
+            <EsperanCuadrilla esperan={publicado.esperan} />
           {/if}
         </section>
       {/if}

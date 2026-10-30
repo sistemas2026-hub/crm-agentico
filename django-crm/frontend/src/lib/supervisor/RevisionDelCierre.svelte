@@ -22,6 +22,21 @@
   const r = $derived(orden.revision);
   const marca = /** @type {Record<string, string>} */ ({ true: '✔', false: '✖', null: '?' });
   let devolviendo = $state(false);
+  //  LO QUE SE ESTÁ ESCRIBIENDO NO SE PISA (30/10/2026). Programación se
+  //  actualiza sola cada pocos segundos; si el porqué y las casillas salieran
+  //  de la revisión en vivo, cada vuelta borraría lo que la persona escribió.
+  //  Se toman UNA vez, al abrir «Devolver».
+  let porque = $state('');
+  /** @type {string[]} */
+  let marcadas = $state([]);
+
+  function abrirDevolver() {
+    if (!devolviendo) {
+      porque = motivosDeLaRevision(r);
+      marcadas = [...(r?.sugeridas ?? [])];
+    }
+    devolviendo = !devolviendo;
+  }
 </script>
 
 {#if r}
@@ -50,7 +65,7 @@
         <input type="hidden" name="veredicto" value={r.texto} />
         <button type="submit" class="snoc-btn snoc-btn-primario" >Aprobar y cerrar</button>
       </form>
-      <button type="button" class="snoc-btn" onclick={() => (devolviendo = !devolviendo)} aria-expanded={devolviendo}>
+      <button type="button" class="snoc-btn" onclick={abrirDevolver} aria-expanded={devolviendo}>
         Devolver al técnico
       </button>
     </div>
@@ -62,13 +77,13 @@
         <fieldset>
           <legend>Qué tiene que rehacer</legend>
           {#each r.evidencias as e (e.id)}
-            <label><input type="checkbox" name="requisito" value={e.id} checked={r.sugeridas.includes(e.id)} /> {e.titulo}</label>
+            <label><input type="checkbox" name="requisito" value={e.id} bind:group={marcadas} /> {e.titulo}</label>
           {:else}
             <p>Esta plantilla no pide fotos: no hay qué devolver desde acá.</p>
           {/each}
         </fieldset>
         <label class="rc-porque">Por qué
-          <textarea name="observacion" rows="3">{motivosDeLaRevision(r)}</textarea>
+          <textarea name="observacion" rows="3" bind:value={porque}></textarea>
         </label>
         <button type="submit" class="snoc-btn snoc-btn-error" disabled={!r.evidencias.length}>Devolver</button>
       </form>

@@ -21,6 +21,7 @@
     textoDeTiempos,
     tonoDelVencimiento
   } from './dia-publicado.js';
+  import ProgresoDeLaOrden from './ProgresoDeLaOrden.svelte';
   import RevisionDelCierre from './RevisionDelCierre.svelte';
 
   /** @type {{ orden: any, dia: string, marca?: string }} */
@@ -62,6 +63,9 @@
     <span class="od-cliente">{orden.cliente || 'Sin cliente'}</span>
     {#if orden.barrio}<span class="od-barrio">{orden.barrio}</span>{/if}
   </div>
+
+  <!-- EL PROGRESO, como en la app (30/10/2026): «debe salir para cada ticket». -->
+  <ProgresoDeLaOrden estado={orden.estado} />
 
   {#if tiempos || seguimiento}
     <p class="od-tiempos">

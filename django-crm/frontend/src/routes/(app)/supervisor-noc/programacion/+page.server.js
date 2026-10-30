@@ -9,6 +9,8 @@ import {
 } from '$lib/server/v2/material-del-dia.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 import { aprobarYCerrar, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
+import { leerCerradas } from '$lib/server/v2/cerradas.js';
+import { rangoDeCerradas } from '$lib/supervisor/dia-publicado.js';
 import {
   cuerpoDeSeguimiento,
   guardarConfiguracionDeSeguimiento,
@@ -46,13 +48,29 @@ export async function load({ url, cookies, locals }) {
   if (!ROLES_GESTION.has(rol)) {
     return {
       puedeVer: false, dia: '', publicado: null, error: false,
-      material: null, errorMaterial: false, configuracion: null, seguimiento: null
+      material: null, errorMaterial: false, configuracion: null, seguimiento: null,
+      vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
     };
   }
 
   //  Hoy en el reloj de la EMPRESA, no en el del servidor (UTC).
   const pedido = (url.searchParams.get('dia') ?? '').trim();
   const dia = /^\d{4}-\d{2}-\d{2}$/.test(pedido) ? pedido : await hoyDeLaEmpresa(locals, cookies);
+
+  //  LA PESTAÑA CERRADAS (30/10/2026): lo que ya se cerró, en el rango que
+  //  se elija, contado desde el día que se mira.
+  if (url.searchParams.get('vista') === 'cerradas') {
+    const pedidoRango = url.searchParams.get('rango') ?? 'hoy';
+    const rango = ['hoy', 'ayer', '7d'].includes(pedidoRango) ? pedidoRango : 'hoy';
+    const { desde, hasta } = rangoDeCerradas(rango, dia);
+    const c = await leerCerradas({ cookies }, desde, hasta);
+    return {
+      puedeVer: true, dia, vista: 'cerradas', rango,
+      cerradas: c.cerradas, errorCerradas: c.error,
+      publicado: null, error: false, material: null, errorMaterial: false,
+      configuracion: null, seguimiento: null
+    };
+  }
   const [dp, mat, conf, seg] = await Promise.all([
     leerDiaPublicado({ cookies }, dia),
     leerMaterialDelDia({ cookies }, dia),
@@ -68,7 +86,8 @@ export async function load({ url, cookies, locals }) {
     errorMaterial: mat.error,
     configuracion: conf.configuracion,
     //  Lo que el Supervisor hace solo (30/10/2026): recordar y cerrar.
-    seguimiento: seg.configuracion
+    seguimiento: seg.configuracion,
+    vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
   };
 }
 

@@ -177,6 +177,98 @@ export function textoDeNovedad(n) {
 }
 
 /**
+ * Los pasos del progreso de una orden, como en la app (30/10/2026).
+ */
+export const PASOS = ['Asignada', 'En camino', 'En sitio', 'Completada', 'Cerrada'];
+
+/**
+ * En qué paso está una orden (0-4), o -1 si no tiene progreso (cancelada).
+ * Bloqueada y devuelta para corregir siguen «en sitio»: hay trabajo en la casa.
+ *
+ * @param {string} estado `estado_operativo` de la orden
+ */
+export function pasoDelProgreso(estado) {
+  switch (estado) {
+    case 'asignada':
+      return 0;
+    case 'en_camino':
+      return 1;
+    case 'en_sitio':
+    case 'bloqueada':
+    case 'correccion_requerida':
+      return 2;
+    case 'completada_campo':
+      return 3;
+    case 'cerrada':
+      return 4;
+    default:
+      return -1;
+  }
+}
+
+/**
+ * Las que esperan cuadrilla, agrupadas por el motivo que dio el servidor, de
+ * la más numerosa a la menos (30/10/2026: «que se puedan contraer»).
+ *
+ * @param {{ id: string, por_que?: string, motivo?: string }[]} esperan
+ * @returns {{ motivo: string, ordenes: any[] }[]}
+ */
+export function gruposQueEsperan(esperan) {
+  /** @type {Map<string, any[]>} */
+  const grupos = new Map();
+  for (const o of esperan ?? []) {
+    const motivo = (o.por_que || o.motivo || 'Sin motivo').trim();
+    if (!grupos.has(motivo)) grupos.set(motivo, []);
+    /** @type {any[]} */ (grupos.get(motivo)).push(o);
+  }
+  return [...grupos].map(([motivo, ordenes]) => ({ motivo, ordenes }))
+    .sort((a, b) => b.ordenes.length - a.ordenes.length);
+}
+
+/**
+ * Cómo quedó el ticket del ISP de una orden cerrada (30/10/2026).
+ *
+ * @param {{ estado: string, detalle?: string } | null | undefined} t
+ */
+export function textoDelTicket(t) {
+  switch (t?.estado) {
+    case 'cerrado':
+      return 'Cerrado en el sistema del ISP';
+    case 'no_cerrado':
+      return `No se pudo cerrar en el sistema del ISP${t.detalle ? `: ${t.detalle}` : ''}`;
+    case 'sin_ticket':
+      return 'La orden no tiene ticket del ISP';
+    default:
+      return 'Sin registro de cómo quedó el ticket';
+  }
+}
+
+/**
+ * Quién cerró una orden (30/10/2026).
+ *
+ * @param {{ de: string, nombre?: string } | null | undefined} q
+ */
+export function textoDeQuien(q) {
+  if (q?.de === 'persona') return `${q.nombre} la aprobó y la cerró`;
+  if (q?.de === 'supervisor') return 'El Supervisor la aprobó y la cerró';
+  return 'Se cerró sin una aprobación registrada';
+}
+
+/**
+ * Los días de la pestaña Cerradas: hoy, ayer o los últimos 7 (hoy incluido).
+ *
+ * @param {string} rango 'hoy' | 'ayer' | '7d'
+ * @param {string} hoy AAAA-MM-DD, el día de la empresa
+ */
+export function rangoDeCerradas(rango, hoy) {
+  /** @param {number} n */
+  const menos = (n) => new Date(Date.parse(`${hoy}T12:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
+  if (rango === 'ayer') return { desde: menos(1), hasta: menos(1) };
+  if (rango === '7d') return { desde: menos(6), hasta: hoy };
+  return { desde: hoy, hasta: hoy };
+}
+
+/**
  * El porqué de una devolución, ya escrito (30/10/2026, revision-del-cierre.md):
  * lo que el Supervisor encontró que no está bien o no se sabe, una línea por
  * punto. Si todo estaba bien, vacío: quien devuelve igual tiene que decir por
