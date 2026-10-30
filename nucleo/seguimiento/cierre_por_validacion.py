@@ -149,3 +149,96 @@ def cerrar_ticket_de_orden(config, tenant: str, *, orden_id: str, ticket: str,
             NO_EJECUTADA, resultado.codigo or resultado.decision or "",
             referencia=origen)
     return ResultadoCierreTicket(CERRADO, "", referencia=origen)
+
+
+# =============================================================================
+#  EL SUPERVISOR CIERRA SOLO  --  30/10/2026
+# =============================================================================
+#
+#  SPEC/objetivos/revision-del-cierre.md. El usuario: «¿de que manera hacemos
+#  para que el supervisor cierre solo?». Lo de arriba es la puerta HUMANA: una
+#  persona valido y su nombre es la evidencia. Esto es la OTRA puerta, la
+#  AUTONOMA: nadie lo pidio en el momento; el Supervisor reviso el cierre en
+#  codigo (`campo/revision_del_cierre.py`) y lo dio por bueno.
+#
+#  POR QUE NO SE REUSA LA FUNCION DE ARRIBA CON actor="supervisor": esa abre
+#  `frontera.humana()`, que no consulta la etapa de Autonomia 2 ni la
+#  autorizacion de la herramienta. Un Supervisor por esa puerta seria lo
+#  automatico disfrazado de humano: el agujero que `humana()` dice que existe
+#  para no tener.
+#
+#  `frontera.autonoma()` consulta, en orden: el interruptor, el techo, la etapa
+#  (AUTONOMIA_2_ACTIVA + el prerequisito B-7 medido contra la base) y la
+#  autorizacion granular de ESTA herramienta. Cualquiera cerrada -> no sale,
+#  y el resultado dice CUAL, para que la oficina sepa que falta.
+#
+#  CLAVE PROPIA. `orden_cerrada_por_el_supervisor:<orden>`, distinta de la de
+#  la validacion humana: si una persona valida despues, el CRM ya sabe que el
+#  ticket se cerro (`campo/services/cierre_en_isp._ya_cerrado`) y no lo pide.
+
+#: El actor de la puerta autonoma: no es una persona, y no se finge que lo sea.
+SUPERVISOR = "supervisor"
+
+#: Lo que firma el texto del ticket. El ISP firma con la API key; esto dice
+#: que lo cerro el Supervisor y no una persona de la oficina.
+FIRMA_DEL_SUPERVISOR = "Supervisor de Dexter"
+
+#: Una compuerta de la puerta autonoma lo freno. El motivo dice cual.
+NO_AUTORIZADA = "NO_AUTORIZADA_PARA_EL_SUPERVISOR"
+
+
+def cerrar_ticket_por_el_supervisor(config, tenant: str, *, orden_id: str,
+                                    ticket: str, texto: str) -> ResultadoCierreTicket:
+    """Cierra el ticket de una orden que el Supervisor reviso y dio por buena.
+    Por la puerta AUTONOMA. A lo sumo una vez por orden."""
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.seguimiento.operativo import _firmado
+    from nucleo.seguridad import frontera, idempotencia
+    from nucleo.seguridad import techo as techos
+
+    orden_id = str(orden_id or "").strip()
+    ticket = str(ticket or "").strip()
+    texto = str(texto or "").strip()
+    if not orden_id or not ticket or not texto:
+        return ResultadoCierreTicket(
+            NO_EJECUTADA, "hacen falta la orden, el ticket y el texto")
+
+    herr = _herramienta_de_cierre(config)
+    if herr is None:
+        return ResultadoCierreTicket(
+            SIN_HERRAMIENTA,
+            "el tenant no declara ninguna herramienta con 'cierra_ticket_operativo'")
+
+    argumentos = dict(herr.argumentos_fijos or {})
+    argumentos.update({"id_ticket": ticket,
+                       "respuesta": _firmado(texto, FIRMA_DEL_SUPERVISOR)})
+    origen = f"orden_cerrada_por_el_supervisor:{orden_id}"
+
+    def _hacer():
+        return ejecutor_http.ejecutar(herr, argumentos, tenant,
+                                      variables_tenant=config.variables_tenant)
+
+    try:
+        #  El nivel y el efecto salen del CATALOGO, como en el motor: nadie que
+        #  llame puede bajarse la exigencia.
+        with frontera.autonoma(tenant, herr.nombre, origen=origen, actor=SUPERVISOR,
+                               nivel_requerido=techos.nivel_requerido_de(herr),
+                               efecto_externo=frontera.efecto_externo(herr)):
+            resultado = idempotencia.ejecutar(
+                tenant, herr.nombre, argumentos, origen, _hacer,
+                clave=f"{origen}|{herr.nombre}")
+    except frontera.AccionExternaNoAutorizada as e:
+        return ResultadoCierreTicket(NO_AUTORIZADA, f"{e.codigo}: {e.motivo}",
+                                     referencia=origen)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("cierre_validacion", "el cierre del Supervisor fallo", error=e)
+        return ResultadoCierreTicket(FALLO, type(e).__name__, referencia=origen)
+
+    if resultado.decision == "repetida":
+        return ResultadoCierreTicket(CERRADO, "ya se habia cerrado antes",
+                                     referencia=origen)
+    if not resultado.ejecutada:
+        return ResultadoCierreTicket(
+            NO_EJECUTADA, resultado.codigo or resultado.decision or "",
+            referencia=origen)
+    return ResultadoCierreTicket(CERRADO, "", referencia=origen)

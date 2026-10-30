@@ -199,9 +199,105 @@ with escenario(registro, proveedor):
 afirmar(r.codigo == cierre.SIN_HERRAMIENTA, f"lo dice (codigo={r.codigo})")
 afirmar(proveedor.llamadas == [], "y no le llega nada al proveedor")
 
+# =============================================================================
+#  EL SUPERVISOR CIERRA SOLO  --  30/10/2026, por la puerta AUTONOMA
+# =============================================================================
+#  6  con las cuatro compuertas abiertas, sale UNA vez, con permiso AUTONOMO,
+#     firmado por el Supervisor y con su propia clave
+#  7  cada compuerta cerrada lo frena, dice cual, y no le llega nada al
+#     proveedor: el interruptor, la etapa (B-7) y la autorizacion
+#  8  la puerta humana NO se abre para el Supervisor
+
+
+class HerramientaQueEscribe(Herramienta):
+    solo_lectura = False
+
+
+class Compuertas:
+    """Las cuatro compuertas de `frontera.autonoma`, sustituidas."""
+
+    def __init__(self, interruptor=True, etapa=True, granular=True):
+        self.cfg = dict(interruptor=interruptor, etapa=etapa, granular=granular)
+
+    def __enter__(self):
+        class V:
+            def __init__(self, ok, codigo):
+                self.permitido, self.codigo, self.estado = ok, codigo, codigo
+                self.motivo, self.nivel_efectivo, self.autorizacion_id = "x", 2, ""
+                self.techo, self.requerido = 2, 2
+
+        c = self.cfg
+        self._orig = (frontera.interruptor.veredicto, frontera.techos.veredicto,
+                      frontera.autonomia2.veredicto, frontera.autorizacion.veredicto,
+                      frontera._bitacora, frontera._anotar)
+        frontera.interruptor.veredicto = lambda t: V(c["interruptor"], "detenido")
+        frontera.techos.veredicto = lambda t, n: V(True, "ok")
+        frontera.autonomia2.veredicto = lambda *a, **k: V(c["etapa"], "B7_REQUERIDO")
+        frontera.autorizacion.veredicto = lambda t, h, **k: V(
+            c["granular"], "HERRAMIENTA_SIN_AUTORIZACION")
+        frontera._bitacora = lambda *a, **k: None
+        frontera._anotar = lambda *a, **k: None
+        return self
+
+    def __exit__(self, *e):
+        (frontera.interruptor.veredicto, frontera.techos.veredicto,
+         frontera.autonomia2.veredicto, frontera.autorizacion.veredicto,
+         frontera._bitacora, frontera._anotar) = self._orig
+        return False
+
+
+def cierra_el_supervisor(**compuertas):
+    registro, proveedor = Registro(), Proveedor()
+    with escenario(registro, proveedor), Compuertas(**compuertas):
+        r = cierre.cerrar_ticket_por_el_supervisor(
+            Config([HerramientaQueEscribe()]), TENANT, orden_id=ORDEN, ticket=TICKET,
+            texto="Trabajo de campo OT #7001 validado en Dexter.")
+    return r, registro, proveedor
+
+
+seccion("6. el Supervisor: sale UNA vez, por la puerta AUTONOMA")
+r, registro, proveedor = cierra_el_supervisor()
+afirmar(r.cerrado, f"el ticket queda cerrado (codigo={r.codigo}, motivo={r.motivo})")
+afirmar(len(proveedor.llamadas) == 1, "le llego UNA mutacion al proveedor")
+if proveedor.llamadas:
+    p = proveedor.permisos[0]
+    afirmar(p is not None and p.clase == "autonoma",
+            "y el permiso es AUTONOMO, no humano: nadie valido en el momento")
+    afirmar(p is not None and p.actor == cierre.SUPERVISOR, "el permiso dice que fue el Supervisor")
+    afirmar(cierre.FIRMA_DEL_SUPERVISOR in proveedor.llamadas[0].get("respuesta", ""),
+            "el texto del ticket dice que lo cerro el Supervisor")
+    afirmar(proveedor.llamadas[0].get("ticket-estado") == "4",
+            "con el estado de cierre de la HERRAMIENTA")
+afirmar(list(registro.filas) == [
+    f"orden_cerrada_por_el_supervisor:{ORDEN}|cerrar_ticket_operativo"],
+    "con su propia clave, distinta de la de la validacion humana")
+
+seccion("7. cada compuerta cerrada lo frena, y dice cual")
+for etiqueta, kw, codigo in (
+        ("el interruptor", {"interruptor": False}, "AUTONOMIA"),
+        ("la etapa con B-7", {"etapa": False}, "B7_REQUERIDO"),
+        ("la autorizacion de la herramienta", {"granular": False},
+         "HERRAMIENTA_SIN_AUTORIZACION")):
+    r, _, proveedor = cierra_el_supervisor(**kw)
+    afirmar(r.codigo == cierre.NO_AUTORIZADA and proveedor.llamadas == [],
+            f"{etiqueta}: no sale (codigo={r.codigo})")
+    afirmar(codigo in r.motivo or etiqueta == "el interruptor",
+            f"{etiqueta}: el motivo dice cual ({r.motivo[:60]})")
+
+seccion("8. la puerta humana no se abre para el Supervisor")
+_orig_humana = frontera.humana
+_abiertas = []
+frontera.humana = lambda *a, **k: _abiertas.append(k) or _orig_humana(*a, **k)
+try:
+    cierra_el_supervisor()
+finally:
+    frontera.humana = _orig_humana
+afirmar(_abiertas == [], "frontera.humana() no se llamo")
+
 print()
 if _fallos:
     print(f"[FALLA] {len(_fallos)} afirmaciones no se cumplen.")
     sys.exit(1)
 print("[OK] Validada la orden, el ticket del ISP se cierra una vez, por la "
-      "puerta humana y con el kill switch consultado.")
+      "puerta humana y con el kill switch consultado; y el Supervisor, por la "
+      "autonoma con sus cuatro compuertas.")

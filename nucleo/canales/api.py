@@ -4922,6 +4922,48 @@ def interno_cerrar_ticket_de_orden(orden_id: str):
     return jsonify(resultado.como_dict()), codigo_http
 
 
+@app.post("/interno/orden/<orden_id>/cerrar-ticket-supervisor")
+def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
+    """
+    El Supervisor cierra SOLO el ticket de una orden que su revision dio por
+    buena (30/10/2026). Por la puerta AUTONOMA: interruptor, techo, Autonomia 2
+    con B-7 y la autorizacion de la herramienta. Ver
+    nucleo/seguimiento/cierre_por_validacion.py::cerrar_ticket_por_el_supervisor.
+
+    No acepta `actor`: quien cierra es el Supervisor, y eso no lo elige quien
+    llama. Una persona que valida usa la ruta de arriba.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"ticket", "texto"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({
+            "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
+                     f"{sobra}: quien cierra es el Supervisor y el estado lo fija "
+                     f"la herramienta."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = cierre_por_validacion.cerrar_ticket_por_el_supervisor(
+        config, tenant, orden_id=orden_id,
+        ticket=str(cuerpo.get("ticket") or ""),
+        texto=str(cuerpo.get("texto") or ""))
+    if resultado.cerrado:
+        codigo_http = 200
+    elif resultado.codigo == cierre_por_validacion.FALLO:
+        codigo_http = 502
+    else:
+        codigo_http = 409
+    return jsonify(resultado.como_dict()), codigo_http
+
+
 @app.get("/autonomia")
 def autonomia_estado():
     """
