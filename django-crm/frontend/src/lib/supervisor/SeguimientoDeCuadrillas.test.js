@@ -78,6 +78,34 @@ describe('el cuadro de cada cuadrilla', () => {
     expect(h).not.toContain('salió');
   });
 
+  it('sin orden en curso, el asunto y la dirección de LA QUE SIGUE (30/10/2026)', () => {
+    const ordenes = [
+      { numero: 18, asunto: 'Cambio de equipo', direccion: 'CR 10 CL 10 - 33', barrio: 'Centro', siguiente: true },
+      { numero: 19, asunto: 'Otra', direccion: 'CL 5', barrio: '', siguiente: false }
+    ];
+    const sin = (r) => html([c({ resumen_del_dia: r, ordenes, log: [] })]);
+    const antes = sin({ salio: null, hechas: 0, total: 7, en_curso: null });
+    expect(antes).toContain('Empieza por OT #18');
+    expect(antes).toContain('Cambio de equipo');
+    expect(antes).toContain('CR 10 CL 10 - 33 · Centro');
+    expect(antes).not.toContain('Todavía no sale');
+    expect(sin({ salio: '07:42', hechas: 1, total: 7, en_curso: null })).toContain('Sigue OT #18');
+  });
+
+  it('en curso, el asunto y la dirección de ESA orden, no de la que sigue', () => {
+    const h = html([
+      c({
+        ordenes: [
+          { numero: 12, asunto: 'No Tiene Internet', direccion: 'CL 1 # 2', barrio: 'Norte', siguiente: false },
+          { numero: 15, asunto: 'Otra', direccion: 'CL 9', barrio: '', siguiente: true }
+        ]
+      })
+    ]);
+    expect(h).toContain('En sitio · OT #12');
+    expect(h).toContain('CL 1 # 2 · Norte');
+    expect(h).not.toContain('CL 9');
+  });
+
   it('sin orden en curso dice si no salió, si está entre órdenes o si terminó', () => {
     const sin = (r) => html([c({ resumen_del_dia: r, log: [] })]);
     expect(sin({ salio: null, hechas: 0, total: 4, en_curso: null })).toContain('Todavía no sale');

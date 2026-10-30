@@ -53,6 +53,19 @@ def _es_de_hoy(d, zona, ahora):
     return d is not None and d.astimezone(zona).date() == ahora.astimezone(zona).date()
 
 
+def _mismo_dia(a, b, zona):
+    """Un traslado o un tiempo en sitio se cuenta en minutos solo si empezo y
+    termino el mismo dia: la OT que llego el 15/10 y se cerro el 30/10 no
+    estuvo «21188 min en sitio»."""
+    return (a is not None and b is not None
+            and a.astimezone(zona).date() == b.astimezone(zona).date())
+
+
+def _con_fecha(hora: str | None) -> bool:
+    """Si una hora de `_hm` es de otro dia (lleva «DD/MM»)."""
+    return bool(hora) and "/" in hora
+
+
 def tiempos_de(ordenes, *, zona, ahora=None, fecha=None) -> dict:
     """{orden.id: {"salio", "llego", "termino", "traslado_min", "en_sitio_min",
     "en_sitio_hace_min", "en_sitio_desde"}}. Las horas, «HH:MM» en la zona de
@@ -86,8 +99,8 @@ def tiempos_de(ordenes, *, zona, ahora=None, fecha=None) -> dict:
             "salio": hm(salio),
             "llego": hm(llego),
             "termino": hm(termino),
-            "traslado_min": _minutos(salio, llego),
-            "en_sitio_min": _minutos(llego, termino),
+            "traslado_min": _minutos(salio, llego) if _mismo_dia(salio, llego, zona) else None,
+            "en_sitio_min": _minutos(llego, termino) if _mismo_dia(llego, termino, zona) else None,
             #  Esta en sitio AHORA: cuanto lleva, si llego hoy; si llego otro
             #  dia, desde cuando, con la fecha (no «21159 min»).
             "en_sitio_hace_min": (_minutos(llego, ahora)
@@ -185,7 +198,9 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
             entradas.append((ev.created_at, f"Llegó a OT #{n}{extra}", "tecnico"))
         elif nuevo in TERMINADAS:
             extra = (f" ({t['en_sitio_min']} min en sitio)"
-                     if t.get("en_sitio_min") is not None else "")
+                     if t.get("en_sitio_min") is not None
+                     else f" (había llegado el {t['llego']})"
+                     if _con_fecha(t.get("llego")) else "")
             entradas.append((ev.created_at, f"Terminó OT #{n}{extra}", "tecnico"))
         elif ev.tipo in REPORTES:
             entradas.append((ev.created_at, f"Reportó {REPORTES[ev.tipo]} en OT #{n}",

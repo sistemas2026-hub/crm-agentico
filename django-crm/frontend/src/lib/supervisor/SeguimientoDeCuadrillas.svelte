@@ -5,7 +5,10 @@
   Supervisor al técnico».
 
   Un cuadro por cuadrilla: en qué está ahora y hace cuánto, cuántas lleva de
-  cuántas, y lo que pide atención (una novedad, o una orden sin reporte). Al
+  cuántas, y lo que pide atención (una novedad, o una orden sin reporte). Con
+  el asunto y la dirección de la orden en curso o, si no hay, de LA QUE SIGUE
+  (30/10/2026, el usuario: «donde dice todavía no sale debería ir el asunto del
+  ticket y la dirección»). Al
   pie, el log del día plegado: lo que hizo el Supervisor y lo que reportó el
   técnico, en orden de hora. Todo lo calcula el servidor
   (`campo/tiempos_del_dia.py`); acá no se resta nada.
@@ -16,11 +19,23 @@
   /** @type {{ cuadrillas: any[] }} */
   let { cuadrillas = [] } = $props();
 
-  /** @param {any} r */
-  function enQueEsta(r) {
+  /**
+   * @param {any} r el resumen del día
+   * @param {any} sigue la orden marcada como siguiente, si hay
+   */
+  function enQueEsta(r, sigue) {
     const c = r?.en_curso;
-    if (!c) return r?.hechas && r.hechas === r.total ? 'Terminó el día' : r?.salio ? 'Entre órdenes' : 'Todavía no sale';
-    return `${c.estado === 'en_sitio' ? 'En sitio' : 'En camino'} · OT #${c.numero}`;
+    if (c) return `${c.estado === 'en_sitio' ? 'En sitio' : 'En camino'} · OT #${c.numero}`;
+    if (r?.hechas && r.hechas === r.total) return 'Terminó el día';
+    if (sigue) return `${r?.salio ? 'Sigue' : 'Empieza por'} OT #${sigue.numero}`;
+    return r?.salio ? 'Entre órdenes' : 'Todavía no sale';
+  }
+
+  /** La orden de la que se habla: la en curso, o la que sigue. @param {any} c */
+  function foco(c) {
+    const ordenes = c?.ordenes ?? [];
+    const numero = c?.resumen_del_dia?.en_curso?.numero;
+    return numero != null ? ordenes.find((o) => o.numero === numero) : ordenes.find((o) => o.siguiente);
   }
 </script>
 
@@ -29,14 +44,18 @@
     {#each cuadrillas as c (c.jornada)}
       {@const r = c.resumen_del_dia ?? { hechas: 0, total: 0 }}
       {@const vigentes = (c.novedades ?? []).filter((n) => n.vigente)}
+      {@const f = foco(c)}
+      {@const asunto = r.en_curso?.asunto || f?.asunto}
+      {@const donde = [f?.direccion, f?.barrio].filter(Boolean).join(' · ')}
       <article class="sc-cuadro" class:sc-alerta={vigentes.length || c.sin_reporte}>
         <header class="sc-cabeza">
           <strong>{c.cuadrilla}</strong>
           {#if c.labor}<span class="sc-labor">{c.labor}</span>{/if}
         </header>
 
-        <p class="sc-ahora">{enQueEsta(r)}</p>
-        {#if r.en_curso?.asunto}<p class="sc-asunto">{r.en_curso.asunto}</p>{/if}
+        <p class="sc-ahora">{enQueEsta(r, r.en_curso ? null : f)}</p>
+        {#if asunto}<p class="sc-asunto">{asunto}</p>{/if}
+        {#if donde}<p class="sc-donde">{donde}</p>{/if}
         {#if r.en_curso?.minutos != null}
           <p class="sc-reloj" aria-label={`Lleva ${r.en_curso.minutos} minutos`}>⏱ {r.en_curso.minutos} min</p>
         {:else if r.en_curso?.desde}
@@ -101,7 +120,8 @@
     font-weight: 600;
   }
   .sc-ahora { margin: 0; font-weight: 700; color: var(--snoc-on-surface); }
-  .sc-asunto { margin: 0; overflow-wrap: anywhere; }
+  .sc-asunto { margin: 0; overflow-wrap: anywhere; color: var(--snoc-on-surface); }
+  .sc-donde { margin: 0; overflow-wrap: anywhere; font-size: 12px; }
   .sc-reloj { margin: 0; font-size: 18px; font-weight: 700; color: var(--snoc-primary); font-variant-numeric: tabular-nums; }
   .sc-viejo { margin: 0; font-weight: 600; color: var(--snoc-error); font-variant-numeric: tabular-nums; }
   .sc-avance { display: grid; gap: 2px; font-size: 12px; }

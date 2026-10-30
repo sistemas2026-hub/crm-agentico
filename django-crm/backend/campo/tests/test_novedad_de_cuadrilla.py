@@ -202,7 +202,8 @@ _numero = iter(range(700, 9999))
 
 def _orden(org, version, de, estado=OrdenTrabajo.EN_SITIO):
     o = OrdenTrabajo.objects.create(org=org, numero=next(_numero), tipo_trabajo_version=version,
-                                    estado_operativo=estado, zona="X")
+                                    estado_operativo=estado, zona="X",
+                                    cliente_direccion="Calle 1")
     AsignacionTrabajo.objects.create(orden=o, profile=de, rol="tecnico", es_principal=True)
     return o
 
@@ -291,6 +292,19 @@ def test_p2_lo_de_otro_dia_lleva_su_fecha_y_no_se_cuenta_en_minutos(
     assert (t["en_sitio_hace_min"], t["en_sitio_desde"]) == (
         None, vieja.strftime("%d/%m %H:%M"))
     assert t["llego"] == vieja.strftime("%d/%m %H:%M"), "la hora de otro dia, con su fecha"
+
+    #  Y si hoy se termina, el log no dice «21188 min en sitio» sino cuando
+    #  habia llegado (el mismo dia, en produccion).
+    OrdenTrabajo.objects.filter(pk=colgada.pk).update(estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO)
+    _paso(colgada, "completada_campo", timezone.now())
+    OrdenTrabajo.objects.filter(pk=colgada.pk).update(completada_campo_en=timezone.now())
+    c = D.del_dia(org, _hoy())["cuadrillas"][0]
+    t = {f["numero"]: f for f in c["ordenes"]}[colgada.numero]["tiempos"]
+    assert (t["traslado_min"], t["en_sitio_min"]) == (0, None)
+    textos = [e["texto"] for e in c["log"]]
+    assert (f"Terminó OT #{colgada.numero} (había llegado el {vieja.strftime('%d/%m %H:%M')})"
+            in textos), textos
+    assert {f["numero"]: f for f in c["ordenes"]}[colgada.numero]["direccion"] == "Calle 1"
 
 
 def test_p3_salio_es_la_primera_salida_de_hoy_y_los_minutos_desde_la_ultima_entrada(

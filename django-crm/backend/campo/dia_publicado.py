@@ -446,6 +446,9 @@ def del_dia(org, fecha) -> dict:
             #  lugar en el orden del dia (el que sigue la app).
             "cliente": o.cliente_nombre or "",
             "asunto": asunto_de.get(o.id, ""),
+            #  30/10/2026: el cuadro del seguimiento dice A DONDE va la
+            #  cuadrilla (la orden en curso, o la que sigue).
+            "direccion": o.cliente_direccion or "",
             "vence_en": o.sla_vence_en.astimezone(zona).isoformat() if o.sla_vence_en else None,
             "orden_del_dia": (o.orden_del_dia if o.orden_del_dia_fecha == fecha else None),
             "siguiente": False,
