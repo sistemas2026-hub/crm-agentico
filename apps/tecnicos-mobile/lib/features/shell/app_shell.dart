@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/api/api_endpoints.dart';
 import '../../core/avisos/avisos_push.dart';
 import '../../core/acciones/salir_de_la_app.dart';
 import '../../core/estado/ordenes_jornada.dart';
@@ -25,6 +27,7 @@ import '../auth/login_screen.dart';
 import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
 import '../inicio/inicio_screen.dart';
+import '../inicio/labor_de_hoy.dart';
 import '../materiales/materiales_screen.dart';
 import '../materiales/recepcion_del_kit.dart';
 import '../sesion/cierre_de_sesion.dart';
@@ -75,7 +78,12 @@ class ShellDependencias {
     this.cicloDeVida,
     this.sesionVencida,
     this.recepcion,
+    this.cargarLaborDeHoy,
   });
+
+  /// Con qué cuadrilla y qué labor sale hoy (29/10/2026), para el saludo de
+  /// Inicio. Null si no se sabe. Nulo en pruebas que no la miden.
+  final Future<LaborDeHoy?> Function()? cargarLaborDeHoy;
 
   /// Avisa que el servidor rechazó la sesión (28/10/2026). Nulo en pruebas
   /// que no lo miden.
@@ -152,6 +160,21 @@ class ShellDependencias {
       conectividad: _conectividadDelTelefono(),
       sesionVencida: ApiClient.sesionVencida,
       recepcion: RecepcionDelKit.real(),
+      // Se pregunta al servidor; sin señal, vale lo último que se supo.
+      cargarLaborDeHoy: () async {
+        try {
+          final Response<dynamic> r =
+              await ApiClient().get<dynamic>(ApiEndpoints.miDia);
+          final LaborDeHoy? labor = LaborDeHoy.desdeJson(r.data);
+          if (labor != null) {
+            await almacenamiento.setLaborDeHoy(labor.aTexto());
+            return labor;
+          }
+        } catch (_) {
+          // Sin señal, o un servidor que todavía no lo sabe decir.
+        }
+        return LaborDeHoy.desdeTexto(await almacenamiento.getLaborDeHoy());
+      },
       cargarIdentidad: () async => IdentidadTecnico(
         nombre: await almacenamiento.getUserName() ?? FieldMockData.tecnicoPorDefecto,
         empresa: await almacenamiento.getOrgName() ?? FieldMockData.empresaPorDefecto,
@@ -279,6 +302,12 @@ class _AppShellState extends State<AppShell> {
   bool? _hayRed;
   IdentidadTecnico? _identidad;
 
+  /// La labor del día. Se vuelve a pedir cuando cambian las órdenes o llega un
+  /// aviso —que es cuando la oficina movió algo—, a lo sumo una vez por
+  /// minuto.
+  LaborDeHoy? _laborDeHoy;
+  DateTime? _laborPedidaEn;
+
   /// Cuántos trabajos le siguen tocando al técnico, para el número de la barra
   /// inferior. Se recalcula cuando cambian las órdenes compartidas; el cálculo
   /// es el mismo que usan las dos pantallas.
@@ -323,6 +352,7 @@ class _AppShellState extends State<AppShell> {
 
     widget.dependencias.ordenes.addListener(_alCambiarOrdenes);
     _cargarIdentidad();
+    _cargarLaborDeHoy(siempre: true);
 
     // LA SESIÓN VENCIDA SACA A ENTRAR DE NUEVO (28/10/2026). Antes la app se
     // quedaba abierta mostrando lo último que bajó, con «sincronizado», sin
@@ -357,7 +387,10 @@ class _AppShellState extends State<AppShell> {
     // El número tiene que moverse cuando llega un aviso por push y cuando la
     // cola baja los de la plataforma: las dos cosas escriben la misma tabla.
     _suscripcionAvisos = LocalDatabase.onDataChanged.listen((evento) {
-      if (evento.tabla == 'local_notificaciones') _contarAvisos();
+      if (evento.tabla == 'local_notificaciones') {
+        _contarAvisos();
+        _cargarLaborDeHoy();
+      }
     });
   }
 
@@ -394,10 +427,29 @@ class _AppShellState extends State<AppShell> {
 
   void _alCambiarOrdenes() {
     if (!mounted) return;
+    _cargarLaborDeHoy();
     setState(() {
       _trabajosActivos =
           SeleccionJornada.activos(widget.dependencias.ordenes.trabajos).length;
     });
+  }
+
+  Future<void> _cargarLaborDeHoy({bool siempre = false}) async {
+    final cargar = widget.dependencias.cargarLaborDeHoy;
+    if (cargar == null) return;
+    final DateTime ahora = DateTime.now();
+    if (!siempre &&
+        _laborPedidaEn != null &&
+        ahora.difference(_laborPedidaEn!) < const Duration(minutes: 1)) {
+      return;
+    }
+    _laborPedidaEn = ahora;
+    try {
+      final LaborDeHoy? labor = await cargar();
+      if (mounted) setState(() => _laborDeHoy = labor);
+    } catch (_) {
+      // No puede tumbar el contenedor.
+    }
   }
 
   Future<void> _cargarIdentidad() async {
@@ -576,6 +628,7 @@ class _AppShellState extends State<AppShell> {
             ordenes: widget.dependencias.ordenes,
             abrirTrabajo: widget.dependencias.abrirTrabajo,
             nombreTecnico: _identidad?.nombre ?? FieldMockData.tecnicoPorDefecto,
+            laborDeHoy: _laborDeHoy,
             resumenSincronizacion: _resumen,
             abrirOrdenDeUnAviso: widget.dependencias.abrirOrdenPorId == null
                 ? null
@@ -584,6 +637,10 @@ class _AppShellState extends State<AppShell> {
             onVerTodos: () => setState(() {
               _seccion = SeccionCampo.trabajo;
               _visitadas.add(SeccionCampo.trabajo);
+            }),
+            onVerMateriales: () => setState(() {
+              _seccion = SeccionCampo.materiales;
+              _visitadas.add(SeccionCampo.materiales);
             }),
           ),
         SeccionCampo.trabajo => TrabajoScreen(

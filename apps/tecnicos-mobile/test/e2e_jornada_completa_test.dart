@@ -250,7 +250,11 @@ void main() {
       );
 
       expect(find.text('Jornada en curso'), findsOneWidget);
-      expect(find.textContaining('Diagnóstico en domicilio'), findsOneWidget);
+      // La orden de la base llega a Inicio. Desde el 29/10/2026 el título es
+      // el asunto del ticket —o el cliente, sin asunto—, como en
+      // Programación; lo que propuso el Supervisor va entero en el detalle.
+      expect(find.text('Carlos Gómez Rincón'), findsOneWidget);
+      expect(find.textContaining('Diagnóstico en domicilio'), findsNothing);
       expect(find.text('INVENTARIO EN MÓVIL'), findsOneWidget);
       // Diez recibidos, cero consumidos: el kit entero todavía encima. La
       // cinta del diseño lo dice en una línea, no en columnas.

@@ -29,6 +29,10 @@ class SecureStorageService implements SecureStorageLectura {
   /// aparece con señal no sirve de nada.
   static const _keyTelefonoSoporte = 'dexter_telefono_soporte';
   static const _keyProfileId = 'dexter_profile_id';
+
+  /// La labor del día, para verla sin señal (29/10/2026). Se borra al cerrar
+  /// sesión: es de quien la tenía.
+  static const _keyLaborDeHoy = 'dexter_labor_de_hoy';
   static const _keyUserEmail = 'dexter_user_email';
   static const _keyUserName = 'dexter_user_name';
   static const _keyBaseUrl = 'dexter_api_base_url';
@@ -87,6 +91,11 @@ class SecureStorageService implements SecureStorageLectura {
   Future<String?> getUserEmail() async => await _storage.read(key: _keyUserEmail);
   Future<String?> getUserName() async => await _storage.read(key: _keyUserName);
 
+  Future<String?> getLaborDeHoy() async =>
+      await _storage.read(key: _keyLaborDeHoy);
+  Future<void> setLaborDeHoy(String texto) async =>
+      await _storage.write(key: _keyLaborDeHoy, value: texto);
+
   Future<String> getBaseUrl() async {
     final url = await _storage.read(key: _keyBaseUrl);
     return url ?? defaultBaseUrl;
@@ -113,6 +122,7 @@ class SecureStorageService implements SecureStorageLectura {
     await _storage.delete(key: _keyProfileId);
     await _storage.delete(key: _keyUserEmail);
     await _storage.delete(key: _keyUserName);
+    await _storage.delete(key: _keyLaborDeHoy);
   }
 
   Future<bool> hasValidSession() async {

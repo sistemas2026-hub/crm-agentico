@@ -53,6 +53,7 @@ class TrabajoVista {
     this.prioridad = '',
     this.zona = '',
     this.resumen = '',
+    this.asunto = '',
     this.ventanaInicio,
     this.ventanaFin,
     this.slaVenceEn,
@@ -146,6 +147,11 @@ class TrabajoVista {
   /// Qué hay que hacer, en una línea.
   final String resumen;
 
+  /// El asunto del ticket del que nació («No Tiene Internet»), o vacío si no
+  /// nació de un ticket. Es el título de la tarjeta, como en Programación
+  /// (29/10/2026); el servidor ya le quitó el cliente que trae pegado.
+  final String asunto;
+
   /// La franja que se le prometió al cliente. No es lo mismo que [compromiso],
   /// que es la hora agendada.
   final DateTime? ventanaInicio;
@@ -225,6 +231,7 @@ class TrabajoVista {
       prioridad: orden['prioridad']?.toString() ?? '',
       zona: orden['zona']?.toString() ?? '',
       resumen: orden['resumen']?.toString() ?? '',
+      asunto: orden['asunto']?.toString() ?? '',
       ventanaInicio: _fecha(orden['ventana_inicio']),
       ventanaFin: _fecha(orden['ventana_fin']),
       slaVenceEn: _fecha(orden['sla_vence_en']),

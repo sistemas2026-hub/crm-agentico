@@ -19,6 +19,9 @@ class ApiEndpoints {
 
   // Módulo Campo v1 (campo/views.py)
   static String get bootstrap => '$baseUrl/api/campo/bootstrap/';
+
+  /// Con qué cuadrilla y qué labor sale hoy el técnico (29/10/2026).
+  static String get miDia => '$baseUrl/api/campo/mi-dia/';
   static String get trabajos => '$baseUrl/api/campo/trabajos/';
 
   // Materiales: la custodia del tecnico y lo que gasta.

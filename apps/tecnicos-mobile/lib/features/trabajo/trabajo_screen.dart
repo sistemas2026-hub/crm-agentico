@@ -159,6 +159,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
   static bool _coincide(TrabajoVista t, String texto) {
     final campos = <String>[
       t.numero?.toString() ?? '',
+      t.asunto,
       t.clienteNombre,
       t.direccion,
       t.tipoNombre,
@@ -177,6 +178,12 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     }
 
     final visibles = _visibles();
+    // La que sigue se calcula sobre el día entero, no sobre lo filtrado: un
+    // filtro no cambia con cuál sigue el técnico.
+    final ({String id, String texto})? sigue = OrdenOperativo.laQueSigue(
+      widget.ordenes.trabajos,
+      ahora: DateTime.now(),
+    );
 
     return ColoredBox(
       color: AppColors.fondo,
@@ -232,6 +239,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                             final trabajo = visibles[i];
                             return TarjetaTrabajo(
                               trabajo: trabajo,
+                              marca: sigue?.id == trabajo.id ? sigue!.texto : null,
                               mostrarDatosFuturos: widget.mostrarDatosFuturos,
                               metrosHasta: Cercania.metrosHasta(
                                 trabajo,

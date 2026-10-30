@@ -4,6 +4,7 @@ import 'package:campo/core/estado/ordenes_jornada.dart';
 import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
+import 'package:campo/features/inicio/labor_de_hoy.dart';
 import 'package:campo/features/materiales/estado_de_jornada.dart';
 import 'package:campo/features/trabajo/seleccion_jornada.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
@@ -132,6 +133,8 @@ class _Banco {
     EstadoDeJornada? jornada,
     VoidCallback? onVerTodos,
     DateTime? ahora,
+    LaborDeHoy? laborDeHoy,
+    VoidCallback? onVerMateriales,
   }) =>
       MaterialApp(
         theme: AppTheme.lightTheme,
@@ -142,6 +145,8 @@ class _Banco {
             resumenSincronizacion: resumen,
             jornada: jornada ?? _jornada(hay: false),
             onVerTodos: onVerTodos,
+            onVerMateriales: onVerMateriales,
+            laborDeHoy: laborDeHoy,
             ahora: ahora,
             abrirTrabajo: (BuildContext contexto, TrabajoVista trabajo) async {
               abiertos.add(trabajo.id);
@@ -618,7 +623,8 @@ void main() {
       await tester.pumpWidget(banco.app(resumen: _sync(), jornada: _jornada()));
       await tester.pumpAndSettle();
 
-      expect(find.text('Alertas operativas'), findsNothing);
+      // Desde el 29/10/2026 las alertas van dentro de «Avisos».
+      expect(find.text('Avisos'), findsNothing);
       await banco.cerrar();
     });
 
@@ -629,7 +635,7 @@ void main() {
       await tester.pumpWidget(banco.app(resumen: _sync(pendientes: 3)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Alertas operativas'), findsOneWidget);
+      expect(find.text('Avisos'), findsOneWidget);
       expect(find.text('3 registros sin enviar'), findsOneWidget);
       expect(
         find.text('Suben solos cuando haya señal. No hace falta esperar acá.'),
@@ -692,7 +698,8 @@ void main() {
       await tester.pumpWidget(banco.app(jornada: _jornada(diferencias: 2)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Alertas operativas'), findsNothing);
+      // Desde el 29/10/2026 las alertas van dentro de «Avisos».
+      expect(find.text('Avisos'), findsNothing);
       await banco.cerrar();
     });
 
@@ -740,7 +747,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('Alertas operativas'), findsNothing);
+      // Desde el 29/10/2026 las alertas van dentro de «Avisos».
+      expect(find.text('Avisos'), findsNothing);
       await banco.cerrar();
     });
   });
@@ -848,6 +856,176 @@ void main() {
       banco.avisos.add(SyncStatus.error);
       await tester.pumpAndSettle();
       expect(banco.cargas, cargasAntes + 1);
+      await banco.cerrar();
+    });
+  });
+
+  group('12. El saludo y la labor del día (29/10/2026)', () {
+    // El usuario: «cuando se abre la aplicación, que salga hola, nombre del
+    // técnico, y tu labor para hoy es…, que se actualiza según esté en la
+    // plataforma de Dexter».
+    final DateTime hoy = DateTime(2026, 10, 29, 9);
+    LaborDeHoy labor({String fecha = '2026-10-29', JornadaDeHoy? jornada}) =>
+        LaborDeHoy(fecha: fecha, jornada: jornada);
+    const JornadaDeHoy instalacion = JornadaDeHoy(
+      cuadrilla: 'Cuadrilla #1',
+      labor: 'Instalación',
+      zonas: <String>['Norte', 'Soledad zona 2'],
+    );
+
+    String textoDe(WidgetTester t, String llave) =>
+        (t.widget(find.byKey(ValueKey<String>(llave))) as Text)
+            .textSpan!
+            .toPlainText();
+
+    testWidgets('dice hola con el primer nombre y la labor que armó la oficina',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: hoy,
+        laborDeHoy: labor(jornada: instalacion),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hola, Carlos'), findsOneWidget);
+      expect(textoDe(tester, 'labor-de-hoy'), 'Tu labor para hoy es Instalación');
+      expect(find.text('Cuadrilla #1 · Norte, Soledad zona 2'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('la labor de otro día no se muestra: mandaría a hacer otra cosa',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: hoy,
+        laborDeHoy: labor(fecha: '2026-10-28', jornada: instalacion),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hola, Carlos'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('labor-de-hoy')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('sin-labor-de-hoy')), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('sin cuadrilla hoy lo dice; sin saber, no inventa nada',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(ahora: hoy, laborDeHoy: labor()));
+      await tester.pumpAndSettle();
+      expect(find.text('Hoy no te asignaron cuadrilla en Programación'), findsOneWidget);
+
+      await tester.pumpWidget(banco.app(ahora: hoy));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<String>('labor-de-hoy')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('sin-labor-de-hoy')), findsNothing);
+      await banco.cerrar();
+    });
+
+    test('lo que contesta el servidor: con jornada, sin jornada, y uno viejo', () {
+      final LaborDeHoy? con = LaborDeHoy.desdeJson(<String, dynamic>{
+        'fecha': '2026-10-29',
+        'jornada': <String, dynamic>{
+          'cuadrilla': 'Cuadrilla #1',
+          'labor': 'instalacion',
+          'labor_nombre': 'Instalación',
+          'zonas': <String>['Norte'],
+        },
+      });
+      expect(con?.jornada?.labor, 'Instalación');
+      expect(con?.esDe(hoy), isTrue);
+      expect(con?.esDe(hoy.add(const Duration(days: 1))), isFalse);
+
+      final LaborDeHoy? sin =
+          LaborDeHoy.desdeJson(<String, dynamic>{'fecha': '2026-10-29', 'jornada': null});
+      expect(sin, isNotNull, reason: '«hoy no salís» es un dato');
+      expect(sin?.jornada, isNull);
+
+      expect(LaborDeHoy.desdeJson(<String, dynamic>{'fecha': '2026-10-29'}), isNull,
+          reason: 'un servidor viejo no dice nada: no es «sin cuadrilla»');
+
+      final LaborDeHoy? guardada = LaborDeHoy.desdeTexto(con!.aTexto());
+      expect(guardada?.jornada?.detalle, 'Cuadrilla #1 · Norte');
+      expect(LaborDeHoy.desdeTexto('{roto'), isNull);
+    });
+  });
+
+  group('13. Los avisos, de a dos (29/10/2026)', () {
+    // El usuario: «el aviso redúcelo, que muestre dos, y si quiere ver más que
+    // arrastre un scroll independiente; y esa alerta operativa puede ir
+    // también en aviso».
+    testWidgets('las alertas van dentro de Avisos: se ven dos y el resto se desliza',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        resumen: _sync(pendientes: 3, conflicto: 1),
+        jornada: _jornada(
+          diferencias: 2,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final Finder recuadro = find.byKey(const ValueKey<String>('avisos-con-scroll'));
+      expect(find.text('Avisos'), findsOneWidget);
+      expect(recuadro, findsOneWidget);
+      expect(find.text('Deslizá dentro del recuadro para ver el otro'), findsOneWidget);
+
+      // El orden lo decide `ResumenDeInicio` (lo grave primero): la prueba no
+      // lo supone, mide cuáles quedan adentro del recuadro y cuál debajo.
+      const List<String> alertas = <String>[
+        '3 registros sin enviar',
+        '1 cambio rechazado',
+        '2 materiales no cuadran',
+      ];
+      final Rect caja = tester.getRect(recuadro);
+      bool aLaVista(String a) =>
+          find.text(a).evaluate().isNotEmpty &&
+          tester.getRect(find.text(a)).bottom <= caja.bottom + 0.5;
+      final List<String> antes = alertas.where(aLaVista).toList();
+      expect(antes, hasLength(2), reason: 'se ven dos, enteras');
+      final String faltante = alertas.firstWhere((String a) => !antes.contains(a));
+
+      final Offset saludoAntes = tester.getTopLeft(find.text('Hola, Carlos'));
+      await tester.drag(recuadro, const Offset(0, -300));
+      await tester.pumpAndSettle();
+
+      expect(aLaVista(faltante), isTrue, reason: 'deslizando adentro aparece la tercera');
+      expect(tester.getTopLeft(find.text('Hola, Carlos')), saludoAntes,
+          reason: 'el scroll es del recuadro: la pantalla no se movió');
+      await banco.cerrar();
+    });
+
+    testWidgets('con una o dos no hay recuadro ni «deslizá»',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(resumen: _sync(pendientes: 3, conflicto: 1)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 registros sin enviar'), findsOneWidget);
+      expect(find.text('1 cambio rechazado'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('avisos-con-scroll')), findsNothing);
+      expect(find.textContaining('Deslizá dentro del recuadro'), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  group('14. El inventario lleva a Materiales (29/10/2026)', () {
+    testWidgets('tocarlo abre Materiales', (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      int veces = 0;
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        jornada: _jornada(),
+        onVerMateriales: () => veces++,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('INVENTARIO EN MÓVIL'));
+      await tester.pumpAndSettle();
+      expect(veces, 1);
       await banco.cerrar();
     });
   });

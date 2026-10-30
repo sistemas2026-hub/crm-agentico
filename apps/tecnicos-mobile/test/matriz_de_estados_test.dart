@@ -226,11 +226,14 @@ void main() {
         dia: jornada(),
       ),
       apareceTexto: <String>['Próximo trabajo', 'Jornada en curso'],
-      apareceParcial: <String>['Diagnóstico en domicilio'],
+      // El título ya no es lo propuesto (29/10/2026): va en el detalle.
+      apareceParcial: <String>['Cra 45 #12-88'],
       noAparece: <String>[
+        'Diagnóstico en domicilio',
         'No tenés trabajos asignados',
         'No se pudieron leer',
-        'Alertas operativas',
+        // Desde el 29/10/2026 las alertas van dentro de «Avisos».
+        'Avisos',
       ],
       accionDisponible: 'CONTINUAR OT #4832',
       permiteContinuar: true,

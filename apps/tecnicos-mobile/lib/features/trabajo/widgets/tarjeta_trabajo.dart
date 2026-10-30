@@ -5,6 +5,7 @@ import '../../../demo/field_mock_data.dart';
 import '../../../core/theme/app_theme.dart';
 import '../estado_trabajo.dart';
 import '../trabajo_vista.dart';
+import '../vencimiento.dart';
 import '../../../core/acciones/salir_de_la_app.dart';
 
 /// Un trabajo en la lista, con las variantes del diseño de Stitch.
@@ -27,9 +28,19 @@ class TarjetaTrabajo extends StatefulWidget {
     this.mostrarDatosFuturos = FieldMockData.modoDemo,
     this.metrosHasta,
     this.salir = const SalirDeLaApp(),
+    this.marca,
+    this.ahora,
   });
 
   final TrabajoVista trabajo;
+
+  /// «Empieza por esta» o «Sigue esta» en la que el técnico hace a
+  /// continuación (`OrdenOperativo.laQueSigue`); null en las demás.
+  final String? marca;
+
+  /// Contra qué día se dicen el vencimiento y el orden del día. Null es ahora;
+  /// se recibe para poder probarlo.
+  final DateTime? ahora;
 
   /// Con qué se abren el mapa y el marcador. Se recibe para poder probarlo.
   final SalirDeLaApp salir;
@@ -62,6 +73,11 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
   bool get mostrarDatosFuturos => widget.mostrarDatosFuturos;
 
   bool get _enCurso => trabajo.estado.enMarcha;
+
+  DateTime get _ahora => widget.ahora ?? DateTime.now();
+
+  /// El lugar que le dio el Supervisor hoy, si se lo dio.
+  int? get _lugar => trabajo.ordenDelDiaPara(_ahora);
 
   /// Hay algo que abrir: una latitud sin longitud, o un 0,0, son dato y no
   /// son ubicación. La misma regla que usa Inicio (`SalirDeLaApp`).
@@ -106,6 +122,10 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
           color: AppColors.surfaceContainerLowest,
           borderRadius: AppRadius.brTarjeta,
           boxShadow: _enCurso ? AppTheme.sombraNivel2 : AppTheme.sombraNivel1,
+          // La que sigue se ve de lejos, como en Programación.
+          border: widget.marca == null
+              ? null
+              : Border.all(color: AppColors.secondary, width: 2),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -117,6 +137,7 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
+                  ..._franjaDelDia(),
                   if (_incidencia) ..._cuerpoIncidencia() else ..._cuerpoTrabajo(),
                   const SizedBox(height: AppSpacing.md),
                   _acciones(),
@@ -265,6 +286,99 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
     );
   }
 
+  // --- La franja del día -----------------------------------------------------
+
+  /// Lo que decide a cuál ir, en una fila y antes que todo (29/10/2026, la
+  /// tarjeta de Programación llevada al teléfono): el lugar que le dio el
+  /// Supervisor, la prioridad, cuándo vence y si es la que sigue. Lo que no
+  /// hay no se dibuja: una franja de «sin dato» no ayuda a decidir.
+  List<Widget> _franjaDelDia() {
+    final Vencimiento? vence = Vencimiento.de(trabajo.slaVenceEn, _ahora);
+    // Si Dexter la evaluó, esa prioridad va con sus motivos más abajo
+    // (`_prioridades`): dos etiquetas de prioridad se contradirían.
+    final bool conPrioridad =
+        trabajo.prioridad.isNotEmpty && !trabajo.prioridadEvaluadaPorDexter;
+    if (_lugar == null && !conPrioridad && vence == null && widget.marca == null) {
+      return const <Widget>[];
+    }
+    final (Color fondoVence, Color colorVence) = switch (vence?.tono) {
+      TonoDeVencimiento.vencida => (AppColors.errorContainer, AppColors.onErrorContainer),
+      // Esta paleta no tiene ámbar (`AppColors.precaucion`): lo que pide
+      // atención va en el azul sobre su fondo.
+      TonoDeVencimiento.hoy => (AppColors.precaucionFondo, AppColors.precaucion),
+      _ => (AppColors.surfaceContainer, AppColors.onSurfaceVariant),
+    };
+    final (Color fondoPrioridad, Color colorPrioridad, String nombre) =
+        _pintaPrioridad(trabajo.prioridad);
+    return <Widget>[
+      const SizedBox(height: AppSpacing.sm),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          if (_lugar != null) ...<Widget>[
+            Container(
+              key: const ValueKey<String>('lugar-del-dia'),
+              width: 24,
+              height: 24,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: widget.marca == null ? AppColors.primaryContainer : AppColors.secondary,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$_lugar',
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: AppColors.onPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+          Expanded(
+            child: Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: <Widget>[
+                if (conPrioridad)
+                  _Etiqueta(
+                    texto: 'Prioridad ${nombre.toLowerCase()}',
+                    fondo: fondoPrioridad,
+                    color: colorPrioridad,
+                  ),
+                if (vence != null)
+                  _Etiqueta(
+                    icono: Icons.event,
+                    texto: vence.texto,
+                    fondo: fondoVence,
+                    color: colorVence,
+                  ),
+              ],
+            ),
+          ),
+          if (widget.marca != null) ...<Widget>[
+            const SizedBox(width: AppSpacing.sm),
+            Container(
+              key: const ValueKey<String>('marca-que-sigue'),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.secondary,
+                borderRadius: BorderRadius.circular(AppRadius.circulo),
+              ),
+              child: Text(
+                widget.marca!,
+                style: AppTypography.etiquetaChica.copyWith(
+                  color: AppColors.onSecondary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    ];
+  }
+
   // --- Cuerpo de un trabajo normal ----------------------------------------
 
   List<Widget> _cuerpoTrabajo() {
@@ -286,13 +400,27 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
         ),
       ],
       const SizedBox(height: AppSpacing.sm),
+      // EL ASUNTO DEL TICKET ES EL TITULO, como en Programación: dice por qué
+      // la llamaron. Sin ticket, el título sigue siendo el cliente.
+      if (trabajo.asunto.isNotEmpty) ...<Widget>[
+        Text(
+          trabajo.asunto,
+          key: const ValueKey<String>('asunto'),
+          style: AppTypography.tituloChico.copyWith(fontWeight: FontWeight.w700),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: AppSpacing.xs),
+      ],
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Expanded(
             child: Text(
               trabajo.clienteNombre,
-              style: AppTypography.tituloChico.copyWith(fontWeight: FontWeight.w700),
+              style: trabajo.asunto.isEmpty
+                  ? AppTypography.tituloChico.copyWith(fontWeight: FontWeight.w700)
+                  : AppTypography.cuerpo.copyWith(fontWeight: FontWeight.w600),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -449,22 +577,30 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
     return <Widget>[
       const SizedBox(height: AppSpacing.sm),
 
-      // 1 · RAZON DE FALLA. Es el asunto del ticket (`resumen`), no el tipo de
-      //     trabajo: "No Tiene Internet" dice por que lo llamaron; "Reparacion
-      //     de Senal (FTTH)" dice que plantilla se usa. Si el asunto no llego,
-      //     el tipo es lo mejor que hay.
+      // 1 · RAZON DE FALLA. El asunto del ticket, no el tipo de trabajo: "No
+      //     Tiene Internet" dice por que lo llamaron; "Reparacion de Senal
+      //     (FTTH)" dice que plantilla se usa. Sin asunto, el tipo: la regla
+      //     de Programacion (29/10/2026, el usuario: «debería salir así como
+      //     está en Programación»). Lo que propuso el Supervisor (`resumen`)
+      //     ya no es el titulo --cortado a dos lineas no se entendia-- y va
+      //     entero en el detalle de la orden.
       Text(
-        trabajo.resumen.isNotEmpty ? trabajo.resumen : trabajo.tipoNombre,
+        trabajo.asunto.isNotEmpty ? trabajo.asunto : trabajo.tipoNombre,
+        key: trabajo.asunto.isNotEmpty ? const ValueKey<String>('asunto') : null,
         style: AppTypography.tituloChico.copyWith(fontWeight: FontWeight.w700),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
 
-      // 2 · PRIORIDAD. Dos, y no una: la que calcula Dexter va con peso, la
-      //     del proveedor al lado y en chico. Mezclarlas haria que la pantalla
-      //     afirme un analisis que hoy no ocurre.
-      const SizedBox(height: AppSpacing.sm),
-      _prioridades(),
+      // 2 · PRIORIDAD. La de la orden va en la franja de arriba, como en
+      //     Programación. Acá van la que calcule Dexter, con peso y sus
+      //     motivos, y la del proveedor en chico: mezclarlas haria que la
+      //     pantalla afirme un analisis que no ocurrio.
+      if (trabajo.prioridadEvaluadaPorDexter ||
+          trabajo.prioridadProveedor.isNotEmpty) ...<Widget>[
+        const SizedBox(height: AppSpacing.sm),
+        _prioridades(),
+      ],
 
       // 2b · POR QUE esa prioridad. Sin motivos la etiqueta es un adorno, asi
       //      que cuando los haya van pegados a ella y no escondidos abajo.
@@ -546,40 +682,41 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
 
   /// La de Dexter con peso, la del proveedor en chico.
   ///
-  /// Hoy Dexter **no calcula** prioridad: el campo lo pone quien despacha y su
-  /// default es 'media'. Mostrar eso como juicio seria presentar una copia
-  /// disfrazada de analisis, que es contra lo que advierte el importador del
-  /// motor. Hasta que calcule, dice 'sin evaluar'.
+  /// Dexter **no evalúa** la prioridad de una orden con motivos propios
+  /// (`prioridad_dexter`). La de la orden —la del nivel del asunto, o la que
+  /// puso quien despacha— va en la franja de arriba con su nombre llano,
+  /// «Prioridad alta», igual que en Programación: es la de la orden y no se
+  /// presenta como un análisis. Hasta el 29/10/2026 esto decía «Sin evaluar»
+  /// en una etiqueta que la tapaba.
   Widget _prioridades() {
     final bool evaluada = trabajo.prioridadEvaluadaPorDexter;
-    final (Color fondo, Color color, String texto) = evaluada
-        ? _pintaPrioridad(trabajo.prioridad)
-        : (AppColors.surfaceContainer, AppColors.onSurfaceVariant, 'Sin evaluar');
+    final (Color fondo, Color color, String texto) = _pintaPrioridad(trabajo.prioridad);
 
     return Row(
       children: <Widget>[
-        Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm, vertical: 6),
-          decoration: BoxDecoration(color: fondo, borderRadius: AppRadius.brCampo),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(evaluada ? Icons.priority_high : Icons.help_outline,
-                  size: 15, color: color),
-              const SizedBox(width: 6),
-              Text(
-                texto.toUpperCase(),
-                style: AppTypography.etiqueta.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
+        if (evaluada)
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm, vertical: 6),
+            decoration: BoxDecoration(color: fondo, borderRadius: AppRadius.brCampo),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(Icons.priority_high,
+                    size: 15, color: color),
+                const SizedBox(width: 6),
+                Text(
+                  texto.toUpperCase(),
+                  style: AppTypography.etiqueta.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         if (trabajo.prioridadProveedor.isNotEmpty) ...<Widget>[
-          const SizedBox(width: AppSpacing.sm),
+          if (evaluada) const SizedBox(width: AppSpacing.sm),
           Flexible(
             child: Text(
               'WispHub: ${trabajo.prioridadProveedor}',

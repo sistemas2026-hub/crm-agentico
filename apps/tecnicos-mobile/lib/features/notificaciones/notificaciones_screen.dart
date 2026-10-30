@@ -33,7 +33,20 @@ class NotificacionesScreen extends StatefulWidget {
     this.alAbrirOrden,
     this.ocultarSiVacio = false,
     this.margenSuperior = 0,
+    this.primeros = const <Widget>[],
+    this.visibles,
   });
+
+  /// Lo que va antes de los avisos de la plataforma (29/10/2026): en Inicio,
+  /// las alertas de la jornada —«5 materiales no cuadran»—, que le piden algo
+  /// al técnico igual que un aviso. Antes eran otro bloque, más abajo.
+  final List<Widget> primeros;
+
+  /// Cuántos se ven sin deslizar (29/10/2026, el usuario: «que muestre dos, y
+  /// si quiere ver más, que arrastre un scroll independiente»). El resto queda
+  /// en un recuadro con su propio scroll, así la pantalla no se alarga con
+  /// cada aviso. Null los muestra todos: la pantalla suelta.
+  final int? visibles;
 
   /// Inyectable para las pruebas: sin esto habría que montar una base real solo
   /// para dibujar una lista.
@@ -72,6 +85,16 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
 
   StreamSubscription<LocalDatabaseChangeEvent>? _suscripcion;
 
+  /// El scroll propio del recuadro, y lo que miden los primeros [visibles]:
+  /// la altura sale de lo dibujado, no de una estimación, porque una alerta
+  /// ocupa el doble que un aviso.
+  final ScrollController _scroll = ScrollController();
+  late final List<GlobalKey> _llaves = List<GlobalKey>.generate(
+    widget.visibles ?? 0,
+    (_) => GlobalKey(),
+  );
+  double? _altoMedido;
+
   @override
   void initState() {
     super.initState();
@@ -87,6 +110,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   @override
   void dispose() {
     _suscripcion?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -141,7 +165,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   Widget build(BuildContext context) {
     // Mientras carga tampoco se dibuja: un bloque que aparece vacío y
     // desaparece medio segundo después empuja todo lo de abajo.
-    if (widget.ocultarSiVacio && (_cargando || _filas.isEmpty)) {
+    if (widget.ocultarSiVacio &&
+        widget.primeros.isEmpty &&
+        (_cargando || _filas.isEmpty)) {
       return const SizedBox.shrink();
     }
 
@@ -158,6 +184,16 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   }
 
   List<Widget> _cuerpo() {
+    final List<Widget> filas = <Widget>[
+      ...widget.primeros,
+      if (!_cargando)
+        for (final Map<String, dynamic> f in _filas) _unAviso(f),
+    ];
+    final int? visibles = widget.visibles;
+    if (visibles != null && filas.length > visibles) {
+      return _conScroll(filas, visibles);
+    }
+    if (filas.isNotEmpty) return filas;
     if (_cargando) {
       return <Widget>[
         Text('Buscando…', style: AppTypography.cuerpoChico),
@@ -175,9 +211,56 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
       ];
     }
 
+    return filas;
+  }
+
+  /// Los primeros [visibles] a la vista y el resto en el mismo recuadro, con
+  /// su scroll. Debajo dice cuántos quedan: un scroll sin aviso es un aviso
+  /// que nadie ve.
+  List<Widget> _conScroll(List<Widget> filas, int visibles) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _medir(visibles));
+    final int mas = filas.length - visibles;
     return <Widget>[
-      for (final Map<String, dynamic> f in _filas) _unAviso(f),
+      ConstrainedBox(
+        key: const ValueKey<String>('avisos-con-scroll'),
+        // Antes de medir, un alto razonable; en el cuadro siguiente, el real.
+        constraints: BoxConstraints(maxHeight: _altoMedido ?? 76.0 * visibles),
+        child: Scrollbar(
+          controller: _scroll,
+          thumbVisibility: true,
+          child: ListView(
+            controller: _scroll,
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
+            children: <Widget>[
+              for (int i = 0; i < filas.length; i++)
+                i < visibles
+                    ? KeyedSubtree(key: _llaves[i], child: filas[i])
+                    : filas[i],
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      Text(
+        'Deslizá dentro del recuadro para ver ${mas == 1 ? 'el otro' : 'los otros $mas'}',
+        style: AppTypography.etiquetaChica,
+        textAlign: TextAlign.center,
+      ),
     ];
+  }
+
+  void _medir(int visibles) {
+    if (!mounted) return;
+    double suma = 0;
+    for (int i = 0; i < visibles; i++) {
+      final RenderObject? r = _llaves[i].currentContext?.findRenderObject();
+      if (r is! RenderBox || !r.hasSize) return;
+      suma += r.size.height;
+    }
+    if (_altoMedido == null || (suma - _altoMedido!).abs() > 0.5) {
+      setState(() => _altoMedido = suma);
+    }
   }
 
   Widget _unAviso(Map<String, dynamic> fila) {

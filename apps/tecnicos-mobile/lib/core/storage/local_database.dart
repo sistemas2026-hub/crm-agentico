@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 24,
+      version: 25,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -203,6 +203,20 @@ class LocalDatabase {
         await db.execute(
           'ALTER TABLE local_ordenes ADD COLUMN orden_del_dia_fecha TEXT;',
         );
+      }
+    }
+
+    // v25: el asunto del ticket del que nació la orden (29/10/2026), el título
+    // de la tarjeta como en Programación. Aditiva: llega en la próxima
+    // sincronización, y hasta entonces la tarjeta usa el tipo de trabajo.
+    if (oldVersion < 25) {
+      final List<Map<String, Object?>> info =
+          await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final Set<String> cols = <String>{
+        for (final Map<String, Object?> c in info) c['name'].toString(),
+      };
+      if (cols.isNotEmpty && !cols.contains('asunto')) {
+        await db.execute('ALTER TABLE local_ordenes ADD COLUMN asunto TEXT;');
       }
     }
 
@@ -896,6 +910,7 @@ class LocalDatabase {
         prioridad TEXT,
         zona TEXT,
         resumen TEXT,
+        asunto TEXT,
         ventana_inicio TEXT,
         ventana_fin TEXT,
         sla_vence_en TEXT,
@@ -1133,6 +1148,7 @@ class LocalDatabase {
         'prioridad',
         'zona',
         'resumen',
+        'asunto',
         'ventana_inicio',
         'ventana_fin',
         'sla_vence_en',
@@ -1237,6 +1253,8 @@ class LocalDatabase {
       'prioridad': conservando(ordenData, 'prioridad', 'prioridad')?.toString(),
       'zona': conservando(ordenData, 'zona', 'zona')?.toString(),
       'resumen': conservando(ordenData, 'resumen', 'resumen')?.toString(),
+      // El asunto del ticket, sin el cliente que trae pegado (29/10/2026).
+      'asunto': conservando(ordenData, 'asunto', 'asunto')?.toString(),
       'ventana_inicio': conservando(
         compromiso,
         'ventana_inicio',

@@ -912,9 +912,27 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(trabajo.tipoNombre, style: AppTypography.headlineMd),
+            // El asunto del ticket, como en la tarjeta (29/10/2026); el tipo
+            // queda debajo, en chico.
+            Text(
+              trabajo.asunto.isNotEmpty ? trabajo.asunto : trabajo.tipoNombre,
+              style: AppTypography.headlineMd,
+            ),
+            if (trabajo.asunto.isNotEmpty)
+              Text(trabajo.tipoNombre, style: AppTypography.etiquetaChica),
+            // Lo que propuso el Supervisor, ENTERO (29/10/2026): salió de las
+            // tarjetas, donde cortado no se entendía, y acá se lee completo.
+            if (trabajo.resumen.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Text(
+                  trabajo.resumen,
+                  key: const ValueKey<String>('resumen-del-trabajo'),
+                  style: AppTypography.cuerpoChico,
+                ),
+              )
             // CAMPO-DATA-037 · Qué hay que hacer, en una línea.
-            if (widget.mostrarDatosFuturos)
+            else if (widget.mostrarDatosFuturos)
               Text(
                 FieldMockData.resumenDelTrabajo,
                 style: AppTypography.cuerpoChico,
