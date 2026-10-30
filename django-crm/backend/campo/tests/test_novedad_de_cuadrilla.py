@@ -266,3 +266,50 @@ def test_p_programacion_dice_cuanto_lleva_cada_orden_y_el_dia_de_la_cuadrilla(
     assert any(t.startswith("Avisó novedad: se pinchó una llanta") for t in textos)
     horas = [e["hora"] for e in c["log"]]
     assert horas == sorted(horas), "el log va en orden de hora"
+
+
+def test_p2_lo_de_otro_dia_lleva_su_fecha_y_no_se_cuenta_en_minutos(
+        org, version, user_profile):
+    """30/10/2026, en produccion: una OT quedo en sitio el 15/10 a las 18:43 y
+    nadie la cerro; el cuadro decia «21159 min» y «salió 18:43». Lo de otro dia
+    va con su fecha, los minutos solo cuentan si empezo hoy, y «salió» es la
+    primera salida de HOY."""
+    _jornada(org, user_profile)
+    vieja = (timezone.now().astimezone(BOGOTA).replace(second=0, microsecond=0)
+             - dt.timedelta(days=15))
+    colgada = _orden(org, version, user_profile, estado=OrdenTrabajo.EN_SITIO)
+    _paso(colgada, "en_camino", vieja)
+    _paso(colgada, "en_sitio", vieja)
+
+    c = D.del_dia(org, _hoy())["cuadrillas"][0]
+
+    r = c["resumen_del_dia"]
+    assert r["salio"] is None, "la salida del 15 no es la de hoy"
+    assert (r["en_curso"]["minutos"], r["en_curso"]["desde"]) == (
+        None, vieja.strftime("%d/%m %H:%M"))
+    t = {f["numero"]: f for f in c["ordenes"]}[colgada.numero]["tiempos"]
+    assert (t["en_sitio_hace_min"], t["en_sitio_desde"]) == (
+        None, vieja.strftime("%d/%m %H:%M"))
+    assert t["llego"] == vieja.strftime("%d/%m %H:%M"), "la hora de otro dia, con su fecha"
+
+
+def test_p3_salio_es_la_primera_salida_de_hoy_y_los_minutos_desde_la_ultima_entrada(
+        org, version, user_profile):
+    """La de hoy cuenta aunque otra orden haya salido antes otro dia; y si la
+    orden volvio a entrar en sitio hoy, los minutos cuentan desde hoy."""
+    _jornada(org, user_profile)
+    ahora = timezone.now()
+    vieja = ahora - dt.timedelta(days=3)
+    de_hoy = ahora.astimezone(BOGOTA).replace(second=0, microsecond=0)
+    o = _orden(org, version, user_profile, estado=OrdenTrabajo.EN_SITIO)
+    _paso(o, "en_camino", vieja)
+    _paso(o, "en_sitio", vieja)
+    #  Hoy: salio y volvio a llegar (una suspension en el medio).
+    _paso(o, "en_camino", de_hoy - dt.timedelta(minutes=1))
+    _paso(o, "en_sitio", de_hoy)
+
+    r = D.del_dia(org, _hoy())["cuadrillas"][0]["resumen_del_dia"]
+
+    assert r["salio"] == (de_hoy - dt.timedelta(minutes=1)).strftime("%H:%M")
+    assert r["en_curso"]["desde"] == de_hoy.strftime("%H:%M")
+    assert r["en_curso"]["minutos"] is not None and r["en_curso"]["minutos"] < 60

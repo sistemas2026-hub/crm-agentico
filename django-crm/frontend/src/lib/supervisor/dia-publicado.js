@@ -110,10 +110,11 @@ export function textoDeLaSiguiente(ordenes) {
 
 /**
  * Los tiempos de una orden (30/10/2026, «¿cuánto han demorado?»): «28 min en
- * camino · 40 min en sitio», o «en sitio hace 35 min» si sigue ahí. Vacío si
- * todavía no salió. Lo calcula el servidor (`campo/tiempos_del_dia.py`).
+ * camino · 40 min en sitio», o «en sitio hace 35 min» si sigue ahí. Si llegó
+ * OTRO día y nadie la cerró, «en sitio desde el 15/10 18:43»: no «21159 min».
+ * Vacío si todavía no salió. Lo calcula el servidor (`campo/tiempos_del_dia.py`).
  *
- * @param {{ traslado_min?: number | null, en_sitio_min?: number | null, en_sitio_hace_min?: number | null } | null | undefined} t
+ * @param {{ traslado_min?: number | null, en_sitio_min?: number | null, en_sitio_hace_min?: number | null, en_sitio_desde?: string | null } | null | undefined} t
  */
 export function textoDeTiempos(t) {
   if (!t) return '';
@@ -121,6 +122,7 @@ export function textoDeTiempos(t) {
   if (t.traslado_min != null) partes.push(`${t.traslado_min} min en camino`);
   if (t.en_sitio_min != null) partes.push(`${t.en_sitio_min} min en sitio`);
   else if (t.en_sitio_hace_min != null) partes.push(`en sitio hace ${t.en_sitio_hace_min} min`);
+  else if (t.en_sitio_desde) partes.push(`en sitio desde el ${t.en_sitio_desde}`);
   return partes.join(' · ');
 }
 

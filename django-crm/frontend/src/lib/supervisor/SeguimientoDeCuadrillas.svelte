@@ -39,6 +39,9 @@
         {#if r.en_curso?.asunto}<p class="sc-asunto">{r.en_curso.asunto}</p>{/if}
         {#if r.en_curso?.minutos != null}
           <p class="sc-reloj" aria-label={`Lleva ${r.en_curso.minutos} minutos`}>⏱ {r.en_curso.minutos} min</p>
+        {:else if r.en_curso?.desde}
+          <!-- Empezó otro día y nadie la cerró: la fecha, no «21159 min». -->
+          <p class="sc-viejo">⏱ Desde el {r.en_curso.desde}, sin cerrar</p>
         {/if}
 
         <div class="sc-avance">
@@ -100,6 +103,7 @@
   .sc-ahora { margin: 0; font-weight: 700; color: var(--snoc-on-surface); }
   .sc-asunto { margin: 0; overflow-wrap: anywhere; }
   .sc-reloj { margin: 0; font-size: 18px; font-weight: 700; color: var(--snoc-primary); font-variant-numeric: tabular-nums; }
+  .sc-viejo { margin: 0; font-weight: 600; color: var(--snoc-error); font-variant-numeric: tabular-nums; }
   .sc-avance { display: grid; gap: 2px; font-size: 12px; }
   .sc-avance progress { width: 100%; height: 6px; accent-color: var(--snoc-primary); }
   .sc-aviso { margin: 0; color: var(--snoc-error); font-weight: 600; }

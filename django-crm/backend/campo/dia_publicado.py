@@ -339,7 +339,7 @@ def del_dia(org, fecha) -> dict:
     #  reportar. Lo que no se pudo calcular no tumba Programacion.
     ahora = timezone.now()
     try:
-        tiempos = TD.tiempos_de(ordenes, zona=zona, ahora=ahora)
+        tiempos = TD.tiempos_de(ordenes, zona=zona, ahora=ahora, fecha=fecha)
     except Exception:                                            # noqa: BLE001
         logger.warning("Programacion: no se pudieron calcular los tiempos")
         tiempos = {}
@@ -509,7 +509,8 @@ def del_dia(org, fecha) -> dict:
             sin_reporte = sin_reporte_de(lista)
             return {
                 "resumen_del_dia": TD.resumen_de_la_cuadrilla(
-                    lista, tiempos, asuntos=asunto_de, ahora=ahora),
+                    lista, tiempos, asuntos=asunto_de, ahora=ahora, zona=zona,
+                    fecha=fecha),
                 "novedades": [N.a_json(n, ahora) for n in novedades_de.get(j.id, [])],
                 "sin_reporte": sin_reporte,
                 "log": TD.log_del_dia(

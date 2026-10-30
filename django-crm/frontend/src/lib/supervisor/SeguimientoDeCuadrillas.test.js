@@ -61,6 +61,23 @@ describe('el cuadro de cada cuadrilla', () => {
     expect(html([c()])).not.toContain('sc-alerta');
   });
 
+  it('si la orden en curso empezó otro día, la fecha y no los minutos (30/10/2026: «21159 min»)', () => {
+    const h = html([
+      c({
+        resumen_del_dia: {
+          salio: null,
+          hechas: 0,
+          total: 5,
+          en_curso: { numero: 3, estado: 'en_sitio', desde: '15/10 18:43', asunto: 'Instalación Tdt', minutos: null }
+        }
+      })
+    ]);
+    expect(h).toContain('⏱ Desde el 15/10 18:43, sin cerrar');
+    expect(h).not.toContain(' min</p>');
+    expect(h).toContain('0 de 5');
+    expect(h).not.toContain('salió');
+  });
+
   it('sin orden en curso dice si no salió, si está entre órdenes o si terminó', () => {
     const sin = (r) => html([c({ resumen_del_dia: r, log: [] })]);
     expect(sin({ salio: null, hechas: 0, total: 4, en_curso: null })).toContain('Todavía no sale');

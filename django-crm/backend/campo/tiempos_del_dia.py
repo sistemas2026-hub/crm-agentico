@@ -17,6 +17,12 @@ LA HORA ES LA DEL SERVIDOR: la del evento que dejo el cambio de estado. Con la
 app sin señal, el cambio sube despues y la hora es la de cuando subio --un
 traslado puede salir mas largo de lo que fue--. Se dice en la pantalla, no se
 corrige adivinando.
+
+LO DE OTRO DIA LLEVA SU FECHA (30/10/2026). Una OT quedo «en sitio» el 15/10 a
+las 18:43 y nadie la cerro: el cuadro de su cuadrilla decia «21159 min» y
+«salió 18:43», como si hubiera salido hoy. Ahora: una hora de otro dia va con
+su fecha («15/10 18:43»); los minutos solo se cuentan si empezo HOY; y «salió»
+es la primera salida DEL DIA, no la primera de la historia de sus ordenes.
 ================================================================================
 """
 
@@ -35,13 +41,28 @@ def _minutos(desde, hasta):
     return int((hasta - desde).total_seconds() // 60)
 
 
-def tiempos_de(ordenes, *, zona, ahora=None) -> dict:
+def _hm(d, zona, dia):
+    """«HH:MM» si es del dia; «DD/MM HH:MM» si no. None sin hora."""
+    if d is None:
+        return None
+    local = d.astimezone(zona)
+    return local.strftime("%H:%M") if local.date() == dia else local.strftime("%d/%m %H:%M")
+
+
+def _es_de_hoy(d, zona, ahora):
+    return d is not None and d.astimezone(zona).date() == ahora.astimezone(zona).date()
+
+
+def tiempos_de(ordenes, *, zona, ahora=None, fecha=None) -> dict:
     """{orden.id: {"salio", "llego", "termino", "traslado_min", "en_sitio_min",
-    "en_sitio_hace_min"}}. Las horas, «HH:MM» en la zona de la empresa; lo que
-    no paso, None. UNA consulta para todas."""
+    "en_sitio_hace_min", "en_sitio_desde"}}. Las horas, «HH:MM» en la zona de
+    la empresa, con su fecha si no son de `fecha` (por defecto, hoy); lo que no
+    paso, None. Esta en sitio AHORA: `en_sitio_hace_min` si llego hoy, y si
+    llego otro dia, `en_sitio_desde` con la fecha. UNA consulta para todas."""
     from campo.models import EventoTrabajo
 
     ahora = ahora or timezone.now()
+    dia = fecha or ahora.astimezone(zona).date()
     ids = [o.id for o in ordenes]
     primero = {}
     for orden_id, datos, cuando in (
@@ -53,50 +74,63 @@ def tiempos_de(ordenes, *, zona, ahora=None) -> dict:
         primero.setdefault((orden_id, clave), cuando)
 
     def hm(d):
-        return d.astimezone(zona).strftime("%H:%M") if d else None
+        return _hm(d, zona, dia)
 
     salida = {}
     for o in ordenes:
         salio = primero.get((o.id, EN_CAMINO))
         llego = primero.get((o.id, EN_SITIO))
         termino = primero.get((o.id, "termino")) or getattr(o, "completada_campo_en", None)
+        ahi = o.estado_operativo == EN_SITIO and termino is None and llego is not None
         salida[o.id] = {
             "salio": hm(salio),
             "llego": hm(llego),
             "termino": hm(termino),
             "traslado_min": _minutos(salio, llego),
             "en_sitio_min": _minutos(llego, termino),
-            #  Esta en sitio AHORA: cuanto lleva.
+            #  Esta en sitio AHORA: cuanto lleva, si llego hoy; si llego otro
+            #  dia, desde cuando, con la fecha (no «21159 min»).
             "en_sitio_hace_min": (_minutos(llego, ahora)
-                                  if o.estado_operativo == EN_SITIO and termino is None
-                                  else None),
+                                  if ahi and _es_de_hoy(llego, zona, ahora) else None),
+            "en_sitio_desde": (llego.astimezone(zona).strftime("%d/%m %H:%M")
+                               if ahi and not _es_de_hoy(llego, zona, ahora) else None),
         }
     return salida
 
 
 def resumen_de_la_cuadrilla(ordenes, tiempos: dict, *, asuntos=None,
-                            ahora=None) -> dict:
-    """A que hora salio a la primera, cuantas lleva hechas de cuantas, y en
-    cual esta ahora (en camino o en sitio): su asunto y hace cuantos minutos.
-    En sitio cuenta desde que llego; en camino, desde que salio."""
+                            ahora=None, zona=None, fecha=None) -> dict:
+    """A que hora salio HOY a la primera, cuantas lleva hechas de cuantas, y en
+    cual esta ahora (en camino o en sitio): su asunto y desde cuando. Desde que
+    ENTRO a ese estado la ultima vez; los minutos, solo si fue hoy --si fue
+    otro dia, `desde` lleva la fecha y `minutos` es None--."""
+    import datetime as dt
+
     from campo.models import EventoTrabajo
 
     ahora = ahora or timezone.now()
-    salidas = [t["salio"] for o in ordenes if (t := tiempos.get(o.id)) and t["salio"]]
+    zona = zona or dt.timezone.utc
+    dia = fecha or ahora.astimezone(zona).date()
+    inicio = dt.datetime.combine(dia, dt.time(0, 0), tzinfo=zona)
+    primera = (EventoTrabajo.objects
+               .filter(orden_id__in=[o.id for o in ordenes], datos__nuevo_estado=EN_CAMINO,
+                       created_at__gte=inicio, created_at__lt=inicio + dt.timedelta(days=1))
+               .order_by("created_at").values_list("created_at", flat=True).first())
     en_curso = next((o for o in ordenes if o.estado_operativo in (EN_CAMINO, EN_SITIO)), None)
     curso = None
     if en_curso is not None:
-        t = tiempos.get(en_curso.id) or {}
-        en_sitio = en_curso.estado_operativo == EN_SITIO
         desde = (EventoTrabajo.objects
                  .filter(orden_id=en_curso.id, datos__nuevo_estado=en_curso.estado_operativo)
-                 .order_by("created_at").values_list("created_at", flat=True).first())
+                 .order_by("-created_at").values_list("created_at", flat=True).first())
+        de_hoy = _es_de_hoy(desde, zona, ahora)
         curso = {"numero": en_curso.numero, "estado": en_curso.estado_operativo,
-                 "desde": t.get("llego" if en_sitio else "salio"),
+                 "desde": (None if desde is None
+                           else desde.astimezone(zona).strftime("%H:%M" if de_hoy
+                                                                else "%d/%m %H:%M")),
                  "asunto": (asuntos or {}).get(en_curso.id, ""),
-                 "minutos": _minutos(desde, ahora)}
+                 "minutos": _minutos(desde, ahora) if de_hoy else None}
     return {
-        "salio": min(salidas) if salidas else None,
+        "salio": _hm(primera, zona, dia),
         "hechas": sum(1 for o in ordenes if o.estado_operativo in TERMINADAS),
         "total": len(ordenes),
         "en_curso": curso,

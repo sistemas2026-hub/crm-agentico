@@ -13,6 +13,9 @@ import { textoDelDiaDeLaCuadrilla, textoDeSeguimiento, textoDeTiempos } from './
 describe('los textos', () => {
   it('los tiempos de una orden: traslado y en sitio; o cuánto lleva en sitio', () => {
     expect(textoDeTiempos({ traslado_min: 28, en_sitio_min: 40 })).toBe('28 min en camino · 40 min en sitio');
+    expect(
+      textoDeTiempos({ traslado_min: 0, en_sitio_min: null, en_sitio_hace_min: null, en_sitio_desde: '15/10 18:43' })
+    ).toBe('0 min en camino · en sitio desde el 15/10 18:43');
     expect(textoDeTiempos({ traslado_min: 12, en_sitio_min: null, en_sitio_hace_min: 35 })).toBe(
       '12 min en camino · en sitio hace 35 min'
     );
