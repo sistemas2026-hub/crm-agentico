@@ -179,10 +179,15 @@
       ? { confiable: true, motivo: 'al_dia', detalle: null, silencio_s: 0 }
       : veredicto;
 
+    //  Durante la demostración no se mezclan los turnos reales en curso: lo
+    //  que se está mirando es un guion, y pintar encima una ejecución de
+    //  verdad haría que una parte de la escena fuera real y otra inventada sin
+    //  que se pueda distinguir cuál es cuál.
     const visual = visualizarAhora(
       demostracion ? instruccionesSimuladas : instruccionesReales,
       veredictoDeEscena,
-      ahora
+      ahora,
+      demostracion ? [] : flujo.activas()
     );
     estados = visual.estados;
     sinRepresentacion = visual.sinRepresentacion;
@@ -192,9 +197,9 @@
 
   /** @type {any} */
   let visualizar = null;
-  function visualizarAhora(instrucciones, v, ahora) {
+  function visualizarAhora(instrucciones, v, ahora, activas) {
     if (!visualizar) return { estados: [], sinRepresentacion: 0 };
-    return visualizar(instrucciones, agentesConPuesto, v, ahora);
+    return visualizar(instrucciones, agentesConPuesto, v, ahora, activas);
   }
 
   /* ── montaje ────────────────────────────────────────────────────────────── */

@@ -3294,7 +3294,8 @@ def registrar_llamada_herramienta(tenant: str, conversation_id: str, rol: str,
 
 def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
                                    llamadas: list[dict],
-                                   profile_id: str | None = None) -> None:
+                                   profile_id: str | None = None,
+                                   ejecucion: dict | None = None) -> None:
     """
     TODA la traza del turno en UNA ida a la base.
 
@@ -3315,11 +3316,26 @@ def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
 
     Con executemany son 5 filas en un viaje. Sigue sin romper el turno si
     falla: perder auditoria no puede tumbar la atencion.
+
+    'ejecucion' CIERRA el turno en ESTE MISMO VIAJE (30/10/2026). Se pliega aca
+    en vez de abrir su propia conexion por la razon de siempre: cada ida a la
+    base cuesta ~1 segundo, y el ciclo de vida de las ejecuciones no vale un
+    viaje extra por turno cuando ya hay uno pasando por el mismo sitio. Sin
+    llamadas que guardar tambien entra: un turno que no llamo a ninguna
+    herramienta igual empezo y termino.
     """
-    if not llamadas:
+    if not llamadas and not ejecucion:
         return
     try:
         with sesion(tenant) as (cur, org):
+            if ejecucion:
+                cerrar_ejecucion(
+                    cur, org, ejecucion["id"], ejecucion["agente"],
+                    ejecucion.get("conversation_id"), ejecucion["estado"],
+                    ejecucion.get("n_llamadas", 0),
+                    bool(ejecucion.get("hubo_fallo")))
+            if not llamadas:
+                return
             cur.executemany(
                 """insert into asistente.tool_calls
                      (organization_id, conversation_id, herramienta, parametros,
@@ -5230,3 +5246,159 @@ def _retraso_del_flujo(cur) -> float | None:
         #  para tumbar la entrega de eventos: se devuelve None, que la pantalla
         #  ya sabe leer como "no se pudo medir".
         return None
+
+
+# =============================================================================
+#  EJECUCIONES  -  "este agente esta trabajando AHORA"
+# =============================================================================
+#
+#  'tool_calls' se escribe cuando la llamada TERMINA. No hay fila en vuelo, y
+#  por eso el motor se niega a emitir 'waiting_tool': una herramienta lenta y
+#  una recien terminada se ven igual. Esto es lo que faltaba.
+#
+#  LAS DOS ESCRITURAS PUEDEN LLEGAR EN CUALQUIER ORDEN, Y ESO ESTA RESUELTO
+#  ------------------------------------------------------------------------
+#  La apertura va en un hilo (fuera del camino critico: un viaje a la base
+#  cuesta 1.054 ms de mediana, y cobrarselo al cliente para animar una pantalla
+#  es exactamente lo que ya se decidio no hacer). El cierre se pliega dentro del
+#  viaje que la traza del turno ya hace.
+#
+#  O sea que son dos escrituras concurrentes sobre la misma fila, sin orden
+#  garantizado. Si el cierre llegara primero, un UPDATE no encontraria nada y la
+#  ejecucion no existiria nunca; y despues la apertura tardia dejaria una fila
+#  'iniciada' para siempre, que la pantalla leeria como "trabajando desde hace
+#  horas".
+#
+#  Por eso las DOS son idempotentes y sobre la misma clave primaria:
+#
+#      abrir    insert ... on conflict (id) DO NOTHING
+#      cerrar   insert ... on conflict (id) DO UPDATE  (al estado terminal)
+#
+#  Asi una apertura tardia no puede revivir una ejecucion cerrada, y un cierre
+#  temprano crea la fila ya cerrada. El orden deja de importar, que es la unica
+#  forma de que esto sea correcto sin coordinar dos hilos.
+#
+#  POR QUE EL IDENTIFICADOR SE GENERA EN PYTHON
+#  --------------------------------------------
+#  Quien abre necesita el id INMEDIATAMENTE para poder cerrar despues, y la
+#  apertura es asincrona: esperar a que la base devuelva el id volveria a poner
+#  el viaje en el camino critico, que es justo lo que esto evita.
+
+#  Pasado este tiempo sin cerrar, una ejecucion deja de ser creible.
+#
+#  Un turno normal dura segundos; uno con cinco herramientas y reintentos puede
+#  llegar al minuto. 10 minutos es holgado a proposito: el umbral no esta para
+#  cortar trabajo lento, esta para que un proceso que murio a mitad no deje a un
+#  personaje tecleando para siempre.
+SEGUNDOS_EJECUCION_CREIBLE = 600
+
+
+def abrir_ejecucion(tenant: str, agente: str, ejecucion_id: str,
+                    conversation_id: str | None = None) -> None:
+    """
+    Deja constancia de que un turno EMPEZO.
+
+    Nunca rompe el turno, mismo criterio que la traza: perder la observabilidad
+    de un turno no puede tumbar la atencion al cliente. Quien la llama lo hace
+    en un hilo.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """insert into asistente.ejecuciones
+                     (id, organization_id, agente, conversation_id, estado)
+                   values (%s, %s, %s, %s, 'iniciada')
+                   on conflict (id) do nothing""",
+                (ejecucion_id, org, agente, conversation_id))
+    except Exception as e:                                       # noqa: BLE001
+        registrar("ejecuciones", "no se pudo abrir", error=e)
+
+
+def cerrar_ejecucion(cur, org, ejecucion_id: str, agente: str,
+                     conversation_id: str | None, estado: str,
+                     n_llamadas: int, hubo_fallo: bool) -> None:
+    """
+    Cierra una ejecucion DENTRO de una transaccion ya abierta.
+
+    Recibe el cursor en vez de abrir el suyo para plegarse al viaje que la traza
+    del turno ya hace: el costo total queda en UN viaje mas por turno, no dos.
+
+    'iniciada_en' NO se toca en el conflicto. Si el cierre llega primero, la
+    fila nace con el 'now()' de este momento --lo unico que se sabe--; si llega
+    despues, conserva el instante real de apertura. Pisarlo haria que toda
+    ejecucion durara cero.
+    """
+    if estado not in ("terminada", "fallida", "cancelada"):
+        raise ValueError(f"estado terminal invalido: {estado}")
+    cur.execute(
+        """insert into asistente.ejecuciones
+             (id, organization_id, agente, conversation_id, estado,
+              n_llamadas, hubo_fallo, terminada_en)
+           values (%s, %s, %s, %s, %s, %s, %s, now())
+           on conflict (id) do update
+             set estado       = excluded.estado,
+                 n_llamadas   = excluded.n_llamadas,
+                 hubo_fallo   = excluded.hubo_fallo,
+                 terminada_en = excluded.terminada_en,
+                 -- La apertura no conoce todavia la conversacion: se crea mas
+                 -- abajo en el turno. El cierre si, asi que la completa. El
+                 -- coalesce evita el caso simetrico -- un cierre sin
+                 -- conversacion no puede borrar la que la apertura ya puso.
+                 conversation_id = coalesce(excluded.conversation_id,
+                                            asistente.ejecuciones.conversation_id)""",
+        (ejecucion_id, org, agente, conversation_id, estado,
+         n_llamadas, hubo_fallo))
+
+
+def ejecuciones_activas(tenant: str, umbral_s: int = SEGUNDOS_EJECUCION_CREIBLE) -> list[dict]:
+    """
+    Quien esta trabajando ahora, y quien lleva demasiado como para creerlo.
+
+    'desconocida' NO se guarda: se calcula aca. El diseño original la listaba
+    como un quinto estado que escribiria un barrido, y se descarto por dos
+    razones, las dos con cicatriz en este repositorio:
+
+      · un veredicto guardado miente mientras el reloj corre (es la misma razon
+        por la que la salud del seguimiento de campo se calcula y no se guarda);
+
+      · un barrido es un proceso que TIENE que estar corriendo, y aca ya paso
+        que el reloj de tareas colgara de un bloque __main__ que gunicorn nunca
+        ejecuta. Si el barrido no corre, las filas se quedan 'iniciada' para
+        siempre y la pantalla afirma que alguien trabaja desde hace tres dias.
+
+    Derivado en la lectura no puede fallar asi: una ejecucion vieja ES
+    desconocida, la calcule quien la calcule, sin que nadie haya corrido nada.
+
+    No devuelve 'conversation_id' ni nada del cliente: la oficina solo necesita
+    saber QUE PUESTO animar y desde cuando.
+    """
+    try:
+        with sesion(tenant) as (cur, org):
+            cur.execute(
+                """select id::text as id, agente, iniciada_en,
+                          extract(epoch from (now() - iniciada_en))::float as edad_s
+                     from asistente.ejecuciones
+                    where organization_id = %s
+                      and estado = 'iniciada'
+                    order by iniciada_en desc
+                    limit 200""",
+                (org,))
+            filas = cur.fetchall()
+    except Exception as e:                                       # noqa: BLE001
+        registrar("ejecuciones", "no se pudieron leer las activas", error=e)
+        return []
+
+    salida = []
+    for f in filas:
+        edad = float(f["edad_s"] or 0)
+        salida.append({
+            "id": f["id"],
+            "agente": f["agente"],
+            "desde": f["iniciada_en"].isoformat() if f["iniciada_en"] else None,
+            "edad_s": round(edad, 1),
+            #  Lo unico que esta funcion AFIRMA: si lleva mas que el umbral, no
+            #  sabemos si sigue trabajando o si el proceso murio. Las dos cosas
+            #  se ven igual desde aca, y decir la primera seria inventar.
+            "creible": edad <= umbral_s,
+        })
+    return salida

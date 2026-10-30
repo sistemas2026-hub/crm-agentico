@@ -57,7 +57,8 @@
     retraso: ['Sin información', 'El flujo viene atrasado: hay eventos que todavía no llegaron.'],
     al_dia: ['Actualizado', 'El flujo de eventos está al día.'],
     sin_actividad_vigente: ['En reposo', 'Ningún evento vigente respalda una actividad.'],
-    sin_representacion: ['Sin representar', 'Hay un hecho registrado que la escena no sabe dibujar.']
+    sin_representacion: ['Sin representar', 'Hay un hecho registrado que la escena no sabe dibujar.'],
+    ejecucion_sin_noticias: ['Sin información', 'Hay un turno abierto desde hace más de lo que un turno puede durar: no se sabe si sigue o si el proceso murió.']
   };
 
   const TIPOS = {
@@ -69,6 +70,10 @@
   };
 
   let confiable = $derived(veredicto?.confiable === true);
+  /** Hay un turno abierto AHORA, no un eco de uno que terminó. */
+  let enCurso = $derived(
+    typeof estado?.procedencia === 'string' && estado.procedencia.startsWith('ejecucion:')
+  );
   let cabecera = $derived(PALABRAS[veredicto?.motivo] ?? ['Sin información', 'No se pudo evaluar la frescura de los datos.']);
 
   /** Hace cuánto, en palabras. Sin librería: son cuatro casos. */
@@ -141,6 +146,15 @@
             No se puede afirmar qué está haciendo ahora. El último estado conocido
             no se muestra como actual a propósito.
           </p>
+        {:else if enCurso}
+          <!-- Lo que `tool_calls` nunca pudo decir. Esa tabla se escribe
+               cuando la llamada termina, así que hasta ahora la ficha solo
+               podía contar cosas que ya habían pasado. -->
+          <p class="actividad en-curso">Un turno en curso</p>
+          <p class="meta">
+            Empezó hace poco y todavía no terminó. No se puede decir con qué
+            está trabajando hasta que cierre.
+          </p>
         {:else if estado?.rotulo}
           <p class="actividad">{estado.rotulo}</p>
           <p class="meta">
@@ -196,6 +210,10 @@
           <dd>{diagnostico.consultas ?? 0}</dd>
           <dt>Retraso declarado</dt>
           <dd>{diagnostico.retraso_s == null ? 'sin medir' : `${diagnostico.retraso_s.toFixed(2)} s`}</dd>
+          {#if diagnostico.enCurso != null}
+            <dt>Turnos en curso</dt>
+            <dd>{diagnostico.enCurso}</dd>
+          {/if}
           <dt>Cursor</dt>
           <dd><code>{diagnostico.cursor ? String(diagnostico.cursor).slice(0, 18) + '…' : 'sin cursor'}</code></dd>
           {#if diagnostico.saltos > 0}
@@ -328,6 +346,9 @@
     letter-spacing: 0;
   }
 
+  .en-curso {
+    color: #8b84f5;
+  }
   .actividad {
     margin: 0;
     font-family: ui-monospace, SFMono-Regular, monospace;

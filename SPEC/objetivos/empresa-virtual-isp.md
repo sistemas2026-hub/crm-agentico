@@ -1327,6 +1327,148 @@ había hecho ella. **No cambia el veredicto** (seguimos sin saber, y con razón)
 cambia el motivo, porque «la pestaña estuvo oculta» se arregla volviendo y «el
 motor no responde» no.
 
+---
+
+## Fase 3B — el ciclo de vida de las ejecuciones, hecho el 30/10/2026
+
+Lo que compra: el personaje puede mostrar **«trabajando AHORA»** y no solo «pasó
+algo hace un momento». Hasta acá `tool_calls` se escribe cuando la llamada
+TERMINA, así que una llamada lenta y una recién terminada se ven igual — y por
+eso el motor se niega, con razón, a emitir `waiting_tool`.
+
+### La medición que cambió el diseño, y estaba en el propio código
+
+El diseño original escribía la fila `iniciada` al empezar el turno. **Un viaje a
+la base de producción cuesta 1.054 ms de mediana** (medido el 07/09/2026; es la
+razón por la que la traza del turno ya se movió a un hilo aparte).
+
+O sea que la versión obvia le agrega **un segundo a cada respuesta del cliente**
+para que una pantalla que quizá nadie mira pueda animar un personaje. Es
+exactamente el costo que la traza dejó de cobrarle al cliente, y volver a
+pagarlo sería deshacerlo.
+
+```
+apertura   en un hilo, fuera del camino crítico
+cierre     plegado DENTRO del viaje que la traza ya hace
+total      +1 viaje por turno, no +2
+```
+
+### Lo que eso obliga, y es la parte que importa
+
+Apertura y cierre son **dos escrituras concurrentes sobre la misma fila sin
+orden garantizado**. Si el orden importara, el caso malo sería silencioso: la
+fila quedaría `iniciada` para siempre y la oficina mostraría a alguien
+tecleando desde hace horas.
+
+Por eso las dos son idempotentes sobre la clave primaria:
+
+```
+abrir    insert ... on conflict (id) DO NOTHING
+cerrar   insert ... on conflict (id) DO UPDATE  (al estado terminal)
+```
+
+Una apertura tardía no puede revivir una ejecución cerrada; un cierre temprano
+crea la fila ya cerrada. **El orden deja de importar**, que es la única forma de
+que esto sea correcto sin coordinar dos hilos. El identificador se genera en
+Python y no en la base, porque el cierre lo necesita enseguida y esperar el
+`returning` volvería a poner el viaje en el camino crítico.
+
+### `desconocida` se deriva, no se guarda — contra lo que decía el diseño
+
+El diseño listaba `desconocida` como un quinto estado que escribiría un barrido.
+No se hace así, por dos razones con cicatriz en este repositorio:
+
+- un veredicto guardado miente mientras el reloj corre (es la misma razón por la
+  que la salud del seguimiento de campo se **calcula**);
+- un barrido es un proceso que **tiene que estar corriendo**, y acá ya pasó que
+  el reloj de tareas colgara de un bloque `__main__` que gunicorn nunca ejecuta.
+  Si el barrido no corre, las filas se quedan `iniciada` para siempre.
+
+Derivado en la lectura no puede fallar así: una ejecución más vieja que el
+umbral **es** desconocida, la calcule quien la calcule, sin que nadie haya
+corrido nada. Umbral: 600 s, holgado a propósito — no está para cortar trabajo
+lento, está para que un proceso muerto no deje a un personaje tecleando para
+siempre.
+
+### El orden de precedencia, que es donde una pantalla empieza a mentir
+
+```
+1  no saber gana siempre                      (el veredicto de frescura)
+2  una ejecución vieja ES no saber            (creible: false -> incognito)
+3  un acontecimiento gana al trabajo de fondo (falla, derivación, escalada)
+4  una ejecución viva sostiene el tecleo      (y NO caduca sola)
+5  lo demás, como antes
+```
+
+El 3 merece su línea: teclear es el fondo y el fondo no puede tapar un
+acontecimiento. El 4 también: con la ejecución abierta la animación deja de ser
+un destello que cuenta algo que pasó y pasa a sostenerse mientras pasa. Y sin
+rótulo —el turno está en curso y todavía no se sabe con qué terminó; poner el
+nombre de lo último sería contar como presente algo que ya pasó.
+
+### Una cuarta procedencia
+
+`ejecucion:<uuid>`, junto a `evento:`, `simulado` y `ambiente`. No se parece a
+las otras tres: las demás describen algo que ya pasó y caducan solas. Esta
+describe algo que sigue pasando. **No entra en el historial** —un trabajo en
+curso todavía no es un hecho que contar— y cuando cierre producirá sus
+`tool_calls`, que sí entran.
+
+### Medido
+
+Contra **PostgreSQL 17** de laboratorio, 16 comprobaciones en verde
+(`tests/test_ejecuciones_con_base.py`):
+
+| | |
+|---|---|
+| Una apertura tardía no revive una ejecución cerrada | ✓ |
+| Un cierre temprano crea la fila ya cerrada | ✓ |
+| `iniciada_en` no se pisa: la ejecución dura 1,10 s y no cero | ✓ |
+| El cierre completa la conversación, y un cierre sin ella no la borra | ✓ |
+| `desconocida` se deriva de la edad, sin barrido | ✓ |
+| Sin empresa fijada se ven **0 filas**, no todas | ✓ |
+| **La escritura no retiene el cursor de E1**: la frontera avanzó 776 → 781 | ✓ |
+
+Las dos mutaciones centrales mueren:
+
+```
+la apertura deja de ser idempotente y pisa el estado  -> 1 comprobación en rojo
+el cierre pisa el instante de apertura                -> 2 comprobaciones en rojo
+```
+
+En el navegador, con el banco:
+
+```
+reposo                        reposo       · ambiente
+turno en curso                teclear      · ejecucion:<uuid>
+el mismo, 9 segundos después  teclear      ← un destello habría caducado a los 0,9 s
+turno sin noticias            incognito    · apagado 0,82
+al cerrarlo                   reposo
+```
+
+**359 pruebas verdes** en el centro de mando (eran 338). La guarda de
+arquitectura del motor, en verde. Y la guarda de la escena **cazó una violación
+mía**: escribí la palabra «herramienta» en un comentario de `adaptador.ts` y la
+prueba se puso roja.
+
+### Lo que queda fuera, dicho
+
+- **La migración NO está aplicada en ninguna parte.** `supabase/202610302200_ejecuciones.sql`
+  existe y está probada en laboratorio; aplicarla a producción va por el ledger
+  (`cli/migrar_asistente.py --aplicar`), con la credencial `DBUSER`, y es parte
+  del despliegue, no de esta fase.
+- **Sin la migración, el endpoint degrada en silencio y a propósito**:
+  `ejecuciones_activas` devuelve `[]` ante un fallo y lo registra, así que la
+  oficina sigue mostrando lo que pasó, como antes de que esto existiera.
+- **El costo con `--workers 1` está acotado por diseño pero no medido en
+  producción**: es un viaje más por turno, en un hilo. Cuántos turnos por día
+  hay allá sigue sin medirse — hace falta acceso de lectura que esta sesión no
+  tiene.
+- **Un turno que revienta deja la fila `iniciada`.** No se cierra como
+  `fallida` porque el camino de excepción no pasa por donde se cierra. El efecto
+  es el correcto —pasado el umbral se deriva «no sé»— pero el estado `fallida`
+  del esquema hoy no lo escribe nadie.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

@@ -60,6 +60,8 @@ export function crearFlujo(opciones = {}) {
   let pausado = false;
   /** Cuántas veces el motor avisó de que el cursor se había quedado atrás. */
   let saltos = 0;
+  /** Los turnos en curso de la última lectura buena. */
+  let activas = [];
   let consultas = 0;
 
   /** @type {Set<(lote: any) => void>} */
@@ -132,11 +134,17 @@ export function crearFlujo(opciones = {}) {
         areas,
         ahora: ahora()
       });
+      //  Los turnos en curso llegan en la MISMA respuesta que los eventos.
+      //  No es un ahorro de peticiones: es que las dos mitades siempre se leen
+      //  juntas, y partirlas permitiría que la pantalla mezclara el «ahora» de
+      //  una lectura con el «pasó» de otra.
+      activas = Array.isArray(datos.activas) ? datos.activas : [];
       emitir({
         eventos: datos.eventos || [],
         instrucciones: proyeccion.instrucciones,
         descartados: proyeccion.descartados,
-        salto: !!datos.salto
+        salto: !!datos.salto,
+        activas
       });
     } catch (/** @type {any} */ e) {
       ultimoFallo = ahora();
@@ -184,9 +192,23 @@ export function crearFlujo(opciones = {}) {
       return { ultimaRespuestaOk, ultimoFallo, retraso_s, pausado, ahora: ahora() };
     },
 
+    /**
+     * Los turnos en curso de la última lectura.
+     *
+     * NO se vacían ante un fallo, y es deliberado: lo que pasa cuando el motor
+     * deja de responder no es «nadie trabaja», es «no sé». Esa distinción la
+     * hace el veredicto de frescura, que ya manda a todos los puestos a «sin
+     * información» — vaciarlas acá los mandaría a reposo, que es la mentira
+     * contraria.
+     */
+    activas() {
+      return activas;
+    },
+
     /** Para la ficha y el panel de diagnóstico. */
     diagnostico() {
-      return { cursor, consultas, saltos, ultimoError, retraso_s, pausado };
+      return { cursor, consultas, saltos, ultimoError, retraso_s, pausado,
+               enCurso: activas.length };
     }
   };
 }

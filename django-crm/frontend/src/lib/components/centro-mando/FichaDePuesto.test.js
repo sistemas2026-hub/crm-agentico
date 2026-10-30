@@ -187,3 +187,43 @@ describe('el diagnóstico del flujo', () => {
     expect(sin).not.toContain('Saltos');
   });
 });
+
+describe('un turno EN CURSO no se cuenta como uno que terminó', () => {
+  const enCurso = {
+    agente: 'supervisor_noc',
+    animacion: 'teclear',
+    rotulo: null,
+    procedencia: `ejecucion:${uuid}`,
+    confiable: true,
+    hasta: null
+  };
+
+  it('lo dice, y dice que todavía no se sabe con qué', () => {
+    // Hasta la fase 3B la ficha solo podía contar cosas que ya habían pasado:
+    // `tool_calls` se escribe cuando la llamada termina.
+    const html = pintar({ puesto, estado: enCurso, veredicto: alDia });
+    expect(html).toContain('Un turno en curso');
+    expect(html).toContain('todavía no terminó');
+  });
+
+  it('NO lo muestra como reposo', () => {
+    const html = pintar({ puesto, estado: enCurso, veredicto: alDia });
+    expect(html).not.toContain('En reposo');
+  });
+
+  it('un turno abierto desde hace demasiado se dice «no sé», no «trabajando»', () => {
+    const v = { confiable: false, motivo: 'ejecucion_sin_noticias', detalle: null };
+    const html = pintar({ puesto, estado: null, veredicto: v });
+    expect(html).toContain('Sin información');
+    expect(html).toContain('no se sabe si sigue');
+  });
+
+  it('el diagnóstico cuenta cuántos hay, y calla cuando no lo sabe', () => {
+    const con = pintar({ puesto, estado: null, veredicto: alDia,
+                         diagnostico: { consultas: 2, enCurso: 3 } });
+    const sin = pintar({ puesto, estado: null, veredicto: alDia,
+                         diagnostico: { consultas: 2 } });
+    expect(con).toContain('Turnos en curso');
+    expect(sin).not.toContain('Turnos en curso');
+  });
+});

@@ -1827,6 +1827,29 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # la decision diria que fue facturacion quien decidio derivar a
         # facturacion.
         rol_evaluado = rol
+        # ── ESTE AGENTE EMPIEZA A TRABAJAR AHORA ─────────────────────────────
+        #
+        # 'tool_calls' se escribe cuando la llamada TERMINA, asi que hasta hoy
+        # no habia forma de distinguir una herramienta lenta de una recien
+        # terminada -- y por eso el motor se niega a emitir 'waiting_tool'. Esta
+        # fila es lo que faltaba.
+        #
+        # VA EN UN HILO, Y NO ES UN DETALLE. Un viaje a la base cuesta 1.054 ms
+        # de mediana; escribir esto en el camino critico le agregaria un segundo
+        # a CADA respuesta del cliente para que una pantalla que quiza nadie
+        # mira pueda animar un personaje. Es exactamente el costo que la traza
+        # dejo de cobrarle al cliente unas lineas mas abajo, y volver a pagarlo
+        # aca seria deshacerlo.
+        #
+        # El identificador se genera ACA y no en la base: el cierre lo necesita
+        # enseguida, y esperar el 'returning' volveria a poner el viaje en el
+        # camino critico. Apertura y cierre son idempotentes sobre esta clave,
+        # asi que da igual cual de los dos hilos llegue primero.
+        ejecucion_id = str(uuid.uuid4())
+        threading.Thread(
+            target=persistencia.abrir_ejecucion,
+            args=(tenant, rol_evaluado, ejecucion_id, None),
+            daemon=True).start()
         # El origen se calcula UNA vez y se guarda: si se reencauza, la
         # segunda vuelta lo reusa con un sufijo. Generarlo de nuevo daria un
         # uuid distinto, y las dos vueltas del mismo turno quedarian sin
@@ -2014,10 +2037,26 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # conversacion, no la conversacion. Al reves --hacer esperar al
         # cliente seis segundos para que la auditoria este a salvo-- es
         # cobrarle al cliente el costo de nuestro registro.
-        def _guardar_traza(cid=conversation_id, llamadas=list(registro_herramientas)):
+        def _guardar_traza(cid=conversation_id, llamadas=list(registro_herramientas),
+                           ejec=ejecucion_id, agente=rol_evaluado):
             try:
+                # El cierre de la ejecucion viaja DENTRO de la misma ida que la
+                # traza. Por eso el ciclo de vida completo cuesta un viaje mas
+                # por turno y no dos.
+                cierre = {
+                    "id": ejec,
+                    "agente": agente,
+                    "conversation_id": str(cid) if cid else None,
+                    "estado": "terminada",
+                    "n_llamadas": len(llamadas),
+                    # Que una herramienta fallara no convierte el turno en
+                    # fallido: el agente contesto igual. Lo que el puesto
+                    # muestra como alerta es esto, no el estado del turno.
+                    "hubo_fallo": any(not l.get("exito", True) for l in llamadas),
+                }
                 persistencia.registrar_llamadas_herramienta(
-                    tenant, cid, rol, llamadas, profile_id=profile_id)
+                    tenant, cid, rol, llamadas, profile_id=profile_id,
+                    ejecucion=cierre)
                 # Fase 1 del ciclo de identidad (23/09/2026): el embudo del
                 # turno va en la misma ida de auditoria, despues de responder,
                 # y con la misma regla -- perderlo no tumba la atencion.
@@ -2034,8 +2073,11 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
             except Exception as e:
                 registrar("traza", "no se pudo guardar", error=e)
 
-        if registro_herramientas:
-            threading.Thread(target=_guardar_traza, daemon=True).start()
+        # SIEMPRE, aunque el turno no haya llamado a ninguna herramienta: una
+        # ejecucion que se abre y no se cierra se queda 'iniciada', y la
+        # pantalla la leeria como alguien trabajando sin parar. Antes el hilo
+        # solo arrancaba si habia traza que guardar.
+        threading.Thread(target=_guardar_traza, daemon=True).start()
         # Mismo motivo que el bucle de arriba: un archivo generado por una
         # herramienta 'agregado' exportable (ver nucleo/herramientas/
         # informes.py) no se pudo guardar dentro de motor.responder() porque
@@ -3390,7 +3432,13 @@ def eventos_incrementales():
     GET /eventos?tenant=<slug>[&desde=<cursor>][&limite=<n>]
 
         {"eventos": [...], "siguiente": "<cursor>", "salto": false,
-         "retraso_s": 0.4}
+         "retraso_s": 0.4, "activas": [...]}
+
+    'activas' son los turnos que estan corriendo AHORA -- lo que 'tool_calls'
+    no puede decir, porque se escribe cuando la llamada termina. Viaja en la
+    MISMA respuesta y no en una ruta aparte: la pantalla sondea cada 12 s y
+    partirlo en dos peticiones duplicaria el trafico para juntar dos mitades
+    que siempre se leen juntas.
 
     SIN 'desde' devuelve la frontera actual y CERO eventos. Es como arranca un
     cliente nuevo: no se traga el historico, que para eso esta la foto de
@@ -3442,6 +3490,12 @@ def eventos_incrementales():
         registrar("eventos", "fallo al leer el flujo incremental", error=e)
         return jsonify({"error": "No se pudo leer el flujo de eventos."}), 500
 
+    #  Las ejecuciones en curso NO pueden tumbar el flujo. Son la mitad nueva y
+    #  la menos critica: sin ellas la oficina sigue mostrando lo que paso, que
+    #  es como funcionaba antes de que existieran. 'ejecuciones_activas' ya
+    #  devuelve [] ante un fallo y lo registra.
+    activas = persistencia.ejecuciones_activas(tenant)
+
     return jsonify({
         "eventos": datos["eventos"],
         "siguiente": f"{datos['siguiente'][0]}.{datos['siguiente'][1]}",
@@ -3453,6 +3507,12 @@ def eventos_incrementales():
         #  'idle_in_transaction_session_timeout' solo corta sesiones OCIOSAS,
         #  no una transaccion que sigue ejecutando o esperando un lock.
         "retraso_s": datos["retraso_s"],
+        #  Quien trabaja ahora. Cada una trae 'creible': False significa que
+        #  lleva abierta mas de lo que un turno puede durar, o sea que no
+        #  sabemos si sigue o si el proceso murio. Las dos cosas se ven igual
+        #  desde aqui, y afirmar la primera seria inventar -- por eso viaja el
+        #  dato y no una conclusion.
+        "activas": activas,
     })
 
 

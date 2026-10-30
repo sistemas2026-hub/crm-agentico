@@ -54,7 +54,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
  * reales sin que esos movimientos acaben contados como trabajo. Un evento
  * simulado que se cuela como operativo es peor que no tener prototipo.
  */
-export const PROCEDENCIA = { REAL: 'evento', SIMULADO: 'simulado', AMBIENTE: 'ambiente' };
+export const PROCEDENCIA = {
+  REAL: 'evento',
+  SIMULADO: 'simulado',
+  AMBIENTE: 'ambiente',
+  /**
+   * Un turno que está corriendo AHORA (30/10/2026, fase 3B).
+   *
+   * Es la cuarta y no se parece a las otras tres: las demás describen algo que
+   * YA PASÓ y por eso caducan solas. Esta describe algo que SIGUE pasando, y
+   * dura hasta que la ejecución se cierra. Por eso no entra en el historial —
+   * un trabajo en curso todavía no es un hecho que contar — y por eso tiene su
+   * propio prefijo: la animación sigue siendo rastreable hasta la fila que la
+   * causó, que es la regla que gobierna todo este archivo.
+   */
+  EJECUCION: 'ejecucion'
+};
 
 /** Cuánto dura en pantalla cada tipo, cuando el evento no dice su duración. */
 const DURACION = {

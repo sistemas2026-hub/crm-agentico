@@ -23,7 +23,7 @@
  * donde olvidarse.
  */
 
-import { estadoDeAgentes } from '../proyeccion.js';
+import { PROCEDENCIA, estadoDeAgentes } from '../proyeccion.js';
 import { estadoVisible } from '../frescura.js';
 import type { Animacion } from './pose';
 
@@ -59,6 +59,22 @@ export interface EstadoDeAgente {
   hasta: number | null;
 }
 
+/**
+ * Un turno que está corriendo ahora, tal como lo sirve el motor.
+ *
+ * `creible` es el dato que más importa y el que más cuesta no malinterpretar:
+ * `false` significa que la ejecución lleva abierta más de lo que un turno puede
+ * durar, o sea que **no sabemos** si sigue trabajando o si el proceso murió a
+ * mitad. Las dos cosas se ven igual desde acá. Por eso el motor manda el dato y
+ * no la conclusión, y acá se traduce a «no sé», no a «trabajando».
+ */
+export interface Ejecucion {
+  id: string;
+  agente: string;
+  edad_s: number;
+  creible: boolean;
+}
+
 export interface Visualizacion {
   estados: EstadoDeAgente[];
   /**
@@ -86,10 +102,25 @@ export function visualizar(
   instrucciones: any[],
   agentes: string[],
   veredicto: any,
-  ahora: number = Date.now()
+  ahora: number = Date.now(),
+  activas: Ejecucion[] = []
 ): Visualizacion {
   const crudos = estadoDeAgentes(instrucciones, agentes, ahora);
   let sinRepresentacion = 0;
+
+  /**
+   * El turno en curso de cada agente, si lo hay.
+   *
+   * De varias abiertas gana LA MÁS NUEVA. Puede haber dos si un proceso murió
+   * sin cerrar la anterior; la vieja ya no es creíble y mostrarla diría que
+   * lleva horas trabajando.
+   */
+  const enCurso = new Map<string, Ejecucion>();
+  for (const e of activas || []) {
+    if (!e || !e.agente) continue;
+    const previa = enCurso.get(e.agente);
+    if (!previa || e.edad_s < previa.edad_s) enCurso.set(e.agente, e);
+  }
 
   const estados = crudos.map((crudo: any) => {
     // `estadoVisible` espera `null` cuando no hay actividad y la instrucción
@@ -108,6 +139,54 @@ export function visualizar(
         confiable: false,
         motivo: visible.motivo ?? null,
         detalle: visible.detalle ?? null,
+        hasta: null
+      };
+    }
+
+    //  HAY UN TURNO CORRIENDO AHORA.
+    //
+    //  Esto es lo que `tool_calls` nunca pudo decir: esa tabla se escribe
+    //  cuando la llamada TERMINA, así que una llamada lenta y una recién
+    //  terminada se ven igual. Con la ejecución abierta, la animación deja de
+    //  ser un destello que cuenta algo que pasó y pasa a sostenerse mientras
+    //  pasa.
+    const activa = enCurso.get(crudo.agente);
+    if (activa && !activa.creible) {
+      //  Lleva abierta más de lo que un turno puede durar. No sabemos si sigue
+      //  o si el proceso murió: decir «trabajando» sería afirmar lo primero
+      //  sin tener con qué.
+      return {
+        agente: crudo.agente,
+        animacion: 'incognito' as Animacion,
+        rotulo: null,
+        procedencia: PROCEDENCIA.AMBIENTE,
+        confiable: false,
+        motivo: 'ejecucion_sin_noticias',
+        detalle: null,
+        hasta: null
+      };
+    }
+
+    //  Un hecho discreto y reciente gana sobre el trabajo de fondo: un fallo o
+    //  una derivación son cosas que alguien querría ver ocurrir. Teclear es el
+    //  fondo, y el fondo no tapa un acontecimiento.
+    const acontecimiento =
+      crudo.tipo === 'falla' || crudo.tipo === 'expediente' || crudo.tipo === 'escalada';
+
+    if (activa && !acontecimiento) {
+      return {
+        agente: crudo.agente,
+        animacion: 'teclear' as Animacion,
+        //  Sin rótulo: el turno está en curso y todavía no se sabe con qué
+        //  terminó. Poner el nombre de lo último que hizo sería contar como
+        //  presente algo que ya pasó.
+        rotulo: null,
+        procedencia: `${PROCEDENCIA.EJECUCION}:${activa.id}`,
+        confiable: true,
+        motivo: null,
+        detalle: null,
+        //  NO caduca sola. Termina cuando la ejecución se cierra, que es el
+        //  cambio que trae toda esta fase.
         hasta: null
       };
     }
@@ -174,4 +253,14 @@ export function esReal(procedencia: string | null | undefined): boolean {
 /** ¿Viene de un lote de demostración? */
 export function esSimulado(procedencia: string | null | undefined): boolean {
   return procedencia === 'simulado';
+}
+
+/**
+ * ¿Es un turno que está corriendo ahora?
+ *
+ * Importa distinguirlo de `esReal`: las dos son verdad, y solo una pertenece al
+ * historial. Un trabajo en curso todavía no es un hecho que contar.
+ */
+export function esEjecucion(procedencia: string | null | undefined): boolean {
+  return typeof procedencia === 'string' && procedencia.startsWith('ejecucion:');
 }
