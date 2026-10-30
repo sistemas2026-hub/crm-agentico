@@ -312,6 +312,15 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         }
         if (cantidad > 1) return 'Te asignaron $cantidad visitas';
         return titulo.isEmpty ? 'Te asignaron visitas' : 'Te asignaron $titulo';
+      // EL RECORDATORIO DEL SUPERVISOR (30/10/2026): la orden pasó la ventana
+      // sin reporte. Con el número y los minutos, por lo mismo que arriba.
+      case 'sin_reporte':
+        final Object? sinReporte = datos['orden_numero'];
+        final Object? minutos = datos['minutos'];
+        if (sinReporte != null && minutos != null) {
+          return 'OT #$sinReporte: $minutos min sin reportar';
+        }
+        return titulo.isEmpty ? 'Sin reporte' : titulo;
       default:
         return titulo.isEmpty ? 'Aviso' : titulo;
     }

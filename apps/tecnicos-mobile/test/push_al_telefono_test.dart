@@ -535,6 +535,20 @@ void main() {
       expect(find.text('Te asignaron 8 visitas'), findsOneWidget);
     });
 
+    testWidgets('d7 · el recordatorio del Supervisor dice la orden y los '
+        'minutos (30/10/2026)', (tester) async {
+      await tester.runAsync(() => push.espejar(mensajeDeAsignacion(
+            id: 'notif-sin-reporte',
+            verbo: 'sin_reporte',
+            titulo: 'OT #9402 sin reporte',
+            datos: <String, dynamic>{'orden_numero': 9402, 'minutos': 38},
+          )));
+
+      await montar(tester, ocultarSiVacio: true);
+
+      expect(find.text('OT #9402: 38 min sin reportar'), findsOneWidget);
+    });
+
     testWidgets('d0 · la frase no repite la palabra del asunto', (tester) async {
       // Los dos caminos traen títulos distintos: la sincronización manda
       // `entity_name` («OT #9401») y el push manda el asunto («OT #9401
