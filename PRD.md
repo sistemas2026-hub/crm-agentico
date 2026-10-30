@@ -1,66 +1,78 @@
-# PRD — Plataforma Interna de IA con SLM
+# PRD — Dexter: la operación de un ISP con IA
 
 > **Documento de Requisitos de Producto (Product Requirements Document)**
-> Versión 1.0 · Asistente interno multi-área basado en un modelo de lenguaje pequeño (SLM)
+> Plataforma SaaS multi-empresa para proveedores de internet. Reescrito en sus §1–§3 el 30/10/2026 (ver §8.17): la versión anterior describía un asistente interno con un modelo local, que dejó de ser el producto en agosto.
 
 ---
 
 ## 1. Resumen ejecutivo
 
-Plataforma interna de inteligencia artificial que permite a los colaboradores de la empresa —según su área— realizar consultas en lenguaje natural y generar informes, conectándose a los sistemas internos de la empresa (empezando por WispHub). El motor es un **modelo de lenguaje pequeño (SLM)** que corre localmente, sin depender de proveedores externos de nube, lo que protege los datos de clientes y reduce costos.
+Dexter es una plataforma para ISPs que **atiende a sus clientes por WhatsApp, responde a sus colaboradores por web y coordina su operación de campo** (Supervisor, Despacho, app de técnicos), consultando y actuando sobre los sistemas de la empresa: WispHub, SmartOLT y el CRM. Es multi-empresa: dar de alta un ISP es configuración, no código (ARQUITECTURA.md).
 
-El sistema **no entrena** un modelo: usa un SLM pre-entrenado (Qwen3) y lo integra mediante *tool calling* a las APIs internas, con capas de validación, filtrado de datos sensibles y control de acceso por área.
+**Lo que se vende es capacidad: que el mismo equipo atienda más clientes, más rápido y con menos errores.** Primer despliegue: Rapilink (~7.272 clientes activos). El modelo de lenguaje es DeepSeek vía API, amparado en la autorización de tratamiento que firma el cliente (RNF-01); la historia del modelo local está en §7.1.
 
-**Estado actual:** el módulo de **Soporte** está construido y validado de punta a punta contra la API de WispHub en producción.
+El sistema **no entrena** un modelo: lo integra mediante *tool calling* a las APIs de la empresa, con validación, filtrado de datos sensibles y una frontera de autorización en código antes de cualquier efecto.
 
 ---
 
-## 2. Problema y objetivo
+## 2. Problema, tesis y principio
 
 ### Problema
-Los colaboradores necesitan consultar información dispersa en sistemas internos (clientes, facturas, tickets, datos de red) y generar informes. Hoy esto requiere navegar manualmente por las plataformas, conocer dónde está cada dato, y armar reportes a mano.
 
-### Objetivo
-Ofrecer un asistente conversacional interno que:
-- Responda consultas en lenguaje natural sobre los datos de la empresa.
-- Genere informes bajo demanda.
-- Se comporte y muestre información **según el área/rol** del colaborador.
-- Mantenga los datos de clientes seguros y dentro de la infraestructura de la empresa.
+Un ISP crece en clientes más rápido que en personas. Cada cliente nuevo trae mensajes, tickets, visitas y cobranza, y hoy cada uno pasa por alguien que busca el dato en tres sistemas, decide y lo vuelve a escribir en otro. El costo de atender crece con la base de clientes; el margen no.
 
-### Norte — el cerebro de la empresa
+### Tesis de negocio (30/10/2026)
 
-El destino de esta plataforma no es un buscador con buenos modales: es la **capa única de acceso al conocimiento operativo de la empresa**. Que cualquier colaborador pregunte en su idioma y obtenga la respuesta, sin importar en qué sistema viva el dato ni si la respuesta exige cruzar tres fuentes.
+> **Con el mismo equipo, el doble de clientes.**
 
-Ese norte se persigue creciendo en **un solo eje**, y explícitamente **no** en el otro:
+Dexter absorbe el **volumen** —el primer contacto, el diagnóstico, la clasificación, el reparto, el seguimiento, el aviso— para que las personas del equipo dediquen su tiempo a lo que solo una persona puede resolver.
 
-| Eje | Dirección | Por qué |
+Se vende como capacidad y no como reemplazo de personal, por tres motivos: un ISP que crece no despide, deja de contratar, y eso es lo que paga; quien compra "reemplazo" compara contra un sueldo, quien compra capacidad compara contra su crecimiento; y el cliente final tiene que poder llegar a una persona cuando la necesita (§8.17, riesgos).
+
+### Métrica norte y sus contrapesos
+
+**Norte: casos resueltos por persona del equipo, por mes**, por empresa. Se calcula, no se declara (§12.5: el código calcula).
+
+| Métrica | Qué mide | Por qué está |
 |---|---|---|
-| **Alcance** — cuántos sistemas ve, cuántas preguntas puede responder | **Crecer sin techo** | Aquí vive el valor. Un cerebro es la suma de lo que sabe consultar. |
-| **Autonomía** — cuánto decide o afirma el modelo por sí solo | **No crecer** | Aquí vive el riesgo. Ver la lección de `gemma3` en §7.1. |
+| **Resolución sin persona** | % de conversaciones de clientes, en canal real, que se cierran sin que una persona escriba, tome el caso ni apruebe una acción | Es la palanca directa de la tesis |
+| **Recontacto a 72 h** | Mismo cliente que vuelve a escribir dentro de 72 h del cierre | Contrapeso: una resolución falsa sube la métrica de arriba y baja esta |
+| **Satisfacción** | Encuesta de cierre por WhatsApp | Contrapeso: cerrar rápido no es resolver |
+| **Visitas evitadas** | Reinicio remoto con `ACCION_CONFIRMADA` y sin visita agendada en los 7 días siguientes | La visita es el costo más alto de un ISP |
+| **Minutos humanos ahorrados** | Casos resueltos sin persona × minutos por tipo de caso que declara cada empresa | Traduce la métrica al idioma de quien compra |
+| **Tiempo hasta resolución** | Del primer mensaje al cierre | Calidad percibida |
 
-> **Principio central:** *la inteligencia del sistema no está en el modelo, está en el catálogo de herramientas.* El modelo es la interfaz —traduce lenguaje a llamadas y datos a frases—; el conocimiento vive en los sistemas de la empresa y las garantías viven en el código. Hacer al sistema más inteligente significa **darle más alcance**, nunca darle más confianza.
+**Regla:** un cambio que sube *resolución sin persona* mientras sube el *recontacto* o baja la *satisfacción* es una regresión, aunque el número principal mejore.
 
-**Qué falta para merecer el nombre** (ninguno de estos puntos se resuelve con un modelo mejor):
+### Principio: alcance sin techo, autonomía ganada con evidencia
 
-1. **Consultas agregadas.** Hoy toda herramienta responde sobre *un* cliente. Un cerebro responde "cuántos morosos hay en la zona norte" o "cómo viene la cartera contra el mes pasado". Requiere herramientas nuevas, no un modelo nuevo.
-2. **Más fuentes.** WispHub es la primera, no la única.
-3. **Identidad y área** (Fase 2). Sin saber quién pregunta no se puede ampliar el acceso a los datos sin ampliar el riesgo. Es el prerrequisito de todo lo demás.
-4. **Memoria y auditoría.** Hoy la conversación muere al cerrar la consola.
-5. **Informes** como salida, no solo frases en pantalla.
+| Eje | Dirección |
+|---|---|
+| **Alcance** — cuántos sistemas ve, cuántas preguntas responde, cuántas tareas toma | **Crece sin techo.** Aquí vive el valor |
+| **Autonomía** — qué ejecuta sin que una persona lo apruebe | **Crece acción por acción y empresa por empresa, solo con evidencia y con validación en código antes del efecto** |
 
-**Consecuencia técnica del norte:** un modelo de 4B es buen enrutador (medido: elige correctamente la herramienta), pero no es analista. Razonar sobre datos agregados y redactar un informe gerencial exige más capacidad — el salto a 8–14B en servidor (§9) deja de ser opcional el día que se persiga este norte en serio.
+*Hasta el 30/10/2026 la segunda fila decía "no crecer". Se cambió porque congelaba la tesis: el reinicio remoto, la rama que resuelve sin visita, exige aprobación humana en cada caso desde M06-A (21/09/2026). El riesgo que motivaba "no crecer" —la lección de `gemma3`, §7.1— sigue intacto: lo que cambia es que la autonomía deja de ser una opinión y pasa a ser una medición.*
 
-### Métricas de éxito
-- Tiempo de consulta reducido frente al proceso manual.
-- Adopción por parte de los colaboradores de cada área.
+Una acción pasa de "una persona aprueba" a "la IA ejecuta" **solo si cumple las cuatro**:
+
+1. **Su efecto se verifica en código después** — p. ej. `last_status_change` para un reinicio (§12, decisiones congeladas de CLAUDE.md). Sin verificación posible, siempre una persona (CLAUDE.md §10).
+2. **Sus precondiciones se comprueban en código antes** (`exige_previas`), sobre datos medidos y no sobre el relato del modelo.
+3. **Hay evidencia en esa empresa**: un mínimo de propuestas revisadas por personas en una ventana, con una tasa de aprobación sin cambios por encima de un umbral, y cero verificaciones fallidas atribuibles a la acción. Mínimo, ventana y umbral son configuración por empresa, con un piso fijo del núcleo que ninguna empresa puede bajar.
+4. **Se degrada sola**: si las verificaciones fallidas o el recontacto de esa acción superan su umbral, vuelve a "una persona aprueba" sin intervención.
+
+**Subir lo decide una persona viendo la evidencia; bajar lo hace el código.** El interruptor y el techo de autonomía (CLAUDE.md §8, PRD §8.6) siguen por encima de todo. Por este camino **nunca** salen solas: `registrar_pago`, las cancelaciones, ni ninguna acción cuyo efecto no se pueda medir.
+
+> **Principio central:** *la inteligencia del sistema no está en el modelo, está en el catálogo de herramientas.* El modelo es la interfaz —traduce lenguaje a llamadas y datos a frases—; el conocimiento vive en los sistemas de la empresa y las garantías viven en el código.
+
+### Requisitos permanentes de seguridad
 - Cero exposición de datos sensibles innecesarios (IP, MAC, credenciales) al modelo.
-- Cero acciones sensibles (pagos) ejecutadas sin confirmación humana.
+- Cero acciones irreversibles sin aprobación humana, salvo las que ganaron autonomía por las cuatro condiciones de arriba.
 
 ---
 
 ## 3. Usuarios y áreas
 
-La plataforma es de **uso interno**. Quien la usa es siempre un **colaborador**, nunca el cliente final. El comportamiento y los permisos cambian por área:
+Dexter tiene **tres tipos de usuario**: el **cliente final** del ISP (por WhatsApp, atendido por los agentes `cliente_final`, `soporte_tecnico_cliente`, `facturacion_cliente` y `ventas`), el **colaborador** (por web, según su área) y la **cuadrilla de campo** (app móvil). *Hasta el 30/10/2026 esta sección decía "uso interno, nunca el cliente final", que dejó de ser cierto en agosto.* Para los colaboradores, el comportamiento y los permisos cambian por área:
 
 | Área | Qué consulta / hace | Datos que SÍ necesita | Datos que NO debe ver |
 |------|--------------------|----------------------|----------------------|
@@ -100,8 +112,10 @@ Ya implementado y funcionando:
 
 ### 4.3 Fuera de alcance (por ahora)
 - Fine-tuning / entrenamiento del modelo.
-- Atención directa al cliente final (la plataforma es interna).
-- Integraciones con sistemas distintos a WispHub (fase posterior).
+- Una abstracción de "proveedor ISP" en código antes de que exista un cliente que no use WispHub (§8.17, decisión 6).
+- Canal telefónico de voz (§8.17, "Qué no se hace").
+
+*Esta lista decía "atención directa al cliente final" e "integraciones distintas a WispHub": las dos dejaron de estar fuera en agosto (WhatsApp, SmartOLT, BottleCRM).*
 
 ---
 
@@ -617,7 +631,7 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 | 7 | **Desenlace + cierre + sincronización del ticket** | Cierre operacional verdadero y dato para aprender |
 | 8 | **Paginación y búsqueda en servidor** | Deuda de escala; va después de los problemas de corrección |
 | 9 | **Ficha de handoff con fuente y frescura** | Entender el caso en segundos (extiende la ficha que ya arma el código) |
-| 10 | **Transcripción de audio** | Hoy la IA recibe `"[El cliente envio un audio]"`; es entrada de negocio en WhatsApp |
+| 10 | **Transcripción de audio** | ✅ Hecha: las notas de voz se transcriben antes del turno (`nucleo/canales/transcripcion.py`, `gpt-4o-transcribe`); el texto fijo `"[El cliente envio un audio]"` queda solo si la transcripción falla (verificado el 30/10/2026) |
 | 11 | **Borrador asistido** | Depende de 9 |
 | 12 | **Comodidades** (citar, borradores, @menciones, macros, atajos) | Las de equipos grandes, diseñadas para no estorbar a quien trabaja solo |
 
@@ -827,6 +841,62 @@ Contrato del relevo v3.2 (C19, C20). Ficha:
 separado en la cola (sería un ajuste de la bandeja, no un cambio del relevo), o
 que T18 empiece a registrar quién cerró y cuándo — entonces la marca de cierre
 lo diría sin cambiar nada más.
+
+### 8.17 DECISIÓN — la reestructura por la tesis de capacidad (30/10/2026)
+
+**El error que la originó.** El usuario preguntó si el proyecto iba por buen camino para su negocio —venderles a los ISPs que con menos personal rinden más— y delegó en esta sesión decidir qué reestructurar. La revisión encontró que **el PRD no decía cuál era el negocio** (su §1 describía un asistente interno con un modelo local; sus métricas eran "tiempo de consulta" y "adopción") y que su principio **congelaba la autonomía** justo donde vive el ahorro. Se revisó el código en cinco frentes en paralelo (medición, autonomía, alta de un ISP, proactividad, escala) y se verificó a mano lo que decide.
+
+**Lo medido ese día** (VERIFICADO salvo donde dice otra cosa):
+
+| Hallazgo | Evidencia |
+|---|---|
+| La única cifra de resultado en una pantalla es la tasa de escalada, y no filtra por canal: mezcla pruebas con clientes | `persistencia.tasa_escalamiento` (`db.py`), `/agentes`; `canales.REALES` no se aplica |
+| Lo resuelto sin persona, el recontacto, las visitas evitadas y las aprobaciones **se pueden calcular con datos que ya se guardan**; nadie los junta | `conversations.control`/`cerrada_por_tipo`, `relevo_eventos`, `messages.origen` (desde 16/09), `verificaciones_accion`, `acciones_propuestas.estado` |
+| `reiniciar_ont` exige aprobación humana en **cada** caso | `irreversible: true`, `aprobacion_humana: true` en `tenants/rapilink.config.yaml` (M06-A, 21/09) |
+| Ninguna herramienta declara `nivel_autonomia`; nada conecta la tasa de aprobación con el nivel | `techo.py`; `indicadores.py` calcula `tasa_aceptacion` sin consumidor |
+| Dexter no le escribe primero a ningún cliente: el envío de plantillas existe y nadie lo llama | `POST /avisos/whatsapp/<tenant>` sin llamador fuera de tests; `plantillas: {}` en el YAML (la base puede tener más: INFERIDO) |
+| La falla de barrio se diagnostica como una casa: 0/10 | Con la ONU en línea, el prompt reinicia sin consultar `consultar_incidente_red` (`SPEC/DEXTER_ESTADO_ACTUAL.md`, validación de producción) |
+| El frontend ya es multi-empresa; **el backend Django no**: 9 lecturas de `MOTOR_TENANT` con respaldo `or "rapilink"` (fallan ABIERTO) y un correo de Rapilink fijo | `solicitudes/entrega.py:120,215,291` · `gestion.py:65` · `views.py:140` · `campo/services/despacho.py:453,510` · `telemetria.py:47` · `operaciones/cierre_de_caso.py:254` · `entrega.py:32` |
+| El reloj descubre las empresas leyendo `tenants/*.config.yaml`: dar de alta una exige commit y deploy | `nucleo/reloj.py` |
+| La config de Rapilink tiene 7.299 líneas; ~60-70 % es contenido propio de la empresa (prompts, escalamiento, catálogos) | INFERIDO por secciones; los conectores compartidos ya existen (`conectores/wisphub.yaml`, `smartolt.yaml`) |
+| Un solo proceso con el historial en memoria; un solo proveedor de modelo sin respaldo | `--workers 1 --threads 8` (`docker-compose.prod.yml`), `api.py::_sesiones`; `cliente.py::chat()` |
+| La transcripción de voz manda el audio del cliente a OpenAI y **no hay registro de que la autorización de tratamiento lo cubra** | `nucleo/canales/transcripcion.py` (30/09/2026); CLAUDE.md §5 exige resolverlo antes de activar un tercero |
+
+**Lo que se decidió**, en el orden en que se construye. Cada ola se mide con la métrica de §2 antes de pasar a la siguiente.
+
+**Ola 1 — medir, y cerrar lo que falla abierto**
+
+1. **Tablero de capacidad.** Las métricas de §2, por empresa, calculadas en el motor (`db.py` → endpoint → pantalla), filtradas a `canales.REALES` y con fecha de corte desde que existe `messages.origen`. Los minutos por tipo de caso son configuración de cada empresa. La tasa de escalada actual se corrige para que filtre por canal. Contrato: `SPEC/objetivos/tablero-de-capacidad.md`. *Va primero porque sin él ninguna de las demás olas puede probar que acerca la tesis, y la Ola 3 lo necesita como insumo.*
+2. **La falla de barrio se consulta antes de tocar una casa.** `reiniciar_ont` agrega `consultar_incidente_red` a sus `exige_previas`, con la condición de que no haya caída compartida: la garantía queda en código y no depende del orden del prompt (§7.4). El prompt se alinea después. Se mide con `cli/bateria_flujos.py` (hoy 0/10). *En una caída general es cuando más personas hacen falta: es el peor momento para que la IA mande a reiniciar treinta casas.*
+3. **El backend Django falla cerrado.** Se quitan los 9 respaldos `or "rapilink"` y el correo fijo: sin tenant no se sirve nada. Es un defecto de seguridad de la misma familia que `app_backend` sin tenant (ARQUITECTURA.md), no una mejora de multi-empresa.
+
+**Ola 2 — que la IA inicie, no solo responda**
+
+4. **Avisos proactivos por WhatsApp**, en este orden: (a) **caída masiva** a los clientes del PON afectado —la detección ya existe en `operaciones/deteccion.py` y `correlacion.py`, falta el aviso—; (b) **seguimiento posterior a la resolución** ("¿quedó funcionando?"), que además alimenta el recontacto; (c) **visita confirmada** y técnico en camino; (d) **recordatorio de pago** antes del corte. Todo respeta la baja (Ley 1581) que ya aplica `/avisos/whatsapp`. *Un aviso de caída evita cientos de mensajes entrantes; es la reducción de volumen más grande disponible.* **Bloqueo operativo:** plantillas UTILITY aprobadas por Meta para cada empresa; Rapilink tiene una sola, de marketing y con otra marca (§8.12).
+
+**Ola 3 — la autonomía ganada (§2)**
+
+5. **El mecanismo de las cuatro condiciones**, genérico en el núcleo: el código calcula por empresa y por acción si es elegible (evidencia de `acciones_propuestas` + `verificaciones_accion`), lo muestra, una persona lo promueve, y el código lo degrada solo. **Primera candidata: `reiniciar_ont`**, que ya cumple 1 y 2 (`last_status_change`, `exige_previas`). *Esto no revierte M06-A: M06-A sigue vigente para cada acción hasta que su evidencia la promueva. Es la medición nueva que exige CLAUDE.md §10 para mover una decisión cerrada.*
+
+**Ola 4 — vender a la segunda empresa sin una sesión de código**
+
+6. **Alta en un día para un ISP con WispHub + SmartOLT.** La config se parte en tres capas: conectores compartidos (ya existen), un **paquete base de agentes** con prompts genéricos parametrizados por variables de la empresa (el mecanismo `{CLAVE}` de §8.8 ya existe), y lo propio de cada empresa. El reloj descubre las empresas desde la base, no desde archivos. El webhook pasa a un dominio neutro (§8.13). **No se construye una abstracción de "proveedor ISP"** hasta que exista un cliente que no use WispHub: diseñarla con un solo proveedor a la vista produce la abstracción equivocada. Mientras tanto, ningún código nuevo fuera de `conectores/` asume un campo de WispHub que no venga ya asumido.
+7. **El techo de escala.** El historial caliente pasa a `asistente.conversations` para poder correr más de un proceso (D4). Un segundo proveedor de modelo como respaldo (D6) **solo después** de resolver la autorización de tratamiento para ese proveedor (CLAUDE.md §5).
+
+**En paralelo, sin ola:** el CI corre las pruebas con Postgres y el deploy deja de publicar con una guarda en rojo (D1, D2). Cuantas más acciones salgan solas, más cara es una regresión que nadie vio.
+
+**Qué no se hace, con su motivo:**
+
+- **Canal telefónico de voz.** Duplicaría el motor de atención por un canal que WhatsApp ya absorbe en estos clientes, y exige un tercero nuevo con su análisis legal. Reabrir si una empresa demuestra que la mayoría de su volumen entra por teléfono.
+- **Autonomía para `registrar_pago`** por el camino de §2: su efecto contable no lo verifica ningún endpoint de forma independiente. Reabrir con un cruce contra el extracto bancario.
+- **Bajar los contrapesos** (recontacto, satisfacción) para mostrar un número principal más alto.
+
+**Riesgos que esta decisión deja escritos:**
+
+- **Transcripción con OpenAI sin base legal registrada.** Hay que confirmar con quien lleva lo legal si la autorización de tratamiento de Rapilink cubre a OpenAI como encargado del audio; si no la cubre, apagarla hasta que lo haga. No es una decisión técnica y no la toma esta sesión.
+- **El régimen de protección de usuarios de telecomunicaciones** probablemente exige que el usuario pueda llegar a una persona (INFERIDO, no verificado contra la norma). El diseño ya lo cumple —`frases_pide_humano` lo detecta en código— y la tesis no lo toca.
+
+**Lo que la reabre:** que el tablero de la Ola 1 muestre que la resolución sin persona no sube con las olas 2 y 3 (la tesis sería falsa para este producto), o que una empresa cliente pida explícitamente lo contrario de la autonomía ganada.
 
 ---
 
