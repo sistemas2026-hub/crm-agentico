@@ -85,8 +85,8 @@ export const actions = {
     }
   },
 
-  //  LO QUE EL SUPERVISOR HACE SOLO (30/10/2026): recordarle al técnico y
-  //  cerrar solo lo que su revisión dio por bueno.
+  //  LO QUE EL SUPERVISOR HACE SOLO (30/10/2026): recordarle al técnico. Que
+  //  cierre solo se le delega desde su chat, no desde acá.
   seguimiento: async ({ request, cookies, locals }) => {
     const rol = /** @type {any} */ (locals).profile?.role ?? null;
     if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'seguimiento', error: 'Esto es para quien gestiona.' });
@@ -94,9 +94,9 @@ export const actions = {
       const r = await guardarConfiguracionDeSeguimiento({ cookies }, cuerpoDeSeguimiento(await request.formData()));
       return {
         de: 'seguimiento',
-        hecho: r?.supervisor_cierra_solo
-          ? 'Guardado. El Supervisor cierra solo lo que dé por bueno, si el motor lo deja.'
-          : 'Guardado. El Supervisor no cierra solo: una persona confirma.'
+        hecho: r?.recordar_al_tecnico
+          ? 'Guardado. El Supervisor le recuerda al técnico la orden sin reporte.'
+          : 'Guardado. El Supervisor ya no le recuerda al técnico.'
       };
     } catch (e) {
       return fail(400, { de: 'seguimiento', error: mensajeDeError(e) });

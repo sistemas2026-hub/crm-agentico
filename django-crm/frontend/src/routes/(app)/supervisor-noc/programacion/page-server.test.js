@@ -149,24 +149,23 @@ describe('Programación: lo que el Supervisor hace solo (30/10/2026)', () => {
     });
   };
 
-  it('una casilla marcada es sí; desmarcada (no llega) es no', async () => {
+  it('la casilla marcada es sí; desmarcada (no llega) es no; y no hay casilla de cerrar solo', async () => {
     apiRequest.mockReset();
-    apiRequest.mockResolvedValue({ recordar_al_tecnico: false, supervisor_cierra_solo: true });
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: true });
 
-    const r = /** @type {any} */ (await actions.seguimiento(pedido('ADMIN', { supervisor_cierra_solo: 'on' })));
+    const r = /** @type {any} */ (await actions.seguimiento(
+      pedido('ADMIN', { recordar_al_tecnico: 'on', supervisor_cierra_solo: 'on' })));
 
     expect(apiRequest.mock.calls[0][0]).toBe('/campo/seguimiento/configuracion/');
-    expect(apiRequest.mock.calls[0][1]).toEqual({
-      method: 'PUT', body: { recordar_al_tecnico: false, supervisor_cierra_solo: true }
-    });
+    expect(apiRequest.mock.calls[0][1]).toEqual({ method: 'PUT', body: { recordar_al_tecnico: true } });
     expect(r.de).toBe('seguimiento');
-    expect(r.hecho).toContain('cierra solo');
+    expect(r.hecho).toContain('le recuerda');
 
     apiRequest.mockReset();
-    apiRequest.mockResolvedValue({ recordar_al_tecnico: true, supervisor_cierra_solo: false });
-    const apagado = /** @type {any} */ (await actions.seguimiento(pedido('ADMIN', { recordar_al_tecnico: 'on' })));
-    expect(apiRequest.mock.calls[0][1].body).toEqual({ recordar_al_tecnico: true, supervisor_cierra_solo: false });
-    expect(apagado.hecho).toContain('una persona confirma');
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: false });
+    const apagado = /** @type {any} */ (await actions.seguimiento(pedido('ADMIN', {})));
+    expect(apiRequest.mock.calls[0][1].body).toEqual({ recordar_al_tecnico: false });
+    expect(apagado.hecho).toContain('ya no le recuerda');
   });
 
   it('quien no gestiona no lo cambia', async () => {

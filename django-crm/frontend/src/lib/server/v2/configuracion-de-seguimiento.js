@@ -2,11 +2,11 @@ import { apiRequest } from '$lib/api-helpers.js';
 
 /**
  * Lo que el Supervisor hace solo con el seguimiento, por empresa (30/10/2026):
- * recordarle al técnico la orden sin reporte, y cerrar solo lo que su revisión
- * dio por bueno. Ver campo/configuracion_de_seguimiento_views.py.
+ * recordarle al técnico la orden sin reporte. Ver
+ * campo/configuracion_de_seguimiento_views.py.
  *
- * Encender el cierre solo NO abre ninguna compuerta del motor: el Supervisor
- * sigue pasando por la puerta autónoma, y sin Autonomía 2 no cierra nada.
+ * Que CIERRE solo no se enciende acá: es una tarea que se le delega desde su
+ * chat, con el nivel 3 y el interruptor de emergencia, como las otras.
  */
 
 /** @param {{ cookies: any }} ctx */
@@ -24,15 +24,12 @@ export async function leerConfiguracionDeSeguimiento(ctx) {
  * @param {FormData} f
  */
 export function cuerpoDeSeguimiento(f) {
-  return {
-    recordar_al_tecnico: f.get('recordar_al_tecnico') === 'on',
-    supervisor_cierra_solo: f.get('supervisor_cierra_solo') === 'on'
-  };
+  return { recordar_al_tecnico: f.get('recordar_al_tecnico') === 'on' };
 }
 
 /**
  * @param {{ cookies: any }} ctx
- * @param {{ recordar_al_tecnico: boolean, supervisor_cierra_solo: boolean }} cuerpo
+ * @param {{ recordar_al_tecnico: boolean }} cuerpo
  */
 export async function guardarConfiguracionDeSeguimiento(ctx, cuerpo) {
   return apiRequest('/campo/seguimiento/configuracion/', { method: 'PUT', body: cuerpo }, ctx);

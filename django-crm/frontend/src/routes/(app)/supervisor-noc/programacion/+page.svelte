@@ -88,9 +88,9 @@
             <span class="snoc-label">Seguimiento de las cuadrillas</span>
             <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
             {#if data.seguimiento}
-              <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Cerrar solo pasa
-                   por la puerta autónoma del motor: encenderlo acá no abre
-                   ninguna compuerta de seguridad. -->
+              <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Que cierre solo
+                   NO se enciende acá: se le delega desde su chat, con el nivel
+                   3 y el interruptor de emergencia, como las otras tareas. -->
               <details>
                 <summary class="snoc-body-sm">Lo que el Supervisor hace solo</summary>
                 <form method="POST" action="?/seguimiento" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
@@ -98,12 +98,8 @@
                     <input type="checkbox" name="recordar_al_tecnico" checked={data.seguimiento.recordar_al_tecnico} />
                     Le recuerda al técnico, en su teléfono, la orden que pasa la ventana sin reporte
                   </label>
-                  <label class="snoc-body-sm">
-                    <input type="checkbox" name="supervisor_cierra_solo" checked={data.seguimiento.supervisor_cierra_solo} />
-                    Aprueba y cierra solo, ticket del ISP incluido, lo que su revisión marca «Se puede cerrar»
-                  </label>
                   <span class="snoc-body-sm snoc-secundario">
-                    Para cerrar solo, además, el motor tiene que tener abierta la Autonomía 2 y autorizada la herramienta de cierre. Si no, lo intenta y la tarjeta dice por qué no pudo.
+                    Para que apruebe y cierre solo las órdenes que da por buenas, pedíselo en su chat («aprobá y cerrá las órdenes que des por buenas»). Necesita el nivel 3 de autonomía, y el ticket del ISP lo cierra solo si el motor lo deja: hoy esa herramienta exige aprobación humana.
                   </span>
                   <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
                     <button class="snoc-btn" type="submit">Guardar</button>
