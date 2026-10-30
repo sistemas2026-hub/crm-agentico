@@ -1200,6 +1200,133 @@ de derivación) · `schema.py` (`SINCRONIZADOS`, entidades) ·
   reemplazo (07/10/2026); no se repite.
 - **NO fusionar departamentos** sin decisión escrita del cliente.
 
+---
+
+## Fase 3A — el NOC isométrico, hecho el 30/10/2026
+
+Ruta nueva `/centro-mando/v2`. El centro de mando de producción **no se tocó**:
+comparte `proyeccion.js` y `frescura.js` y nada más.
+
+### Lo que se construyó
+
+```
+src/lib/centro-mando/escena/
+  isometria.ts    la proyeccion y su inversa          PURO · 12 pruebas
+  camara.ts       zoom, arrastre, clic vs arrastre    PURO · 19 pruebas
+  pose.ts         las cinco poses y su mezcla         PURO · 14 pruebas
+  adaptador.ts    LA FRONTERA: instruccion -> pose    PURO · 17 pruebas
+  paleta.ts       colores derivados de «Fibra»        PURO
+  texturas.ts     halo, sombra, haz, trama            PixiJS
+  oficina.ts      suelo, muros, mural, mobiliario     PixiJS
+  personaje.ts    la figura articulada                PixiJS
+  montar.ts       la unica puerta                     PixiJS
+src/lib/centro-mando/
+  flujo.js        cursor + las cuatro señales         18 pruebas
+  bitacora.js     dos historiales separados           11 pruebas
+  demo.js         guion de demostracion               12 pruebas
+  noc.js          los puestos y quien los ocupa       15 pruebas
+src/lib/components/centro-mando/FichaDePuesto.svelte  19 pruebas
+src/routes/(app)/centro-mando/v2/                     pantalla y su `load`
+```
+
+**Dependencia nueva: `pixi.js@8.22.0`** (publicada el 01/10/2026), en
+`dependencies`. Instalada con pnpm 12.16.1 **dentro del contenedor**: el
+`node_modules` de este árbol se creó ahí (`storeDir: /app/node_modules/
+.pnpm-store`), y el pnpm del host quiere purgarlo antes de tocar nada.
+
+### Las tres cosas que este prototipo fija, y valen más que la sala
+
+1. **El corte entre datos y dibujo.** `adaptador.ts` es el único archivo que
+   conoce los dos lados. Hay una guarda que lo mide
+   (`escena/guardas.test.js`): ninguna fuente de `escena/` contiene
+   `wisphub`, `ticket`, `isp`, `factura`… buscadas **con límites de palabra**,
+   porque `isp` a secas marca «disponible» y una guarda que se pone roja por
+   nada se apaga.
+2. **Las transiciones no se programan.** Cinco estados dan veinte transiciones;
+   escribirlas a mano garantiza que falten cuatro, y las que faltan no fallan:
+   saltan. Cada estado declara una pose de números y la transición es
+   interpolar. Hay una prueba que recorre **las veinte parejas** y afirma que
+   ningún canal salta.
+3. **Lo simulado vive en otro arreglo.** No es una bandera: `bitacora.js` tiene
+   `real` y `simulado` separados y una sola puerta de escritura que mira la
+   procedencia. Para que un dato de demostración entre al historial real hay que
+   cambiar esa función, no olvidarse de un `if`.
+
+### Lo medido en el navegador, y lo que NO se pudo medir
+
+Banco en `node:22` + Vite, fuera del repositorio, con los mismos módulos.
+Navegador real con GPU: `ANGLE (Intel UHD Graphics, Direct3D11)`.
+
+| Qué | Resultado |
+|---|---|
+| La sala se dibuja | sí · WebGL · **244 objetos** |
+| Coste de dibujar un fotograma (`gl.finish()`) | **0,22–0,42 ms** con antialias · 0,12–0,18 ms sin él |
+| Los cuatro puestos se pueden seleccionar | sí, con regiones separadas y sin solapes |
+| Arrastrar NO selecciona | sí |
+| La rueda hace zoom | 1,09 → 2,05 |
+| «Sin información» al caer el flujo | a los **40 s exactos**, el umbral configurado |
+| La recuperación vuelve a «Actualizado» | sí |
+| Lo simulado no entra en el historial real | `historialReal = 0` durante toda la demostración |
+
+**Los cuadros por segundo NO se pudieron medir.** El navegador del banco
+estrangula `requestAnimationFrame`: un contador propio dio **1 por segundo**
+mientras la escena creía ir a 10. Cualquier cifra de fps sacada de ahí habla
+del navegador, no del dibujo — por eso se añadió `medirDibujo()`, que dibuja N
+veces seguidas sin esperar al refresco. El tiempo de la tarjeta en una máquina
+de usuario real sigue **sin medir**, y es lo primero que hay que hacer en un
+equipo de los que usa el cliente.
+
+### Tres defectos que solo se vieron mirando (o midiendo píxeles)
+
+Los tres estaban con todas las pruebas en verde. Es el recordatorio de para qué
+sirve el navegador en una fase visual.
+
+1. **`Container.tint` no existe en PixiJS 8.** El apagado del personaje se
+   aplicaba al grupo que contiene tronco, cabeza y brazos. No falla, no avisa y
+   no hace nada: en «no sé» el personaje seguía con su color, o sea que la
+   pantalla volvía a decir que todo estaba normal — exactamente la mentira que
+   ese estado existe para romper. **Y a simple vista la captura era creíble**;
+   se encontró comparando los píxeles del lienzo entre los dos estados (1,33 %
+   distintos contra 0,16 % de dos fotos del mismo estado).
+2. **La zona sensible era un polígono que se cruzaba a sí mismo.** Seis puntos
+   mezclando alturas sin el orden de la silueta: el recuento de cruces deja
+   agujeros y pulsar en medio del puesto no seleccionaba nada. La silueta de un
+   prisma isométrico es un hexágono convexo.
+3. **El signo de interrogación caía detrás de la placa del puesto.** Estaba
+   dibujado y visible, justo debajo del rótulo con el nombre.
+
+### Lo que queda fuera, dicho
+
+- **No es arte definitivo.** Todo está dibujado con geometría. Lo que se fija
+  acá es la composición, la escala, la profundidad, el reparto de archivos y el
+  coste; el día que haya ilustración se reemplaza el cuerpo de las funciones de
+  `oficina.ts` y `personaje.ts` y nada más.
+- **Cinco animaciones, no siete.** `caminar`, `levantarse`, `sentarse` y
+  `esperando` son de un personaje que recorre la oficina, y eso no tiene todavía
+  un hecho medido detrás. Siete a medias se ven peor que cinco terminadas.
+- **Las tres estaciones están vacías a propósito.** Hoy hay un solo agente
+  ejecutable con puesto en esta área. Dibujar tres ocupantes más haría una
+  escena más vistosa y una pantalla que miente sobre la plantilla.
+- **La geometría de la sala sigue en código.** El agente que la ocupa ya llega
+  como dato desde el inventario del motor; las coordenadas no. Cuando haya un
+  segundo departamento esto se convierte en una plantilla por empresa y
+  `noc.js` desaparece. Está escrito dentro del archivo.
+- **La ruta `/centro-mando/v2` no se abrió en la aplicación real.** Está detrás
+  de la sesión y no hay backend local; lo verificado es la escena y sus módulos,
+  en el banco. Abrirla con sesión es trabajo de quien despliegue.
+- **El panel no se pudo montar en el banco**: `mount` desde fuera de la
+  aplicación carga una segunda copia del runtime de Svelte y revienta — la misma
+  avería que `svelte.config.js` documenta. Se verifica con `render()` de
+  'svelte/server', 19 pruebas.
+
+### Una señal nueva en `frescura.js`
+
+`pausado`. El sondeo se detiene con la pestaña oculta —es la regla del
+transporte— y el silencio crecía solo: la pantalla acusaba al motor de algo que
+había hecho ella. **No cambia el veredicto** (seguimos sin saber, y con razón);
+cambia el motivo, porque «la pestaña estuvo oculta» se arregla volviendo y «el
+motor no responde» no.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

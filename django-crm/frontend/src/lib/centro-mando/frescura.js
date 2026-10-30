@@ -30,6 +30,15 @@
  *   2. si el último intento falló                      (error)
  *   3. si nunca hubo una respuesta                     (arranque)
  *   4. el retraso que el backend declara               (retraso)
+ *
+ * Y UNA QUINTA, QUE NO ES UNA AVERÍA
+ * El sondeo se detiene con la pestaña oculta —es la regla del transporte, para
+ * no pegarle a la base cada 12 s durante días desde una pestaña olvidada—. El
+ * efecto secundario es que el silencio crece solo, y la pantalla acusaría al
+ * backend de algo que hizo ella. Así que `pausado` NO cambia el veredicto: los
+ * datos siguen sin ser de fiar, y con razón. Lo que cambia es el MOTIVO, porque
+ * «la pestaña estuvo oculta» y «el motor no responde» piden cosas distintas de
+ * quien lo lee. Añadido el 30/10/2026, al conectar el indicador a la pantalla.
  */
 
 /**
@@ -51,7 +60,7 @@ export const UMBRALES = {
  * El veredicto sobre los datos, con su motivo.
  *
  * @param {{ultimaRespuestaOk?: number|null, ultimoFallo?: number|null,
- *          retraso_s?: number|null, ahora?: number,
+ *          retraso_s?: number|null, ahora?: number, pausado?: boolean,
  *          umbrales?: {silencio_s:number, retraso_s:number}}} señales
  */
 export function frescura(señales = {}) {
@@ -74,6 +83,12 @@ export function frescura(señales = {}) {
   // 2 · SILENCIO. El cliente es el único que puede notarlo: si el backend no
   //     contesta, no manda un aviso de que no contesta.
   if (silencio_s >= u.silencio_s) {
+    // Si la pausa la pedimos nosotros, el veredicto es el mismo y el motivo no:
+    // sigue siendo «no sé», pero no es culpa de nadie.
+    if (señales.pausado) {
+      return { confiable: false, motivo: 'pausado',
+               detalle: 'la pestaña estuvo oculta; reanudando', silencio_s };
+    }
     return { confiable: false, motivo: 'silencio',
              detalle: `sin respuesta hace ${silencio_s}s`, silencio_s };
   }

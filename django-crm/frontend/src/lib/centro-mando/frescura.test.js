@@ -147,3 +147,36 @@ describe('los umbrales son configurables, no constantes escondidas', () => {
     expect(UMBRALES.retraso_s).toBeGreaterThan(0);
   });
 });
+
+describe('la pestaña oculta no es una avería', () => {
+  it('con el sondeo pausado, el veredicto sigue siendo «no sé»', () => {
+    // Los datos no son frescos y con razón: nadie preguntó. Lo que no se hace
+    // es afirmar que están al día porque la culpa sea nuestra.
+    const v = frescura({ ultimaRespuestaOk: T - s(120), pausado: true, ahora: T });
+    expect(v.confiable).toBe(false);
+  });
+
+  it('pero el motivo distingue quién dejó de hablar', () => {
+    // «La pestaña estuvo oculta» y «el motor no responde» piden cosas distintas
+    // de quien lo lee: una se arregla volviendo a la pestaña.
+    const oculta = frescura({ ultimaRespuestaOk: T - s(120), pausado: true, ahora: T });
+    const caido = frescura({ ultimaRespuestaOk: T - s(120), pausado: false, ahora: T });
+    expect(oculta.motivo).toBe('pausado');
+    expect(caido.motivo).toBe('silencio');
+    expect(oculta.detalle).toContain('oculta');
+  });
+
+  it('una pausa corta no dispara nada', () => {
+    // Ocultar la pestaña dos segundos no tiene por qué avisar de nada.
+    const v = frescura({ ultimaRespuestaOk: T - s(3), pausado: true, ahora: T });
+    expect(v.confiable).toBe(true);
+    expect(v.motivo).toBe('al_dia');
+  });
+
+  it('pausado NO tapa un arranque sin lecturas', () => {
+    // Si no hubo ninguna respuesta, el motivo es que todavía no sabemos nada,
+    // no que la pestaña estuviera oculta.
+    const v = frescura({ ultimaRespuestaOk: null, pausado: true, ahora: T });
+    expect(v.motivo).toBe('sin_lectura');
+  });
+});
