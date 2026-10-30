@@ -8,6 +8,7 @@
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
+  import FaltantesDelDia from '$lib/supervisor/FaltantesDelDia.svelte';
   import MaterialDeLaCuadrilla from '$lib/supervisor/MaterialDeLaCuadrilla.svelte';
   import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
@@ -104,18 +105,9 @@
                   No se pudo calcular el material. No es que no haga falta: no se sabe.
                 </p>
               {:else if material}
-                <p class="snoc-body-sm">
-                  {material.cuentas.completas} de {material.cuentas.cuadrillas} cuadrillas con el kit
-                  completo{#if material.cuentas.con_faltantes} · {material.cuentas.con_faltantes} con
-                    faltantes{/if}{#if material.cuentas.sin_carga} · {material.cuentas.sin_carga} sin
-                    carga{/if}
-                </p>
-                {#each faltantes as b (b.bodega + b.material)}
-                  <p class="snoc-body-sm snoc-error-txt">
-                    {b.bodega}: faltan {b.falta} {b.unidad} de {b.material} (hay {b.disponible}
-                    libres; se piden {b.pedido}).
-                  </p>
-                {/each}
+                <!-- Las cuentas en pastillas y una línea por bodega, con la
+                     tabla plegada (29/10/2026: eran trece líneas rojas iguales). -->
+                <FaltantesDelDia cuentas={material.cuentas} {faltantes} />
               {/if}
               {#if conf}
                 <!-- EL SUPERVISOR ELIGE SOLO (28/10/2026: «la idea era que lo

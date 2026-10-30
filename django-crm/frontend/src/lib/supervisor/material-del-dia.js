@@ -113,6 +113,51 @@ export function tituloDelMaterial(cuadrillas) {
 }
 
 /**
+ * Las cuentas del material del día como pastillas (29/10/2026, el usuario,
+ * con la captura: «¿qué podemos hacer con esto para que se vea más
+ * estético?»). Lo que está en cero no se dice, salvo las completas: «0 de 5
+ * con el kit completo» también es un dato.
+ *
+ * @param {{ cuadrillas: number, completas: number, con_faltantes?: number, sin_carga?: number }} c
+ * @returns {{ texto: string, tono: 'ok' | 'falta' | 'sin' }[]}
+ */
+export function pastillasDeCuentas(c) {
+  /** @type {{ texto: string, tono: 'ok' | 'falta' | 'sin' }[]} */
+  const salida = [{ texto: `${c.completas} de ${c.cuadrillas} con el kit completo`, tono: 'ok' }];
+  if (c.con_faltantes) salida.push({ texto: `${c.con_faltantes} con faltantes`, tono: 'falta' });
+  if (c.sin_carga) salida.push({ texto: `${c.sin_carga} sin carga`, tono: 'sin' });
+  return salida;
+}
+
+/**
+ * Lo que les falta a las bodegas, una entrada por bodega en el orden en que
+ * llegan. Eran trece líneas rojas iguales, una por material
+ * («BOG-SOLEDAD: faltan 2000 m de CABLE DROP (hay 0 libres…)»). `sinNada`
+ * dice que no hay libre NADA de lo que se pide: casi siempre es stock que no
+ * se cargó en Dexter, y se puede decir.
+ *
+ * @param {{ bodega: string, material: string, unidad: string, falta: string, disponible: string, pedido: string }[]} faltantes
+ */
+export function faltantesPorBodega(faltantes) {
+  /** @type {Map<string, typeof faltantes>} */
+  const por = new Map();
+  for (const f of faltantes ?? []) {
+    if (!por.has(f.bodega)) por.set(f.bodega, []);
+    por.get(f.bodega)?.push(f);
+  }
+  return [...por].map(([bodega, materiales]) => ({
+    bodega,
+    materiales,
+    sinNada: materiales.every((m) => Number(m.disponible) <= 0)
+  }));
+}
+
+/** «le faltan 13 materiales», «le falta 1 material». @param {number} n */
+export function cuantosFaltan(n) {
+  return n === 1 ? 'le falta 1 material' : `le faltan ${n} materiales`;
+}
+
+/**
  * «1 unidad», «6 unidades», «300 metros».
  * @param {string} n
  * @param {string} unidad
