@@ -412,12 +412,35 @@ for primero in ("supervisor", "persona"):
 seccion("11. la puerta humana rechaza al Supervisor")
 registro, red = RegistroComoLaBase(), _Red()
 with red_falsa(registro, red):
-    for actor in ("Supervisor", "supervisor", cierre.FIRMA_DEL_SUPERVISOR, "servicio:x"):
+    for actor in ("Supervisor", "supervisor", cierre.FIRMA_DEL_SUPERVISOR, "servicio:x",
+                  "supervisor_noc", "Supervisor-NOC", "Dexter"):
         r = cierre.cerrar_ticket_de_orden(
             _ConfigDe(sin_marca), TENANT, orden_id=ORDEN, ticket=TICKET,
             texto="T", actor=actor)
         afirmar(r.codigo == cierre.NO_EJECUTADA, f"actor {actor!r}: no entra (codigo={r.codigo})")
 afirmar(red.pedidos == [], "y no le llega nada al ISP")
+with red_falsa(registro, red):
+    r = cierre.cerrar_ticket_de_orden(
+        _ConfigDe(sin_marca), TENANT, orden_id="otra-orden", ticket=TICKET, texto="T",
+        actor="Supervisora Ana")
+afirmar(r.cerrado, f"una persona cuyo nombre se parece SI entra (codigo={r.codigo})")
+
+seccion("12. un timeout despues de mandar es INCIERTO, no un fallo")
+import requests                                                   # noqa: E402
+
+
+class _RedQueSeCorta(_Red):
+    def __call__(self, metodo, url, **k):
+        self.pedidos.append(url)
+        raise requests.exceptions.ReadTimeout("se corto")
+
+
+registro, red = RegistroComoLaBase(), _RedQueSeCorta()
+with red_falsa(registro, red):
+    r = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(sin_marca), TENANT, orden_id="orden-timeout", ticket=TICKET, texto="T")
+afirmar(len(red.pedidos) == 1 and r.codigo == cierre.INCIERTO,
+        f"salio el pedido y se corto: no se sabe (codigo={r.codigo})")
 
 print()
 if _fallos:

@@ -79,12 +79,17 @@ def _es_actor_del_sistema(actor: str) -> bool:
     from nucleo.seguridad import techo as techos
 
     nombre = (actor or "").strip().lower()
-    for sistema in techos.ACTORES_DEL_SISTEMA:
-        if sistema.endswith(":"):
-            if nombre.startswith(sistema):
-                return True
-        elif (nombre == sistema or nombre.startswith(sistema + " ")
-              or nombre.startswith(sistema + ":")):
+    #  «Dexter» no es una persona. No va en `techo.ACTORES_DEL_SISTEMA` porque
+    #  esa lista gobierna tambien quien cambia el techo.
+    for sistema in (*techos.ACTORES_DEL_SISTEMA, "dexter"):
+        base = sistema.rstrip(":")
+        if not nombre.startswith(base):
+            continue
+        #  La identidad entera, o seguida de algo que no es una letra:
+        #  «supervisor», «Supervisor de Dexter», «supervisor_noc»,
+        #  «Supervisor-NOC», «servicio:x». No «Supervisora Ana».
+        resto = nombre[len(base):]
+        if not resto or not resto[0].isalpha():
             return True
     return False
 
@@ -283,6 +288,15 @@ def cerrar_ticket_por_el_supervisor(config, tenant: str, *, orden_id: str,
                                      referencia=origen)
     except Exception as e:                                   # noqa: BLE001
         registrar("cierre_validacion", "el cierre del Supervisor fallo", error=e)
+        import requests
+
+        #  Un timeout o un corte DESPUES de mandar no dice que el ISP no lo
+        #  aplico: dice que no se sabe (auditoria de frontera, 30/10/2026).
+        if isinstance(e, (requests.exceptions.Timeout,
+                          requests.exceptions.ConnectionError)):
+            return ResultadoCierreTicket(
+                INCIERTO, f"{type(e).__name__}: no se sabe si el ISP lo cerro; "
+                          f"hay que mirarlo en su sistema", referencia=origen)
         return ResultadoCierreTicket(FALLO, type(e).__name__, referencia=origen)
 
     if resultado.decision == "repetida":
