@@ -38,6 +38,14 @@ Si el bloque es chico y acotado, esta pasada se puede saltear — **diciéndolo*
 
 O sea: agregá lo que se cerró **y borrá lo que dejó de ser cierto**. Si el bloque tenía ficha en `SPEC/objetivos/`, marcala cerrada, podala a su resultado, y anotá la última línea de su bitácora.
 
+**Y el PRD, en el mismo commit** (CLAUDE.md §11, "Al entregar"). Si el bloque cambió lo que Dexter hace, o tomó una decisión:
+
+- cambió lo que hay → la fila que corresponda de **PRD §4.1**;
+- avanzó una ola → **§4.2** y su punto en **§8.17**, con el requisito de **§5** marcado ✅;
+- se decidió algo → una **§8.x nueva** con fecha, evidencia y el error que la originó.
+
+Si no cambió nada de eso (un arreglo interno, una prueba, un refactor), se dice en la entrega: `PRD sin cambios: <motivo>`.
+
 ## Paso 4 · El commit
 
 - **Stage por rutas explícitas.** Prohibidos `git add .`, `git add -A`, `commit -a` y `git add SPEC/` — un directorio entero es el mismo gesto que un `add .`.
@@ -52,6 +60,7 @@ BLOQUE      <qué se cerró>
 EVIDENCIA   <guarda> → verde   (salida pegada arriba)
 AUDITORÍA   <hallazgos: resueltos / anotados en SPEC/auditorias/ / ninguno>
 ESTADO      <qué se agregó y qué se podó de DEXTER_ESTADO_ACTUAL.md>
+PRD         <qué sección cambió, o "sin cambios: <motivo>">
 COMMIT      <hash> — sin push
 QUEDÓ FUERA <lo que no se hizo, y por qué>
 ```

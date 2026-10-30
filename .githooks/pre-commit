@@ -122,6 +122,14 @@ echo "$ARCHIVOS" | grep -qE '^nucleo/modelo/|^nucleo/recuperacion/prompt\.py$' &
       py -3.13 cli/evaluar.py rapilink --humo         (~3 min)
       agente: corredor-de-evaluacion"
 
+TOCA_PRODUCTO=$(echo "$ARCHIVOS" | grep -E '^nucleo/|^django-crm/backend/.+\.py$|^django-crm/frontend/src/routes/|^apps/tecnicos-mobile/lib/|^tenants/.*\.yaml$|^supabase/.*\.sql$' | grep -vE '(^|/)tests?/|_test\.|\.test\.')
+if [ -n "$TOCA_PRODUCTO" ] && ! echo "$ARCHIVOS" | grep -qx 'PRD.md'; then
+    agregar "  PRODUCTO tocado y PRD.md no -> si cambio lo que Dexter hace o se
+    decidio algo, va en el MISMO commit (CLAUDE.md §11, 'Al entregar'):
+      §4.1 lo que hay · §4.2 + §8.17 + §5 si avanzo una ola · §8.x una decision
+    Si no corresponde, decirlo al entregar: 'PRD sin cambios: <motivo>'"
+fi
+
 if [ -n "$PENDIENTES" ]; then
     echo ""
     echo "$RAYA"
