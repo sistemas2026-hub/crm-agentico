@@ -25,7 +25,7 @@
  *     igual a 30 y a 144 cuadros por segundo — solo con menos pasos.
  */
 
-import { Application, Container } from 'pixi.js';
+import { Application, Container, Sprite } from 'pixi.js';
 import { Camara, LIMITES, gesto, type Toque } from './camara';
 import { aPantalla, extensionDelMundo } from './isometria';
 import { COLOR_DE_ANIMACION, PALETA } from './paleta';
@@ -134,6 +134,15 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   const mundo = new Container();
   mundo.addChild(oficina.raiz);
   app.stage.addChild(mundo);
+
+  /* ── la viñeta ────────────────────────────────────────────────────────── */
+  /* Va en el ESCENARIO y no en el mundo: oscurece las esquinas de la vista,
+     que es lo que hace que la mirada caiga donde está la acción. Dentro del
+     mundo se movería con la cámara y sería una mancha persiguiendo al suelo.
+     No es interactiva: sin esto se come todos los clics del lienzo. */
+  const vineta = new Sprite(texturas.vineta);
+  vineta.eventMode = 'none';
+  app.stage.addChild(vineta);
 
   const extension = extensionDelMundo(oficina.mundo);
   const vista = () => ({
@@ -281,7 +290,17 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   app.canvas.addEventListener('pointercancel', alSubir);
   app.canvas.addEventListener('wheel', alRodar, { passive: false });
 
-  const alRedimensionar = () => camara.redimensionar(vista());
+  const ajustarVineta = () => {
+    const v = vista();
+    vineta.width = v.ancho;
+    vineta.height = v.alto;
+  };
+  ajustarVineta();
+
+  const alRedimensionar = () => {
+    camara.redimensionar(vista());
+    ajustarVineta();
+  };
   const observador =
     typeof ResizeObserver !== 'undefined' ? new ResizeObserver(alRedimensionar) : null;
   observador?.observe(contenedor);

@@ -123,12 +123,40 @@ export function texturaTrama(ancho = 128, alto = 128): Texture {
   return Texture.from(c);
 }
 
+/**
+ * Viñeta: transparente en el centro, oscura en los bordes.
+ *
+ * Es el recurso más barato que separa «escena isométrica» de «videojuego». No
+ * agrega un solo objeto a la sala: oscurece las esquinas de la VISTA, así que
+ * la mirada cae donde está la acción en vez de repartirse por un rectángulo
+ * uniforme. Va sobre el escenario y NO dentro del mundo — si se moviera con la
+ * cámara dejaría de ser una viñeta y sería una mancha que persigue al suelo.
+ *
+ * La curva es cuadrática y arranca al 55% del radio: antes de eso no oscurece
+ * nada. Un degradado que empieza en el centro apaga la escena entera y se nota
+ * como «esto se ve sucio».
+ */
+export function texturaVineta(lado = 512): Texture {
+  const { c, ctx } = lienzo(lado, lado);
+  const r = lado / 2;
+  const g = ctx.createRadialGradient(r, r, 0, r, r, r);
+  for (let i = 0; i <= 16; i++) {
+    const p = i / 16;
+    const k = p < 0.55 ? 0 : Math.pow((p - 0.55) / 0.45, 2);
+    g.addColorStop(p, `rgba(0,0,0,${(k * 0.82).toFixed(4)})`);
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, lado, lado);
+  return Texture.from(c);
+}
+
 /** Todas las texturas de la escena, generadas una vez. */
 export interface Texturas {
   halo: Texture;
   sombra: Texture;
   haz: Texture;
   trama: Texture;
+  vineta: Texture;
   destruir(): void;
 }
 
@@ -137,16 +165,18 @@ export function generarTexturas(): Texturas {
   const sombra = texturaSombra();
   const haz = texturaHaz();
   const trama = texturaTrama();
+  const vineta = texturaVineta();
   return {
     halo,
     sombra,
     haz,
     trama,
+    vineta,
     /** Sin esto, salir y entrar de la pantalla cinco veces deja cinco juegos de
      *  texturas en la memoria de la tarjeta. Es la fuga más fácil de provocar
      *  y la más difícil de notar: no falla, solo va poniéndose lento. */
     destruir() {
-      for (const t of [halo, sombra, haz, trama]) t.destroy(true);
+      for (const t of [halo, sombra, haz, trama, vineta]) t.destroy(true);
     }
   };
 }

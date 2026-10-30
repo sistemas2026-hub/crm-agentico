@@ -818,6 +818,118 @@ function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble
   return { nodo };
 }
 
+/**
+ * La zona de supervisión: una alfombra técnica que ancla el puesto principal.
+ *
+ * El suelo del frente era una extensión vacía, y un personaje de pie sobre un
+ * vacío no se lee como el protagonista de la sala: se lee como alguien a quien
+ * le sobra sitio. La zona le pone límites a su espacio y, de paso, rompe la
+ * repetición de las baldosas donde más se nota — adelante, que es donde la
+ * cámara pasa más tiempo.
+ *
+ * Va casi sin color: una alfombra vistosa competiria con los monitores, que son
+ * lo unico que tiene derecho a brillar en una sala oscura.
+ */
+function construirZona(gx: number, gy: number, ancho: number, fondo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = -1500;
+  const g = new Graphics();
+
+  const contorno = [
+    aPantalla(gx, gy + fondo),
+    aPantalla(gx, gy),
+    aPantalla(gx + ancho, gy),
+    aPantalla(gx + ancho, gy + fondo)
+  ];
+  g.poly(aplanar(contorno)).fill({ color: tono(PALETA.pisoA, 0.1), alpha: 0.85 });
+  g.poly(aplanar(contorno)).stroke({ width: 1.4, color: PALETA.emberClaro, alpha: 0.14 });
+
+  // Una trama de lineas en una sola direccion: lo que distingue una alfombra
+  // de un rectangulo pintado. En las dos direcciones pareceria una rejilla, y
+  // una rejilla sobre un suelo que ya tiene juntas se ve como un error.
+  for (let y = gy + 0.5; y < gy + fondo; y += 0.5) {
+    const a = aPantalla(gx + 0.12, y);
+    const b = aPantalla(gx + ancho - 0.12, y);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  }
+  g.stroke({ width: 1, color: PALETA.junta, alpha: 0.5 });
+
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * El tablero de planificación del muro lateral.
+ *
+ * Llena la mitad baja de ese muro, que estaba desnuda, y dice «oficina» sin una
+ * palabra: columnas y tarjetas. No lleva texto NI cifras a proposito — un
+ * tablero decorativo con numeros encima se lee como una medicion, y en cuanto
+ * alguien lo crea la escena esta mintiendo. Es la misma regla que el mural.
+ */
+function construirTableroDePared(gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(0.2, gy);
+  const g = new Graphics();
+
+  const z0 = 1.3;
+  const z1 = 2.75;
+  panelMuroLateral(g, gy - 0.12, 2.74, z0 - 0.1, z1 + 0.1, PALETA.pantallaMarco);
+  panelMuroLateral(g, gy, 2.5, z0, z1, tono(PALETA.muroLateral, 0.16));
+
+  // Tres columnas de tarjetas. El reparto desigual --4, 2, 3-- es lo que lo
+  // hace parecer un tablero en uso en vez de una plantilla vacia.
+  const columnas = [4, 2, 3];
+  columnas.forEach((cuantas, c) => {
+    const base = gy + 0.18 + c * 0.82;
+    // El encabezado de la columna.
+    panelMuroLateral(g, base, 0.62, z1 - 0.22, z1 - 0.12, PALETA.emberClaro, 0.5);
+    for (let i = 0; i < cuantas; i++) {
+      const z = z1 - 0.42 - i * 0.26;
+      if (z < z0 + 0.1) break;
+      panelMuroLateral(g, base, 0.62, z - 0.18, z,
+                       i === 0 && c === 2 ? PALETA.clayClaro : PALETA.textoTenue,
+                       i === 0 && c === 2 ? 0.55 : 0.3);
+    }
+  });
+
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * El ducto de suelo que va de los armarios a los puestos.
+ *
+ * Dos lineas y unas tapas. Hace dos cosas: dice que la sala es tecnica, y le da
+ * al suelo una DIRECCION -- sin algo que lo cruce, un piso isometrico grande se
+ * lee como un tablero de ajedrez y la mirada no sabe hacia donde ir.
+ */
+function construirDucto(gy: number, desde: number, hasta: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = -1400;
+  const g = new Graphics();
+
+  const ancho = 0.34;
+  const contorno = [
+    aPantalla(desde, gy + ancho),
+    aPantalla(desde, gy),
+    aPantalla(hasta, gy),
+    aPantalla(hasta, gy + ancho)
+  ];
+  g.poly(aplanar(contorno)).fill({ color: tono(PALETA.metal, -0.45) });
+  g.poly(aplanar(contorno)).stroke({ width: 1, color: PALETA.metal, alpha: 0.5 });
+
+  // Las juntas entre tapas, cada metro.
+  for (let x = desde + 1; x < hasta; x += 1) {
+    const a = aPantalla(x, gy);
+    const b = aPantalla(x, gy + ancho);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  }
+  g.stroke({ width: 1, color: PALETA.pisoProfundo, alpha: 0.8 });
+
+  nodo.addChild(g);
+  return { nodo };
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    El puesto de trabajo
    ════════════════════════════════════════════════════════════════════════════ */
@@ -1125,6 +1237,11 @@ export function construirOficina(
     // El pasillo, separado de la sala y con su vano de paso. Sin esto la mitad
     // derecha del recinto era suelo vacío.
     construirMampara(11, 0.2, 9.8, [4.6, 6.4]),
+    // La zona del puesto principal y el ducto que cruza la sala: lo que le da
+    // al suelo del frente algo que mirar y una dirección.
+    construirZona(4.2, 6.2, 4.4, 3.4),
+    construirDucto(5.3, 1.0, 10.6),
+    construirTableroDePared(7.0),
     construirArmario(2.4, texturas),
     construirArmario(4.2, texturas),
     construirPanelDeFibra(6.3),
