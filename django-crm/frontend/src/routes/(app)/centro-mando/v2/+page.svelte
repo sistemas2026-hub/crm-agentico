@@ -215,7 +215,7 @@
         ]);
         if (!vivo) return;
         visualizar = adaptador.visualizar;
-        escena = await montarEscena({ contenedor: lienzo, puestos });
+        escena = await montarEscena({ contenedor: lienzo, puestos, rotulo: DEPARTAMENTO_NOC.rotulo });
         if (!vivo) {
           escena.destruir();
           escena = null;

@@ -704,6 +704,120 @@ function construirDispensador(gx: number, gy: number): Mueble {
   return { nodo };
 }
 
+/**
+ * La mampara que separa el pasillo de la sala, con su vano de paso.
+ *
+ * Nace de mirar la primera captura: la mitad derecha del recinto era suelo
+ * vacío. Un pasillo sin nada que lo separe de la sala no se lee como pasillo,
+ * se lee como «aquí no llegamos a poner nada». La mampara cuesta cuatro
+ * rectángulos y convierte ese vacío en una decisión de planta.
+ *
+ * El vidrio va con opacidad baja y SIN sombra: una superficie transparente que
+ * proyecta sombra es el detalle que hace que una escena parezca mal armada sin
+ * que nadie sepa decir por qué.
+ */
+function construirMampara(gx: number, desde: number, hasta: number, vano: [number, number]): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, desde) + 0.4;
+  const g = new Graphics();
+  const alto = 2.3;
+
+  const tramos: [number, number][] = [
+    [desde, vano[0]],
+    [vano[1], hasta]
+  ];
+
+  for (const [a, b] of tramos) {
+    if (b <= a) continue;
+    // El vidrio.
+    const p = [
+      aPantalla(gx, a, alto),
+      aPantalla(gx, b, alto),
+      aPantalla(gx, b, 0.12),
+      aPantalla(gx, a, 0.12)
+    ];
+    g.poly(aplanar(p)).fill({ color: 0x8fa8d8, alpha: 0.1 });
+    // Montantes cada metro y medio: lo que lo hace carpintería y no una mancha.
+    for (let y = a; y <= b + 0.001; y += 1.5) {
+      const arriba = aPantalla(gx, Math.min(y, b), alto);
+      const abajo = aPantalla(gx, Math.min(y, b), 0);
+      g.moveTo(arriba.x, arriba.y).lineTo(abajo.x, abajo.y);
+    }
+    // Travesaños: zócalo, media altura y remate.
+    for (const z of [0.12, 1.15, alto]) {
+      const i = aPantalla(gx, a, z);
+      const f = aPantalla(gx, b, z);
+      g.moveTo(i.x, i.y).lineTo(f.x, f.y);
+    }
+  }
+  g.stroke({ width: 1.6, color: PALETA.metal, alpha: 0.75 });
+
+  // El marco del vano, más grueso: señala por dónde se pasa.
+  const jamba = (y: number) => {
+    const arriba = aPantalla(gx, y, alto + 0.12);
+    const abajo = aPantalla(gx, y, 0);
+    g.moveTo(arriba.x, arriba.y).lineTo(abajo.x, abajo.y);
+  };
+  jamba(vano[0]);
+  jamba(vano[1]);
+  const dintelA = aPantalla(gx, vano[0], alto + 0.12);
+  const dintelB = aPantalla(gx, vano[1], alto + 0.12);
+  g.moveTo(dintelA.x, dintelA.y).lineTo(dintelB.x, dintelB.y);
+  g.stroke({ width: 2.6, color: tono(PALETA.metal, 0.18), alpha: 0.9 });
+
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * El cartel del departamento, en el muro del fondo.
+ *
+ * El texto llega como PARÁMETRO. Escribirlo acá pondría el nombre de un área
+ * concreta dentro del motor gráfico, que es justo lo que la guarda de este
+ * paquete impide: la escena tiene que servir igual para el departamento
+ * siguiente sin tocar una línea.
+ */
+function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = -890;
+
+  const texto = new Text({
+    text: rotulo.toUpperCase(),
+    style: {
+      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      fontSize: 11,
+      fontWeight: '700',
+      fill: PALETA.emberClaro,
+      letterSpacing: 2.2
+    },
+    resolution: 2
+  });
+  texto.anchor.set(0.5, 0.5);
+  // En el friso, ENTRE el remate del muro y el borde superior del mural. A la
+  // derecha del mural quedaba más espacio, y ahí el cartel se montaba encima
+  // de la tercera pantalla: en la captura parecía parte de lo que esa pantalla
+  // mostraba.
+  const centro = aPantalla(gx, 0, 3.63);
+  texto.position.set(centro.x, centro.y);
+  // Acostado sobre el plano del muro: sin esta inclinación el cartel se ve
+  // pegado por delante, como una etiqueta de la interfaz y no como algo que
+  // está en la pared.
+  texto.skew.y = Math.atan2(BALDOSA.alto / 2, BALDOSA.ancho / 2);
+  nodo.addChild(texto);
+
+  const halo = new Sprite(texturas.halo);
+  halo.anchor.set(0.5);
+  halo.position.set(centro.x, centro.y);
+  halo.width = texto.width * 2.2;
+  halo.height = 34;
+  halo.tint = PALETA.emberClaro;
+  halo.blendMode = 'add';
+  halo.alpha = 0.12;
+  nodo.addChildAt(halo, 0);
+
+  return { nodo };
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    El puesto de trabajo
    ════════════════════════════════════════════════════════════════════════════ */
@@ -795,7 +909,18 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
     vidrio.blendMode = 'add';
     vidrio.alpha = 0.3;
     pantallas.addChild(vidrio);
-    brillos.push({ pieza: vidrio, base: 0.42 });
+    brillos.push({ pieza: vidrio, base: 0.52 });
+
+    // El canto encendido del borde superior. Un monitor visto de espaldas se
+    // reconoce por esa línea de luz; sin ella es un bloque oscuro sobre la
+    // mesa, que es como se veía en la primera captura.
+    const canto = new Graphics();
+    const a = aPantalla(mx + 0.01, def.gy + 0.2, z1);
+    const b = aPantalla(mx + mw - 0.01, def.gy + 0.2, z1);
+    canto.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 1.6, color: 0xffffff, alpha: 0.9 });
+    canto.blendMode = 'add';
+    pantallas.addChild(canto);
+    brillos.push({ pieza: canto, base: 0.85 });
 
     // El derrame por el borde superior: la luz que sale del vidrio hacia el
     // espectador. Un monitor visto de espaldas sin derrame se ve apagado.
@@ -859,13 +984,19 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   const puntoPlaca = aPantalla(def.gx + ancho / 2, def.gy - 0.4, alturaPlaca);
   placa.position.set(puntoPlaca.x, puntoPlaca.y);
 
+  // UNA PLACA VACÍA NO PUEDE GRITAR IGUAL QUE UNA OCUPADA.
+  // En la primera versión las cuatro pesaban lo mismo y las tres estaciones
+  // libres se comían la atención del único puesto que tiene a alguien. El dato
+  // es el mismo; lo que cambia es cuánto reclama.
+  const ocupado = !!def.agente;
+
   const titulo = new Text({
     text: def.nombre,
     style: {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      fontSize: 12,
-      fontWeight: '600',
-      fill: PALETA.textoClaro,
+      fontSize: ocupado ? 12 : 10,
+      fontWeight: ocupado ? '600' : '400',
+      fill: ocupado ? PALETA.textoClaro : PALETA.textoTenue,
       letterSpacing: 0.2
     },
     resolution: 2
@@ -875,8 +1006,8 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
     text: def.area,
     style: {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      fontSize: 9.5,
-      fill: PALETA.textoTenue,
+      fontSize: ocupado ? 9.5 : 8.5,
+      fill: ocupado ? PALETA.textoTenue : 0x6b6a85,
       letterSpacing: 0.6
     },
     resolution: 2
@@ -902,12 +1033,15 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   const fondoPlaca = new Graphics();
   fondoPlaca
     .roundRect(-anchoPlaca / 2, -titulo.height - 5, anchoPlaca, titulo.height + subtitulo.height + 11, 4)
-    .fill({ color: PALETA.placa, alpha: 0.86 })
-    .stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
+    .fill({ color: PALETA.placa, alpha: ocupado ? 0.88 : 0.5 })
+    .stroke({ width: 1, color: 0xffffff, alpha: ocupado ? 0.1 : 0.04 });
 
   const testigo = new Graphics();
   testigo.circle(0, 0, 3).fill({ color: PALETA.ember });
   testigo.position.set(-anchoPlaca / 2 + 9, -titulo.height / 2 - 1);
+  // El punto de estado solo donde hay un estado que contar.
+  testigo.visible = ocupado;
+  placa.alpha = ocupado ? 1 : 0.72;
 
   placa.addChild(fondoPlaca, testigo, titulo, subtitulo, rotulo);
   nodo.addChild(placa);
@@ -963,7 +1097,12 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
    El montaje del recinto
    ════════════════════════════════════════════════════════════════════════════ */
 
-export function construirOficina(definiciones: DefinicionDePuesto[], texturas: Texturas): Oficina {
+export function construirOficina(
+  definiciones: DefinicionDePuesto[],
+  texturas: Texturas,
+  /** Lo que se lee en el muro. Dato de la empresa; la escena solo lo dibuja. */
+  rotulo = ''
+): Oficina {
   const raiz = new Container();
   raiz.sortableChildren = true;
 
@@ -983,6 +1122,9 @@ export function construirOficina(definiciones: DefinicionDePuesto[], texturas: T
   animables.push(mural.animar);
 
   const muebles: Mueble[] = [
+    // El pasillo, separado de la sala y con su vano de paso. Sin esto la mitad
+    // derecha del recinto era suelo vacío.
+    construirMampara(11, 0.2, 9.8, [4.6, 6.4]),
     construirArmario(2.4, texturas),
     construirArmario(4.2, texturas),
     construirPanelDeFibra(6.3),
@@ -991,8 +1133,10 @@ export function construirOficina(definiciones: DefinicionDePuesto[], texturas: T
     construirPlanta(12.4, 1.1, texturas),
     construirPlanta(0.9, 8.9, texturas),
     construirBanco(11.3, 8.2),
-    construirDispensador(13.0, 4.6)
+    construirDispensador(13.0, 4.6),
+    construirPlanta(12.3, 6.6, texturas)
   ];
+  if (rotulo) muebles.push(construirCartel(rotulo, 7.4, texturas));
   for (const m of muebles) {
     raiz.addChild(m.nodo);
     if (m.animar) animables.push(m.animar);

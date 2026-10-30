@@ -90,6 +90,8 @@ export interface OpcionesDeEscena {
   /** El elemento que contiene el lienzo. Se mide para encuadrar. */
   contenedor: HTMLElement;
   puestos: DefinicionDePuesto[];
+  /** Lo que se lee en el muro del fondo. Lo pone quien monta, no la escena. */
+  rotulo?: string;
 }
 
 interface Habitante {
@@ -126,7 +128,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   (app.canvas.style as any).userSelect = 'none';
 
   const texturas = generarTexturas();
-  const oficina = construirOficina(opciones.puestos, texturas);
+  const oficina = construirOficina(opciones.puestos, texturas, opciones.rotulo ?? '');
 
   /* El mundo entero cuelga de un contenedor al que se le aplica la cámara. */
   const mundo = new Container();
@@ -145,6 +147,13 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     let personaje: Personaje | null = null;
     if (puesto.def.agente) {
       personaje = construirPersonaje(texturas);
+      // Un 18% más grande que las medidas de `personaje.ts`. En la primera
+      // captura la figura era correcta y se perdía: la sala es de 14 × 10
+      // celdas y una persona sentada a escala estricta ocupa 50 px de 1900. El
+      // protagonista de la escena tiene que leerse sin acercar la cámara, y
+      // esta es la exageración mínima que lo consigue sin que parezca un
+      // gigante detrás de su mesa.
+      personaje.nodo.scale.set(1.18);
       puesto.ancla.addChild(personaje.nodo);
     }
     // El paquete sale del escritorio hacia el pasillo, en línea recta sobre el
