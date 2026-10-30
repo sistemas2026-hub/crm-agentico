@@ -28,7 +28,7 @@
 import { Application, Container, Sprite } from 'pixi.js';
 import { Camara, LIMITES, gesto, type Toque } from './camara';
 import { aPantalla, extensionDelMundo } from './isometria';
-import { COLOR_DE_ANIMACION, PALETA } from './paleta';
+import { PALETA, coloresConAcento } from './paleta';
 import { Transicion } from './pose';
 import { construirOficina, type Planta, type Puesto } from './oficina';
 import { construirPersonaje, type Personaje } from './personaje';
@@ -157,10 +157,13 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   const camara = new Camara(extension, vista(), LIMITES);
 
   /* ── los habitantes ───────────────────────────────────────────────────── */
-  const habitantes: Habitante[] = oficina.puestos.map((puesto) => {
+  const habitantes: Habitante[] = oficina.puestos.map((puesto, asiento) => {
     let personaje: Personaje | null = null;
     if (puesto.def.agente) {
-      personaje = construirPersonaje(texturas);
+      //  El nombre del agente decide su aspecto: ropa, pelo y piel. Sin esto
+      //  ocho departamentos son la misma persona clonada cuarenta veces, que
+      //  es lo primero que delata que la oficina es un fondo repetido.
+      personaje = construirPersonaje(texturas, puesto.def.agente, asiento);
       // Un 18% más grande que las medidas de `personaje.ts`. En la primera
       // captura la figura era correcta y se perdía: la sala es de 14 × 10
       // celdas y una persona sentada a escala estricta ocupa 50 px de 1900. El
@@ -192,6 +195,10 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       h.puesto.halo.alpha = 0;
     }
   }
+
+  /*  Los colores de estado con el acento de esta sala. Los de alarma NO
+      cambian: un rojo tiene que ser el mismo rojo en las ocho. */
+  const colores = coloresConAcento(opciones.planta.acento);
 
   /* ── selección ────────────────────────────────────────────────────────── */
   /* Qué puesto estaba bajo el puntero al pulsar. Lo escribe el sistema de
@@ -335,7 +342,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       const pose = h.transicion.avanzar(dt, t);
       h.personaje?.aplicar(pose);
 
-      const color = COLOR_DE_ANIMACION[h.transicion.destino] ?? PALETA.ember;
+      const color = colores[h.transicion.destino] ?? PALETA.ember;
       h.puesto.halo.tint = color;
       h.puesto.halo.alpha = h.puesto.def.agente ? pose.aura * 0.42 : 0;
       h.puesto.testigo.tint = color;

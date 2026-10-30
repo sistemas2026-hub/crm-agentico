@@ -122,6 +122,95 @@ export function mezclarColor(a: number, b: number, k: number): number {
 }
 
 /**
+ * EL ASPECTO DE UNA PERSONA, Y POR QUÉ NO SIGNIFICA NADA.
+ *
+ * Hasta acá todos los agentes eran la misma figura con la misma ropa: ocho
+ * departamentos habrían sido la misma persona clonada cuarenta veces, que es lo
+ * primero que se nota y lo que delata que la oficina es un fondo repetido.
+ *
+ * El aspecto se deriva del NOMBRE del agente con un reparto opaco. Dos cosas
+ * que eso garantiza: que el mismo agente se vea igual en dos cargas seguidas
+ * —si fuera azar, cambiaría de cara cada vez que alguien recarga— y que no
+ * haya que guardar ni editar nada para que la sala se vea poblada.
+ *
+ * **El reparto es ARBITRARIO y no quiere decir nada.** No codifica rol, ni
+ * antigüedad, ni nada que alguien pueda leer. Existe para que dos puestos no se
+ * vean como la misma persona, y para nada más; si algún día un color tuviera
+ * que significar algo, se pasaría como dato y no saldría de un hash.
+ */
+export const ROPA = [0x4f46e5, 0x2b6e46, 0x9a5b00, 0x3e5c8a, 0x6d3f78, 0x1f6f7a];
+export const PELO = [0x2b2238, 0x4a3326, 0x1a1a22, 0x6b4a2f, 0x3d2b45];
+export const PIEL = [0xd8a375, 0xa9754f, 0xeec4a0, 0x7d5338, 0xc08f63];
+
+export interface Aspecto {
+  camisa: number;
+  camisaSombra: number;
+  pelo: number;
+  piel: number;
+}
+
+/**
+ * Un entero estable a partir de un texto.
+ *
+ * No es criptográfico y no pretende serlo: lo único que tiene que cumplir es
+ * dar siempre el mismo número para el mismo nombre, y repartir razonablemente
+ * nombres parecidos — `atencion_1` y `atencion_2` no pueden caer en el mismo
+ * sitio o la sala vuelve a verse clonada justo donde más se nota.
+ */
+function sembrar(texto: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < texto.length; i++) {
+    h ^= texto.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+/**
+ * El aspecto de un agente: la camisa la decide el ASIENTO, el pelo y la piel la
+ * PERSONA.
+ *
+ * Esa división no es estética, es lo que da la garantía: dos compañeros de sala
+ * ocupan asientos distintos, así que **nunca llevan la misma camisa**. Y el
+ * pelo y la piel salen del nombre, así que la misma persona se ve igual en dos
+ * cargas seguidas y mover a alguien de puesto no le cambia la cara.
+ *
+ * SE INTENTÓ CON EL NOMBRE SOLO, Y SU PROPIA PRUEBA LO CAZÓ. De cuatro puestos
+ * salían tres aspectos: dos agentes sentados en la misma sala eran la misma
+ * persona. Con 6 × 5 × 5 = 150 combinaciones, cuatro nombres chocan el 4% de
+ * las veces — una prueba que dependiera de eso pasaría casi siempre y fallaría
+ * sin motivo aparente el día que alguien renombrara un agente.
+ *
+ * El segundo intento —desplazar el hash del nombre por el asiento— tampoco
+ * servía, y por una razón que conviene dejar escrita: desplazar DOS valores
+ * distintos por cantidades distintas no los separa. La garantía solo aparece
+ * cuando el canal depende únicamente del asiento.
+ *
+ * **El reparto es ARBITRARIO y no quiere decir nada.** No codifica rol, ni
+ * antigüedad, ni nada que alguien pueda leer; existe para que dos puestos no se
+ * vean como la misma persona. Si algún día un color tuviera que significar
+ * algo, se pasaría como dato y no saldría de acá.
+ *
+ * El límite, dicho: pasados `ROPA.length` asientos las camisas se repiten. El
+ * pelo y la piel siguen separándolos, pero la garantía fuerte cubre hasta seis
+ * por sala.
+ */
+export function aspectoDe(nombre: string, asiento = 0): Aspecto {
+  const texto = String(nombre ?? '');
+  const camisa = ROPA[Math.max(0, Math.floor(asiento)) % ROPA.length];
+  return {
+    camisa,
+    //  La sombra se DERIVA de la camisa y no se elige aparte: elegirlas por
+    //  separado deja a alguien con el costado iluminado al revés.
+    camisaSombra: tono(camisa, -0.3),
+    //  Una semilla por canal. Dividir UNA semilla entre dos números
+    //  correlaciona los dos: nombres cercanos caían juntos en más de un canal.
+    pelo: PELO[sembrar(texto + '|pelo') % PELO.length],
+    piel: PIEL[sembrar(texto + '|piel') % PIEL.length]
+  };
+}
+
+/**
  * El color de un estado visual.
  *
  * Centralizado para que el halo del puesto, el borde de la placa y el punto de
@@ -135,3 +224,20 @@ export const COLOR_DE_ANIMACION: Record<string, number> = {
   despachar: PALETA.clayClaro,
   incognito: PALETA.incognito
 };
+
+/**
+ * Los colores de estado con el acento de un departamento.
+ *
+ * **El acento tiñe la SALA, no los ESTADOS.** `alerta`, `despachar` e
+ * `incognito` no se tocan: un rojo tiene que ser el mismo rojo en las ocho
+ * salas, o quien mira dos pantallas aprende que el color no quiere decir nada.
+ * Lo que cambia es el tono de «normal» y «trabajando», que es decoración.
+ */
+export function coloresConAcento(acento?: number): Record<string, number> {
+  if (!acento) return COLOR_DE_ANIMACION;
+  return {
+    ...COLOR_DE_ANIMACION,
+    reposo: acento,
+    teclear: tono(acento, 0.28)
+  };
+}

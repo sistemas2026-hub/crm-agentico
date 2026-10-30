@@ -28,7 +28,7 @@
  */
 
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
-import { PALETA, mezclarColor, tono } from './paleta';
+import { PALETA, aspectoDe, mezclarColor, tono, type Aspecto } from './paleta';
 import type { Pose } from './pose';
 import type { Texturas } from './texturas';
 
@@ -58,7 +58,23 @@ const M = {
   manoY: -11
 };
 
-export function construirPersonaje(texturas: Texturas): Personaje {
+/**
+ * @param lugar el puesto que ocupa en su sala. Garantiza que dos compañeros no
+ *        lleven la misma camisa; ver `aspectoDe`. Se llama `lugar` y no
+ *        `asiento` porque acá dentro `asiento` ya es una pieza de la silla, y
+ *        el choque no lo vio ninguna prueba: este archivo no lo importa
+ *        ninguna, así que un error de sintaxis acá solo aparece en el
+ *        navegador.
+ * @param quien el nombre del agente. De él sale el aspecto: ropa, pelo y piel.
+ *        Estable —el mismo agente se ve igual en dos cargas— y arbitrario: el
+ *        reparto no codifica nada y no hay que leerlo. Sin nombre, todos
+ *        vuelven a ser la misma persona, que es lo que había antes.
+ */
+export function construirPersonaje(texturas: Texturas, quien = '', lugar = 0): Personaje {
+  const A: Aspecto = quien
+    ? aspectoDe(quien, lugar)
+    : { camisa: PALETA.camisa, camisaSombra: PALETA.camisaSombra,
+        pelo: PALETA.pelo, piel: PALETA.piel };
   const nodo = new Container();
 
   /* ── sombra de contacto ───────────────────────────────────────────────── */
@@ -125,7 +141,7 @@ export function construirPersonaje(texturas: Texturas): Personaje {
     .lineTo(6, M.hombros - 2)
     .quadraticCurveTo(11, M.hombros - 2, 11, M.hombros + 4)
     .lineTo(9, M.asiento)
-    .fill({ color: PALETA.camisa });
+    .fill({ color: A.camisa });
   // El costado en sombra: la luz entra por el mismo lado que en el mobiliario.
   tronco
     .moveTo(4, M.hombros - 2)
@@ -133,7 +149,7 @@ export function construirPersonaje(texturas: Texturas): Personaje {
     .quadraticCurveTo(11, M.hombros - 2, 11, M.hombros + 4)
     .lineTo(9, M.asiento)
     .lineTo(4, M.asiento)
-    .fill({ color: PALETA.camisaSombra });
+    .fill({ color: A.camisaSombra });
   cuerpo.addChild(tronco);
 
   /* ── los brazos ───────────────────────────────────────────────────────── */
@@ -145,9 +161,9 @@ export function construirPersonaje(texturas: Texturas): Personaje {
   cuerpo.addChild(brazos);
 
   const manoIzq = new Graphics();
-  manoIzq.circle(0, 0, 3.2).fill({ color: PALETA.piel });
+  manoIzq.circle(0, 0, 3.2).fill({ color: A.piel });
   const manoDer = new Graphics();
-  manoDer.circle(0, 0, 3.2).fill({ color: PALETA.piel });
+  manoDer.circle(0, 0, 3.2).fill({ color: A.piel });
   cuerpo.addChild(manoIzq, manoDer);
 
   /* ── la cabeza ────────────────────────────────────────────────────────── */
@@ -156,18 +172,18 @@ export function construirPersonaje(texturas: Texturas): Personaje {
   cuerpo.addChild(cabeza);
 
   const cuello = new Graphics();
-  cuello.rect(-2.5, -2, 5, M.hombros - M.cuello + 7).fill({ color: tono(PALETA.piel, -0.22) });
+  cuello.rect(-2.5, -2, 5, M.hombros - M.cuello + 7).fill({ color: tono(A.piel, -0.22) });
   cabeza.addChild(cuello);
 
   const craneo = new Graphics();
   craneo
     .circle(0, 0, M.radioCabeza)
-    .fill({ color: PALETA.piel })
+    .fill({ color: A.piel })
     // El lado en sombra, recortado por el propio círculo: media luna de un
     // tono más bajo. Sin esto la cabeza es un disco.
     .moveTo(2, -M.radioCabeza + 1)
     .arc(0, 0, M.radioCabeza, -1.2, 1.2)
-    .fill({ color: tono(PALETA.piel, -0.16) });
+    .fill({ color: tono(A.piel, -0.16) });
   cabeza.addChild(craneo);
 
   const pelo = new Graphics();
@@ -176,7 +192,7 @@ export function construirPersonaje(texturas: Texturas): Personaje {
     .arc(0, -0.5, M.radioCabeza + 0.6, Math.PI, 0)
     .lineTo(M.radioCabeza, -1)
     .quadraticCurveTo(3, -3.5, -M.radioCabeza - 0.5, -1)
-    .fill({ color: PALETA.pelo });
+    .fill({ color: A.pelo });
   cabeza.addChild(pelo);
 
   // Los auriculares: lo que dice «esto es un puesto de operación» sin una sola
@@ -202,7 +218,7 @@ export function construirPersonaje(texturas: Texturas): Personaje {
   cara
     .circle(-3.6, 1.2, 0.95)
     .circle(0.6, 1.2, 0.95)
-    .fill({ color: PALETA.pelo });
+    .fill({ color: A.pelo });
   cabeza.addChild(cara);
 
   /* ── el signo de interrogación ────────────────────────────────────────── */
@@ -274,10 +290,10 @@ export function construirPersonaje(texturas: Texturas): Personaje {
     brazos
       .moveTo(-7, M.hombros + 2)
       .quadraticCurveTo(-15, M.hombros + 12, manoIzq.x, manoIzq.y)
-      .stroke({ width: 5.2, color: PALETA.camisa, cap: 'round' })
+      .stroke({ width: 5.2, color: A.camisa, cap: 'round' })
       .moveTo(2, M.hombros + 2)
       .quadraticCurveTo(-8, M.hombros + 14, manoDer.x, manoDer.y)
-      .stroke({ width: 5.2, color: PALETA.camisaSombra, cap: 'round' });
+      .stroke({ width: 5.2, color: A.camisaSombra, cap: 'round' });
 
     incertidumbre.visible = pose.incertidumbre > 0.02;
     if (incertidumbre.visible) {

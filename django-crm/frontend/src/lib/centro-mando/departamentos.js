@@ -43,6 +43,9 @@ const NOC = {
   rotulo: 'NOC y Redes',
   direccion: 'Dirección de Operaciones',
   planta: {
+    //  Índigo: el color de la acción del producto. La primera sala se queda
+    //  con él porque es la que fijó la identidad visual.
+    acento: 0x4f46e5,
     mundo: { ancho: 14, fondo: 10, alto: 4 },
     pasillo: { desde: 11, hasta: 14 },
     cartel: { gx: 7.4 },
@@ -72,10 +75,10 @@ const NOC = {
       { tipo: 'dispensador', gx: 13.0, gy: 4.6 }
     ],
     puestos: [
-      { id: 'noc-supervision', principal: true, gx: 4.8, gy: 7.4 },
-      { id: 'noc-monitoreo-1', gx: 1.5, gy: 3.4 },
-      { id: 'noc-monitoreo-2', gx: 4.5, gy: 3.4 },
-      { id: 'noc-monitoreo-3', gx: 7.5, gy: 3.4 }
+      { id: 'noc-supervision', nombre: 'Supervisión', principal: true, gx: 4.8, gy: 7.4 },
+      { id: 'noc-monitoreo-1', nombre: 'Monitoreo 1', gx: 1.5, gy: 3.4 },
+      { id: 'noc-monitoreo-2', nombre: 'Monitoreo 2', gx: 4.5, gy: 3.4 },
+      { id: 'noc-monitoreo-3', nombre: 'Monitoreo 3', gx: 7.5, gy: 3.4 }
     ]
   }
 };
@@ -96,6 +99,9 @@ const ATENCION = {
   rotulo: 'Atención al Cliente',
   direccion: 'Dirección de Servicio',
   planta: {
+    //  Verde azulado. Distinto del NOC de un vistazo y a la misma distancia
+    //  del rojo de un fallo, que es lo que no puede cambiar de sala en sala.
+    acento: 0x1f7a6b,
     mundo: { ancho: 13, fondo: 9, alto: 4 },
     pasillo: { desde: 10, hasta: 13 },
     cartel: { gx: 5.2 },
@@ -127,10 +133,10 @@ const ATENCION = {
       // tapaba el nombre de la de atrás. En isometría dos puestos con el
       // mismo `gx` caen en la misma columna de pantalla aunque estén a tres
       // celdas de distancia.
-      { id: 'atencion-coordinacion', principal: true, gx: 2.2, gy: 6.4 },
-      { id: 'atencion-1', gx: 1.2, gy: 3.0 },
-      { id: 'atencion-2', gx: 4.2, gy: 3.0 },
-      { id: 'atencion-3', gx: 7.2, gy: 3.0 }
+      { id: 'atencion-coordinacion', nombre: 'Coordinación', principal: true, gx: 2.2, gy: 6.4 },
+      { id: 'atencion-1', nombre: 'Atención 1', gx: 1.2, gy: 3.0 },
+      { id: 'atencion-2', nombre: 'Atención 2', gx: 4.2, gy: 3.0 },
+      { id: 'atencion-3', nombre: 'Atención 3', gx: 7.2, gy: 3.0 }
     ]
   }
 };
@@ -206,7 +212,10 @@ export function plantaDe(depto, agentes) {
     return {
       ...p,
       agente: agente?.nombre ?? null,
-      nombre: agente?.rotulo || (p.principal ? 'Puesto principal' : `Puesto ${i}`),
+      //  Ocupado: el cargo del agente. Libre: el nombre del PUESTO, que lo
+      //  pone la planta. Un «Puesto 3» genérico no le dice a nadie para qué
+      //  está ese escritorio, y el nombre del sitio sobrevive a quien lo ocupa.
+      nombre: agente?.rotulo || p.nombre || (p.principal ? 'Puesto principal' : `Puesto ${i}`),
       area: agente ? depto.rotulo : 'puesto libre'
     };
   });

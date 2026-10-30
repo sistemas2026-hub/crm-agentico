@@ -63,6 +63,8 @@ export interface Mueble2D {
 
 export interface Planta {
   mundo: Mundo;
+  /** El color propio del departamento. Tiñe la sala, nunca los estados. */
+  acento?: number;
   /** La franja de suelo más clara que cruza el recinto. */
   pasillo: { desde: number; hasta: number } | null;
   /** Lo que se lee en el muro del fondo, y a qué altura del muro va. */
@@ -84,6 +86,23 @@ export const MUNDO: Mundo = { ancho: 14, fondo: 10, alto: 4 };
  * al entrar en `construirOficina` y no se lee desde ningún otro sitio.
  */
 let PASILLO: { desde: number; hasta: number } = { desde: 11, hasta: 14 };
+
+/**
+ * EL ACENTO DE LA SALA.
+ *
+ * Tiñe lo DECORATIVO —la luz de las pantallas, la banda del muro, el cartel,
+ * el halo de un puesto tranquilo— para que ocho departamentos no se vean como
+ * ocho recoloreados de la misma sala.
+ *
+ * Lo que NO tiñe son los estados. El rojo de un fallo y el gris de «no sé»
+ * viven en `COLOR_DE_ANIMACION` y no se tocan: si el rojo cambiara de sala en
+ * sala, quien mira dos pantallas aprendería que el color no quiere decir nada.
+ *
+ * Mismo patrón que `PASILLO`: se fija al entrar en `construirOficina` y no se
+ * lee desde ningún otro sitio.
+ */
+let ACENTO = PALETA.ember;
+let ACENTO_CLARO = PALETA.emberClaro;
 
 /** Declaración de un puesto. Posición y a quién pertenece, nada más. */
 export interface DefinicionDePuesto {
@@ -366,7 +385,7 @@ function construirMural(texturas: Texturas,
   paneles.forEach((p, indice) => {
     const marco = new Graphics();
     panelMuroFondo(marco, p.gx - 0.1, p.ancho + 0.2, z0 - 0.1, z1 + 0.1, PALETA.pantallaMarco);
-    panelMuroFondo(marco, p.gx, p.ancho, z0, z1, tono(PALETA.ember, -0.78));
+    panelMuroFondo(marco, p.gx, p.ancho, z0, z1, tono(ACENTO, -0.78));
     nodo.addChild(marco);
 
     // La trama, recortada al panel. Le da estructura a un rectángulo brillante,
@@ -398,7 +417,7 @@ function construirMural(texturas: Texturas,
     luz.position.set(centro.x, centro.y);
     luz.width = p.ancho * BALDOSA.ancho * 1.5;
     luz.height = (z1 - z0) * ALTURA_UNIDAD * 3.2;
-    luz.tint = PALETA.emberClaro;
+    luz.tint = ACENTO_CLARO;
     luz.blendMode = 'add';
     luz.alpha = 0.16;
     nodo.addChild(luz);
@@ -423,7 +442,7 @@ function muralDeBarras(padre: Container, gx: number, ancho: number, z0: number, 
     const bx = gx + 0.18 + (i * (ancho - 0.36)) / n;
     const bw = (ancho - 0.36) / n - 0.045;
     const g = new Graphics();
-    panelMuroFondo(g, bx, bw, z0 + 0.18, z1 - 0.3, PALETA.emberClaro, 0.85);
+    panelMuroFondo(g, bx, bw, z0 + 0.18, z1 - 0.3, ACENTO_CLARO, 0.85);
     // El pivote de la escala está en la base de la barra, no en el origen del
     // panel: escalar desde el origen hunde las barras en el suelo.
     const base = aPantalla(bx, 0, z0 + 0.18);
@@ -475,14 +494,14 @@ function muralDeEnlaces(padre: Container, gx: number, ancho: number, z0: number,
     const pb = punto(nodos[b]);
     lineas.moveTo(pa.x, pa.y).lineTo(pb.x, pb.y);
   }
-  lineas.stroke({ width: 1.4, color: PALETA.emberClaro, alpha: 0.45 });
+  lineas.stroke({ width: 1.4, color: ACENTO_CLARO, alpha: 0.45 });
   padre.addChild(lineas);
 
   const puntos: Graphics[] = [];
   nodos.forEach((n, i) => {
     const p = punto(n);
     const g = new Graphics();
-    g.circle(0, 0, i === 0 ? 4.2 : 2.6).fill({ color: i === 0 ? PALETA.clayClaro : PALETA.emberClaro });
+    g.circle(0, 0, i === 0 ? 4.2 : 2.6).fill({ color: i === 0 ? PALETA.clayClaro : ACENTO_CLARO });
     g.position.set(p.x, p.y);
     padre.addChild(g);
     puntos.push(g);
@@ -588,7 +607,7 @@ function construirArmario(gy: number, texturas: Texturas): Mueble {
     for (let j = 0; j < 2; j++) {
       const p = aPantalla(0.1, gy + 0.22 + j * 0.22, 0.34 + i * 0.32);
       const led = new Graphics();
-      led.circle(0, 0, 1.5).fill({ color: j === 0 ? PALETA.mossClaro : PALETA.emberClaro });
+      led.circle(0, 0, 1.5).fill({ color: j === 0 ? PALETA.mossClaro : ACENTO_CLARO });
       led.position.set(p.x, p.y);
       nodo.addChild(led);
       testigos.push(led);
@@ -649,7 +668,7 @@ function construirPanelDeFibra(gy: number): Mueble {
     const b = aPantalla(0, gy + 0.1 + i * 0.3, 0.55);
     hebras.moveTo(a.x, a.y).quadraticCurveTo(a.x - 10, a.y + 28, b.x, b.y);
   }
-  hebras.stroke({ width: 1.3, color: PALETA.emberClaro, alpha: 0.4 });
+  hebras.stroke({ width: 1.3, color: ACENTO_CLARO, alpha: 0.4 });
   nodo.addChild(hebras);
 
   return { nodo };
@@ -835,7 +854,7 @@ function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
       fontSize: 11,
       fontWeight: '700',
-      fill: PALETA.emberClaro,
+      fill: ACENTO_CLARO,
       letterSpacing: 2.2
     },
     resolution: 2
@@ -858,7 +877,7 @@ function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble
   halo.position.set(centro.x, centro.y);
   halo.width = texto.width * 2.2;
   halo.height = 34;
-  halo.tint = PALETA.emberClaro;
+  halo.tint = ACENTO_CLARO;
   halo.blendMode = 'add';
   halo.alpha = 0.12;
   nodo.addChildAt(halo, 0);
@@ -890,7 +909,7 @@ function construirZona(gx: number, gy: number, ancho: number, fondo: number): Mu
     aPantalla(gx + ancho, gy + fondo)
   ];
   g.poly(aplanar(contorno)).fill({ color: tono(PALETA.pisoA, 0.1), alpha: 0.85 });
-  g.poly(aplanar(contorno)).stroke({ width: 1.4, color: PALETA.emberClaro, alpha: 0.14 });
+  g.poly(aplanar(contorno)).stroke({ width: 1.4, color: ACENTO_CLARO, alpha: 0.14 });
 
   // Una trama de lineas en una sola direccion: lo que distingue una alfombra
   // de un rectangulo pintado. En las dos direcciones pareceria una rejilla, y
@@ -930,7 +949,7 @@ function construirTableroDePared(gy: number): Mueble {
   columnas.forEach((cuantas, c) => {
     const base = gy + 0.18 + c * 0.82;
     // El encabezado de la columna.
-    panelMuroLateral(g, base, 0.62, z1 - 0.22, z1 - 0.12, PALETA.emberClaro, 0.5);
+    panelMuroLateral(g, base, 0.62, z1 - 0.22, z1 - 0.12, ACENTO_CLARO, 0.5);
     for (let i = 0; i < cuantas; i++) {
       const z = z1 - 0.42 - i * 0.26;
       if (z < z0 + 0.1) break;
@@ -1033,7 +1052,7 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   reflejo.position.set(tapa.x, tapa.y - 4);
   reflejo.width = ancho * 44;
   reflejo.height = 26;
-  reflejo.tint = PALETA.emberClaro;
+  reflejo.tint = ACENTO_CLARO;
   reflejo.blendMode = 'add';
   reflejo.alpha = 0.2;
   reflejo.zIndex = 1;
@@ -1065,7 +1084,7 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
       aPantalla(mx + mw - 0.01, def.gy + 0.2, z0),
       aPantalla(mx + 0.01, def.gy + 0.2, z0)
     ];
-    vidrio.poly(aplanar(p)).fill({ color: PALETA.emberClaro });
+    vidrio.poly(aplanar(p)).fill({ color: ACENTO_CLARO });
     vidrio.blendMode = 'add';
     vidrio.alpha = 0.3;
     pantallas.addChild(vidrio);
@@ -1090,7 +1109,7 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
     derrame.position.set(borde.x, borde.y);
     derrame.width = mw * 95;
     derrame.height = 56;
-    derrame.tint = PALETA.emberClaro;
+    derrame.tint = ACENTO_CLARO;
     derrame.blendMode = 'add';
     derrame.alpha = 0.35;
     pantallas.addChild(derrame);
@@ -1209,7 +1228,7 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
     .stroke({ width: 1, color: 0xffffff, alpha: ocupado ? 0.1 : 0.04 });
 
   const testigo = new Graphics();
-  testigo.circle(0, 0, 3).fill({ color: PALETA.ember });
+  testigo.circle(0, 0, 3).fill({ color: ACENTO });
   testigo.position.set(-anchoPlaca / 2 + 9, -titulo.height / 2 - 1);
   // El punto de estado solo donde hay un estado que contar.
   testigo.visible = ocupado;
@@ -1299,6 +1318,8 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   raiz.sortableChildren = true;
 
   const mundo = planta.mundo;
+  ACENTO = planta.acento ?? PALETA.ember;
+  ACENTO_CLARO = tono(ACENTO, 0.28);
   //  Sin pasillo se fija una franja vacía en vez de un `if` repartido por el
   //  dibujo del suelo: una sala sin pasillo es una sala con un pasillo de
   //  ancho cero, y así hay un solo camino de código.
