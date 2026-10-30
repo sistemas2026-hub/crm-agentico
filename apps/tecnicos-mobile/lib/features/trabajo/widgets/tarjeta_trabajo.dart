@@ -425,7 +425,9 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (trabajo.compromiso != null || mostrarDatosFuturos)
+          if (trabajo.ventanaTexto.isNotEmpty ||
+              trabajo.horaComprometida != null ||
+              mostrarDatosFuturos)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: const BoxDecoration(
@@ -1209,7 +1211,9 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
   /// al cliente, la hora agendada, y recién al final el ejemplo.
   String _ventana(TrabajoVista trabajo) {
     if (trabajo.ventanaTexto.isNotEmpty) return trabajo.ventanaTexto;
-    if (trabajo.compromiso != null) return _ventanaReal(trabajo.compromiso!);
+    if (trabajo.horaComprometida != null) {
+      return _ventanaReal(trabajo.horaComprometida!);
+    }
     return FieldMockData.ventanaHoraria;
   }
 

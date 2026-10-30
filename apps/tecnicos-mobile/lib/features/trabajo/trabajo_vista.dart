@@ -78,6 +78,21 @@ class TrabajoVista {
   final FamiliaTrabajo familia;
   final DateTime? compromiso;
 
+  /// La hora del compromiso, si de verdad tiene una (29/10/2026).
+  ///
+  /// El Supervisor crea la orden PARA UN DÍA y la guarda a las 00:00 de ese
+  /// día (`ordenes_de_despacho._a_las_cero`): no es una cita a medianoche. La
+  /// app la mostraba como «12:00 AM» y, en las horas del día, como un reloj
+  /// rojo «00:00» vencido desde la madrugada (el usuario: «tiene una hora,
+  /// dice 12:00 AM, ¿qué significa?»). A las 00:00 en punto la orden no tiene
+  /// hora; el día sigue valiendo en [compromiso].
+  DateTime? get horaComprometida {
+    final DateTime? c = compromiso;
+    if (c == null) return null;
+    final DateTime local = c.toLocal();
+    return local.hour == 0 && local.minute == 0 ? null : c;
+  }
+
   /// Version de la orden en el servidor. La transicion la manda como base para
   /// que el backend detecte si alguien la movio mientras tanto.
   final int revision;

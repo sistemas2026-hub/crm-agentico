@@ -265,7 +265,11 @@ class ShellDependencias {
 /// jornada**, para que existan una sola suscripción y una sola carga en vez de
 /// una por pantalla. No las interpreta: eso lo hacen Inicio y Trabajo.
 class AppShell extends StatefulWidget {
-  AppShell({super.key, ShellDependencias? dependencias, this.seccionInicial = SeccionCampo.trabajo})
+  // ABRE EN INICIO (29/10/2026). Abría en Órdenes desde que la app entró al
+  // repositorio, sin ningún motivo escrito; el usuario: «¿por qué cuando abro
+  // la app sale en la pestaña de órdenes enseguida y no en inicio?». Inicio es
+  // la primera pestaña, y la que saluda y dice la labor y lo que sigue.
+  AppShell({super.key, ShellDependencias? dependencias, this.seccionInicial = SeccionCampo.inicio})
       : dependencias = dependencias ?? ShellDependencias.reales();
 
   final ShellDependencias dependencias;

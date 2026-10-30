@@ -1029,4 +1029,39 @@ void main() {
       await banco.cerrar();
     });
   });
+
+  group('15. Una orden sin hora no dice «12:00 AM» (29/10/2026)', () {
+    // El Supervisor crea la orden para un día y la guarda a las 00:00. El
+    // usuario: «tiene una hora, dice 12:00 AM, ¿qué significa?».
+    final DateTime hoy = DateTime.now();
+    final DateTime medianoche = DateTime(hoy.year, hoy.month, hoy.day);
+
+    test('a las 00:00 no hay hora; a cualquier otra, sí', () {
+      expect(
+          _vista(id: '1', numero: 1, estado: 'asignada', compromiso: medianoche)
+              .horaComprometida,
+          isNull);
+      final DateTime nueve = medianoche.add(const Duration(hours: 9, minutes: 30));
+      expect(
+          _vista(id: '2', numero: 2, estado: 'asignada', compromiso: nueve)
+              .horaComprometida,
+          nueve);
+    });
+
+    testWidgets('ni en «Después» ni como reloj rojo en las horas del día',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada', compromiso: medianoche),
+        _orden(id: '2', numero: 2, estado: 'asignada', compromiso: medianoche),
+        _orden(id: '3', numero: 3, estado: 'asignada', compromiso: medianoche),
+      ]);
+      await tester.pumpWidget(banco.app(ahora: medianoche.add(const Duration(hours: 9))));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('12:00 AM'), findsNothing);
+      expect(find.text('00:00'), findsNothing);
+      await banco.cerrar();
+    });
+  });
 }

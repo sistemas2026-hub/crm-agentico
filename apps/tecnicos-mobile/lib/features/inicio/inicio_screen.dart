@@ -1348,7 +1348,7 @@ class _TarjetaDeTrabajo extends StatelessWidget {
   /// cuando el servidor no dijo ninguna de las dos.
   static String _ventana(TrabajoVista trabajo) {
     if (trabajo.ventanaTexto.isNotEmpty) return trabajo.ventanaTexto;
-    final DateTime? f = trabajo.compromiso;
+    final DateTime? f = trabajo.horaComprometida;
     if (f == null) return '';
     return '${f.hour.toString().padLeft(2, '0')}:'
         '${f.minute.toString().padLeft(2, '0')}';
@@ -1506,10 +1506,10 @@ class _ItemProximo extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (trabajo.compromiso != null) ...<Widget>[
+                    if (trabajo.horaComprometida != null) ...<Widget>[
                       const SizedBox(width: 6),
                       Text(
-                        '· ${_hora(trabajo.compromiso!)}',
+                        '· ${_hora(trabajo.horaComprometida!)}',
                         style: AppTypography.etiquetaChica,
                       ),
                     ],

@@ -8,9 +8,11 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/core/widgets/dexter_app_header.dart';
 import 'package:campo/core/widgets/dexter_bottom_nav.dart';
 import 'package:campo/features/auth/login_screen.dart';
+import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
 import 'package:campo/features/materiales/recepcion_del_kit.dart';
 import 'package:campo/features/shell/app_shell.dart';
+import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -459,6 +461,22 @@ void main() {
       await tester.tap(_enBarra('Materiales'));
       await tester.pumpAndSettle();
       expect(find.byType(MaterialesScreen), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('10b2. La aplicacion abre en Inicio (29/10/2026)',
+        (WidgetTester tester) async {
+      // Sin decir la seccion, como la monta `main.dart` y el login.
+      final banco = _Banco();
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: AppShell(dependencias: banco.dependencias),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InicioScreen), findsOneWidget);
+      expect(find.byType(TrabajoScreen, skipOffstage: false), findsNothing,
+          reason: 'Órdenes no se construye hasta que el técnico la abre');
       await banco.cerrar();
     });
 
