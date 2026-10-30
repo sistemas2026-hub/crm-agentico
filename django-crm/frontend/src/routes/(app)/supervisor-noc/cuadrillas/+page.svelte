@@ -171,6 +171,8 @@
   /** Qué cuadrilla se está armando. `null` = ninguna. */
   let armando = $state(/** @type {any} */ (null));
   let labor = $state('instalacion');
+  /** La de apoyo (30/10/2026, labor-de-apoyo.md). Vacía = sin apoyo. */
+  let laborDeApoyo = $state('');
   let lider = $state('');
   /** El líder que la jornada ya tiene (o el de la cuadrilla): se ofrece siempre. */
   let liderActual = $state(/** @type {any} */ (null));
@@ -264,6 +266,7 @@
     const ya = jornadaDe(c.id);
     armando = c;
     labor = ya?.labor ?? 'instalacion';
+    laborDeApoyo = ya?.labor_de_apoyo ?? '';
     lider = ya?.lider?.id ?? c.lider?.id ?? '';
     liderActual = ya?.lider ?? c.lider ?? null;
     zonasDelDia = ya ? (ya.zonas ?? []).map((z) => z.id) : [];
@@ -460,7 +463,7 @@
                   <tr>
                     <td>{c.cuadrilla}</td>
                     <td>{c.que_haria}</td>
-                    <td>{c.labor_antes && c.labor_antes !== c.labor ? `${c.labor_antes} → ` : ''}{c.labor || '—'}</td>
+                    <td>{c.labor_antes && c.labor_antes !== c.labor ? `${c.labor_antes} → ` : ''}{c.labor || '—'}{c.apoyo ? ` · apoyo: ${c.apoyo}` : ''}</td>
                     <td>{c.zonas.join(', ') || '—'}</td>
                     <td>{[c.lider, ...c.gente.map((g) => g.nombre)].filter(Boolean).join(', ') || '—'}</td>
                   </tr>
@@ -530,6 +533,9 @@
                 <td>
                   {#if j}
                     <span class="snoc-insignia snoc-insignia-primaria">{j.labor_nombre}</span>
+                    {#if j.labor_de_apoyo_nombre}
+                      <span class="snoc-tag">Apoyo: {j.labor_de_apoyo_nombre}</span>
+                    {/if}
                     <!-- QUIÉN LA ARMÓ (17/10/2026). La que se armó sola —el
                          Supervisor o el ciclo de la madrugada— se reajusta de
                          labor mientras no tenga órdenes; corregirla a mano la
@@ -590,6 +596,18 @@
               <span class="snoc-label">Labor</span>
               <select class="snoc-select" name="labor" bind:value={labor}>
                 {#each LABORES as l (l.id)}
+                  <option value={l.id}>{l.texto}</option>
+                {/each}
+              </select>
+            </label>
+
+            <!-- LA LABOR DE APOYO (30/10/2026): con el cupo que su labor deja
+                 libre, la cuadrilla recibe órdenes de esta otra en sus zonas. -->
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Apoyo con el cupo libre</span>
+              <select class="snoc-select" name="labor_de_apoyo" bind:value={laborDeApoyo}>
+                <option value="">— sin apoyo —</option>
+                {#each LABORES.filter((l) => l.id !== labor) as l (l.id)}
                   <option value={l.id}>{l.texto}</option>
                 {/each}
               </select>

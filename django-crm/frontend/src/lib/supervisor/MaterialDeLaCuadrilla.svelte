@@ -30,7 +30,7 @@
 
   {#if m.kit}
     <p class="mc-kit">
-      <strong>{m.kit}</strong>{#if m.lineas.length}<span class="mc-desde"> de {m.bodega} para {m.lider}</span>{/if}
+      <strong>{m.kit}</strong>{#if m.kit_apoyo}<span> + </span><strong>{m.kit_apoyo}</strong>{/if}{#if m.lineas.length}<span class="mc-desde"> de {m.bodega} para {m.lider}</span>{/if}
     </p>
   {/if}
 

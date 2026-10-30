@@ -110,10 +110,15 @@ describe('el formulario de configuración', () => {
     f.set('kit:trabajos', '');
     f.set('bodega:c-1', 'b-1');
     f.set('otra_cosa', 'x');
+    // Si cada labor se toma de apoyo (30/10/2026); lo que no es sí o no, no viaja.
+    f.set('apoyo:instalacion', 'si');
+    f.set('apoyo:trabajos', 'no');
+    f.set('apoyo:correctivo', 'tal vez');
 
     expect(cuerpoDeConfiguracion(f)).toEqual({
       kits: { correctivo: 'k-1', trabajos: null },
-      bodegas: { 'c-1': 'b-1' }
+      bodegas: { 'c-1': 'b-1' },
+      apoyos: { instalacion: true, trabajos: false }
     });
   });
 });

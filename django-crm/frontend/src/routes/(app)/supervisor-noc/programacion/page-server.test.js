@@ -32,7 +32,8 @@ describe('Programación: guardar de dónde y qué carga cada cuadrilla', () => {
     expect(apiRequest.mock.calls[0][0]).toBe('/campo/material-del-dia/configuracion/');
     expect(apiRequest.mock.calls[0][1]).toEqual({
       method: 'PUT',
-      body: { kits: { correctivo: 'k-1' }, bodegas: { 'c-1': null } }
+      // `apoyos` vacío: el formulario de la prueba no trae «se toma de apoyo» (30/10/2026).
+      body: { kits: { correctivo: 'k-1' }, bodegas: { 'c-1': null }, apoyos: {} }
     });
     expect(r.hecho).toBeTruthy();
   });

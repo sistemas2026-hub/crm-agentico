@@ -111,6 +111,10 @@ class Plan:
     motivo: str
     labor: str = ""
     labor_antes: str = ""
+    #: La de apoyo (30/10/2026, SPEC/objetivos/labor-de-apoyo.md): con el cupo
+    #: que su labor deja libre, en sus mismas zonas. Vacia = sin apoyo.
+    labor_de_apoyo: str = ""
+    apoyo_antes: str = ""
     zonas: list = field(default_factory=list)
     lider: object = None
     #: [(PersonaDeCampo, rol)]
@@ -246,18 +250,23 @@ def planear_el_dia(org, fecha, *, demanda=None, ausentes=None) -> list:
         if ya is not None:
             if ya.armada_por != JornadaDeCuadrilla.AUTOMATICA:
                 planes.append(Plan(c, DEJAR, ARMADA_POR_UNA_PERSONA,
-                                   labor=ya.labor, jornada=ya,
-                                   zonas=list(ya.zonas.all())))
+                                   labor=ya.labor,
+                                   labor_de_apoyo=ya.labor_de_apoyo,
+                                   jornada=ya, zonas=list(ya.zonas.all())))
             elif tiene_ordenes(ya):
+                #  Con ordenes no se toca, tampoco el apoyo: el material del
+                #  dia ya se cargo con el que tenia.
                 planes.append(Plan(c, DEJAR, YA_TIENE_ORDENES,
-                                   labor=ya.labor, jornada=ya,
-                                   zonas=list(ya.zonas.all())))
+                                   labor=ya.labor,
+                                   labor_de_apoyo=ya.labor_de_apoyo,
+                                   jornada=ya, zonas=list(ya.zonas.all())))
             else:
-                #  Candidata a reajustar: la labor se elige abajo, con las
-                #  demas. Si sale la misma, queda en DEJAR.
+                #  Candidata a reajustar: la labor y el apoyo se eligen
+                #  abajo, con las demas. Si salen los mismos, queda en DEJAR.
                 planes.append(Plan(c, REAJUSTAR, OTRA_LABOR,
-                                   labor_antes=ya.labor, jornada=ya,
-                                   zonas=list(ya.zonas.all())))
+                                   labor_antes=ya.labor,
+                                   apoyo_antes=ya.labor_de_apoyo,
+                                   jornada=ya, zonas=list(ya.zonas.all())))
             continue
 
         if not zonas:
@@ -343,7 +352,8 @@ def _elegir_labores(planes, demanda) -> None:
     resto = {str(z): {lab: n for lab, n in (labs or {}).items() if n and n > 0}
              for z, labs in demanda.items()}
 
-    def _cubrir(zonas, labor, cuanto) -> None:
+    def _cubrir(zonas, labor, cuanto) -> int:
+        """Descuenta lo que cubre; devuelve el cupo que le queda."""
         for z in sorted(zonas, key=lambda z: -resto.get(z, {}).get(labor, 0)):
             if cuanto <= 0:
                 break
@@ -352,14 +362,24 @@ def _elegir_labores(planes, demanda) -> None:
                 toma = min(hay, cuanto)
                 resto[z][labor] = hay - toma
                 cuanto -= toma
+        return cuanto
 
     def _cerrar(p) -> None:
-        if p.accion == REAJUSTAR and p.labor == p.labor_antes:
+        if (p.accion == REAJUSTAR and p.labor == p.labor_antes
+                and p.labor_de_apoyo == p.apoyo_antes):
             p.accion, p.motivo = DEJAR, MISMA_LABOR
 
+    #  El cupo que le queda a cada una despues de su labor principal: es el
+    #  unico que puede usar el apoyo.
+    libre = {}
     for p in planes:
         if p.accion == DEJAR:
-            _cubrir([str(z.id) for z in p.zonas], p.labor, _tope(p))
+            zonas = [str(z.id) for z in p.zonas]
+            libre[id(p)] = _cubrir(zonas, p.labor, _tope(p))
+            #  Un apoyo ya puesto --por una persona, o por el Supervisor en una
+            #  jornada que ya salio-- tambien se lleva lo suyo.
+            if p.labor_de_apoyo and p.labor_de_apoyo != p.labor:
+                _cubrir(zonas, p.labor_de_apoyo, libre[id(p)])
 
     pendientes = [p for p in planes if p.accion in (ARMAR, REAJUSTAR)]
     while pendientes:
@@ -393,13 +413,58 @@ def _elegir_labores(planes, demanda) -> None:
                                      *_DESEMPATE) if x]
                 p.labor = (_la_de_mas_casos(total, orden) if total
                            else p.labor_antes or p.cuadrilla.labor_habitual)
-                _cerrar(p)
+                libre[id(p)] = _tope(p)
             break
         _, p, lab = mejor
         p.labor = lab
-        _cubrir([str(z.id) for z in p.zonas], lab, _tope(p))
-        _cerrar(p)
+        libre[id(p)] = _cubrir([str(z.id) for z in p.zonas], lab, _tope(p))
         pendientes.remove(p)
+
+    from campo.labores import labores_de_apoyo
+
+    _elegir_apoyos(planes, resto, libre, _cubrir,
+                   permitidas=labores_de_apoyo(planes[0].cuadrilla.org))
+    for p in planes:
+        _cerrar(p)
+
+
+def _elegir_apoyos(planes, resto, libre, cubrir, *, permitidas) -> None:
+    """LA LABOR DE APOYO de cada jornada que se arma o se reajusta sola
+    (30/10/2026, SPEC/objetivos/labor-de-apoyo.md). Escribe en el plan.
+
+    Va DESPUES de todas las principales: el apoyo nunca le gana a la labor
+    principal de otra cuadrilla. De a una, el par (cuadrilla, labor) con mas
+    casos SIN CUBRIR en las zonas de esa cuadrilla, entre las que tienen cupo
+    libre; lo que toma se descuenta, y dos cuadrillas no se llevan el mismo
+    caso. Sin casos sin cubrir de otra labor, sin apoyo. Solo las labores
+    que la empresa dice que se toman de apoyo (`Labor.se_toma_de_apoyo`): una
+    obra de red no se le da a la de soporte.
+    """
+    candidatas = [p for p in planes
+                  if p.accion in (ARMAR, REAJUSTAR) and libre.get(id(p), 0) > 0]
+    for p in planes:
+        if p.accion in (ARMAR, REAJUSTAR):
+            p.labor_de_apoyo = ""
+    while candidatas:
+        mejor = None
+        for i, p in enumerate(candidatas):
+            sin_cubrir = {}
+            for z in (str(z.id) for z in p.zonas):
+                for lab, n in resto.get(z, {}).items():
+                    if n > 0 and lab != p.labor and lab in permitidas:
+                        sin_cubrir[lab] = sin_cubrir.get(lab, 0) + n
+            for lab, n in sin_cubrir.items():
+                clave = (min(n, libre[id(p)]), -i,
+                         -(_DESEMPATE.index(lab) if lab in _DESEMPATE
+                           else len(_DESEMPATE)))
+                if mejor is None or clave > mejor[0]:
+                    mejor = (clave, p, lab)
+        if mejor is None:
+            return
+        _, p, lab = mejor
+        p.labor_de_apoyo = lab
+        cubrir([str(z.id) for z in p.zonas], lab, libre[id(p)])
+        candidatas.remove(p)
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +502,8 @@ def resumen(planes) -> dict:
             salida[p.motivo].append(nombre)
         if p.accion in (ARMAR, REAJUSTAR):
             salida["labores"][nombre] = p.labor
+            if p.labor_de_apoyo:
+                salida.setdefault("apoyos", {})[nombre] = p.labor_de_apoyo
     return salida
 
 
@@ -466,8 +533,10 @@ def aplicar(org, fecha, planes, *, origen: str = "") -> dict:
                 n = (JornadaDeCuadrilla.objects
                      .filter(id=p.jornada.id,
                              armada_por=JornadaDeCuadrilla.AUTOMATICA,
-                             labor=p.labor_antes)
-                     .update(labor=p.labor, updated_at=timezone.now()))
+                             labor=p.labor_antes,
+                             labor_de_apoyo=p.apoyo_antes)
+                     .update(labor=p.labor, labor_de_apoyo=p.labor_de_apoyo,
+                             updated_at=timezone.now()))
                 if n:
                     _auditar(org, fecha, p, p.jornada.id, origen)
             if not n:
@@ -481,6 +550,7 @@ def _armar(org, fecha, p, origen) -> bool:
         with transaction.atomic():
             jornada = JornadaDeCuadrilla.objects.create(
                 org=org, cuadrilla=p.cuadrilla, fecha=fecha, labor=p.labor,
+                labor_de_apoyo=p.labor_de_apoyo,
                 lider=p.lider, armada_por=JornadaDeCuadrilla.AUTOMATICA,
             )
             jornada.zonas.set(p.zonas)
@@ -514,18 +584,23 @@ def _auditar(org, fecha, p, jornada_id, origen) -> None:
 
     armada = p.accion == ARMAR
     zonas = ", ".join(z.nombre for z in p.zonas) or "sin zona"
+    apoyo = f" (apoyo: {p.labor_de_apoyo})" if p.labor_de_apoyo else ""
+    apoyo_antes = f" (apoyo: {p.apoyo_antes})" if p.apoyo_antes else ""
     auditoria.registrar(
         org=org, actor=None,
         accion="CREATE" if armada else "UPDATE",
         entidad=auditoria.ENTIDAD_JORNADA, entidad_id=jornada_id,
         nombre=f"{p.cuadrilla.nombre} · {fecha.isoformat()}",
-        descripcion=(f"Jornada armada sola: {p.labor} en {zonas}." if armada
-                     else f"Labor reajustada sola: de {p.labor_antes} a "
-                          f"{p.labor}."),
+        descripcion=(f"Jornada armada sola: {p.labor}{apoyo} en {zonas}."
+                     if armada
+                     else f"Labor reajustada sola: de {p.labor_antes}"
+                          f"{apoyo_antes} a {p.labor}{apoyo}."),
         estado_anterior="" if armada else p.labor_antes,
         estado_nuevo=p.labor,
         motivo=p.motivo,
-        extra={"automatico": True, "origen": origen or "sin_origen"},
+        extra={"automatico": True, "origen": origen or "sin_origen",
+               "labor_de_apoyo": p.labor_de_apoyo,
+               "apoyo_antes": "" if armada else p.apoyo_antes},
     )
 
 

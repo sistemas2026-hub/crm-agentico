@@ -474,6 +474,7 @@
                   </div>
                   <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
                     {#if c.labor}<span class="snoc-tag">{c.labor}</span>{/if}
+                    {#if c.apoyo}<span class="snoc-tag">Apoyo: {c.apoyo}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
                   <p class="snoc-body-sm snoc-secundario">

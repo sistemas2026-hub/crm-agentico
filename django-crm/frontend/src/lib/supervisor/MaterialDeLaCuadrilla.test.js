@@ -58,6 +58,12 @@ describe('el material de una cuadrilla', () => {
     expect(h.slice(0, h.indexOf('mc-lineas'))).not.toContain('lo eligió el Supervisor');
   });
 
+  it('con labor de apoyo dice los dos kits (30/10/2026)', () => {
+    const h = html({ m: { ...m, kit: 'Kit de soporte', kit_apoyo: 'Kit de instalacion' } });
+    expect(h).toMatch(/Kit de soporte<\/strong>(?:<!--[^>]*-->)?<span[^>]*>\s*\+\s*<\/span><strong[^>]*>Kit de instalacion<\/strong>/);
+    expect(html({ m })).not.toContain(' + ');
+  });
+
   it('sin cargar dice que es una propuesta', () => {
     expect(html({ m: { ...m, cargado_en: null } })).toContain('Propuesta');
   });

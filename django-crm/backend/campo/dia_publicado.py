@@ -271,9 +271,14 @@ def de_la_persona(org, profile, fecha) -> dict | None:
               .select_related("cuadrilla", "cuadrilla__lider", "lider")
               .prefetch_related("zonas").order_by("cuadrilla__nombre", "id")):
         if profile.id in {r["profile"].id for r in destinatarios(j)["reciben"]}:
+            nombres = nombres_de_labor(org)
             return {"cuadrilla": j.cuadrilla.nombre,
                     "labor": j.labor,
-                    "labor_nombre": nombres_de_labor(org).get(j.labor, j.labor),
+                    "labor_nombre": nombres.get(j.labor, j.labor),
+                    #  La de apoyo (30/10/2026): «y apoyás Instalación».
+                    "apoyo": j.labor_de_apoyo,
+                    "apoyo_nombre": (nombres.get(j.labor_de_apoyo, j.labor_de_apoyo)
+                                     if j.labor_de_apoyo else ""),
                     "zonas": sorted(z.nombre for z in j.zonas.all())}
     return None
 
@@ -447,6 +452,10 @@ def del_dia(org, fecha) -> dict:
             "jornada": str(j.id),
             "cuadrilla": j.cuadrilla.nombre,
             "labor": labores.get(j.labor, j.labor),
+            #  La de apoyo (30/10/2026, labor-de-apoyo.md), con su nombre; vacia
+            #  si no tiene.
+            "apoyo": (labores.get(j.labor_de_apoyo, j.labor_de_apoyo)
+                      if j.labor_de_apoyo else ""),
             "zonas": [z.nombre for z in j.zonas.all()],
             "tope": j.cuadrilla.tope_diario or tope,
             "ordenes": filas_de(por_jornada[j.id]),

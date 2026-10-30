@@ -169,21 +169,25 @@ export function cantidad(n, unidad) {
 
 /**
  * Del formulario de configuración al cuerpo del PUT. Los campos se llaman
- * `kit:<código de labor>` y `bodega:<id de cuadrilla>`; vacío = sin kit / sin
- * bodega. Solo viaja lo que el formulario trae.
+ * `kit:<código de labor>`, `bodega:<id de cuadrilla>` y `apoyo:<código de
+ * labor>` (30/10/2026: «si» o «no», si se toma de apoyo); vacío = sin kit /
+ * sin bodega. Solo viaja lo que el formulario trae.
  *
  * @param {FormData} f
- * @returns {{ kits: Record<string, string|null>, bodegas: Record<string, string|null> }}
+ * @returns {{ kits: Record<string, string|null>, bodegas: Record<string, string|null>, apoyos: Record<string, boolean> }}
  */
 export function cuerpoDeConfiguracion(f) {
   /** @type {Record<string, string|null>} */
   const kits = {};
   /** @type {Record<string, string|null>} */
   const bodegas = {};
+  /** @type {Record<string, boolean>} */
+  const apoyos = {};
   for (const [clave, valor] of f.entries()) {
     const v = String(valor ?? '').trim() || null;
     if (clave.startsWith('kit:')) kits[clave.slice(4)] = v;
     else if (clave.startsWith('bodega:')) bodegas[clave.slice(7)] = v;
+    else if (clave.startsWith('apoyo:') && (v === 'si' || v === 'no')) apoyos[clave.slice(6)] = v === 'si';
   }
-  return { kits, bodegas };
+  return { kits, bodegas, apoyos };
 }

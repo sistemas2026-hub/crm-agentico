@@ -68,6 +68,7 @@ def test_l_quien_sale_hoy_recibe_su_labor_su_cuadrilla_y_sus_zonas(
     assert r["fecha"] == _hoy().isoformat()
     assert r["jornada"] == {"cuadrilla": "Cuadrilla #1", "labor": "instalacion",
                             "labor_nombre": "Instalacion",
+                            "apoyo": "", "apoyo_nombre": "",
                             "zonas": ["Norte", "Soledad zona 2"]}
 
 

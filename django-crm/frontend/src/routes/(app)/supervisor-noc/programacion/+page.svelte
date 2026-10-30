@@ -127,6 +127,15 @@
                             <option value="">{opcionDelSupervisor(l.elige_el_supervisor)}</option>
                             {#each conf.kits as k (k.id)}<option value={k.id}>{k.nombre}</option>{/each}
                           </select>
+                          <!-- SI SE TOMA DE APOYO (30/10/2026): una cuadrilla con
+                               cupo libre recibe órdenes de esta labor. La obra de
+                               red arranca en «no»: pide equipo de empalme. -->
+                          <select class="snoc-select" name={`apoyo:${l.codigo}`}
+                                  value={l.de_apoyo === false ? 'no' : 'si'}
+                                  aria-label={`¿${l.nombre} se toma de apoyo?`}>
+                            <option value="si">Se toma de apoyo</option>
+                            <option value="no">No se toma de apoyo</option>
+                          </select>
                         </span>
                         {#if !l.kit}<span class="snoc-body-sm snoc-secundario">{l.motivo}</span>{/if}
                       </label>
@@ -167,6 +176,8 @@
                   </div>
                   <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:center;">
                     {#if c.labor}<span style="padding:0 8px; border-radius:999px; background:var(--snoc-surface-container); color:var(--snoc-on-surface-variant); font-size:12px; line-height:20px; font-weight:600;">{c.labor}</span>{/if}
+                    <!-- La de apoyo (30/10/2026): con el cupo libre, órdenes de esta otra. -->
+                    {#if c.apoyo}<span style="padding:0 8px; border-radius:999px; border:1px dashed var(--snoc-outline-variant); color:var(--snoc-secondary); font-size:12px; line-height:20px; font-weight:600;">Apoyo: {c.apoyo}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
                   <!-- POR PERSONA: lo que la app de cada uno debería tener. La

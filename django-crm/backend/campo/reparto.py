@@ -538,14 +538,24 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
     # puede recibir instalaciones -- hasta el 08/10/2026 el reparto ignoraba
     # ese campo y se las daba igual.
     por_zona: dict = {}
+    #  Y CON QUE LABOR DE APOYO (30/10/2026, SPEC/objetivos/labor-de-apoyo.md):
+    #  la segunda pasada, abajo. `getattr` porque las jornadas que la
+    #  simulacion arma de un plan pueden no traerla.
+    de_apoyo: dict = {}
     for j in jornadas:
+        apoyo = getattr(j, "labor_de_apoyo", "") or ""
         for z in zonas_de.get(j.id, ()):
             por_zona.setdefault((str(z), j.labor), []).append(j)
+            if apoyo and apoyo != j.labor:
+                de_apoyo.setdefault((str(z), apoyo), []).append(j)
 
     carga = {j.id: (carga_inicial or {}).get(j.id, 0) for j in jornadas}
     asignadas: dict = {j.id: [] for j in jornadas}
     sin_zona, sin_cuadrilla, sobrantes, sin_clasificar = [], [], [], []
     otro_dia = []
+    #  Lo que la primera pasada no ubico, con la lista donde quedo: la segunda
+    #  pasada lo saca de ahi si una cuadrilla de apoyo lo toma.
+    sin_lugar = []
 
     for orden in ordenadas:
         #  LO QUE ES PARA OTRO DIA, ESE DIA. Va primero: no importa si tiene
@@ -576,6 +586,7 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
             # se arreglan igual --poniendo una cuadrilla-- y por eso van
             # juntas.
             sin_cuadrilla.append(orden)
+            sin_lugar.append((orden, zona_id, labor, sin_cuadrilla))
             continue
 
         # La menos cargada de las que cubren esa zona, con desempate estable
@@ -583,10 +594,25 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
         con_lugar = [j for j in candidatas if carga[j.id] < topes[j.id]]
         if not con_lugar:
             sobrantes.append(orden)
+            sin_lugar.append((orden, zona_id, labor, sobrantes))
             continue
         elegida = min(con_lugar, key=lambda j: (carga[j.id], j.cuadrilla.nombre))
         asignadas[elegida.id].append(orden)
         carga[elegida.id] += 1
+
+    #  SEGUNDA PASADA: LA LABOR DE APOYO. Lo que quedo sin cuadrilla o sin
+    #  lugar, en el mismo orden, va a una cuadrilla con esa labor de apoyo en
+    #  esa zona y cupo libre. Despues de la primera pasada ENTERA: el apoyo
+    #  nunca le quita lugar a la labor principal de nadie.
+    for orden, zona_id, labor, quedo_en in sin_lugar:
+        apoyan = [j for j in de_apoyo.get((zona_id, labor)) or []
+                  if carga[j.id] < topes[j.id]]
+        if not apoyan:
+            continue
+        elegida = min(apoyan, key=lambda j: (carga[j.id], j.cuadrilla.nombre))
+        asignadas[elegida.id].append(orden)
+        carga[elegida.id] += 1
+        quedo_en.remove(orden)
 
     return {"asignadas": asignadas, "sin_zona": sin_zona,
             "sin_cuadrilla": sin_cuadrilla, "sobrantes": sobrantes,
@@ -876,7 +902,9 @@ def cobertura(org, barrio: str, fecha, labor: str = "") -> dict:
             "jornada": str(j.id),
             "cuadrilla": j.cuadrilla.nombre,
             "labor": j.labor,
-            "coincide_labor": (not labor) or j.labor == labor,
+            "coincide_labor": ((not labor) or j.labor == labor
+                               or (j.labor_de_apoyo or "") == labor),
+            "labor_de_apoyo": j.labor_de_apoyo or "",
             #  QUIEN LA RECIBE en un telefono: el lider del dia primero, aunque
             #  no este anotado entre los integrantes (`cuadrillas.destinatarios`,
             #  la misma regla del despacho y del reparto). Los demas van con

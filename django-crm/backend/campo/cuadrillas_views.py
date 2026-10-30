@@ -131,6 +131,10 @@ def _jornada_json(j, nombres: dict | None = None) -> dict:
         "fecha": j.fecha.isoformat(),
         "labor": j.labor,
         "labor_nombre": nombres.get(j.labor, j.labor),
+        #  La de apoyo (30/10/2026, labor-de-apoyo.md). Vacia = sin apoyo.
+        "labor_de_apoyo": j.labor_de_apoyo,
+        "labor_de_apoyo_nombre": (nombres.get(j.labor_de_apoyo, j.labor_de_apoyo)
+                                  if j.labor_de_apoyo else ""),
         "cuadrilla": {"id": str(j.cuadrilla_id), "nombre": j.cuadrilla.nombre},
         # El lider del DIA, que puede no ser el de la cuadrilla: si esta de
         # vacaciones, alguien la lleva igual.
@@ -404,6 +408,22 @@ class JornadaDeCuadrillaView(APIView):
                 {"detail": f"'{labor}' no es una labor. Son: {_codigos(org)}."},
                 status=status.HTTP_400_BAD_REQUEST)
 
+        #  LA LABOR DE APOYO, A MANO (30/10/2026): la pone o la quita una
+        #  persona. Solo si viene: una pantalla que no la conoce no la borra.
+        #  Vacia = sin apoyo; igual a la principal no es un apoyo.
+        apoyo_pedido = {}
+        if "labor_de_apoyo" in request.data:
+            apoyo = (request.data.get("labor_de_apoyo") or "").strip()
+            if apoyo and not labor_valida(org, apoyo):
+                return Response(
+                    {"detail": f"'{apoyo}' no es una labor. Son: {_codigos(org)}."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            if apoyo == labor:
+                return Response(
+                    {"detail": "La labor de apoyo no puede ser la misma que la principal."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            apoyo_pedido = {"labor_de_apoyo": apoyo}
+
         crudos = request.data.get("integrantes") or []
         if not isinstance(crudos, list):
             return Response({"detail": "'integrantes' tiene que ser una lista."},
@@ -416,6 +436,7 @@ class JornadaDeCuadrillaView(APIView):
                     defaults={
                         "org": org,
                         "labor": labor,
+                        **apoyo_pedido,
                         "lider": _perfil_de(org, request.data.get("lider"))
                                  or cuadrilla.lider,
                         "notas": (request.data.get("notas") or "").strip(),
