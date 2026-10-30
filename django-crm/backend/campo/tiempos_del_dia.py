@@ -178,6 +178,9 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
     numero = {o.id: o.numero for o in ordenes}
     entradas = []
     asignadas = defaultdict(list)
+    #  «Terminó» una vez por orden: cerrarla despues (una persona o el
+    #  Supervisor) no es terminarla otra vez.
+    terminadas = set()
     for ev in (EventoTrabajo.objects.filter(orden_id__in=list(numero))
                .select_related("profile__user").order_by("created_at")):
         if ev.created_at.astimezone(zona).date() != fecha:
@@ -196,7 +199,10 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
             extra = (f" ({t['traslado_min']} min de camino)"
                      if t.get("traslado_min") is not None else "")
             entradas.append((ev.created_at, f"Llegó a OT #{n}{extra}", "tecnico"))
+        elif nuevo in TERMINADAS and ev.orden_id in terminadas:
+            continue
         elif nuevo in TERMINADAS:
+            terminadas.add(ev.orden_id)
             extra = (f" ({t['en_sitio_min']} min en sitio)"
                      if t.get("en_sitio_min") is not None
                      else f" (había llegado el {t['llego']})"
@@ -205,6 +211,9 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
         elif ev.tipo in REPORTES:
             entradas.append((ev.created_at, f"Reportó {REPORTES[ev.tipo]} en OT #{n}",
                              "alerta" if ev.tipo == "bloqueo_campo" else "tecnico"))
+        elif ev.tipo == "cerrada_por_el_supervisor":
+            entradas.append((ev.created_at, f"El Supervisor aprobó y cerró OT #{n}",
+                             "supervisor"))
         elif ev.tipo == "bloqueo_detuvo_el_trabajo":
             entradas.append((ev.created_at, f"OT #{n} quedó detenida por un bloqueo", "alerta"))
         elif ev.tipo == "bloqueo_libero_el_trabajo":

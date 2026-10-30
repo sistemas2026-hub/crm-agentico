@@ -5,6 +5,7 @@ from django.urls import path
 
 from campo import (
     avisos_views,
+    configuracion_de_seguimiento_views,
     cuadrillas_views,
     despacho_pantalla_views,
     despacho_views,
@@ -100,6 +101,10 @@ urlpatterns = [
     path("material-del-dia/configuracion/",
          material_del_dia_views.ConfiguracionDeMaterialView.as_view(),
          name="material_del_dia_configuracion"),
+    #  Lo que el Supervisor hace solo con el seguimiento (30/10/2026).
+    path("seguimiento/configuracion/",
+         configuracion_de_seguimiento_views.ConfiguracionDeSeguimientoView.as_view(),
+         name="seguimiento_configuracion"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),

@@ -133,6 +133,13 @@ app.conf.beat_schedule = {
         "task": "campo.tasks.recordar_reportes",
         "schedule": crontab(minute="*/5"),
     },
+    # El Supervisor cierra solo lo que su revision dio por bueno, en las
+    # empresas que lo encendieron (campo/cierre_por_el_supervisor.py). Pasa por
+    # la puerta autonoma del motor: con las compuertas cerradas no cierra nada.
+    "cerrar-lo-revisado-por-el-supervisor": {
+        "task": "campo.tasks.cerrar_lo_revisado",
+        "schedule": crontab(minute="*/10"),
+    },
     # Purge already-read in-app notifications older than 90 days - daily at 3 AM
     "purge-read-notifications": {
         "task": "common.tasks.purge_read_notifications",

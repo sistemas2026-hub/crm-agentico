@@ -94,6 +94,19 @@ class ConfiguracionDeSeguimiento(BaseModel):
         ),
     )
 
+    #: 30/10/2026 (`campo/cierre_por_el_supervisor.py`): el Supervisor
+    #: aprueba y cierra solo lo que su revision marca «Se puede cerrar».
+    #: Apagado por omision: encenderlo es una decision de la empresa.
+    supervisor_cierra_solo = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si el Supervisor aprueba y cierra solo, ticket del ISP "
+            "incluido, lo que su revisión marca «Se puede cerrar». "
+            "Pasa por la puerta autónoma del motor: sin Autonomía 2 "
+            "y la autorización de la herramienta, no cierra nada."
+        ),
+    )
+
     class Meta:
         db_table = "campo_configuracion_seguimiento"
 

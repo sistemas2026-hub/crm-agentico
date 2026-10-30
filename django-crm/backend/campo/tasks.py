@@ -262,6 +262,30 @@ def recordar_reportes() -> dict:
     return salida
 
 
+@shared_task(name="campo.tasks.cerrar_lo_revisado")
+def cerrar_lo_revisado() -> dict:
+    """Cada 10 minutos: el Supervisor cierra solo lo que su revision dio por
+    bueno, en las empresas que lo encendieron (`campo/cierre_por_el_supervisor.py`).
+    Cada empresa con su contexto y en su propio try/except."""
+    from campo.cierre_por_el_supervisor import cerrar_lo_revisado as cerrar
+    from common.tasks import clear_rls_context, set_rls_context
+
+    salida = {"cerradas": 0, "bloqueadas": 0, "errores": []}
+    try:
+        for org in Org.objects.filter(is_active=True):
+            set_rls_context(org.id)
+            try:
+                r = cerrar(org)
+                salida["cerradas"] += r["cerradas"]
+                salida["bloqueadas"] += r["bloqueadas"]
+            except Exception as e:                               # noqa: BLE001
+                salida["errores"].append({"org": str(org.id),
+                                          "error": type(e).__name__})
+    finally:
+        clear_rls_context()
+    return salida
+
+
 @shared_task(name="campo.tasks.ciclo_de_la_madrugada")
 def ciclo_de_la_madrugada() -> dict:
     """Recorre las empresas y corre el ciclo de las que les toca.

@@ -358,8 +358,21 @@ def del_dia(org, fecha) -> dict:
         """Lo que dice el Supervisor del cierre. No tumba Programacion."""
         from campo import revision_del_cierre as RC
 
+        from campo.cierre_por_el_supervisor import EVENTO_BLOQUEADO
+
         try:
-            return RC.revisar(o)
+            r = RC.revisar(o)
+            if r is not None:
+                #  Si el Supervisor la quiso cerrar solo y el motor no lo
+                #  dejo: cuando, y que compuerta (30/10/2026).
+                ev = (EventoTrabajo.objects
+                      .filter(org=org, orden=o, tipo=EVENTO_BLOQUEADO)
+                      .order_by("-created_at").first())
+                r["supervisor_no_pudo"] = ({
+                    "hora": ev.created_at.astimezone(zona).strftime("%H:%M"),
+                    "detalle": str((ev.datos or {}).get("detalle") or ""),
+                } if ev else None)
+            return r
         except Exception:                                        # noqa: BLE001
             logger.warning("Programacion: no se pudo revisar un cierre")
             return None
