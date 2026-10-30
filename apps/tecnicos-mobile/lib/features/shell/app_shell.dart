@@ -17,6 +17,7 @@ import '../../core/storage/ciclo_de_vida_local.dart';
 import '../../core/storage/ubicacion_de_captura.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
+import '../../core/sync/envio_automatico.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -331,7 +332,7 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   StreamSubscription<SyncSummary>? _suscripcionResumen;
   StreamSubscription<bool>? _suscripcionConexion;
   StreamSubscription<void>? _suscripcionSesion;
@@ -377,10 +378,19 @@ class _AppShellState extends State<AppShell> {
   /// La versión de la app, para dictarla cuando se llama a soporte.
   String _version = '';
 
+  /// Lo pendiente sale solo: al volver la red, al volver a la app y cada dos
+  /// minutos mientras quede algo (30/10/2026, `envio_automatico.dart`).
+  late final EnvioAutomatico _envio = EnvioAutomatico(
+    enviar: widget.dependencias.sincronizarAhora,
+    hayPendientes: () => (_resumen?.totalPendientes ?? 0) > 0,
+  );
+
   @override
   void initState() {
     super.initState();
     _resumen = widget.dependencias.resumenInicial;
+    WidgetsBinding.instance.addObserver(this);
+    _envio.arrancar();
 
     _suscripcionResumen = widget.dependencias.resumenes.listen(
       (SyncSummary resumen) {
@@ -395,6 +405,7 @@ class _AppShellState extends State<AppShell> {
     if (conectividad != null) {
       _suscripcionConexion = conectividad.listen(
         (bool hayRed) {
+          _envio.alCambiarLaRed(hayRed);
           if (mounted) setState(() => _hayRed = hayRed);
         },
         onError: (Object _) {
@@ -542,7 +553,14 @@ class _AppShellState extends State<AppShell> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    if (estado == AppLifecycleState.resumed) _envio.alVolverALaApp();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _envio.parar();
     _suscripcionResumen?.cancel();
     _suscripcionConexion?.cancel();
     _suscripcionSesion?.cancel();
