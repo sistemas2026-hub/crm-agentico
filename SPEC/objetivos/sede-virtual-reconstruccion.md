@@ -5,8 +5,9 @@
 > siendo el contrato del **qué** y del **por qué**. Acá vive una sola pregunta:
 > **con qué tecnología se dibuja**, y con qué evidencia se decide.
 >
-> Rama aislada: `spec/sede-virtual-3d`. Versión recuperable de lo anterior:
-> tag `sede-pixi-2026-10-31` → `37972d59`.
+> Rama aislada: `spec/sede-virtual` — se llamó `-3d` hasta el 31/10/2026, y
+> el nombre afirmaba una decisión que no está tomada.
+> Versión recuperable de lo anterior: tag `sede-pixi-2026-10-31` → `37972d59`.
 
 ---
 
@@ -116,7 +117,7 @@ servidor — y el motor gráfico tiene un consumidor, que es una pantalla.
 
 ## La evaluación de motor
 
-### El conflicto estructural que obliga a decidir
+### La desigualdad de oclusión, y lo que de verdad obliga
 
 Está medido, no opinado. En la escena actual un puesto queda tapado por el piso
 de arriba cuando:
@@ -130,20 +131,39 @@ crecer a lo **ancho**, nunca a lo hondo: a lo hondo desaparece debajo del piso
 superior. Eso no es un defecto pendiente de pulir — es lo que *es* una escena
 2.5D ordenada por pintor con losas opacas.
 
-Y de ahí sale la conclusión incómoda: **«no oficinas flotantes» y «2.5D ordenado
-por pintor» están en conflicto directo.** Con losas opacas no se ve dentro de un
-edificio de tres pisos; sin losas, lo que queda son oficinas flotando. La
-tercera salida —ver dentro de un volumen recortando lo que estorba— necesita
-profundidad real y una cámara que pueda cortar. Eso es 3D.
+**CORRECCIÓN DEL 31/10/2026.** Acá, hasta hoy, este documento decía que
+*«no oficinas flotantes» y «2.5D ordenado por pintor» están en conflicto
+directo*, y que la salida obligaba a profundidad real. **Es falso, y lo
+desmiente el propio código.**
+
+`edificio.js` ya resolvió ese conflicto, y lo hizo *usando* la desigualdad en
+vez de escapando de ella: si lo que tapa es la zona de `gx+gy` pequeño —el
+fondo—, entonces las salas van **al frente** y la circulación **al fondo**, y lo
+que el piso de arriba oculta es el pasillo, que es lo que menos información
+lleva. De ahí sale `ALTURA_DE_PISO = 15`, que no es un gusto: con seis, la
+prueba de `edificio.test.js` encontró escritorios de los pisos 1 y 2 detrás de
+la losa de arriba —agentes trabajando donde nadie los ve, sin error ni aviso—.
+Quince deja **1,6 celdas de margen** sobre el caso que manda, que es la placa de
+un puesto.
+
+Y el aire que queda entre losas se llena con estructura —el núcleo vertical y
+columnas cada seis celdas, que suben sólo hasta donde hay algo que sostener—,
+que es, textual en ese archivo, *«lo que distingue un edificio en sección de
+tres bandejas flotando»*.
+
+O sea: la referencia del eje 1 **no escapa** de la desigualdad. La cumple —
+plantas altas y poco profundas, sección abierta al frente— y por eso se ve
+entera. Lo que la separa de nuestra escena no es la profundidad real: es la
+composición, la luz y los materiales.
 
 ### Las cuatro exigencias del objetivo, contra cada motor
 
 | Exigencia | PixiJS 2.5D hoy | Three.js ortográfico |
 |---|---|---|
-| **Edificio de 3 pisos que se vea por dentro** | imposible sin volver a oficinas flotantes (desigualdad de arriba) | buffer de profundidad + ocultar/recortar niveles: es cómo lo resuelve cualquier juego del género |
-| **Personajes con movimiento natural** | hojas de sprites (8 orientaciones × N animaciones × N aspectos) o esqueletos de pago. **No tenemos pipeline de arte ni artista** | un `.glb` con rig + clips (reposo, caminar, sentarse, teclear, hablar); el ciclo de caminata viene con el modelo |
-| **Iluminación y profundidad de calidad comercial** | cada superficie y cada sombra se calcula a mano — es buena parte de las 1.880 líneas de `oficina.ts`, y cada mueble nuevo exige dibujar su sombra | una platina de luces; las sombras salen solas y siguen siendo coherentes cuando el contenido crece |
-| **Cámara como juego de simulación** | panear y acercar, sí; **orbitar, no**: el arte sólo existe desde un ángulo. Mirar la otra cara del edificio es redibujar todo | orbitar es un parámetro de cámara |
+| **Edificio de 3 pisos que se vea por dentro** | **ya resuelto**: salas al frente, circulación al fondo, y 1,6 celdas de margen medidas. Lo que falta es fachada, cubierta y basamento — composición, no geometría | lo resuelve de otra forma (profundidad + recorte), pero **habría que volver a garantizarlo desde cero** |
+| **Personajes con movimiento natural** | hojas de sprites (8 orientaciones × N animaciones × N aspectos) o esqueletos de pago. **No tenemos pipeline de arte ni artista**. Hoy: una figura sentada de primitivas | un `.glb` con rig + clips (reposo, caminar, sentarse, teclear, hablar); el ciclo de caminata viene con el modelo. **Es la ventaja más clara de 3D, y la decide el eje 3** |
+| **Iluminación y profundidad de calidad comercial** | cada superficie y cada sombra se calcula a mano — buena parte de las 1.880 líneas de `oficina.ts`, y cada mueble nuevo exige dibujar su sombra. Alcanza para luz coherente; no es obvio que alcance para luz *cálida de interior* contra fondo oscuro | una platina de luces; las sombras salen solas y siguen coherentes cuando el contenido crece |
+| **Cámara de simulación** | panear, acercar y aislar un piso: **ya funciona y tiene prueba**. Orbitar, no: el arte existe desde un ángulo | orbitar es un parámetro. **Pero la referencia del eje 1 no muestra giro**, así que todavía nadie pidió esto: lo dirá el eje 6 |
 
 ### El caso a favor de quedarse, con su mejor cara
 
@@ -163,21 +183,31 @@ Y lo procedural tampoco desaparece: un edificio configurable por empresa sigue
 teniendo que **generarse desde la configuración**, no modelarse a mano. El
 problema de composición se traslada, no se resuelve.
 
-### Recomendación
+### Dónde está la decisión hoy
 
-**Three.js con cámara ortográfica**, que conserva la legibilidad isométrica que
-ya funciona y gana profundidad real, luz y personajes articulados.
+**El motor NO está decidido, y no lo decide este documento.** Instrucción
+expresa del usuario el 31/10/2026: *«la imagen establece el objetivo estético,
+no demuestra que debamos utilizar Three.js»*. Tiene razón, y la evaluación
+contra el eje 1 va en esa dirección: de los cuatro criterios que hoy fallan,
+**ninguno falla por el motor**.
 
-**Pero no se adopta por este documento.** Se adopta si un *spike* lo demuestra
-contra criterios escritos ANTES de construirlo — o se descarta si no los
-alcanza, y entonces el camino es 2.5D con arte real en vez de geometría
-calculada. Un spike que se califica a sí mismo no mide nada.
+Lo que queda abierto, y con qué se cierra:
+
+| Pregunta | La decide | Estado |
+|---|---|---|
+| ¿La composición y la luz de la referencia se alcanzan en 2.5D? | reconstruir `oficina.ts` + encuadre, y comparar la captura contra los 8 criterios | **medible sin cambiar de motor** |
+| ¿Los personajes y sus animaciones se alcanzan sin pipeline de arte? | la referencia del **eje 3** | falta la referencia |
+| ¿La navegación pedida incluye girar el edificio? | la referencia del **eje 6** | falta la referencia |
+
+Sea cual sea la respuesta, el camino arranca igual: `oficina.ts` se reconstruye
+en los dos escenarios. Eso quiere decir que **esperar las dos referencias no
+cuesta tiempo de trabajo** — el primer tramo es el mismo.
 
 ---
 
 ## El spike, y sus criterios de muerte
 
-Una rebanada vertical en `spec/sede-virtual-3d`, en una ruta nueva
+Una rebanada vertical en `spec/sede-virtual`, en una ruta nueva
 (`/centro-mando/v3`), **sin tocar v2**: un edificio de 3 niveles generado desde
 la configuración real de Rapilink, un departamento amoblado, un personaje
 articulado caminando, y la cámara.
@@ -221,6 +251,94 @@ comprobables mirando una captura. Lo de abajo son los criterios del objetivo,
 que es otra cosa: dicen con qué evidencia se cierra, no cómo se ve.
 
 ---
+
+## La referencia del eje 1, y qué dice del motor
+
+![sección de la sede](../../documentos/sede/referencia/1-arquitectura/sede-tres-pisos-seccion-abierta.png)
+
+Aprobada por el usuario el 31/10/2026 como **referencia principal de
+composición arquitectónica**. Guardada en
+`documentos/sede/referencia/1-arquitectura/`.
+
+**No es una obligación de copiar** muebles, personajes, indicadores ni cifras.
+Los números de su pie —41 puestos, 6 agentes, 12 empleados— son **ilustrativos
+y no son requisitos de capacidad**: la sede real declara 8 departamentos, 3
+pisos y 37 puestos, y ese número sale de la configuración de la empresa.
+
+### Lo que queda congelado de esta referencia
+
+| Elemento | Decisión |
+|---|---|
+| Arquitectura | edificio compacto de tres pisos, **no** plataformas flotantes |
+| Fachada | sección abierta, paredes de vidrio |
+| Circulación | escaleras y ascensor **visibles** |
+| Iluminación | oficinas cálidas, tecnología azul, fondo oscuro |
+| Personajes | 3D estilizado, no pixel art |
+| Departamentos | espacios diferenciados y visualmente conectados |
+| Navegación | edificio completo → piso → departamento |
+| Interfaz | paneles oscuros, información legible, controles discretos |
+
+### Los ocho criterios del eje 1
+
+Los fijó el usuario. Se comprueban mirando una captura.
+
+```
+[ ] 1  los pisos forman un UNICO edificio conectado
+[ ] 2  las oficinas se ven claramente desde la vista general
+[ ] 3  ningun departamento queda oculto permanentemente tras otro piso
+[ ] 4  el edificio aprovecha el viewport sin recortarse
+[ ] 5  existe un nucleo vertical de circulacion
+[ ] 6  se puede aislar cualquier piso y acercarse a una sala
+[ ] 7  la cantidad de pisos y departamentos sigue siendo configurable
+[ ] 8  el render conserva legibilidad, profundidad e iluminacion
+```
+
+**Criterio de adaptación, del usuario:** otro ISP puede tener **un piso y tres
+departamentos** mientras Rapilink usa tres pisos y ocho. Ningún criterio de
+arriba se cumple a costa del 7.
+
+### La escena de hoy contra esos ocho criterios
+
+Medido sobre la captura `p7-1-edificio-final.png` (31/10/2026, 2.353 objetos,
+97 fps), no sobre lo que debería verse.
+
+| # | Hoy | Qué falta |
+|---|---|---|
+| 1 | **NO** | las tres bandejas se leen como losas escalonadas en diagonal: no hay fachada, ni cubierta, ni basamento que las cierre en un volumen |
+| 2 | **a medias** | los escritorios están, pero a escala de conjunto son manchas sobre suelo oscuro |
+| 3 | **SÍ** | garantizado por construcción, con 1,6 celdas de margen medidas |
+| 4 | **NO** | el edificio ocupa ~40% del ancho útil y está descentrado; queda vacío a la izquierda y abajo |
+| 5 | **existe, no se lee** | el núcleo está en el código y en la escena, pero del mismo tono que todo lo demás |
+| 6 | **SÍ** | ya funciona, y tiene prueba de navegador |
+| 7 | **SÍ** | la estructura sale de la configuración de la empresa |
+| 8 | **NO** | casi un solo violeta oscuro: sin luz cálida interior, sin contraste entre suelo y mobiliario, y los rótulos flotan sobre el vacío |
+
+```
+cumple 3 de 8 · a medias 1 · no cumple 4
+```
+
+### Qué dice esto del motor — el veredicto parcial
+
+**Ninguno de los cuatro incumplimientos necesita profundidad real, ni orbitar,
+ni una malla articulada.** Son composición (1), encuadre de cámara (4),
+material y color (5), y paleta e iluminación (8). Los dos criterios que sí
+tocan la geometría profunda —el 3 y el 6— son justamente **los que ya se
+cumplen**, y el 3 lo garantiza la aritmética de la proyección con margen medido.
+
+**Con el eje 1 sobre la mesa, cambiar de motor no es lo que falta.** Lo que
+falta es reconstruir `oficina.ts` —las 1.880 líneas que el inventario ya marcó
+como «se reconstruye»— más el encuadre de la cámara. Three.js aportaría luz
+real (criterio 8) a cambio de **volver a resolver desde cero el criterio 3**,
+que hoy sale gratis.
+
+La decisión **sigue abierta**, y se decide donde todavía no hay evidencia: el
+eje 3 (personajes y animación) es donde el coste de 2.5D es real —hojas de
+sprites para ocho orientaciones, o esqueletos de pago— y el eje 6 dirá si la
+navegación pedida incluye girar. Por eso las dos referencias que faltan no son
+un trámite: son las que deciden.
+
+---
+
 
 ## Criterios de aceptación del objetivo
 
@@ -297,7 +415,7 @@ Y las propias de esta fase:
 
 3. **La guarda de push se pone POR RAMA, y una rama nueva no la hereda.**
    `branch.<rama>.pushRemote` es por rama; el `pre-push` de `.githooks` es el que
-   cubre todo. Al abrir `spec/sede-virtual-3d` se puso la primera y se
+   cubre todo. Al abrir `spec/sede-virtual` se puso la primera y se
    **volvió a medir** la segunda desde la rama nueva: destino rama de deploy →
    bloquea; destino propia → pasa.
 
@@ -331,5 +449,6 @@ usuario lo diga.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
+| 31/10/2026 | **Primera referencia aprobada (eje 1)** y sus ocho criterios registrados. La escena de hoy cumple 3 de 8. Corregido un párrafo de esta misma ficha que el código desmiente: la desigualdad de oclusión no obliga a 3D, `edificio.js` ya la usó para colocar salas al frente y circulación al fondo | Las referencias de los ejes 3 y 6; son las que deciden el motor | — |
 | 31/10/2026 | Los seis ejes de la referencia quedan fijados y la carpeta preparada; **inventario de qué se conserva y qué se reconstruye, medido archivo por archivo**: 2.411 líneas se reconstruyen, 1.900 sobreviven, la capa de datos no se toca, y el motor gráfico tiene un solo consumidor. Ninguna garantía del SaaS está del lado que se reconstruye | Las imágenes. Sin ellas no se construye | — |
-| 31/10/2026 | Rama aislada `spec/sede-virtual-3d` + tag recuperable `sede-pixi-2026-10-31`; guarda de push medida desde la rama nueva; acoplamiento medido (4 de 32 archivos; 16 de 18 pruebas agnósticas); evaluación de motor con recomendación y criterios de muerte del spike escritos antes de construirlo | B1: fijar la imagen de referencia. Después: el spike | esta ficha |
+| 31/10/2026 | Rama aislada `spec/sede-virtual` + tag recuperable `sede-pixi-2026-10-31`; guarda de push medida desde la rama nueva; acoplamiento medido (4 de 32 archivos; 16 de 18 pruebas agnósticas); evaluación de motor con recomendación y criterios de muerte del spike escritos antes de construirlo | B1: fijar la imagen de referencia. Después: el spike | esta ficha |

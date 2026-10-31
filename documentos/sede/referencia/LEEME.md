@@ -42,6 +42,27 @@ Carpetas sugeridas, por si son muchas:
 
 ---
 
+## Estado de las referencias
+
+| Eje | Estado |
+|---|---|
+| **1 · Arquitectura y los tres pisos** | **APROBADA** el 31/10/2026 — `1-arquitectura/sede-tres-pisos-seccion-abierta.png`. Sus ocho criterios y la comparación contra la escena de hoy (cumple 3 de 8) viven en la ficha del objetivo |
+| 2 · Conexiones y núcleo vertical | cubierto en parte por la de arriba |
+| **3 · Personajes y animaciones** | **falta, y es la que decide el motor** |
+| 4 · Luz, materiales y paleta | cubierto en parte por la de arriba |
+| 5 · Legibilidad | cubierto en parte por la de arriba |
+| **6 · Cámara y navegación** | **falta** — en particular, si la navegación incluye girar el edificio |
+
+Recomendación del usuario, adoptada: no pedirle todo a una sola imagen. Faltan
+dos — **personajes y animaciones**, y **la vista ampliada del NOC**.
+
+Una imagen aprobada **no obliga a copiar** sus muebles, personajes, indicadores
+ni cifras. Las cifras de un panel de referencia son ilustrativas y **nunca son
+requisitos de capacidad**: los números reales salen de la configuración de cada
+empresa.
+
+---
+
 ## Qué se deriva de ellas, y por qué no alcanza la imagen sola
 
 Una imagen de referencia sin lista legible se juzga con *«se parece»*, y eso no
