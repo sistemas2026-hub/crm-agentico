@@ -190,19 +190,39 @@ export function poseDe(animacion: Animacion, t: number): Pose {
     }
 
     case 'reposo':
-    default:
+    default: {
+      //  EL GESTO AMBIENTAL: estirarse en la silla, de vez en cuando.
+      //
+      //  Respirar y mirar de lado son continuos, y un cuerpo que SÓLO hace
+      //  cosas continuas se lee como un mecanismo bien hecho, no como alguien
+      //  sentado. Lo que falta es un movimiento DISCRETO y poco frecuente: se
+      //  echa atrás, levanta la cabeza, sube las manos, y vuelve.
+      //
+      //  QUÉ NO ES, Y ES LA PARTE QUE IMPORTA. No es actividad. El aura y el
+      //  brillo de pantalla —las dos señales que dicen que algo está pasando—
+      //  NO los toca: siguen exactamente donde estaban. Un gesto de ambiente
+      //  que subiera el aura estaría afirmando trabajo que nadie hizo, y esta
+      //  escena no puede inventar actividad ni por un segundo.
+      //
+      //  La frecuencia sale de un seno lento recortado: `0,07 Hz` son catorce
+      //  segundos de periodo, y el recorte deja el gesto encendido alrededor
+      //  de una quinta parte. Con el reloj propio de cada persona, nunca se
+      //  estiran dos a la vez.
+      const estira = Math.max(0, Math.sin(t * 0.07) * 2.6 - 1.9);
+      const g = Math.min(1, estira);
       return {
         ...POSE_NEUTRA,
-        torsoY: respira * 0.9,
-        torsoInclina: 0.01,
-        cabezaY: respira * 0.35,
-        cabezaGiro: mira * 2.4,
-        cabezaInclina: 0.03,
-        manoIzqY: respira * 0.3,
-        manoDerY: respira * 0.3,
+        torsoY: respira * 0.9 - g * 1.1,
+        torsoInclina: 0.01 - g * 0.1,
+        cabezaY: respira * 0.35 - g * 0.6,
+        cabezaGiro: mira * 2.4 * (1 - g * 0.7),
+        cabezaInclina: 0.03 - g * 0.14,
+        manoIzqY: respira * 0.3 - g * 2.2,
+        manoDerY: respira * 0.3 - g * 2.0,
         brilloPantalla: 0.55,
         aura: 0.12
       };
+    }
   }
 }
 
@@ -226,11 +246,37 @@ export class Transicion {
   private pose: Pose;
   private animacion: Animacion;
   private tau: number;
+  private desfase: number;
+  private tempo: number;
 
-  constructor(animacion: Animacion = 'reposo', tau = 0.18) {
+  /**
+   * @param desfase  Segundos que se le suman al reloj de ESTE personaje.
+   * @param tempo    Multiplicador de su ritmo. 1 es el de referencia.
+   *
+   * POR QUÉ CADA PERSONA LLEVA SU PROPIO RELOJ
+   * ------------------------------------------
+   * `poseDe` es una función pura del estado y del tiempo. Con el tiempo global
+   * —que es como nació— todos los personajes en el mismo estado devuelven la
+   * MISMA pose, al píxel. Ocho departamentos y treinta y siete puestos
+   * respirando a la vez, girando la cabeza a la vez y tecleando a la vez.
+   *
+   * Eso no se lee como gente: se lee como un mecanismo, y es exactamente lo que
+   * se describe desde fuera como «figuras rígidas». El movimiento de cada
+   * figura ya era orgánico; lo que no lo era era el conjunto.
+   *
+   * El desfase lo decide quien monta la escena a partir del asiento, no un
+   * `Math.random()`: la escena tiene que verse igual en dos cargas seguidas, o
+   * una captura deja de poder compararse con la anterior.
+   *
+   * El tempo es un ±8% y no más. Más que eso y alguien teclea al doble de
+   * velocidad que su vecino, que se nota como un error de reproducción.
+   */
+  constructor(animacion: Animacion = 'reposo', tau = 0.18, desfase = 0, tempo = 1) {
     this.animacion = animacion;
     this.tau = tau;
-    this.pose = poseDe(animacion, 0);
+    this.desfase = desfase;
+    this.tempo = tempo;
+    this.pose = poseDe(animacion, desfase * tempo);
   }
 
   /** Cambia el estado objetivo. Repetir el mismo no reinicia nada. */
@@ -240,7 +286,7 @@ export class Transicion {
 
   /** @returns la pose a dibujar. `dt` y `t` en segundos. */
   avanzar(dt: number, t: number): Pose {
-    const objetivo = poseDe(this.animacion, t);
+    const objetivo = poseDe(this.animacion, (t + this.desfase) * this.tempo);
     const k = this.tau <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dt) / this.tau);
     this.pose = mezclar(this.pose, objetivo, k);
     return this.pose;

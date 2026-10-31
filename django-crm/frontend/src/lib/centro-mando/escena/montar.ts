@@ -330,7 +330,19 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     return {
       puesto,
       personaje,
-      transicion: new Transicion(personaje ? 'reposo' : 'incognito'),
+      //  EL RELOJ DE ESTA PERSONA. Derivado del asiento y no aleatorio: dos
+      //  cargas seguidas tienen que dar la misma escena, o una captura deja de
+      //  poder compararse con la anterior.
+      //
+      //  1,37 y 0,37 no son redondos a propósito — con un paso entero los
+      //  desfases se repiten cada pocos asientos y vuelven a aparecer filas
+      //  enteras sincronizadas, que es el defecto que esto arregla.
+      transicion: new Transicion(
+        personaje ? 'reposo' : 'incognito',
+        0.18,
+        asiento * 1.37,
+        1 + (((asiento * 0.37) % 1) - 0.5) * 0.16
+      ),
       acontecimiento: null,
       recorrido: { desde, hasta }
     };

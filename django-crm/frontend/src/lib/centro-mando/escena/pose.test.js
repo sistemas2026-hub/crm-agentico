@@ -158,3 +158,118 @@ describe('mezclar', () => {
     for (const c of CANALES) expect(m[c]).toBeCloseTo((a[c] + 10) / 2, 6);
   });
 });
+
+describe('CADA PERSONA LLEVA SU PROPIO RELOJ', () => {
+  //  EL DEFECTO QUE ESTO MATA: `poseDe` es pura del estado y del tiempo, y
+  //  `avanzar` recibía el tiempo GLOBAL. Todos los personajes en el mismo
+  //  estado devolvían la misma pose al píxel: treinta y siete puestos
+  //  respirando, girando la cabeza y tecleando a la vez.
+  //
+  //  Eso no se lee como gente, se lee como un mecanismo — y es lo que desde
+  //  fuera se describe como «figuras rígidas». El movimiento de CADA figura ya
+  //  era orgánico; lo que no lo era era el conjunto.
+
+  /** El mismo reparto que hace `montar.ts`, para medir lo que de verdad pasa. */
+  const relojDe = (asiento) => ({
+    desfase: asiento * 1.37,
+    tempo: 1 + (((asiento * 0.37) % 1) - 0.5) * 0.16
+  });
+
+  /** Avanza una transición hasta estabilizarla y devuelve su pose. */
+  function poseEn(asiento, animacion, t) {
+    const r = relojDe(asiento);
+    const tr = new Transicion(animacion, 0.18, r.desfase, r.tempo);
+    //  Se deja converger: la pose arranca en la del instante inicial y se
+    //  acerca al objetivo con una constante de tiempo.
+    for (let k = 0; k < 60; k++) tr.avanzar(1 / 60, t);
+    return tr.actual;
+  }
+
+  it('dos asientos distintos NO están en la misma postura', () => {
+    const a = poseEn(0, 'teclear', 7.3);
+    const b = poseEn(1, 'teclear', 7.3);
+    //  La mano es el canal que más se mueve al teclear: si coincidiera ahí,
+    //  coincidiría en todo.
+    expect(Math.abs(a.manoIzqY - b.manoIzqY)).toBeGreaterThan(0.2);
+  });
+
+  it('y treinta y siete asientos no caen en un puñado de posturas', () => {
+    //  LA AFIRMACIÓN QUE DE VERDAD IMPORTA, y es sobre el conjunto. Dos que
+    //  difieren no prueban nada: con un desfase de paso entero, los asientos se
+    //  repiten cada pocos sitios y vuelven a aparecer filas sincronizadas.
+    const valores = [];
+    for (let i = 0; i < 37; i++) valores.push(poseEn(i, 'teclear', 11.1).manoIzqY);
+    const redondo = new Set(valores.map((v) => v.toFixed(2)));
+    //  Al menos tres cuartas partes tienen que caer en posturas distintas.
+    expect(redondo.size).toBeGreaterThanOrEqual(28);
+  });
+
+  it('el reparto es DETERMINISTA: dos cargas dan la misma escena', () => {
+    //  Con `Math.random()` esto fallaría, y con él una captura dejaría de poder
+    //  compararse con la anterior — que es como se mide todo acá.
+    expect(poseEn(5, 'teclear', 3.0)).toEqual(poseEn(5, 'teclear', 3.0));
+  });
+
+  it('el ritmo varía poco: nadie teclea al doble que su vecino', () => {
+    const tempos = [];
+    for (let i = 0; i < 37; i++) tempos.push(relojDe(i).tempo);
+    expect(Math.min(...tempos)).toBeGreaterThan(0.9);
+    expect(Math.max(...tempos)).toBeLessThan(1.1);
+  });
+
+  it('sin reloj propio, el defecto vuelve: dos asientos coinciden exactamente', () => {
+    //  LA GUARDA DE LA GUARDA. Las de arriba están en verde y eso no prueba que
+    //  midan: hay que ver que el caso malo SÍ se detecta. Sin desfase ni tempo,
+    //  dos transiciones tienen que dar la misma pose al valor exacto.
+    const a = new Transicion('teclear');
+    const b = new Transicion('teclear');
+    for (let k = 0; k < 60; k++) { a.avanzar(1 / 60, 7.3); b.avanzar(1 / 60, 7.3); }
+    expect(a.actual).toEqual(b.actual);
+  });
+});
+
+describe('EL GESTO AMBIENTAL NO ES ACTIVIDAD', () => {
+  //  LA REGLA QUE ESTO PROTEGE, y es de producto antes que de dibujo: un
+  //  movimiento de ambiente NO puede parecerse a trabajo. El aura y el brillo
+  //  de pantalla son las dos señales que dicen que algo esta pasando; si el
+  //  estiramiento las moviera, la escena estaria afirmando actividad que nadie
+  //  hizo. Es la misma regla que prohibe dibujar un agente ocupado sin evento.
+
+  /** Barre un ciclo largo y devuelve el recorrido de cada canal. */
+  function recorrido(canal) {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let t = 0; t < 120; t += 0.25) {
+      const v = poseDe('reposo', t)[canal];
+      min = Math.min(min, v);
+      max = Math.max(max, v);
+    }
+    return max - min;
+  }
+
+  it('el aura y el brillo de pantalla NO se mueven en reposo', () => {
+    expect(recorrido('aura')).toBe(0);
+    expect(recorrido('brilloPantalla')).toBe(0);
+  });
+
+  it('pero el cuerpo SI se mueve, y mas que solo respirar', () => {
+    //  Sin el gesto, el recorrido del torso es el de la respiracion: 1,8. Con
+    //  el, pasa de 2,5. Se afirma sobre el NUMERO y no sobre que exista una
+    //  variable `estira`, que es lo que una prueba floja habria hecho.
+    expect(recorrido('torsoY')).toBeGreaterThan(2.5);
+    expect(recorrido('manoIzqY')).toBeGreaterThan(2.0);
+  });
+
+  it('y es un gesto POCO frecuente, no un balanceo continuo', () => {
+    //  Lo que separa un gesto de un tic: la mayor parte del tiempo no pasa
+    //  nada. Se mide cuantas muestras estan lejos del reposo.
+    let agitado = 0;
+    let total = 0;
+    for (let t = 0; t < 400; t += 0.25) {
+      total++;
+      if (poseDe('reposo', t).manoIzqY < -1) agitado++;
+    }
+    expect(agitado / total).toBeGreaterThan(0.02);
+    expect(agitado / total).toBeLessThan(0.3);
+  });
+});
