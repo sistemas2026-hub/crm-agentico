@@ -160,8 +160,10 @@ class _Contexto:
         import os
         self._parches = [
             mock.patch("requests.post", self.motor.post),
+            #  La empresa de la organizacion, preguntada al motor (31/10/2026:
+            #  ya no es una variable del servidor).
+            mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: self.tenant),
             mock.patch.dict(os.environ, {
-                "MOTOR_TENANT": self.tenant,
                 "MOTOR_URL": "http://motor-de-prueba:5000",
                 "SUPERVISOR_HERRAMIENTAS_CAIDAS_PON": "consultar_caidas_pon_1",
             }, clear=False),
@@ -938,7 +940,7 @@ def test_50_si_UNA_OLT_falla_la_lectura_entera_es_un_error(org_a):
     assert f.registros is None
 
 
-def test_51_sin_MOTOR_TENANT_no_se_consulta_y_se_dice(org_a):
+def test_51_sin_empresa_no_se_consulta_y_se_dice(org_a):
     import os
 
     f = _fuente(org_a, Fuente.SMARTOLT)
@@ -950,8 +952,7 @@ def test_51_sin_MOTOR_TENANT_no_se_consulta_y_se_dice(org_a):
     #  prueba no alcanzaria el camino que quiere medir, que es el fail-closed del
     #  tenant. El caso "sin herramientas" tiene su propia prueba abajo.
     with mock.patch("requests.post", motor.post):
-        with mock.patch.dict(os.environ, {
-                "MOTOR_TENANT": "",
+        with mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: ""), mock.patch.dict(os.environ, {
                 "SUPERVISOR_HERRAMIENTAS_CAIDAS_PON": "consultar_caidas_pon_1",
         }, clear=False):
             fuentes.sondear(org_a)
@@ -959,7 +960,7 @@ def test_51_sin_MOTOR_TENANT_no_se_consulta_y_se_dice(org_a):
     f.refresh_from_db()
     #  Fail-closed: suponer el tenant leeria los datos de otra empresa.
     assert f.estado == EstadoLectura.ERROR
-    assert "MOTOR_TENANT" in f.error_tecnico
+    assert "sin empresa en el motor" in f.error_tecnico
     assert motor.llamadas == [], "no tenia que salir ninguna peticion"
 
 
@@ -983,8 +984,7 @@ def test_51b_sin_herramienta_declarada_es_NO_DISPONIBLE_nunca_sin_caidas(org_a):
     motor = Motor(RespuestaFalsa(200, SOBRE_SMARTOLT))
 
     with mock.patch("requests.post", motor.post):
-        with mock.patch.dict(os.environ, {
-                "MOTOR_TENANT": "rapilink",
+        with mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: "rapilink"), mock.patch.dict(os.environ, {
                 "SUPERVISOR_HERRAMIENTAS_CAIDAS_PON": "",
         }, clear=False):
             fuentes.sondear(org_a)

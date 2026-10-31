@@ -322,7 +322,7 @@ def avisar_visita_al_cliente(orden_id, org_id, fecha_iso, vuelta=0):
     from common.tasks import _motor, clear_rls_context, set_rls_context
     from operaciones import areas_del_tenant
 
-    url, _ = _motor()
+    url, _ = _motor(org_id)
     if not url:
         logger.info("avisar_visita_al_cliente: el asistente no esta configurado")
         return None

@@ -438,7 +438,7 @@ def contexto_del_caso(case_id: str) -> dict:
     # a pasar. Medido: 4 de 100 casos reales estan asi (24/09/2026).
     from cases.models import Case
     caso = Case.objects.filter(pk=case_id).only(
-        "external_service_id", "external_ticket_id", "provider",
+        "org_id", "external_service_id", "external_ticket_id", "provider",
         "external_status", "external_created_by").first()
     servicio = (caso.external_service_id or "").strip() if caso else ""
     if caso is not None and not servicio:
@@ -453,7 +453,8 @@ def contexto_del_caso(case_id: str) -> dict:
         #
         # Se perdia lo mas util exactamente cuando existia.
         vacio = sin_contexto("caso_sin_servicio", motor_alcanzado=True)
-        dexter = _lo_que_el_asistente_averiguo(_conversacion_del_caso(case_id))
+        dexter = _lo_que_el_asistente_averiguo(
+            _conversacion_del_caso(case_id, caso.org_id))
         if dexter:
             vacio["dexter"] = dexter
         ticket = _ticket_del_proveedor(caso)
@@ -461,12 +462,14 @@ def contexto_del_caso(case_id: str) -> dict:
             vacio["ticket"] = ticket
         return vacio
 
+    from operaciones import areas_del_tenant
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    #  La empresa del CASO (31/10/2026). Sin ella no se pide la ficha: con dos
+    #  empresas en la instalacion seria el cliente de la otra.
+    tenant = areas_del_tenant.tenant_de(caso.org_id) if caso is not None else ""
     if not tenant:
-        #  Sin empresa no se pide la ficha: el motor la buscaria en la que diga
-        #  la variable, y con dos empresas seria el cliente de la otra.
-        return sin_contexto("falta_motor_tenant", motor_alcanzado=False)
+        return sin_contexto("sin_empresa", motor_alcanzado=False)
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
@@ -507,7 +510,7 @@ def contexto_del_caso(case_id: str) -> dict:
     return depurar_contexto(crudo, conversacion=conversacion, caso=caso)
 
 
-def _conversacion_del_caso(case_id: str) -> dict:
+def _conversacion_del_caso(case_id: str, org_id) -> dict:
     """
     Solo la conversacion que origino el caso, sin pedir contexto tecnico.
 
@@ -522,8 +525,10 @@ def _conversacion_del_caso(case_id: str) -> dict:
     # como si el motor no hubiera contestado.
     import requests
 
+    from operaciones import areas_del_tenant
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    tenant = areas_del_tenant.tenant_de(org_id)
     if not tenant:
         return {}
     cabeceras = {}

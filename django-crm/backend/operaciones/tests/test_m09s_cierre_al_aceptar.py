@@ -79,7 +79,7 @@ def _propuesta(org, caso, estado=PropuestaSupervisor.ACEPTADA):
 
 def _motor_dice(respuesta, registro=None):
     """Sustituye la unica salida al mundo. 'registro' cuenta las llamadas."""
-    def falso(propuesta_id, id_caso):
+    def falso(propuesta_id, id_caso, *, org=None):
         if registro is not None:
             registro.append((propuesta_id, id_caso))
         if isinstance(respuesta, Exception):
@@ -554,7 +554,7 @@ def test_12_dos_cierres_de_la_misma_propuesta_no_cierran_dos_veces(
                    "motivo": "ya se habia ejecutado antes",
                    "referencia": "propuesta:x"}]
 
-    def motor(propuesta_id, id_caso):
+    def motor(propuesta_id, id_caso, *, org=None):
         llamadas.append((propuesta_id, id_caso))
         return dict(respuestas[min(len(llamadas) - 1, 1)])
 
@@ -824,7 +824,7 @@ def test_18_el_cierre_no_llama_a_wisphub_por_ningun_lado(org_a, user_profile,
 
     #  Sin empresa el cierre ni siquiera le habla al motor (30/10/2026); aca se
     #  mide A DONDE sale, asi que se declara una.
-    monkeypatch.setenv("MOTOR_TENANT", "rapilink")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "rapilink")
     urls = []
 
     def _espia(verbo):

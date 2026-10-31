@@ -428,7 +428,9 @@ def enviar_encuesta_whatsapp(case_id, org_id, cerrado_en=None, vuelta=0):
     if case is None or case.status != "Closed":
         logger.info("enviar_encuesta_whatsapp: case=%s ya no esta cerrado, no se pide", case_id)
         return None
-    url, tenant = _motor()
+    #  La empresa del caso (31/10/2026): con la variable de antes, la encuesta
+    #  de un cliente de la segunda empresa salia desde el WhatsApp de la primera.
+    url, tenant = _motor(org_id)
     if not url or not tenant:
         logger.info("enviar_encuesta_whatsapp: el asistente no esta configurado")
         return None
@@ -487,7 +489,7 @@ def avisar_ticket_creado(case_id, org_id, vuelta=0):
     from common.tasks import _motor
     from operaciones import areas_del_tenant
 
-    url, _ = _motor()
+    url, _ = _motor(org_id)
     if not url:
         logger.info("avisar_ticket_creado: el asistente no esta configurado")
         return None

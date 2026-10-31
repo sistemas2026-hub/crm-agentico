@@ -35,6 +35,8 @@ class _Respuesta:
 class _Orden:
     def __init__(self, contexto):
         self.contexto = contexto
+        #  La empresa sale de la organizacion de la orden (31/10/2026).
+        self.org_id = "org-de-prueba"
 
 
 # Forma real de la respuesta de WispHub despues de la lista blanca del motor:
@@ -54,7 +56,7 @@ PING_REAL = {
 # La empresa se declara: sin MOTOR_TENANT el ping no sale (30/10/2026,
 # common/tests/test_motor_tenant_falla_cerrado.py). Estas pruebas miden el
 # ping, no esa regla, asi que fijan una.
-@patch.dict("os.environ", {"MOTOR_TENANT": "rapilink"})
+@patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: "rapilink")
 class ProbarConexionTest(SimpleTestCase):
 
     def _orden(self, servicio="5832"):

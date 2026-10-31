@@ -7,7 +7,7 @@
 Fase 2.3, entrega 2: `ordenes_de_despacho.crear_las_ordenes`, la fase del
 ciclo. Afirma:
 
-  P  las puertas: sin la tarea, sin el nivel, sin MOTOR_TENANT o sin hora de
+  P  las puertas: sin la tarea, sin el nivel, sin empresa en el motor o sin hora de
      corte NO crea nada (la sombra)
   C  con las puertas, crea la orden como el boton: plantilla, prioridad, dia,
      barrio y cliente de la ficha, y deja escrito que la creo el Supervisor
@@ -84,7 +84,7 @@ def abierto(empresa, admin_profile, monkeypatch):
                       motivo="crear las ordenes", criterios="vista previa")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
                         lambda org: (True, ""))
-    monkeypatch.setenv("MOTOR_TENANT", "una-empresa")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "una-empresa")
     return empresa
 
 
@@ -98,7 +98,7 @@ def _correr(org, motor=None):
 # ---------------------------------------------------------------------------
 
 def test_p_sin_la_tarea_queda_en_sombra_y_no_crea(empresa, plantillas, monkeypatch):
-    monkeypatch.setenv("MOTOR_TENANT", "una-empresa")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "una-empresa")
     _caso(empresa)
     motor = _Motor()
 
@@ -114,7 +114,7 @@ def test_p2_sin_el_nivel_tampoco(empresa, plantillas, admin_profile, monkeypatch
     td.delegar(empresa, td.CREAR_LAS_ORDENES, actor=admin_profile)
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
                         lambda org: (True, ""))
-    monkeypatch.setenv("MOTOR_TENANT", "una-empresa")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "una-empresa")
     _caso(empresa)
 
     r = _correr(empresa)
@@ -124,13 +124,13 @@ def test_p2_sin_el_nivel_tampoco(empresa, plantillas, admin_profile, monkeypatch
 
 
 def test_p3_sin_motor_tenant_tampoco(abierto, plantillas, monkeypatch):
-    monkeypatch.delenv("MOTOR_TENANT")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "")
     _caso(abierto)
 
     r = _correr(abierto)
 
     assert (r["modo"], r["creadas"]) == (O.SOMBRA, 0)
-    assert "MOTOR_TENANT" in r["porque"]
+    assert "sin empresa en el motor" in r["porque"]
 
 
 def test_p4_sin_hora_de_corte_no_corre(abierto, plantillas):
@@ -393,7 +393,7 @@ def _delegada(org, perfil, monkeypatch, *, nivel, interruptor):
                       criterios="medido")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
                         lambda org: interruptor)
-    monkeypatch.setenv("MOTOR_TENANT", "una-empresa")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "una-empresa")
 
 
 def test_f_con_nivel_2_no_crea(empresa, plantillas, admin_profile, monkeypatch):

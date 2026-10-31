@@ -475,16 +475,16 @@ def test_25_el_bucle_NO_escribe_una_fila(org_a):
             SituacionOperativa.objects.count()) == antes
 
 
-def test_26_sin_MOTOR_TENANT_no_se_consulta_el_modelo(org_a):
+def test_26_sin_empresa_no_se_consulta_el_modelo(org_a):
     """Fail-closed: ese parámetro decide de qué empresa es la config."""
     import os
 
-    with mock.patch.dict(os.environ, {"MOTOR_TENANT": ""}, clear=False):
+    with mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: ""):
         with mock.patch("requests.post") as salida:
             with pytest.raises(cerebro.ErrorCerebro) as e:
                 cerebro.razonar(org_a, instrucciones="x", entrada="y")
 
-    assert "MOTOR_TENANT" in str(e.value)
+    assert "sin empresa en el motor" in str(e.value)
     salida.assert_not_called()
 
 

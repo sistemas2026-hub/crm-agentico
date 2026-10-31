@@ -148,11 +148,14 @@ def _cerrar(orden, profile, ruta: str = "cerrar-ticket") -> dict:
         return {"estado": "no_cerrado",
                 "detalle": "sin una persona que valide no se pide por la ruta humana"}
 
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    from operaciones import areas_del_tenant
+
+    #  La empresa de la ORDEN, no la de una variable del servidor (31/10/2026).
+    tenant = areas_del_tenant.tenant_de(orden.org_id)
     if not tenant:
         return {"estado": "no_cerrado",
-                "detalle": "falta MOTOR_TENANT: sin saber de que empresa es la "
-                           "orden no se le escribe al ISP"}
+                "detalle": f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que "
+                           "empresa es la orden no se le escribe al ISP"}
 
     import requests
 

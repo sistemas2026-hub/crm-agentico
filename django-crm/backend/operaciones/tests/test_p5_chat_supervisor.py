@@ -143,8 +143,7 @@ def _conversacion(org, actor, **kw):
 
 def _entorno():
     import os
-    return mock.patch.dict(os.environ, {"MOTOR_TENANT": "rapilink"},
-                           clear=False)
+    return mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: "rapilink")
 
 
 @pytest.fixture
@@ -963,16 +962,16 @@ def test_39_la_ruta_no_acepta_otros_verbos(org_a, jefe_de_ops):
         assert getattr(jefe_de_ops, verbo)(RUTA).status_code == 405, verbo
 
 
-def test_40_sin_MOTOR_TENANT_no_se_consulta_el_modelo(org_a, admin_profile):
+def test_40_sin_empresa_no_se_consulta_el_modelo(org_a, admin_profile):
     import os
 
     #  Fail-closed: este parámetro decide de qué empresa es la config --y quién
     #  paga el consumo--. Suponerlo usaría la de otra.
     c = _conversacion(org_a, admin_profile)
-    with mock.patch.dict(os.environ, {"MOTOR_TENANT": ""}, clear=False):
+    with mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: ""):
         with mock.patch("requests.post") as salida:
             r = chat.responder(c, "hola")
 
     assert r.rol == RolMensaje.ERROR
-    assert "MOTOR_TENANT" in r.error
+    assert "sin empresa en el motor" in r.error
     salida.assert_not_called()

@@ -61,13 +61,16 @@ def _motor(ruta: str, metodo: str = "POST", **kw):
     return requests.request(metodo, f"{base}{ruta}", headers=cabeceras, **kw)
 
 
-def _tenant() -> str:
-    #  Sin empresa no se pregunta: el motor contestaria por la que diga la
-    #  variable, y con dos empresas en la instalacion seria la otra.
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+def _tenant(org) -> str:
+    #  La empresa de la organizacion de quien pide, no la de una variable del
+    #  servidor (31/10/2026): con dos empresas en la instalacion seria la otra.
+    #  Sin empresa no se pregunta.
+    from operaciones import areas_del_tenant
+
+    tenant = areas_del_tenant.tenant_de(org)
     if not tenant:
-        raise RuntimeError("falta MOTOR_TENANT: sin saber de que empresa es "
-                           "la solicitud no se le pregunta nada al motor")
+        raise RuntimeError(f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que "
+                           "empresa es la solicitud no se le pregunta nada al motor")
     return tenant
 
 
@@ -79,7 +82,7 @@ class TecnicosView(APIView):
     def get(self, request):
         try:
             r = _motor(f"/interno/herramienta/consultar_tecnicos",
-                       params={"tenant": _tenant()}, json={})
+                       params={"tenant": _tenant(request.profile.org)}, json={})
             r.raise_for_status()
             crudo = (r.json() or {}).get("resultado") or {}
         except Exception as e:                      # noqa: BLE001
@@ -109,7 +112,7 @@ class AjustesView(APIView):
         # pero no lectura, asi que ninguna pantalla podia mostrar lo que hay.
         try:
             r = _motor("/configuracion/variables", metodo="GET",
-                       params={"tenant": _tenant()})
+                       params={"tenant": _tenant(request.profile.org)})
             r.raise_for_status()
             variables = (r.json() or {}).get("variables") or {}
         except Exception as e:                      # noqa: BLE001
@@ -265,7 +268,7 @@ class DecidirView(APIView):
                 detalle += f" | GPS: {s.gps_lat}, {s.gps_lng}"
             try:
                 r = _motor("/interno/herramienta/reasignar_ticket_instalacion",
-                           params={"tenant": _tenant()},
+                           params={"tenant": _tenant(org)},
                            json={"id_ticket": s.ticket_wisphub,
                                  "descripcion": detalle[:400]}, timeout=45)
                 r.raise_for_status()

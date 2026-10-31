@@ -182,12 +182,10 @@ BOTTLECRM_API_TOKEN=
 
 SECRETOS_CLAVE_MAESTRA=
 
-ASISTENTE_TENANT=rapilink
-
 DEFAULT_FROM_EMAIL=noreply@rapilinksas.co
 ```
 
-`ASISTENTE_TENANT` es el slug del `tenants/<slug>.config.yaml`, y es de quién habla el frontend cuando alguien abre `/agentes` o `/settings/asistente`. Se declara acá y no en el código porque es lo único que ata esa interfaz a una empresa concreta. La URL del motor no está en esta lista: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
+La empresa **no** está en esta lista (31/10/2026): hasta ese día `ASISTENTE_TENANT` ataba el frontend y el backend a una sola empresa por instalación. Hoy los dos la sacan de la organización de quien entra o del objeto que se trata, y se la preguntan al motor. La URL del motor tampoco: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
 
 `SECRETOS_CLAVE_MAESTRA` descifra las credenciales por empresa (`asistente.tenant_secrets`). Tiene que ser **la misma** que la del `.env` de desarrollo, o lo que se cargue desde una máquina no se descifra en la otra. Se genera una vez con:
 
@@ -343,7 +341,7 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 **Pasos, en este orden** (saltarse el primero hace fallar el tercero):
 
 1. **DNS**: registro A de `motor.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short motor.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
-2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat`: `ASISTENTE_URL` y `ASISTENTE_TENANT`.
+2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat` no hace falta ninguna: la URL la pone el compose y la empresa sale de la organización (31/10/2026; antes se declaraba `ASISTENTE_TENANT`).
 3. **Dominio** en Dokploy sobre el servicio `motor`. La regla de arriba no se escribe a mano: Dokploy la arma con los campos del formulario.
 
 | Campo del formulario | Valor |
@@ -562,7 +560,7 @@ La configuración vive en `asistente.tenant_config` y se edita en dos lugares, a
 | Nombre, tono y largo del asistente | La interfaz (`/settings/asistente`) | Ídem |
 | Herramientas, prompts, RAG, filtros | El YAML, en git | `cli/cargar_config.py tenants/<slug>.config.yaml` |
 
-Lo que se edita desde la interfaz necesita `PRIVATE_ASISTENTE_URL=http://motor:5000` y `PRIVATE_ASISTENTE_TENANT=<slug>` en el servicio `frontend`. Sin esas dos, las pantallas cargan pero no encuentran al asistente — y el hub de configuración las lista igual, sin valor, en vez de caerse.
+Lo que se edita desde la interfaz necesita `PRIVATE_ASISTENTE_URL=http://motor:5000` en el servicio `frontend` (la pone el compose). La empresa sale de la sesión (`lib/server/v2/tenant.js`), no de `PRIVATE_ASISTENTE_TENANT`, que ya no se lee. Sin la URL, las pantallas cargan pero no encuentran al asistente — y el hub de configuración las lista igual, sin valor, en vez de caerse.
 
 ```
 py -3.13 cli/cargar_config.py --exportar rapilink   # base  -> archivo
@@ -650,14 +648,14 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
-**ANTES del próximo deploy del backend: una variable que dejó de tener valor por defecto, y un dato que ahora carga cada empresa (30-31/10/2026, PRD §8.17 Ola 1).** El backend Django caía a la empresa de siempre cuando faltaban, y eso con una segunda empresa le sirve a una los datos de la otra. Ahora sin ellos **no sale nada**, y el síntoma no señala la causa:
+**ANTES del próximo deploy del backend: la empresa ya no es una variable, y el buzón de solicitudes lo carga cada empresa (30-31/10/2026, PRD §8.17 Ola 1).** El backend Django sacaba la empresa de `MOTOR_TENANT` (y la ingesta de documentos, de `ASISTENTE_TENANT`): una por instalación, así que con dos empresas a una le servía los datos de la otra. Ahora la saca de la **organización** de cada objeto, preguntándosela al motor (`/tenant-de-organizacion/<id>`, el mismo camino que el frontend usa desde octubre). Sin eso **no sale nada**, y el síntoma no señala la causa:
 
 | Qué | Si falta |
 |---|---|
-| `MOTOR_TENANT` (variable de los servicios `backend` y `celery-*`) | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `falta_motor_tenant`; Despacho no trae la ficha del cliente; el cierre de caso no le pide nada al motor. El `docker-compose.prod.yml` la trae con default `rapilink`, así que **debería estar**: comprobarlo en Dokploy igual |
-| El correo que recibe las solicitudes (**no es una variable**: `Org.correo_solicitudes`, migración `common/0046`) | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. Hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). **Después** del deploy, el administrador lo carga en Ajustes → Organización → Editar; la pantalla de Organización muestra «Falta» mientras esté vacío. Cada empresa nueva hace lo mismo al darse de alta. Nada de esto va en Dokploy |
+| Que la organización tenga empresa en el motor | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `sin_empresa`; Despacho no trae la ficha del cliente; el cierre de caso queda en `SIN_EMPRESA_EN_EL_MOTOR`; el Supervisor no razona ni consulta; un documento marcado para el asistente queda en error. **Comprobarlo apenas levante el backend** (abajo) |
+| El correo que recibe las solicitudes (**no es una variable**: `Org.correo_solicitudes`, migración `common/0046`) | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. Hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). **Después** del deploy, el administrador lo carga en Ajustes → Organización → Editar; la pantalla de Organización muestra «Falta» mientras esté vacío. Cada empresa nueva hace lo mismo al darse de alta |
 
-Cómo comprobar sin leer valores: `docker exec <backend> sh -c 'test -n "$MOTOR_TENANT" && echo ok'`, y para el correo, la fila «Correo que recibe las solicitudes de servicio» de Ajustes → Organización. Lo definitivo para `MOTOR_TENANT` es derivarlo de la organización (§3.3 de CLAUDE.md, Ola 4): una variable de entorno sigue siendo una instalación por empresa.
+Cómo comprobar la empresa de cada organización, sin leer secretos: `docker exec <backend> python manage.py shell -c "from common.models import Org; from operaciones.areas_del_tenant import tenant_de; print([(o.name, tenant_de(o)) for o in Org.objects.filter(is_active=True)])"`. Rapilink tiene que salir con `rapilink`; una organización de pruebas sin empresa sale con `''`, y eso es correcto. Para el correo, la fila «Correo que recibe las solicitudes de servicio» de Ajustes → Organización. **Nada de esto va en Dokploy**: `MOTOR_TENANT`, `ASISTENTE_TENANT` y `PRIVATE_ASISTENTE_TENANT` ya no los lee nadie y el compose no los declara; si quedan en el Environment del despliegue, no hacen nada.
 
 **La rama `producto/tesis-de-negocio` (30-31/10/2026, PRD §8.17 Olas 1 a 3) trae, además, cuatro cosas que no se aplican solas.** En este orden:
 
@@ -870,7 +868,9 @@ Fue semánticamente neutro —ninguna herramienta lo tenía, ninguna quedó en `
 
 Qué evaluar cuando se retome: `model_dump(exclude_unset=True)` en el camino de escritura, o —probablemente lo correcto— aplicar la mutación como **patch sobre el documento original** y usar el modelo solo para *validar* el resultado, no para producir lo que se guarda. Con una prueba que edite una sola clave y exija exactamente una hoja distinta en el diff.
 
-**Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
+**Dar de alta un segundo ISP** — *lo que sigue es historia del 24/09/2026; el pegamento ya está*: el frontend saca la empresa de la sesión desde el 06/10 y el backend de la organización desde el 31/10/2026 (PRD §8.17, Ola 1), y el compose no declara ninguna variable de empresa. **Lo que queda** es lo de abajo: el dominio del webhook, `--workers 1`, y que el reloj del motor descubre las empresas en `tenants/*.config.yaml`.
+
+**El motor está listo, el pegamento no** (24/09/2026). El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
 Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en el frontend, y nunca se deriva de la organización del usuario logueado**.
 

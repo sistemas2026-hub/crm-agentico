@@ -123,8 +123,8 @@ def test_los_tickets_de_cartera_NO_entran(org_a, monkeypatch):
     """
     soporte = _perfil(org_a, "Mario Vasquez")
     cartera = _perfil(org_a, "Alejandra Castro")
-    monkeypatch.setattr(areas, "area_por_persona",
-                        lambda: {str(soporte.id): "soporte_tecnico",
+    monkeypatch.setattr(areas, "area_por_persona_de_org",
+                        lambda org_id: {str(soporte.id): "soporte_tecnico",
                                  str(cartera.id): "cartera"})
 
     tecnico = _ticket(org_a, "No Tiene Internet", soporte)
@@ -149,7 +149,7 @@ def test_si_no_se_puede_saber_el_area_NO_se_lee_nada(org_a, monkeypatch):
     """
     quien_sea = _perfil(org_a, "Alguien")
     _ticket(org_a, "No Tiene Internet", quien_sea)
-    monkeypatch.setattr(areas, "area_por_persona", lambda: {})
+    monkeypatch.setattr(areas, "area_por_persona_de_org", lambda org_id: {})
 
     assert sup._tickets_abiertos_con_tecnico(org_a, timezone.now()) == []
 
@@ -159,8 +159,8 @@ def test_un_ticket_sin_nadie_asignado_sigue_afuera(org_a, monkeypatch):
     from cases.models import Case
 
     soporte = _perfil(org_a, "Mario Vasquez")
-    monkeypatch.setattr(areas, "area_por_persona",
-                        lambda: {str(soporte.id): "soporte_tecnico"})
+    monkeypatch.setattr(areas, "area_por_persona_de_org",
+                        lambda org_id: {str(soporte.id): "soporte_tecnico"})
     ahora = timezone.now()
     huerfano = Case.objects.create(
         org=org_a, name="No Tiene Internet", status="New", priority="Normal",

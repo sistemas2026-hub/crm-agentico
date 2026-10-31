@@ -57,7 +57,7 @@ class _Respuesta:
 def _entorno(org_a, monkeypatch):
     org_a.timezone = "America/Bogota"
     org_a.save(update_fields=["timezone"])
-    monkeypatch.setenv("MOTOR_TENANT", "tenant-de-prueba")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "tenant-de-prueba")
     monkeypatch.delenv(cierre_en_isp.BANDERA, raising=False)
     monkeypatch.setattr(RC, "pendientes_de_medir", lambda org, ahora=None: set())
 

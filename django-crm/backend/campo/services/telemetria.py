@@ -41,10 +41,14 @@ class SinServicioParaPing(Exception):
     """La orden no tiene con que preguntar: no hay identificador del servicio."""
 
 
-def _motor():
-    """Donde vive el motor y con que se le habla. Igual que despacho.py."""
+def _motor(org):
+    """Donde vive el motor, con que se le habla, y la empresa de 'org' (una
+    Org o su id) -- de la organizacion de la orden, nunca de una variable del
+    servidor (31/10/2026). Igual que despacho.py."""
+    from operaciones import areas_del_tenant
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    tenant = areas_del_tenant.tenant_de(org)
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
@@ -99,10 +103,11 @@ def probar_conexion(orden, *, paquetes: int = PAQUETES,
     if not servicio:
         raise SinServicioParaPing(
             "La orden no tiene identificado el servicio del cliente.")
-    return pinguear_servicio(servicio, paquetes=paquetes, timeout=timeout)
+    return pinguear_servicio(servicio, org=orden.org_id, paquetes=paquetes,
+                             timeout=timeout)
 
 
-def pinguear_servicio(servicio: str, *, paquetes: int = PAQUETES,
+def pinguear_servicio(servicio: str, *, org, paquetes: int = PAQUETES,
                       timeout: int = 120) -> dict:
     """
     El mismo ping, a partir de un id de servicio en vez de una orden.
@@ -117,12 +122,14 @@ def pinguear_servicio(servicio: str, *, paquetes: int = PAQUETES,
     'probar_conexion' queda igual para la app de campo: resuelve el servicio
     de la orden y llama aqui. Lo unico que cambio de lugar es de donde sale
     el identificador.
+
+    'org' ES OBLIGATORIA: es la empresa en cuyo ISP se busca ese servicio, y
+    un id de servicio solo no dice de cual (31/10/2026).
     """
-    base, tenant, cabeceras = _motor()
+    base, tenant, cabeceras = _motor(org)
     if not tenant:
-        #  Sin empresa no se mide: el motor buscaria el equipo en la que diga
-        #  la variable. Se dice asi, no como "el equipo no responde".
-        return {"ok": False, "motivo": "falta_motor_tenant"}
+        #  Sin empresa no se mide: se dice asi, no como "el equipo no responde".
+        return {"ok": False, "motivo": "sin_empresa"}
     try:
         r = requests.post(
             f"{base}/interno/herramienta/ping_cliente",
@@ -297,11 +304,10 @@ def medir_senal(orden, *, timeout: int = 30) -> dict:
         raise SinEquipoParaMedir(
             "La orden no tiene el serial del equipo del cliente.")
 
-    base, tenant, cabeceras = _motor()
+    base, tenant, cabeceras = _motor(orden.org_id)
     if not tenant:
-        #  Sin empresa no se mide: el motor buscaria el equipo en la que diga
-        #  la variable. Se dice asi, no como "el equipo no responde".
-        return {"ok": False, "motivo": "falta_motor_tenant"}
+        #  Sin empresa no se mide: se dice asi, no como "el equipo no responde".
+        return {"ok": False, "motivo": "sin_empresa"}
     try:
         r = requests.post(
             f"{base}/interno/herramienta/consultar_senal_ont",

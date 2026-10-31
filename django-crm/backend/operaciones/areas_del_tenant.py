@@ -72,7 +72,7 @@ SEGUNDOS_DE_CACHE = 15 * 60
 ESPERA_MAXIMA = 5
 
 #:  Cuanto se recuerda que el motor NO contesto, para no volver a preguntar en
-#:  cada lectura de la misma vuelta. Ver '_sin_respuesta' en area_por_persona.
+#:  cada lectura de la misma vuelta. Ver '_sin_respuesta' en _mapa_del_motor.
 SEGUNDOS_SIN_RESPUESTA = 60
 _SIN_RESPUESTA = "__sin_respuesta__"
 
@@ -94,45 +94,50 @@ def _solo_texto(mapa) -> dict:
 def _motor():
     """Donde vive el motor y con que se le habla. Igual que telemetria.py."""
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or ""
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
         cabeceras["X-Servicio-Token"] = token
-    return base, tenant, cabeceras
+    return base, cabeceras
 
 
-def area_por_persona() -> dict:
+#: Lo que dice quien no le pregunta nada al motor porque no sabe de que
+#: empresa es. Texto fijo: termina en logs, en la bitacora de una orden y en
+#: lo que ve una persona.
+SIN_EMPRESA = "sin empresa en el motor"
+
+
+def tenant_de(org) -> str:
     """
-    {profile_id: area} tal como lo declara la configuracion de la empresa.
+    El tenant del motor de 'org' (una Org, o su id), o '' si no se sabe.
 
-    Devuelve {} cuando no se puede saber, y quien llama tiene que distinguir
-    ESO de "nadie es de esa area": son cosas distintas y la diferencia decide
-    si se lee un ticket ajeno.
+    LO UNICO QUE EL BACKEND USA PARA SABER DE QUE EMPRESA ES ALGO (31/10/2026).
+    Hasta ese dia era 'MOTOR_TENANT', una variable de entorno: una por
+    instalacion, asi que con dos empresas en la misma, la segunda le escribia
+    al WispHub de la primera, le pedia su modelo y leia sus areas. Quien llama
+    pasa la organizacion del objeto que esta tratando --la orden, la
+    solicitud, el caso, la propuesta--, nunca una que elija el pedido.
+
+    SIN DEFAULT, igual que 'tenant_de_organizacion': no saber es '' y quien
+    llama no le pide nada al motor (PRD §8.17, Ola 4).
     """
-    _, tenant, _ = _motor()
-    if not tenant:
-        #  FAIL-CLOSED CON EL TENANT, igual que en el resto del proyecto: sin
-        #  saber de que empresa es, preguntar por sus areas devolveria las de
-        #  otra.
-        logger.info("Supervisor: falta MOTOR_TENANT, no se consultan areas")
-        return {}
-    return _mapa_del_motor(tenant, "areas_por_persona")
+    return tenant_de_organizacion(getattr(org, "pk", org))
 
 
 def area_por_persona_de_org(org_id) -> dict:
     """
-    {profile_id: area} de la empresa de ESA organizacion.
+    {profile_id: area} de la empresa de ESA organizacion, tal como la declara
+    su configuracion.
 
-    Lo mismo que 'area_por_persona', con la empresa sacada de la organizacion
-    de quien pregunta y no de 'MOTOR_TENANT' (24/10/2026). Existe porque de
-    este mapa pasa a depender un PERMISO -- un colaborador toma un ticket sin
-    asignar de su area (cases/access.py) -- y un permiso no puede leer las
-    areas de la empresa que diga una variable de entorno: con dos empresas en
-    la misma instalacion, la segunda leeria las de la primera.
+    La empresa sale de la organizacion y no de una variable de entorno
+    (24/10/2026 para el permiso de 'cases/access.py'; 31/10/2026 para todo lo
+    demas, cuando 'area_por_persona' -- la de la variable -- se borro). Con dos
+    empresas en la misma instalacion, la segunda leeria las areas de la
+    primera.
 
-    {} si no se sabe de que empresa es o el motor no contesta: el permiso cae
-    al de antes, ver solo lo propio.
+    Devuelve {} cuando no se puede saber, y quien llama tiene que distinguir
+    ESO de "nadie es de esa area": son cosas distintas y la diferencia decide
+    si se lee un ticket ajeno. Un permiso cae al de antes, ver solo lo propio.
     """
     tenant = tenant_de_organizacion(org_id)
     if not tenant:
@@ -163,7 +168,7 @@ def tenant_de_organizacion(org_id) -> str:
     except Exception:                                        # noqa: BLE001
         pass
 
-    base, _, cabeceras = _motor()
+    base, cabeceras = _motor()
     tenant = ""
     try:
         r = requests.get(f"{base}/tenant-de-organizacion/{org_id}",
@@ -214,7 +219,7 @@ def _mapa_del_motor(tenant: str, clave: str) -> dict:
             pass
         return {}
 
-    base, _, cabeceras = _motor()
+    base, cabeceras = _motor()
 
     #  Se prueba el liviano y se cae al viejo, igual que la pantalla de
     #  Tickets: '/agentes/asignaciones' devuelve lo mismo y ademas sale a
@@ -245,7 +250,7 @@ def _mapa_del_motor(tenant: str, clave: str) -> dict:
     return {}
 
 
-def responsables_de(areas, mapa: dict | None = None) -> list:
+def responsables_de(areas, mapa: dict | None = None, *, org=None) -> list:
     """
     Los perfiles que pertenecen a esas areas. Acepta un nombre o varios.
 
@@ -254,7 +259,7 @@ def responsables_de(areas, mapa: dict | None = None) -> list:
     lista vacia no filtra nada y traeria la cola entera -- que es exactamente
     lo que este modulo vino a evitar.
     """
-    m = area_por_persona() if mapa is None else mapa
+    m = _mapa_de(org) if mapa is None else mapa
     nombres = [areas] if isinstance(areas, str) else list(areas or [])
     objetivo = {str(a or "").strip().lower() for a in nombres}
     return [pid for pid, suya in (m or {}).items()
@@ -302,11 +307,19 @@ class CriterioDeArea:
     mapa: dict
 
 
+def _mapa_de(org) -> dict:
+    """El mapa de la empresa de 'org', o {} si no hay organizacion: sin saber
+    de que empresa es, preguntar por sus areas devolveria las de otra."""
+    if org is None:
+        return {}
+    return area_por_persona_de_org(getattr(org, "pk", org))
+
+
 def _normal(area) -> str:
     return str(area or "").strip().lower()
 
 
-def criterio_de_area(mapa: dict | None = None) -> CriterioDeArea:
+def criterio_de_area(mapa: dict | None = None, *, org=None) -> CriterioDeArea:
     """
     Los dos filtros --propio y ajeno-- para 'Case', y si se pudo saber.
 
@@ -314,7 +327,7 @@ def criterio_de_area(mapa: dict | None = None) -> CriterioDeArea:
     (con su cache de 15 minutos). Con el mapa vacio solo decide el area
     escrita en el caso.
     """
-    m = _solo_texto(area_por_persona() if mapa is None else mapa)
+    m = _solo_texto(_mapa_de(org) if mapa is None else mapa)
     objetivo = {_normal(a) for a in AREAS_DEL_SUPERVISOR}
     #  LO ESCRITO SE COMPARA SIN MAYUSCULAS NI ESPACIOS ALREDEDOR. 'Case.area'
     #  lo escribe la importacion tal cual viene de 'destinos', y el nucleo

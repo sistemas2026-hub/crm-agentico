@@ -122,17 +122,22 @@ def _enviar_correo(s) -> None:
     correo.send(fail_silently=False)
 
 
-def _tenant_del_motor() -> str:
-    """La empresa a la que se le escribe en WispHub. Sin ella, nada sale.
+def _tenant_del_motor(s) -> str:
+    """La empresa de la solicitud 's', en cuyo WispHub se escribe. Sin ella,
+    nada sale.
 
-    Hasta el 30/10/2026 caia a 'rapilink' si faltaba la variable: con dos
-    empresas en la misma instalacion, una solicitud de la segunda habria
-    creado, completado o cerrado un ticket en el WispHub de la primera.
+    Hasta el 30/10/2026 caia a 'rapilink' si faltaba la variable, y hasta el
+    31/10 la empresa era la de una variable del servidor: con dos empresas en
+    la misma instalacion, una solicitud de la segunda habria creado, completado
+    o cerrado un ticket en el WispHub de la primera. Ahora sale de la
+    organizacion de la solicitud.
     """
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    from operaciones import areas_del_tenant
+
+    tenant = areas_del_tenant.tenant_de(s.org_id)
     if not tenant:
-        raise RuntimeError("falta MOTOR_TENANT: sin saber de que empresa es "
-                           "la solicitud no se escribe en ningun WispHub")
+        raise RuntimeError(f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que "
+                           "empresa es la solicitud no se escribe en ningun WispHub")
     return tenant
 
 
@@ -141,7 +146,7 @@ def _crear_ticket_wisphub(s) -> str:
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = _tenant_del_motor()
+    tenant = _tenant_del_motor(s)
     herramienta = (os.environ.get("SOLICITUDES_HERRAMIENTA_TICKET", "")
                    or "crear_ticket_instalacion")
 
@@ -210,7 +215,7 @@ def _completar_ticket(s) -> None:
     decodifica y lo manda como archivo -- ver 'argumentos_archivo' en
     nucleo/config/schema.py.
     """
-    tenant = _tenant_del_motor()   # antes de armar nada: sin empresa no sale
+    tenant = _tenant_del_motor(s)   # antes de armar nada: sin empresa no sale
     import base64
     import requests
 
@@ -309,7 +314,7 @@ def cerrar_ticket_wisphub(s, motivo: str) -> None:
     lo anota en 'fallo_integracion' y sigue: la cancelacion ya esta guardada y
     no se deshace porque un tercero no responda.
     """
-    tenant = _tenant_del_motor()   # antes de armar nada: sin empresa no sale
+    tenant = _tenant_del_motor(s)   # antes de armar nada: sin empresa no sale
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")

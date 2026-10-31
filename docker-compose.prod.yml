@@ -72,7 +72,6 @@ services:
       # header y un despliegue que todavia no configuro el token no se rompe.
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
-      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       # La cuenta de servicio de Firebase, para el aviso push a la app de campo.
       # Es el JSON COMPLETO pegado como valor, o la ruta a un archivo montado.
       #
@@ -154,11 +153,11 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # El CRM le habla al motor por la red interna del compose: la ingesta de
       # documentos al corpus (common/tasks.py) y la purga diaria de retencion
-      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # (purgar_retencion_asistente). Sin la URL, esas tareas no fallan --
       # registran "el asistente no esta configurado" y no hacen nada, que es
-      # peor porque no se nota.
+      # peor porque no se nota. LA EMPRESA NO VA ACA (31/10/2026): sale de la
+      # organizacion del documento, y la purga recorre todas.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
       # --- Correo ---
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@rapilinksas.co}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?}
@@ -207,32 +206,31 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # El CRM le habla al motor por la red interna del compose: la ingesta de
       # documentos al corpus (common/tasks.py) y la purga diaria de retencion
-      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # (purgar_retencion_asistente). Sin la URL, esas tareas no fallan --
       # registran "el asistente no esta configurado" y no hacen nada, que es
-      # peor porque no se nota.
+      # peor porque no se nota. LA EMPRESA NO VA ACA (31/10/2026): sale de la
+      # organizacion del documento, y la purga recorre todas.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
       #  EL CICLO DEL SUPERVISOR CORRE AQUI, y necesita hablar con el motor:
       #  el diagnostico optico de cada caso, el interruptor de autonomia y el
       #  cierre pasan todos por 'POST /interno/herramienta/...'. Las
       #  credenciales de SmartOLT y WispHub viven SOLO en el motor -- copiarlas
       #  a este servicio seria tener la misma clave en dos lugares.
       #
-      #  NO ALCANZABA CON LAS DOS DE ARRIBA: el codigo lee 'MOTOR_URL' y
-      #  'MOTOR_TENANT', que son OTRAS variables, no 'ASISTENTE_*'. Y compose
-      #  solo inyecta lo que el bloque declara, aunque todas existan en el
-      #  Environment del despliegue -- es el mismo error que ya se habia
-      #  cometido con SUPERVISOR_HERRAMIENTAS_CAIDAS_PON (ver el bloque de
-      #  'backend'), encontrado por una auditoria y no por un fallo.
+      #  NO ALCANZABA CON LA DE ARRIBA: el codigo lee 'MOTOR_URL', que es OTRA
+      #  variable, no 'ASISTENTE_URL'. Y compose solo inyecta lo que el bloque
+      #  declara, aunque todas existan en el Environment del despliegue -- es
+      #  el mismo error que ya se habia cometido con
+      #  SUPERVISOR_HERRAMIENTAS_CAIDAS_PON (ver el bloque de 'backend'),
+      #  encontrado por una auditoria y no por un fallo.
       #
-      #  'MOTOR_TENANT' FALLA CERRADO y ahi esta la diferencia que importa:
-      #  'fuentes_adaptadores' levanta 'MotorNoDisponible' si falta, en vez de
-      #  suponer una empresa y leerle los datos a otra. Sin esta linea el ciclo
-      #  no habria cerrado nada y cada caso habria quedado con un diagnostico
-      #  fallido -- un sintoma que señala a SmartOLT, no aqui.
+      #  LA EMPRESA NO ES UNA VARIABLE (31/10/2026). Hasta ese dia la decia
+      #  'MOTOR_TENANT', una por instalacion: con dos empresas, el ciclo de la
+      #  segunda le leia los datos a la primera. Ahora cada pedido al motor
+      #  lleva la empresa de la organizacion que se esta tratando
+      #  ('operaciones/areas_del_tenant.py::tenant_de'), y sin ella no sale.
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
-      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       #  La fuente de flota del Supervisor, misma variable que en 'backend'.
       #  Vacia por defecto: encenderla es una decision aparte, y vacia la
       #  fuente contesta "el estado de la red NO se conoce", nunca "sin
@@ -282,11 +280,11 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # El CRM le habla al motor por la red interna del compose: la ingesta de
       # documentos al corpus (common/tasks.py) y la purga diaria de retencion
-      # (purgar_retencion_asistente). Sin estas dos, esas tareas no fallan --
+      # (purgar_retencion_asistente). Sin la URL, esas tareas no fallan --
       # registran "el asistente no esta configurado" y no hacen nada, que es
-      # peor porque no se nota.
+      # peor porque no se nota. LA EMPRESA NO VA ACA (31/10/2026): sale de la
+      # organizacion del documento, y la purga recorre todas.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
     depends_on:
       redis:
         condition: service_healthy
@@ -317,12 +315,12 @@ services:
       # asi que la unica forma de llegarle es desde el frontend por la red
       # interna, y quien pide se autentico antes contra Django.
       #
-      # Sin estas dos, /agentes y /settings/asistente cargan pero muestran
-      # "Asistente no configurado": el CRM anda y la mitad del producto no, sin
-      # que nada falle visiblemente. Por eso el tenant es obligatorio y el
-      # despliegue se detiene nombrandolo, igual que el resto.
+      # Sin la URL, /agentes y /settings/asistente cargan pero muestran
+      # "Asistente no configurado". La empresa NO va aca: sale de la sesion
+      # (lib/server/v2/tenant.js, con una guarda que impide leer
+      # PRIVATE_ASISTENTE_TENANT), y desde el 31/10/2026 tampoco la declara
+      # el backend. Una variable de empresa es una instalacion por empresa.
       PRIVATE_ASISTENTE_URL: http://motor:5000
-      PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:?slug del tenant, el mismo de tenants/<slug>.config.yaml}
       # El header que nucleo/canales/api.py exige cuando 'motor' (mas abajo)
       # tiene MOTOR_SERVICE_TOKEN puesto. Opcional a proposito -- ':-' y no
       # ':?': sin la variable, headersMotor() no manda nada y nada se rompe.

@@ -16,7 +16,7 @@ LAS PUERTAS, las mismas que las otras tareas de accion y todas fail-closed
     persona desde el chat del Supervisor (`tareas_delegadas`)
     el nivel 3 de la empresa (`autonomia.puede`): con el interruptor de
     emergencia detenido no se cierra NADA, tampoco lo de adentro
-    `MOTOR_TENANT` (la empresa atada al tenant del motor, D5)
+    que la organizacion tenga empresa en el motor (`areas_del_tenant.tenant_de`)
 
 Sin alguna, SOMBRA: no escribe nada y dice cuantas cerraria. Y del lado del
 motor, el ticket pasa por cinco compuertas mas (interruptor, techo, Autonomia 2
@@ -76,13 +76,11 @@ def _tarea():
 
 def puertas(org) -> str:
     """Por que NO puede cerrar, o "" si puede. Texto fijo: va a un log."""
-    import os
-
-    from operaciones import autonomia
+    from operaciones import areas_del_tenant, autonomia
     from operaciones import tareas_delegadas as td
 
-    if not (os.environ.get("MOTOR_TENANT", "") or "").strip():
-        return "falta MOTOR_TENANT: sin saber de que empresa es el ticket, no se cierra"
+    if not areas_del_tenant.tenant_de(org):
+        return f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que empresa es el ticket, no se cierra"
     try:
         if not td.esta_delegada(org, _tarea()):
             return ("nadie le delego al Supervisor que cierre lo que da por "

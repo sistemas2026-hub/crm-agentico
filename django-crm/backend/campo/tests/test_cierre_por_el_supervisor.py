@@ -8,7 +8,7 @@ El motor se sustituye en el borde (`requests.post`): se afirma sobre lo que
 SALE hacia el motor y sobre lo que queda en Dexter.
 
   P   las puertas, como las otras tareas de accion: sin la tarea delegada, sin
-      el nivel 3 (con el interruptor), o sin MOTOR_TENANT, SOMBRA: no le pide
+      el nivel 3 (con el interruptor), o sin empresa en el motor, SOMBRA: no le pide
       nada al motor y dice cuantas cerraria.
   S2  abiertas y el motor cierra el ticket: la orden queda APROBADA y CERRADA
       a nombre del Supervisor, por la ruta AUTONOMA, sin `actor`.
@@ -84,7 +84,7 @@ def abierto(org_a, admin_profile, monkeypatch):
     autonomia.cambiar(org_a, 3, actor=admin_profile, motivo="cerrar lo revisado",
                       criterios="la revision del cierre en codigo")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
-    monkeypatch.setenv("MOTOR_TENANT", "tenant-de-prueba")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "tenant-de-prueba")
     return org_a
 
 
@@ -129,7 +129,7 @@ def _fase(org, **kw):
 def test_p_sin_la_tarea_queda_en_sombra(org_a, orden, admin_profile, monkeypatch):
     autonomia.cambiar(org_a, 3, actor=admin_profile, motivo="x", criterios="y")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
-    monkeypatch.setenv("MOTOR_TENANT", "t")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "t")
     with mock.patch("requests.post") as post:
         r = _fase(org_a)
     assert (r["modo"], r["cerraria"], r["cerradas"]) == (CS.SOMBRA, 1, 0)
@@ -142,7 +142,7 @@ def test_p_sin_la_tarea_queda_en_sombra(org_a, orden, admin_profile, monkeypatch
 def test_p2_sin_el_nivel_o_con_el_interruptor_detenido_tampoco(
         org_a, orden, admin_profile, monkeypatch):
     td.delegar(org_a, td.CERRAR_LO_REVISADO, actor=admin_profile)
-    monkeypatch.setenv("MOTOR_TENANT", "t")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "t")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
     with mock.patch("requests.post") as post:
         assert _fase(org_a)["modo"] == CS.SOMBRA, "sin nivel 3"
@@ -154,7 +154,7 @@ def test_p2_sin_el_nivel_o_con_el_interruptor_detenido_tampoco(
 
 
 def test_p3_sin_motor_tenant_tampoco(abierto, orden, monkeypatch):
-    monkeypatch.delenv("MOTOR_TENANT")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "")
     with mock.patch("requests.post") as post:
         assert _fase(abierto)["modo"] == CS.SOMBRA
     post.assert_not_called()
@@ -335,7 +335,7 @@ def test_m2_una_falla_nunca_medida_sigue_esperando_pasadas_las_48_horas(
 
     monkeypatch.undo()
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
-    monkeypatch.setenv("MOTOR_TENANT", "tenant-de-prueba")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "tenant-de-prueba")
     OrdenTrabajo.objects.filter(pk=orden.pk).update(
         origen_sistema="crm", origen_ref="caso-falla",
         completada_campo_en=timezone.now() - dt.timedelta(days=5))

@@ -213,7 +213,7 @@ def test_pasar_a_despacho_DEJA_la_tarea_en_la_auditoria(org_a, monkeypatch):
     monkeypatch.setattr(autonomia, "puede",
                         lambda o, nivel: {"puede": True, "motivo": ""})
     monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
-                        lambda propuesta_id, id_caso: {"cerrado": True})
+                        lambda propuesta_id, id_caso, org=None: {"cerrado": True})
 
     caso = _caso(org_a)
     p = _propuesta_que_pasa(org_a, caso)

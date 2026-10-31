@@ -71,6 +71,7 @@ import os
 import re
 import time
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from operaciones import chat_herramientas
@@ -110,18 +111,22 @@ def _pedirle_al_modelo(mensajes: list[dict], tools: list) -> dict:
     """
     Le pide al motor que llame al modelo. Devuelve contenido y llamadas.
 
-    FAIL-CLOSED CON EL TENANT: sin 'MOTOR_TENANT' no se pregunta. Ese parametro
-    decide de QUE empresa es la config --y por tanto el modelo y quien paga-- y
-    suponerlo usaria la de otra.
+    FAIL-CLOSED CON EL TENANT: sin empresa no se pregunta. Ese parametro decide
+    de QUE empresa es la config --y por tanto el modelo y quien paga-- y
+    suponerlo usaria la de otra. Sale de la organizacion de la pasada en curso
+    ('razonar(org, ...)'), no de una variable del servidor (31/10/2026).
     """
     import requests
 
+    from operaciones import areas_del_tenant
+
     url = (os.environ.get(VARIABLE_URL, "") or URL_POR_DEFECTO).strip()
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    org = _EMPRESA_EN_CURSO.get()
+    tenant = areas_del_tenant.tenant_de(org) if org is not None else ""
     if not tenant:
         raise ErrorCerebro(
-            "falta MOTOR_TENANT: sin saber de qué empresa es esta consulta no "
-            "se puede razonar")
+            f"{areas_del_tenant.SIN_EMPRESA}: sin saber de qué empresa es esta "
+            "consulta no se puede razonar")
 
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -182,7 +187,26 @@ class Razonamiento:
         return any(c.get("hubo_error") for c in self.consultadas)
 
 
-def razonar(org, *, instrucciones: str, entrada: str, historial=(),
+#: La organizacion de la pasada que esta razonando. La pone 'razonar' -- que la
+#: recibe de quien llama, nunca del modelo -- y la lee la puerta al modelo para
+#: saber de que empresa es la consulta. Va por contexto y no como argumento de
+#: 'pedir' porque esa puerta se inyecta y la sustituyen decenas de pruebas con
+#: la firma (mensajes, tools); el valor es el mismo 'org' de la firma de
+#: 'razonar', y fuera de una pasada vale None: sin empresa no se pregunta.
+_EMPRESA_EN_CURSO: ContextVar = ContextVar("empresa_en_curso", default=None)
+
+
+def razonar(org, **opciones) -> Razonamiento:
+    """Una pasada completa para 'org'. Ver '_razonar'; aca solo se fija de que
+    empresa es la pasada, y se suelta al terminar aunque falle."""
+    marca = _EMPRESA_EN_CURSO.set(org)
+    try:
+        return _razonar(org, **opciones)
+    finally:
+        _EMPRESA_EN_CURSO.reset(marca)
+
+
+def _razonar(org, *, instrucciones: str, entrada: str, historial=(),
             tools=None, vueltas_maximas: int = VUELTAS_MAXIMAS,
             pedir=None, actor=None, conversacion_id=None,
             cierre: str | None = None) -> Razonamiento:

@@ -651,7 +651,7 @@ def _motor_que_cierra(monkeypatch):
 
     llamadas = []
 
-    def falso(propuesta_id, caso_id):
+    def falso(propuesta_id, caso_id, *, org=None):
         llamadas.append((propuesta_id, caso_id))
         Case.objects.filter(id=caso_id).update(
             status="Closed", resolved_at=timezone.now())
@@ -1005,7 +1005,7 @@ def test_el_interruptor_se_consulta_UNA_vez_por_ciclo(monkeypatch):
     #  Segundo ciclo: se cuentan las consultas al interruptor.
     consultas = []
 
-    def falso_estado():
+    def falso_estado(org):
         consultas.append(1)
         return {"permitido": True, "estado": "activo", "motivo": ""}
 
@@ -1118,11 +1118,11 @@ def test_NINGUNA_llamada_externa_ocurre_con_la_transaccion_abierta(monkeypatch):
         _anotar(f"diagnostico({id_servicio})")
         return SANO
 
-    def falso_interruptor():
+    def falso_interruptor(org):
         _anotar("interruptor")
         return {"permitido": True, "estado": "activo", "motivo": ""}
 
-    def falso_motor(propuesta_id, caso_id):
+    def falso_motor(propuesta_id, caso_id, *, org=None):
         _anotar("cierre")
         from cases.models import Case
         Case.objects.filter(id=caso_id).update(

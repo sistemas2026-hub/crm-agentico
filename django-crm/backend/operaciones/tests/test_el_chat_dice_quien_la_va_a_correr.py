@@ -46,7 +46,7 @@ def org_y_persona(db):
 def _con_nivel_3(org, perfil, monkeypatch):
     from operaciones import autonomia, fuentes_adaptadores
     monkeypatch.setattr(fuentes_adaptadores, "estado_de_autonomia",
-                        lambda: {"permitido": True, "estado": "activo",
+                        lambda org: {"permitido": True, "estado": "activo",
                                  "motivo": ""})
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")

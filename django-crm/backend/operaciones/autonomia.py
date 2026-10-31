@@ -146,7 +146,7 @@ def _interruptor_de(org) -> tuple[bool, str]:
     from operaciones import fuentes_adaptadores
 
     try:
-        estado_motor = fuentes_adaptadores.estado_de_autonomia()
+        estado_motor = fuentes_adaptadores.estado_de_autonomia(org)
     except Exception as e:                                       # noqa: BLE001
         #  Tipo y no texto: el texto de un error de red trae la URL.
         return False, (f"no se pudo leer el interruptor de autonomia "
@@ -187,7 +187,7 @@ def mover_interruptor(org, *, detener: bool, actor, motivo: str) -> dict:
             "no se puede discutir despues")
     try:
         return fuentes_adaptadores.mover_interruptor_de_autonomia(
-            detener=detener, actor=str(actor.id), motivo=motivo.strip())
+            org, detener=detener, actor=str(actor.id), motivo=motivo.strip())
     except Exception as e:                                       # noqa: BLE001
         raise ErrorAutonomia(str(e)) from None
 

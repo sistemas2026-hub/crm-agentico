@@ -152,7 +152,7 @@ def equipo(org_a, monkeypatch):
     nuevo = _persona(org_a, "nuevo@x.test")
     mapa[str(tecnico.id)] = "soporte_tecnico"
     mapa[str(cartera.id)] = "cartera"
-    monkeypatch.setattr(areas, "area_por_persona", lambda: dict(mapa))
+    monkeypatch.setattr(areas, "area_por_persona_de_org", lambda org_id: dict(mapa))
     return SimpleNamespace(tecnico=tecnico, cartera=cartera, nuevo=nuevo, mapa=mapa)
 
 
@@ -261,7 +261,7 @@ def test_g_sin_el_mapa_del_motor_no_se_cancela_nada(org_a, equipo, monkeypatch):
     estado por una lectura que no llegó es peor que esperar la próxima vuelta.
     """
     p = _propuesta(org_a, _caso(org_a, area="ventas", responsables=[equipo.tecnico]))
-    monkeypatch.setattr(areas, "area_por_persona", lambda: {})
+    monkeypatch.setattr(areas, "area_por_persona_de_org", lambda org_id: {})
 
     assert _retirar(org_a) == 0
     assert _estado(p) == P.PROPUESTA
@@ -346,7 +346,7 @@ def test_j1b_sin_mapa_solo_entra_lo_que_no_depende_de_la_persona(
     escrito_propio = _caso(org_a, area="soporte_tecnico", responsables=[equipo.cartera])
     sin_nadie = _caso(org_a, area="", responsables=[])
     con_alguien = _caso(org_a, area="", responsables=[equipo.cartera])
-    monkeypatch.setattr(areas, "area_por_persona", lambda: {})
+    monkeypatch.setattr(areas, "area_por_persona_de_org", lambda org_id: {})
     dentro_de_ocho_dias = timezone.now() + timedelta(days=sup.DIAS_CASO_ANTIGUO + 1)
 
     ids = _ids(sup._casos_abiertos_antiguos(org_a, dentro_de_ocho_dias))
@@ -465,7 +465,7 @@ def test_l3_el_comando_sin_mapa_falla_en_vez_de_decir_cero(org_a, equipo, monkey
     from django.core.management.base import CommandError
 
     _propuesta(org_a, _caso(org_a, area="ventas", responsables=[equipo.tecnico]))
-    monkeypatch.setattr(areas, "area_por_persona", lambda: {})
+    monkeypatch.setattr(areas, "area_por_persona_de_org", lambda org_id: {})
 
     with pytest.raises(CommandError):
         call_command(

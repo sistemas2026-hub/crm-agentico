@@ -102,8 +102,8 @@ def _tecnicos_de_soporte(monkeypatch):
     from operaciones import areas_del_tenant as areas
 
     monkeypatch.setattr(
-        areas, "area_por_persona",
-        lambda: {str(p.id): areas.AREA_DEL_SUPERVISOR
+        areas, "area_por_persona_de_org",
+        lambda org_id: {str(p.id): areas.AREA_DEL_SUPERVISOR
                  for p in Profile.objects.all()})
 
 

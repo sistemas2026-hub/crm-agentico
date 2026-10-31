@@ -89,8 +89,7 @@ def actividad_bloqueada(org_a, user_profile):
 @pytest.fixture
 def entorno():
     import os
-    return mock.patch.dict(os.environ, {"MOTOR_TENANT": "rapilink"},
-                           clear=False)
+    return mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: "rapilink")
 
 
 def _senal(sufijo="1"):

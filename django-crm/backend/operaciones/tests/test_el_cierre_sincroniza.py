@@ -263,7 +263,7 @@ def _las_puertas_abiertas(org, monkeypatch, llamadas=None):
     monkeypatch.setattr(autonomia, "puede",
                         lambda o, nivel: {"puede": True, "motivo": ""})
 
-    def _falso_motor(propuesta_id, id_caso):
+    def _falso_motor(propuesta_id, id_caso, *, org=None):
         if llamadas is not None:
             llamadas.append((propuesta_id, id_caso))
         return {"cerrado": True, "codigo": "CERRADO", "motivo": "",

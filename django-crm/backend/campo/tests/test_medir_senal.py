@@ -58,10 +58,10 @@ CONTEXTO_CONGELADO = {
 
 @pytest.fixture(autouse=True)
 def _empresa(monkeypatch):
-    """Sin MOTOR_TENANT la medicion no sale (30/10/2026, ver
+    """Sin empresa en el motor la medicion no sale (30/10/2026, ver
     common/tests/test_motor_tenant_falla_cerrado.py). Aca se mide la senal, no
     esa regla, asi que se declara una empresa."""
-    monkeypatch.setenv("MOTOR_TENANT", "rapilink")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "rapilink")
 
 
 @pytest.fixture

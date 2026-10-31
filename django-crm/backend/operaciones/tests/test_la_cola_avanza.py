@@ -82,8 +82,8 @@ def _tecnicos_de_soporte(monkeypatch):
     from common.models import Profile
 
     monkeypatch.setattr(
-        areas, "area_por_persona",
-        lambda: {str(p.id): areas.AREA_DEL_SUPERVISOR
+        areas, "area_por_persona_de_org",
+        lambda org_id: {str(p.id): areas.AREA_DEL_SUPERVISOR
                  for p in Profile.objects.all()})
 
 
