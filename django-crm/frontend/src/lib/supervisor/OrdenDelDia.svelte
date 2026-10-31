@@ -74,6 +74,15 @@
     </p>
   {/if}
 
+  <!-- LOS RECORDATORIOS (31/10/2026): se ven aunque la orden ya esté
+       terminada. Si «no llegó al teléfono», el aviso salió pero Google no lo
+       aceptó; si no hay ninguno, no se cumplió la regla de los 30 minutos. -->
+  {#each orden.recordatorios ?? [] as r, i (i)}
+    <p class="od-recordatorio" class:od-recordatorio-mal={!r.llego}>
+      El Supervisor le recordó reportar · {r.cuando}{r.llego ? '' : ' (no llegó al teléfono)'}
+    </p>
+  {/each}
+
   <RevisionDelCierre {orden} />
 
   <!-- COMPLETADA SIN REVISIÓN (30/10/2026): dice su validación, y si ya está
@@ -216,6 +225,8 @@
     gap: 4px 10px;
   }
   .od-seguimiento { font-weight: 600; }
+  .od-recordatorio { margin: 0; font-size: 12px; font-weight: 600; color: var(--snoc-primary); }
+  .od-recordatorio-mal { color: var(--snoc-error); }
   .od-validacion {
     display: flex;
     flex-wrap: wrap;

@@ -311,8 +311,9 @@ def del_dia(org, fecha) -> dict:
         {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, zonas, tope,
                                   ordenes: [fila]}],
          "con_alguien_que_no_sale": [fila], "esperan": [orden],
+         "por_revisar": [fila],
          "cuentas": {publicadas, por_el_supervisor, por_personas,
-                     sin_registro, avisadas, esperan}}
+                     sin_registro, avisadas, esperan, por_revisar}}
     """
     from django.db.models import Q
     from django.utils import timezone
@@ -333,13 +334,30 @@ def del_dia(org, fecha) -> dict:
 
     zona = R._zona_de(org)
     jornadas, reciben, receptores, ordenes = jornadas_y_ordenes(org, fecha)
-    asunto_de = asuntos_de_las_ordenes(org, ordenes)
+
+    #  POR REVISAR (31/10/2026): lo terminado en campo que nadie cerro, DE
+    #  CUALQUIER DIA. Las del dia salen en su cuadrilla; las de antes no salian
+    #  en ningun lado: en produccion la OT #4, terminada el 30 y sin aprobar, el
+    #  31 no estaba ni en Hoy ni en Cerradas (el usuario: «en la supervisor no
+    #  sale el ticket»). Quedan aca hasta que alguien la apruebe y la cierre.
+    del_dia_ids = {o.id for o in ordenes}
+    por_revisar = [
+        o for o in (OrdenTrabajo.objects
+                    .filter(org=org, estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO)
+                    .select_related("tipo_trabajo_version__work_type")
+                    .prefetch_related("asignaciones__profile__user")
+                    .order_by("completada_campo_en", "numero"))
+        if o.id not in del_dia_ids]
+    #  Los tiempos, el asunto, quien la asigno y el aviso se calculan para las
+    #  dos listas; las cuadrillas y las cuentas del dia siguen siendo del dia.
+    todas = [*ordenes, *por_revisar]
+    asunto_de = asuntos_de_las_ordenes(org, todas)
 
     #  EL SEGUIMIENTO (30/10/2026): cuanto lleva cada orden y si dejo de
     #  reportar. Lo que no se pudo calcular no tumba Programacion.
     ahora = timezone.now()
     try:
-        tiempos = TD.tiempos_de(ordenes, zona=zona, ahora=ahora, fecha=fecha)
+        tiempos = TD.tiempos_de(todas, zona=zona, ahora=ahora, fecha=fecha)
     except Exception:                                            # noqa: BLE001
         logger.warning("Programacion: no se pudieron calcular los tiempos")
         tiempos = {}
@@ -397,14 +415,14 @@ def del_dia(org, fecha) -> dict:
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
     for ev in (EventoTrabajo.objects
-               .filter(org=org, orden_id__in=[o.id for o in ordenes],
+               .filter(org=org, orden_id__in=[o.id for o in todas],
                        tipo__in=EVENTOS_DE_ASIGNACION)
                .select_related("profile__user").order_by("created_at", "id")):
         ultimo[ev.orden_id] = ev
 
     #  EL AVISO: la notificacion de la asignacion, si salio al telefono, y si
     #  hay telefono. Ver el encabezado.
-    perfiles = {a.profile_id for o in ordenes for a in o.asignaciones.all()}
+    perfiles = {a.profile_id for o in todas for a in o.asignaciones.all()}
     con_telefono = set(
         DispositivoDeTecnico.objects.filter(org=org, activo=True,
                                             profile_id__in=perfiles)
@@ -442,6 +460,29 @@ def del_dia(org, fecha) -> dict:
             notificado.add((n["recipient_id"], numero))
             if salio:
                 al_telefono.add((n["recipient_id"], numero))
+
+    #  LOS RECORDATORIOS DE CADA ORDEN (31/10/2026). El log de la cuadrilla
+    #  solo muestra lo abierto, asi que al terminarse la orden el recordatorio
+    #  desaparecia de todos lados: el usuario probo la vibracion con la OT #4 y
+    #  no habia donde ver si el Supervisor se lo mando. Desde que se creo la
+    #  orden mas vieja de la pantalla; la clave la arma `services/avisos.py`:
+    #  `sin_reporte|<orden>|<referencia>`.
+    recordatorios = {}
+    if todas:
+        ids = {str(o.id) for o in todas}
+        for clave, canales, cuando in (
+                AvisoEnviado.objects
+                .filter(org=org, clave__startswith=f"{avisos.CLAVE_SIN_REPORTE}|",
+                        created_at__gte=min(o.created_at for o in todas))
+                .order_by("created_at").values_list("clave", "canales", "created_at")):
+            partes = clave.split("|")
+            if len(partes) > 2 and partes[1] in ids:
+                local = cuando.astimezone(zona)
+                recordatorios.setdefault(partes[1], []).append({
+                    "cuando": local.strftime("%H:%M" if local.date() == fecha
+                                             else "%d/%m %H:%M"),
+                    "llego": "push" in (canales or []),
+                })
 
     def fila(o) -> dict:
         quienes = sorted(o.asignaciones.all(),
@@ -495,6 +536,7 @@ def del_dia(org, fecha) -> dict:
             #  30/10/2026: cuanto lleva, y la regla de los 30 minutos.
             "tiempos": tiempos.get(o.id),
             "seguimiento": salud.get(o.id),
+            "recordatorios": recordatorios.get(str(o.id), []),
             #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
             #  valido trae lo que dice el Supervisor. Indica, no decide.
             "revision": revision_de(o),
@@ -611,6 +653,10 @@ def del_dia(org, fecha) -> dict:
             "por_que": por_que.get(str(o.id), ("", ""))[1],
         } for o in sorted(esperan, key=lambda o: (
             _RANGO_PRIORIDAD.get(o.prioridad or "", 3), o.numero))],
+        #  La mas vieja primero: es la que lleva mas tiempo esperando.
+        "por_revisar": [{**fila(o), "terminada_el": (
+            o.completada_campo_en.astimezone(zona).strftime("%d/%m %H:%M")
+            if o.completada_campo_en else "")} for o in por_revisar],
         "cuentas": {
             "publicadas": len(filas),
             "por_el_supervisor": sum(1 for f in filas if f["asignada_por"] == SUPERVISOR),
@@ -618,5 +664,6 @@ def del_dia(org, fecha) -> dict:
             "sin_registro": sum(1 for f in filas if not f["asignada_por"]),
             "avisadas": sum(1 for f in filas if f["aviso"] == AVISADO),
             "esperan": len(esperan),
+            "por_revisar": len(por_revisar),
         },
     }

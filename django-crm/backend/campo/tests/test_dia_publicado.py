@@ -16,6 +16,9 @@ publicado un dia, para la pantalla de Programacion. Cada punto, con su prueba:
   D  el DIA: lo programado para otro dia no entra; lo terminado ese dia si,
      lo terminado otro dia no.
   P  solo quien gestiona, con fecha, y solo su empresa.
+  R  POR REVISAR (31/10/2026): lo terminado en campo y sin cerrar de un dia
+     anterior sale aparte, hasta que alguien lo apruebe y lo cierre. Y cada
+     orden trae los recordatorios que el Supervisor le mando, terminada o no.
   B  el boton deja quien publico SIN congelar la orden para el reparto.
 
     pytest campo/tests/test_dia_publicado.py
@@ -586,6 +589,95 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     assert _filas(d)[asignada.numero]["direccion"] == "Calle 38 # 78-33"
     assert texto.count("Calle 38") == 1, "la direccion, solo en la orden asignada"
     assert "3113683499" not in texto, "el telefono, nunca"
+
+
+# ---------------------------------------------------------------------------
+# R · por revisar
+# ---------------------------------------------------------------------------
+
+def _terminada(org, version, de, dia, *, validacion=OrdenTrabajo.PENDIENTE,
+               estado=OrdenTrabajo.COMPLETADA_CAMPO):
+    o = _orden(org, version, de=de, estado=estado)
+    OrdenTrabajo.objects.filter(pk=o.pk).update(
+        estado_validacion=validacion,
+        completada_campo_en=timezone.make_aware(dt.datetime.combine(dia, dt.time(14, 0))))
+    return o
+
+
+def test_r_lo_terminado_sin_cerrar_de_otro_dia_sale_por_revisar(
+        org_a, org_b, version, norte, admin_profile):
+    """31/10/2026, en produccion: la OT #4 se termino el 30 y el 31 no salia ni
+    en Hoy ni en Cerradas. El usuario: «en la supervisor no sale el ticket»."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    domingo = LUNES - dt.timedelta(days=1)
+    pendiente = _terminada(org_a, version, admin_profile, domingo)
+    vieja = _terminada(org_a, version, admin_profile, LUNES - dt.timedelta(days=9))
+    aprobada = _terminada(org_a, version, admin_profile, domingo,
+                          validacion=OrdenTrabajo.APROBADO)
+    de_hoy = _terminada(org_a, version, admin_profile, LUNES)
+    cerrada = _terminada(org_a, version, admin_profile, domingo,
+                         validacion=OrdenTrabajo.APROBADO, estado=OrdenTrabajo.CERRADA)
+    wt = WorkType.objects.create(org=org_b, codigo="ftth", nombre="FTTH",
+                                 labor=JornadaDeCuadrilla.INSTALACION)
+    vb = WorkTypeVersion.objects.create(work_type=wt, version=1,
+                                        estado=WorkTypeVersion.PUBLICADA,
+                                        esquema={"campos": []})
+    ajena = _terminada(org_b, vb, admin_profile, domingo)
+
+    d = D.del_dia(org_a, LUNES)
+
+    por_revisar = {f["numero"]: f for f in d["por_revisar"]}
+    assert [f["numero"] for f in d["por_revisar"]] == [vieja.numero, pendiente.numero,
+                                                       aprobada.numero], \
+        "las de antes, la mas vieja primero; ni la de hoy, ni la cerrada, ni la ajena"
+    assert de_hoy.numero in _filas(d), "la de hoy sigue en su cuadrilla"
+    assert pendiente.numero not in _filas(d)
+    assert cerrada.numero not in por_revisar and ajena.numero not in por_revisar
+    assert por_revisar[pendiente.numero]["revision"] is not None, \
+        "trae lo que dice el Supervisor, para aprobar o devolver"
+    assert por_revisar[aprobada.numero]["validacion"] == OrdenTrabajo.APROBADO
+    assert por_revisar[pendiente.numero]["terminada_el"].startswith("04/10")
+    assert por_revisar[pendiente.numero]["tecnicos"]
+    assert d["cuentas"]["por_revisar"] == 3
+    assert d["cuentas"]["publicadas"] == 1, "las cuentas del dia siguen siendo del dia"
+
+
+def test_r2_cada_orden_trae_sus_recordatorios_aunque_este_terminada(
+        org_a, org_b, version, norte, admin_profile):
+    """31/10/2026: el usuario probo la vibracion con la OT #4, la termino, y no
+    habia donde ver si el Supervisor le mando el recordatorio: el log de la
+    cuadrilla solo muestra lo abierto."""
+    from campo.avisos import AvisoEnviado
+
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    domingo = LUNES - dt.timedelta(days=1)
+    terminada = _terminada(org_a, version, admin_profile, domingo)
+    en_curso = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    callada = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    OrdenTrabajo.objects.filter(pk__in=[terminada.pk, en_curso.pk, callada.pk]).update(
+        created_at=timezone.make_aware(dt.datetime.combine(domingo, dt.time(7, 0))))
+
+    def recordo(orden, dia, hora, canales, org=org_a):
+        a = AvisoEnviado.objects.create(org=org, clave=f"sin_reporte|{orden.id}|{dia}T{hora}",
+                                        canales=canales)
+        AvisoEnviado.objects.filter(pk=a.pk).update(created_at=timezone.make_aware(
+            dt.datetime.combine(dia, dt.time(*map(int, hora.split(":"))))))
+
+    recordo(terminada, domingo, "10:15", ["push"])
+    recordo(en_curso, LUNES, "09:40", [])
+    recordo(callada, LUNES, "09:50", ["push"], org=org_b)
+    #  Otra clave de la misma orden no es un recordatorio.
+    AvisoEnviado.objects.create(org=org_a, clave=f"asignacion|{callada.id}|1", canales=["push"])
+
+    d = D.del_dia(org_a, LUNES)
+
+    por_revisar = {f["numero"]: f for f in d["por_revisar"]}
+    assert por_revisar[terminada.numero]["recordatorios"] == [
+        {"cuando": "04/10 10:15", "llego": True}], "de otro dia, con su fecha"
+    assert _filas(d)[en_curso.numero]["recordatorios"] == [
+        {"cuando": "09:40", "llego": False}], "si no llego al telefono, se dice"
+    assert _filas(d)[callada.numero]["recordatorios"] == [], \
+        "ni lo de otra empresa ni otra clave cuentan"
 
 
 # ---------------------------------------------------------------------------

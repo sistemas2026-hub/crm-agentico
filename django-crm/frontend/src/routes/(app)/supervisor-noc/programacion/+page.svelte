@@ -15,6 +15,7 @@
   import NovedadesDeLaCuadrilla from '$lib/supervisor/NovedadesDeLaCuadrilla.svelte';
   import SeguimientoDeCuadrillas from '$lib/supervisor/SeguimientoDeCuadrillas.svelte';
   import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
+  import PorRevisar from '$lib/supervisor/PorRevisar.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
     lineaDePersona,
@@ -181,6 +182,10 @@
         {#if form?.de === 'revision'}
           <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">{form?.hecho ?? form?.error}</p>
         {/if}
+        <!-- POR REVISAR (31/10/2026): lo terminado de días anteriores que nadie
+             cerró. Antes no salía en ningún lado (la OT #4 en producción). -->
+        <PorRevisar ordenes={publicado?.por_revisar ?? []} dia={data.dia} />
+
         {#if publicado?.cuadrillas?.length}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
             <span class="snoc-label">Seguimiento de las cuadrillas</span>
