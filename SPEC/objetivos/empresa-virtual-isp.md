@@ -1928,6 +1928,144 @@ aviso     consulta → acción → derivación → escalada
 
 Antes, cada uno de esos cuatro habría reemplazado la animación del cuerpo.
 
+---
+
+## P0.4 · La oficina dentro del CRM real — 31/10/2026
+
+### El entorno, y por qué no se pudo usar el del repositorio
+
+`docker-compose.yml` **no sirve para esto**, por tres razones medidas antes de
+escribir nada:
+
+1. El servicio `motor` hace `env_file: .env` — el de la **raíz**, que está en
+   `.gitignore` y tiene credenciales de producción. Levantarlo arrancaría un
+   contenedor apuntando a la base productiva.
+2. El volumen `postgres_data` está declarado `external: true`: lo comparte con
+   otros proyectos de esta máquina.
+3. Publica 5432, 6379, 5173 y 5000, y hay servicios de otras sesiones corriendo.
+
+Laboratorio propio en `oficinalab`: volúmenes propios, puertos 55500/55600/
+55700/55800, variables inventadas, **sin leer el `.env` de la raíz**.
+
+```
+db (pgvector:pg16) · redis · backend Django · motor Flask · frontend SvelteKit
+2 organizaciones ficticias, sembradas por `seed_data` (dominios reservados IANA)
+30 migraciones del motor aplicadas POR EL LEDGER
+configuración del tenant cargada: los 9 roles
+autenticación local real, por el formulario de login
+```
+
+### La comprobación del ledger que pidió la auditoría
+
+```
+archivo   202610302200_ejecuciones.sql
+sha256    d8d64e376b9d34fad5246cce522af80f9043852ad74aa9139d309380a3cf2e1a
+          (algoritmo sha256-utf8-lf-v1)
+```
+
+En el laboratorio figuraba **pendiente** antes de aplicarla y quedó anotada con
+ese checksum: no había una versión distinta registrada.
+
+Para los entornos que esta sesión no alcanza, la comprobación es una consulta:
+
+```sql
+select archivo, sha256 from asistente.migraciones_aplicadas
+ where archivo = '202610302200_ejecuciones.sql';
+```
+
+Cero filas = nunca aplicada. Ese sha256 = es esta versión. **Otro sha256** = se
+aplicó una distinta y modificarla en el sitio fue un error que hay que revertir.
+No se consultó producción ni bases de otras sesiones, y no se intentó.
+
+### DEFECTO 1 — E1 nunca había funcionado
+
+`/eventos` devolvía **HTTP 500** la primera vez que el motor lo sirvió de
+verdad.
+
+`sesion()` abre la conexión con `row_factory=dict_row`, así que una fila es un
+diccionario. `eventos_desde` estaba escrita **por índice** de principio a fin:
+`cur.fetchone()[0]` para la frontera, `for (a, b, c, ...) in filas` para
+desempaquetar, `filas[-1][0]` para el cursor siguiente. Todo `KeyError`.
+
+**La función entera nunca se había ejecutado.**
+
+Y había un segundo fallo escondido detrás del primero: `_retraso_del_flujo`
+hacía `fila[0]` dentro de un `try/except Exception: return None` puesto para el
+caso sin permiso sobre `pg_stat_activity`. El `KeyError` caía ahí, así que la
+función devolvía `None` **siempre** y la pantalla leía «no se pudo medir el
+retraso» sin que nada fallara. Un fallo silencioso escondido detrás de un fallo
+silencioso previsto.
+
+**Por qué ninguna prueba lo vio, y lo dice su propio comentario:**
+
+> «Se copia aquí en vez de importar db.py porque ese módulo abre su propia
+> sesión contra la base de verdad; lo que se prueba es la GARANTÍA de la
+> consulta.»
+
+La prueba de E1 verificaba el SQL, no el código que lo usa. Es
+`PARSEA ≠ IMPORTA ≠ FUNCIONA` en el único sitio donde faltaba.
+
+Arreglado leyendo por nombre, y el `except` ahora **registra** en vez de callar.
+Prueba nueva, `tests/test_eventos_desde_integracion.py`, que **llama a la
+función**: 18 comprobaciones en verde.
+
+### DEFECTO 2 — configuración del laboratorio, mío
+
+El frontend pedía `/api/api/auth/login/` y la pantalla decía «Correo o
+contraseña incorrectos» — **que era falso**: las credenciales estaban bien y la
+ruta no existía. Un 404 disfrazado de credenciales malas. `PUBLIC_DJANGO_API_URL`
+no lleva `/api`: lo agrega el cliente.
+
+### Las cinco validaciones
+
+**1 · Integración.** `/centro-mando/v2` carga dentro del CRM, con la barra
+lateral, la organización de la sesión y las siete vistas. **293 objetos a 144
+fps** en el NOC; **1.292 a 144 fps** con la empresa entera. Sin sesión,
+redirige **307**.
+
+**2 · Seguridad multiempresa.** Con la sesión en la segunda organización
+—que no tiene tenant configurado— la oficina muestra **la sala vacía**, los
+puestos dicen «agente no encontrado» y `/api/eventos` devuelve **500 sin un
+solo dato**. No cae a un tenant por defecto: **falla cerrado**. Y en el motor,
+el evento sembrado en la organización 2 **no sale** en el flujo de la 1.
+
+**3 · Funcionamiento visual.** Las seis salas y la vista de empresa renderizan;
+la selección abre la ficha; la rueda hace zoom; las animaciones corren.
+
+**4 · Estados operativos.** Con `supervisor_noc` sentado desde el inventario
+real y una ejecución abierta en la base, la ficha dice **«Un turno en curso»**
+y el diagnóstico muestra consultas, turnos en curso y el cursor de E1
+avanzando. Al **detener el motor**, el indicador pasa a «Sin información · la
+última lectura falló» en 5 s —una lectura fallida es evidencia inmediata, no
+hace falta esperar el silencio de 40 s—, el motivo escala a «el motor no
+responde» al cruzarlo, y **las seis salas se apagan a la vez**. Al levantarlo,
+vuelve a «Actualizado» en un sondeo.
+
+**5 · Ciclo de vida.** Navegar fuera y volver remonta la escena con **los
+mismos 293 objetos**: sin fuga. Recorrer las siete vistas no deja errores.
+
+**Resoluciones.** 1625×600 (escritorio) y 1366×768 (portátil): el lienzo se
+ajusta al contenedor, no hay desbordamiento horizontal, 144 fps en las dos.
+
+### Lo que NO se validó, y hay que decirlo
+
+- **Rendimiento de la aplicación entera.** Los 144 fps son del dibujo. El coste
+  de la escritura de ejecuciones con `--workers 1` sigue sin medirse en carga.
+- **La consola muestra un 500 cada 12 s** con una organización sin asistente
+  configurado: el flujo reintenta indefinidamente una ruta que nunca va a
+  funcionar para esa empresa. No rompe nada y es ruido; dejarlo de reintentar
+  ante «no configurado» es trabajo pendiente.
+- **El historial de eventos sale vacío al entrar**, y es por diseño: el flujo
+  arranca en la frontera actual y no entrega histórico. La foto que lo
+  completaría es `/api/centro-mando`, que esta pantalla todavía no pide.
+- **Playwright como suite** no se montó: las comprobaciones de navegador se
+  hicieron conduciendo la página, no con pruebas que alguien pueda volver a
+  correr. Montarlas es trabajo aparte.
+- **Los 62 rojos preexistentes** siguen como estaban; no se tocaron.
+- **Las dos pruebas con base del laboratorio no pueden compartir instancia**:
+  cada una borra `public.organization` al preparar, y la otra tiene filas que la
+  referencian. Se corren en contenedores separados.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

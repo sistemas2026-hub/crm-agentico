@@ -5183,8 +5183,15 @@ def eventos_desde(tenant: str, cursor: tuple[str, str] | None = None,
             #  pide la foto DESPUES de esto, asi que cualquier evento entre
             #  ambas lecturas llega por los dos caminos -- duplicado, no
             #  perdido. Deduplicar por id es trivial; recuperar un hueco, no.
-            cur.execute(f"select {_FRONTERA}::text")
-            return {"eventos": [], "siguiente": [cur.fetchone()[0], _UUID_CERO],
+            #  Por NOMBRE y no por indice: `sesion()` abre la conexion con
+            #  `row_factory=dict_row`, asi que una fila es un dict y `[0]`
+            #  levanta KeyError. Esta funcion entera estaba escrita por indice
+            #  y NUNCA se habia ejecutado -- la prueba de E1 copia la consulta
+            #  en vez de llamar aqui, asi que verificaba la garantia del SQL y
+            #  no el codigo que la usa. Se descubrio el 31/10/2026, la primera
+            #  vez que el motor sirvio /eventos de verdad.
+            cur.execute(f"select {_FRONTERA}::text as frontera")
+            return {"eventos": [], "siguiente": [cur.fetchone()["frontera"], _UUID_CERO],
                     "salto": False, "retraso_s": _retraso_del_flujo(cur)}
 
         tx, ident = cursor
@@ -5203,17 +5210,17 @@ def eventos_desde(tenant: str, cursor: tuple[str, str] | None = None,
         filas = cur.fetchall()
 
         eventos = []
-        for (f_tx, f_id, herr, rol, exito, escritura, err, ms, cuando,
-             params) in filas:
+        for f in filas:
+            params = f["parametros"]
             eventos.append({
-                "id": f_id,
-                "en": cuando.isoformat(),
-                "agente": rol,
-                "tipo": ("herramienta_fallida" if not exito
-                         else "accion" if escritura else "consulta"),
-                "herramienta": herr,
-                "duracion_ms": ms,
-                "codigo_error": err,
+                "id": f["id"],
+                "en": f["creado_en"].isoformat(),
+                "agente": f["rol_solicitante"],
+                "tipo": ("herramienta_fallida" if not f["exito"]
+                         else "accion" if f["es_escritura"] else "consulta"),
+                "herramienta": f["herramienta"],
+                "duracion_ms": f["duracion_ms"],
+                "codigo_error": f["codigo_error"],
                 #  Solo la lista blanca. 'area' es el destino de una derivacion
                 #  y sobrevive al enmascarado por ser un enum del catalogo; el
                 #  motivo y la cedula no salen de aqui.
@@ -5221,7 +5228,7 @@ def eventos_desde(tenant: str, cursor: tuple[str, str] | None = None,
                           if isinstance(params, dict) and c in params},
             })
 
-        siguiente = ([filas[-1][0], filas[-1][1]] if filas
+        siguiente = ([filas[-1]["tx"], filas[-1]["id"]] if filas
                      else [tx, ident])
         return {"eventos": eventos, "siguiente": siguiente,
                 "salto": False, "retraso_s": _retraso_del_flujo(cur)}
@@ -5242,15 +5249,26 @@ def _retraso_del_flujo(cur) -> float | None:
     """
     try:
         cur.execute("""select extract(epoch from (now() - min(xact_start)))
+                            as retraso
                          from pg_stat_activity
                         where backend_xid is not null
                           and pid <> pg_backend_pid()""")
         fila = cur.fetchone()
-        return round(float(fila[0]), 1) if fila and fila[0] is not None else None
-    except Exception:                                            # noqa: BLE001
+        #  Por NOMBRE: con `dict_row`, `fila[0]` levanta KeyError -- y el
+        #  `except` de abajo se lo tragaba, asi que esto devolvia None SIEMPRE
+        #  y la pantalla leia "no se pudo medir el retraso" sin que nada
+        #  fallara. Un fallo silencioso que se escondia detras de un fallo
+        #  silencioso previsto.
+        return (round(float(fila["retraso"]), 1)
+                if fila and fila["retraso"] is not None else None)
+    except Exception as e:                                       # noqa: BLE001
         #  Sin permiso sobre pg_stat_activity la consulta falla. No es motivo
         #  para tumbar la entrega de eventos: se devuelve None, que la pantalla
         #  ya sabe leer como "no se pudo medir".
+        #
+        #  Pero se REGISTRA. Tragarse la excepcion sin decir nada fue lo que
+        #  dejo escondido un KeyError durante toda la fase E1.
+        registrar("eventos", "no se pudo medir el retraso del flujo", error=e)
         return None
 
 
