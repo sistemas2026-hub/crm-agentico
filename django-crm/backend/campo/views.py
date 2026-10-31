@@ -1,0 +1,1393 @@
+# -*- coding: utf-8 -*-
+"""Vistas API REST del módulo campo."""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import uuid
+from datetime import datetime
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.http import Http404
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from campo.avisos import DispositivoDeTecnico
+from campo.models import EvidenciaTrabajo, EventoTrabajo, OrdenTrabajo
+from campo.permissions import IsCampoAuthenticated, PuedeAccederOrden, ROLES_GESTION
+from campo.serializers import (
+    AccionOperativaSerializer,
+    EvidenciaTrabajoSerializer,
+    GuardarDatosSerializer,
+    OrdenTrabajoDetailSerializer,
+    OrdenTrabajoListSerializer,
+    RegistroEvidenciaSerializer,
+)
+from campo.services.idempotencia import manejar_idempotencia
+from campo.services.materiales_de_orden import materiales_de_orden
+from campo.services import bloqueos
+from campo.services import historial_del_servicio
+from campo.services.formulario_del_trabajo import formulario_del_trabajo
+from campo.services import salud_seguimiento
+from campo.services import seguimiento_campo as seguimiento
+from campo.services import telemetria
+from campo.services import mediciones
+from campo.services.telemetria import (
+    TANDAS,
+    SinServicioParaPing,
+    probar_conexion,
+)
+from campo.services.storage import CampoStorage
+from campo.services.transiciones import (
+    OrdenYaNoAsignadaError,
+    TransicionInvalidaError,
+    completar_campo,
+    ejecutar_accion_operativa,
+)
+from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
+from campo import tasks as tareas_de_campo
+
+
+def _debe_estar_asignado(request) -> bool:
+    """La gestion actua sobre cualquier orden de su empresa; el resto, solo
+    sobre las que tiene asignadas. Una sola regla para leer la orden y para
+    volver a comprobarla bajo bloqueo (AccionesTrabajoView)."""
+    profile = getattr(request, "profile", None)
+    if not profile:
+        return False
+    rol = (profile.role or "").upper()
+    return rol not in ROLES_GESTION and not request.user.is_superuser
+
+
+def _obtener_orden_o_404(request, pk) -> OrdenTrabajo:
+    """Busca la orden garantizando aislamiento estricto (404, nunca 403) ante recursos de otro tenant."""
+    org = getattr(request, "org", None)
+    if not org:
+        raise Http404
+
+    orden = (
+        OrdenTrabajo.objects.select_related("tipo_trabajo_version__work_type", "org")
+        .prefetch_related("asignaciones__profile__user", "evidencias")
+        .filter(pk=pk, org=org)
+        .first()
+    )
+    if not orden:
+        raise Http404
+
+    # Permisos intra-tenant
+    if _debe_estar_asignado(request):
+        esta_asignado = orden.asignaciones.filter(profile=request.profile).exists()
+        if not esta_asignado:
+            raise Http404
+
+    return orden
+
+
+class BootstrapView(APIView):
+    """Configuración inicial, usuario, tenant, capacidades y reloj servidor."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        profile = request.profile
+        org = request.org
+
+        return Response({
+            "usuario": {
+                "id": str(profile.id),
+                "nombre": user.name or user.email,
+                "email": user.email,
+                "rol": profile.role or "tecnico",
+            },
+            "organizacion": {
+                "id": str(org.id),
+                "nombre": org.name,
+                # A quien llama el tecnico cuando algo no cuadra. Viaja SIEMPRE
+                # --aunque este vacio-- para que la app distinga «esta empresa
+                # no lo configuro» de «el servidor viejo no lo manda».
+                "telefono_soporte": _telefono_de_soporte(org),
+            },
+            "capacidades": {
+                "trabajos": True,
+                "offline": True,
+                "validacion_visual": False,
+            },
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class MiDiaView(APIView):
+    """``GET /api/campo/mi-dia/`` — con que cuadrilla y que labor sale hoy
+    quien pregunta, segun lo armado en Programacion (29/10/2026: el saludo de
+    Inicio, «tu labor para hoy es …»).
+
+    `jornada` va siempre, aunque sea null: la app distingue «hoy no sale con
+    ninguna cuadrilla» de «el servidor viejo no lo manda». `fecha` es el dia de
+    la EMPRESA, no el de Greenwich: la app no muestra una jornada de otro dia.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        from campo import reparto as R
+        from campo.dia_publicado import de_la_persona
+
+        hoy = timezone.now().astimezone(R._zona_de(request.org)).date()
+        return Response({
+            "fecha": hoy.isoformat(),
+            "jornada": de_la_persona(request.org, request.profile, hoy),
+        })
+
+
+#: Cuantas ordenes se entregan por pagina si el cliente no pide otra cosa.
+LIMITE_POR_DEFECTO = 100
+
+#: Techo duro. Una cuadrilla con mil ordenes no puede pedirlas todas de una:
+#: la respuesta no entra en memoria del telefono y el tiempo de espera hace
+#: que la sincronizacion se reintente encima de si misma.
+LIMITE_MAXIMO = 200
+
+
+def _limite_pedido(request) -> int:
+    """Cuantas filas pidio el cliente, acotado."""
+    crudo = request.query_params.get("limite")
+    if not crudo:
+        return LIMITE_POR_DEFECTO
+    try:
+        pedido = int(crudo)
+    except (TypeError, ValueError):
+        return LIMITE_POR_DEFECTO
+    return max(1, min(pedido, LIMITE_MAXIMO))
+
+
+def _escribir_cursor(orden) -> str:
+    """
+    Donde quedo la pagina: fecha de creacion e identificador.
+
+    Van los dos porque el orden es por fecha y la fecha se repite. Con solo la
+    fecha, dos ordenes del mismo milisegundo se pisan entre paginas.
+    """
+    crudo = f"{orden.created_at.isoformat()}|{orden.id}"
+    return base64.urlsafe_b64encode(crudo.encode("utf-8")).decode("ascii")
+
+
+def _leer_cursor(cursor: str):
+    """El corte que representa el cursor, o None si viene roto."""
+    try:
+        crudo = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        fecha_texto, ident = crudo.split("|", 1)
+        fecha = datetime.fromisoformat(fecha_texto)
+        return fecha, uuid.UUID(ident)
+    except (ValueError, TypeError, binascii.Error, UnicodeDecodeError):
+        return None
+
+
+class TrabajosListView(APIView):
+    """Listado de órdenes de trabajo disponibles para el técnico o supervisor."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = request.org
+        profile = request.profile
+        qs = (
+            OrdenTrabajo.objects.select_related("tipo_trabajo_version__work_type", "org")
+            .prefetch_related("asignaciones__profile__user")
+            .filter(org=org)
+        )
+
+        # Si no es supervisor/admin, fuerza a filtrar solo los asignados
+        rol = (profile.role or "").upper()
+        solo_mios = request.query_params.get("solo_mios", "").lower() in ("true", "1")
+        if rol not in ROLES_GESTION or solo_mios:
+            qs = qs.filter(asignaciones__profile=profile)
+
+        # Filtro de estado
+        estado = request.query_params.get("estado")
+        if estado:
+            estados = [e.strip() for e in estado.split(",") if e.strip()]
+            qs = qs.filter(estado_operativo__in=estados)
+
+        # Orden estable: sin un desempate, dos ordenes creadas en el mismo
+        # milisegundo pueden intercambiarse entre paginas y una se pierde.
+        qs = qs.distinct().order_by("-created_at", "-id")
+
+        limite = _limite_pedido(request)
+        cursor = request.query_params.get("cursor")
+        if cursor:
+            corte = _leer_cursor(cursor)
+            if corte is None:
+                return Response(
+                    {"detail": "El cursor no es valido."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            creada_en, ident = corte
+            qs = qs.filter(
+                Q(created_at__lt=creada_en)
+                | Q(created_at=creada_en, id__lt=ident)
+            )
+
+        # Se pide una fila de mas: es como se sabe si hay pagina siguiente sin
+        # contar la tabla entera.
+        filas = list(qs[: limite + 1])
+        hay_mas = len(filas) > limite
+        filas = filas[:limite]
+
+        #  El asunto de toda la pagina en una consulta, no una por orden.
+        from campo.niveles import asuntos_de_las_ordenes
+
+        serializer = OrdenTrabajoListSerializer(
+            filas, many=True,
+            context={"asuntos": asuntos_de_las_ordenes(org, filas)})
+        return Response(
+            {
+                "results": serializer.data,
+                "next_cursor": _escribir_cursor(filas[-1]) if hay_mas and filas else None,
+            }
+        )
+
+
+class TrabajoDetailView(APIView):
+    """Detalle completo descargable de una orden para ejecución offline."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        serializer = OrdenTrabajoDetailSerializer(orden)
+        return Response(serializer.data)
+
+
+class DispositivoDeCampoView(APIView):
+    """El telefono dice «este soy yo», para poder recibir una notificacion.
+
+    POR QUE ES UN POST Y NO ALGO QUE SE DEDUCE
+    ------------------------------------------
+    El token lo emite el servicio de notificaciones en el telefono y cambia solo:
+    al reinstalar, al limpiar datos, cada tanto por su cuenta. No hay forma de
+    que el servidor lo sepa si el telefono no lo dice. Por eso la app lo manda al
+    entrar y cada vez que cambia.
+
+    ES IDEMPOTENTE, Y NO POR PROLIJIDAD
+    -----------------------------------
+    La app lo va a mandar muchas veces --cada arranque--. Si cada envio creara
+    una fila, el mismo telefono recibiria el aviso cinco veces, que es
+    exactamente lo que hace que la gente apague las notificaciones. La unicidad
+    la garantiza la base: `(org, token)`.
+
+    DELETE da de baja el telefono de ESTE perfil. Se usa al cerrar sesion: un
+    telefono de cuadrilla pasa de mano en mano, y el que entra no tiene por que
+    recibir los avisos del que salio.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request):
+        token = (request.data.get("token") or "").strip()
+        if not token:
+            return Response(
+                {"detail": "Falta el token del dispositivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        plataforma = (request.data.get("plataforma") or "android").strip().lower()
+        if plataforma not in dict(DispositivoDeTecnico.PLATAFORMAS):
+            return Response(
+                {"detail": f"Plataforma '{plataforma}' desconocida."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        dispositivo, creado = DispositivoDeTecnico.objects.update_or_create(
+            org=request.org,
+            token=token,
+            defaults={
+                # El perfil se REESCRIBE a proposito: si el telefono cambio de
+                # dueño, los avisos tienen que seguir a quien lo tiene ahora.
+                "profile": request.profile,
+                "plataforma": plataforma,
+                "activo": True,
+            },
+        )
+        return Response(
+            {"id": str(dispositivo.id), "nuevo": creado},
+            status=status.HTTP_201_CREATED if creado else status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        token = (request.data.get("token") or "").strip()
+        qs = DispositivoDeTecnico.objects.filter(
+            org=request.org, profile=request.profile
+        )
+        if token:
+            qs = qs.filter(token=token)
+        # Se desactiva, no se borra: un token que dejo de servir y CUANDO dejo de
+        # servir es lo que permite contestar por que un aviso no llego.
+        bajas = qs.update(activo=False)
+        return Response({"dados_de_baja": bajas})
+
+
+class SeguimientoDeOrdenView(APIView):
+    """La bitacora de la intervencion: leerla entera, o agregarle un reporte.
+
+    GET  devuelve la linea de tiempo --los cuatro momentos mezclados con los nueve
+         eventos que ya se escribian-- mas los formularios vigentes, para que la
+         app y la pantalla dibujen lo que ESTE tipo de trabajo pide sin saberlo de
+         antemano.
+    POST agrega un reporte: `momento` (inicio, avance, bloqueo, cierre) y
+         `respuestas`.
+
+    NO MUEVE EL ESTADO OPERATIVO, y no es un olvido: la maquina de estados vive en
+    `services/transiciones.py` y NIEGA los saltos invalidos. Que `bloqueada` sea
+    un estado --con sus transiciones y su estado de retorno-- es la fase siguiente.
+    Ver SPEC/objetivos/seguimiento-campo-por-ticket.md, decision 1.
+
+    El aislamiento lo da `_obtener_orden_o_404`: otra empresa recibe 404 --nunca
+    403-- y un tecnico que no esta asignado tampoco la ve.
+
+    La idempotencia sale de la cabecera `Idempotency-Key`, que es la que manda la
+    cola offline del telefono. Sin ella, un reintento de red dejaria dos AVANCE
+    identicos y la bitacora contaria dos hechos donde hubo uno.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        datos = seguimiento.linea_de_tiempo(orden)
+        datos["formularios"] = {
+            m: seguimiento.formulario_de(orden, m) for m in seguimiento.MOMENTOS
+        }
+        # El bloqueo vivo, si hay. La ficha lo necesita para poder decir dos cosas
+        # distintas: "detenida desde tal hora, vuelve a tal estado" y "reportado,
+        # pero el estado operativo NO cambió".
+        abierto = bloqueos.bloqueo_abierto_de(orden)
+        datos["bloqueo_abierto"] = bloqueos.serializar(abierto) if abierto else None
+        datos["estado_operativo"] = orden.estado_operativo
+        # La salud del seguimiento viaja con la bitacora: es la misma pregunta
+        # --"¿este trabajo esta reportando?"-- y separarla en otra llamada haria
+        # que la pantalla mostrara la linea de tiempo y el veredicto en dos
+        # momentos distintos.
+        #
+        # El BACKEND decide y la pantalla dibuja. Reconstruir la regla en el
+        # frontend seria repetir el defecto que encontro la fase C: la regla
+        # viviria en dos lados y uno se quedaria viejo.
+        datos["salud"] = salud_seguimiento.calcular(orden)
+        # Lo que llenó en el formulario del trabajo y las fotos del checklist
+        # (18/10/2026). Se guardaban y ninguna pantalla los mostraba. Viajan
+        # con la bitácora porque es la misma pregunta --qué hizo el técnico--
+        # y porque su proxy la pasa entera: no hay una capa nueva que pueda
+        # dejar caer un campo.
+        datos["formulario_del_trabajo"] = formulario_del_trabajo(orden)
+        return Response(datos)
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        momento = str(request.data.get("momento") or "").strip().lower()
+        respuestas = request.data.get("respuestas") or {}
+        if not isinstance(respuestas, dict):
+            return Response(
+                {"error": "RESPUESTAS_INVALIDAS",
+                 "detalle": "'respuestas' tiene que ser un objeto."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            if momento == seguimiento.BLOQUEO:
+                # UN SOLO CAMINO para un bloqueo. Si esta ruta escribiera solo el
+                # evento, habria dos formas de reportar lo mismo y una de ellas no
+                # dejaria la fila que la bandeja del NOC necesita.
+                #
+                # `requiere_noc` viaja aparte de las respuestas a proposito: el
+                # campo del formulario lo nombra cada empresa como quiere, y un
+                # filtro que depende de ese nombre deja de funcionar con la
+                # segunda. Ver campo/bloqueos.py.
+                _bloqueo, evento, _detuvo = bloqueos.bloquear(
+                    orden,
+                    profile=getattr(request, "profile", None),
+                    respuestas=respuestas,
+                    requiere_noc=bool(request.data.get("requiere_noc")),
+                    detener=request.data.get("detener", True) is not False,
+                    capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+                )
+            else:
+                evento = seguimiento.registrar(
+                    orden,
+                    profile=getattr(request, "profile", None),
+                    momento=momento,
+                    respuestas=respuestas,
+                    capturado_en_dispositivo=request.data.get("capturado_en_dispositivo"),
+                    sin_material_confirmado=(
+                        request.data.get("sin_material_confirmado") is True),
+                )
+        except bloqueos.BloqueoInvalido as e:
+            return Response(
+                {"error": "BLOQUEO_INVALIDO", "detalle": e.mensaje, "campos": e.errores},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        except seguimiento.SeguimientoInvalido as e:
+            # 422 y no 400: el cuerpo esta bien formado y la ruta es la correcta;
+            # lo que no se puede es aceptar ESTE contenido. Con un 400 para las dos
+            # cosas, la pantalla no sabe si reintentar o pedirle algo a la persona.
+            return Response(
+                {"error": "SEGUIMIENTO_INVALIDO", "detalle": e.mensaje,
+                 "campos": e.errores},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        #  EL REPORTE DE CIERRE DESPIERTA AL SUPERVISOR (31/10/2026). Es la
+        #  mitad de la condicion --la otra es que la orden quede completada--
+        #  y cual llega ultima depende de la app y de si venia offline. Por
+        #  eso se dispara desde las DOS y la tarea decide: la que llegue
+        #  primero no va a encontrar nada que hacer y no escribe nada.
+        if evento.tipo == seguimiento.TIPOS[seguimiento.CIERRE]:
+            tareas_de_campo.pedir_revision_del_cierre(orden)
+
+        return Response(
+            {
+                "id": str(evento.id),
+                "tipo": evento.tipo,
+                "etiqueta": seguimiento.ETIQUETAS.get(evento.tipo, evento.tipo),
+                "recibido_en": evento.created_at.isoformat() if evento.created_at else None,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ResolverBloqueoView(APIView):
+    """Destraba un trabajo detenido.
+
+    El estado al que vuelve NO se adivina: lo guardo la fila del bloqueo cuando se
+    abrio, y la maquina de transiciones valida que ese retorno sea legal. Se puede
+    pedir otro destino --el mundo cambio mientras estaba trabado-- y se valida
+    igual.
+
+    Idempotente por `Idempotency-Key`: destrabar dos veces por un reintento de red
+    dejaria dos eventos y una historia que cuenta dos resoluciones donde hubo una.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        bloqueo = bloqueos.bloqueo_abierto_de(orden)
+        if bloqueo is None:
+            return Response(
+                {"error": "SIN_BLOQUEO_ABIERTO",
+                 "detalle": "Esta orden no tiene ningún bloqueo abierto."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            bloqueo, evento, volvio_a = bloqueos.resolver(
+                bloqueo,
+                profile=getattr(request, "profile", None),
+                que_se_hizo=request.data.get("que_se_hizo", ""),
+                resuelto_por_rol=request.data.get("resuelto_por_rol", ""),
+                volver_a=request.data.get("volver_a") or None,
+            )
+        except bloqueos.BloqueoInvalido as e:
+            return Response(
+                {"error": "BLOQUEO_INVALIDO", "detalle": e.mensaje, "campos": e.errores},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        # El estado sale de la instancia que la transicion MOVIO --la que cuelga
+        # del bloqueo--, no de la que cargo esta vista: son dos objetos distintos
+        # en memoria apuntando a la misma fila, y el de aca quedo viejo. La
+        # pantalla pinta el estado con esto, asi que devolverlo sin refrescar
+        # mostraria "bloqueada" justo despues de destrabar.
+        return Response(
+            {
+                "bloqueo": bloqueos.serializar(bloqueo),
+                "evento_id": str(evento.id),
+                "volvio_a": volvio_a,
+                "estado_operativo": bloqueo.orden.estado_operativo,
+            }
+        )
+
+
+class BloqueosAbiertosView(APIView):
+    """Los bloqueos vivos de la empresa, para los filtros de la bandeja.
+
+    `?requiere_noc=1` devuelve SOLO los que le tocan al NOC. Son dos filtros
+    distintos y los dos dicen la verdad: un trabajo detenido esperando al cliente
+    esta bloqueado y NO requiere NOC, y mezclarlos llenaria esa bandeja de cosas
+    que nadie de esa mesa puede resolver.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = getattr(request, "org", None)
+        if org is None:
+            raise Http404
+        solo_noc = str(request.query_params.get("requiere_noc", "")).lower() in (
+            "1", "true", "si", "sí",
+        )
+        filas = bloqueos.abiertos_de(org, solo_noc=solo_noc)
+        return Response({"bloqueos": filas, "total": len(filas)})
+
+
+class SaludDelSeguimientoView(APIView):
+    """La salud del seguimiento de todas las ordenes en ejecucion.
+
+    Una llamada para toda la bandeja, en vez de una por fila: con veinte lineas
+    serian veinte viajes y el calculo es el mismo.
+
+    NO DEVUELVE UN ESTADO GUARDADO. Se calcula al preguntar, a proposito: un
+    veredicto guardado diria "al dia" mientras el reloj sigue corriendo, y haria
+    falta un proceso que lo refresque. Ver campo/services/salud_seguimiento.py.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        org = getattr(request, "org", None)
+        if org is None:
+            raise Http404
+        return Response(salud_seguimiento.resumen_de_org(org))
+
+
+class MaterialesDeOrdenView(APIView):
+    """Que material toco esta orden: comprometido, consumido, devuelto y otros.
+
+    Solo lectura, y a proposito: la ficha de una orden no es lugar para mover
+    inventario. Despachar, devolver y trasladar siguen entrando por sus propias
+    rutas, que son las que tienen la frontera puesta.
+
+    El aislamiento lo da `_obtener_orden_o_404`: una orden de otra empresa
+    responde 404 --nunca 403-- y un tecnico que no esta asignado tampoco la ve.
+    No se repite el chequeo aca para que exista UN solo lugar donde se decide
+    quien puede leer una orden.
+
+    `?custodia=1` agrega el kit vigente del tecnico como CONTEXTO. Viene apagado
+    por defecto porque no es material de esta orden, y la respuesta lo dice en el
+    propio dato (`es_de_esta_orden: false`).
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        incluir = str(request.query_params.get("custodia", "")).lower() in (
+            "1", "true", "si", "sí",
+        )
+        return Response(
+            materiales_de_orden(orden, incluir_custodia=incluir)
+        )
+
+
+class RefrescarFichaView(APIView):
+    """Volver a pedir la ficha del equipo de una orden, desde el terreno.
+
+    POR QUE EXISTE (17/10/2026)
+    ---------------------------
+    La ficha se pide UNA vez, al crear la orden. Si en ese momento el motor no
+    contestaba, la orden quedaba sin niveles, sin estado del equipo y SIN
+    SERIAL -- y sin serial tampoco se puede «Volver a medir». La app le decia
+    al técnico «Se reintenta al sincronizar», y no se reintentaba nunca:
+    `despacho.refrescar_contexto` existía, probado, y no tenía ningún llamador.
+
+    Es el mismo refresco: si falla, la ficha anterior queda EXACTAMENTE como
+    estaba; si anda, la anterior queda guardada en la bitácora. Manual a
+    propósito: cada pedido le pega al sistema del ISP, que tiene límite de
+    tasa.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.serializers import OrdenTrabajoDetailSerializer
+        from campo.services.despacho import ErrorDespacho, refrescar_contexto
+
+        orden = _obtener_orden_o_404(request, pk)
+        try:
+            resultado = refrescar_contexto(orden, profile=request.profile)
+        except ErrorDespacho as e:
+            return Response({"ok": False, "motivo": "no_admite", "detalle": str(e)},
+                            status=status.HTTP_409_CONFLICT)
+        if resultado.get("ok"):
+            orden.refresh_from_db()
+            resultado["orden"] = OrdenTrabajoDetailSerializer(orden).data
+        return Response(resultado)
+
+
+class MedirSenalView(APIView):
+    """Volver a medir la señal optica del equipo, desde el terreno.
+
+    LA QUE TRAE LA FICHA ES DE CUANDO SE ARMO LA ORDEN. Si eso fue a las 08:10 y
+    el tecnico llego a las 14:00, esa lectura tiene seis horas -- y justo despues
+    de limpiar un conector o cambiar una roseta, lo unico que contesta «¿quedo
+    bien?» es volver a medir.
+
+    NO PISA LA LECTURA CONGELADA. `orden.contexto` es el registro de como estaba
+    el servicio ANTES de la visita, que es lo que permite decir despues si la
+    visita sirvio. Esta ruta devuelve una lectura nueva con SU hora; quien la
+    muestra la pone al lado de la vieja.
+
+    TRES RESPUESTAS, igual que el ping:
+      200 ok=true    se midio -- con los niveles y la hora
+      200 ok=false   no se pudo medir, con el motivo
+      409            la orden no tiene serial: no hay a que equipo preguntarle
+
+    «No se pudo medir» y «se midio y esta mal» son cosas distintas, y esa
+    diferencia es el punto entero: la primera se reintenta, la segunda es un dato
+    sobre el equipo del cliente.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        try:
+            resultado = telemetria.medir_senal(orden)
+        except telemetria.SinEquipoParaMedir as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        # Queda en la bitacora, con su hora y quien la pidio (18/10/2026). Antes
+        # volvia al telefono y se perdia: justo el «despues» de la visita.
+        mediciones.anotar_senal(orden, request.profile, resultado)
+        return Response(resultado)
+
+
+def _telefono_de_soporte(org) -> str:
+    """El numero del NOC de esta empresa, o vacio si no lo configuro.
+
+    Vacio no es un error: ninguna empresa nace con esto puesto, y la aplicacion
+    simplemente no dibuja el boton.
+    """
+    from campo.avisos import ConfiguracionDeAvisos
+
+    config = ConfiguracionDeAvisos.objects.filter(org=org).first()
+    return (config.telefono_soporte if config else "") or ""
+
+
+class HistorialDelServicioView(APIView):
+    """Las ultimas visitas al MISMO servicio, para quien esta en la puerta.
+
+    POR QUE EXISTE
+    --------------
+    El cliente dice «ya llame tres veces» y el tecnico no tiene con que
+    contestar: la ficha le da el numero de ticket y nada mas. Es la llamada al
+    NOC mas frecuente de la lista que armo el tecnico, y el dato ya estaba en la
+    base -- son ordenes del mismo abonado, y nadie se las mostraba.
+
+    SE AGRUPA POR EL IDENTIFICADOR DEL ABONADO, NUNCA POR NOMBRE
+    -----------------------------------------------------------
+    Agrupar por nombre o direccion devolveria visitas de otra persona, y el
+    tecnico decidiria sobre eso: le diria al cliente «ya le cambiamos la ONT dos
+    veces» cuando fue al vecino. Sin identificador se devuelve lista vacia y se
+    dice por que, en vez de adivinar.
+
+    EL AISLAMIENTO LO DA `_obtener_orden_o_404`, igual que el resto: una orden de
+    otra empresa responde 404 y un tecnico no asignado tampoco la ve. Y las
+    hermanas se filtran por `org` ademas del servicio -- dos empresas pueden usar
+    el mismo identificador de abonado, porque cada una lo toma de SU WispHub.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        servicio = historial_del_servicio.id_de_servicio(orden)
+        return Response(
+            {
+                # `hay_servicio: false` es distinto de `visitas: []`. El primero
+                # dice «no se puede saber»; el segundo, «es la primera vez». La
+                # app los dibuja distinto porque el tecnico actua distinto.
+                "hay_servicio": bool(servicio),
+                "visitas": historial_del_servicio.visitas_anteriores(orden),
+                "tickets": historial_del_servicio.tickets_anteriores(orden),
+            }
+        )
+
+
+class AccionesTrabajoView(APIView):
+    """Transición de estado operativo con soporte de Idempotency-Key."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        serializer = AccionOperativaSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        accion = serializer.validated_data["accion"]
+        metadatos = serializer.validated_data.get("metadatos", {})
+
+        try:
+            orden = ejecutar_accion_operativa(
+                orden=orden,
+                accion=accion,
+                profile=request.profile,
+                metadatos=metadatos,
+                exigir_asignado=_debe_estar_asignado(request),
+            )
+        except OrdenYaNoAsignadaError:
+            # La orden cambio de manos entre la lectura de arriba y el bloqueo.
+            # 404, como si ya se hubiera movido antes de pedir: la cola offline
+            # de la app (apps/tecnicos-mobile, sync_queue_service.dart) trata un
+            # 404 de /acciones/ como «la orden no existe o fue reasignada», lo
+            # da por terminado y no reintenta. Un 409 lo dejaria en «conflicto»
+            # --algo que el tecnico tiene que resolver-- y un 403 diria «sesion
+            # expirada». Y el mismo hecho tiene que dar la misma respuesta, haya
+            # pasado antes o durante el pedido.
+            return Response(
+                {"error": "ORDEN_REASIGNADA",
+                 "detalle": "La orden ya no está asignada a quien marca la acción."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except TransicionInvalidaError as e:
+            return Response(
+                {"error": "TRANSICION_INVALIDA", "detalle": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            "mutation_id": serializer.validated_data.get("client_mutation_id") or "",
+            "aplicada": True,
+            "estado_operativo": orden.estado_operativo,
+            "revision": orden.revision,
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class GuardarDatosTrabajoView(APIView):
+    """Guarda valores técnicos de la orden verificando revisión y reglas deterministas."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def patch(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        serializer = GuardarDatosSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        revision_base = serializer.validated_data["revision_base"]
+        nuevos_valores = serializer.validated_data["valores"]
+
+        with transaction.atomic():
+            orden_fresca = OrdenTrabajo.objects.select_for_update().get(pk=orden.pk)
+
+            # Control de concurrencia optimista para evitar pisar cambios offline
+            if revision_base < orden_fresca.revision:
+                # Comprobar si hay colisión en los mismos campos modificados
+                datos_actuales = orden_fresca.datos or {}
+                claves_conflicto = [k for k in nuevos_valores if k in datos_actuales and datos_actuales[k] != nuevos_valores[k]]
+                if claves_conflicto:
+                    return Response(
+                        {
+                            "error": "STALE_WORK_ORDER",
+                            "detalle": f"Conflicto de concurrencia en campos: {claves_conflicto}. La orden fue modificada en el servidor.",
+                            "revision_actual": orden_fresca.revision,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+            # Validar campos contra la plantilla inmutable
+            esquema = orden_fresca.tipo_trabajo_version.esquema
+            valores_limpios, errores = validar_campos_tecnicos(esquema, nuevos_valores)
+            if errores:
+                return Response(
+                    {"guardado": False, "errores": errores},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Aplicar delta
+            datos_actualizados = dict(orden_fresca.datos or {})
+            datos_actualizados.update(valores_limpios)
+            orden_fresca.datos = datos_actualizados
+            orden_fresca.revision += 1
+            orden_fresca.save(update_fields=["datos", "revision", "updated_at"])
+
+            EventoTrabajo.objects.create(
+                org=orden_fresca.org,
+                orden=orden_fresca,
+                tipo="datos_actualizados",
+                profile=request.profile,
+                datos={"campos_modificados": list(valores_limpios.keys()), "revision": orden_fresca.revision},
+            )
+
+        return Response({
+            "guardado": True,
+            "revision": orden_fresca.revision,
+            "validaciones": {k: {"estado": "ok"} for k in valores_limpios},
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class EvidenciasTrabajoView(APIView):
+    """Registra la intención de subida de evidencia y emite URL temporal segura."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+        serializer = RegistroEvidenciaSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        requisito_id = serializer.validated_data["requisito_id"]
+        nombre = serializer.validated_data["nombre"]
+        mime_type = serializer.validated_data["mime_type"]
+        tamano_bytes = serializer.validated_data["bytes"]
+        sha256 = serializer.validated_data["sha256"]
+        capturada_en = serializer.validated_data.get("capturada_en_cliente")
+        metadatos = serializer.validated_data.get("metadatos_captura", {})
+        evento_id = serializer.validated_data.get("evento_id")
+
+        # ---------------------------------------------------------------
+        # DE QUE ES ESTA FOTO, Y CONTRA QUE SE VALIDA
+        # ---------------------------------------------------------------
+        # Sin `evento_id` es lo de siempre: una evidencia del CHECKLIST, y el
+        # requisito tiene que estar en la version inmutable de la orden.
+        #
+        # Con `evento_id` es una foto de un REPORTE de la bitacora, y entonces el
+        # conjunto valido NO sale del esquema vigente sino del snapshot que ese
+        # reporte guardo cuando se escribio. Es la misma razon por la que el
+        # reporte guarda sus campos: una version nueva del tipo de trabajo no
+        # puede volver invalida la foto que el tecnico saco siguiendo lo que la
+        # app le mostro ese dia, ni aceptar una que entonces nadie le pidio.
+        evento = None
+        if evento_id:
+            evento = EventoTrabajo.objects.filter(
+                id=evento_id, org=orden.org, orden=orden
+            ).first()
+            # Se comprueba que sea DE ESTA ORDEN: con solo el id, una foto podria
+            # colgarse del reporte de otra empresa.
+            if evento is None:
+                return Response(
+                    {
+                        "error": "EVENTO_INVALIDO",
+                        "detalle": "Ese reporte no pertenece a esta orden.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            declaradas = (evento.datos or {}).get("evidencias") or []
+            requisitos_validos = {
+                e.get("id") for e in declaradas if isinstance(e, dict)
+            }
+            donde = "el reporte"
+        else:
+            esquema = orden.tipo_trabajo_version.esquema
+            requisitos_validos = {e["id"] for e in esquema.get("evidencias", [])}
+            donde = "la versión de esta orden"
+
+        if requisito_id not in requisitos_validos:
+            return Response(
+                {
+                    "error": "REQUISITO_INVALIDO",
+                    "detalle": f"El requisito '{requisito_id}' no pertenece a {donde}. Válidos: {sorted(requisitos_validos)}",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ---------------------------------------------------------------
+        # Reintento seguro. Antes esto era un update_or_create con
+        # 'estado_archivo': SUBIENDO y una storage_key nueva en los defaults,
+        # o sea que PISABA el estado sin mirarlo. Un reintento tardio del
+        # movil -- el mismo requisito y el mismo sha, que es exactamente lo
+        # que manda quien reintenta -- encontraba una evidencia RECIBIDA o
+        # VERIFICADA y la devolvia a SUBIENDO, apuntando a una key vacia. La
+        # evidencia ya subida quedaba huerfana en el storage y el checklist
+        # de la orden retrocedia solo.
+        #
+        # 'manejar_idempotencia' no lo cubre: solo actua si el cliente manda
+        # la cabecera Idempotency-Key, y ante un corte de red un movil puede
+        # reintentar sin ella o con una clave nueva (es otra intencion para
+        # el, aunque sea la misma para el servidor). La garantia no puede
+        # depender de que el cliente colabore.
+        #
+        # select_for_update: dos subidas en paralelo de la misma foto se
+        # serializan aca en vez de competir por el UniqueConstraint.
+        # ---------------------------------------------------------------
+        with transaction.atomic():
+            # El reintento se busca EN SU AMBITO. Buscar siempre por orden
+            # haria que la foto de un bloqueo encontrara la de otro reporte con
+            # el mismo requisito y el mismo sha, y devolviera esa -- la segunda
+            # nunca se guardaria y el segundo bloqueo quedaria sin su foto.
+            ambito = (
+                {"evento": evento}
+                if evento is not None
+                else {"orden_trabajo": orden, "evento__isnull": True}
+            )
+            evidencia = (
+                EvidenciaTrabajo.objects.select_for_update()
+                .filter(requisito_id=requisito_id, sha256=sha256, **ambito)
+                .first()
+            )
+
+            # Estados terminales: la evidencia ya esta en el servidor. Se
+            # devuelve la MISMA, sin tocar su estado ni su storage_key, y SIN
+            # emitir URL de subida: entregarla seria dar la forma de
+            # reemplazar una evidencia ya aceptada -- o auditada, si esta
+            # verificada -- y el sha256 identifica la fila, no garantiza que
+            # lo que se suba despues coincida.
+            if evidencia and evidencia.estado_archivo in (
+                EvidenciaTrabajo.RECIBIDO,
+                EvidenciaTrabajo.VERIFICADO,
+            ):
+                return Response({
+                    "evidencia_id": str(evidencia.id),
+                    "estado_archivo": evidencia.estado_archivo,
+                    "storage_key": evidencia.storage_key,
+                    "upload": None,
+                    "mensaje": "La evidencia ya fue recibida; no hay nada que subir.",
+                })
+
+            if evidencia:
+                # PENDIENTE, SUBIENDO o FALLIDO: es un reintento legitimo y
+                # aca es donde se renueva la URL vencida. Se conserva la
+                # storage_key -- si se generara otra, lo ya subido quedaria
+                # sin dueno y el confirmar posterior no lo encontraria.
+                if not evidencia.storage_key:
+                    evidencia.storage_key = CampoStorage.generar_storage_key(
+                        org_id=str(orden.org.id),
+                        orden_id=str(orden.id),
+                        requisito_id=requisito_id,
+                        nombre_original=nombre,
+                    )
+                evidencia.nombre_original = nombre
+                evidencia.mime_type = mime_type
+                evidencia.bytes = tamano_bytes
+                evidencia.estado_archivo = EvidenciaTrabajo.SUBIENDO
+                evidencia.capturada_en_cliente = capturada_en
+                evidencia.metadatos_captura = metadatos
+                evidencia.save(update_fields=[
+                    "storage_key", "nombre_original", "mime_type", "bytes",
+                    "estado_archivo", "capturada_en_cliente",
+                    "metadatos_captura", "updated_at",
+                ])
+            else:
+                key_nueva = CampoStorage.generar_storage_key(
+                    org_id=str(orden.org.id),
+                    orden_id=str(orden.id),
+                    requisito_id=requisito_id,
+                    nombre_original=nombre,
+                )
+                try:
+                    # atomic() ANIDADO, no decorativo: abre un SAVEPOINT. En
+                    # PostgreSQL un INSERT que viola una constraint aborta la
+                    # transaccion entera, y toda consulta posterior falla con
+                    # InFailedSqlTransaction -- incluida la relectura de aca
+                    # abajo. Sin este savepoint, el 'except' atrapaba el
+                    # IntegrityError y moria en la linea siguiente.
+                    #
+                    # No lo detecta la suite: en SQLite la transaccion no queda
+                    # abortada y todo pasa en verde. Es un fallo que solo
+                    # aparece en produccion, y solo cuando dos subidas de la
+                    # misma foto caen a la vez. Ver la guarda marcada
+                    # postgres_only en tests/.
+                    with transaction.atomic():
+                        evidencia = EvidenciaTrabajo.objects.create(
+                            org=orden.org,
+                            orden_trabajo=orden,
+                            # La orden se guarda IGUAL cuando la foto es de un
+                            # reporte: es la misma orden, y sin ella una consulta
+                            # por trabajo dejaria estas fotos afuera.
+                            evento=evento,
+                            requisito_id=requisito_id,
+                            # La pone el SERVIDOR desde la orden. Si viniera del
+                            # cliente, un movil podria declarar la vuelta que
+                            # quisiera y dar por corregido lo que no corrigio.
+                            vuelta=orden.vuelta,
+                            sha256=sha256,
+                            storage_key=key_nueva,
+                            nombre_original=nombre,
+                            mime_type=mime_type,
+                            bytes=tamano_bytes,
+                            estado_archivo=EvidenciaTrabajo.SUBIENDO,
+                            capturada_en_cliente=capturada_en,
+                            metadatos_captura=metadatos,
+                        )
+                except IntegrityError:
+                    # La otra peticion gano la carrera: la fila ya existe. Se
+                    # relee y se devuelve la MISMA -- el UniqueConstraint hizo
+                    # su trabajo, no hay nada roto que reportar.
+                    evidencia = EvidenciaTrabajo.objects.get(
+                        requisito_id=requisito_id, sha256=sha256, **ambito
+                    )
+
+        # El descriptor se arma recien aca, con el id ya resuelto: la URL de
+        # subida se indexa por EVIDENCIA, no por la storage_key, asi el cliente
+        # nunca propone una ruta. Ver CampoStorage.descriptor_subida.
+        return Response({
+            "evidencia_id": str(evidencia.id),
+            "estado_archivo": evidencia.estado_archivo,
+            "storage_key": evidencia.storage_key,
+            "upload": CampoStorage.descriptor_subida(evidencia.id),
+        })
+
+
+class ConfirmarEvidenciaView(APIView):
+    """Confirma que la evidencia fue subida con éxito al storage."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        org = getattr(request, "org", None)
+        if not org:
+            raise Http404
+
+        evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).select_related("orden_trabajo").first()
+        if not evidencia:
+            raise Http404
+
+        # Si la evidencia ya fue confirmada previamente, retorno idempotente 200 sin duplicar eventos
+        if evidencia.estado_archivo in (EvidenciaTrabajo.RECIBIDO, EvidenciaTrabajo.VERIFICADO):
+            return Response({
+                "estado": "recibida",
+                "evidencia_id": str(evidencia.id),
+                "mensaje": "Evidencia previamente confirmada",
+            })
+
+        # Verificar que el archivo realmente exista en el storage antes de confirmar
+        if not CampoStorage.verify_upload(evidencia.storage_key):
+            return Response(
+                {
+                    "error": "ARCHIVO_NO_ENCONTRADO",
+                    "detalle": "El archivo de evidencia no se encuentra presente en el almacenamiento.",
+                    "storage_key": evidencia.storage_key,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        evidencia.estado_archivo = EvidenciaTrabajo.RECIBIDO
+        evidencia.save(update_fields=["estado_archivo", "updated_at"])
+
+        EventoTrabajo.objects.create(
+            org=org,
+            orden=evidencia.orden_trabajo,
+            tipo="evidencia_confirmada",
+            profile=request.profile,
+            datos={"evidencia_id": str(evidencia.id), "requisito_id": evidencia.requisito_id},
+        )
+
+        return Response({"estado": "recibida", "evidencia_id": str(evidencia.id)})
+
+
+class SubirEvidenciaDirectoView(APIView):
+    """Recibe el binario de UNA evidencia, en desarrollo Y en produccion.
+
+    Cierra el circuito que quedaba cortado: 'descriptor_subida' prometia un PUT
+    contra esta ruta y la ruta no existia, asi que la app registraba la
+    evidencia, recibia una URL y no tenia donde subir el archivo.
+
+    NO es un endpoint generico de escritura. La storage_key NO viaja: se
+    resuelve leyendo la evidencia, que ya esta acotada al tenant de quien pide.
+    Por eso no hay ruta que sanear -- no hay ruta que el cliente pueda
+    proponer, y el path traversal deja de ser un problema a resolver para pasar
+    a ser imposible de plantear.
+
+    30/10/2026: hasta hoy devolvia 404 fuera de desarrollo, suponiendo que
+    produccion tendria S3/R2 con URL prefirmada. Produccion guarda en disco
+    (`crm/server_settings.py`: «aqui no hay S3», volumen `media:/app/media`) y
+    `descriptor_subida` le da a la app ESTA ruta siempre: ninguna foto podia
+    subir, y como «completar» espera a que todas esten confirmadas, ninguna
+    orden con foto se cerraba desde la app. Visto en una OT real: el reporte de
+    cierre llegaba y la orden seguia en sitio con «5 cambios locales».
+
+    La regla que queda: si `descriptor_subida` promete esta ruta, esta ruta
+    responde. El dia que haya un proveedor con URL prefirmada, cambian los dos
+    juntos.
+
+    Y por eso mismo se acota como el registro (`_obtener_orden_o_404`): un
+    tecnico sube solo a las fotos de SUS ordenes; la gestion, a las de su
+    empresa. Antes alcanzaba con ser de la empresa, que en desarrollo daba
+    igual.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def put(self, request, pk):
+        org = getattr(request, "org", None)
+        if not org:
+            raise Http404
+
+        # El 404 tapa las dos cosas a la vez, y es deliberado: una evidencia
+        # que no existe y una de otra empresa tienen que ser indistinguibles
+        # desde afuera.
+        evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
+        if not evidencia:
+            raise Http404
+        # La misma puerta que el registro: un tecnico, solo en SUS ordenes.
+        # Tambien 404: la foto de una orden ajena no existe para el.
+        _obtener_orden_o_404(request, evidencia.orden_trabajo_id)
+
+        # Una evidencia que ya esta en el servidor no se reemplaza. Es el mismo
+        # criterio que el registro: el sha256 identifica la fila, no garantiza
+        # que lo que se suba despues coincida, y una VERIFICADA ya fue
+        # auditada.
+        if evidencia.estado_archivo in (EvidenciaTrabajo.RECIBIDO,
+                                        EvidenciaTrabajo.VERIFICADO):
+            return Response(
+                {
+                    "error": "EVIDENCIA_NO_MODIFICABLE",
+                    "detalle": "La evidencia ya fue recibida; su archivo no se reemplaza.",
+                    "estado_archivo": evidencia.estado_archivo,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        contenido = request.body or b""
+        if not contenido:
+            return Response(
+                {"error": "CUERPO_VACIO", "detalle": "El PUT no trae bytes."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(contenido) > CampoStorage.MAX_BYTES:
+            return Response(
+                {
+                    "error": "ARCHIVO_DEMASIADO_GRANDE",
+                    "detalle": f"Maximo {CampoStorage.MAX_BYTES} bytes.",
+                    "bytes": len(contenido),
+                },
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        # Se mira el MIME que la evidencia DECLARO al registrarse, no la
+        # cabecera del PUT: la cabecera la elige quien sube, la declaracion ya
+        # quedo guardada y es contra eso que se contrasto el resto.
+        if evidencia.mime_type not in CampoStorage.MIME_PERMITIDOS:
+            return Response(
+                {
+                    "error": "MIME_NO_PERMITIDO",
+                    "detalle": f"'{evidencia.mime_type}' no esta permitido.",
+                    "permitidos": list(CampoStorage.MIME_PERMITIDOS),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not evidencia.storage_key or not CampoStorage.guardar(
+                evidencia.storage_key, contenido):
+            return Response(
+                {
+                    "error": "STORAGE_KEY_INVALIDA",
+                    "detalle": "La evidencia no tiene una ubicacion valida donde guardar.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Reintentar el PUT sobrescribe el MISMO archivo y no toca la fila: no
+        # hay forma de que un reintento cree otra EvidenciaTrabajo, porque esta
+        # vista no crea ninguna.
+        return Response({
+            "evidencia_id": str(evidencia.id),
+            "estado_archivo": evidencia.estado_archivo,
+            "storage_key": evidencia.storage_key,
+            "bytes": len(contenido),
+        })
+
+
+class ObtenerUrlEvidenciaView(APIView):
+    """Donde se puede ver una evidencia.
+
+    15/10/2026: devolvia `/media/<key>`, una ruta que Django solo sirve con
+    DEBUG -- en produccion ninguna foto se podia abrir. Ahora apunta a
+    `ArchivoDeEvidenciaView`, que la entrega con los mismos permisos que la
+    orden. Y ya no la entrega a cualquiera de la empresa: un tecnico solo ve
+    las de sus ordenes, igual que las ordenes mismas.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        evidencia = _evidencia_visible_o_404(request, pk)
+        return Response({
+            "evidencia_id": str(evidencia.id),
+            "download_url": f"/api/campo/evidencias/{evidencia.id}/archivo/",
+            "estado_archivo": evidencia.estado_archivo,
+        })
+
+
+def _evidencia_visible_o_404(request, pk) -> EvidenciaTrabajo:
+    """La evidencia, si quien pregunta puede ver SU orden. Si no, 404.
+
+    El permiso es el de la orden (`_obtener_orden_o_404`): otra empresa o un
+    tecnico que no esta asignado reciben 404, nunca 403, para no confirmar que
+    el id existe.
+    """
+    org = getattr(request, "org", None)
+    if not org:
+        raise Http404
+    evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
+    if not evidencia:
+        raise Http404
+    _obtener_orden_o_404(request, evidencia.orden_trabajo_id)
+    return evidencia
+
+
+class ArchivoDeEvidenciaView(APIView):
+    """El binario de una foto, para mirarla.
+
+    Hasta el 15/10/2026 no habia forma de ver una foto en produccion: la unica
+    URL que se emitia era `/media/...`, que solo existe con DEBUG. Las fotos
+    llegaban, se guardaban y nadie podia abrirlas.
+
+    Se sirve por Django y no por un `/media` publico A PROPOSITO: son fotos
+    de la casa de un cliente. Con la ruta publica, quien tuviera el enlace la
+    veria sin sesion y para siempre. Aca cada pedido pasa por la sesion y por
+    el permiso de la orden, y la respuesta no se guarda en caches compartidas.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        from django.http import FileResponse
+
+        from campo.services.storage import CampoStorage
+
+        evidencia = _evidencia_visible_o_404(request, pk)
+        if evidencia.estado_archivo not in (EvidenciaTrabajo.RECIBIDO,
+                                            EvidenciaTrabajo.VERIFICADO):
+            raise Http404
+        ruta = CampoStorage.ruta_absoluta(evidencia.storage_key)
+        if not ruta:
+            raise Http404
+        try:
+            archivo = open(ruta, "rb")
+        except OSError:
+            raise Http404
+        #  Solo imagenes y PDF se muestran en linea; cualquier otra cosa se
+        #  descarga. Un mime declarado por el telefono no puede convertir el
+        #  archivo en una pagina que el navegador ejecute.
+        mime = (evidencia.mime_type or "").lower()
+        en_linea = mime.startswith("image/") or mime == "application/pdf"
+        respuesta = FileResponse(
+            archivo,
+            content_type=mime if en_linea else "application/octet-stream",
+            as_attachment=not en_linea,
+            filename=evidencia.nombre_original or "evidencia",
+        )
+        respuesta["Cache-Control"] = "private, no-store"
+        respuesta["X-Content-Type-Options"] = "nosniff"
+        return respuesta
+
+
+class CompletarTrabajoView(APIView):
+    """Única puerta de cierre de campo. Valida checklist y transiciona a completada_campo."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+
+        # 1. Comprobar checklist determinista duro
+        errores = verificar_checklist_completo(orden)
+        if errores:
+            return Response(
+                {
+                    "ok": False,
+                    "error": "CHECKLIST_INCOMPLETO",
+                    "mensaje": "Faltan datos técnicos o evidencias requeridas para finalizar el trabajo.",
+                    "errores": errores,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 2. Transicionar
+        try:
+            orden = completar_campo(orden=orden, profile=request.profile)
+        except TransicionInvalidaError as e:
+            return Response(
+                {"error": "TRANSICION_INVALIDA", "detalle": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        #  LA OTRA MITAD (31/10/2026). Ver el comentario en SeguimientoView:
+        #  con la orden ya en 'completada_campo', si el reporte de cierre
+        #  llego antes, el Supervisor la revisa y decide en segundos.
+        tareas_de_campo.pedir_revision_del_cierre(orden)
+
+        return Response({
+            "ok": True,
+            "estado_operativo": orden.estado_operativo,
+            "revision": orden.revision,
+            "completada_campo_en": orden.completada_campo_en.isoformat(),
+            "server_time": timezone.now().isoformat(),
+        })
+
+
+class ProbarConexionView(APIView):
+    """
+    Un ping en vivo al equipo del cliente, pedido desde el terreno.
+
+    ES DEL TECNICO, a diferencia del refresco de ficha: el que la pide es el
+    que esta parado en la casa despues de mover un conector, y la respuesta
+    solo le sirve en ese momento.
+
+    SIN SEÑAL SE RECHAZA, NUNCA SE ENCOLA. Es el mismo criterio que
+    RefrescarFichaView dejo escrito para lo suyo, y aca aprieta mas: un ping
+    encolado se ejecutaria cuando el tecnico ya se fue, midiendo un momento
+    que a nadie le importa y con cara de respuesta a lo que pregunto. La
+    aplicacion no lo mete en la cola; si no hay conexion, lo dice.
+
+    TRES RESPUESTAS, NO DOS
+    -----------------------
+      200 medido=true      se pregunto y contesto -- con el conteo crudo
+      200 medido=false     no se pudo preguntar, con el motivo
+      409                  la orden no tiene servicio identificado: no hay a
+                           que equipo pingear
+
+    'no se pudo medir' y 'se midio y no respondio' son cosas distintas y la
+    diferencia es el punto entero de este endpoint. La primera se reintenta;
+    la segunda es un dato sobre el equipo del cliente.
+
+    Y lo que devuelve NO es un veredicto. Esta medido dos veces en este
+    proyecto que el mismo equipo sano da '1 de 3', '2 de 3' y '3 de 3' en
+    corridas seguidas: el conteo viaja crudo, y quien decide que significa es
+    la persona que esta ahi.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        orden = _obtener_orden_o_404(request, pk)
+
+        # Cuantos paquetes pide ESTA llamada. La app manda tandas para ir
+        # mostrandolas; el minimo que WispHub acepta es 3, medido (1 y 2 dan
+        # 400), asi que se acota en vez de confiar en lo que llegue.
+        try:
+            pedidos = int(request.data.get("paquetes") or max(TANDAS))
+        except (TypeError, ValueError):
+            pedidos = max(TANDAS)
+        pedidos = max(3, min(pedidos, 10))
+
+        try:
+            resultado = probar_conexion(orden, paquetes=pedidos)
+        except SinServicioParaPing as e:
+            return Response(
+                {"error": "SIN_SERVICIO", "detalle": str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Cada tanda queda en la bitacora; al leerla se juntan (18/10/2026).
+        mediciones.anotar_conexion(orden, request.profile, resultado)
+
+        if not resultado["ok"]:
+            # 200 y no 5xx: la peticion al CRM se proceso bien, y "no se pudo
+            # medir" es un dato sobre el intento, no un error del servidor.
+            # Mandarlo como 5xx haria que la app dijera "algo salio mal" en
+            # vez del motivo, que es justo la distincion que cuida el modulo.
+            return Response({
+                "medido": False,
+                "motivo": resultado["motivo"],
+                "server_time": timezone.now().isoformat(),
+            })
+
+        return Response({
+            "medido": True,
+            "respondieron": resultado["respondieron"],
+            # Uno por uno, no un promedio: la pantalla los lista y quien mira
+            # ve DONDE se cayo, no solo cuantos volvieron.
+            "paquetes": resultado["paquetes"],
+            "server_time": timezone.now().isoformat(),
+        })

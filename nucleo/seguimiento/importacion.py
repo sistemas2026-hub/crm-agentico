@@ -1,0 +1,1202 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ IMPORTACION DE TICKETS DEL SISTEMA OPERATIVO  --  del ISP hacia la bandeja
+================================================================================
+
+Hasta ahora los tickets viajaban en un solo sentido: una conversacion se
+escalaba y abria un ticket alla. Lo que una persona abria del otro lado -- que
+medido son 83 tickets por dia contra los 18 que Dexter registro en toda su
+historia-- no existia de este lado.
+
+Este modulo trae el otro sentido, y SOLO ese: cada llamada al proveedor es un
+GET. Responder y cerrar ya viven en operativo.py y no se tocan desde aca.
+
+DOS PROCESOS, NO UNO
+--------------------
+'descubrir' busca tickets que Dexter todavia no conoce, dentro de una ventana
+por fecha de creacion. 'reconciliar' vuelve a mirar los que ya conoce, uno por
+uno. Son distintos porque un ticket abierto hace tres semanas puede cambiar de
+estado hoy y no aparecer en ninguna ventana de creacion -- con un solo proceso,
+ese cambio no se ve nunca.
+
+LO QUE ESTE MODULO NO DECIDE
+----------------------------
+No escribe. Devuelve veredictos y cambios propuestos; quien los aplica es otro.
+Eso es lo que permite que el dry-run sea el MISMO codigo que la corrida real y
+no una simulacion parecida que se desincroniza con el tiempo.
+
+Tampoco toca 'Case.status'. El estado de Dexter es de Dexter; lo que el
+proveedor diga vive en 'external_status'. Si divergen, la divergencia se
+conserva y la mira una persona.
+
+DEPENDENCIAS
+------------
+Deliberadamente pocas: pydantic para la config y 'reparto' para el desempate.
+Todo lo que sale al mundo -- listar tickets, leer un cliente, saber que casos
+existen -- entra como funcion. Asi las pruebas corren sin red y sin base, que
+es la unica forma de probar de verdad los caminos de fallo.
+================================================================================
+"""
+
+from __future__ import annotations
+
+import unicodedata
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+
+from nucleo.seguimiento import reparto
+
+# --- resultados posibles de un ticket inspeccionado -------------------------
+# Cada uno es un motivo DISTINTO por el que algo no entro, y estan separados
+# porque llevan a acciones distintas: un asunto no permitido es una decision
+# tomada, un area sin gente es un problema de plantilla, y un destino sin
+# configurar es una regla que falta escribir. Un solo "descartado" los
+# escondería a los tres detras del mismo numero.
+CANDIDATO = "CANDIDATO"
+YA_EXISTE = "YA_EXISTE"
+DESCARTADO_POR_DEPARTAMENTO = "DESCARTADO_POR_DEPARTAMENTO"
+DESCARTADO_POR_ASUNTO = "DESCARTADO_POR_ASUNTO"
+DESCARTADO_POR_CREADOR = "DESCARTADO_POR_CREADOR"
+SIN_DESTINO_CONFIGURADO = "SIN_DESTINO_CONFIGURADO"
+AREA_DESTINO_INVALIDA = "AREA_DESTINO_INVALIDA"
+SIN_RESPONSABLE_DISPONIBLE = "SIN_RESPONSABLE_DISPONIBLE"
+SIN_SERVICIO = "SIN_SERVICIO"
+DESCARTADO_POR_ESTADO = "DESCARTADO_POR_ESTADO"
+ESTADO_SIN_MAPEO = "ESTADO_SIN_MAPEO"
+
+# --- clasificacion de autoria ----------------------------------------------
+DEXTER = "dexter"
+HUMANO_VERIFICADO = "humano_verificado"
+EXTERNO_DESCONOCIDO = "externo_desconocido"
+
+
+def normalizar(texto) -> str:
+    """
+    Minusculas, sin acentos, espacios colapsados.
+
+    Hace falta porque el filtro compara NOMBRES: 'GET /api/tickets/' devuelve
+    'departamento' y 'asunto' como texto y no trae ningun id para ellos
+    (verificado sobre 1.162 tickets, ninguna clave anidada). Sin normalizar,
+    'Soporte Técnico' y 'SOPORTE TECNICO' serian dos departamentos distintos y
+    la lista blanca fallaria por un acento.
+
+    Es deuda conocida, no una eleccion. El dia que la API exponga ids, esto se
+    borra.
+    """
+    crudo = "" if texto is None else str(texto)
+    sin_tildes = "".join(
+        c for c in unicodedata.normalize("NFD", crudo)
+        if unicodedata.category(c) != "Mn")
+    return " ".join(sin_tildes.lower().split())
+
+
+# Cuanto se copia de la descripcion del ticket. No es un limite tecnico: es
+# minimizacion. Lo util son las primeras lineas -- que reporto el cliente y que
+# vio quien tomo el ticket-- y cuanto mas texto libre se arrastra, mas
+# probabilidad de traer un dato personal que nadie necesitaba.
+TOPE_DESCRIPCION = 800
+
+
+def limpiar_descripcion(crudo) -> str:
+    """
+    La descripcion del ticket, en texto plano y acotada.
+
+    El proveedor la entrega en HTML ('<p>No Tiene Internet</p>\\r\\n\\r\\n<p>Pago
+    reconexion en factura</p>'), asi que hay que sacarle las etiquetas: pegar
+    HTML crudo en un campo que la pantalla del CRM muestra tal cual seria, en
+    el mejor caso, ilegible, y en el peor una via para inyectar marcado que
+    nadie escribio pensando en eso.
+
+    Se resuelven las entidades ('&aacute;' -> 'a') porque si no el texto llega
+    con ruido justo donde hay acentos, que en español es en todas partes.
+    """
+    import html
+    import re
+
+    texto = "" if crudo is None else str(crudo)
+    # Los saltos de bloque se vuelven salto de linea ANTES de borrar etiquetas,
+    # o los parrafos quedarian pegados uno con otro en una sola frase.
+    texto = re.sub(r"(?i)<\s*br\s*/?>|</\s*(?:p|div|li|tr)\s*>", "\n", texto)
+    texto = re.sub(r"<[^>]+>", "", texto)
+    texto = html.unescape(texto)
+    lineas = [" ".join(l.split()) for l in texto.splitlines()]
+    texto = "\n".join(l for l in lineas if l)
+    return texto[:TOPE_DESCRIPCION].strip()
+
+
+def huella_respuesta(fecha: str, autor: str, cuerpo: str) -> str:
+    """
+    La identidad de una respuesta, que el proveedor no da.
+
+    El payload trae {respuesta, created, autor, archivos} y NINGUN id, asi que
+    hay que derivarla o cada pasada del reloj duplicaria el hilo entero.
+
+    Se calcula sobre fecha + autor + texto. El limite es conocido: si alguien
+    EDITA una respuesta alla, cambia la huella y entra como una segunda. Se
+    prefiere eso a sobrescribir -- esto es el registro de lo que se dijo, y
+    reemplazarlo perderia justamente lo que se audita.
+    """
+    import hashlib
+
+    crudo = f"{fecha}|{autor}|{cuerpo}"
+    return hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:64]
+
+
+def leer_respuestas(ticket: dict) -> list[dict]:
+    """
+    El hilo del ticket, limpio y con su huella.
+
+    Se filtra igual que todo lo demas: del autor se guardan nombre y usuario y
+    nada mas -- el payload trae ademas su id interno del proveedor, que no le
+    sirve a nadie de este lado. De los archivos, solo cuantos hay: los bytes
+    viven alla y traerlos seria copiar adjuntos que nadie pidio.
+    """
+    salida = []
+    for r in (ticket.get("respuestas") or []):
+        if not isinstance(r, dict):
+            continue
+        cuerpo = limpiar_descripcion(r.get("respuesta"))
+        autor = r.get("autor") or {}
+        usuario = str(autor.get("username") or "").strip()
+        fecha = str(r.get("created") or "").strip()
+        if not cuerpo and not usuario:
+            continue
+        salida.append({
+            "huella": huella_respuesta(fecha, usuario, cuerpo),
+            "autor_nombre": str(autor.get("nombre") or "").strip()[:160],
+            "autor_usuario": usuario[:160],
+            "cuerpo": cuerpo,
+            "creada_en_proveedor": momento_de_respuesta(fecha),
+            "archivos": len(r.get("archivos") or []),
+        })
+    return salida
+
+
+def momento_de_respuesta(crudo: str):
+    """
+    La fecha de una respuesta, en ISO, o None.
+
+    Llega como '09/10/2026 14:15:50' -- MM/DD/YYYY y sin zona, el mismo formato
+    de 'fecha_fin' que ya costo cinco horas de diferencia una vez. Se le pone
+    la zona del tenant que informa el resto del ticket... salvo que no la hay
+    en este campo, asi que se devuelve sin zona y quien la muestre decide.
+    Inventarle una seria repetir el error de febrero al reves.
+    """
+    from datetime import datetime
+
+    crudo = (crudo or "").strip()
+    if not crudo:
+        return None
+    for formato in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(crudo[:19], formato).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def clave(departamento, asunto) -> str:
+    """La clave de filtro y de mapeo: 'departamento|asunto', normalizada.
+
+    Lleva el departamento adentro porque el mismo asunto existe en dos:
+    'Cambio De Contraseña En Router Wifi' aparece 100 veces en Administrativo
+    y 28 en Soporte Tecnico, y son trabajos distintos con destinos distintos.
+    """
+    return f"{normalizar(departamento)}|{normalizar(asunto)}"
+
+
+def _comodin(departamento) -> str:
+    return f"{normalizar(departamento)}|*"
+
+
+@dataclass
+class Veredicto:
+    """Que se decidio sobre un ticket, y con que datos se decidio."""
+    external_ticket_id: str
+    external_service_id: str = ""
+    departamento: str = ""
+    asunto: str = ""
+    external_status: str = ""
+    external_created_by: str = ""
+    external_created_by_type: str = ""
+    cliente_identificado: bool = False
+    identidad_es_placeholder: bool = False
+    sn_onu: str = ""
+    # El nombre que el proveedor tiene del cliente, tal cual. Sale de la misma
+    # ficha que 'sn_onu' -- una sola llamada por servicio, ya existente-- y es
+    # el unico dato personal que se guarda de ahi: sin el, el tablero del
+    # Supervisor no puede nombrar a quien espera una decision. Cadena vacia
+    # cuando el proveedor no lo entrega; nunca se compone a partir de otra cosa.
+    cliente_nombre: str = ""
+    area: str = ""
+    responsable: str = ""
+    prioridad: str = ""
+    # Lo que escribio quien abrio el ticket, y con que prioridad lo marco ALLA.
+    #
+    # La descripcion se copia por decision explicita del 10/09/2026, revirtiendo
+    # la exclusion anterior. El motivo de aquella sigue siendo cierto -- es
+    # texto libre de un operador y puede traer datos personales embebidos (PRD
+    # 7.4) -- y se acepta el riesgo porque sin ella quien atiende no sabe que
+    # paso: en el ticket que motivo el cambio decia "Pago reconexion en
+    # factura", que es justo el contexto que hacia falta y obligaba a saltar al
+    # otro sistema para leerlo.
+    #
+    # 'prioridad_proveedor' se GUARDA pero no se usa como prioridad del caso.
+    # Se descubrio que el proveedor manda 'Alta' y el importador escribia
+    # 'Normal' fijo: no es que el dato faltara, lo estabamos ignorando. Se
+    # conserva a la vista para que nadie crea que el 'Normal' fue un juicio.
+    # Quien decide la prioridad del caso va a ser Dexter, con un score propio,
+    # y eso es otro bloque.
+    descripcion: str = ""
+    prioridad_proveedor: str = ""
+    resultado: str = ""
+    detalle: str = ""
+
+    @property
+    def tiene_onu(self) -> bool:
+        return bool(self.sn_onu)
+
+
+# El sello de "cuando preguntamos", que no es un cambio del caso: se refresca
+# en cada lectura aunque el proveedor conteste exactamente lo mismo.
+SELLO_DE_LECTURA = "external_fetched_at"
+
+# El momento en que el proveedor movio el estado. Se compara como INSTANTE y no
+# como texto, y tiene su propia constante por eso -- ver '_mismo_instante'.
+MOMENTO_DEL_ESTADO = "external_status_at"
+
+
+def _mismo_instante(uno, otro) -> bool:
+    """
+    Si dos sellos nombran el mismo momento, aunque esten escritos distinto.
+
+    HACE FALTA, Y SE MIDIO (06/10/2026). Los dos lados de esta comparacion
+    escriben la MISMA fecha de dos formas:
+
+        lo guardado     2026-09-22T20:39:30+00:00   la base es timestamptz y
+                                                    Django la sirve en UTC
+        lo que se leyo  2026-09-22T15:39:30-05:00   'momento_del_estado' usa la
+                                                    zona del propio ticket
+
+    Es el mismo instante y son textos distintos, asi que compararlos con '!='
+    da diferencia SIEMPRE. Comparar el texto habria dejado el defecto que esto
+    viene a arreglar, cambiandole la causa: en lugar de 'la clave no esta en
+    antes' seria 'la zona se escribe distinta', con el mismo 142 de salida.
+    """
+    if uno == otro:
+        return True
+    if not uno or not otro:
+        #  Uno con valor y el otro vacio SI es una diferencia real.
+        return False
+    try:
+        return (datetime.fromisoformat(str(uno))
+                == datetime.fromisoformat(str(otro)))
+    except (ValueError, TypeError):
+        #  Un sello que no se puede leer no se declara igual por las dudas.
+        return False
+
+
+@dataclass
+class Cambio:
+    """Lo que la reconciliacion actualizaria de un caso ya conocido."""
+    caso_id: str
+    external_ticket_id: str
+    antes: dict = field(default_factory=dict)
+    despues: dict = field(default_factory=dict)
+    # El hilo del ticket en el sistema del ISP, ya listo para persistir.
+    #
+    # Viaja aca y no en una consulta aparte porque la reconciliacion YA lee el
+    # ticket entero para saber su estado, y las respuestas vienen en ese mismo
+    # payload: sincronizar el hilo no cuesta ni una llamada mas.
+    respuestas: list = field(default_factory=list)
+    error: str = ""
+    #  Un fallo pasajero del proveedor (429, 5xx, sin red): NO se escribe.
+    #  Ver 'clase_de_fallo'.
+    transitorio: bool = False
+
+    @property
+    def hay_diferencia(self) -> bool:
+        """
+        Si esto cambiaria ALGO que alguien quiera saber.
+
+        'external_fetched_at' no cuenta: es el sello de "cuando preguntamos",
+        y cambia por definicion en cada lectura. Contarlo hacia que la
+        respuesta fuera siempre que si -- medido el 10/09/2026 en el primer
+        dry-run del ciclo cableado: 34 alcanzados, 34 "con diferencia", que es
+        un numero que no informa nada. Lo que se quiere contar es cuantos
+        casos cambian de estado, de autoria o de error, y esos eran 16.
+
+        'external_status_at' se compara como instante (ver '_mismo_instante') y
+        exige que 'antes' lo traiga. Medido en produccion el 06/10/2026: no lo
+        traia, asi que 'antes.get' devolvia None contra la fecha real y TODO
+        ticket cerrado contaba diferencia para siempre. Eran 142 de 184
+        alcanzados -- exactamente los 142 'Cerrado'-- y el numero no bajaba
+        nunca entre ciclos, que es la firma de una diferencia que no existe:
+        una real desaparece en cuanto se escribe.
+        """
+        for clave, valor in self.despues.items():
+            if clave == SELLO_DE_LECTURA:
+                continue
+            anterior = self.antes.get(clave)
+            if clave == MOMENTO_DEL_ESTADO:
+                if not _mismo_instante(anterior, valor):
+                    return True
+            elif anterior != valor:
+                return True
+        return False
+
+
+# =============================================================================
+#  DECISIONES  --  puras, sin red ni base
+# =============================================================================
+
+def pasa_la_lista(config_imp, departamento, asunto) -> tuple[bool, str]:
+    """
+    Si este ticket esta permitido, y si no, por cual de los dos filtros cayo.
+
+    Lista vacia = NADA, nunca 'todo'. Es la unica lectura segura: un
+    despliegue sin configurar no importa nada, mientras que la lectura
+    contraria convertiria un olvido en 2.400 casos al mes.
+    """
+    permitidos = {normalizar(d) for d in config_imp.departamentos}
+    if normalizar(departamento) not in permitidos:
+        return False, DESCARTADO_POR_DEPARTAMENTO
+
+    asuntos = {normalizar(a) for a in config_imp.asuntos}
+    if clave(departamento, asunto) in asuntos or _comodin(departamento) in asuntos:
+        return True, ""
+    return False, DESCARTADO_POR_ASUNTO
+
+
+def clasificar_creador(creado_por, external_ticket_id,
+                       cuenta_api: str, registrados_por_dexter: set) -> str:
+    """
+    Quien abrio el ticket, dicho con el cuidado que los datos permiten.
+
+    El proveedor SI informa autoria -- 'creado_por' viene poblado en el 100 %
+    de los tickets, con cuentas nominales. Pero una de esas cuentas es la que
+    firma la API key, y por ahi entra todo lo automatico: Dexter, cualquier
+    otra integracion que comparta la clave, y una persona que inicie sesion
+    con ella. Medido: 91 tickets en dos semanas entraron asi sin que Dexter
+    los hubiera registrado, o sea que la clave esta compartida.
+
+    De ahi las tres categorias. 'humano_verificado' solo cuando el proveedor
+    nombro una cuenta individual; lo que llega por la cuenta compartida y no
+    esta en nuestro registro es 'externo_desconocido' y no 'humano', que seria
+    una afirmacion que los datos no sostienen.
+    """
+    autor = (creado_por or "").strip()
+    if str(external_ticket_id) in registrados_por_dexter:
+        return DEXTER
+    if autor and normalizar(autor) != normalizar(cuenta_api):
+        return HUMANO_VERIFICADO
+    return EXTERNO_DESCONOCIDO
+
+
+# Con que estado NACE un caso importado, segun el que tenga en el proveedor.
+#
+# El mapeo se aplica UNA sola vez, al crear. Despues el estado de Dexter es de
+# Dexter y la reconciliacion no lo toca -- el del proveedor vive aparte, en
+# 'external_status'.
+#
+# 'Cerrado' no esta, y no es un olvido: la decision de producto es no traer
+# historia resuelta, y el filtro de descubrimiento ya lo excluye. Que tampoco
+# tenga mapeo es la segunda capa: si alguien agregara 'Cerrado' a
+# 'estados_descubrimiento', el ticket no se importaria igual en vez de entrar
+# como caso cerrado que nadie va a mirar.
+MAPEO_ESTADO_INICIAL = {
+    "nuevo": "New",
+    "en progreso": "Assigned",
+}
+
+
+def estado_inicial(external_status) -> str | None:
+    """
+    El 'Case.status' con el que nace un caso importado, o None si no hay mapeo.
+
+    None significa NO IMPORTAR, no "usar el valor por defecto". La version
+    anterior mandaba 'New' fijo, sin mirar el estado externo: los cuatro
+    tickets 'En Progreso' de la primera importacion real nacieron como 'New' y
+    quedaron un escalon antes del que les tocaba. Un valor por defecto habria
+    repetido eso en silencio cada hora.
+    """
+    return MAPEO_ESTADO_INICIAL.get(normalizar(external_status))
+
+
+def momento_del_estado(ticket: dict):
+    """
+    Cuando el proveedor movio el estado, o None si no se puede afirmar.
+
+    AUDITADO EN VIVO (09/09/2026), dos veces y con dos hallazgos distintos.
+
+    Primero: el proveedor NO entrega un sello de "ultimo cambio de estado". Lo
+    unico que entrega es 'fecha_fin', y solo al cerrar -- medido sobre la
+    ventana: poblada en 40 de 40 tickets 'Cerrado' y en 0 de 40 'Nuevo'. Asi
+    que hay dos respuestas honestas: la fecha real del cierre, o nada. Poner
+    'fecha_creacion' diria que el ticket cambio de estado cuando nacio, y poner
+    el momento de nuestra lectura diria que cambio cuando miramos.
+
+    Segundo, y por poco se escribe mal: las dos fechas del MISMO payload vienen
+    en formatos distintos.
+
+        fecha_creacion   2026-08-29T09:16:37.844072-05:00   ISO, con zona
+        fecha_fin        09/05/2026 15:22:38                MM/DD/YYYY, sin zona
+
+    Guardar 'fecha_fin' tal cual en una columna con zona la habria interpretado
+    como UTC: un cierre de las 15:22 de Bogota archivado como las 15:22 de
+    Londres, cinco horas antes de lo que paso. Y el formato ademas es ambiguo
+    de leer -- '09/05' es 5 de septiembre solo porque el ticket nacio el 29 de
+    agosto.
+
+    La zona se toma de 'fecha_creacion' DEL MISMO TICKET, no de una constante:
+    es el mismo sistema y el mismo reloj informando el mismo registro, asi que
+    no hace falta suponer nada ni escribir el huso de una empresa en el nucleo.
+    Sin esa referencia no se devuelve nada: un instante sin zona no es un
+    instante.
+    """
+    if normalizar(ticket.get("estado")) != "cerrado":
+        return None
+    crudo = str(ticket.get("fecha_fin") or "").strip()
+    if not crudo:
+        return None
+    try:
+        cuando = datetime.strptime(crudo, "%m/%d/%Y %H:%M:%S")
+    except ValueError:
+        return None
+    try:
+        zona = datetime.fromisoformat(str(ticket.get("fecha_creacion"))).tzinfo
+    except (ValueError, TypeError):
+        return None
+    if zona is None:
+        return None
+    return cuando.replace(tzinfo=zona).isoformat()
+
+
+def clasificar_creador_persistente(creado_por, external_ticket_id, cuenta_api,
+                                   registrados_por_dexter, tipo_guardado="") -> str:
+    """
+    La clasificacion de autoria para un caso QUE YA EXISTE.
+
+    Igual que 'clasificar_creador' salvo por una regla: 'dexter' no se
+    degrada. Si alguna vez supimos que ese ticket lo abrimos nosotros, eso no
+    deja de ser cierto porque hoy el proveedor conteste con el nombre de la
+    cuenta compartida -- que es lo que contesta SIEMPRE para todo lo que entra
+    por API, incluido lo nuestro.
+
+    Sin esto, la primera reconciliacion despues de importar convertiria cada
+    caso 'dexter' en 'externo_desconocido', y la clasificacion empeoraria sola
+    con el tiempo. La evidencia interna (nuestro propio registro) es mas
+    especifica que una identidad que el proveedor comparte entre todos.
+    """
+    if tipo_guardado == DEXTER:
+        return DEXTER
+    return clasificar_creador(creado_por, external_ticket_id,
+                              cuenta_api, registrados_por_dexter)
+
+
+def destino_de(config_imp, departamento, asunto):
+    """El destino declarado para este ticket, o None. Cae a 'departamento|*'."""
+    normalizados = {normalizar(k): v for k, v in config_imp.destinos.items()}
+    return (normalizados.get(clave(departamento, asunto))
+            or normalizados.get(_comodin(departamento)))
+
+
+def area_declarada(config, area) -> str:
+    """
+    El nombre con que el tenant declaro esa area, o "" si no la declaro.
+
+    Se compara normalizado --como valida el alta-- pero se escribe el nombre
+    DECLARADO: la cola de Tickets filtra por igualdad exacta, y un destino
+    escrito 'Soporte_Tecnico' quedaba afuera de 'soporte_tecnico' (auditor
+    independiente, 20/10/2026).
+    """
+    nombres = {normalizar(a.nombre): a.nombre for a in (config.areas or [])}
+    return nombres.get(normalizar(area or ""), "")
+
+
+def area_por_la_regla(config, ticket) -> str:
+    """
+    El area que la regla de importacion le da a este ticket, o "".
+
+    LA MISMA REGLA QUE EL ALTA: 'destino_de' sobre 'departamento|asunto' (con
+    el comodin 'departamento|*'), y solo si el area esta declarada en las
+    areas del tenant -- lo mismo que 'descubrir' exige antes de crear un caso.
+
+    "" NO BORRA NADA: quien la llama no manda la clave, y el caso se queda con
+    el area que tenia. Tampoco adivina: un destino que no existe devuelve "".
+    El departamento y el asunto se toman como los toma 'descubrir' -- vacios
+    si faltan--, y 'normalizar' ya tolera lo que no es texto.
+    """
+    destino = destino_de(config.importacion_tickets,
+                         ticket.get("departamento") or "",
+                         ticket.get("asunto") or "")
+    return area_declarada(config, destino.area) if destino else ""
+
+
+def responsable_para(area: str, areas_por_persona: dict,
+                     carga: dict | None = None) -> str | None:
+    """
+    A quien de esa area le toca. None si no hay nadie.
+
+    Se resuelve ACA y no en la config a proposito: una persona se va de
+    vacaciones, entra otra, cambia de equipo -- y con el profile_id escrito en
+    el YAML, cada uno de esos dias normales obligaria a editar la integracion.
+    El area es la regla de negocio; la persona es su consecuencia del dia.
+
+    El desempate lo hace 'reparto', el mismo que ya reparte los tickets que
+    salen: dos criterios distintos para lo mismo terminarian discrepando.
+    """
+    candidatos = [p for p, a in (areas_por_persona or {}).items()
+                  if normalizar(a) == normalizar(area)]
+    return reparto.elegir_menos_cargado(candidatos, carga)
+
+
+# =============================================================================
+#  DESCUBRIMIENTO
+# =============================================================================
+
+def debe_correr(config_imp, ultima: datetime | None = None,
+                ahora: datetime | None = None) -> bool:
+    """
+    Si al barrido le toca. Con 'cada_horas' en 0 -- el valor por defecto -- NO.
+
+    Es la compuerta que hace que desplegar este codigo no importe nada por su
+    cuenta. Vive aca y no en el reloj del motor a proposito: el reloj sabe de
+    tiempo, no de esta integracion, y la regla "0 significa apagado" tiene que
+    poder probarse sin levantar un hilo.
+
+    Se comprueba en cada pasada y no al arrancar: 'cada_horas' se cambia
+    guardando la config, que es justo lo que un proceso ya arrancado no
+    relee. Condicionarlo al arranque lo dejaria dormido hasta el proximo
+    reinicio -- el mismo error que el reloj de vencimientos ya documenta.
+    """
+    if not config_imp.cada_horas or config_imp.cada_horas <= 0:
+        return False
+    if ultima is None:
+        return True
+    ahora = ahora or datetime.now(timezone.utc)
+    if ultima.tzinfo is None:
+        ultima = ultima.replace(tzinfo=timezone.utc)
+    return (ahora - ultima) >= timedelta(hours=config_imp.cada_horas)
+
+
+def ventana(config_imp, ahora: datetime | None = None) -> tuple[str, str]:
+    """
+    Desde cuando y hasta cuando mirar, en 'YYYY-MM-DD'.
+
+    Una ventana MOVIL de 'ventana_dias', sin checkpoint persistido. Repetir lo
+    ya visto no cuesta: un ticket que ya tiene caso se corta contra los
+    conocidos antes de resolver ninguna identidad, y la unicidad la sostiene
+    la base. A cambio, la ventana entera es la red de recuperacion -- un ciclo
+    que falla no deja nada atras, porque no habia nada que avanzar.
+
+    El tope de 55 dias no es prudencia: el proveedor responde HTTP 400 a
+    cualquier ventana mayor a dos meses.
+    """
+    ahora = ahora or datetime.now(timezone.utc)
+    dias = min(max(config_imp.ventana_dias, 1), 55)
+    desde = ahora - timedelta(days=dias)
+    return desde.date().isoformat(), ahora.date().isoformat()
+
+
+def descubrir(config, tickets: list[dict], *,
+              conocidos: set,
+              registrados_por_dexter: set,
+              areas_por_persona: dict,
+              cuenta_api: str,
+              servicio_placeholder: str = "",
+              resolver_servicio=None,
+              carga: dict | None = None) -> list[Veredicto]:
+    """
+    Un veredicto por ticket inspeccionado. No escribe nada, en ningun modo.
+
+    'resolver_servicio' recibe una LISTA de id_servicio y devuelve
+    {id_servicio: {...cliente...}}. Se llama UNA vez, con los servicios unicos
+    de los tickets que pasaron el filtro: medido, 1.162 tickets son 607
+    servicios distintos, asi que consultar por ticket seria casi el doble de
+    llamadas para el mismo dato. Y solo despues del filtro, para no pagar
+    ninguna consulta por un ticket que no iba a entrar.
+    """
+    conf = config.importacion_tickets
+    areas_validas = {normalizar(a.nombre) for a in (config.areas or [])}
+
+    # --- primera pasada: todo lo que se decide sin salir a la red ---------
+    #
+    # Cada ticket entra a 'veredictos' en el ORDEN EN QUE LLEGO, decida lo que
+    # decida. 'pendientes' guarda referencias a los que todavia les falta la
+    # identidad, y la segunda pasada los completa en su lugar: quien lee el
+    # reporte tiene que poder seguirlo contra el listado del proveedor, y una
+    # salida reordenada por resultado obliga a buscar cada ticket.
+    veredictos: list[Veredicto] = []
+    pendientes: list[Veredicto] = []
+    for t in tickets:
+        servicio = t.get("servicio") if isinstance(t.get("servicio"), dict) else {}
+        v = Veredicto(
+            external_ticket_id=str(t.get("id_ticket", "")),
+            external_service_id=str(servicio.get("id_servicio") or ""),
+            departamento=t.get("departamento") or "",
+            asunto=t.get("asunto") or "",
+            external_status=t.get("estado") or "",
+            external_created_by=(t.get("creado_por") or "").strip(),
+            descripcion=limpiar_descripcion(t.get("descripcion")),
+            prioridad_proveedor=(t.get("prioridad") or "").strip(),
+        )
+        veredictos.append(v)
+        v.external_created_by_type = clasificar_creador(
+            v.external_created_by, v.external_ticket_id,
+            cuenta_api, registrados_por_dexter)
+
+        permitido, motivo = pasa_la_lista(conf, v.departamento, v.asunto)
+        if not permitido:
+            v.resultado = motivo
+            continue
+
+        # El estado se mira ACA: antes de resolver identidad, cliente y ONU.
+        # Enriquecer un ticket que ya sabemos que se descarta es pagar una
+        # llamada por un dato que nadie va a leer, y en el piloto eran 118 de
+        # 139. Vacio no significa 'todos': significa que no entra ninguno.
+        #
+        # Solo gobierna el DESCUBRIMIENTO. Un ticket que se cierra despues de
+        # importado lo sigue la reconciliacion, que no mira esta lista: el
+        # caso ya existe y su estado externo tiene que poder cambiar.
+        if v.external_status not in conf.estados_descubrimiento:
+            v.resultado = DESCARTADO_POR_ESTADO
+            continue
+
+        # Que el estado este permitido no alcanza: tiene que saberse con que
+        # estado propio nace el caso. Fail-closed -- sin mapeo no se importa.
+        if estado_inicial(v.external_status) is None:
+            v.resultado = ESTADO_SIN_MAPEO
+            v.detalle = f"no hay estado inicial para '{v.external_status}'"
+            continue
+
+        if conf.tipos_de_creador and \
+                v.external_created_by_type not in conf.tipos_de_creador:
+            v.resultado = DESCARTADO_POR_CREADOR
+            continue
+
+        # Antes que cualquier resolucion de identidad: un ticket que ya tiene
+        # caso no necesita ninguna consulta. Es tambien lo que hace que dos
+        # pasadas seguidas no produzcan dos casos -- el solapamiento de la
+        # ventana los vuelve a traer y aca se paran.
+        if v.external_ticket_id in conocidos:
+            v.resultado = YA_EXISTE
+            continue
+
+        if not v.external_service_id:
+            v.resultado = SIN_SERVICIO
+            continue
+
+        destino = destino_de(conf, v.departamento, v.asunto)
+        if destino is None:
+            v.resultado = SIN_DESTINO_CONFIGURADO
+            continue
+
+        v.area = destino.area
+        v.prioridad = destino.prioridad
+        if normalizar(destino.area) not in areas_validas:
+            v.resultado = AREA_DESTINO_INVALIDA
+            v.detalle = f"'{destino.area}' no esta declarada en areas"
+            continue
+        #  El nombre DECLARADO, no la grafia del destino (20/10/2026): es el
+        #  que viaja al caso, y la cola de Tickets lo compara exacto.
+        v.area = area_declarada(config, destino.area)
+
+        elegido = responsable_para(destino.area, areas_por_persona, carga)
+        if not elegido:
+            # No se crea igual. Un caso sin responsable no tiene area -- el
+            # area sale de la persona-- y terminaria invisible para todo el
+            # equipo salvo quien administra. Peor que no crearlo.
+            v.resultado = SIN_RESPONSABLE_DISPONIBLE
+            v.detalle = f"nadie con area '{destino.area}'"
+            continue
+
+        v.responsable = elegido
+        pendientes.append(v)
+
+    # --- segunda pasada: la identidad, por SERVICIO unico ------------------
+    if pendientes and resolver_servicio:
+        # El cliente ficticio queda afuera de la consulta: no es una persona.
+        unicos = sorted({v.external_service_id for v in pendientes
+                         if v.external_service_id != str(servicio_placeholder)})
+        fichas = resolver_servicio(unicos) if unicos else {}
+        for v in pendientes:
+            if v.external_service_id == str(servicio_placeholder):
+                # Se conserva la referencia externa -- vino del proveedor y es
+                # cierta-- pero no se le atribuye a nadie ni se le busca ONU:
+                # es el registro que la empresa usa para poder abrir un ticket
+                # de instalacion cuando el cliente todavia no existe.
+                v.identidad_es_placeholder = True
+                v.detalle = "servicio de instalaciones: prospecto sin identidad resuelta"
+            else:
+                ficha = fichas.get(v.external_service_id) or {}
+                v.cliente_identificado = bool(ficha)
+                v.sn_onu = str(ficha.get("sn_onu") or "")
+                v.cliente_nombre = str(ficha.get("nombre") or "").strip()
+            v.resultado = CANDIDATO
+    else:
+        for v in pendientes:
+            v.resultado = CANDIDATO
+
+    return veredictos
+
+
+# =============================================================================
+#  RECONCILIACION
+# =============================================================================
+
+def hay_que_reconciliar(config_imp, caso: dict,
+                        ahora: datetime | None = None) -> bool:
+    """
+    Si vale la pena volver a preguntar por este caso.
+
+    Se reconcilia lo que todavia se esta trabajando, mas una gracia despues de
+    cerrar: el cierre de Dexter y el del proveedor no son el mismo momento, y
+    esa divergencia de unos dias es justo la que se quiere poder mostrar.
+    Fuera de eso no se pregunta: releer para siempre miles de casos cerrados
+    es trafico permanente para enterarse de nada.
+    """
+    if caso.get("status") in config_imp.reconciliar_estados:
+        return True
+    cerrado = caso.get("closed_on")
+    if not cerrado:
+        return False
+    ahora = ahora or datetime.now(timezone.utc)
+    if isinstance(cerrado, str):
+        try:
+            cerrado = datetime.fromisoformat(cerrado)
+        except ValueError:
+            return False
+    # 'Case.closed_on' es un DateField, asi que la base devuelve un 'date' y no
+    # un 'datetime' -- y 'date.replace()' no acepta tzinfo. Reventaba con
+    # TypeError sobre datos reales mientras las pruebas, que le pasaban cadenas
+    # ISO, pasaban en verde: 'fromisoformat' de una cadena con hora si da un
+    # datetime. Encontrado en el primer dry-run contra produccion.
+    if isinstance(cerrado, date) and not isinstance(cerrado, datetime):
+        cerrado = datetime(cerrado.year, cerrado.month, cerrado.day,
+                           tzinfo=timezone.utc)
+    if getattr(cerrado, "tzinfo", None) is None:
+        cerrado = cerrado.replace(tzinfo=timezone.utc)
+    return (ahora - cerrado) <= timedelta(days=config_imp.gracia_cierre_dias)
+
+
+def _momento_de_lectura(caso: dict) -> datetime:
+    """Cuando se leyo este caso por ultima vez. Nunca leido = lo mas viejo."""
+    valor = caso.get(SELLO_DE_LECTURA)
+    if isinstance(valor, str) and valor:
+        try:
+            valor = datetime.fromisoformat(valor)
+        except ValueError:
+            valor = None
+    if not isinstance(valor, datetime):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return valor if valor.tzinfo else valor.replace(tzinfo=timezone.utc)
+
+
+def _fallo_la_lectura(caso: dict) -> bool:
+    return bool(str(caso.get("external_fetch_error") or "").strip())
+
+
+# =============================================================================
+#  LA CONCILIACION  --  20/10/2026
+# =============================================================================
+#  El usuario comparo WispHub con Dexter y no coincidian: Dexter relee 200
+#  casos por hora y tardaba hasta ~4 h en enterarse de un cierre; un ticket
+#  borrado alla dejaba su caso abierto aca para siempre; y una relectura en
+#  paralelo devolvio 80 de 808 con '429 Too Many Requests', que quedaban
+#  escritos como error. Pidio: "que se mantenga sincronizado bajo cualquier
+#  pronostico de error, que no se tenga que repetir ni cerrar manual".
+
+#: Como queda un caso cuyo ticket el proveedor ya no tiene. El Supervisor lo
+#: trata como cerrado alla (operaciones/supervisor.py::CERRADO_EN_PROVEEDOR) y
+#: lo cierra con sus mismas compuertas.
+ESTADO_ELIMINADO = "Eliminado"
+
+#: La marca del primer 404, con su momento: el segundo 404, una hora despues,
+#: es el que lo da por eliminado. Un 404 suelto puede ser un tropiezo del
+#: proveedor; dos, separados, no.
+MARCA_NO_EXISTE = "NO_EXISTE_EN_PROVEEDOR desde"
+HORAS_PARA_DARLO_POR_ELIMINADO = 1
+
+#: LA GUARDA DEL 404 MASIVO. Una credencial o una URL mal puesta hace que el
+#: proveedor conteste 404 a TODO, y sin esto cada caso abierto quedaria
+#: "Eliminado" y el Supervisor los cerraria en masa. Medido el 20/10/2026: 2
+#: borrados de 808 abiertos. Si una vuelta da mas que esto, no se declara
+#: ninguno y queda la alarma: eso no es un borrado, es una falla.
+TOPE_ELIMINADOS_POR_VUELTA = 10
+
+#: Respuestas que dicen "ahora no", no "esto es asi": no se escriben.
+CODIGOS_TRANSITORIOS = (408, 425, 429, 500, 502, 503, 504)
+
+NO_EXISTE = "no_existe"
+TRANSITORIO = "transitorio"
+OTRO_FALLO = "otro"
+
+
+def clase_de_fallo(error) -> str:
+    """
+    Que dice un fallo al leer un ticket: que no existe (404), que es pasajero
+    (429, 5xx, sin red) u otra cosa. Se mira el codigo de la respuesta y el
+    tipo del error, nunca el texto.
+    """
+    codigo = getattr(getattr(error, "response", None), "status_code", None)
+    if codigo == 404:
+        return NO_EXISTE
+    if codigo in CODIGOS_TRANSITORIOS:
+        return TRANSITORIO
+    nombres = {k.__name__ for k in type(error).__mro__}
+    if nombres & {"Timeout", "ConnectionError"}:
+        return TRANSITORIO
+    return OTRO_FALLO
+
+
+def _desde_cuando_no_existe(error: str):
+    """El momento del primer 404 anotado en el error, o None."""
+    if not error.startswith(MARCA_NO_EXISTE + " "):
+        return None
+    try:
+        momento = datetime.fromisoformat(
+            error[len(MARCA_NO_EXISTE) + 1:].strip().split()[0])
+    except (ValueError, IndexError):
+        return None
+    return momento if momento.tzinfo else momento.replace(tzinfo=timezone.utc)
+
+
+def por_no_existir(caso: dict, ahora: datetime, *,
+                   puede_eliminar: bool = True) -> dict:
+    """
+    Que se escribe de un caso cuyo ticket el proveedor contesta con 404.
+
+    El primero deja la marca con su momento; uno dentro de la hora no toca
+    nada; uno despues de la hora lo da por ELIMINADO --con su momento y la
+    lectura fresca, que es lo que el cierre del Supervisor exige-- y uno que
+    ya estaba eliminado solo refresca la lectura, para que el cierre no se
+    trabe por "lectura vieja" mientras espera sus compuertas.
+
+    'puede_eliminar' en False deja la marca pero nunca declara: es lo que pasa
+    cuando esta vuelta no consiguio la lista entera de abiertos, o cuando el
+    ticket SI figura en ella (la lista y el detalle se contradicen).
+    """
+    if normalizar(caso.get("external_status") or "") == normalizar(ESTADO_ELIMINADO):
+        return {SELLO_DE_LECTURA: ahora.isoformat()}
+    desde = _desde_cuando_no_existe(str(caso.get("external_fetch_error") or ""))
+    if desde is None:
+        return {"external_fetch_error": f"{MARCA_NO_EXISTE} {ahora.isoformat()}"}
+    if not puede_eliminar or ahora - desde < timedelta(
+            hours=HORAS_PARA_DARLO_POR_ELIMINADO):
+        return {}
+    return {"external_status": ESTADO_ELIMINADO,
+            MOMENTO_DEL_ESTADO: ahora.isoformat(),
+            "external_fetch_error": "",
+            SELLO_DE_LECTURA: ahora.isoformat()}
+
+
+def tramos_de_conciliacion(meses: int,
+                           ahora: datetime | None = None) -> list[tuple[str, str]]:
+    """
+    Los tramos [desde, hasta] que cubren los ultimos 'meses', de 59 dias como
+    mucho cada uno: el proveedor responde 400 a mas de dos meses. 59 es lo que
+    se uso el 20/10/2026 en produccion, en 30 tramos seguidos, sin un error.
+    """
+    if meses <= 0:
+        return []
+    ahora = ahora or datetime.now(timezone.utc)
+    inicio = ahora.date() - timedelta(days=30 * meses)
+    fin = ahora.date() + timedelta(days=1)
+    tramos = []
+    while fin >= inicio:
+        desde = fin - timedelta(days=59)
+        tramos.append((desde.isoformat(), fin.isoformat()))
+        fin = desde - timedelta(days=1)
+    return tramos
+
+
+#: Una lista de abiertos que no contiene ni la mitad de los casos abiertos de
+#: Dexter no es la lista: es una respuesta rota (un 200 vacio, un formato
+#: nuevo). Medido el 20/10/2026: 788 abiertos alla, ~800 aca, coinciden casi
+#: todos. Con pocos casos no se mide el porcentaje: alcanza con que no venga
+#: vacia (auditor independiente, 20/10/2026).
+COBERTURA_MINIMA = 0.5
+MINIMO_PARA_MEDIR_COBERTURA = 20
+
+
+def lista_creible(config_imp, casos: list[dict], abiertos: set | None) -> bool:
+    """Si la lista de abiertos del proveedor se puede usar para sospechar."""
+    if abiertos is None:
+        return False
+    aca = [str(c.get("external_ticket_id") or "") for c in casos
+           if c.get("status") in config_imp.reconciliar_estados
+           and c.get("external_ticket_id")]
+    if not aca:
+        return True
+    if len(aca) < MINIMO_PARA_MEDIR_COBERTURA:
+        return bool(abiertos)
+    return sum(1 for t in aca if t in abiertos) >= COBERTURA_MINIMA * len(aca)
+
+
+#: Lo que el proveedor ya dijo que esta cerrado o que ya no existe. Esos casos
+#: no se releen primero: Dexter ya sabe lo que son y los cierra el Supervisor.
+#: Releerlos cada hora era trafico para nada (auditor independiente).
+YA_SABIDOS_CERRADOS = ("cerrado", "eliminado")
+
+
+def sospechosos_de(config_imp, casos: list[dict],
+                   abiertos_en_proveedor: set | None) -> list[dict]:
+    """
+    Los casos ABIERTOS en Dexter cuyo ticket ya no esta en la lista de
+    abiertos del proveedor: los que probablemente se cerraron o se borraron
+    alla. Sin la lista (no se pudo pedir entera), ninguno: sin el dato no se
+    sospecha.
+    """
+    if abiertos_en_proveedor is None:
+        return []
+    return [c for c in casos
+            if c.get("status") in config_imp.reconciliar_estados
+            and str(c.get("external_ticket_id") or "") not in abiertos_en_proveedor
+            and normalizar(c.get("external_status") or "") not in YA_SABIDOS_CERRADOS]
+
+
+def de_esta_vuelta(config_imp, casos: list[dict],
+                   ahora: datetime | None = None, *,
+                   todos: bool = False,
+                   abiertos_en_proveedor: set | None = None) -> list[dict]:
+    """
+    Los casos que se releen en ESTA vuelta: los que hay que reconciliar, los de
+    lectura mas vieja primero, hasta 'reconciliar_por_vuelta'.
+
+    EL TOPE  --  19/10/2026. Se releian todos en cada vuelta, ~800 consultas
+    sueltas y mas de 50 minutos medidos en produccion. Un deploy reinicia el
+    reloj y cortaba la vuelta a la mitad; lo que no se releia envejecia hasta
+    pasar las 72 h que exige un cierre, y el Supervisor dejaba de cerrar.
+
+    EL ORDEN es lo que hace que el tope no deje a nadie afuera: cada vuelta
+    toma los que llevan mas tiempo sin leerse, y al leerlos su fecha pasa a
+    ser la mas nueva. La vuelta siguiente sigue con los que quedaron, sin
+    guardar un "por donde iba": esa marca ya es la fecha de cada caso. Un caso
+    que nunca se leyo va primero; a igual fecha, el orden de la lista.
+
+    LO QUE CAMBIO LA AUDITORIA (auditor-independiente, 19/10/2026):
+
+    'todos'  -- la herramienta de recuperacion ('--solo-reconciliar' del CLI)
+       relee TODO. Quien la corre quiere el estado entero al dia, y recortarla
+       a 200 sin avisar era decirle "listo" con 600 sin tocar.
+
+    SIN LA FECHA NO HAY TOPE  -- si ningun caso trae 'external_fetched_at' (un
+       backend que no la manda), no hay orden: el tope tomaria SIEMPRE los
+       mismos y el resto no se releeria nunca, con cada vuelta luciendo sana
+       en el log (medido en simulacion: 600 de 800 nunca releidos). Se relee
+       todo, como antes. Se pregunta por la CLAVE: un caso nunca leido la trae
+       en None, y eso si es un orden.
+
+    LOS QUE FALLAN, HASTA LA MITAD  -- una lectura fallida no estrena fecha,
+       asi que el caso queda primero en la vuelta siguiente. Con muchos que
+       fallan siempre (un ticket que el proveedor ya no devuelve) se comian el
+       tope entero: con 200 asi, 0 de 800 sanos releidos (medido en
+       simulacion). Ahora tienen como mucho la mitad del cupo si hay sanos
+       esperando, y los sanos avanzan siempre. NO se arregla escribiendo la
+       fecha en el fallo: 'TICKET_SIN_DIAGNOSTICO' usa esa fecha como prueba
+       de que el dato esta fresco.
+    """
+    elegibles = [c for c in casos if hay_que_reconciliar(config_imp, c, ahora)]
+    elegibles.sort(key=_momento_de_lectura)
+    if todos or (elegibles
+                 and not any(SELLO_DE_LECTURA in c for c in elegibles)):
+        return elegibles
+    tope = config_imp.reconciliar_por_vuelta
+    #  PRIMERO LOS SOSPECHOSOS  --  20/10/2026. Los abiertos aca que ya no estan
+    #  abiertos alla van al frente y fuera del tope: son los que el usuario
+    #  necesita ver cerrados. Con un tope propio (dos veces el de la vuelta)
+    #  por si la lista viniera mal: nunca releer 800 de golpe.
+    primero = sospechosos_de(config_imp, elegibles,
+                             abiertos_en_proveedor)[:2 * tope]
+    if primero:
+        ya = {id(c) for c in primero}
+        elegibles = [c for c in elegibles if id(c) not in ya]
+    sanos = [c for c in elegibles if not _fallo_la_lectura(c)]
+    fallan = [c for c in elegibles if _fallo_la_lectura(c)]
+    de_los_que_fallan = fallan[:max(tope // 2, tope - len(sanos))]
+    de_los_sanos = sanos[:tope - len(de_los_que_fallan)]
+    return primero + sorted(de_los_sanos + de_los_que_fallan,
+                            key=_momento_de_lectura)
+
+
+def reconciliar(config, casos: list[dict], *, leer_ticket,
+                cuenta_api: str, registrados_por_dexter: set,
+                ahora: datetime | None = None,
+                todos: bool = False,
+                abiertos_en_proveedor: set | None = None) -> list[Cambio]:
+    """
+    Que cambiaria de cada caso ya conocido. No escribe.
+
+    Se consulta ticket por ticket ('GET /api/tickets/<id>/', que existe y
+    responde) y no por ventana: un ticket abierto hace tres semanas puede
+    cambiar hoy y no aparecer en ninguna ventana por fecha de creacion.
+
+    'Case.status' NO esta entre lo que se toca, y no por olvido: el estado de
+    Dexter es de Dexter. Lo que diga el proveedor vive en 'external_status', y
+    si los dos discrepan la discrepancia se conserva para que la mire una
+    persona.
+
+    Un fallo en un ticket queda escrito en ESE caso y no corta el lote: que un
+    ticket no responda no es motivo para no enterarse de los otros doscientos.
+    """
+    ahora = ahora or datetime.now(timezone.utc)
+    cambios: list[Cambio] = []
+
+    for caso in de_esta_vuelta(config.importacion_tickets, casos, ahora,
+                               todos=todos,
+                               abiertos_en_proveedor=abiertos_en_proveedor):
+        tid = str(caso.get("external_ticket_id") or "")
+        cambio = Cambio(
+            caso_id=str(caso.get("id") or ""),
+            external_ticket_id=tid,
+            antes={
+                "external_status": caso.get("external_status") or "",
+                "external_created_by": caso.get("external_created_by") or "",
+                "external_created_by_type": caso.get("external_created_by_type") or "",
+                "external_fetch_error": caso.get("external_fetch_error") or "",
+                #  El area que el caso ya tiene (19/10/2026). Sin ella, cada
+                #  area que se manda contaria una diferencia en cada vuelta, la
+                #  misma trampa que el momento del estado de aca abajo.
+                "area": caso.get("area") or "",
+                #  Tiene que estar, y sin el 'or ""' de los demas: lo que se
+                #  compara es un instante, y una cadena vacia no es uno. Si
+                #  falta esta clave, 'antes.get' devuelve None contra la fecha
+                #  real y todo ticket cerrado cuenta diferencia para siempre
+                #  (142 de 184, medido en produccion el 06/10/2026).
+                MOMENTO_DEL_ESTADO: caso.get(MOMENTO_DEL_ESTADO),
+            },
+        )
+        try:
+            t = leer_ticket(tid)
+        except Exception as e:                              # noqa: BLE001
+            cambio.error = f"{type(e).__name__}: {e}"
+            clase = clase_de_fallo(e)
+            if clase == TRANSITORIO:
+                #  UN FRENAZO NO ES UN DATO  --  20/10/2026: 80 de 808 con 429
+                #  quedaron escritos como error y trababan el cierre. No se
+                #  escribe nada; el caso sigue siendo de lectura vieja y va
+                #  primero en la vuelta siguiente.
+                cambio.transitorio = True
+                cambio.despues = {}
+            elif clase == NO_EXISTE:
+                #  Solo se puede dar por eliminado si ESTA vuelta consiguio la
+                #  lista entera de abiertos --prueba de que el proveedor
+                #  contesta bien con esta credencial-- y el ticket no esta.
+                cambio.despues = por_no_existir(
+                    caso, ahora,
+                    puede_eliminar=(abiertos_en_proveedor is not None
+                                    and tid not in abiertos_en_proveedor))
+            else:
+                # El fallo se escribe en la fila para que se vea en la
+                # plataforma, y no toca el estado: un error de lectura no dice
+                # nada del caso.
+                cambio.despues = {"external_fetch_error": cambio.error[:500]}
+            cambios.append(cambio)
+            continue
+
+        # Se exige que la respuesta SEA ese ticket, no solo que sea un dict.
+        # La guarda anterior pedia "dict no vacio", y un listado paginado
+        # ({count, next, results}) lo es: con la herramienta equivocada la
+        # reconciliacion daba 16/16 leidos y proponia vaciar el estado de los
+        # 16. Comparar el id devuelto contra el pedido es lo unico que
+        # distingue "me contestaron por este ticket" de "me contestaron algo".
+        if not isinstance(t, dict) or str(t.get("id_ticket") or "") != str(tid):
+            cambio.error = (f"la respuesta no corresponde al ticket {tid} "
+                            f"(claves: {sorted(t)[:6] if isinstance(t, dict) else type(t).__name__})")
+            cambio.despues = {"external_fetch_error": cambio.error[:500]}
+            cambios.append(cambio)
+            continue
+
+        autor = (t.get("creado_por") or "").strip()
+        cambio.despues = {
+            "external_status": t.get("estado") or "",
+            "external_status_at": momento_del_estado(t),
+            "external_created_by": autor,
+            # Persistente: un caso que ya sabemos que abrio Dexter no se
+            # degrada a 'externo_desconocido' porque el proveedor conteste
+            # con el nombre de la cuenta compartida.
+            "external_created_by_type": clasificar_creador_persistente(
+                autor, tid, cuenta_api, registrados_por_dexter,
+                caso.get("external_created_by_type") or ""),
+            # Una lectura correcta limpia el error anterior: dejarlo puesto
+            # mostraria para siempre un fallo que ya se resolvio.
+            "external_fetch_error": "",
+            "external_fetched_at": ahora.isoformat(),
+        }
+        #  EL AREA, CON LA REGLA DEL ALTA  --  19/10/2026
+        #  ----------------------------------------------
+        #  El backend la acepta desde el 16/10 ("es lo que rellena los
+        #  viejos"), pero solo el alta la mandaba: medido en produccion, 816 de
+        #  816 casos abiertos sin area escrita, y el area de cada uno salia de
+        #  la persona asignada. Solo viaja si la regla la resuelve: un ticket
+        #  sin destino no le borra el area a nadie.
+        area = area_por_la_regla(config, t)
+        if area:
+            cambio.despues["area"] = area
+        # El hilo viene en el MISMO payload que se acaba de leer para saber el
+        # estado. Medido el 10/09/2026: 24 de 25 tickets tienen respuestas, 70
+        # en total, asi que esto es la norma y no un caso raro.
+        cambio.respuestas = leer_respuestas(t)
+        cambios.append(cambio)
+
+    limitar_eliminados_por_vuelta(cambios)
+    return cambios
+
+
+def limitar_eliminados_por_vuelta(cambios: list) -> int:
+    """
+    Una vuelta declara como mucho TOPE_ELIMINADOS_POR_VUELTA eliminados: los de
+    marca MAS VIEJA. Los demas conservan su marca y esperan la vuelta
+    siguiente. Devuelve cuantos quedaron para despues.
+
+    Hasta la auditoria del 20/10/2026 no declaraba NINGUNO si pasaban el tope,
+    y con mas de diez borrados reales quedaban retenidos para siempre: habia
+    que cerrarlos a mano, justo lo que el usuario pidio evitar. El 404 a todo
+    lo frena antes la lista: sin una lista entera y creible no se declara
+    nada ('puede_eliminar' y 'lista_creible').
+    """
+    declarados = [c for c in cambios
+                  if c.despues.get("external_status") == ESTADO_ELIMINADO]
+    if len(declarados) <= TOPE_ELIMINADOS_POR_VUELTA:
+        return 0
+    lejos = datetime.max.replace(tzinfo=timezone.utc)
+    declarados.sort(key=lambda c: _desde_cuando_no_existe(
+        str(c.antes.get("external_fetch_error") or "")) or lejos)
+    para_despues = declarados[TOPE_ELIMINADOS_POR_VUELTA:]
+    for c in para_despues:
+        c.despues = {}
+        c.error = (f"eliminacion pospuesta: {len(declarados)} en una vuelta, "
+                   f"el tope es {TOPE_ELIMINADOS_POR_VUELTA}")
+    return len(para_despues)
+
+
+def resumen(veredictos: list[Veredicto]) -> dict:
+    """El conteo por resultado, mas lo que hay que mirar aunque no sea un conteo."""
+    conteo: dict[str, int] = {}
+    for v in veredictos:
+        conteo[v.resultado] = conteo.get(v.resultado, 0) + 1
+    candidatos = [v for v in veredictos if v.resultado == CANDIDATO]
+    return {
+        "inspeccionados": len(veredictos),
+        "por_resultado": dict(sorted(conteo.items(), key=lambda x: -x[1])),
+        "candidatos": len(candidatos),
+        "con_cliente_real": sum(1 for v in candidatos if v.cliente_identificado),
+        "placeholder_instalaciones": sum(
+            1 for v in candidatos if v.identidad_es_placeholder),
+        "con_onu": sum(1 for v in candidatos if v.tiene_onu),
+        "sin_onu": sum(1 for v in candidatos if not v.tiene_onu),
+        "por_tipo_de_creador": _contar(veredictos, "external_created_by_type"),
+        "candidatos_por_tipo": _contar(candidatos, "external_created_by_type"),
+        "candidatos_por_responsable": _contar(candidatos, "responsable"),
+        "candidatos_por_area": _contar(candidatos, "area"),
+    }
+
+
+def _contar(items, atributo) -> dict:
+    salida: dict[str, int] = {}
+    for i in items:
+        v = getattr(i, atributo) or "(vacio)"
+        salida[v] = salida.get(v, 0) + 1
+    return dict(sorted(salida.items(), key=lambda x: -x[1]))

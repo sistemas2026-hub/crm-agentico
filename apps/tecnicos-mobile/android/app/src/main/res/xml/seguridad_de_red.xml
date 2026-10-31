@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CONFIGURACIÓN DE RELEASE. Nada de HTTP en claro, nunca.
+
+  Esta aplicación transporta datos de clientes del ISP: nombre, dirección,
+  teléfono y las coordenadas del domicilio, además de las fotografías de cada
+  instalación. En claro, todo eso lo lee cualquiera en la misma red wifi, y
+  una cuadrilla trabaja desde la red del cliente o desde un teléfono
+  compartiendo datos en la calle.
+
+  Hasta acá el manifest declaraba `usesCleartextTraffic="true"` para toda la
+  aplicación, release incluido, y estaba ahí por una sola razón: poder apuntar
+  a `127.0.0.1:8000` mientras se desarrolla. Esa comodidad de desarrollo
+  viajaba dentro del APK que se le instala al técnico.
+
+  La variante de desarrollo reemplaza este archivo por el suyo
+  (`src/debug/res/xml/seguridad_de_red.xml`), que abre el mínimo
+  imprescindible y solo hacia el equipo de quien programa. Gradle resuelve el
+  recurso por variante, así que el APK de release nunca ve esa versión.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

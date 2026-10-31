@@ -1,0 +1,60 @@
+- generic [ref=f7e3]:
+  - generic [ref=f7e4]:
+    - generic [ref=f7e5]:
+      - button "Abrir menú" [ref=f7e6] [cursor=pointer]
+      - generic [ref=f7e8]: Q
+      - heading "QA BANDEJA (datos de prueba)" [level=2] [ref=f7e9]
+      - button "Buscar" [ref=f7e10] [cursor=pointer]
+    - banner [ref=f7e14]:
+      - generic [ref=f7e15]:
+        - heading "Negociaciones" [level=1] [ref=f7e16]
+        - generic [ref=f7e17]: 0 negociaciones · $0 · $0 ponderado · 0 estancadas
+      - generic [ref=f7e18]:
+        - generic [ref=f7e19] [cursor=pointer]: Lista
+        - link "Tablero" [ref=f7e21] [cursor=pointer]:
+          - /url: /pipeline?view=board
+        - link "Nueva negociación" [ref=f7e24] [cursor=pointer]:
+          - /url: /pipeline/new
+    - generic [ref=f7e26]:
+      - group [ref=f7e27]:
+        - generic "Todas las negociaciones" [ref=f7e28] [cursor=pointer]
+      - group [ref=f7e31]:
+        - generic "Filtrar" [ref=f7e32] [cursor=pointer]
+        - option "Cualquiera" [selected]
+        - option "ana.qa"
+        - option "Cualquiera" [selected]
+        - option "Prospección"
+        - option "Calificación"
+        - option "Propuesta"
+        - option "Negociación"
+        - option "Ganada"
+        - option "Perdida"
+        - option "Cualquiera" [selected]
+        - option "Llamada"
+        - option "Correo"
+        - option "Cliente existente"
+        - option "Socio"
+        - option "Relaciones públicas"
+        - option "Campaña"
+        - option "Otro"
+        - option "Cualquiera" [selected]
+      - generic [ref=f7e34]: Ordenado por valor
+    - generic [ref=f7e36]:
+      - heading "No hay negociaciones acá" [level=3] [ref=f7e40]
+      - paragraph [ref=f7e41]: Nada coincide con esta vista. Iniciá una negociación desde una cuenta con la que ya estás hablando, convertí un prospecto que esté listo, o limpiá un filtro para ver más.
+      - generic [ref=f7e42]:
+        - link "Nueva negociación" [ref=f7e43] [cursor=pointer]:
+          - /url: /pipeline/new
+        - link "Ir a prospectos" [ref=f7e44] [cursor=pointer]:
+          - /url: /leads
+    - navigation "Secciones" [ref=f7e45]:
+      - link "Hoy" [ref=f7e46] [cursor=pointer]:
+        - /url: /
+      - link "Negociaciones" [ref=f7e53] [cursor=pointer]:
+        - /url: /pipeline
+      - link "Tickets" [ref=f7e56] [cursor=pointer]:
+        - /url: /tickets
+      - link "Facturas" [ref=f7e64] [cursor=pointer]:
+        - /url: /invoices
+  - link "Nueva negociación" [ref=f7e68] [cursor=pointer]:
+    - /url: /pipeline/new

@@ -1,0 +1,279 @@
+/**
+ * Canal de WhatsApp: estado del canal y las credenciales cifradas que lo
+ * activan. El puente entre el CRM y el motor, mismo patron que
+ * asistente-config.js.
+ *
+ * Server-only. Habla con crm-agentico (`PRIVATE_ASISTENTE_URL`), en la red
+ * interna. El tenant sale del entorno del servidor y nunca del cliente.
+ *
+ * `leer*` no lanza -- mismo criterio que asistente-config.js: si el motor
+ * esta caido, la pantalla de ajustes tiene que poder abrirse igual y decir
+ * "no se pudo leer", no reventar. `guardar*`/`borrar*` SI lanzan: ahi alguien
+ * apreto un boton y tiene que enterarse de que no se guardo.
+ */
+import { headersMotor } from './motor-headers.js';
+import { destinoDelAsistente } from './tenant.js';
+import { autorDeSesion } from './autor.js';
+
+/**
+ * Estado del canal: activo, version, numero visible, plantillas y los
+ * NOMBRES de los cinco secretos que declara (nunca sus valores).
+ * @returns {Promise<any | null>}
+ */
+export async function leerCanalWhatsapp(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/configuracion/canales?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
+    );
+    if (!resp.ok) return null;
+    const datos = await resp.json();
+    return datos.whatsapp;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cómo ve Meta al número emisor (28/10/2026): calidad, estado, nombre visible,
+ * modo. En vivo. null si el motor o Meta no contestan: la pantalla dice "no se
+ * pudo leer" y sigue, como el resto de los `leer*`.
+ *
+ * @returns {Promise<{ numero_final: string | null, nombre_visible: string | null,
+ *   estado_nombre: string | null, calidad: string | null, estado: string | null,
+ *   modo: string | null, plataforma: string | null, nivel_envio: string | null,
+ *   limite_diario: string | null, cuenta_oficial: boolean | null } | null>}
+ */
+export async function leerSaludWhatsapp(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/canales/whatsapp/salud?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Que secretos de la empresa ya tienen un valor cargado -- nombre,
+ * descripcion, pista (los ultimos 4 caracteres) y cuando se cargaron. Nunca
+ * el valor.
+ * @returns {Promise<any[]>}
+ */
+export async function listarSecretos(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return [];
+  try {
+    const resp = await fetch(`${cfg.baseUrl}/secretos?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() });
+    if (!resp.ok) return [];
+    const datos = await resp.json();
+    return datos.secretos ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Prende/apaga el canal y fija el numero visible.
+ * @param {{ activo: boolean, numero_visible?: string | null }} valores
+ */
+export async function guardarCanalWhatsapp(locals, fetch, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/canales/whatsapp`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ ...valores, tenant: cfg.tenant })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'El asistente rechazo el cambio.');
+  return datos;
+}
+
+/**
+ * Cifra y guarda un secreto. 'descripcion' es para que la lista diga para
+ * que sirve sin tener que recordarlo.
+ * @param {string} nombre
+ * @param {string} valor
+ * @param {string} [descripcion]
+ */
+export async function guardarSecreto(locals, fetch, nombre, valor, descripcion) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(`${cfg.baseUrl}/secretos`, {
+    method: 'POST',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, nombre, valor, descripcion })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar la credencial.');
+}
+
+/** @param {string} nombre */
+export async function borrarSecreto(locals, fetch, nombre) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+
+  const resp = await fetch(
+    `${cfg.baseUrl}/secretos/${encodeURIComponent(nombre)}?tenant=${encodeURIComponent(cfg.tenant)}`,
+    { method: 'DELETE', headers: headersMotor() }
+  );
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo borrar la credencial.');
+}
+
+/*
+ * PLANTILLAS (28/10/2026): verlas en cualquier estado, mandar una nueva a
+ * revision de Meta y borrarla, desde Ajustes. El motor valida antes de
+ * mandarla (whatsapp.armar_plantilla_nueva) y firma con el autor de la sesion.
+ */
+
+/**
+ * Todas las plantillas de la empresa en Meta, en cualquier estado. null si
+ * el motor o Meta no contestan -- no es "no hay plantillas".
+ * @returns {Promise<any[] | null>}
+ */
+export async function listarPlantillas(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/canales/plantillas/todas?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
+    );
+    if (!resp.ok) return null;
+    return (await resp.json()).plantillas ?? [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {Record<string, any>} plantilla
+ * @returns {Promise<{ nombre: string, estado: string, categoria: string }>}
+ */
+export async function crearPlantilla(locals, fetch, plantilla) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/canales/plantillas`, {
+    method: 'POST',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, plantilla, ...autorDeSesion(locals) }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'Meta no aceptó la plantilla.');
+  return datos;
+}
+
+/** @param {string} nombre */
+export async function borrarPlantilla(locals, fetch, nombre) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/canales/plantillas/${encodeURIComponent(nombre)}`, {
+    method: 'DELETE',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, ...autorDeSesion(locals) }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'Meta no borró la plantilla.');
+}
+
+/*
+ * MENSAJES AUTOMATICOS (28/10/2026): cada momento en que Dexter le escribe a
+ * alguien por plantilla, y que dato va en cada {{n}}. El catalogo de momentos
+ * y datos es del motor (nucleo/config/mensajes_catalogo.py); la eleccion de
+ * cada empresa vive en su config.
+ */
+
+/**
+ * Los momentos, sus datos posibles, lo configurado y las plantillas en Meta.
+ * null si el motor no contesta.
+ * @returns {Promise<any | null>}
+ */
+export async function leerMensajesAutomaticos(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/mensajes-automaticos?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
+    );
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Guarda un momento. Lanza con el motivo si el motor lo rechaza (plantilla
+ * sin aprobar, datos de menos o de mas).
+ * @param {string} evento
+ * @param {{ activo: boolean, plantilla: string, datos: string[] }} valores
+ */
+export async function guardarMensajeAutomatico(locals, fetch, evento, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/mensajes-automaticos/${encodeURIComponent(evento)}`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, ...valores }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar.');
+  return datos;
+}
+
+/**
+ * Cuántos minutos después de cerrar un caso sale la encuesta (29/10/2026), de
+ * 0 a 1440. Lo valida el motor.
+ * @param {number} minutos
+ */
+export async function guardarEsperaEncuesta(locals, fetch, minutos) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/encuestas/espera`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, espera_minutos: minutos }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo guardar.');
+  return datos;
+}
+
+/**
+ * Activa o desactiva una plantilla para esta empresa (28/10/2026). En Meta no
+ * cambia nada. Devuelve qué momentos encendidos de Mensajes automáticos la
+ * usan: esos dejan de salir mientras esté desactivada.
+ * @param {string} nombre
+ * @param {boolean} enUso
+ * @returns {Promise<{ plantilla: string, en_uso: boolean, momentos_que_la_usan: string[] }>}
+ */
+export async function cambiarUsoDePlantilla(locals, fetch, nombre, enUso) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  const resp = await fetch(`${cfg.baseUrl}/canales/plantillas/${encodeURIComponent(nombre)}/uso`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, en_uso: enUso }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'No se pudo cambiar.');
+  return datos;
+}

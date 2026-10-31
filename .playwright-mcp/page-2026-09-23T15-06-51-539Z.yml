@@ -1,0 +1,175 @@
+- generic [active] [ref=f11e1]:
+  - generic [ref=f11e2]:
+    - generic [ref=f11e3]:
+      - text: DEXTER
+      - generic [ref=f11e5]: · COMMAND CENTER
+    - generic [ref=f11e6]:
+      - generic [ref=f11e7]: RAPILINK S.A.S.
+      - text: · ISP CORE
+    - generic [ref=f11e8]: OFICINA VIRTUAL · 6 AGENTES EN LÍNEA
+    - generic [ref=f11e9]:
+      - text: 10:43:27
+      - generic [ref=f11e10]: (America/Bogotá)
+    - generic [ref=f11e11]: ● MODO DEMOSTRACIÓN · DATOS SIMULADOS
+  - generic [ref=f11e12]:
+    - generic [ref=f11e13]:
+      - generic [ref=f11e14]: "27"
+      - generic [ref=f11e15]: Conversaciones activas
+    - generic [ref=f11e16]:
+      - generic [ref=f11e17]: "18"
+      - generic [ref=f11e18]: Agentes IA trabajando
+    - generic [ref=f11e19]:
+      - generic [ref=f11e20]: "1.240"
+      - generic [ref=f11e21]: Clientes atendidos hoy
+    - generic [ref=f11e22]:
+      - generic [ref=f11e23]: 1,2 s
+      - generic [ref=f11e24]: Latencia IA promedio
+    - generic [ref=f11e25]:
+      - generic [ref=f11e26]: "3.812"
+      - generic [ref=f11e27]: Herramientas ejecutadas
+    - generic [ref=f11e28]:
+      - generic [ref=f11e29]: "2"
+      - generic [ref=f11e30]: Alertas activas
+  - generic [ref=f11e31]:
+    - generic [ref=f11e34]:
+      - img:
+        - generic:
+          - generic: SLA
+          - generic: ESCALADAS
+          - generic: SUPERVISIÓN
+        - generic:
+          - generic: CARTERA
+          - generic: PAGOS
+          - generic: FACTURACIÓN Y CARTERA
+        - generic:
+          - generic: EMBUDO
+          - generic: COBERTURA
+          - generic: VENTAS Y CONTRATACIÓN
+        - generic:
+          - generic: MENSAJES
+          - generic: INTENCIÓN
+          - generic: RECEPCIÓN Y TRIAJE
+        - generic:
+          - generic: ÓRDENES
+          - generic: CUADRILLA
+          - generic: DESPACHO DE CAMPO
+        - generic:
+          - generic: POTENCIA
+          - generic: ONU
+          - generic: SOPORTE TÉCNICO FTTH
+      - img "Supervisor IA" [ref=f11e80] [cursor=pointer]
+      - generic [ref=f11e82] [cursor=pointer]:
+        - generic [ref=f11e83]:
+          - generic [ref=f11e84]: Supervisor IA
+          - generic [ref=f11e85]: SUPERVISANDO
+        - generic [ref=f11e87]: Supervisión
+        - generic [ref=f11e88]: "\"Auditando 27 conversaciones en curso\""
+        - generic [ref=f11e89]:
+          - generic [ref=f11e90]: "Escaladas: 2"
+          - generic [ref=f11e91]: "Errores: 0"
+      - img "Facturación" [ref=f11e94] [cursor=pointer]
+      - generic [ref=f11e96] [cursor=pointer]:
+        - generic [ref=f11e97]:
+          - generic [ref=f11e98]: Facturación
+          - generic [ref=f11e99]: DISPONIBLE
+        - generic [ref=f11e101]: Facturación y cartera
+        - generic [ref=f11e102]: "\"Sin tareas pendientes · Cartera al día\""
+        - generic [ref=f11e103]:
+          - generic [ref=f11e104]: "Cola: 0"
+          - generic [ref=f11e105]: "Resueltas: 96%"
+      - img "Ventas" [ref=f11e108] [cursor=pointer]
+      - generic [ref=f11e110] [cursor=pointer]:
+        - generic [ref=f11e111]:
+          - generic [ref=f11e112]: Ventas
+          - generic [ref=f11e113]: PROCESANDO
+        - generic [ref=f11e115]: Ventas y contratación
+        - generic [ref=f11e116]: "\"Cotizando plan 300 Mbps en Sabanalarga\""
+        - generic [ref=f11e117]:
+          - generic [ref=f11e118]: "Conv: 5"
+          - generic [ref=f11e119]: "Cotiz: 3"
+      - img "Router IA" [ref=f11e122] [cursor=pointer]
+      - generic [ref=f11e124] [cursor=pointer]:
+        - generic [ref=f11e125]:
+          - generic [ref=f11e126]: Router IA
+          - generic [ref=f11e127]: PROCESANDO
+        - generic [ref=f11e129]: Recepción y triaje
+        - generic [ref=f11e130]: "\"Clasificando mensaje entrante de WhatsApp\""
+        - generic [ref=f11e131]:
+          - generic [ref=f11e132]: "Conv: 24"
+          - generic [ref=f11e133]: "Resp: 0,8 s"
+      - img "Agente Campo" [ref=f11e136] [cursor=pointer]
+      - generic [ref=f11e138] [cursor=pointer]:
+        - generic [ref=f11e139]:
+          - generic [ref=f11e140]: Agente Campo
+          - generic [ref=f11e141]: ESPERANDO
+        - generic [ref=f11e143]: Despacho de campo
+        - generic [ref=f11e144]: "\"Esperando checklist del técnico en sitio\""
+        - generic [ref=f11e145]:
+          - generic [ref=f11e146]: "Órdenes: 4"
+          - generic [ref=f11e147]: "Zona: Norte"
+      - img "Soporte Fibra" [ref=f11e150] [cursor=pointer]
+      - generic [ref=f11e152] [cursor=pointer]:
+        - generic [ref=f11e153]:
+          - generic [ref=f11e154]: Soporte Fibra
+          - generic [ref=f11e155]: CONSULTANDO
+        - generic [ref=f11e157]: Soporte técnico FTTH
+        - generic [ref=f11e158]: "\"Analizando potencia óptica de la ONU\""
+        - generic [ref=f11e159]:
+          - generic [ref=f11e160]: "Conv: 12"
+          - generic [ref=f11e161]: "Tool: consultar_olt"
+      - generic:
+        - generic: NÚCLEO DE ORQUESTACIÓN
+        - generic: "27"
+        - generic: Conversaciones en curso
+        - generic: ● sinapsis 14 ms
+      - generic [ref=f11e162]:
+        - generic [ref=f11e163]: "● CANAL: WHATSAPP API"
+        - generic [ref=f11e164]: Webhook activo · 18 ms
+      - generic [ref=f11e165]:
+        - generic [ref=f11e166]: "● TOOL: SMARTOLT"
+        - generic [ref=f11e167]: consultar_olt · 342 ms
+      - generic [ref=f11e168]:
+        - generic [ref=f11e169]: ● WISPHUB CRM
+        - generic [ref=f11e170]: sincronizado · 2 min
+    - complementary [ref=f11e171]:
+      - generic [ref=f11e172]:
+        - generic [ref=f11e173]: EVENTOS EN TIEMPO REAL
+        - generic [ref=f11e175]: EN VIVO
+      - generic [ref=f11e176]:
+        - generic [ref=f11e177]:
+          - generic [ref=f11e178]: 10:43:02
+          - generic [ref=f11e179]: SOPORTE FIBRA
+          - generic [ref=f11e180]: Respuesta generada y enviada a WhatsApp
+        - generic [ref=f11e181]:
+          - generic [ref=f11e182]: 10:43:00
+          - generic [ref=f11e183]: SMARTOLT
+          - generic [ref=f11e184]: Consulta de ONU completada (−19.2 dBm OK)
+        - generic [ref=f11e185]:
+          - generic [ref=f11e186]: 10:42:51
+          - generic [ref=f11e187]: IDENTIDAD
+          - generic [ref=f11e188]: Cliente verificado por cédula en CRM
+        - generic [ref=f11e189]:
+          - generic [ref=f11e190]: 10:42:47
+          - generic [ref=f11e191]: ROUTER IA
+          - generic [ref=f11e192]: "Derivado a Soporte Fibra (intención: falla LOS)"
+        - generic [ref=f11e193]:
+          - generic [ref=f11e194]: 10:42:44
+          - generic [ref=f11e195]: ROUTER IA
+          - generic [ref=f11e196]: Nueva conversación de WhatsApp entrante
+        - generic [ref=f11e197]:
+          - generic [ref=f11e198]: 10:42:31
+          - generic [ref=f11e199]: SUPERVISOR IA
+          - generic [ref=f11e200]: Conversación escalada a operador humano
+        - generic [ref=f11e201]:
+          - generic [ref=f11e202]: 10:41:58
+          - generic [ref=f11e203]: FACTURACIÓN
+          - generic [ref=f11e204]: Acuerdo de pago registrado y servicio activo
+  - generic [ref=f11e205]:
+    - generic [ref=f11e206]: "SEGURIDAD: E2E cifrado · TLS 1.3 · Ley 1581 (Habeas Data)"
+    - generic [ref=f11e207]:
+      - generic [ref=f11e208]: DISPONIBLE
+      - generic [ref=f11e210]: PROCESANDO
+      - generic [ref=f11e212]: ESPERANDO
+      - generic [ref=f11e214]: SUPERVISANDO
+      - generic [ref=f11e216]: ERROR
+  - complementary [aria-hidden] [ref=f11e218]

@@ -1,0 +1,722 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ LA CUADRILLA  --  el equipo que existe entre el lunes y el martes
+================================================================================
+
+POR QUE HACIA FALTA ALGO NUEVO
+------------------------------
+`AsignacionTrabajo` ata personas a UNA orden con un rol (lider, ayudante,
+chofer). Es correcto y sigue siendo la verdad de quien ejecuto cada trabajo,
+pero no alcanza para despachar: no existe ningun objeto al que decirle "mañana
+haces instalaciones". La cuadrilla se armaba orden por orden y desaparecia con
+ella, asi que no se podia preguntar "cuanto hizo la cuadrilla 1 este mes" ni
+"a quien le asigno las 12 instalaciones de mañana".
+
+LA COMPOSICION ES DEL DIA, NO DE LA CUADRILLA
+---------------------------------------------
+La cuadrilla tiene identidad estable --un nombre, un lider-- y una composicion
+que cambia: hay dias que pasa de instalacion a correctivo, y hay dias que el
+auxiliar es otro. Guardar la labor y los auxiliares EN la cuadrilla obligaria a
+pisarlos cada mañana, y el martes nadie podria decir quien fue el miercoles
+pasado.
+
+Por eso son dos tablas:
+
+    Cuadrilla          quien es, y sigue siendo la misma mañana
+    JornadaDeCuadrilla que hizo ESE dia: su labor y quienes la integraron
+
+Es la misma forma que `ProgramacionSemanal` / `ProgramacionOrden` ya usa en
+operaciones, y por el mismo motivo: sin una fila por dia, "se cambio de labor"
+deja de ser una afirmacion verificable.
+
+LO QUE ESTO NO HACE
+-------------------
+No reemplaza a `AsignacionTrabajo` y no se mezcla con ella. Una orden sigue
+diciendo quien la ejecuto, persona por persona; la cuadrilla dice a quien se le
+reparte el trabajo. Cuando una orden se asigna a una cuadrilla, lo que se
+escribe son las asignaciones de sus integrantes de ESE dia -- la orden no
+guarda un puntero a la cuadrilla, porque la composicion de mañana no puede
+cambiar quien hizo el trabajo de ayer.
+"""
+
+from __future__ import annotations
+
+from django.core.exceptions import ValidationError
+from django.db import models
+
+from common.base import BaseModel
+from common.models import Org, Profile
+
+#  Los roles de cuadrilla se IMPORTAN de `AsignacionTrabajo`, no se copian --
+#  ver el docstring de `IntegranteDeJornada`. El import de arriba hacia abajo
+#  funciona porque `campo/models.py` importa ESTE modulo al final, ya con
+#  `AsignacionTrabajo` definido; al reves seria un ciclo. Si alguna vez se
+#  mueve ese import al principio de models.py, esto se rompe al arrancar --
+#  ruidoso, no en silencio, que es lo que importa.
+from campo.models import AsignacionTrabajo
+
+
+class Cuadrilla(BaseModel):
+    """Un equipo de campo con identidad estable.
+
+    El nombre es lo que la gente usa para hablar de ella ("la 1", "la de
+    Soledad"), asi que es unico por empresa: dos cuadrillas con el mismo nombre
+    vuelven ambiguo cualquier reporte.
+    """
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="cuadrillas"
+    )
+    nombre = models.CharField(max_length=120)
+
+    #: Quien responde por la cuadrilla. Puede faltar --una cuadrilla en armado
+    #: todavia no tiene lider-- pero sin lider no se le puede despachar, y eso
+    #: lo valida quien despacha, no este modelo.
+    lider = models.ForeignKey(
+        Profile,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cuadrillas_que_lidera",
+    )
+
+    #: El vehiculo en el que se mueve, si lo tiene fijo.
+    #:
+    #: Es la ubicacion de inventario de tipo `vehiculo`: en una cuadrilla el
+    #: material vive en la camioneta y no en la mochila de una persona, y esa
+    #: distincion ya existe en el inventario. Se referencia en vez de repetirse.
+    vehiculo = models.ForeignKey(
+        "campo.UbicacionInventario",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cuadrillas",
+        help_text="Ubicacion de inventario de tipo vehiculo.",
+    )
+
+    #: De que bodega carga su kit cada mañana (28/10/2026,
+    #: SPEC/objetivos/material-del-dia.md). Una empresa con mas de una bodega
+    #: carga cada cuadrilla de la suya. Vacio = no se le puede proponer carga.
+    #: El kit va a la custodia del LIDER, no al `vehiculo`: decidido por el
+    #: usuario, y es lo que la app y el cierre de jornada cuentan por persona.
+    bodega = models.ForeignKey(
+        "campo.UbicacionInventario",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cuadrillas_que_cargan",
+        help_text="Ubicacion de inventario de tipo bodega.",
+    )
+
+    #: Una cuadrilla NO se borra: se da de baja. Sus jornadas la referencian y
+    #: son las que explican quien hizo que.
+    activa = models.BooleanField(default=True)
+    notas = models.TextField(blank=True, default="")
+
+    # --- LO HABITUAL, para que la primera jornada no haya que armarla a mano --
+    #
+    # La composicion sigue siendo DEL DIA (ver `JornadaDeCuadrilla`): esto no
+    # la reemplaza. Es de donde sale la jornada cuando todavia no hay ninguna
+    # anterior que copiar -- el arranque en frio.
+    #
+    # Sin esto, una empresa que acaba de dar de alta sus cuadrillas tendria
+    # que armar un dia entero a mano antes de que el reparto automatico
+    # pudiera hacer algo, y el sintoma seria "no se asigno nada" sin decir por
+    # que.
+
+    #: Que hace normalmente. Mismo catalogo que la jornada.
+    #  Sin `choices` desde el 20/10/2026: ver `campo.labores`.
+    labor_habitual = models.CharField(
+        max_length=20,
+        default="instalacion",
+    )
+
+    #: Que zonas cubre normalmente.
+    #:
+    #: Vacio significa "sin zona", igual que en la jornada: una cuadrilla sin
+    #: zona NO recibe trabajo por zona, y eso tiene que notarse en vez de
+    #: repartirle cualquier cosa.
+    zonas_habituales = models.ManyToManyField(
+        "campo.ZonaOperativa",
+        related_name="cuadrillas_habituales",
+        blank=True,
+    )
+
+    #: Cuantas ordenes acepta por dia, si tiene un numero propio.
+    #:
+    #: Vacio = el de la empresa (`ConfiguracionDeReparto.tope_por_cuadrilla`).
+    #: Existe porque una cuadrilla de dos personas no rinde lo mismo que una
+    #: de cuatro, y un solo numero para todas obliga a elegir entre
+    #: sobrecargar a la chica o desaprovechar a la grande.
+    tope_diario = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "campo_cuadrilla"
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "nombre"], name="unique_cuadrilla_nombre_por_org"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class JornadaDeCuadrilla(BaseModel):
+    """Que hizo una cuadrilla un dia: su labor y quienes la integraron.
+
+    UNA FILA POR CUADRILLA Y POR DIA, y ahi esta todo el punto. La labor del
+    martes no pisa la del lunes, asi que "el miercoles pasaron a correctivo" se
+    demuestra en vez de deducirse -- y cuando alguien pregunte por que esa
+    semana se hicieron pocas instalaciones, la respuesta esta escrita.
+    """
+
+    INSTALACION = "instalacion"
+    CORRECTIVO = "correctivo"
+    TRABAJOS = "trabajos"
+    LABORES = (
+        (INSTALACION, "Instalacion"),
+        (CORRECTIVO, "Correctivo"),
+        (TRABAJOS, "Trabajos"),
+    )
+
+    #: Quien la armo. Ver `armada_por`.
+    PERSONA = "persona"
+    AUTOMATICA = "automatica"
+    ARMADAS_POR = (
+        (PERSONA, "Una persona"),
+        (AUTOMATICA, "El sistema"),
+    )
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="jornadas_de_cuadrilla"
+    )
+    cuadrilla = models.ForeignKey(
+        Cuadrilla, on_delete=models.CASCADE, related_name="jornadas"
+    )
+    fecha = models.DateField()
+    #  Sin `choices` desde el 20/10/2026: ver `campo.labores`.
+    labor = models.CharField(max_length=20, default=INSTALACION)
+
+    #: LA LABOR DE APOYO  --  30/10/2026, SPEC/objetivos/labor-de-apoyo.md.
+    #: Con el cupo que su labor deja libre, la cuadrilla recibe ordenes de esta
+    #: otra en sus mismas zonas. Nunca le quita lugar a la suya: el reparto
+    #: llena primero las labores principales de todas y recien despues reparte
+    #: lo que quedo sin cuadrilla (`reparto.repartir`). Vacio = sin apoyo.
+    labor_de_apoyo = models.CharField(max_length=20, blank=True, default="")
+
+    #: QUE ZONAS CUBRE ESE DIA, y por eso vive en la jornada y no en la
+    #: cuadrilla: igual que la labor, hay dias que una cuadrilla se sale de su
+    #: territorio de siempre, y el martes nadie podria decir donde estuvo el
+    #: miercoles pasado si esto se pisara cada mañana.
+    #:
+    #: Son VARIAS porque una cuadrilla cubre mas de una zona en un dia flojo, y
+    #: obligar a una sola llevaria a inventar zonas combinadas ("Norte y
+    #: Centro") que despues nadie sabe mantener.
+    #:
+    #: Vacio significa "sin zona asignada", que NO es "cubre todas": con zona
+    #: dura, una cuadrilla sin zona no recibe trabajo por zona, y eso tiene que
+    #: notarse en vez de repartirle cualquier cosa.
+    zonas = models.ManyToManyField(
+        "campo.ZonaOperativa",
+        related_name="jornadas",
+        blank=True,
+    )
+
+    #: El lider de ESE dia. Normalmente el de la cuadrilla, pero no siempre:
+    #: si el lider esta de vacaciones, alguien la lleva igual. Se guarda aparte
+    #: por el mismo motivo que la labor -- quien respondia ese martes no puede
+    #: depender de quien la lidera hoy.
+    lider = models.ForeignKey(
+        Profile,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="jornadas_que_lidero",
+    )
+    notas = models.TextField(blank=True, default="")
+
+    #: QUIEN LA ARMO  --  17/10/2026. Decide si el armado automatico la puede
+    #: tocar: una jornada armada por una persona no se toca nunca (decidido por
+    #: el usuario), y una armada sola se reajusta de labor mientras no tenga
+    #: ordenes. De fabrica es PERSONA, y a proposito: las que ya existian las
+    #: armo alguien, y ante la duda ganan las manos. Armarla o corregirla desde
+    #: la pantalla la vuelve de PERSONA (`JornadaDeCuadrillaView.post`).
+    armada_por = models.CharField(
+        max_length=20, choices=ARMADAS_POR, default=PERSONA
+    )
+
+    class Meta:
+        db_table = "campo_jornada_cuadrilla"
+        ordering = ["-fecha", "cuadrilla__nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cuadrilla", "fecha"],
+                name="unique_jornada_por_cuadrilla_y_dia",
+            )
+        ]
+
+    def __str__(self) -> str:
+        from campo.labores import NOMBRE_DE_FABRICA
+        return (f"{self.cuadrilla.nombre} · {self.fecha} · "
+                f"{NOMBRE_DE_FABRICA.get(self.labor, self.labor)}")
+
+
+class ConfiguracionDeReparto(BaseModel):
+    """Como reparte el trabajo esta empresa, y a que hora.
+
+    MISMO PATRON QUE `ConfiguracionDeSeguimiento` Y `ConfiguracionDeAvisos`:
+    una fila por empresa, y si no existe valen los valores de fabrica. La fila
+    NO se crea al leer -- una lectura que escribe convierte cualquier consulta
+    en una escritura, y con `--workers 1` eso se nota.
+
+    POR QUE LA HORA ES UN NUMERO Y NO UNA ENTRADA DE CELERY BEAT
+    ------------------------------------------------------------
+    Beat corre en UTC (`TIME_ZONE = "UTC"` en settings) y cada empresa lleva su
+    propia `Org.timezone`. Una entrada `crontab(hour=3)` serian las 3 de la
+    mañana UTC, o sea las 10 de la noche ANTERIOR en Bogota -- y para la
+    siguiente empresa, otra hora distinta.
+
+    Por eso la tarea corre seguido y cada empresa decide si ya es SU hora. El
+    dia que entre un ISP en otro huso, funciona sin tocar codigo.
+    """
+
+    #: Valores de fabrica. Son los que valen mientras nadie cree la fila.
+    TOPE_DE_FABRICA = 8
+    HORA_DE_FABRICA = 3
+    #: Desde cuantas ONU del mismo puerto en LOS a la vez es un corte de red
+    #: (caso 4 de las correcciones del usuario). 2 lo decidio el usuario el
+    #: 19/10/2026: es el umbral que ya usa el resto del sistema para una falla
+    #: agrupada.
+    CORTE_DE_RED_DE_FABRICA = 2
+
+    #: De que labor es cada grupo de caso de Despacho, si la empresa no dice
+    #: otra cosa. Las claves son los grupos de `operaciones.paso_a_despacho`
+    #: (`GRUPOS`); los dos que nunca pasan solos a Despacho --'nada_lo_mide' y
+    #: 'ni_cliente_ni_red'-- no tienen labor, y un caso suyo no inclina la
+    #: labor de ninguna jornada. Los de falla y obra ya los implicaba
+    #: `clasificacion_de_trabajo`.
+    #:
+    #: EL TRABAJO PEDIDO SE PARTE EN DOS  --  18/10/2026, correccion 1 del
+    #: usuario. El 17/10 se habia decidido "trabajo pedido -> instalacion", y
+    #: el usuario lo corrigio con un caso a la vista: un trabajo pedido sobre
+    #: un cliente que YA existe (cambio de equipo, de plan, traslado) es
+    #: correctivo; instalacion es solo para un cliente nuevo. Cliente nuevo es
+    #: un ticket que cuelga del cliente de instalaciones del ISP
+    #: (`INSTALACION_NUEVA`, ver `operaciones.armado_de_jornadas`).
+    LABOR_POR_GRUPO_DE_FABRICA = {
+        "falla_de_servicio": "correctivo",
+        "obra_de_red": "trabajos",
+        "trabajo_pedido": "correctivo",
+        "instalacion_nueva": "instalacion",
+        #  LOS QUE PASAN PORQUE UNA PERSONA LOS ACEPTO  --  25/10/2026. El
+        #  informe de Despacho de ese dia: los dos «ni cliente ni red» eran
+        #  obras abiertas con la cuenta de la oficina («PROYECTO DE
+        #  AMPLIACION», «INTERVENCION CTO») y el «nada lo mide» era un cliente
+        #  («Paginas Bloqueadas»). Sin fila quedaban sin labor y no se creaba
+        #  su orden. Pedido del usuario: que el Supervisor lo identifique solo.
+        #  Como las demas, la empresa las cambia en Cuadrillas.
+        "ni_cliente_ni_red": "trabajos",
+        "nada_lo_mide": "correctivo",
+    }
+
+    org = models.OneToOneField(
+        Org, on_delete=models.CASCADE, related_name="configuracion_de_reparto"
+    )
+
+    #: Si el reparto de la madrugada corre solo.
+    #:
+    #: Apagado de fabrica, y a proposito: encender un proceso que arma jornadas
+    #: todas las noches es una decision de operacion, no algo que deba pasar
+    #: porque alguien desplego una version. Mismo criterio que
+    #: `RELOJ_HABILITADO` en el motor.
+    activo = models.BooleanField(default=False)
+
+    #: A que hora LOCAL de la empresa corre. 0-23.
+    hora_local = models.PositiveSmallIntegerField(default=HORA_DE_FABRICA)
+
+    #: Cuantas ordenes se le proponen a una cuadrilla en un dia.
+    #:
+    #: NO es una capacidad calculada --eso depende de la duracion de cada tipo
+    #: de trabajo, de la disponibilidad y de los bloqueos-- sino un TOPE para
+    #: que el reparto no le vuelque treinta ordenes a la primera cuadrilla.
+    #: Una cuadrilla puede tener el suyo (`Cuadrilla.tope_diario`); esto es el
+    #: de la empresa para las que no lo declaren.
+    tope_por_cuadrilla = models.PositiveSmallIntegerField(default=TOPE_DE_FABRICA)
+
+    #: Si la jornada del dia se arma copiando la del ultimo dia trabajado.
+    #:
+    #: Apagarlo deja el reparto corriendo solo sobre lo que alguien armo a
+    #: mano, que es como funcionaba antes de esto.
+    copia_la_jornada = models.BooleanField(default=True)
+
+    #: DE QUE LABOR ES CADA GRUPO DE CASO  --  17/10/2026. Con esto se elige la
+    #: labor de una jornada armada sola: la de la mayoria de los casos de
+    #: Despacho de sus zonas. Por empresa y no en codigo: en otro ISP un
+    #: trabajo pedido puede ir a otra labor (CLAUDE.md §3.3). Vacio = los de
+    #: fabrica; una clave guardada pisa solo la suya. Ver `labor_de_cada_grupo`.
+    labor_por_grupo = models.JSONField(default=dict, blank=True)
+
+    #: EL CORTE DE RED  --  19/10/2026, caso 4 de las correcciones del usuario.
+    #: Cuantas ONU del mismo puerto tienen que estar en LOS a la vez (incluida
+    #: la del caso) para que una falla se marque como corte de red: un solo
+    #: trabajo para todos los casos del puerto, no una visita por cliente. Por
+    #: empresa y no en codigo (CLAUDE.md §3.3): en otro ISP puede ser otro
+    #: numero.
+    onus_para_corte_de_red = models.PositiveSmallIntegerField(
+        default=CORTE_DE_RED_DE_FABRICA)
+
+    #: COMO SE LLAMA CADA LABOR EN ESTA EMPRESA  --  20/10/2026. Pedido del
+    #: usuario: en Rapilink la cuadrilla de instalacion solo hace clientes
+    #: nuevos, y los traslados los hace la de correctivo -- pero «un cambio de
+    #: domicilio no es un correctivo». Se cambia el NOMBRE que se ve, no la
+    #: labor: el valor interno ('correctivo') lo usan el reparto, el Supervisor
+    #: y las jornadas. Por empresa (CLAUDE.md §3.3). Vacio = los de fabrica;
+    #: una clave guardada pisa solo la suya. Ver `labores_de`.
+    nombres_de_labor = models.JSONField(default=dict, blank=True)
+
+    #: EL HORARIO DE LAS CUADRILLAS  --  21/10/2026. Pedido del usuario: el
+    #: calendario por defecto de la empresa es el de ATENCION AL CLIENTE (cuenta
+    #: los objetivos de respuesta de los tickets), y el Supervisor lo estaba
+    #: usando para saber cuando trabajan las cuadrillas. Son dos horarios
+    #: distintos: este apunta a un `BusinessCalendar` propio, que no es el por
+    #: defecto. Ver `campo/horario_de_cuadrillas.py`.
+    calendario_de_cuadrillas = models.ForeignKey(
+        "business_hours.BusinessCalendar", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+")
+
+    #: LA HORA DE CORTE  --  21/10/2026, decision del usuario: lo que entra a
+    #: Despacho antes de esta hora sale HOY; despues, mañana a primera hora. En
+    #: el reloj del horario de las cuadrillas. Vacia = el Supervisor no crea
+    #: ordenes solo (Fase 2.3 de supervisor-arma-la-jornada).
+    hora_de_corte = models.TimeField(null=True, blank=True)
+
+    #: LOS FERIADOS QUE SI SE TRABAJAN  --  21/10/2026, decision del usuario:
+    #: un feriado no es «cerrado» sin mas; se trabaja segun la cola, lo propone
+    #: el Supervisor y quien lo aprueba pone el horario. {"AAAA-MM-DD":
+    #: {"abre": "HH:MM", "cierra": "HH:MM"}}. Un feriado que no esta aca queda
+    #: cerrado. Ver `campo/horario_de_cuadrillas.py`.
+    feriados_trabajados = models.JSONField(default=dict, blank=True)
+
+    #: El ULTIMO DIA LOCAL en que esto corrio. Es lo que evita que corra dos
+    #: veces.
+    #:
+    #: La tarea se dispara seguido --cada empresa tiene su hora local y beat
+    #: corre en UTC-- asi que sin esta marca, todas las corridas posteriores a
+    #: la hora del dia volverian a notificar. `asegurar_jornadas` es
+    #: idempotente y no duplicaria nada, pero la notificacion si: el
+    #: supervisor abriria la plataforma con el mismo aviso repetido veinte
+    #: veces y dejaria de leerlos.
+    #:
+    #: Es una FECHA y no una marca de tiempo a proposito: la pregunta que hay
+    #: que contestar es "¿ya corrio HOY?", y un timestamp obligaria a
+    #: recalcular el dia local en cada comparacion.
+    ultima_corrida = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = "campo_configuracion_reparto"
+
+    def __str__(self) -> str:
+        return f"Reparto de {self.org_id}"
+
+
+#: La clave de la tabla para el trabajo pedido de un CLIENTE NUEVO. No es un
+#: grupo de `paso_a_despacho`: es una parte del trabajo pedido, que la tabla
+#: distingue porque su labor es otra (correccion 1 del usuario, 18/10/2026).
+INSTALACION_NUEVA = "instalacion_nueva"
+
+
+def onus_para_corte_de_red(org_id) -> int:
+    """El umbral del corte de red de esta empresa, o el de fabrica. Por id: lo
+    piden lugares que tienen la propuesta y no la empresa entera."""
+    n = (ConfiguracionDeReparto.objects.filter(org_id=org_id)
+         .values_list("onus_para_corte_de_red", flat=True).first())
+    return n if isinstance(n, int) and n >= 2 else (
+        ConfiguracionDeReparto.CORTE_DE_RED_DE_FABRICA)
+
+
+#: El nombre mas largo que se acepta para una labor.
+MAX_NOMBRE_DE_LABOR = 40
+
+
+def labores_de(org, *, incluir_inactivas: bool = False) -> list[dict]:
+    """Ver `campo.labores.labores_de`: vive alla desde el 20/10/2026. Queda
+    aca para quien ya la importaba de este modulo."""
+    from campo.labores import labores_de as _labores_de
+    return _labores_de(org, incluir_inactivas=incluir_inactivas)
+
+
+def labor_de_cada_grupo(org) -> dict:
+    """grupo -> labor para esta empresa: los de fabrica, pisados por lo suyo.
+
+    Solo se toman las labores que existen: una clave guardada con una labor
+    que `campo.labores.labor_valida` rechaza --una que se dio de baja, un
+    error de tipeo-- vuelve al valor de fabrica en vez de inclinar jornadas
+    hacia una labor que el reparto no conoce. Lo que no tiene labor --un grupo
+    sin entrada-- no aparece: quien llama lo cuenta aparte.
+    """
+    from campo.labores import labor_valida
+    efectivo = dict(ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA)
+    propio = getattr(configuracion_de_reparto(org), "labor_por_grupo", None)
+    for grupo, labor in (propio if isinstance(propio, dict) else {}).items():
+        if labor_valida(org, labor):
+            efectivo[str(grupo)] = labor
+        elif labor in (None, ""):
+            #  Vacio a proposito: la empresa dice que ese grupo no inclina
+            #  ninguna jornada.
+            efectivo.pop(str(grupo), None)
+    return efectivo
+
+
+def configuracion_de_reparto(org):
+    """Los ajustes de esta empresa, o los de fabrica.
+
+    Devuelve siempre un objeto con los mismos atributos, exista la fila o no,
+    para que quien lo use no tenga que preguntar cual de los dos casos es.
+    """
+    fila = ConfiguracionDeReparto.objects.filter(org=org).first()
+    if fila is not None:
+        return fila
+    return ConfiguracionDeReparto(
+        org=org,
+        activo=False,
+        hora_local=ConfiguracionDeReparto.HORA_DE_FABRICA,
+        tope_por_cuadrilla=ConfiguracionDeReparto.TOPE_DE_FABRICA,
+        copia_la_jornada=True,
+    )
+
+
+class PersonaDeCampo(BaseModel):
+    """Alguien que trabaja en campo, tenga o no cuenta en el sistema.
+
+    POR QUE NO ALCANZA `Profile`
+    ----------------------------
+    `Profile` exige un `User`, o sea un correo y credenciales: es quien ENTRA
+    al sistema. Y los auxiliares no entran -- no tienen celular asignado, asi
+    que no hay nada que les pedir una contraseña para. Mientras el integrante
+    de una jornada fue un `Profile`, anotar a un auxiliar obligaba a inventarle
+    una cuenta que nadie iba a usar, y el catalogo de roles quedaba mintiendo:
+    ofrecia 'ayudante' y 'chofer' (ver `AsignacionTrabajo.ROLES_CUADRILLA`)
+    para gente que el modelo no permitia registrar.
+
+    Son dos preguntas distintas y ahora son dos tablas:
+
+        Profile          quien puede ENTRAR al sistema
+        PersonaDeCampo   quien TRABAJO, con cuenta o sin ella
+
+    EL ENLACE A `profile` ES OPCIONAL, Y ESO ES EL PUNTO
+    ---------------------------------------------------
+    Lleno para el lider, que tiene celular y usa la aplicacion; vacio para el
+    auxiliar. El dia que a un auxiliar le asignen un celular se le crea la
+    cuenta y se le enlaza a ESTA MISMA fila: su historial no se parte en dos
+    personas distintas, que es lo que pasaria si cada forma de identificarlo
+    tuviera su propia tabla.
+
+    POR QUE EL NOMBRE NO ES UNICO
+    -----------------------------
+    Dos personas se pueden llamar igual de verdad, y bloquear la segunda
+    obligaria a deformarle el nombre para poder cargarla. Quien crea una
+    recibe un aviso si ya hay otra con ese nombre --ver
+    `cuadrillas_views.PersonasDeCampoView`-- y decide; el modelo no decide por
+    el. Lo que si se impide es que dos filas apunten al MISMO `profile`: ahi no
+    hay ambiguedad posible, seria la misma persona dos veces.
+    """
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="personas_de_campo"
+    )
+    nombre = models.CharField(max_length=120)
+
+    #: La cuenta de esta persona, si tiene. Ver el docstring: vacio es el caso
+    #: normal de un auxiliar, no un dato faltante.
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="persona_de_campo",
+    )
+
+    #: Con que rol entra normalmente a una cuadrilla. Es un valor por defecto
+    #: para no retipearlo cada mañana, NO una restriccion: el rol que vale es
+    #: el de la jornada, porque un ayudante puede manejar un dia.
+    rol_habitual = models.CharField(
+        max_length=64,
+        choices=AsignacionTrabajo.ROLES_CUADRILLA,
+        default=AsignacionTrabajo.AYUDANTE,
+    )
+
+    #: Una persona NO se borra: se da de baja. Sus jornadas la referencian y
+    #: son las que explican quien estuvo cada dia.
+    activa = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "campo_persona_de_campo"
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["org", "profile"],
+                condition=models.Q(profile__isnull=False),
+                name="unique_persona_de_campo_por_cuenta",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+    @property
+    def tiene_cuenta(self) -> bool:
+        """Si puede recibir trabajo en la aplicacion de campo.
+
+        No es cosmetico: una orden asignada a quien no entra al sistema no la
+        ve nadie en un telefono. Ver `cuadrillas_views.RepartoView`.
+        """
+        return self.profile_id is not None
+
+
+class IntegranteDeJornada(BaseModel):
+    """Quien trabajo en esa cuadrilla ese dia, y con que rol.
+
+    LOS ROLES SON LOS DE `AsignacionTrabajo`, y no se duplican: una persona que
+    es ayudante en la cuadrilla tiene que poder quedar como ayudante en la
+    orden sin traducir nada. Importarlos de alla evita que los dos catalogos
+    se separen en silencio, que es exactamente lo que ya le paso una vez a ese
+    campo (ver el comentario de ROLES_CUADRILLA).
+
+    APUNTA A `PersonaDeCampo`, NO A `Profile` -- ver el docstring de aquella:
+    un auxiliar sin celular tambien integra la cuadrilla, y antes no podia.
+    """
+
+    org = models.ForeignKey(
+        Org, on_delete=models.CASCADE, related_name="integrantes_de_jornada"
+    )
+    jornada = models.ForeignKey(
+        JornadaDeCuadrilla, on_delete=models.CASCADE, related_name="integrantes"
+    )
+    persona = models.ForeignKey(
+        PersonaDeCampo, on_delete=models.PROTECT,
+        related_name="jornadas_de_cuadrilla",
+    )
+    rol = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "campo_integrante_jornada"
+        ordering = ["rol", "persona__nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["jornada", "persona"],
+                name="unique_persona_por_jornada",
+            )
+        ]
+
+    def clean(self):
+        """Una persona no puede estar en dos cuadrillas el mismo dia.
+
+        La unicidad de arriba cubre la misma jornada; esto cubre el caso que de
+        verdad pasa: alguien anotado en la cuadrilla 1 y en la 2 el martes. No
+        es un error de tipeo inofensivo -- las dos cuadrillas contarian con esa
+        persona al repartir el trabajo, y una de las dos se quedaria corta sin
+        que nadie lo note hasta la mañana.
+
+        Desde que el integrante es una `PersonaDeCampo`, esto tambien alcanza a
+        los auxiliares. Antes no: un auxiliar no podia estar anotado en ningun
+        lado, asi que doblarlo entre dos cuadrillas no lo veia nadie.
+        """
+        if not self.jornada_id or not self.persona_id:
+            return
+        choque = (
+            IntegranteDeJornada.objects.filter(
+                jornada__fecha=self.jornada.fecha,
+                jornada__org=self.jornada.org,
+                persona_id=self.persona_id,
+            )
+            .exclude(jornada_id=self.jornada_id)
+            .select_related("jornada__cuadrilla")
+            .first()
+        )
+        if choque:
+            raise ValidationError(
+                f"Esa persona ya esta en la cuadrilla "
+                f"'{choque.jornada.cuadrilla.nombre}' el {self.jornada.fecha}."
+            )
+
+    def __str__(self) -> str:
+        return f"{self.persona_id} · {self.rol}"
+
+
+def _nombre_de_cuenta(profile) -> str:
+    user = getattr(profile, "user", None)
+    return (getattr(user, "name", "") or getattr(user, "email", "") or "").strip()
+
+
+def destinatarios(jornada) -> dict:
+    """A quien le llega una orden asignada a esta jornada. UNA sola regla.
+
+    Correccion del usuario (15/10/2026): «una cuadrilla esta compuesta por un
+    tecnico (lider responsable) y un auxiliar (ayudante). El tecnico es el
+    unico que tiene celular de la operacion; el auxiliar no tiene telefono ni
+    cuenta de acceso».
+
+    Hasta ahi la orden se le entregaba solo a los INTEGRANTES con cuenta, y el
+    lider se elige en otro campo («Lider del dia»): armada la jornada como
+    corresponde --lider arriba, auxiliar como integrante-- el sistema veia
+    solo gente sin cuenta y decia «no tiene a nadie con cuenta». Los tres
+    caminos (despacho a mano, publicar el reparto y el recuadro de la zona)
+    tenian el mismo hueco, cada uno con su copia de la regla.
+
+    Ahora:
+      - el LIDER DEL DIA (o, si no se eligio, el de la cuadrilla) la recibe
+        siempre, como principal, este o no anotado entre los integrantes;
+      - un integrante que ademas tenga cuenta tambien la recibe;
+      - quien no tiene cuenta va con la cuadrilla y queda en la jornada, pero
+        no recibe nada.
+
+    Un lider con la cuenta dada de baja NO recibe: su telefono ya no entra.
+    `motivo` dice por que nadie la recibiria, para que el aviso nombre la
+    causa en vez de un generico.
+    """
+    lider = jornada.lider or jornada.cuadrilla.lider
+    integrantes = list(jornada.integrantes.select_related("persona__profile__user"))
+
+    reciben, vistos = [], set()
+    if lider is not None and lider.is_active:
+        propio = next((i for i in integrantes
+                       if i.persona.profile_id == lider.id), None)
+        reciben.append({"profile": lider,
+                        "nombre": _nombre_de_cuenta(lider) or (
+                            propio.persona.nombre if propio else ""),
+                        "rol": propio.rol if propio else AsignacionTrabajo.TECNICO_LIDER,
+                        "es_principal": True})
+        vistos.add(lider.id)
+    for i in integrantes:
+        p = i.persona.profile
+        if p is None or p.id in vistos or not p.is_active:
+            continue
+        reciben.append({"profile": p, "nombre": i.persona.nombre,
+                        "rol": i.rol, "es_principal": False})
+        vistos.add(p.id)
+
+    van_sin_cuenta = [i.persona.nombre for i in integrantes
+                      if i.persona.profile_id is None]
+
+    if reciben:
+        motivo = "ok"
+    elif lider is None:
+        motivo = "sin_lider"
+    else:
+        motivo = "lider_inactivo"
+    return {"reciben": reciben, "van_sin_cuenta": van_sin_cuenta,
+            "lider": lider, "motivo": motivo}
+
+
+def por_que_nadie_recibe(jornada, d: dict) -> str:
+    """El aviso cuando `destinatarios` no deja a nadie: nombra la causa."""
+    nombre = jornada.cuadrilla.nombre
+    if d["motivo"] == "sin_lider":
+        return (f"La cuadrilla {nombre} no tiene líder ese día: la orden no la "
+                f"vería nadie en un teléfono. Elegí el líder en «El día».")
+    return (f"El líder de la cuadrilla {nombre} ({_nombre_de_cuenta(d['lider'])}) "
+            f"tiene la cuenta dada de baja: la orden no la vería nadie en un "
+            f"teléfono.")
