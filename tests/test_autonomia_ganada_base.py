@@ -63,6 +63,13 @@ def q(sentencia, params=None):
         return cur.fetchall() if cur.description else []
 
 
+def q_sin_disparadores(sentencia, params=None):
+    with psycopg.connect(f"host={HOST} port={PUERTO} dbname={BASE} user={USUARIO} password={CLAVE} "
+                         f"sslmode=disable connect_timeout=15", autocommit=True) as con:
+        con.execute("set session_replication_role = replica")
+        con.execute(sentencia, params)
+
+
 def fila_minima(tabla: str, fijos: dict) -> None:
     cols = q("""select column_name, data_type, character_maximum_length from information_schema.columns
                 where table_schema = 'public' and table_name = %s
@@ -85,24 +92,32 @@ def hace(dias: float) -> datetime:
     return AHORA - timedelta(days=dias)
 
 
-def conversacion(org) -> str:
+def conversacion(org, canal="whatsapp") -> str:
     return str(q("""insert into asistente.conversations (organization_id, canal, usuario_externo)
-                    values (%s, 'whatsapp', %s) returning id""", (org, "57300" + uuid.uuid4().hex[:7]))[0][0])
+                    values (%s, %s, %s) returning id""", (org, canal, "57300" + uuid.uuid4().hex[:7]))[0][0])
 
 
-def propuesta(org, estado, *, herramienta="reiniciar_ont", nacio=None, decidida=None):
-    q("""insert into asistente.acciones_propuestas
+def propuesta(org, estado, *, herramienta="reiniciar_ont", nacio=None, decidida=None,
+              canal="whatsapp", rol="soporte_tecnico_cliente", revisado_por="Ana Perez", huella=None):
+    #  Historia sembrada: una vinculante (con huella) solo puede NACER pendiente
+    #  por disparador. Para escribir su desenlace de una vez, la siembra apaga
+    #  los disparadores SOLO en esta sesion de la base efimera.
+    sembrar = q_sin_disparadores if huella else q
+    sembrar("""insert into asistente.acciones_propuestas
            (organization_id, conversation_id, herramienta, resumen, propuesto_por, estado,
-            creado_en, revisado_en, motivo_rechazo)
-         values (%s, %s, %s, 'Reiniciar', 'ia', %s, %s, %s, %s)""",
-      (org, conversacion(org), herramienta, estado, nacio or hace(3), decidida,
-       "x" if estado in ("cancelada", "rechazada") else None))
+            creado_en, revisado_en, motivo_rechazo, rol_solicitante, revisado_por, hash_argumentos,
+            origen)
+         values (%s, %s, %s, 'Reiniciar', 'ia', %s, %s, %s, %s, %s, %s, %s, %s)""",
+      (org, conversacion(org, canal), herramienta, estado, nacio or hace(3), decidida,
+       "x" if estado in ("cancelada", "rechazada") else None, rol,
+       revisado_por if decidida else None, huella, f"prueba:{uuid.uuid4()}" if huella else None))
 
 
-def verificacion(org, estado, *, herramienta="reiniciar_ont", cuando=None):
+def verificacion(org, estado, *, herramienta="reiniciar_ont", cuando=None, canal="whatsapp"):
     q("""insert into asistente.verificaciones_accion
            (organization_id, conversation_id, herramienta, ejecutada_en, espera_segundos, max_intentos, estado)
-         values (%s, %s, %s, %s, 120, 3, %s)""", (org, conversacion(org), herramienta, cuando or hace(3), estado))
+         values (%s, %s, %s, %s, 120, 3, %s)""",
+      (org, conversacion(org, canal), herramienta, cuando or hace(3), estado))
 
 
 print("=" * 74)
@@ -148,6 +163,13 @@ try:
     propuesta(org, "rechazada", decidida=hace(45))
     propuesta(org, "rechazada", herramienta="cambiar_tipo_onu", decidida=hace(2))
     propuesta(otra, "rechazada", decidida=hace(2))
+    # NO son evidencia (auditor de frontera, 31/10/2026): la Bandeja (la propone
+    # y la aprueba la misma persona), el simulador, y lo que firmo la autonomia.
+    propuesta(org, "ejecutada_ok", decidida=hace(2), rol="bandeja")
+    propuesta(org, "ejecutada_ok", decidida=hace(2), canal="simulador-whatsapp")
+    propuesta(org, "ejecutada_ok", decidida=hace(2), revisado_por="autonomia_ganada:p1", huella="h-equipo-1")
+    propuesta(org, "ejecutada_ok", decidida=hace(0.5 / 24), revisado_por="autonomia_ganada:p1",
+              huella="h-equipo-2")
 
     for estado in ("ACCION_CONFIRMADA", "ACCION_CONFIRMADA", "ACCION_NO_CONFIRMADA",
                    "NO_VERIFICABLE", "VERIFICACION_PENDIENTE"):
@@ -155,17 +177,20 @@ try:
     verificacion(org, "ACCION_NO_CONFIRMADA", cuando=hace(45))
     verificacion(org, "ACCION_NO_CONFIRMADA", herramienta="cambiar_tipo_onu")
     verificacion(otra, "ACCION_NO_CONFIRMADA")
+    verificacion(org, "ACCION_NO_CONFIRMADA", canal="simulador-whatsapp")
 
-    m = medicion.medir("rapilink", "reiniciar_ont", hace(30), AHORA)
+    from nucleo.canales import canal as canales                       # noqa: E402
+    m = medicion.medir("rapilink", "reiniciar_ont", hace(30), AHORA, canales=canales.REALES)
     print()
     comprobar(m["revisadas"] == 8, "revisadas: 4 aprobadas + rechazada + fallo + incierta + la que nacio "
-              "antes y se decidio adentro = 8 (sin vencida, cancelada ni pendiente)", str(m))
+              "antes y se decidio adentro = 8 (sin vencida, cancelada, pendiente, Bandeja, simulador ni lo "
+              "que firmo la autonomia)", str(m))
     comprobar(m["rechazadas"] == 1, "rechazadas: 1 (la de afuera, la de otra herramienta y la de otra "
               "empresa no)", str(m))
     comprobar(m["fallidas"] == 2, "fallidas: ejecutada_fallo + desconocida", str(m))
     comprobar((m["confirmadas"], m["no_confirmadas"], m["no_verificables"], m["pendientes"]) == (2, 1, 1, 1),
               "verificaciones: 2 confirmadas, 1 no confirmada, 1 no verificable, 1 pendiente", str(m))
-    vacia = medicion.medir("otra_empresa", "reiniciar_ont", hace(30), AHORA)
+    vacia = medicion.medir("otra_empresa", "reiniciar_ont", hace(30), AHORA, canales=canales.REALES)
     comprobar(vacia["revisadas"] == 1 and vacia["no_confirmadas"] == 1,
               "la otra empresa ve solo lo suyo", str(vacia))
 
@@ -227,6 +252,33 @@ try:
               "retirada por una persona: la ultima fila manda", str(v))
     historia = q("select estado from asistente.autonomia_ganada where organization_id = %s order by creado_en",
                  (org,))
+
+    # Los frenos de la ejecucion autonoma, contados en la base.
+    print()
+    verificacion(org, "VERIFICACION_PENDIENTE", cuando=hace(0.2))         # ~5 h: sin resolver
+    verificacion(org, "VERIFICACION_PENDIENTE", cuando=hace(0.01))        # 15 min: todavia no
+    comprobar(medicion.verificaciones_sin_resolver("rapilink", "reiniciar_ont", 1) == 2,
+              "sin resolver: las pendientes con mas de 1 h (la de hace 3 dias y la de hace 5 h)")
+    comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=1) == 1,
+              "ejecuciones autonomas en la ultima hora: 1")
+    comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=96) == 2,
+              "en 4 dias: 2")
+    comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=96,
+                                             hash_argumentos="h-equipo-1") == 1,
+              "del mismo equipo (misma huella): 1")
+
+    # T20: una ejecucion huerfana ('ejecutando' de hace rato) degrada la autonomia.
+    medicion.promover("rapilink", "reiniciar_ont", "Ana · u-1", "para probar T20", {})
+    q_sin_disparadores("""insert into asistente.acciones_propuestas
+                            (organization_id, conversation_id, herramienta, resumen, propuesto_por, estado,
+                             creado_en, revisado_en, revisado_por, hash_argumentos, origen)
+                          values (%s, %s, 'reiniciar_ont', 'Reiniciar', 'ia', 'ejecutando', %s, %s,
+                                  'autonomia_ganada:p9', 'h-huerfana', 'prueba:huerfana')""",
+                       (org, conversacion(org), hace(1), hace(1)))
+    barridas = db.barrer_acciones_ejecutando("rapilink", 30)
+    comprobar(len(barridas) == 1 and medicion.vigente("rapilink", "reiniciar_ont")["estado"] == "degradada",
+              "T20: una ejecucion que quedo huerfana degrada la autonomia de su herramienta",
+              str(medicion.vigente("rapilink", "reiniciar_ont")))
     comprobar([h[0] for h in historia] == ["activa", "degradada", "activa", "retirada"],
               "la historia completa queda: nada se borra", str(historia))
 finally:

@@ -2022,10 +2022,26 @@ def ejecutar_accion_irreversible(config, accion: dict, tenant: str
                     config, herramienta.verificacion, sesion, tenant,
                     config.variables_tenant)
 
+            #  EL ULTIMO METRO DE LA AUTONOMIA (31/10/2026): las previas y la
+            #  medicion tardan segundos, y una degradacion en ese rato tiene
+            #  que frenar el efecto. Se vuelve a leer, sin cache.
+            if aprobacion is not None and str(getattr(aprobacion, "aprobador", "")).startswith(
+                    aprobaciones.PREFIJO_AUTONOMIA):
+                promocion = aprobacion.aprobador[len(aprobaciones.PREFIJO_AUTONOMIA):]
+                vigente = aprobaciones._autonomia_vigente(tenant, herramienta.nombre)
+                if not vigente.get("autonoma") or vigente.get("promocion_id") != promocion:
+                    return ({"error": "La autonomia dejo de estar vigente antes del efecto. "
+                                      "No se ejecuto.", "bloqueo_de_frontera": True},
+                            aprobaciones.AUTONOMIA_NO_VIGENTE, None)
+
             r = idempotencia.ejecutar(tenant, herramienta.nombre, argumentos,
                                       origen, _llamar)
     except frontera.AccionExternaNoAutorizada as e:
-        return ({"error": f"Esta accion no se ejecuto: {e.motivo}"}, e.codigo, None)
+        #  'bloqueo_de_frontera': no salio nada. Quien llama lo distingue de una
+        #  ejecucion fallida (la autonomia la devuelve a una persona y no
+        #  degrada por esto).
+        return ({"error": f"Esta accion no se ejecuto: {e.motivo}", "bloqueo_de_frontera": True},
+                e.codigo, None)
     except Exception as e:                                       # noqa: BLE001
         return ({"error": "La API no acepto la accion."},
                 f"{type(e).__name__}: {e}"[:200], None)

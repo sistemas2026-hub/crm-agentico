@@ -4416,7 +4416,7 @@ def barrer_acciones_ejecutando(tenant: str, minutos: int, limite: int = 50) -> l
                   order by revisado_en
                   limit %s
                   for update skip locked)
-               returning id, conversation_id""",
+               returning id, conversation_id, herramienta""",
             (org, minutos, limite))
         barridas = [dict(f) for f in cur.fetchall()]
         for fila in barridas:
@@ -4427,7 +4427,20 @@ def barrer_acciones_ejecutando(tenant: str, minutos: int, limite: int = 50) -> l
                        f"efecto llego a ocurrir",
                 actor_tipo="sistema",
                 conversation_id=str(fila["conversation_id"]) if fila["conversation_id"] else None)
-        return barridas
+    #  CONDICION 4 de la autonomia ganada (PRD §2): no se sabe si el efecto
+    #  ocurrio. La herramienta pierde la autonomia, si la tenia. Despues del
+    #  commit de arriba, y sin romper el barrido si no se puede escribir.
+    for herramienta in sorted({str(f.get("herramienta") or "") for f in barridas} - {""}):
+        try:
+            from nucleo.persistencia import autonomia_ganada as registro_autonomia
+
+            registro_autonomia.degradar(tenant, herramienta,
+                                        "una ejecucion quedo huerfana: no se sabe si ocurrio",
+                                        {"barridas": len(barridas)})
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            registrar("autonomia_ganada", "no se pudo degradar la autonomia",
+                      tenant=tenant, herramienta=herramienta, error=e)
+    return barridas
 
 
 def barrer_acciones_vencidas(tenant: str, limite: int = 50) -> list[dict]:

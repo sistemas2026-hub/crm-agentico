@@ -17,6 +17,15 @@ ni conversaciones, ni quien. Lo decide nucleo/seguridad/autonomia_ganada.py.
 
 Una propuesta cuenta en la ventana por cuando se DECIDIO (revisado_en), no
 cuando nacio: la evidencia es la decision.
+
+QUE NO ES EVIDENCIA  (auditor de frontera, 31/10/2026)
+  - el boton de reinicio de la Bandeja (rol 'bandeja'): lo propone y lo
+    aprueba la misma persona en el mismo pedido -- 100% por construccion;
+  - una conversacion que no es de un canal real (el simulador);
+  - lo que firmo la propia autonomia: una accion no se gana la autonomia con
+    las ejecuciones que hizo sola.
+Sin estas exclusiones, 30 reinicios desde la Bandeja y 3 propuestas del
+modelo rechazadas daban 90,9% y la accion quedaba elegible.
 ================================================================================
 """
 
@@ -25,31 +34,42 @@ from __future__ import annotations
 from nucleo.persistencia.db import sesion
 
 DECIDIDAS = ("aprobada", "ejecutada_ok", "ejecutada_fallo", "desconocida", "rechazada")
+#: El aprobador con que firma la autonomia (nucleo/seguridad/aprobacion.py).
+PREFIJO = "autonomia_ganada:"
 
 
-def medir(tenant: str, herramienta: str, desde, hasta) -> dict:
-    """Los conteos de una herramienta en [desde, hasta)."""
+def medir(tenant: str, herramienta: str, desde, hasta, *, canales) -> dict:
+    """Los conteos de una herramienta en [desde, hasta). 'canales' son los
+    reales (nucleo/canales/canal.REALES)."""
+    p = {"org": None, "h": herramienta, "desde": desde, "hasta": hasta,
+         "decididas": list(DECIDIDAS), "canales": list(canales), "autonoma": f"{PREFIJO}%"}
     with sesion(tenant) as (cur, org):
+        p["org"] = org
         cur.execute(
-            """select count(*) filter (where estado = any(%(decididas)s::text[])) as revisadas,
-                      count(*) filter (where estado = 'rechazada') as rechazadas,
-                      count(*) filter (where estado in ('ejecutada_fallo', 'desconocida')) as fallidas
-                 from asistente.acciones_propuestas
-                where organization_id = %(org)s and herramienta = %(h)s
-                  and coalesce(revisado_en, creado_en) >= %(desde)s
-                  and coalesce(revisado_en, creado_en) < %(hasta)s""",
-            {"org": org, "h": herramienta, "desde": desde, "hasta": hasta,
-             "decididas": list(DECIDIDAS)})
+            """select count(*) filter (where a.estado = any(%(decididas)s::text[])) as revisadas,
+                      count(*) filter (where a.estado = 'rechazada') as rechazadas,
+                      count(*) filter (where a.estado in ('ejecutada_fallo', 'desconocida')) as fallidas
+                 from asistente.acciones_propuestas a
+                 join asistente.conversations c
+                   on c.organization_id = a.organization_id and c.id = a.conversation_id
+                where a.organization_id = %(org)s and a.herramienta = %(h)s
+                  and coalesce(a.rol_solicitante, '') <> 'bandeja'
+                  and coalesce(a.revisado_por, '') not like %(autonoma)s
+                  and c.canal = any(%(canales)s::text[])
+                  and coalesce(a.revisado_en, a.creado_en) >= %(desde)s
+                  and coalesce(a.revisado_en, a.creado_en) < %(hasta)s""", p)
         a = cur.fetchone()
         cur.execute(
-            """select count(*) filter (where estado = 'ACCION_CONFIRMADA') as confirmadas,
-                      count(*) filter (where estado = 'ACCION_NO_CONFIRMADA') as no_confirmadas,
-                      count(*) filter (where estado = 'NO_VERIFICABLE') as no_verificables,
-                      count(*) filter (where estado = 'VERIFICACION_PENDIENTE') as pendientes
-                 from asistente.verificaciones_accion
-                where organization_id = %(org)s and herramienta = %(h)s
-                  and ejecutada_en >= %(desde)s and ejecutada_en < %(hasta)s""",
-            {"org": org, "h": herramienta, "desde": desde, "hasta": hasta})
+            """select count(*) filter (where v.estado = 'ACCION_CONFIRMADA') as confirmadas,
+                      count(*) filter (where v.estado = 'ACCION_NO_CONFIRMADA') as no_confirmadas,
+                      count(*) filter (where v.estado = 'NO_VERIFICABLE') as no_verificables,
+                      count(*) filter (where v.estado = 'VERIFICACION_PENDIENTE') as pendientes
+                 from asistente.verificaciones_accion v
+                 join asistente.conversations c
+                   on c.organization_id = v.organization_id and c.id = v.conversation_id
+                where v.organization_id = %(org)s and v.herramienta = %(h)s
+                  and c.canal = any(%(canales)s::text[])
+                  and v.ejecutada_en >= %(desde)s and v.ejecutada_en < %(hasta)s""", p)
         v = cur.fetchone()
     return {k: int(fila[k]) for fila, claves in ((a, ("revisadas", "rechazadas", "fallidas")),
                                                  (v, ("confirmadas", "no_confirmadas",
@@ -103,6 +123,37 @@ def _agregar(tenant, herramienta, estado, actor, motivo, evidencia) -> dict:
                returning id, estado, actor, motivo, evidencia, creado_en""",
             (org, herramienta, estado, actor, motivo, json.dumps(evidencia or {})))
         return dict(cur.fetchone())
+
+
+def verificaciones_sin_resolver(tenant: str, herramienta: str, horas: int) -> int:
+    """Cuantas verificaciones de la herramienta siguen pendientes con mas de
+    'horas' de antiguedad. Una verificacion se resuelve recien cuando el
+    cliente vuelve a escribir: si no vuelve, queda pendiente para siempre, y
+    una autonomia que se mide asi no se degradaria nunca."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select count(*) as n from asistente.verificaciones_accion
+                where organization_id = %s and herramienta = %s
+                  and estado = 'VERIFICACION_PENDIENTE'
+                  and ejecutada_en < now() - make_interval(hours => %s::int)""",
+            (org, herramienta, int(horas)))
+        return int(cur.fetchone()["n"])
+
+
+def ejecuciones_autonomas(tenant: str, herramienta: str, *, horas: int,
+                          hash_argumentos: str | None = None) -> int:
+    """Cuantas veces la ejecuto la autonomia en las ultimas 'horas' (de esa
+    accion EXACTA si se pasa su huella). El tope de volumen vive en la base, no
+    en el historial en memoria de un proceso (CLAUDE.md §13, D4)."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select count(*) as n from asistente.acciones_propuestas
+                where organization_id = %s and herramienta = %s
+                  and revisado_por like %s
+                  and revisado_en >= now() - make_interval(hours => %s::int)
+                  and (%s::text is null or hash_argumentos = %s::text)""",
+            (org, herramienta, f"{PREFIJO}%", int(horas), hash_argumentos, hash_argumentos))
+        return int(cur.fetchone()["n"])
 
 
 def degradar(tenant: str, herramienta: str, motivo: str, evidencia: dict | None = None) -> dict | None:

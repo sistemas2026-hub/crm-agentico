@@ -103,7 +103,9 @@ export async function cambiarAutonomia(locals, fetch, que, datos) {
   const resp = await fetch(`${cfg.baseUrl}/autonomia-ganada/${que}`, {
     method: 'POST',
     headers: headersMotor({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ tenant: cfg.tenant, ...datos, ...autorDeSesion(locals) })
+    //  El rol también sale de la SESIÓN: el motor vuelve a exigir ADMIN.
+    body: JSON.stringify({ tenant: cfg.tenant, ...datos, ...autorDeSesion(locals),
+      autor_rol: locals?.profile?.role ?? '' })
   });
   const cuerpo = await resp.json().catch(() => ({}));
   if (!resp.ok) {

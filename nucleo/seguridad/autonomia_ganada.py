@@ -42,9 +42,24 @@ from __future__ import annotations
 from datetime import timedelta
 
 #: El piso del nucleo: lo menos que puede pedir una empresa.
-PISO = {"minimo_revisadas": 20, "ventana_dias": 14, "tasa_minima_aprobacion": 0.90}
+#: Las confirmaciones (31/10/2026, auditor de frontera): aprobar no prueba que
+#: el efecto ocurra. Se exige ademas un minimo de verificaciones CONFIRMADAS y
+#: una tasa de confirmacion sobre las que se pudieron medir -- una
+#: NO_VERIFICABLE cuenta en contra: sin verificacion posible, una persona.
+PISO = {"minimo_revisadas": 20, "ventana_dias": 14, "tasa_minima_aprobacion": 0.90,
+        "minimo_confirmadas": 10, "tasa_minima_confirmacion": 0.90}
 #: Lo que se pide si la empresa no dijo nada: mas que el piso.
-POR_DEFECTO = {"minimo_revisadas": 30, "ventana_dias": 30, "tasa_minima_aprobacion": 0.95}
+POR_DEFECTO = {"minimo_revisadas": 30, "ventana_dias": 30, "tasa_minima_aprobacion": 0.95,
+               "minimo_confirmadas": 20, "tasa_minima_confirmacion": 0.95}
+#: Cuantas verificaciones sin resolver (con mas de HORAS_SIN_RESOLVER) frenan
+#: la autonomia y la degradan: una verificacion se resuelve cuando el cliente
+#: vuelve a escribir, y un reinicio que nadie mide no es evidencia de nada.
+MAXIMO_SIN_RESOLVER = 3
+HORAS_SIN_RESOLVER = 1
+#: El tope de volumen, en la base: cuantas ejecuciones autonomas por hora en
+#: una empresa, y cuantas de la MISMA accion (mismo equipo) en un dia.
+TOPE_POR_HORA = 10
+TOPE_MISMA_ACCION_POR_DIA = 1
 
 
 def por_que_no_es_candidata(herramienta) -> list[str]:
@@ -66,12 +81,9 @@ def umbrales(config, accion: str) -> dict:
     ag = getattr(config, "autonomia_ganada", None)
     if ag is not None and accion in (ag.acciones or {}):
         u = ag.acciones[accion]
-        propios = {"minimo_revisadas": u.minimo_revisadas, "ventana_dias": u.ventana_dias,
-                   "tasa_minima_aprobacion": u.tasa_minima_aprobacion}
+        propios = {k: getattr(u, k) for k in POR_DEFECTO if getattr(u, k, None) is not None}
     u = {**POR_DEFECTO, **propios}
-    return {"minimo_revisadas": max(u["minimo_revisadas"], PISO["minimo_revisadas"]),
-            "ventana_dias": max(u["ventana_dias"], PISO["ventana_dias"]),
-            "tasa_minima_aprobacion": max(u["tasa_minima_aprobacion"], PISO["tasa_minima_aprobacion"])}
+    return {k: max(u[k], PISO[k]) for k in PISO}
 
 
 def veredicto(medicion: dict, u: dict) -> dict:
@@ -94,7 +106,17 @@ def veredicto(medicion: dict, u: dict) -> dict:
                        "necesita": 0})
     if medicion["fallidas"] > 0:
         faltan.append({"condicion": "cero_fallidas", "tiene": medicion["fallidas"], "necesita": 0})
+    medidas = medicion["confirmadas"] + medicion["no_confirmadas"] + medicion["no_verificables"]
+    confirmacion = medicion["confirmadas"] / medidas if medidas else None
+    if medicion["confirmadas"] < u["minimo_confirmadas"]:
+        faltan.append({"condicion": "minimo_confirmadas", "tiene": medicion["confirmadas"],
+                       "necesita": u["minimo_confirmadas"]})
+    if confirmacion is None or confirmacion < u["tasa_minima_confirmacion"]:
+        faltan.append({"condicion": "tasa_minima_confirmacion",
+                       "tiene": None if confirmacion is None else round(confirmacion, 4),
+                       "necesita": u["tasa_minima_confirmacion"]})
     return {"elegible": not faltan, "tasa_aprobacion": None if tasa is None else round(tasa, 4),
+            "tasa_confirmacion": None if confirmacion is None else round(confirmacion, 4),
             "faltan": faltan}
 
 
@@ -162,7 +184,8 @@ def vigente(tenant: str, herramienta: str, *, leer) -> dict:
     return {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id"))}
 
 
-def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escribir) -> dict:
+def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escribir,
+             leer_vigente=None) -> dict:
     """
     Una PERSONA le da autonomia a una accion. Se vuelve a medir la evidencia
     en este momento -- no la de la pantalla que la persona miro --, y si no
@@ -178,8 +201,17 @@ def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escr
     if h is None:
         raise NoPromovible("NO_ES_UNA_ACCION_CON_APROBACION")
     no_candidata = por_que_no_es_candidata(h)
+    if not getattr(h, "irreversible", False):
+        #  Solo las irreversibles pasan por frontera.critica, que es donde se
+        #  vuelve a exigir la promocion al ejecutar: una reversible quedaria
+        #  "autonoma" en el reporte sin ejecutarse nunca sola.
+        no_candidata = [*no_candidata, "no_pasa_por_la_puerta_critica"]
     if no_candidata:
         raise NoPromovible("NO_CANDIDATA", no_candidata)
+    if leer_vigente is not None and vigente(tenant, accion, leer=leer_vigente)["autonoma"]:
+        #  Dos clics seguidos dejaban dos filas 'activa'; la segunda tapaba a
+        #  la primera y una degradacion bajaba la que no correspondia.
+        raise NoPromovible("YA_ES_AUTONOMA")
     u = umbrales(config, accion)
     desde = ahora - timedelta(days=u["ventana_dias"])
     m = medir(tenant, accion, desde, ahora)

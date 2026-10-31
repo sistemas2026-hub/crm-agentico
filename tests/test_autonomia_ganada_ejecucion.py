@@ -131,6 +131,13 @@ llamadas: list[tuple] = []
 api._aprobar_y_ejecutar_datos = lambda config, tenant, i, quien, al_bloquear="vencer": (
     llamadas.append((tenant, i, quien, al_bloquear)) or ({"ok": True}, 200))
 REINICIO = SimpleNamespace(nombre="reiniciar_ont", aprobacion_humana=True, irreversible=True)
+volumen = {"sin_resolver": 0, "por_hora": 0, "misma": 0}
+registro.verificaciones_sin_resolver = lambda tenant, h, horas: volumen["sin_resolver"]
+registro.ejecuciones_autonomas = lambda tenant, h, horas, hash_argumentos=None: (
+    volumen["misma"] if hash_argumentos else volumen["por_hora"])
+api.persistencia.accion_propuesta_de = lambda tenant, i: {"id": i, "hash_argumentos": "h1"}
+degradadas_c: list[tuple] = []
+api._degradar_autonomia = lambda tenant, h, motivo, ev: degradadas_c.append((h, motivo))
 TICKET = SimpleNamespace(nombre="crear_ticket", aprobacion_humana=True, irreversible=False)
 registro.vigente = lambda tenant, h: {"id": "p1", "estado": "activa"} if h == "reiniciar_ont" else None
 r = api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO)
@@ -154,6 +161,52 @@ registro.vigente = base_caida
 comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO) is None and llamadas == [],
           "con la base caida: falla cerrado, no se ejecuta")
 
+print("\nlos frenos de la autonomia: lo que nadie midio, y el volumen")
+registro.vigente = lambda tenant, h: {"id": "p1", "estado": "activa"}
+volumen.update(sin_resolver=3)
+llamadas.clear(); degradadas_c.clear()
+comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO) is None
+          and llamadas == [] and degradadas_c and "sin resolver" in degradadas_c[0][1],
+          "3 verificaciones sin resolver: no se ejecuta y la autonomia baja", str(degradadas_c))
+volumen.update(sin_resolver=0, por_hora=10)
+degradadas_c.clear()
+comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO) is None
+          and llamadas == [] and degradadas_c == [],
+          "tope por hora: queda para una persona, sin degradar (no es una falla)")
+volumen.update(por_hora=0, misma=1)
+comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO) is None
+          and llamadas == [], "el mismo equipo ya se reinicio solo hoy: queda para una persona")
+volumen.update(misma=0)
+r = api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO)
+comprobar(r == {"ok": True} and len(llamadas) == 1, "dentro de los topes, sale", str(llamadas))
+
+print("\nel disparo: despues de contestar, solo en canal real, nunca si el turno escalo")
+import time as _time                                            # noqa: E402
+
+lanzadas: list[tuple] = []
+api._ejecutar_si_es_autonoma = lambda config, tenant, i, h: lanzadas.append((i, h.nombre))
+api._efecto_del_turno = lambda tenant, canal, id_sesion, estado, que: estado.get("sigue_al_mando", True)
+api.SEGUNDOS_ANTES_DE_LA_AUTONOMA = 0
+
+
+def lanzar(canal="whatsapp", cerrada=False, **estado):
+    lanzadas.clear()
+    e = {"autonomas_por_ejecutar": [("acc-1", REINICIO)], **estado}
+    api._lanzar_autonomas(SimpleNamespace(), "rapilink", canal, "s-1", e, cerrada)
+    _time.sleep(0.3)
+    return list(lanzadas), e
+
+
+hechas, e = lanzar()
+comprobar(hechas == [("acc-1", "reiniciar_ont")] and "autonomas_por_ejecutar" not in e,
+          "un turno normal en WhatsApp la ejecuta, y la lista se consume", str(hechas))
+comprobar(lanzar(canal="simulador-whatsapp")[0] == [], "el simulador no reinicia equipos solo")
+comprobar(lanzar(escalada_del_turno={"motivo": "x"})[0] == [], "un turno que escalo no ejecuta solo")
+comprobar(lanzar(escalada=True)[0] == [], "una conversacion escalada tampoco")
+comprobar(lanzar(cerrada=True)[0] == [], "ni una que se cerro")
+comprobar(lanzar(sigue_al_mando=False)[0] == [],
+          "si una persona intervino entre la respuesta y el efecto (D25), no sale")
+
 # ---------------------------------------------------------------------------
 print("\nC4 y D1 · si una guarda la frena vuelve a una persona; si falla, se degrada")
 import importlib                                                # noqa: E402
@@ -174,6 +227,8 @@ api2.revalidacion.revalidar = lambda *a, **k: SimpleNamespace(desenlace="cumple"
 api2._confirmar_efecto = lambda *a, **k: (None, None)
 degradadas: list[tuple] = []
 api2._degradar_autonomia = lambda tenant, h, motivo, ev: degradadas.append((h, motivo))
+api2.persistencia.accion_propuesta_de = lambda tenant, i: {"id": i, "estado": "ejecutando",
+                                                          "herramienta": "reiniciar_ont", "argumentos": ARGS}
 CONFIG = SimpleNamespace(herramientas=[SimpleNamespace(nombre="reiniciar_ont", aprobacion_humana=True,
                                                        irreversible=True, politica=None)])
 bloqueo = sorted(api2.motor.CODIGOS_DE_BLOQUEO)[0]
@@ -191,6 +246,38 @@ datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "aut
                                                al_bloquear="liberar")
 comprobar(("resuelta", "HTTP_502") in quedo and degradadas and degradadas[0][0] == "reiniciar_ont",
           "una ejecucion que fallo degrada la autonomia (condicion 4)", f"{quedo} {degradadas}")
+degradadas.clear()
+quedo.clear()
+api2.motor.ejecutar_accion_irreversible = lambda config, fila, tenant: (
+    {"error": "x", "bloqueo_de_frontera": True}, "AUTONOMIA_NO_VIGENTE", None)
+datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "autonomia_ganada:p1",
+                                               al_bloquear="liberar")
+comprobar(quedo == [("liberada", "AUTONOMIA_NO_VIGENTE")] and degradadas == [] and datos["estado"] == "pendiente",
+          "un bloqueo de la FRONTERA en la autonoma vuelve a una persona y no degrada", f"{quedo} {degradadas}")
+quedo.clear()
+degradadas.clear()
+api2.motor.ejecutar_accion_irreversible = lambda config, fila, tenant: (
+    {"error": "x", "bloqueo_de_frontera": True}, "AUTORIZACION_EXPIRADA", None)
+datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "Ana Perez")
+comprobar(degradadas == [], "aprobada por una persona y frenada por la frontera: tampoco degrada (no salio nada)",
+          str(degradadas))
+quedo.clear()
+api2.revalidacion.revalidar = lambda *a, **k: SimpleNamespace(desenlace="no_cumple", codigo="otro_estado",
+                                                             detalle="ya no aplica")
+datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "autonomia_ganada:p1",
+                                               al_bloquear="liberar")
+comprobar(quedo == [("liberada", "otro_estado")], "la autonomia no decide que 'ya no aplica': vuelve a una persona",
+          str(quedo))
+quedo.clear()
+datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "Ana Perez")
+comprobar(quedo == [("vencida", "otro_estado")], "para una persona, 'ya no aplica' se vence como siempre", str(quedo))
+api2.revalidacion.revalidar = lambda *a, **k: SimpleNamespace(desenlace="cumple", codigo="", detalle="")
+degradadas.clear()
+api2.motor.ejecutar_accion_irreversible = lambda config, fila, tenant: ({"ok": True}, None, None)
+api2._confirmar_efecto = lambda *a, **k: (False, "se releyo y no estaba")
+datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "autonomia_ganada:p1")
+comprobar(degradadas and "no estaba" in degradadas[0][1], "se releyo y el efecto no estaba: degrada", str(degradadas))
+api2._confirmar_efecto = lambda *a, **k: (None, None)
 degradadas.clear()
 api2.motor.ejecutar_accion_irreversible = lambda config, fila, tenant: ({"ok": True}, None, None)
 datos, codigo = api2._aprobar_y_ejecutar_datos(CONFIG, "rapilink", "acc-9", "autonomia_ganada:p1")
@@ -211,7 +298,8 @@ pend = {"id": "v-1", "herramienta": "reiniciar_ont", "intentos": 0, "max_intento
 api3.persistencia.verificacion_pendiente_de = lambda tenant, conv: pend
 api3.persistencia.resolver_verificacion = lambda *a, **k: None
 api3.motor.medir_para_verificar = lambda *a, **k: {}
-for resultado, debe in ((verificacion_accion.NO_CONFIRMADA, True), (verificacion_accion.CONFIRMADA, False)):
+for resultado, debe in ((verificacion_accion.NO_CONFIRMADA, True), (verificacion_accion.NO_VERIFICABLE, True),
+                        (verificacion_accion.CONFIRMADA, False)):
     degradadas3.clear()
     api3.verificacion_accion.evaluar = lambda *a, r=resultado: (r, "x")
     CONF_V = SimpleNamespace(herramientas=[SimpleNamespace(
@@ -233,6 +321,36 @@ comprobar(motor._tiene_autonomia_ganada("rapilink", REINICIO) is True
           "solo la irreversible con autonomia vigente cuenta como autonoma")
 registro.vigente = base_caida
 comprobar(motor._tiene_autonomia_ganada("rapilink", REINICIO) is False, "y con la base caida, no")
+
+print("\nel ultimo metro: una degradacion entre la frontera y el efecto lo frena")
+import contextlib                                               # noqa: E402
+
+motor = importlib.reload(motor)          # las secciones de arriba reemplazaron la funcion real
+efectos: list = []
+motor.frontera.critica = lambda *a, **k: contextlib.nullcontext()
+motor.idempotencia.ejecutar = lambda *a, **k: efectos.append(a) or SimpleNamespace(
+    hubo_respuesta=True, respuesta={"ok": True}, ejecutada=True, motivo="", codigo=None)
+motor.aprobaciones.desde_fila = lambda fila, tenant: SimpleNamespace(aprobador=fila["revisado_por"])
+HERR_M = SimpleNamespace(nombre="reiniciar_ont", irreversible=True, tipo="http", asincrona=False,
+                         inyectar_sesion={}, exige_previas=[], verificacion=None)
+CONF_M = SimpleNamespace(herramientas=[HERR_M], variables_tenant={})
+motor.aprobaciones._autonomia_vigente = lambda t, h: {"autonoma": False, "estado": "degradada"}
+res, codigo, _ = motor.ejecutar_accion_irreversible(
+    CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
+             "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
+comprobar(efectos == [] and codigo == aprobacion.AUTONOMIA_NO_VIGENTE and res.get("bloqueo_de_frontera"),
+          "degradada en el ultimo metro: el efecto NO sale, y se marca como bloqueo", f"{codigo} {efectos}")
+motor.aprobaciones._autonomia_vigente = lambda t, h: {"autonoma": True, "estado": "activa", "promocion_id": "p1"}
+res, codigo, _ = motor.ejecutar_accion_irreversible(
+    CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
+             "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
+comprobar(len(efectos) == 1 and codigo is None, "vigente en el ultimo metro: sale", f"{codigo} {efectos}")
+efectos.clear()
+motor.aprobaciones._autonomia_vigente = lambda t, h: (_ for _ in ()).throw(AssertionError("no consultar"))
+res, codigo, _ = motor.ejecutar_accion_irreversible(
+    CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
+             "revisado_por": "Ana Perez", "contexto": {}}, "rapilink")
+comprobar(len(efectos) == 1, "una aprobacion humana no consulta la autonomia en el ultimo metro", str(codigo))
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

@@ -3203,6 +3203,10 @@ class UmbralesAutonomia(Base):
     minimo_revisadas: int = Field(default=30, ge=20, le=10000)
     ventana_dias: int = Field(default=30, ge=14, le=90)
     tasa_minima_aprobacion: float = Field(default=0.95, ge=0.90, le=1.0)
+    # Aprobar no prueba el efecto: verificaciones CONFIRMADAS, y su tasa sobre
+    # las que se pudieron medir (31/10/2026, auditor de frontera).
+    minimo_confirmadas: int = Field(default=20, ge=10, le=10000)
+    tasa_minima_confirmacion: float = Field(default=0.95, ge=0.90, le=1.0)
 
 
 class AutonomiaGanada(Base):

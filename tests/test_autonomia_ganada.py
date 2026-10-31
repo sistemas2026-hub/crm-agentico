@@ -65,14 +65,16 @@ comprobar(ag.por_que_no_es_candidata(sin_previas) == ["sin_previas_en_codigo"],
           "medir el efecto no alcanza: sin previas en codigo tampoco es candidata")
 
 print("\nel piso")
-for campo, valor in (("minimo_revisadas", 5), ("ventana_dias", 7), ("tasa_minima_aprobacion", 0.8)):
+for campo, valor in (("minimo_revisadas", 5), ("ventana_dias", 7), ("tasa_minima_aprobacion", 0.8),
+                     ("minimo_confirmadas", 3), ("tasa_minima_confirmacion", 0.5)):
     try:
         UmbralesAutonomia(**{campo: valor})
         comprobar(False, f"el schema rechaza {campo}={valor}")
     except ValidationError:
         comprobar(True, f"el schema rechaza {campo}={valor}")
 vieja = SimpleNamespace(autonomia_ganada=SimpleNamespace(acciones={"reiniciar_ont": SimpleNamespace(
-    minimo_revisadas=3, ventana_dias=2, tasa_minima_aprobacion=0.5)}))
+    minimo_revisadas=3, ventana_dias=2, tasa_minima_aprobacion=0.5, minimo_confirmadas=1,
+    tasa_minima_confirmacion=0.1)}))
 comprobar(ag.umbrales(vieja, "reiniciar_ont") == ag.PISO,
           "una config vieja bajo el piso se sube al piso", str(ag.umbrales(vieja, "reiniciar_ont")))
 comprobar(ag.umbrales(SimpleNamespace(autonomia_ganada=None), "x") == ag.POR_DEFECTO,
@@ -80,16 +82,20 @@ comprobar(ag.umbrales(SimpleNamespace(autonomia_ganada=None), "x") == ag.POR_DEF
 propia = SimpleNamespace(autonomia_ganada=SimpleNamespace(acciones={"reiniciar_ont": UmbralesAutonomia(
     minimo_revisadas=50, ventana_dias=60, tasa_minima_aprobacion=0.98)}))
 comprobar(ag.umbrales(propia, "reiniciar_ont") == {"minimo_revisadas": 50, "ventana_dias": 60,
-                                                   "tasa_minima_aprobacion": 0.98},
+                                                   "tasa_minima_aprobacion": 0.98,
+                                                   "minimo_confirmadas": 20,
+                                                   "tasa_minima_confirmacion": 0.95},
           "una empresa mas exigente que el piso se respeta")
 
 print("\nel veredicto")
-U = {"minimo_revisadas": 30, "ventana_dias": 30, "tasa_minima_aprobacion": 0.95}
+U = {"minimo_revisadas": 30, "ventana_dias": 30, "tasa_minima_aprobacion": 0.95,
+     "minimo_confirmadas": 20, "tasa_minima_confirmacion": 0.95}
 
 
-def m(revisadas=40, rechazadas=1, fallidas=0, no_confirmadas=0):
+def m(revisadas=40, rechazadas=1, fallidas=0, no_confirmadas=0, confirmadas=30, no_verificables=0):
     return {"revisadas": revisadas, "rechazadas": rechazadas, "fallidas": fallidas,
-            "confirmadas": 30, "no_confirmadas": no_confirmadas, "no_verificables": 2, "pendientes": 0}
+            "confirmadas": confirmadas, "no_confirmadas": no_confirmadas,
+            "no_verificables": no_verificables, "pendientes": 0}
 
 
 v = ag.veredicto(m(), U)
@@ -107,6 +113,16 @@ comprobar(not v["elegible"] and {"condicion": "cero_no_confirmadas", "tiene": 1,
 v = ag.veredicto(m(fallidas=1), U)
 comprobar(not v["elegible"] and {"condicion": "cero_fallidas", "tiene": 1, "necesita": 0} in v["faltan"],
           "UNA ejecucion fallida tambien", str(v))
+v = ag.veredicto(m(confirmadas=12), U)
+comprobar(not v["elegible"] and {"condicion": "minimo_confirmadas", "tiene": 12, "necesita": 20} in v["faltan"],
+          "aprobar no alcanza: hacen falta reinicios CONFIRMADOS (12 de 20)", str(v))
+v = ag.veredicto(m(confirmadas=30, no_verificables=3), U)
+comprobar(not v["elegible"] and any(f["condicion"] == "tasa_minima_confirmacion" for f in v["faltan"])
+          and v["tasa_confirmacion"] == round(30 / 33, 4),
+          "una que no se pudo verificar cuenta en contra (30 de 33 < 95%)", str(v))
+v = ag.veredicto(m(confirmadas=0), U)
+comprobar(not v["elegible"] and v["tasa_confirmacion"] is None,
+          "sin ninguna verificacion, no hay tasa y no es elegible", str(v))
 v = ag.veredicto(m(revisadas=0, rechazadas=0), U)
 comprobar(v["tasa_aprobacion"] is None and not v["elegible"]
           and any(f["condicion"] == "tasa_minima_aprobacion" and f["tiene"] is None for f in v["faltan"]),
@@ -169,11 +185,12 @@ def escribir(tenant, accion, actor, motivo, evidencia):
     return {"id": "nueva", "estado": "activa"}
 
 
-def intentar(accion="reiniciar_ont", actor="Ana · u-1", medicion=None):
+def intentar(accion="reiniciar_ont", actor="Ana · u-1", medicion=None, ya=None):
     escritas.clear()
     try:
         return ag.promover(RAPILINK, "rapilink", accion, actor, AHORA,
-                           medir=lambda *a: medicion or m(), escribir=escribir), None
+                           medir=lambda *a: medicion or m(), escribir=escribir,
+                           leer_vigente=lambda t, h: ya), None
     except ag.NoPromovible as e:
         return None, e
 
@@ -192,6 +209,11 @@ comprobar(error is not None and error.codigo == "NO_CANDIDATA" and escritas == [
 _, error = intentar(accion="consultar_cliente")
 comprobar(error is not None and error.codigo == "NO_ES_UNA_ACCION_CON_APROBACION",
           "lo que no pide aprobacion no se promueve")
+_, error = intentar(ya={"id": "p1", "estado": "activa"})
+comprobar(error is not None and error.codigo == "YA_ES_AUTONOMA" and escritas == [],
+          "si ya es autonoma, un segundo clic no agrega otra promocion", str(error and error.codigo))
+_, error = intentar(ya={"id": "p1", "estado": "degradada"})
+comprobar(error is None, "despues de una degradacion, con evidencia nueva, se puede volver a promover")
 _, error = intentar(actor="   ")
 comprobar(error is not None and error.codigo == "FALTA_QUIEN_PROMUEVE" and escritas == [],
           "sin una persona que promueva, no")
@@ -202,7 +224,7 @@ from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
 
 api._config_de = lambda tenant: RAPILINK
 api._TOKEN_SERVICIO = None
-medicion.medir = lambda tenant, h, desde, hasta: m(revisadas=10, rechazadas=0)
+medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=10, rechazadas=0)
 medicion.vigente = lambda t, h: None
 http = api.app.test_client()
 r = http.get("/reportes/autonomia-ganada?tenant=rapilink")
@@ -220,8 +242,9 @@ medicion.promover = lambda t, a, actor, motivo, ev: escritas_ruta.append(("promo
 medicion.retirar = lambda t, a, actor, motivo: escritas_ruta.append(("retirar", a, actor, motivo)) or {
     "id": "p10", "estado": "retirada"}
 medicion.vigente = lambda t, h: None
-medicion.medir = lambda tenant, h, desde, hasta: m()
-AUTOR = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+medicion.medir = lambda tenant, h, desde, hasta, canales=None: m()
+AUTOR = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+         "autor_rol": "ADMIN"}
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
 comprobar(r.status_code == 201 and escritas_ruta[-1][:2] == ("promover", "reiniciar_ont")
           and "Ana Perez" in escritas_ruta[-1][2], "con evidencia y autor: 201, y queda quien",
@@ -229,7 +252,18 @@ comprobar(r.status_code == 201 and escritas_ruta[-1][:2] == ("promover", "reinic
 n = len(escritas_ruta)
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont"})
 comprobar(r.status_code == 400 and len(escritas_ruta) == n, "sin autor de la sesion: 400 y nada escrito")
-medicion.medir = lambda tenant, h, desde, hasta: m(revisadas=5, rechazadas=0)
+r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                  **AUTOR, "autor_rol": "SUPERVISOR"})
+comprobar(r.status_code == 403 and len(escritas_ruta) == n,
+          "quien no es ADMIN no promueve: el motor lo vuelve a exigir", str(r.status_code))
+canales_pedidos: list = []
+medicion.medir = lambda tenant, h, desde, hasta, canales=None: canales_pedidos.append(canales) or m()
+http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
+from nucleo.canales import canal as modulo_canal                 # noqa: E402
+comprobar(canales_pedidos and set(canales_pedidos[-1]) == set(modulo_canal.REALES),
+          "la evidencia se mide solo en canales reales", str(canales_pedidos))
+n = len(escritas_ruta)
+medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=5, rechazadas=0)
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
 comprobar(r.status_code == 409 and r.get_json()["error"] == "SIN_EVIDENCIA" and len(escritas_ruta) == n,
           "sin evidencia: 409 con lo que falta, y nada escrito", r.get_data(as_text=True)[:200])
@@ -241,7 +275,7 @@ comprobar(http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "ac
                                                         **AUTOR}).status_code == 400,
           "retirar sin motivo: 400")
 medicion.vigente = lambda t, h: {"id": "p9", "estado": "activa"}
-medicion.medir = lambda tenant, h, desde, hasta: m()
+medicion.medir = lambda tenant, h, desde, hasta, canales=None: m()
 d = http.get("/reportes/autonomia-ganada?tenant=rapilink").get_json()
 reinicio = next(f for f in d["acciones"] if f["accion"] == "reiniciar_ont")
 comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "promocion_id": "p9"},

@@ -467,8 +467,9 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
         intentos, int(pendiente["max_intentos"]))
     persistencia.resolver_verificacion(
         tenant, pendiente["id"], resultado, por_que, medicion_posterior, intentos)
-    if resultado == verificacion_accion.NO_CONFIRMADA:
-        #  CONDICION 4 (PRD §2, Fase D): el efecto no aparecio. La herramienta
+    if resultado in (verificacion_accion.NO_CONFIRMADA, verificacion_accion.NO_VERIFICABLE):
+        #  CONDICION 4 (PRD §2, Fase D): el efecto no aparecio, o no se pudo
+        #  medir -- sin verificacion posible, una persona. La herramienta
         #  pierde la autonomia ganada en esta empresa, si la tenia.
         _degradar_autonomia(tenant, pendiente["herramienta"], "una verificacion no confirmo el efecto",
                             {"verificacion": str(pendiente["id"])})
@@ -2086,11 +2087,11 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                         tenant, pendiente["accion_id"], conversation_id,
                         aprob.vigencia_minutos if aprob else None)
                     #  AUTONOMIA GANADA (31/10/2026, PRD §2, Fase C). Recien
-                    #  ligada a su conversacion la accion se puede aprobar; si
-                    #  esta empresa le dio autonomia a la herramienta, la firma
-                    #  la promocion y recorre la misma cadena que una persona.
-                    #  Sin promocion vigente no pasa nada: queda en la cola.
-                    _ejecutar_si_es_autonoma(config, tenant, pendiente["accion_id"], herr)
+                    #  ligada a su conversacion la accion se puede aprobar. Se
+                    #  ANOTA aca y se decide al final del turno, despues del
+                    #  escalamiento: un turno que escala no ejecuta solo.
+                    estado.setdefault("autonomas_por_ejecutar", []).append(
+                        (pendiente["accion_id"], herr))
                 except Exception as e:
                     # La accion existe y sigue sin conversacion: no se puede
                     # aprobar, que es el lado seguro. Se registra para que no
@@ -3020,6 +3021,8 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # reconstruido traia el corregido. Un solo punto al final, para todas.
     _sincronizar_respuesta_en_memoria(estado["historial"], inicio_turno, respuesta)
 
+    _lanzar_autonomas(config, tenant, canal, id_sesion, estado, cerrada)
+
     rol_cfg_final = config.roles.get(rol)
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
@@ -3888,8 +3891,10 @@ def reporte_autonomia_ganada():
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
     try:
-        filas = autonomia_ganada.evaluar(_config_de(tenant), tenant, datetime.now(timezone.utc),
-                                         medir=medicion.medir, leer_vigente=medicion.vigente)
+        filas = autonomia_ganada.evaluar(
+            _config_de(tenant), tenant, datetime.now(timezone.utc),
+            medir=lambda t, h, d, hh: medicion.medir(t, h, d, hh, canales=canales.REALES),
+            leer_vigente=medicion.vigente)
     except Exception as e:
         registrar("reportes", "fallo al calcular la autonomia ganada", error=e)
         return jsonify({"error": "No se pudo calcular la autonomia ganada."}), 500
@@ -3916,10 +3921,18 @@ def autonomia_ganada_promover():
         autor, usuario, _ = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido:
         return jsonify({"error": "FALTA_QUIEN_PROMUEVE"}), 400
+    #  Solo un ADMIN. El rol lo arma el proxy con la sesion autenticada, como
+    #  'autor_rol' en el reinicio de la Bandeja; el CRM ya lo exige, y el motor
+    #  lo vuelve a exigir aca: es la primera palanca de autonomia expuesta por
+    #  HTTP (auditor de frontera, 31/10/2026).
+    if (cuerpo.get("autor_rol") or "").upper() != "ADMIN":
+        return jsonify({"error": "SOLO_ADMIN"}), 403
     try:
         fila = autonomia_ganada.promover(
             _config_de(tenant), tenant, str(accion), f"{autor} · {usuario}",
-            datetime.now(timezone.utc), medir=medicion.medir, escribir=medicion.promover)
+            datetime.now(timezone.utc),
+            medir=lambda t, h, d, hh: medicion.medir(t, h, d, hh, canales=canales.REALES),
+            escribir=medicion.promover, leer_vigente=medicion.vigente)
     except autonomia_ganada.NoPromovible as e:
         return jsonify({"error": e.codigo, "faltan": e.faltan}), 409
     except Exception as e:
@@ -9597,6 +9610,11 @@ def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *
                         "codigo": "revalidacion_indeterminada",
                         "detalle": veredicto.codigo, "estado": "pendiente"}), 503
 
+    if veredicto.desenlace == revalidacion.NO_CUMPLE and al_bloquear == "liberar":
+        #  La autonomia no decide que "ya no aplica": lo mira una persona.
+        persistencia.liberar_accion(tenant, id_accion, veredicto.codigo)
+        return ({"ok": False, "estado": "pendiente", "codigo": "revalidacion_fallida",
+                 "detalle": veredicto.codigo}), 409
     if veredicto.desenlace == revalidacion.NO_CUMPLE:
         persistencia.vencer_accion(tenant, id_accion, veredicto.codigo, conv)
         return ({"error": veredicto.detalle or "Esta accion ya no aplica.",
@@ -9635,7 +9653,13 @@ def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *
     # no salio nada hacia el tercero. No es un fallo del sistema externo y no
     # queda como 'ejecutada_fallo'. Queda 'vencida' con el codigo del bloqueo:
     # la aprobacion era para ESE momento y no se reutiliza sola.
-    if codigo_error in motor.CODIGOS_DE_BLOQUEO:
+    #  Un bloqueo de la FRONTERA (interruptor, techo, autorizacion, aprobacion,
+    #  autonomia que dejo de estar vigente) no es una ejecucion fallida: no
+    #  salio nada. Para la autonoma se trata como cualquier guarda -- vuelve a
+    #  una persona -- y nunca degrada (auditor de frontera, 31/10/2026). El
+    #  camino humano queda como estaba.
+    de_frontera = bool((resultado or {}).get("bloqueo_de_frontera"))
+    if codigo_error in motor.CODIGOS_DE_BLOQUEO or (de_frontera and al_bloquear == "liberar"):
         if al_bloquear == "liberar":
             persistencia.liberar_accion(tenant, id_accion, codigo_error)
             return ({"ok": False, "estado": "pendiente", "codigo": codigo_error,
@@ -9671,13 +9695,17 @@ def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *
         registrar("acciones", "la accion se ejecuto y no se pudo guardar el desenlace",
                   error=e)
 
-    if codigo_error:
+    if codigo_error and not de_frontera:
         #  CONDICION 4 (PRD §2, Fase D): una ejecucion que fallo o quedo
         #  incierta degrada la autonomia de esa herramienta en esta empresa,
         #  la haya ejecutado una persona o la autonomia. No-op si no la tenia.
         _degradar_autonomia(tenant, herramienta.nombre,
                             "una ejecucion fallo o quedo incierta",
                             {"accion": str(id_accion), "codigo": str(codigo_error)})
+    elif confirmado is False:
+        #  Se releyo y el efecto NO esta: lo mismo.
+        _degradar_autonomia(tenant, herramienta.nombre, "se releyo y el efecto no estaba",
+                            {"accion": str(id_accion)})
 
     if verificacion_pendiente and conv and not codigo_error:
         # El efecto salio EN ESTA pasada (reiniciar_ont): se comprueba despues,
@@ -9688,6 +9716,10 @@ def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *
         except Exception as e:
             registrar("acciones", "no se pudo anotar la verificacion de la accion",
                       error=e)
+            #  Un efecto que nadie va a medir no puede sostener una autonomia.
+            _degradar_autonomia(tenant, herramienta.nombre,
+                                "no se pudo anotar la verificacion del efecto",
+                                {"accion": str(id_accion)})
 
     if incierto:
         return ({"ok": False, "estado": "desconocida",
@@ -9724,6 +9756,43 @@ def _aprobador_reservado(quien: str) -> bool:
     return (quien or "").strip().lower().startswith(aprobacion.PREFIJO_AUTONOMIA)
 
 
+#: Cuanto espera la ejecucion autonoma despues de que el turno contesto: el
+#: cliente tiene que leer "quedo pedido" ANTES de que se le reinicie el equipo
+#: (si usa el wifi de esa misma ONT, despues no le llega nada).
+SEGUNDOS_ANTES_DE_LA_AUTONOMA = 8
+
+
+def _lanzar_autonomas(config, tenant: str, canal: str, id_sesion: str, estado: dict,
+                      cerrada: bool) -> None:
+    """
+    Las acciones autonomas que dejo el turno, en un hilo y un rato despues de
+    contestar (PRD §2, Fase C). No se lanza nada si el turno escalo o cerro, ni
+    fuera de un canal real (el simulador no reinicia equipos solo). Justo antes
+    de cada una se vuelve a preguntar si el turno sigue al mando (D25): si una
+    persona intervino en el medio, no sale.
+    """
+    pendientes = estado.pop("autonomas_por_ejecutar", None) or []
+    if not pendientes:
+        return
+    if canal not in canales.REALES or cerrada or estado.get("escalada_del_turno") \
+            or estado.get("escalada"):
+        registrar("autonomia_ganada", "no se ejecuta sola: el turno escalo, cerro o no es un canal real",
+                  tenant=tenant, acciones=len(pendientes))
+        return
+
+    def correr():
+        time.sleep(SEGUNDOS_ANTES_DE_LA_AUTONOMA)
+        for accion_id, herr in pendientes:
+            try:
+                if not _efecto_del_turno(tenant, canal, id_sesion, estado, "autonomia_ganada"):
+                    continue
+                _ejecutar_si_es_autonoma(config, tenant, accion_id, herr)
+            except Exception as e:                               # noqa: BLE001
+                registrar("autonomia_ganada", "la ejecucion autonoma fallo", tenant=tenant, error=e)
+
+    threading.Thread(target=correr, name="autonomia-ganada", daemon=True).start()
+
+
 def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -> dict | None:
     """
     Si la herramienta tiene autonomia ganada vigente en esta empresa, ejecuta
@@ -9744,6 +9813,29 @@ def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -
 
     vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente)
     if not vigente.get("autonoma"):
+        return None
+    try:
+        sin_resolver = registro.verificaciones_sin_resolver(
+            tenant, herramienta.nombre, autonomia_ganada.HORAS_SIN_RESOLVER)
+        por_hora = registro.ejecuciones_autonomas(tenant, herramienta.nombre, horas=1)
+        fila = persistencia.accion_propuesta_de(tenant, accion_id) or {}
+        misma = registro.ejecuciones_autonomas(tenant, herramienta.nombre, horas=24,
+                                               hash_argumentos=fila.get("hash_argumentos"))
+    except (Exception, SystemExit) as e:                         # noqa: BLE001
+        registrar("autonomia_ganada", "no se pudo medir el volumen: queda para una persona",
+                  tenant=tenant, herramienta=herramienta.nombre, error=e)
+        return None
+    if sin_resolver >= autonomia_ganada.MAXIMO_SIN_RESOLVER:
+        #  Reinicios que nadie midio: no son evidencia, y la autonomia baja.
+        _degradar_autonomia(tenant, herramienta.nombre,
+                            "verificaciones sin resolver: el efecto no se esta midiendo",
+                            {"sin_resolver": sin_resolver})
+        return None
+    if por_hora >= autonomia_ganada.TOPE_POR_HORA or \
+            misma >= autonomia_ganada.TOPE_MISMA_ACCION_POR_DIA:
+        #  Tope de volumen: no degrada (no es una falla), queda para una persona.
+        registrar("autonomia_ganada", "tope de volumen: queda para una persona", tenant=tenant,
+                  herramienta=herramienta.nombre, por_hora=por_hora, misma_accion=misma)
         return None
     try:
         datos, codigo = _aprobar_y_ejecutar_datos(

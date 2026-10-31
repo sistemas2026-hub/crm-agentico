@@ -220,11 +220,11 @@ describe('darle y quitarle autonomía a una acción', () => {
     });
   }
 
-  it('promover viaja con la acción y el autor de la SESIÓN', async () => {
+  it('promover viaja con la acción, el autor y el rol de la SESIÓN', async () => {
     const r = await actions.promover(accion({ accion: 'reiniciar_ont', confirmo: 'si' }));
     expect(pedidos).toEqual([{ url: 'http://motor/autonomia-ganada/promover', cuerpo: {
       tenant: 'rapilink', accion: 'reiniciar_ont', autor: 'Ana Perez',
-      autor_usuario_id: '7c9e6679-7425-40de-944b-e07fc1f90ae7' } }]);
+      autor_usuario_id: '7c9e6679-7425-40de-944b-e07fc1f90ae7', autor_rol: 'ADMIN' } }]);
     expect(r).toEqual({ autonomia: { accion: 'reiniciar_ont', ok: 'promovida' } });
   });
 
