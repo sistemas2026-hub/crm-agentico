@@ -19,6 +19,7 @@
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
 import { leerAjustesBandeja } from './bandeja-config.js';
+import { leerOrganizacion } from './organizacion-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
@@ -221,7 +222,7 @@ export function conPlazo(promesa, ms = PLAZO_MOTOR_MS) {
  */
 async function leerDelMotor(event) {
   const [asistente, canalWhatsapp, smartolt, planesVenta, oferta, guiasTv, credenciales,
-    ajustesBandeja] = await Promise.all([
+    ajustesBandeja, organizacion] = await Promise.all([
     conPlazo(leerConfiguracionAsistente(event.locals, event.fetch)),
     conPlazo(leerCanalWhatsapp(event.locals, event.fetch)),
     conPlazo(leerSmartOlt(event.locals, event.fetch)),
@@ -235,7 +236,11 @@ async function leerDelMotor(event) {
     conPlazo(leerCredenciales(event.locals, event.fetch)),
     // Dos enteros de la config del tenant. Sin definir NO lleva warn: es el
     // default deliberado, no una falta.
-    conPlazo(leerAjustesBandeja(event.locals, event.fetch))
+    conPlazo(leerAjustesBandeja(event.locals, event.fetch)),
+    // La estructura de la empresa. Al hub le interesa UNA cosa: si esta
+    // empresa ya declaro la suya o esta viendo la generica del producto. Las
+    // dos se dibujan igual, asi que sin decirlo nadie lo sabria.
+    conPlazo(leerOrganizacion(event.locals, event.fetch))
   ]);
   return {
     // null = no hay asistente, o no contesto a tiempo. El hub lista igual sus
@@ -244,6 +249,7 @@ async function leerDelMotor(event) {
     canalWhatsapp,
     smartolt,
     ajustesBandeja,
+    organizacion,
     // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
     // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
     credencialesTotales: credenciales?.disponible

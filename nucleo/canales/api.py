@@ -59,6 +59,22 @@ from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
 from nucleo.config.organizacion import organizacion_de
+
+#  Las salas que la pantalla sabe dibujar, para ofrecerlas al editar.
+#
+#  Son NOMBRES, no geometria: cuanto mide una sala y donde van sus muebles vive
+#  en el frontend ('centro-mando/plantillas.js'), igual que los iconos de
+#  'AreaDeTrabajo'. Esta lista existe para que un formulario pueda ofrecer las
+#  opciones sin tenerlas escritas dentro, que es lo que obligaria a tocar dos
+#  sitios cada vez que el catalogo crezca.
+PLANTILLAS_DE_SALA = [
+    {"nombre": "operaciones", "rotulo": "Centro de operaciones", "puestos": 4},
+    {"nombre": "atencion", "rotulo": "Sala de atencion", "puestos": 4},
+    {"nombre": "tecnica", "rotulo": "Sala tecnica", "puestos": 3},
+    {"nombre": "expedientes", "rotulo": "Sala de expedientes", "puestos": 4},
+    {"nombre": "comercial", "rotulo": "Sala comercial", "puestos": 4},
+    {"nombre": "reuniones", "rotulo": "Sala de reuniones", "puestos": 2},
+]
 from nucleo.habilidades import analista
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
@@ -4484,6 +4500,66 @@ def configuracion_bandeja_rotulos():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     return jsonify(_rotulos_de(config))
+
+
+@app.get("/configuracion/organizacion")
+def configuracion_organizacion():
+    """
+    La estructura de la empresa para la pantalla que la edita.
+
+    Devuelve lo mismo que /centro-mando sirve a la oficina virtual --con su
+    'origen'-- mas el CATALOGO de plantillas que la pantalla puede ofrecer.
+
+    El catalogo viaja desde aqui y no escrito en el formulario por el mismo
+    motivo que 'areas.icono': el vocabulario es del producto y la eleccion es de
+    la empresa, pero quien edita tiene que ver las opciones que existen. Es la
+    lista de nombres, no geometria: la escena sigue siendo la unica que sabe
+    cuanto mide una sala.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify({
+        **organizacion_de(config),
+        "plantillas": PLANTILLAS_DE_SALA,
+        # Los roles que existen HOY, para que el formulario ofrezca a quien
+        # sentar en vez de pedir que se escriba un nombre a mano. Solo el
+        # nombre y el cargo: esta pantalla no necesita nada mas, y lo que no
+        # llega al navegador no se puede filtrar por accidente.
+        "agentes": [{"nombre": n, "cargo": r.cargo, "area": r.area}
+                    for n, r in sorted(config.roles.items())],
+    })
+
+
+@app.put("/configuracion/organizacion")
+def configuracion_organizacion_guardar():
+    """
+    Reemplaza la organizacion entera.
+
+    Un organigrama no se edita campo a campo: mover un departamento de piso,
+    renombrarlo y quitarle un espacio son el mismo gesto, y guardarlos de a uno
+    dejaria estados intermedios invalidos.
+
+    Las reglas de coherencia NO estan aqui: viven en el esquema, y el editor
+    valida el TenantConfig completo antes de escribir. Un documento invalido
+    sale por 400 con el motivo, sin tocar la base.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = editor.guardar_organizacion(tenant, cuerpo.get("organizacion") or {})
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify(organizacion_de(config))
 
 
 @app.put("/configuracion/bandeja/rotulos")

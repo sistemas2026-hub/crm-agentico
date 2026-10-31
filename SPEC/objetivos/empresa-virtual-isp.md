@@ -2346,6 +2346,184 @@ que mirar una sala siga siendo lo que era.
 - **Los subdepartamentos** siguen sin modelarse: no hay ninguno declarado.
 - **La escena sigue oscura** en la vista de conjunto. Es palette, y entra en P2.
 
+---
+
+## P1.4 · La integración, medida dentro del CRM — 31/10/2026
+
+Laboratorio aislado `oficinalab` (puertos 55500/55600/55700/55800, volúmenes
+propios, variables inventadas, **sin leer el `.env` de la raíz**). Dos
+organizaciones ficticias, autenticación real por el formulario.
+
+| Qué | Resultado |
+|---|---|
+| La oficina dentro del CRM | `/centro-mando/v2` con la barra lateral, la organización de la sesión y el selector de 13 vistas |
+| **Aislamiento multiempresa** | Con la sesión en la segunda organización: **«Sin estructura · 0 departamentos · 0 piso(s)»**, lienzo vacío y el selector **sin una sola sala ajena**. La organización no se filtra |
+| Ciclo de vida | Salir y volver remonta con los **mismos 2.271 objetos**: sin fuga |
+| Centro de Comando v1 | Sigue sirviendo, intacto |
+| Evento real por E1 | Fila sembrada en `asistente.tool_calls` → la ficha muestra **CONSULTA · consultar_potencia_optica · 832f5c62**, y ese rastro **coincide con el cursor** `2220.832f5c62…` |
+| Ejecución abierta | Fila en `asistente.ejecuciones` → «Un turno en curso», **separado** del historial (que decía 0) |
+| Motor caído | «la última lectura falló» a los 23 s → **«el motor no responde» a los 41 s**, al cruzar el silencio de 40. Recuperado en **3 s** |
+
+**Otra empresa, cero código.** Con una organización **declarada** en la base del
+laboratorio —3 departamentos, 1 piso— la misma pantalla dibuja otro edificio y
+rotula *«organización declarada por la empresa»*: 985 objetos a 144 fps. Es la
+prueba de que esto es un producto y no una pantalla para una empresa. La base
+quedó **restaurada** a la configuración del repositorio.
+
+Una rareza conocida que el diseño aguanta: tras restaurar, la base **tiene** la
+clave `organizacion` pero **vacía** —el editor escribe los defaults ausentes
+(§13 D7)— y vacía significa «no declarada», así que vuelve a servirse la
+estructura por defecto. Si «vacía» se hubiera interpretado como «declarada y sin
+departamentos», el piloto se habría quedado sin edificio sin que nadie tocara
+nada.
+
+---
+
+## P1.5 · La ficha dice QUÉ ocupa el puesto, y con qué verificarlo — 31/10/2026
+
+La ficha decía «Agente IA» para cualquier cosa sentada. Ahora nombra el **tipo
+de miembro**, que son tres cosas distintas y confundirlas es lo que hacía que la
+oficina dibujara nueve empleados donde hay seis:
+
+```
+Agente IA ejecutable                        tiene instancia en el motor
+Agente declarado, ausente del inventario    la configuración lo declara y no está
+Puesto libre                                existe y nadie lo ocupa
+```
+
+Las **capacidades** no aparecen ahí a propósito: no ocupan un puesto, así que no
+pueden ser el tipo de miembro de uno. Siguen en su bloque.
+
+**Identificación verificable**, porque el nombre que se lee arriba es el *cargo*
+y una empresa lo cambia cuando quiere:
+
+```
+Agente        supervisor_noc            el rol en la configuración
+Puesto        operativo:principal       el identificador global
+Departamento  NOC y Redes · Dirección de Operaciones
+Piso          3
+Atiende a     colaborador
+```
+
+**Advertencias.** Las incoherencias de la configuración se ven en la ficha y no
+en una consola: una plantilla que el catálogo no tiene, un puesto declarado que
+la plantilla no trae. No son fallos del flujo ni del motor, y callarlas dejaría
+un hueco que nadie puede explicar.
+
+**Lo que NO lleva, y por qué:** *acciones permitidas*. Esta pantalla no recibe
+la lista blanca de herramientas del rol, y escribirla de memoria sería inventar
+permisos — exactamente lo que la frontera existe para impedir. Servirla es una
+decisión de qué dato llega al navegador, no un detalle de maquetado.
+
+---
+
+## P2 · El texto deja de encogerse con la cámara — 31/10/2026
+
+Medido: la vista de conjunto entra a escala **0,204**, así que el nombre escrito
+en el canto de la losa —13 px— mide **2,6** y no se lee. Agrandar la fuente no
+sirve: en una sala quedaría gigante. Lo que hace falta es texto que **no
+participe del zoom**.
+
+Los rótulos de nivel se dibujan en el escenario, no en el mundo: se les aplica
+la misma transformación al ancla y se deja el texto a tamaño de pantalla. Con
+placa detrás, porque sobre una pantalla encendida el texto suelto se pierde.
+
+```
+P3 · Tecnología y dirección
+P2 · Operación y clientes
+P1 · Administración
+```
+
+**Lo que queda de P2:** la escena sigue oscura en la vista de conjunto, no hay
+puertas dibujadas entre el pasillo y cada sala, y las placas de los puestos
+siguen siendo texto del mundo — legibles en una sala y en un piso aislado, no en
+el edificio entero. El mecanismo para arreglarlo ya está (`letreros`); lo que
+falta es decidir cuántos mostrar sin llenar la vista de etiquetas.
+
+---
+
+## P3 · El constructor: la empresa se organiza sin tocar código — 31/10/2026
+
+Hasta acá, dar de alta un ISP con otra estructura exigía editar `tenant_config`
+a mano o cargar un YAML. `/settings/organizacion` crea, mueve, renombra y borra
+pisos, departamentos y espacios.
+
+```
+GET  /configuracion/organizacion   la estructura + el catálogo de salas
+                                   + los agentes que existen
+PUT  /configuracion/organizacion   reemplaza el documento ENTERO
+```
+
+**Entero y no campo a campo.** Un organigrama no se edita así: mover un
+departamento de piso, renombrarlo y quitarle un espacio son el mismo gesto para
+quien lo hace, y guardarlos de a uno dejaría estados intermedios inválidos — un
+departamento en un piso que todavía no existe, dos salas con el mismo
+identificador.
+
+**Ninguna regla de coherencia se escribió de nuevo.** Las once viven en
+`schema.py::Organizacion` y el editor valida el `TenantConfig` completo antes de
+escribir, por la misma puerta que el resto de `/settings`. Repetirlas en el
+formulario sería tener dos verdades sobre lo mismo y descubrir el día que se
+separen cuál manda. El mensaje del motor **viaja tal cual** a la pantalla: es el
+que dice *qué* regla se rompió, y reemplazarlo por «revisá los datos» dejaría a
+quien organiza la empresa adivinando.
+
+El catálogo de salas viaja desde el motor como **lista de nombres**, no como
+geometría: cuánto mide una sala sigue viviendo en el frontend. Es el mismo
+reparto que `AreaDeTrabajo.icono`.
+
+### El defecto que apareció al usarlo
+
+Al agregar un departamento desde la pantalla, **Atención al Cliente perdió a su
+segundo agente**: el pie de la oficina pasó de «6 de 37 puestos ocupados» a
+**«5 de 40»**. Sin error, sin aviso, y sólo visible contando.
+
+La causa: el formulario sólo pregunta por el puesto principal —declarar silla
+por silla sería pedirle a quien organiza la empresa que sepa cómo se llaman los
+puestos de una plantilla— y el documento se guarda entero, así que mandar sólo
+el principal **borra los demás**.
+
+Se arregló haciendo que las otras ocupaciones **viajen de ida y vuelta** en un
+campo oculto. No se fusionan con lo que hay en la base: eso haría imposible
+quitar una ocupación, que es justo lo que un editor tiene que poder hacer. Tres
+pruebas nuevas, incluida la del campo oculto roto —un JSON inválido se descarta
+entero, porque guardar media lista es peor que guardar ninguna.
+
+**Medido después del arreglo:** «6 de 40 puestos ocupados», con
+`soporte_tecnico_cliente` intacto.
+
+### Medido en el navegador
+
+```
+la pantalla carga    3 pisos · 8 departamentos · 3 espacios, de la estructura
+                     real, con el aviso «se está usando la estructura por
+                     defecto: guardar acá la declara»
+alta                 «Laboratorio de Fibra», piso 2, sala técnica
+el edificio          9 departamentos · 3 piso(s) · organización declarada por
+                     la empresa — 2.427 objetos a 99 fps, y la sala nueva en su
+                     piso, con su botón en el selector
+cero código          no se tocó una línea para que esa empresa exista
+```
+
+El laboratorio quedó **restaurado** a la configuración del repositorio.
+
+### Lo que NO hace, y por qué
+
+- **No mueve cosas arrastrando.** Es un formulario: filas con sus campos. Una
+  distribución espacial editable con el ratón exige decidir antes qué es una
+  posición válida —y hoy la posición de una sala la calcula el compositor del
+  edificio a partir de su tamaño, no la elige nadie.
+- **No edita los puestos de a uno**, por lo dicho arriba. El principal se
+  elige; los demás se conservan.
+- **No valida accesibilidad de rutas** porque en este modelo no hay rutas que
+  validar: toda sala nace sobre la franja de circulación de su nivel y toda
+  circulación toca el núcleo. Es una propiedad de cómo se compone el edificio,
+  no algo que alguien pueda romper desde el formulario. El día que se puedan
+  colocar salas libremente, hará falta.
+- **La capacidad es la de la plantilla elegida** y se muestra al elegirla
+  («Sala técnica (3 puestos)»). No hay un campo de capacidad propio: sería un
+  número que puede contradecir a la geometría.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

@@ -241,6 +241,21 @@
           warn: false
         },
         {
+          href: '/settings/organizacion',
+          title: 'Organización de la empresa',
+          body: 'Qué departamentos tiene, cómo se llaman y en qué piso están. Es lo que dibuja la oficina virtual.',
+          //  El valor dice de dónde sale la estructura, no cuántos
+          //  departamentos hay: lo que alguien necesita saber desde acá es si
+          //  esta empresa ya decidió la suya o si está viendo la genérica del
+          //  producto. Las dos se dibujan igual.
+          value: motor.organizacion
+            ? motor.organizacion.origen === 'declarada'
+              ? `${motor.organizacion.departamentos.length} departamentos`
+              : 'Sin declarar · se usa la del producto'
+            : null,
+          warn: false
+        },
+        {
           href: '/settings/bandeja',
           title: 'Bandeja',
           body: 'Los dos números con los que la Bandeja se permite emitir un veredicto: el plazo de toma y el umbral óptico.',

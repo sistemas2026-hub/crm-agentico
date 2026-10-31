@@ -1268,6 +1268,38 @@ def claves_con_rotulo(doc: dict) -> dict[str, list[str]]:
     }
 
 
+def guardar_organizacion(tenant: str, organizacion: dict) -> TenantConfig:
+    """
+    La estructura de la empresa: sus pisos, sus departamentos y sus espacios.
+
+    REEMPLAZA EL DOCUMENTO ENTERO, y es la unica forma sensata de guardarlo.
+    Un organigrama no se edita campo a campo: mover un departamento de piso,
+    renombrarlo y quitarle un espacio son el mismo gesto para quien lo hace, y
+    guardarlos de a uno dejaria estados intermedios invalidos -- un
+    departamento en un piso que todavia no existe, dos salas con el mismo id.
+
+    NO VALIDA NADA AQUI, y es a proposito. Las once reglas de una organizacion
+    coherente ya viven en 'schema.py::Organizacion': dos salas con el mismo id,
+    un area reclamada por dos departamentos, un agente sentado en dos sitios, un
+    piso que no esta declarado. '_editar' valida el TenantConfig completo contra
+    ese modelo antes de escribir, asi que repetirlas aqui seria tener dos
+    verdades sobre lo mismo y descubrir el dia que se separen cual de las dos
+    manda.
+
+    Un documento VACIO es legitimo: significa que la empresa deja de declarar su
+    organizacion y vuelve a la estructura por defecto del producto. Hay que
+    poder deshacer.
+    """
+    if not isinstance(organizacion, dict):
+        raise ErrorEdicion("la organización tiene que venir como un objeto.")
+    for clave in organizacion:
+        if clave not in ("pisos", "departamentos", "espacios"):
+            raise ErrorEdicion(
+                f"'{clave}' no es parte de una organización: se esperan "
+                f"'pisos', 'departamentos' y 'espacios'.")
+    return _editar(tenant, lambda doc: doc.__setitem__("organizacion", organizacion))
+
+
 def guardar_rotulos_bandeja(tenant: str, rotulos: dict) -> TenantConfig:
     """
     Como se lee en pantalla cada motivo, etiqueta o caso (29/10/2026).
