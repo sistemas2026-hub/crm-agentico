@@ -1,4 +1,10 @@
 <script>
+  //  El catalogo de salas se lee del frontend y NO del motor: el motor
+  //  sirve los NOMBRES de plantilla, la geometria -cuantas sillas tiene
+  //  cada una y donde- vive aca. Es el mismo reparto que `AreaDeTrabajo.icono`.
+  import { PLANTILLAS } from '$lib/centro-mando/plantillas.js';
+  import { sugerirOcupantes, sentadosEnOtrosDepartamentos } from '$lib/centro-mando/sugerencias.js';
+
   /**
    * EL CONSTRUCTOR DE LA EMPRESA.
    *
@@ -31,18 +37,77 @@
       ...d,
       areas: (d.areas ?? []).join(', '),
       capacidades: (d.capacidades ?? []).join(', '),
-      agente: (d.ocupaciones ?? []).find((o) => o.puesto === 'principal')?.agente ?? '',
-      //  Lo que esta pantalla no edita y no puede perder. Ver el comentario de
-      //  `otrasOcupaciones` en el traductor: guardar sólo el principal borró a
-      //  un agente de verdad, y el síntoma fue un número en el pie.
-      otras: JSON.stringify((d.ocupaciones ?? []).filter((o) => o.puesto !== 'principal'))
+      //  LAS OCUPACIONES SE EDITAN COMO LISTA, NO COMO UN CAMPO POR DEPARTAMENTO.
+      //  Antes acá vivía un solo `agente` —el del puesto principal— y las demás
+      //  ocupaciones viajaban escondidas. Eso ya costó un agente de verdad: el
+      //  pie de la oficina pasó de «6 de 37» a «5 de 40» sin un error. Ahora la
+      //  lista entera es el estado, se dibuja una silla por puesto, y lo que la
+      //  plantilla elegida no tiene es lo único que viaja oculto.
+      ocupaciones: (d.ocupaciones ?? []).map((o) => ({ ...o }))
     }))
   );
   let espacios = $state((data.organizacion?.espacios ?? []).map((e) => ({ ...e })));
 
+  //  Qué se propuso en cada departamento, para decirlo debajo del botón. Es
+  //  del momento y no se guarda: describe el gesto, no la empresa.
+  let propuestas = $state({});
+
   const vacio = () => ({ id: '', rotulo: '', direccion: '', piso: pisos[0]?.nivel ?? 1,
-                         plantilla: '', areas: '', capacidades: '', agente: '',
-                         otras: '[]', acento: '' });
+                         plantilla: '', areas: '', capacidades: '', ocupaciones: [],
+                         acento: '' });
+
+  /** Los puestos de la plantilla elegida, o ninguno si todavía no eligió. */
+  function puestosDe(nombre) {
+    const pl = PLANTILLAS[String(nombre ?? '')];
+    return pl ? pl.puestos : [];
+  }
+
+  /** Quién se sienta hoy en ese puesto, o cadena vacía. */
+  function ocupante(dep, puesto) {
+    return (dep.ocupaciones ?? []).find((o) => o.puesto === puesto)?.agente ?? '';
+  }
+
+  /**
+   * Sentar (o desentar) a alguien. Vaciar QUITA la ocupación en vez de dejarla
+   * con agente vacío: «ninguno» es la ausencia, y guardarla haría que un puesto
+   * libre y uno que alguien vació se vieran distintos sin serlo.
+   */
+  function sentar(dep, puesto, agente) {
+    const otras = (dep.ocupaciones ?? []).filter((o) => o.puesto !== puesto);
+    dep.ocupaciones = agente ? [...otras, { puesto, agente }] : otras;
+  }
+
+  /**
+   * Las ocupaciones de puestos que la plantilla elegida NO tiene. Son las que
+   * no se pueden dibujar y por eso viajan en un campo oculto: la empresa pudo
+   * declarar un puesto y después cambiar de sala, y el motor lo reporta como
+   * «puesto desconocido» en vez de borrarlo.
+   */
+  function ocultas(dep) {
+    const dibujados = new Set(puestosDe(dep.plantilla).map((p) => p.id));
+    return JSON.stringify((dep.ocupaciones ?? []).filter((o) => !dibujados.has(o.puesto)));
+  }
+
+  /**
+   * PROPONER, NO DECIDIR. Llena las sillas vacías con los agentes del área y
+   * deja el formulario sin guardar: lo que queda escrito lo confirma una
+   * persona apretando Guardar. Las reglas —no sentar una capacidad, no sentar
+   * a nadie dos veces, no pisar lo elegido— viven en `sugerencias.js`.
+   */
+  function proponer(i) {
+    const d = departamentos[i];
+    const r = sugerirOcupantes(
+      { areas: comas(d.areas), capacidades: comas(d.capacidades), ocupaciones: d.ocupaciones },
+      agentes,
+      puestosDe(d.plantilla),
+      sentadosEnOtrosDepartamentos(departamentos, i)
+    );
+    d.ocupaciones = r.ocupaciones;
+    propuestas = { ...propuestas, [i]: r };
+  }
+
+  const comas = (t) => String(t ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const nombreDe = (n) => agentes.find((a) => a.nombre === n)?.cargo || n;
 </script>
 
 <svelte:head><title>Organización de la empresa · Dexter</title></svelte:head>
@@ -102,6 +167,13 @@
           comas: hay dos vocabularios y no coinciden, así que se declaran todas
           las escrituras que este departamento reclama.
         </p>
+        <p class="nota">
+          Quién se sienta se <strong>elige</strong>, silla por silla. «Sugerir
+          ocupantes» propone a los agentes del área en los puestos libres, pero
+          no guarda nada: lo confirma quien apriete Guardar. Las capacidades no
+          se proponen — son roles que se le asignan a una persona real, no
+          empleados con escritorio.
+        </p>
         {#each departamentos as d, i (i)}
           <div class="tarjeta">
             <div class="fila">
@@ -122,22 +194,59 @@
                   {/each}
                 </select>
               </label>
-              <label>Agente del puesto principal
-                <select name="dep:{i}:agente" bind:value={d.agente}>
-                  <option value="">— ninguno —</option>
-                  {#each agentes as a (a.nombre)}
-                    <option value={a.nombre}>{a.cargo || a.nombre}</option>
-                  {/each}
-                </select>
-              </label>
               <label>Dirección <input name="dep:{i}:direccion" bind:value={d.direccion} /></label>
             </div>
             <div class="fila">
               <label class="ancho">Áreas <input name="dep:{i}:areas" bind:value={d.areas} placeholder="operativo, Operaciones" /></label>
               <label class="ancho">Capacidades <input name="dep:{i}:capacidades" bind:value={d.capacidades} /></label>
               <label>Color <input name="dep:{i}:acento" bind:value={d.acento} placeholder="#4f46e5" /></label>
-              <input type="hidden" name="dep:{i}:otras" value={d.otras} />
+              <input type="hidden" name="dep:{i}:otras" value={ocultas(d)} />
               <button type="button" onclick={() => (departamentos = departamentos.filter((_, j) => j !== i))}>Quitar</button>
+            </div>
+
+            <div class="puestos">
+              {#if !d.plantilla}
+                <p class="nota">Elegí una sala arriba y acá aparecen sus puestos.</p>
+              {:else}
+                <div class="fila">
+                  {#each puestosDe(d.plantilla) as p (p.id)}
+                    <label>
+                      {p.nombre}{p.principal ? ' · principal' : ''}
+                      <select name="dep:{i}:ocupa_{p.id}"
+                              value={ocupante(d, p.id)}
+                              onchange={(e) => sentar(d, p.id, e.currentTarget.value)}>
+                        <option value="">— libre —</option>
+                        {#each agentes as a (a.nombre)}
+                          <option value={a.nombre}>{a.cargo || a.nombre}</option>
+                        {/each}
+                      </select>
+                    </label>
+                  {/each}
+                  <button type="button" class="proponer" onclick={() => proponer(i)}>
+                    Sugerir ocupantes
+                  </button>
+                </div>
+                {#if propuestas[i]}
+                  <p class="propuesta" data-prueba="propuesta-{i}">
+                    {#if propuestas[i].sentados.length}
+                      Propuesto: {propuestas[i].sentados.map(nombreDe).join(', ')}.
+                      Revisalo y guardá para confirmarlo.
+                    {:else}
+                      Nada que proponer: no quedan puestos libres o ningún agente
+                      del área está disponible.
+                    {/if}
+                    {#if propuestas[i].sinSilla.length}
+                      <strong>Sin silla:</strong>
+                      {propuestas[i].sinSilla.map(nombreDe).join(', ')} —
+                      pertenecen a este departamento y la sala no tiene más puestos.
+                    {/if}
+                    {#if propuestas[i].ocupadoEnOtra.length}
+                      <strong>Ya sentados en otro departamento:</strong>
+                      {propuestas[i].ocupadoEnOtra.map(nombreDe).join(', ')}.
+                    {/if}
+                  </p>
+                {/if}
+              {/if}
             </div>
           </div>
         {/each}
@@ -200,6 +309,11 @@
   input, select { padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem; }
   button { padding: 0.35rem 0.7rem; border: 1px solid #d1d5db; background: #fff; border-radius: 6px; cursor: pointer; font-size: 0.82rem; }
   .agregar { border-style: dashed; }
+  .puestos { border-top: 1px dashed #e5e7eb; padding-top: 0.6rem; margin-top: 0.2rem; }
+  .proponer { align-self: flex-end; border-color: #4f46e5; color: #4f46e5; }
+  .propuesta { font-size: 0.8rem; color: #374151; background: #f8fafc; padding: 0.5rem 0.7rem;
+               border-radius: 6px; margin: 0.4rem 0 0; }
+  .propuesta strong { color: #92400e; }
   .guardar { background: #4f46e5; color: #fff; border-color: #4f46e5; padding: 0.5rem 1.1rem; }
   .roto { color: #b42318; background: #fef3f2; padding: 0.6rem 0.8rem; border-radius: 6px; }
   .ok { color: #166534; background: #f0fdf4; padding: 0.6rem 0.8rem; border-radius: 6px; }

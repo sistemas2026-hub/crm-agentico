@@ -17,22 +17,24 @@
  */
 
 /**
- * Las ocupaciones que la pantalla NO edita, tal como viajaron en el campo
- * oculto.
+ * Las ocupaciones de puestos que la plantilla elegida NO tiene, tal como
+ * viajaron en el campo oculto.
+ *
+ * Existen: la empresa pudo declarar un puesto y después cambiar la sala por
+ * una que no lo tiene. El motor lo reporta como «puesto desconocido» en vez de
+ * ignorarlo, así que descartarlo acá convertiría un aviso en una desaparición.
  *
  * Un JSON roto se descarta entero en vez de propagarse: lo que llega mal es un
  * campo que el navegador reescribió, y guardar media lista sería peor que
- * guardar ninguna. El principal nunca sale de acá —ése lo pone el formulario—,
- * y si viniera repetido el documento tendría dos ocupaciones del mismo puesto,
- * que el esquema del motor rechaza con razón.
+ * guardar ninguna.
  */
-function otrasOcupaciones(texto) {
+function ocupacionesOcultas(texto) {
   if (!texto) return [];
   try {
     const lista = JSON.parse(texto);
     if (!Array.isArray(lista)) return [];
     return lista
-      .filter((o) => o && typeof o.puesto === 'string' && o.puesto !== 'principal')
+      .filter((o) => o && typeof o.puesto === 'string' && o.puesto)
       .map((o) => ({
         puesto: o.puesto,
         agente: typeof o.agente === 'string' ? o.agente : '',
@@ -41,6 +43,37 @@ function otrasOcupaciones(texto) {
   } catch {
     return [];
   }
+}
+
+/**
+ * QUIÉN SE SIENTA EN CADA SILLA, UNA POR UNA.
+ *
+ * El formulario manda un campo por puesto de la plantilla elegida
+ * (`ocupa_principal`, `ocupa_p1`, …) y este traductor NO sabe qué puestos
+ * tiene cada plantilla: lee los que vengan. Esa ignorancia es a propósito —la
+ * geometría de una sala vive en el catálogo del frontend, y duplicar acá qué
+ * sillas tiene cada plantilla sería una segunda verdad que se separa el día
+ * que alguien agregue un escritorio.
+ *
+ * Un puesto vacío NO se guarda: «ninguno» es la ausencia de la ocupación, no
+ * una ocupación con agente vacío. Guardarla haría que un puesto libre y uno
+ * que alguien vació se vieran distintos en la configuración sin serlo.
+ *
+ * Y UN PUESTO NO PUEDE VENIR DOS VECES. El esquema del motor rechaza dos
+ * ocupaciones del mismo puesto, con razón: no se sabría cuál manda. Lo que
+ * está en pantalla gana sobre lo que viajó oculto, porque es lo que alguien
+ * acaba de mirar.
+ */
+function ocupacionesDe(campos) {
+  const enPantalla = Object.entries(campos)
+    .filter(([clave, valor]) => clave.startsWith('ocupa_') && valor)
+    .map(([clave, valor]) => ({ puesto: clave.slice('ocupa_'.length), agente: valor }));
+
+  const declarados = new Set(enPantalla.map((o) => o.puesto));
+  return [
+    ...enPantalla,
+    ...ocupacionesOcultas(campos.otras).filter((o) => !declarados.has(o.puesto))
+  ];
 }
 
 /** Una lista escrita con comas → un arreglo sin vacíos ni espacios sueltos. */
@@ -68,7 +101,10 @@ export function organizacionDelFormulario(form) {
   const porPrefijo = (prefijo) => {
     const filas = new Map();
     for (const [clave, valor] of form.entries()) {
-      const m = /^([a-z]+):(\d+):([a-z_]+)$/.exec(clave);
+      //  `[a-z0-9_]` y no `[a-z_]`: los puestos de una plantilla se llaman
+      //  `p1`, `p2`, `p3`, asi que `ocupa_p1` no entraria y la silla se
+      //  guardaria vacia sin que nada lo dijera.
+      const m = /^([a-z]+):(\d+):([a-z0-9_]+)$/.exec(clave);
       if (!m || m[1] !== prefijo) continue;
       const i = Number(m[2]);
       if (!filas.has(i)) filas.set(i, {});
@@ -91,26 +127,7 @@ export function organizacionDelFormulario(form) {
       plantilla: d.plantilla || '',
       areas: comasALista(d.areas),
       capacidades: comasALista(d.capacidades),
-      //  EL PUESTO PRINCIPAL SE EDITA; LOS DEMÁS VIAJAN DE IDA Y VUELTA.
-      //
-      //  La pantalla sólo pregunta por el principal: declarar silla por silla
-      //  sería pedirle a quien organiza la empresa que sepa cómo se llaman los
-      //  puestos de una plantilla. Pero el documento se guarda ENTERO, así que
-      //  mandar sólo el principal BORRA los otros.
-      //
-      //  Pasó, y se vio en el navegador: al agregar un departamento desde esta
-      //  pantalla, Atención al Cliente perdió a su segundo agente y el pie
-      //  pasó de «6 de 37 puestos ocupados» a «5 de 40». Sin error, sin aviso,
-      //  y sólo visible contando.
-      //
-      //  Así que el formulario lleva los otros en un campo oculto y los
-      //  devuelve tal cual. No se fusiona con lo que hay en la base: eso haría
-      //  imposible quitar una ocupación, que es justo lo que un editor tiene
-      //  que poder hacer.
-      ocupaciones: [
-        ...(d.agente ? [{ puesto: 'principal', agente: d.agente }] : []),
-        ...otrasOcupaciones(d.otras)
-      ],
+      ocupaciones: ocupacionesDe(d),
       acento: d.acento || ''
     }));
 

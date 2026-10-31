@@ -2534,3 +2534,121 @@ El laboratorio quedó **restaurado** a la configuración del repositorio.
   medición.
 - **No usar métricas simuladas como si fueran reales**, ni en capturas ni en
   demostraciones.
+
+---
+
+## P5 · Quién se sienta, y cuántas sillas hay — 31/10/2026
+
+Dos preguntas que la pantalla no podía responder, y que son la misma pregunta
+vista desde los dos lados: **la empresa no podía sentar a nadie fuera del puesto
+principal, ni decidir cuántos puestos tiene un departamento.**
+
+### Lo que no se hizo, y por qué
+
+**No se volvió al llenado automático.** Sentar a todos los agentes del área en
+orden es lo que dibujaba nueve empleados donde hay seis: `soporte`,
+`facturacion` y `administracion` no son empleados virtuales, son capacidades que
+se le asignan a una persona real del CRM. Esa deducción se eliminó el
+30/10/2026 y no vuelve.
+
+**Tampoco se agregó un campo «capacidad».** Un número de puestos que se escribe
+a mano puede contradecir al dibujo —siete declarados en una sala con cuatro
+escritorios—, y entonces o el número miente o el dibujo miente.
+
+### Lo que sí
+
+```
+una silla, un selector       cada puesto de la plantilla elegida tiene el suyo
+sugerir ocupantes            propone a los agentes del área en los puestos
+                             libres y NO guarda: lo confirma quien apriete
+                             Guardar
+tamaños de sala              cada sala en tres: `tecnica` (3), `tecnica_6`,
+                             `tecnica_9`. El nombre dice cuántos puestos trae
+```
+
+**Proponer separa el gesto del dato.** El sistema arma la propuesta de una vez
+para todo el departamento y una persona la confirma; lo que queda escrito sigue
+siendo una declaración explícita, igual que si se hubiera tipeado silla por
+silla. Las tres reglas que la mantienen honesta viven en `sugerencias.js`: no
+sienta una capacidad, no sienta a nadie dos veces —el esquema lo rechaza y el
+otro puesto puede estar en otro piso—, y no pisa lo que alguien eligió.
+
+Y **dice lo que sobra**: si pertenecen cinco al departamento y hay tres sillas,
+los dos que quedan afuera salen por nombre. Callarlos haría que la propuesta
+pareciera completa.
+
+### Los tamaños crecen a lo ANCHO, y no es estética
+
+La separación entre pisos salió de invertir la proyección isométrica: un puesto
+a altura `z` queda tapado por el nivel de arriba cuando
+
+```
+(ALTURA_DE_PISO - z) * 0,8125  <=  fondo de la sala - gy del puesto
+```
+
+`gx` **no aparece**. Crecer en fondo empeora los dos lados a la vez y los
+escritorios nuevos se esconderían bajo el piso de arriba —sin error, con la
+escena animándolos donde nadie los ve—. Crecer en ancho es gratis.
+
+Las salas grandes se **generan**, no se copian: tres tamaños de seis salas son
+dieciocho geometrías de cuarenta números, y equivocarse en uno da una silla
+dentro de una pared. La guarda de solapamiento cazó el primer defecto al
+generar `operaciones_7`: la fila se corría *además* de estirarse, así que el
+último escritorio viejo caía exactamente encima del último nuevo —`p3` y `p6` en
+el mismo punto, que dibuja uno solo—. Sin esa prueba entraba derecho.
+
+### Los dos catálogos no se separan
+
+El motor sirve los **nombres**; la geometría vive en el frontend. Son dos listas
+en dos lenguajes, así que `cli/exportar_organizacion.py` escribe también
+`plantillas-del-motor.json` y se comprueba en las **dos** direcciones: toda
+plantilla que el motor ofrece existe acá con sus mismos puestos, y toda
+plantilla de acá se puede elegir. Una sala que existe y nadie puede elegir es
+código que no corre.
+
+El catálogo salió además de `canales/api.py` —9.000 líneas— a
+`nucleo/config/organizacion.py`, que es desde donde lo lee el exportador sin
+levantar Flask entero.
+
+### El defecto que apareció al usarlo
+
+Cambiar un departamento a una sala más chica deja al agente de `p3` **sin silla
+y sin aviso**. La ocupación no se borra, y eso es correcto: volver a la sala
+grande lo devuelve a su puesto. Pero el pie decía «5 de 38 puestos ocupados» y
+la diferencia con el documento guardado no la veía nadie.
+
+Ahora la oficina lo dice: *«1 ocupación(es) declarada(s) en un puesto que su
+sala no tiene, así que no se dibujan: Auditoría y Cumplimiento/p3. Elegir una
+sala más grande las devuelve.»*
+
+### Medido en el navegador
+
+```
+29 selectores de silla   8 departamentos, uno por puesto de su plantilla
+la propuesta, diferencial  con `administracion` declarada como capacidad: «nada
+                         que proponer». Quitándola: propone «Analista» en `p1` y
+                         dice «Revisalo y guardá para confirmarlo». Lo que lo
+                         dejaba fuera era la regla, no la falta de candidatos
+cambiar de tamaño        Recursos Humanos a `expedientes_7`: siete sillas al
+                         instante, con los nombres de la sala (Coordinación,
+                         Gestión 1..6). Guardado: 6 de 40 puestos, y Atención al
+                         Cliente conserva sus DOS ocupaciones
+achicar                  Auditoría a `reuniones`: `ventas` en `p3` sobrevive en
+                         la configuración y la oficina avisa de que no la dibuja
+el invariante            sentar una capacidad en otra sala -> el motor rechaza y
+                         el mensaje llega TAL CUAL: «'soporte' es capacidad de
+                         'atencion_cliente' y a la vez ocupa el puesto
+                         'auditoria:p3'»
+rendimiento              el edificio con la sala grande: 2.373 obj a 144 fps
+```
+
+### Lo que queda
+
+- **El orden de los nombres puede leerse raro.** En `expedientes_7` la fila es
+  Gestión 1, 2, 4, 5, 6 y la 3 queda al costado: la sala base ya tenía ese
+  puesto en otra fila. Renumerarla exigiría cambiar identificadores de puesto, y
+  eso desentaría a quien estuviera ahí.
+- **La mitad agregada tiene poco mobiliario.** Se estiran los ductos y se suma
+  una luminaria cada dos puestos; las estanterías y las plantas no se duplican.
+- **Dos tamaños y no cinco**, a propósito: veinte opciones en una lista
+  desplegable no son más libertad, son veinte líneas para leer antes de elegir.

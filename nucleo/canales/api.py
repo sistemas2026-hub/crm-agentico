@@ -58,7 +58,7 @@ from nucleo.relevo.control import control_efectivo
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
-from nucleo.config.organizacion import organizacion_de
+from nucleo.config.organizacion import PLANTILLAS_DE_SALA, organizacion_de
 
 #  Las salas que la pantalla sabe dibujar, para ofrecerlas al editar.
 #
@@ -67,14 +67,6 @@ from nucleo.config.organizacion import organizacion_de
 #  'AreaDeTrabajo'. Esta lista existe para que un formulario pueda ofrecer las
 #  opciones sin tenerlas escritas dentro, que es lo que obligaria a tocar dos
 #  sitios cada vez que el catalogo crezca.
-PLANTILLAS_DE_SALA = [
-    {"nombre": "operaciones", "rotulo": "Centro de operaciones", "puestos": 4},
-    {"nombre": "atencion", "rotulo": "Sala de atencion", "puestos": 4},
-    {"nombre": "tecnica", "rotulo": "Sala tecnica", "puestos": 3},
-    {"nombre": "expedientes", "rotulo": "Sala de expedientes", "puestos": 4},
-    {"nombre": "comercial", "rotulo": "Sala comercial", "puestos": 4},
-    {"nombre": "reuniones", "rotulo": "Sala de reuniones", "puestos": 2},
-]
 from nucleo.habilidades import analista
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades

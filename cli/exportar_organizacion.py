@@ -28,10 +28,18 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
-from nucleo.config.organizacion import ORGANIZACION_POR_DEFECTO     # noqa: E402
+from nucleo.config.organizacion import (                          # noqa: E402
+    ORGANIZACION_POR_DEFECTO, PLANTILLAS_DE_SALA)
 
-DESTINO = (RAIZ / "django-crm" / "frontend" / "src" / "lib" / "centro-mando" /
-           "__fixtures__" / "organizacion-por-defecto.json")
+_FIXTURES = (RAIZ / "django-crm" / "frontend" / "src" / "lib" / "centro-mando" /
+             "__fixtures__")
+DESTINO = _FIXTURES / "organizacion-por-defecto.json"
+
+#  EL CATALOGO DE SALAS, por el mismo motivo y con un riesgo distinto: el motor
+#  sirve los NOMBRES y el frontend tiene la geometria, asi que son dos listas en
+#  dos lenguajes. Separadas, el formulario ofrece una sala que la oficina dibuja
+#  como «Sala sin plantilla» -- degrada visible, pero es un defecto igual.
+DESTINO_PLANTILLAS = _FIXTURES / "plantillas-del-motor.json"
 
 
 def main() -> int:
@@ -47,6 +55,11 @@ def main() -> int:
     print(f"escrito  {DESTINO.relative_to(RAIZ)}")
     print(f"         {len(doc['departamentos'])} departamentos · "
           f"{len(doc['espacios'])} espacios · {len(doc['pisos'])} pisos")
+
+    with open(DESTINO_PLANTILLAS, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(PLANTILLAS_DE_SALA, ensure_ascii=False, indent=2) + "\n")
+    print(f"escrito  {DESTINO_PLANTILLAS.relative_to(RAIZ)}")
+    print(f"         {len(PLANTILLAS_DE_SALA)} plantillas de sala")
     return 0
 
 

@@ -296,8 +296,145 @@ const GENERICA = {
   ]
 };
 
+/**
+ * UNA SALA MAS GRANDE, GENERADA. NO COPIADA.
+ *
+ * Que una empresa pueda decidir cuantos puestos tiene un departamento exigia
+ * una de dos cosas: un numero de capacidad -que puede contradecir al dibujo, y
+ * entonces o el numero miente o el dibujo miente- o mas salas en el catalogo.
+ * Se eligio lo segundo, y se GENERAN: escribir a mano tres tamanos de seis
+ * salas son dieciocho geometrias de cuarenta numeros cada una, y equivocarse en
+ * uno no da error, da una silla dentro de una pared.
+ *
+ * CRECEN A LO ANCHO, Y ESO NO ES ESTETICA. La separacion entre pisos del
+ * edificio salio de invertir la proyeccion isometrica: un puesto a altura `z`
+ * de un nivel queda tapado por el nivel de arriba cuando
+ *
+ *     (ALTURA_DE_PISO - z) * 0.8125  <=  fondo de la sala - gy del puesto
+ *
+ * `gx` NO aparece en esa condicion. Crecer en FONDO empeora los dos lados de la
+ * desigualdad a la vez -mas fondo y, si la fila nueva va mas atras, menos gy- y
+ * los escritorios del nuevo tamano se esconderian bajo el piso de arriba sin un
+ * error que lo explique: la escena los seguiria animando donde nadie los ve.
+ * Crecer en ANCHO es gratis. Por eso la fila se estira y la sala se ensancha.
+ *
+ * QUE SE CORRE Y QUE NO. Lo que esta en la mitad derecha se aleja; lo que esta
+ * en la izquierda se queda, y la fila nueva llena el hueco. El cartel se
+ * reubica proporcional -es el nombre de la sala y tiene que seguir centrado-, y
+ * un mueble que ATRAVIESA la sala -un ducto- se estira hasta el muro nuevo.
+ *
+ * @param {Plantilla} base
+ * @param {number} extra cuantos puestos de mas
+ * @returns {Plantilla}
+ */
+function ampliar(base, extra) {
+  const secundarios = base.puestos.filter((p) => !p.principal);
+
+  //  La fila mas larga es la que se estira. Una sala puede tener los puestos
+  //  repartidos -expedientes tiene dos atras y uno al costado-, y estirar la
+  //  del costado dejaria la sala creciendo en diagonal.
+  const filas = new Map();
+  for (const p of secundarios) {
+    if (!filas.has(p.gy)) filas.set(p.gy, []);
+    filas.get(p.gy).push(p);
+  }
+  const fila = [...filas.values()]
+    .sort((a, b) => b.length - a.length || a[0].gy - b[0].gy)[0]
+    .slice()
+    .sort((a, b) => a.gx - b.gx);
+
+  //  La separacion sale de la sala misma, no de una constante: cada plantilla
+  //  tiene su escala y un numero fijo apretaria unas y desparramaria otras.
+  const sep = fila.length > 1 ? Number((fila[1].gx - fila[0].gx).toFixed(2)) : 3.2;
+  const delta = Number((extra * sep).toFixed(2));
+  const mitad = base.mundo.ancho / 2;
+  const ancho = Number((base.mundo.ancho + delta).toFixed(2));
+  const correr = (gx) => (gx > mitad ? Number((gx + delta).toFixed(2)) : gx);
+
+  //  LA FILA QUE SE ESTIRA NO SE CORRE. Correrla ademas de estirarla pone el
+  //  ultimo escritorio viejo exactamente encima del ultimo nuevo -- `p3` y `p6`
+  //  en el mismo punto, que dibuja uno solo y muestra la oficina con menos
+  //  gente de la que tiene. Lo cazo la guarda de solapamiento al generar
+  //  `operaciones_7` por primera vez; sin ella habria entrado derecho.
+  const enLaFila = new Set(fila.map((p) => p.id));
+
+  //  Los nombres siguen el patron de la sala: «Atencion 1, 2, 3» sigue en 4, y
+  //  una fila sin numero cae en «Puesto N». Inventar un vocabulario propio
+  //  haria que la cuarta silla se llamara distinto que las tres de al lado.
+  const ultimo = fila[fila.length - 1];
+  const raiz = String(ultimo.nombre ?? '').replace(/\s*\d+\s*$/, '').trim() || 'Puesto';
+  const desde = secundarios.length;
+
+  const nuevos = [];
+  const lamparas = [];
+  for (let k = 1; k <= extra; k++) {
+    const gx = Number((ultimo.gx + k * sep).toFixed(2));
+    nuevos.push({ id: `p${desde + k}`, nombre: `${raiz} ${desde + k}`, gx, gy: ultimo.gy });
+    //  Una luminaria cada dos puestos nuevos: sin esto la mitad agregada queda
+    //  a oscuras y parece un deposito, no una oficina.
+    if (k % 2 === 1) lamparas.push({ tipo: 'luminaria', gx: Math.round(gx), gy: Math.round(ultimo.gy + 0.6) });
+  }
+
+  const mueble = (m) => {
+    //  Un mueble CON `gx` esta puesto en un punto: se corre. Sus `desde`/`hasta`
+    //  son el otro eje -una mampara va de gy a gy- y tocarlos la rotaria.
+    if (typeof m.gx === 'number') return { ...m, gx: correr(m.gx) };
+    //  Sin `gx`, un `desde`/`hasta` recorre la sala a lo ancho: se estira.
+    if (typeof m.hasta === 'number') return { ...m, hasta: correr(m.hasta) };
+    return { ...m };
+  };
+
+  return {
+    ...base,
+    rotulo: `${base.rotulo} · ${base.puestos.length + extra} puestos`,
+    mundo: { ...base.mundo, ancho },
+    pasillo: base.pasillo
+      ? { desde: correr(base.pasillo.desde), hasta: correr(base.pasillo.hasta) }
+      : null,
+    //  Proporcional y no `correr`: el cartel nombra la sala y tiene que quedar
+    //  centrado, no pegado a la pared que no se movio.
+    cartel: { ...base.cartel, gx: Number((base.cartel.gx * ancho / base.mundo.ancho).toFixed(2)) },
+    mural: base.mural
+      ? { ...base.mural, paneles: base.mural.paneles.map((p) => ({ ...p, gx: correr(p.gx) })) }
+      : base.mural,
+    mobiliario: [...base.mobiliario.map(mueble), ...lamparas],
+    puestos: [
+      ...base.puestos.map((p) => (enLaFila.has(p.id) ? { ...p } : { ...p, gx: correr(p.gx) })),
+      ...nuevos
+    ]
+  };
+}
+
+//  Cuantos puestos de mas tiene cada tamano. Dos y no cinco: el catalogo se
+//  elige de una lista desplegable, y veinte opciones no son mas libertad que
+//  seis -- son veinte lineas para leer antes de elegir.
+const TAMANOS = [3, 6];
+
+/**
+ * El catalogo con sus tamanos.
+ *
+ * La clave es `<base>_<total de puestos>`, que es lo que se guarda en la
+ * configuracion de la empresa: `tecnica_6` dice sola que sala es y de que
+ * tamano, y el dia que alguien lea el documento crudo no tiene que buscar una
+ * tabla para entenderlo.
+ */
+function conTamanos(catalogo) {
+  const salida = {};
+  for (const [nombre, base] of Object.entries(catalogo)) {
+    salida[nombre] = base;
+    //  La generica no se amplia: es la sala a la que se cae cuando la
+    //  plantilla pedida no existe, y ofrecer tamanos de una sala de reserva
+    //  seria ofrecer elegir el error.
+    if (nombre === 'generica') continue;
+    for (const extra of TAMANOS) {
+      salida[`${nombre}_${base.puestos.length + extra}`] = ampliar(base, extra);
+    }
+  }
+  return salida;
+}
+
 /** @type {Record<string, Plantilla>} */
-export const PLANTILLAS = {
+export const PLANTILLAS = conTamanos({
   operaciones: OPERACIONES,
   atencion: ATENCION,
   tecnica: TECNICA,
@@ -305,7 +442,7 @@ export const PLANTILLAS = {
   comercial: COMERCIAL,
   reuniones: REUNIONES,
   generica: GENERICA
-};
+});
 
 /** El nombre que se usa cuando la configuración pide una que no está. */
 export const PLANTILLA_DE_RESERVA = 'generica';

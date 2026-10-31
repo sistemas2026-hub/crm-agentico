@@ -40,6 +40,7 @@ No necesita base ni red.
     py -3.13 tests/test_organizacion_config.py
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -49,6 +50,7 @@ sys.path.insert(0, str(RAIZ))
 from pydantic import ValidationError                                 # noqa: E402
 
 from nucleo.config.organizacion import (ORGANIZACION_POR_DEFECTO,    # noqa: E402
+                                        PLANTILLAS_DE_SALA,
                                         organizacion_de)
 from nucleo.config.schema import (Departamento, EspacioDeTrabajo,    # noqa: E402
                                   Ocupacion, Organizacion, Piso,
@@ -56,6 +58,8 @@ from nucleo.config.schema import (Departamento, EspacioDeTrabajo,    # noqa: E40
 
 FIXTURE = (RAIZ / "django-crm" / "frontend" / "src" / "lib" / "centro-mando" /
            "__fixtures__" / "organizacion-por-defecto.json")
+FIXTURE_PLANTILLAS = (RAIZ / "django-crm" / "frontend" / "src" / "lib" /
+                      "centro-mando" / "__fixtures__" / "plantillas-del-motor.json")
 
 fallos: list[str] = []
 
@@ -321,6 +325,37 @@ def fixture_al_dia() -> None:
     if not igual:
         print("        Para regenerarlo:")
         print("        py -3.13 cli/exportar_organizacion.py")
+
+    #  EL CATALOGO DE SALAS, que es el otro lado del mismo riesgo. El motor
+    #  sirve los NOMBRES y el frontend tiene la GEOMETRIA: son dos listas en
+    #  dos lenguajes, y separadas el formulario ofrece una sala que la oficina
+    #  dibuja como «Sala sin plantilla». Degrada visible, pero es un defecto.
+    if not FIXTURE_PLANTILLAS.exists():
+        comprobar(False, f"falta el fixture del catalogo: {FIXTURE_PLANTILLAS}")
+        return
+    catalogo = json.loads(FIXTURE_PLANTILLAS.read_text(encoding="utf-8"))
+    comprobar(catalogo == PLANTILLAS_DE_SALA,
+              "el fixture del catalogo de salas es el que sirve el motor")
+
+    #  Y el catalogo mismo. Un nombre repetido haria que dos salas distintas se
+    #  guardaran con el mismo identificador en la configuracion de la empresa.
+    nombres = [p["nombre"] for p in PLANTILLAS_DE_SALA]
+    comprobar(len(set(nombres)) == len(nombres),
+              "ningun nombre de plantilla se repite")
+    comprobar(all(re.fullmatch(r"[a-z][a-z0-9_]*", n) for n in nombres),
+              "todo nombre de plantilla es un id valido para el esquema")
+    comprobar(all(p["puestos"] >= 1 for p in PLANTILLAS_DE_SALA),
+              "ninguna plantilla ofrece cero puestos")
+
+    #  EL NOMBRE DE UNA VARIANTE PROMETE UN NUMERO. Si prometiera 10 y trajera
+    #  7, la empresa elegiria su sala por un numero que no es el que recibe, y
+    #  el sintoma seria un escritorio de menos que nadie sabria explicar.
+    variantes = [p for p in PLANTILLAS_DE_SALA if re.search(r"_\d+$", p["nombre"])]
+    comprobar(len(variantes) > 0,
+              f"el catalogo ofrece tamanos ({len(variantes)} variantes)")
+    comprobar(all(int(p["nombre"].rsplit("_", 1)[1]) == p["puestos"]
+                  for p in variantes),
+              "el nombre de cada variante dice cuantos puestos tiene")
 
 
 def main() -> int:

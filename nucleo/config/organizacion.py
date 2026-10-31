@@ -195,3 +195,57 @@ def organizacion_de(config: TenantConfig) -> dict:
         "origen": "declarada" if declarada else "por_defecto",
         **org.model_dump(mode="json"),
     }
+
+
+#  ──────────────────────────────────────────────────────────────────────────
+#  EL CATALOGO DE SALAS
+#
+#  Son NOMBRES y cuantos puestos tiene cada una. La geometria -cuanto mide la
+#  sala, donde va cada escritorio- vive en el frontend, en
+#  `lib/centro-mando/plantillas.js`, y es correcto que viva ahi: describir una
+#  sala isometrica son cuarenta numeros y el motor no dibuja. Mismo reparto que
+#  `AreaDeTrabajo.icono`.
+#
+#  Vive aqui y no en `canales/api.py` porque api.py ya tiene 9.000 lineas y
+#  porque este dato lo necesitan dos cosas: la API que lo sirve al formulario y
+#  el exportador que escribe el fixture del frontend. Importarlo desde api.py
+#  levantaria la aplicacion Flask entera para leer una lista.
+#
+#  LOS TAMANOS. Una empresa no elige un numero de puestos -un numero puede
+#  contradecir al dibujo, y entonces o el numero miente o el dibujo miente-:
+#  elige una sala que YA tiene esa cantidad de escritorios. Por eso el catalogo
+#  trae cada sala en tres tamanos y el nombre dice cual es: `tecnica_6` es la
+#  sala tecnica de seis puestos.
+#
+#  La lista se escribe a mano aqui y se GENERA en el frontend. Que no se
+#  separen lo vigila `tests/test_organizacion_config.py` contra el fixture que
+#  escribe `cli/exportar_organizacion.py`, en las dos direcciones.
+#  ──────────────────────────────────────────────────────────────────────────
+
+#  Cuantos puestos de mas tiene cada tamano. Tiene que ser el mismo `TAMANOS`
+#  que el de `plantillas.js`.
+TAMANOS_DE_SALA = (3, 6)
+
+_SALAS_BASE = (
+    ("operaciones", "Centro de operaciones", 4),
+    ("atencion", "Sala de atencion", 4),
+    ("tecnica", "Sala tecnica", 3),
+    ("expedientes", "Sala de expedientes", 4),
+    ("comercial", "Sala comercial", 4),
+    ("reuniones", "Sala de reuniones", 2),
+)
+
+
+def _catalogo() -> list[dict]:
+    salida: list[dict] = []
+    for nombre, rotulo, puestos in _SALAS_BASE:
+        salida.append({"nombre": nombre, "rotulo": rotulo, "puestos": puestos})
+        for extra in TAMANOS_DE_SALA:
+            total = puestos + extra
+            salida.append({"nombre": f"{nombre}_{total}",
+                           "rotulo": f"{rotulo} - {total} puestos",
+                           "puestos": total})
+    return salida
+
+
+PLANTILLAS_DE_SALA = _catalogo()

@@ -202,15 +202,50 @@ export function salaPorId(salas, id) {
  * las dos cosas sentaría al agente equivocado en el puesto, sin un error que lo
  * explique.
  *
+ * Se EXPORTA porque la pantalla que organiza la empresa propone ocupantes
+ * casando las mismas areas, y dos normalizaciones distintas casarian distinto:
+ * una propondria a alguien que la oficina despues no agrupa en esa sala.
+ *
  * @param {string} texto
  */
-function normalizar(texto) {
+export function normalizar(texto) {
   return String(texto ?? '')
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+/**
+ * SENTADOS EN UNA SILLA QUE NO EXISTE.
+ *
+ * Las ocupaciones que la configuración declara en un puesto que la plantilla
+ * elegida NO tiene. Devuelve `sala/puesto` para que se pueda nombrar sin
+ * ambigüedad: el mismo `p3` existe en cinco salas distintas.
+ *
+ * PASA, Y AHORA ES FACIL QUE PASE. Alguien cambia la sala de un departamento
+ * por una más chica desde `/settings/organizacion` y el agente que estaba en
+ * `p3` se queda sin dónde sentarse. La ocupación NO se borra -- se conserva a
+ * propósito, para que volver a la sala grande lo devuelva a su puesto --, pero
+ * mientras tanto el agente es invisible.
+ *
+ * Y eso, sin decirlo, es la falla de siempre: el pie decía «5 de 38 puestos
+ * ocupados» y la diferencia con el documento guardado no la veía nadie. Un
+ * agente que la empresa cree sentado y la oficina no dibuja tiene que aparecer
+ * como lo que es.
+ *
+ * Vive acá y no en la pantalla porque una pantalla de SvelteKit no se puede
+ * probar en este repositorio -- el harness no resuelve `$app/*` --, y esto es
+ * exactamente la clase de cálculo que se rompe en silencio.
+ *
+ * @param {Sala[]} salas las que se estén mirando: una, un piso o el edificio
+ * @returns {string[]}
+ */
+export function ocupacionesSinSilla(salas) {
+  return (Array.isArray(salas) ? salas : [])
+    .filter(Boolean)
+    .flatMap((s) => (s.puestosDesconocidos ?? []).map((p) => `${s.rotulo}/${p}`));
 }
 
 /**

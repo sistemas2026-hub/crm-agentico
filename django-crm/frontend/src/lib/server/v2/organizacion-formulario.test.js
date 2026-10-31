@@ -46,7 +46,7 @@ describe('el formulario se convierte en una organización', () => {
       'piso:1:nivel': '1', 'piso:1:rotulo': '',
       'dep:0:id': 'operativo', 'dep:0:rotulo': 'NOC y Redes', 'dep:0:piso': '3',
       'dep:0:plantilla': 'operaciones', 'dep:0:areas': 'operativo, Operaciones',
-      'dep:0:capacidades': '', 'dep:0:agente': 'supervisor_noc', 'dep:0:acento': '#4f46e5',
+      'dep:0:capacidades': '', 'dep:0:ocupa_principal': 'supervisor_noc', 'dep:0:acento': '#4f46e5',
       'esp:0:id': 'recepcion', 'esp:0:rotulo': 'Recepción', 'esp:0:piso': '1',
       'esp:0:plantilla': 'atencion'
     }));
@@ -62,25 +62,52 @@ describe('el formulario se convierte en una organización', () => {
     ]);
   });
 
-  it('el agente elegido se guarda como una ocupación del puesto principal', () => {
-    // Quien organiza la empresa elige una persona, no una silla. La silla la
-    // pone la plantilla, y por eso el formulario no pregunta por ella.
+  it('cada silla elegida se guarda como su ocupación', () => {
+    // Una silla, un campo. El traductor NO sabe qué puestos tiene cada
+    // plantilla y lee los que vengan: duplicar acá la geometría de las salas
+    // sería una segunda verdad que se separa el día que alguien agregue un
+    // escritorio.
     const org = organizacionDelFormulario(formDe({
-      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica', 'dep:0:agente': 'ventas'
+      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica',
+      'dep:0:ocupa_principal': 'ventas', 'dep:0:ocupa_p1': 'soporte'
     }));
     expect(org.departamentos[0].ocupaciones).toEqual([
-      { puesto: 'principal', agente: 'ventas' }
+      { puesto: 'principal', agente: 'ventas' },
+      { puesto: 'p1', agente: 'soporte' }
     ]);
   });
 
-  it('NO borra las ocupaciones que la pantalla no edita', () => {
+  it('UN PUESTO CON DÍGITO entra igual que uno sin él', () => {
+    // Los puestos de una plantilla se llaman `p1`, `p2`, `p3`. El filtro de
+    // campos del formulario aceptaba sólo `[a-z_]`, así que `ocupa_p1` se caía
+    // en silencio: la silla se guardaba vacía y nada lo decía. Es la prueba
+    // que mata esa mutación.
+    const org = organizacionDelFormulario(formDe({
+      'dep:0:id': 'x', 'dep:0:plantilla': 'operaciones',
+      'dep:0:ocupa_p1': 'a', 'dep:0:ocupa_p2': 'b', 'dep:0:ocupa_p3': 'c'
+    }));
+    expect(org.departamentos[0].ocupaciones.map((o) => o.puesto)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('una silla en «— libre —» NO se guarda como ocupación vacía', () => {
+    // «Ninguno» es la ausencia de la ocupación. Guardar `{agente: ''}` haría
+    // que un puesto libre y uno que alguien vació se vieran distintos en la
+    // configuración sin serlo.
+    const org = organizacionDelFormulario(formDe({
+      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica',
+      'dep:0:ocupa_principal': '', 'dep:0:ocupa_p1': 'soporte'
+    }));
+    expect(org.departamentos[0].ocupaciones).toEqual([{ puesto: 'p1', agente: 'soporte' }]);
+  });
+
+  it('NO borra las ocupaciones de puestos que la plantilla elegida no tiene', () => {
     // El defecto, encontrado en el navegador el 31/10/2026: al agregar un
     // departamento desde la pantalla, Atención al Cliente perdió a su segundo
     // agente y el pie pasó de «6 de 37 puestos ocupados» a «5 de 40». Sin
     // error y sin aviso: sólo visible contando.
     const org = organizacionDelFormulario(formDe({
       'dep:0:id': 'atencion_cliente', 'dep:0:plantilla': 'atencion',
-      'dep:0:agente': 'cliente_final',
+      'dep:0:ocupa_principal': 'cliente_final',
       'dep:0:otras': JSON.stringify([
         { puesto: 'p1', agente: 'soporte_tecnico_cliente', nombre: 'Diagnóstico' }
       ])
@@ -96,7 +123,7 @@ describe('el formulario se convierte en una organización', () => {
     // lista sería peor que guardar ninguna.
     for (const basura of ['{', 'null', '"texto"', '42', '[1,2]']) {
       const org = organizacionDelFormulario(formDe({
-        'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica', 'dep:0:agente': 'ventas',
+        'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica', 'dep:0:ocupa_principal': 'ventas',
         'dep:0:otras': basura
       }));
       expect(org.departamentos[0].ocupaciones, basura).toEqual([
@@ -105,11 +132,11 @@ describe('el formulario se convierte en una organización', () => {
     }
   });
 
-  it('un principal repetido en el campo oculto no se cuela', () => {
+  it('un puesto repetido en el campo oculto no se cuela: gana la pantalla', () => {
     // Dos ocupaciones del mismo puesto son un documento que el esquema del
     // motor rechaza, con razón. Lo que no puede pasar es que lo arme esta capa.
     const org = organizacionDelFormulario(formDe({
-      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica', 'dep:0:agente': 'ventas',
+      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica', 'dep:0:ocupa_principal': 'ventas',
       'dep:0:otras': JSON.stringify([{ puesto: 'principal', agente: 'otro' }])
     }));
     expect(org.departamentos[0].ocupaciones).toEqual([
@@ -117,7 +144,7 @@ describe('el formulario se convierte en una organización', () => {
     ]);
   });
 
-  it('sin agente, el departamento queda SIN ocupaciones', () => {
+  it('sin nadie elegido, el departamento queda SIN ocupaciones', () => {
     // Un departamento sin nadie es el caso que la estructura deducida de los
     // agentes no podía representar. Mandar `[{puesto:'principal', agente:''}]`
     // lo haría parecer ocupado por alguien sin nombre.

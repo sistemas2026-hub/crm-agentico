@@ -1,0 +1,92 @@
+[
+  {
+    "nombre": "operaciones",
+    "rotulo": "Centro de operaciones",
+    "puestos": 4
+  },
+  {
+    "nombre": "operaciones_7",
+    "rotulo": "Centro de operaciones - 7 puestos",
+    "puestos": 7
+  },
+  {
+    "nombre": "operaciones_10",
+    "rotulo": "Centro de operaciones - 10 puestos",
+    "puestos": 10
+  },
+  {
+    "nombre": "atencion",
+    "rotulo": "Sala de atencion",
+    "puestos": 4
+  },
+  {
+    "nombre": "atencion_7",
+    "rotulo": "Sala de atencion - 7 puestos",
+    "puestos": 7
+  },
+  {
+    "nombre": "atencion_10",
+    "rotulo": "Sala de atencion - 10 puestos",
+    "puestos": 10
+  },
+  {
+    "nombre": "tecnica",
+    "rotulo": "Sala tecnica",
+    "puestos": 3
+  },
+  {
+    "nombre": "tecnica_6",
+    "rotulo": "Sala tecnica - 6 puestos",
+    "puestos": 6
+  },
+  {
+    "nombre": "tecnica_9",
+    "rotulo": "Sala tecnica - 9 puestos",
+    "puestos": 9
+  },
+  {
+    "nombre": "expedientes",
+    "rotulo": "Sala de expedientes",
+    "puestos": 4
+  },
+  {
+    "nombre": "expedientes_7",
+    "rotulo": "Sala de expedientes - 7 puestos",
+    "puestos": 7
+  },
+  {
+    "nombre": "expedientes_10",
+    "rotulo": "Sala de expedientes - 10 puestos",
+    "puestos": 10
+  },
+  {
+    "nombre": "comercial",
+    "rotulo": "Sala comercial",
+    "puestos": 4
+  },
+  {
+    "nombre": "comercial_7",
+    "rotulo": "Sala comercial - 7 puestos",
+    "puestos": 7
+  },
+  {
+    "nombre": "comercial_10",
+    "rotulo": "Sala comercial - 10 puestos",
+    "puestos": 10
+  },
+  {
+    "nombre": "reuniones",
+    "rotulo": "Sala de reuniones",
+    "puestos": 2
+  },
+  {
+    "nombre": "reuniones_5",
+    "rotulo": "Sala de reuniones - 5 puestos",
+    "puestos": 5
+  },
+  {
+    "nombre": "reuniones_8",
+    "rotulo": "Sala de reuniones - 8 puestos",
+    "puestos": 8
+  }
+]

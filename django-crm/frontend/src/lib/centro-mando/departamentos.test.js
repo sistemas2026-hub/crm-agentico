@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { salasDe, pisosDe, salaPorId, agentesDe, plantaDe } from './departamentos.js';
+import {
+  agentesDe,
+  ocupacionesSinSilla,
+  pisosDe,
+  plantaDe,
+  salaPorId,
+  salasDe
+} from './departamentos.js';
 import { PLANTILLAS, plantillaDe } from './plantillas.js';
 import { TIPOS_DE_MUEBLE } from './escena/oficina';
 import PORDEFECTO from './__fixtures__/organizacion-por-defecto.json';
@@ -481,10 +488,18 @@ describe('la guarda de este archivo: no vuelve a saber de ninguna empresa', () =
     // La mutación que esta prueba mata: alguien agrega
     // `export const DEPARTAMENTOS = [...]` «solo para el caso de esta empresa»
     // y la estructura vuelve a estar escrita en el frontend.
+    //  `normalizar` se agrego el 31/10/2026 y es la unica excepcion: la
+    //  pantalla que organiza la empresa propone ocupantes casando las mismas
+    //  areas, y dos normalizaciones distintas casarian distinto. Es una
+    //  FUNCION, no una lista -- que es justo lo que esta guarda vigila.
     const mod = await import('./departamentos.js');
     expect(Object.keys(mod).sort()).toEqual([
-      'agentesDe', 'pisosDe', 'plantaDe', 'salaPorId', 'salasDe'
+      'agentesDe', 'normalizar', 'ocupacionesSinSilla', 'pisosDe', 'plantaDe',
+      'salaPorId', 'salasDe'
     ]);
+    for (const [nombre, valor] of Object.entries(mod)) {
+      expect(typeof valor, `${nombre} dejo de ser una funcion`).toBe('function');
+    }
   });
 
   it('el catálogo de plantillas no nombra ningún departamento', () => {
@@ -502,5 +517,44 @@ describe('la guarda de este archivo: no vuelve a saber de ninguna empresa', () =
     // comprueba nada».
     expect(plantillaDe('cartera').faltante).toBe('cartera');
     expect(plantillaDe('expedientes').faltante).toBeNull();
+  });
+});
+
+describe('ocupacionesSinSilla', () => {
+  //  QUE VIGILA. Cambiar un departamento a una sala mas chica deja al agente de
+  //  `p3` sin donde sentarse. La ocupacion NO se borra -a proposito: volver a la
+  //  sala grande lo devuelve a su puesto-, pero mientras tanto el agente es
+  //  invisible, y el pie decia «5 de 38 puestos ocupados» sin que la diferencia
+  //  con el documento guardado la viera nadie.
+  const org = (plantilla, ocupaciones) => ({
+    departamentos: [{ id: 'auditoria', rotulo: 'Auditoría', piso: 1, plantilla, ocupaciones }]
+  });
+
+  it('nombra la sala Y el puesto de la ocupación que no se puede dibujar', () => {
+    const salas = salasDe(org('reuniones', [{ puesto: 'p3', agente: 'ventas' }]));
+    expect(ocupacionesSinSilla(salas)).toEqual(['Auditoría/p3']);
+  });
+
+  it('una ocupación que SÍ tiene silla no se denuncia', () => {
+    const salas = salasDe(org('expedientes', [{ puesto: 'p3', agente: 'ventas' }]));
+    expect(ocupacionesSinSilla(salas)).toEqual([]);
+  });
+
+  it('dice la sala porque el mismo `p3` existe en cinco salas distintas', () => {
+    const salas = salasDe({
+      departamentos: [
+        { id: 'a', rotulo: 'Uno', piso: 1, plantilla: 'reuniones',
+          ocupaciones: [{ puesto: 'p3', agente: 'x' }] },
+        { id: 'b', rotulo: 'Dos', piso: 1, plantilla: 'reuniones',
+          ocupaciones: [{ puesto: 'p3', agente: 'y' }] }
+      ]
+    });
+    expect(ocupacionesSinSilla(salas)).toEqual(['Uno/p3', 'Dos/p3']);
+  });
+
+  it('una lista vacía o rota no revienta la pantalla', () => {
+    expect(ocupacionesSinSilla([])).toEqual([]);
+    expect(ocupacionesSinSilla(null)).toEqual([]);
+    expect(ocupacionesSinSilla([null, undefined])).toEqual([]);
   });
 });

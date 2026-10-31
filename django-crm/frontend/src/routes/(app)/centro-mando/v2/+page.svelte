@@ -34,7 +34,8 @@
   import { crearDemostracion } from '$lib/centro-mando/demo.js';
   import { proyectar, vigentes } from '$lib/centro-mando/proyeccion.js';
   import { frescura } from '$lib/centro-mando/frescura.js';
-  import { salasDe, pisosDe, salaPorId, plantaDe } from '$lib/centro-mando/departamentos.js';
+  import { ocupacionesSinSilla, pisosDe, plantaDe, salaPorId, salasDe }
+    from '$lib/centro-mando/departamentos.js';
   import { edificioDe } from '$lib/centro-mando/edificio.js';
   import FichaDePuesto from '$lib/components/centro-mando/FichaDePuesto.svelte';
 
@@ -172,6 +173,21 @@
     planta === null ? [] : Array.isArray(planta) ? planta.flatMap((p) => p.puestos) : planta.puestos
   );
   let agentesConPuesto = $derived(puestosVisibles.map((p) => p.agente).filter(Boolean));
+
+  /**
+   * Las ocupaciones que la sala vista no puede dibujar. El cálculo vive en
+   * `departamentos.js` porque acá no se puede probar: el harness de vitest no
+   * resuelve `$app/*`, y esto se rompe en silencio.
+   */
+  let sinSilla = $derived(
+    ocupacionesSinSilla(
+      vista.tipo === 'sala'
+        ? (sala ? [sala] : [])
+        : vista.tipo === 'piso'
+          ? (pisoVisto?.salas ?? [])
+          : SALAS
+    )
+  );
 
   /** @type {HTMLElement|null} */
   let lienzo = $state(null);
@@ -562,6 +578,13 @@
       <span>
         {agentesConPuesto.length} de {puestosVisibles.length} puestos ocupados:
         <code>{agentesConPuesto.join(', ')}</code>
+      </span>
+    {/if}
+    {#if sinSilla.length > 0}
+      <span class="alarma">
+        {sinSilla.length} ocupación(es) declarada(s) en un puesto que su sala no
+        tiene, así que no se dibujan: <code>{sinSilla.join(', ')}</code>. Elegir
+        una sala más grande las devuelve.
       </span>
     {/if}
     {#if sinRepresentacion > 0}
