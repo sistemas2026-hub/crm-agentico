@@ -135,6 +135,19 @@
       ? (estados.find((e) => e.agente === puestoSeleccionado.agente) ?? null)
       : null
   );
+  /**
+   * Las capacidades del departamento al que pertenece el puesto abierto.
+   *
+   * En la vista de empresa hay varias plantas, así que se busca la que
+   * contiene este puesto en vez de asumir la vigente.
+   */
+  let capacidadesDelPuesto = $derived.by(() => {
+    if (!puestoSeleccionado) return [];
+    const plantas = Array.isArray(planta) ? planta : [planta];
+    const suya = plantas.find((p) => p.puestos.some((q) => q.id === puestoSeleccionado.id));
+    return suya?.capacidades ?? [];
+  });
+
   let historialSeleccionado = $derived(
     puestoSeleccionado?.agente
       ? (demostracion ? historialSimulado : historialReal).filter(
@@ -368,6 +381,7 @@
         estado={estadoSeleccionado}
         veredicto={demostracion ? { confiable: true, motivo: 'al_dia', detalle: 'Guion de demostración en curso.' } : veredicto}
         historial={historialSeleccionado}
+        capacidades={capacidadesDelPuesto}
         simulado={demostracion}
         {diagnostico}
         alCerrar={() => {

@@ -57,7 +57,14 @@ export async function load({ locals, fetch }) {
       agentes: (datos.agentes || []).map((/** @type {any} */ a) => ({
         nombre: a.nombre,
         area: a.area ?? null,
-        cargo: a.cargo ?? null
+        cargo: a.cargo ?? null,
+        //  A quién atiende este agente. Viaja como INFORMACIÓN para la ficha,
+        //  no como criterio de quién se sienta: medido el 30/10/2026, su valor
+        //  por defecto en el esquema es `colaborador`, así que los tres roles
+        //  que no lo declaran salen idénticos a los dos que sí. Separa 4 de 5,
+        //  no distingue a un agente ejecutable de una capacidad asignada a una
+        //  persona. Quién ocupa cada puesto se declara en la organización.
+        orientado_a: a.orientado_a ?? null
       })),
       areas: areas.map((/** @type {any} */ a) => a?.nombre ?? a).filter(Boolean),
       error: null

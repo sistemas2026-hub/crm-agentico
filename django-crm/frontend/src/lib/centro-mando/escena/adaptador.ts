@@ -44,6 +44,25 @@ export const ANIMACION_POR_TIPO: Record<string, Animacion> = {
   escalada: 'despachar'
 };
 
+/**
+ * Lo último que PASÓ en este puesto, al margen de si el turno sigue.
+ *
+ * Es la segunda dimensión, y viene de una objeción que acepté: un fallo de una
+ * llamada no significa que el turno haya terminado. El agente puede estar
+ * recuperándose, llamando a otra cosa o redactando. Con una sola dimensión, el
+ * fallo reemplazaba la animación y durante un segundo y medio el personaje
+ * parecía haber dejado lo que hacía.
+ *
+ * Ahora conviven: el cuerpo muestra si TRABAJA, y esto muestra qué pasó. Una
+ * señal no reemplaza a la otra.
+ */
+export interface Acontecimiento {
+  tipo: string;
+  etiqueta: string | null;
+  procedencia: string;
+  hasta: number | null;
+}
+
 export interface EstadoDeAgente {
   agente: string;
   animacion: Animacion;
@@ -57,6 +76,16 @@ export interface EstadoDeAgente {
   detalle: string | null;
   /** Hasta cuándo vale la actividad. `null` si no hay ninguna. */
   hasta: number | null;
+  /**
+   * El estado del TURNO, separado de lo que se dibuja.
+   *
+   *   en_curso      hay una ejecución abierta y creíble
+   *   sin_noticias  hay una abierta más vieja de lo que un turno dura
+   *   null          no hay ninguna abierta
+   */
+  ejecucion: 'en_curso' | 'sin_noticias' | null;
+  /** Lo último que pasó, si hay algo vigente. Convive con la animación. */
+  acontecimiento: Acontecimiento | null;
 }
 
 /**
@@ -139,7 +168,11 @@ export function visualizar(
         confiable: false,
         motivo: visible.motivo ?? null,
         detalle: visible.detalle ?? null,
-        hasta: null
+        hasta: null,
+        //  Con los datos en duda tampoco se afirma que haya un turno abierto:
+        //  lo último que supimos pudo cerrarse hace rato.
+        ejecucion: null,
+        acontecimiento: null
       };
     }
 
@@ -163,17 +196,29 @@ export function visualizar(
         confiable: false,
         motivo: 'ejecucion_sin_noticias',
         detalle: null,
-        hasta: null
+        hasta: null,
+        ejecucion: 'sin_noticias',
+        acontecimiento: null
       };
     }
 
-    //  Un hecho discreto y reciente gana sobre el trabajo de fondo: un fallo o
-    //  una derivación son cosas que alguien querría ver ocurrir. Teclear es el
-    //  fondo, y el fondo no tapa un acontecimiento.
-    const acontecimiento =
-      crudo.tipo === 'falla' || crudo.tipo === 'expediente' || crudo.tipo === 'escalada';
+    //  LO QUE PASÓ, COMO SEGUNDA DIMENSIÓN.
+    //
+    //  Antes un fallo GANABA sobre el trabajo de fondo y reemplazaba la
+    //  animación. Duraba 1,6 s y el personaje volvía a teclear solo, así que
+    //  no llegaba a «el agente se detuvo» — pero durante ese segundo y medio
+    //  lo parecía, y una pantalla no debería dar a entender nada que no sea
+    //  cierto ni por un segundo.
+    //
+    //  Ahora convive: con el turno abierto el cuerpo sigue trabajando y esto
+    //  viaja aparte para que la escena lo muestre al lado del puesto.
+    const suceso: Acontecimiento | null =
+      crudo.tipo && crudo.tipo !== 'reposo'
+        ? { tipo: crudo.tipo, etiqueta: crudo.etiqueta ?? null,
+            procedencia: crudo.procedencia, hasta: crudo.caduca_en ?? null }
+        : null;
 
-    if (activa && !acontecimiento) {
+    if (activa) {
       return {
         agente: crudo.agente,
         animacion: 'teclear' as Animacion,
@@ -187,7 +232,9 @@ export function visualizar(
         detalle: null,
         //  NO caduca sola. Termina cuando la ejecución se cierra, que es el
         //  cambio que trae toda esta fase.
-        hasta: null
+        hasta: null,
+        ejecucion: 'en_curso',
+        acontecimiento: suceso
       };
     }
 
@@ -200,7 +247,9 @@ export function visualizar(
         confiable: true,
         motivo: visible.motivo ?? 'sin_actividad_vigente',
         detalle: null,
-        hasta: null
+        hasta: null,
+        ejecucion: null,
+        acontecimiento: null
       };
     }
 
@@ -219,7 +268,9 @@ export function visualizar(
         confiable: true,
         motivo: 'sin_representacion',
         detalle: null,
-        hasta: crudo.caduca_en ?? null
+        hasta: crudo.caduca_en ?? null,
+        ejecucion: null,
+        acontecimiento: suceso
       };
     }
 
@@ -231,7 +282,11 @@ export function visualizar(
       confiable: true,
       motivo: null,
       detalle: null,
-      hasta: crudo.caduca_en ?? null
+      hasta: crudo.caduca_en ?? null,
+      //  Sin turno abierto, el acontecimiento ES lo único que hay, y por eso
+      //  también manda el cuerpo. Es el caso de siempre.
+      ejecucion: null,
+      acontecimiento: suceso
     };
   });
 

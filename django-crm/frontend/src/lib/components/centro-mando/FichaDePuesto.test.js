@@ -227,3 +227,47 @@ describe('un turno EN CURSO no se cuenta como uno que terminó', () => {
     expect(sin).not.toContain('Turnos en curso');
   });
 });
+
+describe('las dos dimensiones, y lo que NO tiene escritorio', () => {
+  const enCursoConFallo = {
+    agente: 'supervisor_noc',
+    animacion: 'teclear',
+    rotulo: null,
+    procedencia: `ejecucion:${uuid}`,
+    confiable: true,
+    hasta: null,
+    ejecucion: 'en_curso',
+    acontecimiento: { tipo: 'falla', etiqueta: 'consultar_inventario_puertos',
+                      procedencia: `evento:${uuid}`, hasta: T + 1000 }
+  };
+
+  it('un fallo NO dice que el turno terminó: se muestran las dos cosas', () => {
+    const html = pintar({ puesto, estado: enCursoConFallo, veredicto: alDia });
+    expect(html).toContain('Un turno en curso');
+    expect(html).toContain('consultar_inventario_puertos');
+    expect(html).toContain('mientras el turno sigue abierto');
+  });
+
+  it('las capacidades del área se dicen, y se dice que no tienen puesto', () => {
+    // No basta con no dibujarlas: si desaparecieran, la oficina estaría
+    // ocultando que existen.
+    const html = pintar({ puesto, estado: null, veredicto: alDia,
+                          capacidades: [{ nombre: 'soporte', cargo: 'Soporte', ausente: false }] });
+    expect(html).toContain('Capacidades del área');
+    expect(html).toContain('soporte');
+    expect(html).toContain('no ocupan un puesto propio');
+  });
+
+  it('sin capacidades, la sección no ocupa sitio', () => {
+    const html = pintar({ puesto, estado: null, veredicto: alDia, capacidades: [] });
+    expect(html).not.toContain('Capacidades del área');
+  });
+
+  it('un agente declarado y ausente del inventario lo dice con esas palabras', () => {
+    // No es lo mismo que un puesto libre.
+    const roto = { ...puesto, agente: null,
+                   motivo: 'la configuración declara «supervisor_noc» y el inventario no lo trae' };
+    const html = pintar({ puesto: roto, estado: null, veredicto: alDia });
+    expect(html).toContain('el inventario no lo trae');
+  });
+});

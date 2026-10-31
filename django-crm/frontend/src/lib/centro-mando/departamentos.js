@@ -84,7 +84,7 @@ const NOC = {
       { tipo: 'dispensador', gx: 13.0, gy: 4.6 }
     ],
     puestos: [
-      { id: 'noc-supervision', nombre: 'Supervisión', principal: true, gx: 4.8, gy: 7.4 },
+      { id: 'noc-supervision', nombre: 'Supervisión', principal: true, gx: 4.8, gy: 7.4, agente: 'supervisor_noc' },
       { id: 'noc-monitoreo-1', nombre: 'Monitoreo 1', gx: 1.5, gy: 3.4 },
       { id: 'noc-monitoreo-2', nombre: 'Monitoreo 2', gx: 4.5, gy: 3.4 },
       { id: 'noc-monitoreo-3', nombre: 'Monitoreo 3', gx: 7.5, gy: 3.4 }
@@ -112,6 +112,7 @@ const ATENCION = {
   //  distinto, tienen miembros distintos. Por eso este departamento lleva un
   //  identificador propio.
   areas: ['Atención al Cliente', 'atencion_cliente'],
+  capacidades: ['soporte'],
   planta: {
     //  LOS SEIS ACENTOS SE ELIGIERON MIDIENDO, NO A OJO.
     //
@@ -158,7 +159,7 @@ const ATENCION = {
       // tapaba el nombre de la de atrás. En isometría dos puestos con el
       // mismo `gx` caen en la misma columna de pantalla aunque estén a tres
       // celdas de distancia.
-      { id: 'atencion-coordinacion', nombre: 'Coordinación', principal: true, gx: 2.2, gy: 6.4 },
+      { id: 'atencion-coordinacion', nombre: 'Coordinación', principal: true, gx: 2.2, gy: 6.4, agente: 'cliente_final' },
       { id: 'atencion-1', nombre: 'Atención 1', gx: 1.2, gy: 3.0 },
       { id: 'atencion-2', nombre: 'Atención 2', gx: 4.2, gy: 3.0 },
       { id: 'atencion-3', nombre: 'Atención 3', gx: 7.2, gy: 3.0 }
@@ -198,7 +199,7 @@ const SOPORTE = {
       { tipo: 'dispensador', gx: 9.9, gy: 6.4 }
     ],
     puestos: [
-      { id: 'soporte-diagnostico', nombre: 'Diagnóstico', principal: true, gx: 3.4, gy: 5.4 },
+      { id: 'soporte-diagnostico', nombre: 'Diagnóstico', principal: true, gx: 3.4, gy: 5.4, agente: 'soporte_tecnico_cliente' },
       { id: 'soporte-1', nombre: 'Soporte 1', gx: 1.6, gy: 2.4 },
       { id: 'soporte-2', nombre: 'Soporte 2', gx: 5.4, gy: 2.4 }
     ]
@@ -218,6 +219,7 @@ const CARTERA = {
   rotulo: 'Facturación y Cartera',
   direccion: 'Dirección Financiera',
   areas: ['cartera', 'Facturación', 'Cartera'],
+  capacidades: ['facturacion'],
   planta: {
     acento: 0xa855f7,
     mundo: { ancho: 12, fondo: 10, alto: 4 },
@@ -237,7 +239,7 @@ const CARTERA = {
       { tipo: 'dispensador', gx: 11.0, gy: 8.4 }
     ],
     puestos: [
-      { id: 'cartera-coordinacion', nombre: 'Coordinación', principal: true, gx: 4.6, gy: 6.8 },
+      { id: 'cartera-coordinacion', nombre: 'Coordinación', principal: true, gx: 4.6, gy: 6.8, agente: 'facturacion_cliente' },
       { id: 'cartera-1', nombre: 'Cobranza 1', gx: 3.0, gy: 3.2 },
       { id: 'cartera-2', nombre: 'Cobranza 2', gx: 6.4, gy: 3.2 },
       { id: 'cartera-3', nombre: 'Cobranza 3', gx: 9.0, gy: 5.6 }
@@ -277,7 +279,7 @@ const VENTAS = {
       { tipo: 'dispensador', gx: 12.0, gy: 6.2 }
     ],
     puestos: [
-      { id: 'ventas-cierre', nombre: 'Cierre', principal: true, gx: 2.2, gy: 6.6 },
+      { id: 'ventas-cierre', nombre: 'Cierre', principal: true, gx: 2.2, gy: 6.6, agente: 'ventas' },
       { id: 'ventas-1', nombre: 'Asesoría 1', gx: 1.4, gy: 2.6 },
       { id: 'ventas-2', nombre: 'Asesoría 2', gx: 4.6, gy: 2.6 },
       { id: 'ventas-3', nombre: 'Asesoría 3', gx: 6.6, gy: 4.4 }
@@ -298,6 +300,7 @@ const ADMINISTRACION = {
   rotulo: 'Administración',
   direccion: 'Dirección General',
   areas: ['administracion', 'Administración'],
+  capacidades: ['administracion'],
   planta: {
     acento: 0x2563eb,
     mundo: { ancho: 12, fondo: 9, alto: 4 },
@@ -318,7 +321,7 @@ const ADMINISTRACION = {
       { tipo: 'dispensador', gx: 11.0, gy: 5.6 }
     ],
     puestos: [
-      { id: 'admin-direccion', nombre: 'Dirección', principal: true, gx: 2.0, gy: 6.0 },
+      { id: 'admin-direccion', nombre: 'Dirección', principal: true, gx: 2.0, gy: 6.0, agente: 'configuracion_guiada' },
       { id: 'admin-1', nombre: 'Gestión', gx: 2.2, gy: 2.4 }
     ]
   }
@@ -384,32 +387,82 @@ export function agentesDe(agentes, depto) {
 /**
  * La planta lista para dibujar: geometría del departamento + quién la ocupa.
  *
- * Los agentes se sientan en orden, el primero en el puesto principal. Un puesto
- * sin agente se dibuja VACÍO y lo dice: inventarle un ocupante para que la
- * escena no se vea sosa es la clase de afirmación que esta pantalla no puede
- * permitirse.
+ * QUIÉN SE SIENTA SE DECLARA, NO SE DEDUCE (30/10/2026, corrección P0.1)
+ * ---------------------------------------------------------------------
+ * Antes esta función sentaba a TODOS los agentes del área, en orden, hasta
+ * llenar los puestos. Eso dibujaba nueve empleados donde hay seis: tres de los
+ * nueve roles —`soporte`, `facturacion`, `administracion`— **no son empleados
+ * virtuales**, son capacidades que se le asignan a una persona real del CRM, y
+ * el motor las resuelve por `agentes_de_colaborador(tenant, profile_id)`. La
+ * oficina les estaba dibujando un escritorio propio.
+ *
+ * EL CAMPO QUE PARECÍA RESOLVERLO NO RESUELVE NADA. `orientado_a` viaja desde
+ * el motor, y se midió el 30/10/2026 contra el YAML del tenant: su valor por
+ * defecto en el esquema es `colaborador`, así que los TRES que no lo declaran
+ * salen idénticos a los DOS que sí lo declaran y sí tienen puerta propia.
+ * Separa 4 de 5, no 4-2-3. Deducir la ocupación de ahí habría cambiado una
+ * invención por otra.
+ *
+ * Así que la ocupación es una DECLARACIÓN: cada puesto dice qué agente lo
+ * ocupa, o ninguno. Es además lo que el producto pide —los personajes vienen
+ * de identidades existentes y asignadas— y lo que hace que esto se pueda mover
+ * a la configuración por empresa sin rediseñarlo.
+ *
+ * Y se VALIDA contra el inventario: un agente declarado que el motor no sirve
+ * deja el puesto vacío **y dice por qué**. Dibujarlo igual sería volver a
+ * inventar un empleado; callarlo sería un hueco que nadie puede explicar.
  *
  * @param {Departamento} depto
  * @param {any[]} agentes inventario del motor
  */
 export function plantaDe(depto, agentes) {
-  const suyos = agentesDe(agentes, depto);
-  const puestos = depto.planta.puestos.map((p, i) => {
-    const agente = suyos[i] ?? null;
+  const inventario = new Map(
+    (Array.isArray(agentes) ? agentes : [])
+      .filter((a) => a && a.nombre)
+      .map((a) => [String(a.nombre), a])
+  );
+
+  const puestos = depto.planta.puestos.map((p) => {
+    if (!p.agente) {
+      return { ...p, agente: null, nombre: p.nombre || 'Puesto', area: 'puesto libre',
+               motivo: 'sin agente asignado' };
+    }
+    const real = inventario.get(p.agente);
+    if (!real) {
+      //  Declarado y ausente del inventario. No es lo mismo que un puesto
+      //  libre, y la ficha lo dice con esas palabras.
+      return { ...p, agente: null, nombre: p.nombre || 'Puesto',
+               area: 'agente no encontrado',
+               motivo: `la configuración declara «${p.agente}» y el inventario no lo trae` };
+    }
     return {
       ...p,
-      agente: agente?.nombre ?? null,
-      //  Ocupado: el cargo del agente. Libre: el nombre del PUESTO, que lo
-      //  pone la planta. Un «Puesto 3» genérico no le dice a nadie para qué
-      //  está ese escritorio, y el nombre del sitio sobrevive a quien lo ocupa.
-      nombre: agente?.rotulo || p.nombre || (p.principal ? 'Puesto principal' : `Puesto ${i}`),
-      area: agente ? depto.rotulo : 'puesto libre'
+      agente: p.agente,
+      nombre: real.cargo || p.nombre || p.agente,
+      area: depto.rotulo,
+      //  A quién atiende. Es información real y se muestra en la ficha; NO se
+      //  usa para decidir quién se sienta.
+      orientado_a: real.orientado_a ?? null,
+      motivo: null
     };
   });
+
   return {
     ...depto.planta,
     cartel: { ...depto.planta.cartel, rotulo: depto.rotulo },
-    puestos
+    puestos,
+    /**
+     * Roles del área que existen y NO tienen puesto propio.
+     *
+     * Se resuelven contra el inventario y se muestran en la ficha del
+     * departamento. Que no tengan escritorio no los hace invisibles: existen,
+     * y lo que la oficina no puede hacer es dibujarlos como si fueran alguien
+     * sentado.
+     */
+    capacidades: (depto.capacidades ?? [])
+      .map((n) => inventario.get(n) ?? { nombre: n, cargo: null, ausente: true })
+      .map((a) => ({ nombre: String(a.nombre), cargo: a.cargo ?? null,
+                     ausente: a.ausente === true }))
   };
 }
 

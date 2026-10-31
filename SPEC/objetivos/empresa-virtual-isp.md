@@ -1715,6 +1715,219 @@ dejaría de decir nada. Los de alarma siguen sin cambiar nunca.
   unan, ni puertas, ni un vestíbulo. Son seis oficinas cerca, no un edificio.
 - **Las seis siguen siendo rectángulos con dos muros.**
 
+---
+
+## Decisiones de producto congeladas — 31/10/2026
+
+Tomadas por el cliente tras una auditoría externa, y registradas acá porque en
+este proyecto **una decisión sin escribir se reabre sola cada sesión**.
+
+### D1 · Ocho departamentos para la empresa piloto, ninguna cantidad fija
+
+```
+1 NOC y redes                5 Finanzas y cartera
+2 Operaciones de campo       6 Administración
+3 Atención al cliente        7 Recursos humanos
+4 Comercial y marketing      8 Auditoría y cumplimiento
+```
+
+**Los departamentos vienen de la configuración organizacional de cada empresa,
+no se deducen de los agentes.** Un departamento existe aunque no tenga a nadie:
+Recursos Humanos y Auditoría son ejemplos. Eso representa una estructura
+configurada, no inventa empleados.
+
+Las áreas históricas de los roles **se mapean** a esa estructura; no se crean
+departamentos duplicados.
+
+Lo que esto corrige de lo que yo había construido: medí seis departamentos
+leyendo las áreas de los roles y los di por el organigrama. **Eran los grupos
+de los agentes, no la organización.** Son dos cosas distintas y las confundí.
+
+### D2 · Edificio de tres niveles para la empresa piloto
+
+Sección arquitectónica separada: niveles desplazados en vertical, unidos por un
+núcleo visible, cada uno aislable.
+
+```
+Piso 3  NOC y redes · Dirección · sala de reuniones
+Piso 2  Operaciones de campo · Atención al cliente · Comercial y marketing
+Piso 1  Finanzas y cartera · Administración · Recursos humanos ·
+        Auditoría y cumplimiento · recepción
+```
+
+**Tres pisos es la configuración del piloto, no un límite del producto.** El
+motor debe admitir uno, dos, tres o más.
+
+Antes de esta decisión, la ficha listaba «múltiples pisos» como *posterior* y el
+MVP como *un solo departamento visual*. Queda elevado a requisito.
+
+### D3 · Personas humanas, en una fase posterior
+
+La plataforma representará **agentes IA y empleados humanos**, distinguiendo
+identidad, capacidades, permisos y **procedencia de sus estados**.
+
+La regla que lo gobierna: **no atribuir actividad laboral a una persona sin
+evidencia real.** Haber iniciado sesión hace horas no es trabajar. Sin
+información de actividad, el personaje se queda en reposo ambiental.
+
+Los técnicos de campo **no se dibujan en la oficina**: se representarán con
+unidades móviles o un mapa operativo. Fingir que están en un escritorio sería
+afirmar algo falso sobre dónde está una persona.
+
+Se implementa **después** de estabilizar el modelo de agentes IA.
+
+### D4 · Entorno local autorizado
+
+Autorizado levantar un entorno local aislado del CRM y SvelteKit para validar
+la oficina. Condiciones: sin producción ni sus credenciales, sin tocar
+contenedores ajenos, base de prueba aislada con datos inventados,
+autenticación local, sin push ni deploy, y **sin fusionar automáticamente** los
+24 commits pendientes de producción.
+
+---
+
+## P0.1 · Quién se sienta se DECLARA — hecho el 31/10/2026
+
+### La corrección, y es de un diagnóstico mío equivocado
+
+Dije: *«el dato que distingue a un agente ejecutable viaja desde el motor, y mi
+capa servidor lo descarta»*. Lo verifiqué y **era falso en su conclusión**.
+
+`orientado_a` sí viaja. Pero su valor por defecto en el esquema es
+`colaborador`, así que los tres roles que no lo declaran salen **idénticos** a
+los dos que sí lo declaran y sí tienen puerta propia:
+
+```
+cliente_final  4 roles   cliente_final, facturacion_cliente,
+                         soporte_tecnico_cliente, ventas
+colaborador    5 roles   configuracion_guiada, supervisor_noc   (declarado)
+                         soporte, facturacion, administracion   (POR DEFECTO)
+```
+
+Separa 4 de 5. **No distingue un agente ejecutable de una capacidad asignada a
+una persona.** Deducir la ocupación de ahí habría cambiado una invención por
+otra.
+
+### Lo que se hizo
+
+**La ocupación es una declaración, no una deducción.** Cada puesto dice qué
+agente lo ocupa, o ninguno. Antes `plantaDe` sentaba a *todos* los agentes del
+área en orden hasta llenar los puestos — y así dibujaba nueve empleados donde
+hay seis.
+
+Y se **valida contra el inventario**: un agente declarado que el motor no sirve
+deja el puesto vacío **y dice por qué**. Dibujarlo igual volvería a inventar un
+empleado; callarlo sería un hueco que nadie puede explicar. La ficha distingue
+«sin agente asignado» de «la configuración lo declara y el inventario no lo
+trae», que no son lo mismo.
+
+Las tres capacidades **no desaparecen**: cada departamento las declara y la
+ficha las muestra como lo que son, sin escritorio. No basta con no dibujarlas;
+ocultarlas sería otra forma de mentir.
+
+`orientado_a` se reenvía igual, pero como **información** para la ficha —a
+quién atiende el agente— y nunca como criterio de ocupación.
+
+### Medido
+
+```
+Atención al Cliente   sentaba 2 agentes  →  ahora 1 (soporte es capacidad)
+en total              9 personajes       →  6, y 3 declaradas como capacidad
+una prueba que afirmaba «los nueve se sientan» se puso ROJA: era la mentira
+```
+
+---
+
+## P0.2 · El primer estado terminal manda — hecho el 31/10/2026
+
+### Lo que NO era cierto
+
+La auditoría dijo que un estado antiguo puede sobrescribir uno más reciente. En
+el **esquema**, sí. En el **cableado**, no: hay exactamente un cerrador por
+turno, se llama una vez y siempre escribe `terminada`. `fallida` y `cancelada`
+**no las escribe nadie**. Decir que estaba roto habría sido fabricarlo.
+
+La puerta estaba abierta y no entraba nadie. Cerrarla ahora es barato, y el día
+que exista un segundo escritor —una cancelación externa, un barrido, un corte—
+deja de ser teórico.
+
+### La regla
+
+El primer estado terminal **gana**; el segundo levanta `cierre_en_conflicto`.
+No se descarta en silencio: una contradicción es un hecho que alguien tiene que
+poder ver, y el motor la registra.
+
+Dos efectos del mismo cambio, que no estaban y hacían falta:
+
+- `hubo_fallo` ahora es un **or**: un fallo visto una vez no lo borra un cierre
+  posterior que no lo vio.
+- `n_llamadas` toma el **mayor**, y `terminada_en` conserva el primero.
+
+### Medido contra PostgreSQL 17
+
+```
+[OK] el primer cierre no es un conflicto
+[OK] el primer terminal se conserva (quedó 'terminada')
+[OK] el segundo se REPORTA como contradictorio
+[OK] y queda anotado en la fila
+[OK] no pierde el recuento de llamadas del primero
+[OK] reintentar el mismo cierre no levanta la bandera
+[OK] un cierre posterior que no lo vio NO borra el fallo
+```
+
+La migración se modificó **en el sitio** en vez de agregar una segunda: nunca
+se aplicó en ninguna base. Si se hubiera aplicado, esto estaría prohibido — el
+ledger valida por checksum.
+
+---
+
+## P0.3 · Ejecución y acontecimiento son dos dimensiones — hecho el 31/10/2026
+
+### Lo que yo tenía, y la objeción que acepté
+
+Un fallo **ganaba** sobre el trabajo de fondo y reemplazaba la animación.
+Corrijo un matiz de la auditoría: no hacía que el agente *se detuviera* —duraba
+1,6 s y el personaje volvía a teclear solo, porque la ejecución seguía
+abierta—. Pero durante ese segundo y medio **lo parecía**, y una pantalla no
+debería dar a entender algo falso ni por un segundo.
+
+Un fallo de una llamada no significa que el turno haya terminado: el agente
+puede estar recuperándose, llamando a otra cosa o redactando.
+
+### Las dos dimensiones
+
+```
+ejecución        en_curso · sin_noticias · null      ← el cuerpo
+acontecimiento   consulta · acción · falla ·         ← el aviso al lado
+                 derivación · escalada
+```
+
+Conviven. Con el turno abierto, el cuerpo **sigue trabajando** y el
+acontecimiento viaja aparte, se dibuja como un aviso junto a la placa y aparece
+en la ficha etiquetado como lo que es: *lo último que pasó, mientras el turno
+sigue abierto*.
+
+Sin turno abierto, el acontecimiento **sí** manda el cuerpo: es lo único que
+hay.
+
+Y el aviso **caduca aunque el turno siga**. Un aviso perpetuo contaría un fallo
+de hace media hora como si acabara de ocurrir.
+
+El aviso va en la capa de rótulos, no en el puesto: un acontecimiento tampoco
+puede quedar tapado por un mueble cercano.
+
+### Medido en el navegador
+
+Con un turno en curso y el guion de demostración corriendo a la vez:
+
+```
+cuerpo    supervisor_noc:teclear    (constante)
+ejecución supervisor_noc:en_curso   (constante)
+aviso     consulta → acción → derivación → escalada
+```
+
+Antes, cada uno de esos cuatro habría reemplazado la animación del cuerpo.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

@@ -44,6 +44,8 @@
     simulado = false,
     /** Diagnóstico del flujo: cursor, consultas, saltos. */
     diagnostico = null,
+    /** Roles del área que existen y no ocupan un puesto. */
+    capacidades = [],
     alCerrar = () => {}
   } = $props();
 
@@ -155,6 +157,19 @@
             Empezó hace poco y todavía no terminó. No se puede decir con qué
             está trabajando hasta que cierre.
           </p>
+          {#if estado?.acontecimiento}
+            <!-- LA SEGUNDA DIMENSIÓN. Un fallo de una llamada no significa que
+                 el turno haya terminado: el agente puede estar recuperándose o
+                 llamando a otra cosa. Las dos señales conviven; una no
+                 reemplaza a la otra. -->
+            <p class="suceso">
+              <span class="tipo tipo-{estado.acontecimiento.tipo}">
+                {TIPOS[estado.acontecimiento.tipo] ?? estado.acontecimiento.tipo}
+              </span>
+              <span class="que">{estado.acontecimiento.etiqueta ?? '—'}</span>
+            </p>
+            <p class="meta">Lo último que pasó, mientras el turno sigue abierto.</p>
+          {/if}
         {:else if estado?.rotulo}
           <p class="actividad">{estado.rotulo}</p>
           <p class="meta">
@@ -195,9 +210,37 @@
       </section>
     {:else}
       <section>
+        {#if puesto.motivo && puesto.motivo !== 'sin agente asignado'}
+          <!-- UN AGENTE DECLARADO QUE EL INVENTARIO NO TRAE no es lo mismo que
+               un puesto libre, y decir «no es un fallo del flujo» en ese caso
+               sería afirmar que todo está bien cuando algo falta. -->
+          <p class="vacio alarma">{puesto.motivo}</p>
+          <p class="vacio">
+            El puesto se dibuja vacío a propósito: dibujarlo ocupado sería
+            inventar un empleado.
+          </p>
+        {:else}
+          <p class="vacio">
+            Esta estación existe en la sala y no tiene agente. No hay actividad
+            que mostrar, y no es un fallo del flujo.
+          </p>
+        {/if}
+      </section>
+    {/if}
+
+    {#if capacidades.length > 0}
+      <section>
+        <h3>Capacidades del área <span class="cuenta">{capacidades.length}</span></h3>
+        <!-- No tienen escritorio y NO es un olvido: son capacidades que se le
+             asignan a una persona real del CRM, no empleados virtuales.
+             Dibujarles un puesto sería inventar gente. -->
+        <ul class="capacidades">
+          {#each capacidades as c (c.nombre)}
+            <li><code>{c.nombre}</code> {c.cargo ?? ''}</li>
+          {/each}
+        </ul>
         <p class="vacio">
-          Esta estación existe en la sala y no tiene agente. No hay actividad que
-          mostrar, y no es un fallo del flujo.
+          Se le asignan a una persona del CRM; no ocupan un puesto propio.
         </p>
       </section>
     {/if}
@@ -349,6 +392,14 @@
   .en-curso {
     color: #8b84f5;
   }
+  .suceso {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
   .actividad {
     margin: 0;
     font-family: ui-monospace, SFMono-Regular, monospace;
@@ -410,6 +461,19 @@
     font-size: 10px;
   }
 
+  .capacidades {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 11.5px;
+  }
+  .capacidades li {
+    padding: 2px 0;
+  }
+  .capacidades code {
+    color: #8b84f5;
+  }
+
   .diagnostico dl {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -424,6 +488,9 @@
     margin: 0;
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+  .vacio.alarma {
+    color: #e0a653;
   }
   .diagnostico code {
     font-size: 10.5px;

@@ -33,7 +33,7 @@ import { Transicion } from './pose';
 import { construirOficina, type Planta, type Puesto } from './oficina';
 import { construirPersonaje, type Personaje } from './personaje';
 import { generarTexturas } from './texturas';
-import type { EstadoDeAgente } from './adaptador';
+import { ANIMACION_POR_TIPO, type Acontecimiento, type EstadoDeAgente } from './adaptador';
 
 export interface Metricas {
   /** Cuadros por segundo del último segundo. */
@@ -102,6 +102,8 @@ export interface OpcionesDeEscena {
 
 interface Habitante {
   puesto: Puesto;
+  /** Lo último que pasó en este puesto, si hay algo vigente. */
+  acontecimiento: Acontecimiento | null;
   personaje: Personaje | null;
   transicion: Transicion;
   /** Inicio y fin del recorrido del paquete, en coordenadas del puesto. */
@@ -219,6 +221,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       puesto,
       personaje,
       transicion: new Transicion(personaje ? 'reposo' : 'incognito'),
+      acontecimiento: null,
       recorrido: { desde, hasta }
     };
   });
@@ -390,6 +393,19 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
 
       for (const b of h.puesto.brillos) b.pieza.alpha = b.base * pose.brilloPantalla;
 
+      //  EL AVISO: lo último que pasó, al lado de la placa y al margen de si
+      //  el personaje sigue trabajando. Las dos señales conviven; una no
+      //  reemplaza a la otra.
+      const suceso = h.acontecimiento;
+      const vivo = suceso && (suceso.hasta == null || suceso.hasta > Date.now());
+      h.puesto.aviso.visible = !!vivo;
+      if (vivo) {
+        const tono = colores[ANIMACION_POR_TIPO[suceso.tipo] ?? 'reposo'] ?? PALETA.ember;
+        for (const hijo of h.puesto.aviso.children) (hijo as any).tint = tono;
+        //  Late despacio: un aviso fijo se confunde con un adorno de la placa.
+        h.puesto.aviso.alpha = 0.72 + Math.sin(t * 3.4) * 0.28;
+      }
+
       // El paquete: visible solo mientras hay despacho, recorriendo la recta
       // hacia el pasillo. Fuera de eso se oculta, no se deja quieto en el
       // camino: un paquete parado a mitad del pasillo parece un objeto olvidado.
@@ -449,6 +465,7 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
         const h = habitantes.find((x) => x.puesto.def.agente === e.agente);
         if (!h) continue;
         h.transicion.hacia(e.animacion);
+        h.acontecimiento = e.acontecimiento ?? null;
         const texto = e.rotulo ?? '';
         if (h.puesto.rotulo.text !== texto) h.puesto.rotulo.text = texto;
         h.puesto.rotulo.visible = texto.length > 0;

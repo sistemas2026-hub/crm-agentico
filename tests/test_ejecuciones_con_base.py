@@ -102,12 +102,22 @@ CERRAR = """
      n_llamadas, hubo_fallo, terminada_en)
   values (%s, %s, %s, %s, %s, %s, %s, now())
   on conflict (id) do update
-    set estado       = excluded.estado,
-        n_llamadas   = excluded.n_llamadas,
-        hubo_fallo   = excluded.hubo_fallo,
-        terminada_en = excluded.terminada_en,
+    set estado = case
+                   when asistente.ejecuciones.estado = 'iniciada'
+                     then excluded.estado
+                   else asistente.ejecuciones.estado
+                 end,
+        cierre_en_conflicto = asistente.ejecuciones.cierre_en_conflicto
+          or (asistente.ejecuciones.estado <> 'iniciada'
+              and asistente.ejecuciones.estado <> excluded.estado),
+        n_llamadas   = greatest(asistente.ejecuciones.n_llamadas,
+                                excluded.n_llamadas),
+        hubo_fallo   = asistente.ejecuciones.hubo_fallo or excluded.hubo_fallo,
+        terminada_en = coalesce(asistente.ejecuciones.terminada_en,
+                                excluded.terminada_en),
         conversation_id = coalesce(excluded.conversation_id,
                                    asistente.ejecuciones.conversation_id)
+  returning cierre_en_conflicto
 """
 
 ACTIVAS = """
@@ -162,13 +172,14 @@ def abrir(con, ident, org, agente="supervisor_noc", conv=None):
 
 def cerrar(con, ident, org, agente="supervisor_noc", conv=None,
            estado="terminada", n=0, fallo=False):
-    con.execute(CERRAR, (ident, org, agente, conv, estado, n, fallo))
+    return con.execute(
+        CERRAR, (ident, org, agente, conv, estado, n, fallo)).fetchone()[0]
 
 
 def fila(con, ident):
     return con.execute(
         "select estado, n_llamadas, hubo_fallo, iniciada_en, terminada_en, "
-        "       conversation_id::text, tx::text "
+        "       conversation_id::text, tx::text, cierre_en_conflicto "
         "  from asistente.ejecuciones where id = %s", (ident,)).fetchone()
 
 
@@ -227,6 +238,38 @@ def main() -> int:
               "la recien abierta sigue siendo creible")
     comprobar(all(a[0] != ident for a in activas),
               "una ejecucion cerrada ya no aparece entre las activas")
+
+    print("\n[B7] el PRIMER estado terminal manda, y la contradiccion se anota")
+    #  No es alcanzable hoy --hay un solo cerrador y siempre escribe
+    #  'terminada'-- pero el esquema admite los otros dos. Sin guarda ganaria
+    #  el ultimo en llegar, que es lo contrario de lo que vale.
+    ident = str(uuid.uuid4())
+    abrir(con, ident, org_a)
+    choque1 = cerrar(con, ident, org_a, estado="terminada", n=4)
+    comprobar(choque1 is False, "el primer cierre no es un conflicto")
+    choque2 = cerrar(con, ident, org_a, estado="fallida", n=1)
+    f = fila(con, ident)
+    comprobar(f[0] == "terminada",
+              f"el primer terminal se conserva (quedo '{f[0]}')")
+    comprobar(choque2 is True, "el segundo se REPORTA como contradictorio")
+    comprobar(f[7] is True, "y queda anotado en la fila")
+    comprobar(f[1] == 4, "no pierde el recuento de llamadas del primero")
+
+    print("\n[B7b] un cierre repetido IGUAL no es un conflicto")
+    ident = str(uuid.uuid4())
+    abrir(con, ident, org_a)
+    cerrar(con, ident, org_a, estado="terminada", n=2)
+    repetido = cerrar(con, ident, org_a, estado="terminada", n=2)
+    comprobar(repetido is False, "reintentar el mismo cierre no levanta la bandera")
+    comprobar(fila(con, ident)[7] is False, "y la fila sigue limpia")
+
+    print("\n[B7c] un fallo visto una vez no se borra despues")
+    ident = str(uuid.uuid4())
+    abrir(con, ident, org_a)
+    cerrar(con, ident, org_a, estado="terminada", n=3, fallo=True)
+    cerrar(con, ident, org_a, estado="terminada", n=3, fallo=False)
+    comprobar(fila(con, ident)[2] is True,
+              "un cierre posterior que no lo vio NO borra el fallo")
 
     print("\n[B5] dos empresas no se ven")
     ident_b = str(uuid.uuid4())

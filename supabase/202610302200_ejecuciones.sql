@@ -110,6 +110,21 @@ create table if not exists asistente.ejecuciones (
     iniciada_en      timestamptz not null default now(),
     terminada_en     timestamptz,
 
+    -- UN CIERRE CONTRADICTORIO NO PISA AL PRIMERO, SE ANOTA.
+    --
+    -- Hoy hay un solo cerrador por turno y siempre escribe 'terminada', asi
+    -- que esto no es alcanzable. Pero el esquema admite 'fallida' y
+    -- 'cancelada', y el dia que exista un segundo escritor --una cancelacion
+    -- externa, un barrido, un corte-- dos terminales distintos podrian llegar
+    -- en cualquier orden. Sin guarda, el ultimo en llegar ganaria, que es
+    -- justo lo contrario de lo que vale: el primero es el que vio terminar la
+    -- ejecucion.
+    --
+    -- Asi que el primer estado terminal MANDA y el segundo levanta esta
+    -- bandera. No se descarta en silencio: una contradiccion es un hecho que
+    -- alguien tiene que poder ver.
+    cierre_en_conflicto boolean not null default false,
+
     -- La frontera de entrega del flujo incremental.
     tx               xid8 not null default pg_current_xact_id()
 );

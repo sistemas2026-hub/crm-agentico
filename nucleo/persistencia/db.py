@@ -3329,11 +3329,17 @@ def registrar_llamadas_herramienta(tenant: str, conversation_id: str, rol: str,
     try:
         with sesion(tenant) as (cur, org):
             if ejecucion:
-                cerrar_ejecucion(
+                choque = cerrar_ejecucion(
                     cur, org, ejecucion["id"], ejecucion["agente"],
                     ejecucion.get("conversation_id"), ejecucion["estado"],
                     ejecucion.get("n_llamadas", 0),
                     bool(ejecucion.get("hubo_fallo")))
+                if choque:
+                    #  Dos estados terminales distintos para la misma
+                    #  ejecucion. Gano el primero; esto deja constancia de que
+                    #  hubo contradiccion, que es lo que nadie podria deducir
+                    #  mirando la fila.
+                    registrar("ejecuciones", "cierre contradictorio")
             if not llamadas:
                 return
             cur.executemany(
@@ -5316,7 +5322,7 @@ def abrir_ejecucion(tenant: str, agente: str, ejecucion_id: str,
 
 def cerrar_ejecucion(cur, org, ejecucion_id: str, agente: str,
                      conversation_id: str | None, estado: str,
-                     n_llamadas: int, hubo_fallo: bool) -> None:
+                     n_llamadas: int, hubo_fallo: bool) -> bool:
     """
     Cierra una ejecucion DENTRO de una transaccion ya abierta.
 
@@ -5327,6 +5333,21 @@ def cerrar_ejecucion(cur, org, ejecucion_id: str, agente: str,
     fila nace con el 'now()' de este momento --lo unico que se sabe--; si llega
     despues, conserva el instante real de apertura. Pisarlo haria que toda
     ejecucion durara cero.
+
+    EL PRIMER ESTADO TERMINAL MANDA (30/10/2026)
+    --------------------------------------------
+    Hoy hay un solo cerrador por turno y siempre escribe 'terminada', asi que
+    un terminal contradictorio NO es alcanzable -- decir que esta roto seria
+    fabricarlo. Pero el esquema admite 'fallida' y 'cancelada', y el dia que
+    exista un segundo escritor dos terminales distintos podrian llegar en
+    cualquier orden; sin guarda ganaria el ultimo, que es lo contrario de lo
+    que vale: el primero es el que vio terminar la ejecucion.
+
+    El 'case' de abajo conserva el primero y levanta 'cierre_en_conflicto'. No
+    se descarta en silencio: una contradiccion es un hecho que alguien tiene
+    que poder ver, y quien llama lo registra.
+
+    @returns True si este cierre contradijo a uno anterior.
     """
     if estado not in ("terminada", "fallida", "cancelada"):
         raise ValueError(f"estado terminal invalido: {estado}")
@@ -5336,18 +5357,32 @@ def cerrar_ejecucion(cur, org, ejecucion_id: str, agente: str,
               n_llamadas, hubo_fallo, terminada_en)
            values (%s, %s, %s, %s, %s, %s, %s, now())
            on conflict (id) do update
-             set estado       = excluded.estado,
-                 n_llamadas   = excluded.n_llamadas,
-                 hubo_fallo   = excluded.hubo_fallo,
-                 terminada_en = excluded.terminada_en,
+             set estado = case
+                            when asistente.ejecuciones.estado = 'iniciada'
+                              then excluded.estado
+                            else asistente.ejecuciones.estado
+                          end,
+                 cierre_en_conflicto = asistente.ejecuciones.cierre_en_conflicto
+                   or (asistente.ejecuciones.estado <> 'iniciada'
+                       and asistente.ejecuciones.estado <> excluded.estado),
+                 n_llamadas   = greatest(asistente.ejecuciones.n_llamadas,
+                                         excluded.n_llamadas),
+                 -- Un fallo visto una vez no se borra con un cierre posterior
+                 -- que no lo vio.
+                 hubo_fallo   = asistente.ejecuciones.hubo_fallo or excluded.hubo_fallo,
+                 terminada_en = coalesce(asistente.ejecuciones.terminada_en,
+                                         excluded.terminada_en),
                  -- La apertura no conoce todavia la conversacion: se crea mas
                  -- abajo en el turno. El cierre si, asi que la completa. El
                  -- coalesce evita el caso simetrico -- un cierre sin
                  -- conversacion no puede borrar la que la apertura ya puso.
                  conversation_id = coalesce(excluded.conversation_id,
-                                            asistente.ejecuciones.conversation_id)""",
+                                            asistente.ejecuciones.conversation_id)
+           returning cierre_en_conflicto""",
         (ejecucion_id, org, agente, conversation_id, estado,
          n_llamadas, hubo_fallo))
+    fila = cur.fetchone()
+    return bool(fila and fila.get("cierre_en_conflicto"))
 
 
 def ejecuciones_activas(tenant: str, umbral_s: int = SEGUNDOS_EJECUCION_CREIBLE) -> list[dict]:

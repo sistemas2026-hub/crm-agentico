@@ -287,15 +287,56 @@ describe('la empresa entera, las seis salas a la vez', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('los nueve agentes del inventario se sientan en alguna sala', () => {
-    // Si uno no cayera en ninguna, ese agente no se dibujaría en ninguna parte
-    // y nadie se enteraría.
+  it('se sientan SEIS de los nueve: tres son capacidades, no empleados', () => {
+    // Es el arreglo P0.1. `soporte`, `facturacion` y `administracion` no son
+    // empleados virtuales: son capacidades que se le asignan a una persona del
+    // CRM. Dibujarles un escritorio era inventar tres empleados.
+    //
+    // Esta prueba FALLABA antes del arreglo, afirmando que los nueve se
+    // sientan. Esa era exactamente la mentira.
     const sentados = new Set(
       edificio.flatMap((p) => p.puestos.map((q) => q.agente)).filter(Boolean)
     );
-    for (const a of inventario) {
-      expect(sentados.has(a.nombre), `${a.nombre} no se sienta en ninguna sala`).toBe(true);
+    expect(sentados.size).toBe(6);
+    for (const capacidad of ['soporte', 'facturacion', 'administracion']) {
+      expect(sentados.has(capacidad), `${capacidad} NO debería tener escritorio`).toBe(false);
     }
+  });
+
+  it('y ninguno de los nueve se pierde: o se sienta, o es capacidad declarada', () => {
+    // No basta con no dibujarlos: si desaparecieran del todo, la oficina
+    // estaría ocultando que existen.
+    const sentados = new Set(
+      edificio.flatMap((p) => p.puestos.map((q) => q.agente)).filter(Boolean)
+    );
+    const capacidades = new Set(
+      edificio.flatMap((p) => p.capacidades.map((c) => c.nombre))
+    );
+    for (const a of inventario) {
+      expect(sentados.has(a.nombre) || capacidades.has(a.nombre),
+             `${a.nombre} no aparece ni sentado ni como capacidad`).toBe(true);
+    }
+  });
+
+  it('una capacidad se resuelve contra el inventario, con su cargo', () => {
+    const conCapacidades = edificio.filter((p) => p.capacidades.length > 0);
+    expect(conCapacidades.length).toBeGreaterThan(0);
+    for (const p of conCapacidades) {
+      for (const c of p.capacidades) {
+        expect(c.ausente, `${c.nombre} declarada y ausente del inventario`).toBe(false);
+        expect(typeof c.cargo).toBe('string');
+      }
+    }
+  });
+
+  it('un agente declarado que el inventario NO trae deja el puesto vacío y dice por qué', () => {
+    // Dibujarlo igual sería volver a inventar un empleado; callarlo sería un
+    // hueco que nadie puede explicar.
+    const solo = plantaDe(departamentoPorId('operativo'), []);
+    const principal = solo.puestos.find((p) => p.principal);
+    expect(principal.agente).toBeNull();
+    expect(principal.motivo).toContain('supervisor_noc');
+    expect(principal.area).toBe('agente no encontrado');
   });
 
   it('cada sala conserva su acento', () => {

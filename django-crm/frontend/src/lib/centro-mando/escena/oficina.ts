@@ -146,6 +146,14 @@ export interface Puesto {
   rotulo: Text;
   /** El punto de color del estado en la placa. */
   testigo: Graphics;
+  /**
+   * El aviso de lo último que pasó, al lado de la placa.
+   *
+   * Es la segunda dimensión hecha visible: el cuerpo dice si TRABAJA y esto
+   * dice QUÉ PASÓ. Antes un fallo reemplazaba la animación y el personaje
+   * parecía detenerse; ahora sigue tecleando con el aviso al lado.
+   */
+  aviso: Container;
   /** El rótulo del puesto. Vive en la capa de arriba, no en el puesto. */
   placa: Container;
   /** El marco que aparece al seleccionar. */
@@ -1348,7 +1356,25 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   testigo.visible = ocupado;
   placa.alpha = ocupado ? 1 : 0.72;
 
-  placa.addChild(fondoPlaca, testigo, titulo, subtitulo, rotulo);
+  /* El aviso: un punto con halo, a la derecha de la placa. Va DENTRO de la
+     placa para heredar la capa de rótulos — un acontecimiento tampoco puede
+     quedar tapado por un mueble cercano. */
+  const aviso = new Container();
+  const avisoHalo = new Sprite(texturas.halo);
+  avisoHalo.anchor.set(0.5);
+  avisoHalo.width = 34;
+  avisoHalo.height = 34;
+  avisoHalo.blendMode = 'add';
+  avisoHalo.alpha = 0.55;
+  const avisoPunto = new Graphics();
+  avisoPunto.circle(0, 0, 4.4).fill({ color: 0xffffff });
+  avisoPunto.circle(0, 0, 6.6).stroke({ width: 1.4, color: 0xffffff, alpha: 0.5 });
+  aviso.addChild(avisoHalo, avisoPunto);
+  aviso.x = anchoPlaca / 2 + 11;
+  aviso.y = -titulo.height / 2 - 1;
+  aviso.visible = false;
+
+  placa.addChild(fondoPlaca, testigo, titulo, subtitulo, rotulo, aviso);
   //  LA PLACA NO CUELGA DEL PUESTO: va a una capa propia, encima de todo.
   //
   //  Colgaba de él, y una luminaria de techo le pasaba por delante: la
@@ -1405,7 +1431,8 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
     ])
   );
 
-  return { def, nodo, placa, ancla, halo, brillos, rotulo, testigo, seleccion, paquete };
+  return { def, nodo, placa, ancla, halo, brillos, rotulo, testigo, aviso,
+           seleccion, paquete };
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
