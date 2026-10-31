@@ -669,3 +669,155 @@ describe('LA ENVOLVENTE NO ESTÁ ESCRITA PARA OCHO DEPARTAMENTOS EN TRES PISOS',
     expect(solo.plantas.filter((p) => p.arquitectura?.tipo === 'fachada')).toHaveLength(1);
   });
 });
+
+describe('LA ENVOLVENTE NO TAPA NINGÚN PUESTO', () => {
+  //  LA PREGUNTA QUE ESTE BLOQUE RESPONDE, y que la reconstrucción
+  //  arquitectónica abrió: fachada, cubierta, extremo, núcleo y remate son
+  //  piezas NUEVAS que se dibujan en el mismo mundo que los puestos. Si alguna
+  //  queda delante de un escritorio, ese agente trabaja donde nadie lo ve —
+  //  exactamente el defecto que el bloque anterior mide para las losas, con
+  //  una familia de objetos que antes no existía.
+  //
+  //  NO SE MIDE CON UNA CAPTURA. Un puesto tapado por una pieza semitransparente
+  //  se ve raro pero se ve; uno tapado por una opaca no está, y en una captura
+  //  de 2.400 objetos nadie nota que falta uno.
+
+  /** El punto de pantalla de una celda, con la misma aritmética de la escena. */
+  const pt = (gx, gy, gz) => aPantalla(gx, gy, gz);
+
+  /** Las ocho esquinas de una caja, proyectadas. */
+  function siluetaDe(p) {
+    const o = p.origen;
+    const m = p.mundo;
+    const pts = [];
+    for (const gx of [o.gx, o.gx + m.ancho]) {
+      for (const gy of [o.gy, o.gy + m.fondo]) {
+        for (const gz of [o.gz ?? 0, (o.gz ?? 0) + m.alto]) pts.push(pt(gx, gy, gz));
+      }
+    }
+    return envolvente(pts);
+  }
+
+  /** Envolvente convexa (cadena monótona). La silueta de una caja isométrica
+   *  es un hexágono, y tomar la caja envolvente en vez del hexágono daría
+   *  falsos positivos justo en las cuatro esquinas. */
+  function envolvente(puntos) {
+    const ps = [...puntos].sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    const cruz = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const mitad = (lista) => {
+      const h = [];
+      for (const p of lista) {
+        while (h.length >= 2 && cruz(h[h.length - 2], h[h.length - 1], p) <= 0) h.pop();
+        h.push(p);
+      }
+      h.pop();
+      return h;
+    };
+    return [...mitad(ps), ...mitad([...ps].reverse())];
+  }
+
+  /** ¿El punto cae dentro del polígono convexo? Con margen hacia DENTRO: tocar
+   *  el borde no es estar tapado. */
+  function dentro(poli, p) {
+    let signo = 0;
+    for (let i = 0; i < poli.length; i++) {
+      const a = poli[i];
+      const b = poli[(i + 1) % poli.length];
+      const c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+      if (Math.abs(c) < 1e-9) continue;
+      const s = Math.sign(c);
+      if (signo === 0) signo = s;
+      else if (s !== signo) return false;
+    }
+    return signo !== 0;
+  }
+
+  /** El orden de pintado real, el mismo de `montar.ts`. */
+  const orden = (p) => (p.origen.gz ?? 0) * 1000
+    + (p.origen.gx + p.origen.gy + (p.origen.gz ?? 0) * 0.001);
+
+  //  Las piezas OPACAS. El extremo no entra: es vidrio con alfa 0,26 y su
+  //  trabajo es justamente dejar ver la última sala a través. Que lo cubra es
+  //  el diseño, no un defecto — y mezclarlo acá convertiría la prueba en un
+  //  rojo permanente que se aprende a ignorar, que es peor que no tenerla.
+  const OPACAS = ['basamento', 'cubierta', 'remate'];
+
+  it('ninguna pieza opaca de la envolvente queda delante de un puesto', () => {
+    const piezas = EDIFICIO.plantas.filter(
+      (p) => OPACAS.includes(p.arquitectura?.tipo));
+    expect(piezas.length).toBeGreaterThan(0);
+
+    const tapados = [];
+    for (const sala of EDIFICIO.plantas.filter((p) => p.papel === 'sala')) {
+      for (const q of sala.puestos) {
+        //  La placa del puesto, que es la parte MÁS ALTA y por eso el caso que
+        //  manda: lo que no tapa a la placa no tapa al escritorio.
+        const punto = pt(sala.origen.gx + q.gx + 1,
+                         sala.origen.gy + q.gy,
+                         (sala.origen.gz ?? 0) + 3.4);
+        for (const pieza of piezas) {
+          if (orden(pieza) <= orden(sala)) continue;
+          if (dentro(siluetaDe(pieza), punto)) {
+            tapados.push(`${sala.sala}:${q.id} bajo ${pieza.arquitectura.tipo}`);
+          }
+        }
+      }
+    }
+    expect(tapados).toEqual([]);
+  });
+
+  it('y el núcleo del piso de arriba tampoco', () => {
+    //  El núcleo se apila en la MISMA huella en todos los niveles, así que el
+    //  de arriba se dibuja después que las salas de abajo. Está en el extremo
+    //  izquierdo y las salas empiezan cinco celdas más allá, pero eso es un
+    //  argumento, no una medición.
+    const nucleos = EDIFICIO.plantas.filter((p) => p.papel === 'nucleo');
+    expect(nucleos.length).toBe(3);
+
+    const tapados = [];
+    for (const sala of EDIFICIO.plantas.filter((p) => p.papel === 'sala')) {
+      for (const q of sala.puestos) {
+        const punto = pt(sala.origen.gx + q.gx + 1,
+                         sala.origen.gy + q.gy,
+                         (sala.origen.gz ?? 0) + 3.4);
+        for (const n of nucleos) {
+          if (orden(n) <= orden(sala)) continue;
+          if (dentro(siluetaDe(n), punto)) tapados.push(`${sala.sala}:${q.id}`);
+        }
+      }
+    }
+    expect(tapados).toEqual([]);
+  });
+
+  it('la prueba sabe fallar: una cubierta bajada al piso SÍ tapa', () => {
+    //  LA GUARDA DE LA GUARDA. Las dos de arriba están en verde, y una prueba
+    //  de oclusión en verde puede estarlo porque mide mal. Se baja la cubierta
+    //  hasta la altura del último piso y se comprueba que entonces sí acusa:
+    //  sin esto, no hay manera de distinguir «no tapa nada» de «no mira nada».
+    const sala = EDIFICIO.plantas.find((p) => p.papel === 'sala');
+    const cubierta = EDIFICIO.plantas.find((p) => p.arquitectura?.tipo === 'cubierta');
+    const q = sala.puestos[0];
+    const px = sala.origen.gx + q.gx + 1;
+    const py = sala.origen.gy + q.gy;
+    const pz = (sala.origen.gz ?? 0) + 3.4;
+    const punto = pt(px, py, pz);
+
+    //  La cubierta falsa se coloca con la MISMA aritmética que decide una
+    //  oclusión, no a ojo: un plano a altura `z` tapa el punto que cae en
+    //  `gy + (z - pz) * 0,8125`. El primer intento la puso «cerca» y no tapaba
+    //  nada — y una guarda de la guarda que no cubre no prueba que la guarda
+    //  mire, que era justo lo que se quería saber.
+    const dz = 2;
+    const corrimiento = dz * 0.8125;
+    const falsa = {
+      ...cubierta,
+      origen: {
+        gx: px + corrimiento - cubierta.mundo.ancho / 2,
+        gy: py + corrimiento - cubierta.mundo.fondo / 2,
+        gz: pz + dz
+      }
+    };
+    expect(orden(falsa)).toBeGreaterThan(orden(sala));
+    expect(dentro(siluetaDe(falsa), punto)).toBe(true);
+  });
+});
