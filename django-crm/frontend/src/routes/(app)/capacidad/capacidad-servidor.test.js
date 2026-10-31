@@ -38,6 +38,21 @@ const DEL_MOTOR = {
   tiempo_hasta_resolucion: { mediana_minutos: 45.0 }
 };
 
+// La forma EXACTA de GET /reportes/autonomia-ganada (nucleo/seguridad/autonomia_ganada.py).
+const AUTONOMIA = {
+  piso: { minimo_revisadas: 20, ventana_dias: 14, tasa_minima_aprobacion: 0.9 },
+  acciones: [
+    { accion: 'reiniciar_ont', candidata: true, no_candidata: [], elegible: false, tasa_aprobacion: 1.0,
+      umbrales: { minimo_revisadas: 30, ventana_dias: 30, tasa_minima_aprobacion: 0.95 },
+      evidencia: { revisadas: 12, rechazadas: 0, fallidas: 0, confirmadas: 9, no_confirmadas: 0,
+                   no_verificables: 1, pendientes: 2 },
+      desde: '2026-10-01T00:00:00+00:00',
+      faltan: [{ condicion: 'minimo_revisadas', tiene: 12, necesita: 30 }] },
+    { accion: 'registrar_pago', candidata: false, no_candidata: ['efecto_no_verificable', 'sin_previas_en_codigo'],
+      elegible: false }
+  ]
+};
+
 const SEIS = ['casos_por_persona', 'resolucion_sin_persona', 'recontacto', 'satisfaccion',
   'visitas_evitadas', 'minutos_ahorrados', 'tiempo_hasta_resolucion'];
 
@@ -53,6 +68,9 @@ describe('el tablero de capacidad, de la respuesta del motor a la pantalla', () 
   beforeEach(() => {
     pedido = null;
     globalThis.fetch = /** @type {any} */ (vi.fn(async (url) => {
+      if (String(url).includes('/reportes/autonomia-ganada')) {
+        return { ok: true, status: 200, json: async () => structuredClone(AUTONOMIA) };
+      }
       pedido = String(url);
       return { ok: true, status: 200, json: async () => structuredClone(DEL_MOTOR) };
     }));
@@ -145,5 +163,34 @@ describe('lo que declara la empresa: minutos y personas del equipo (§3.3)', () 
       minutos_por_visita: '', personas_del_equipo: '' }, 'USER')));
     expect(r.status).toBe(403);
     expect(cuerpo).toBeNull();
+  });
+});
+
+describe('la autonomía ganada, de la respuesta del motor a la pantalla', () => {
+  beforeEach(() => {
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url) => {
+      if (String(url).includes('/reportes/autonomia-ganada')) {
+        expect(String(url)).toContain('tenant=rapilink');
+        return { ok: true, status: 200, json: async () => structuredClone(AUTONOMIA) };
+      }
+      return { ok: true, status: 200, json: async () => structuredClone(DEL_MOTOR) };
+    }));
+  });
+
+  it('llega entera y con los mismos nombres', async () => {
+    const d = await cargar(evento());
+    expect(d.autonomia).toEqual(AUTONOMIA);
+    expect(d.errorAutonomia).toBeNull();
+  });
+
+  it('si el motor no la calcula, el tablero se muestra igual', async () => {
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url) =>
+      String(url).includes('/reportes/autonomia-ganada')
+        ? { ok: false, status: 500, json: async () => ({ error: 'No se pudo calcular la autonomia ganada.' }) }
+        : { ok: true, status: 200, json: async () => structuredClone(DEL_MOTOR) }));
+    const d = await cargar(evento());
+    expect(d.tablero).toEqual(DEL_MOTOR);
+    expect(d.autonomia).toBeNull();
+    expect(d.errorAutonomia).toMatch(/autonomia ganada/);
   });
 });

@@ -14,11 +14,15 @@
   import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import { Info } from '@lucide/svelte';
+  import { textoDeFalta, textoDeNoCandidata } from '$lib/capacidad/autonomia.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
   const t = $derived(data.tablero);
+  const ag = $derived(data.autonomia);
+  const candidatas = $derived((ag?.acciones ?? []).filter((/** @type {any} */ a) => a.candidata));
+  const otras = $derived((ag?.acciones ?? []).filter((/** @type {any} */ a) => !a.candidata));
   const pct = (/** @type {number|null|undefined} */ x) =>
     x === null || x === undefined ? null : Math.round(x * 1000) / 10 + '%';
   const num = (/** @type {number|null|undefined} */ x) =>
@@ -137,6 +141,50 @@
       <div><button class="v2-btn v2-btn-primary" type="submit">Guardar</button></div>
     </form>
   {/if}
+
+  <!-- LA AUTONOMÍA GANADA (31/10/2026, PRD §2, Ola 3). Qué acciones que hoy
+       aprueba una persona podrían hacerse solas, con la evidencia de ESTA
+       empresa. Solo se muestra: subir lo decide una persona; bajar, el código. -->
+  <section class="v2-card declarar" aria-labelledby="autonomia-titulo">
+    <div class="rotulo" id="autonomia-titulo">Autonomía ganada</div>
+    <p class="pie">
+      Una acción pasa a hacerse sola solo si su efecto se comprueba en código, sus condiciones previas
+      también, y en esta empresa hubo suficientes casos revisados por una persona, casi todos aprobados,
+      sin ninguno fallido ni sin confirmar. Si después falla, vuelve sola a pedir aprobación.
+    </p>
+    {#if data.errorAutonomia}
+      <p class="aviso-error">⚠️ {data.errorAutonomia}</p>
+    {:else if ag}
+      {#each candidatas as a (a.accion)}
+        <div class="accion">
+          <div class="fila-accion">
+            <strong>{a.accion}</strong>
+            <span class="estado" class:listo={a.elegible}>
+              {a.elegible ? 'Tiene la evidencia' : 'Todavía no'}
+            </span>
+          </div>
+          <p class="pie">
+            Desde el {fecha(a.desde)}: {num(a.evidencia.revisadas)} revisadas por una persona,
+            {num(a.evidencia.rechazadas)} rechazadas, {num(a.evidencia.confirmadas)} con el efecto confirmado
+            {#if a.tasa_aprobacion !== null}· {pct(a.tasa_aprobacion)} aprobadas sin cambios{/if}
+          </p>
+          {#each a.faltan as f, i (i)}
+            <p class="pie falta">{textoDeFalta(f)}</p>
+          {/each}
+        </div>
+      {:else}
+        <p class="pie">Ninguna acción cumple todavía las condiciones de código para ganar autonomía.</p>
+      {/each}
+      {#if otras.length}
+        <details>
+          <summary class="pie">Las que siempre necesitan una persona ({otras.length})</summary>
+          {#each otras as a (a.accion)}
+            <p class="pie"><strong>{a.accion}</strong>: {textoDeNoCandidata(a.no_candidata)}.</p>
+          {/each}
+        </details>
+      {/if}
+    {/if}
+  </section>
 </div>
 
 <style>
@@ -164,4 +212,10 @@
   .declarar { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
   .campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
   .campos label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+  .accion { display: flex; flex-direction: column; gap: 4px; padding: 10px 0;
+            border-top: 1px solid color-mix(in srgb, var(--v2-slate) 20%, transparent); }
+  .fila-accion { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .estado { font-size: 12px; color: var(--v2-slate); }
+  .estado.listo { color: var(--v2-ember); font-weight: 600; }
+  .falta { color: var(--v2-rust); }
 </style>

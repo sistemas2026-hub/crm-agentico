@@ -3862,6 +3862,29 @@ def reporte_escalamiento():
     return jsonify({"dias": dias, **r})
 
 
+@app.get("/reportes/autonomia-ganada")
+def reporte_autonomia_ganada():
+    """
+    Que acciones que hoy pide una persona podrian ganar autonomia en esta
+    empresa, con su evidencia y lo que les falta (PRD §2, §8.17 Ola 3). Solo
+    LEE: no promueve nada ni cambia ningun permiso. Conteos, nunca casos. Ver
+    nucleo/seguridad/autonomia_ganada.py.
+    """
+    from nucleo.persistencia import autonomia_ganada as medicion
+    from nucleo.seguridad import autonomia_ganada
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        filas = autonomia_ganada.evaluar(_config_de(tenant), tenant, datetime.now(timezone.utc),
+                                         medir=medicion.medir)
+    except Exception as e:
+        registrar("reportes", "fallo al calcular la autonomia ganada", error=e)
+        return jsonify({"error": "No se pudo calcular la autonomia ganada."}), 500
+    return jsonify({"acciones": filas, "piso": autonomia_ganada.PISO}), 200
+
+
 @app.get("/reportes/capacidad")
 def reporte_capacidad():
     """

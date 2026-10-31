@@ -3193,6 +3193,23 @@ class AvisoDeCaida(Base):
     lote: int = Field(default=25, ge=1, le=100)
 
 
+class UmbralesAutonomia(Base):
+    """
+    Cuanta evidencia pide ESTA empresa para que una accion gane autonomia
+    (31/10/2026, PRD §2). Nunca por debajo del piso del nucleo
+    (nucleo/seguridad/autonomia_ganada.PISO): ninguna empresa puede ganarla con
+    cinco casos revisados. Cero no confirmadas y cero fallidas no se eligen.
+    """
+    minimo_revisadas: int = Field(default=30, ge=20, le=10000)
+    ventana_dias: int = Field(default=30, ge=14, le=90)
+    tasa_minima_aprobacion: float = Field(default=0.95, ge=0.90, le=1.0)
+
+
+class AutonomiaGanada(Base):
+    """Los umbrales por accion. Una accion sin entrada usa los por defecto."""
+    acciones: dict[str, UmbralesAutonomia] = Field(default_factory=dict)
+
+
 class Capacidad(Base):
     """
     Lo que el tablero de capacidad necesita saber de ESTA empresa (30/10/2026,
@@ -3452,6 +3469,7 @@ class TenantConfig(Base):
     #: Entre que horas salen los avisos proactivos (nucleo/seguimiento/avisos.py).
     horario_avisos: HorarioAvisos = Field(default_factory=HorarioAvisos)
     aviso_de_caida: AvisoDeCaida = Field(default_factory=AvisoDeCaida)
+    autonomia_ganada: AutonomiaGanada = Field(default_factory=AutonomiaGanada)
 
     @field_validator("mensajes_automaticos")
     @classmethod

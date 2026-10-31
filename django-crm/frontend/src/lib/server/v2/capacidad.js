@@ -57,3 +57,30 @@ export async function guardarDeclaracionCapacidad(locals, fetch, valores) {
   if (!resp.ok) throw new Error(datos.error || 'El asistente rechazó el cambio.');
   return datos;
 }
+
+/**
+ * La autonomía ganada (31/10/2026, PRD §2 y §8.17 Ola 3): qué acciones que hoy
+ * aprueba una persona podrían hacerse solas en esta empresa, con su evidencia
+ * y lo que les falta. Lo calcula el motor (nucleo/seguridad/autonomia_ganada.py);
+ * acá solo se pide. No promueve nada. No lanza.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @returns {Promise<{ autonomia: any | null, error?: string }>}
+ */
+export async function leerAutonomiaGanada(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return { autonomia: null, error: 'Asistente no configurado para esta empresa.' };
+  const q = new URLSearchParams({ tenant: cfg.tenant });
+  try {
+    const resp = await fetch(`${cfg.baseUrl}/reportes/autonomia-ganada?${q}`, {
+      headers: headersMotor(),
+      signal: AbortSignal.timeout(20000)
+    });
+    const datos = await resp.json();
+    if (!resp.ok) return { autonomia: null, error: datos?.error || 'No se pudo calcular la autonomía ganada.' };
+    return { autonomia: datos };
+  } catch {
+    return { autonomia: null, error: 'No se pudo contactar al asistente.' };
+  }
+}

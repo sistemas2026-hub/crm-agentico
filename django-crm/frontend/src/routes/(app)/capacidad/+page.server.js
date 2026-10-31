@@ -1,5 +1,10 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { guardarDeclaracionCapacidad, leerTableroCapacidad, PERIODOS } from '$lib/server/v2/capacidad.js';
+import {
+  guardarDeclaracionCapacidad,
+  leerAutonomiaGanada,
+  leerTableroCapacidad,
+  PERIODOS
+} from '$lib/server/v2/capacidad.js';
 
 /**
  * Capacidad: cuánto trabajo le resolvió Dexter a la empresa (PRD §2).
@@ -20,8 +25,16 @@ export async function load({ locals, fetch, url }) {
   }
   const pedido = Number(url.searchParams.get('dias'));
   const dias = PERIODOS.includes(pedido) ? pedido : 30;
-  const { tablero, error } = await leerTableroCapacidad(locals, fetch, dias);
-  return { tablero, dias, periodos: PERIODOS, error };
+  //  Las dos en paralelo: una no espera a la otra, y si una falla la otra se
+  //  muestra igual (31/10/2026: la autonomía ganada, PRD §2).
+  const [{ tablero, error }, ganada] = await Promise.all([
+    leerTableroCapacidad(locals, fetch, dias),
+    leerAutonomiaGanada(locals, fetch)
+  ]);
+  return {
+    tablero, dias, periodos: PERIODOS, error,
+    autonomia: ganada.autonomia, errorAutonomia: ganada.error ?? null
+  };
 }
 
 /** Los tres números que declara la empresa. Vacío = null = sin declarar. */
