@@ -655,7 +655,7 @@ Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se de
 | Variable (servicios `backend` y `celery-*`) | Si falta |
 |---|---|
 | `MOTOR_TENANT` | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `falta_motor_tenant`; Despacho no trae la ficha del cliente; el cierre de caso no le pide nada al motor. El `docker-compose.prod.yml` la trae con default `rapilink` (líneas 75 y 235), así que **debería estar**: comprobarlo en Dokploy igual |
-| `SOLICITUDES_EMAIL_DESTINO` | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. **No figura en ningún archivo del repo**: hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). Cargarla en Dokploy con ese buzón, o el que la empresa diga, **antes** de desplegar |
+| `SOLICITUDES_EMAIL_DESTINO` | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. Hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). Cargarla en el Environment del despliegue en Dokploy con ese buzón, o el que la empresa diga, **antes** de desplegar. El `docker-compose.prod.yml` ya la pasa a `backend` y a `celery-worker` (31/10/2026: antes no la declaraba, y cargarla en Dokploy no habría alcanzado) |
 
 Cómo comprobar sin leer valores: `docker exec <backend> sh -c 'test -n "$MOTOR_TENANT" && test -n "$SOLICITUDES_EMAIL_DESTINO" && echo ok'`. Lo definitivo es que las dos sean configuración **por empresa** desde la interfaz (§3.3 de CLAUDE.md, Ola 4): una variable de entorno sigue siendo una instalación por empresa.
 

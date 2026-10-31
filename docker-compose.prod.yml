@@ -73,6 +73,13 @@ services:
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
       MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      #  El buzon que recibe cada solicitud de servicio nueva con su PDF
+      #  (solicitudes/entrega.py). SIN DEFAULT desde el 30/10/2026: antes era un
+      #  correo fijo en el codigo, y con una segunda empresa le llegaban las
+      #  solicitudes de la otra. Vacia, el correo no sale y la solicitud queda
+      #  con 'fallo_integracion' -- no se pierde. Declarada aca porque compose
+      #  solo inyecta lo que el bloque nombra.
+      SOLICITUDES_EMAIL_DESTINO: ${SOLICITUDES_EMAIL_DESTINO:-}
       # La cuenta de servicio de Firebase, para el aviso push a la app de campo.
       # Es el JSON COMPLETO pegado como valor, o la ruta a un archivo montado.
       #
@@ -233,6 +240,13 @@ services:
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
       MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
+      #  El buzon que recibe cada solicitud de servicio nueva con su PDF
+      #  (solicitudes/entrega.py). SIN DEFAULT desde el 30/10/2026: antes era un
+      #  correo fijo en el codigo, y con una segunda empresa le llegaban las
+      #  solicitudes de la otra. Vacia, el correo no sale y la solicitud queda
+      #  con 'fallo_integracion' -- no se pierde. Declarada aca porque compose
+      #  solo inyecta lo que el bloque nombra.
+      SOLICITUDES_EMAIL_DESTINO: ${SOLICITUDES_EMAIL_DESTINO:-}
       #  La fuente de flota del Supervisor, misma variable que en 'backend'.
       #  Vacia por defecto: encenderla es una decision aparte, y vacia la
       #  fuente contesta "el estado de la red NO se conoce", nunca "sin
