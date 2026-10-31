@@ -4,16 +4,41 @@
  * asistente-config.js.
  *
  * Server-only. Habla con crm-agentico (`PRIVATE_ASISTENTE_URL`), en la red
- * interna. El tenant sale del entorno del servidor y nunca del cliente.
+ * interna. El tenant sale de la sesion (tenant.js) y nunca del cliente.
  *
  * `leer*` no lanza -- mismo criterio que asistente-config.js: si el motor
  * esta caido, la pantalla de ajustes tiene que poder abrirse igual y decir
  * "no se pudo leer", no reventar. `guardar*`/`borrar*` SI lanzan: ahi alguien
  * apreto un boton y tiene que enterarse de que no se guardo.
  */
+import { env } from '$env/dynamic/private';
 import { headersMotor } from './motor-headers.js';
 import { destinoDelAsistente } from './tenant.js';
 import { autorDeSesion } from './autor.js';
+
+/**
+ * La URL que la empresa pega en Meta como "Callback URL" (31/10/2026).
+ *
+ * El dominio es de la INSTALACION, no de la empresa: el motor se publica una
+ * vez (DESPLIEGUE.md 4.c) y todas las empresas llegan por el mismo, cada una
+ * por su ruta. Antes la pantalla le pedia "Tu dominio" al administrador del
+ * ISP, que no tiene como saberlo cuando el dominio es de Dexter.
+ *
+ * Vacio sin `PRIVATE_WEBHOOK_BASE_URL` o sin empresa: la pantalla vuelve a
+ * pedir el dominio a mano en vez de mostrar una URL que no atiende a nadie.
+ * Siempre https: Meta no acepta otra cosa.
+ *
+ * @param {string | null | undefined} tenantSlug
+ * @returns {string}
+ */
+export function urlDelWebhook(tenantSlug) {
+  const dominio = (env.PRIVATE_WEBHOOK_BASE_URL ?? '')
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '');
+  if (!dominio || !tenantSlug) return '';
+  return `https://${dominio}/canales/whatsapp/${encodeURIComponent(tenantSlug)}`;
+}
 
 /**
  * Estado del canal: activo, version, numero visible, plantillas y los

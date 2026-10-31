@@ -182,6 +182,33 @@ def tenant_de_organizacion(organization_id: str) -> str | None:
         con.close()
 
 
+def tenants_activos() -> list[str]:
+    """
+    Los slugs de las empresas que este despliegue atiende: las filas de
+    asistente.tenant_config con 'activo'.
+
+    La usa el reloj para saber a quien darle trabajos (ver
+    nucleo/reloj.py::tenants_conocidos). Antes salia de 'tenants/*.config.yaml'
+    de la imagen, asi que dar de alta una empresa desde la plataforma no le
+    daba reloj hasta un commit y un redespliegue, y darla de baja no se lo
+    quitaba.
+
+    Mismo patron que `tenant_de_organizacion`: conexion propia y el usuario que
+    conecta, porque es la consulta que dice QUE tenants hay, asi que no puede
+    depender de que uno ya este fijado. Si la base no contesta, LEVANTA: quien
+    llama decide, y el reloj decide no atender a nadie.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            cur.execute("""select slug from asistente.tenant_config
+                            where activo order by slug""")
+            return [str(f["slug"]) for f in cur.fetchall()]
+    finally:
+        con.close()
+
+
 # El timeout de conexion de casi todo: una consulta de conversacion, una
 # escritura de traza, un barrido del reloj. No se toca.
 SEGUNDOS_CONEXION = 30

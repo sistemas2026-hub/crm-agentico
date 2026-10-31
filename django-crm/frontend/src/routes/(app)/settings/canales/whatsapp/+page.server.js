@@ -5,7 +5,8 @@ import {
   guardarSecreto,
   leerCanalWhatsapp,
   leerSaludWhatsapp,
-  listarSecretos
+  listarSecretos,
+  urlDelWebhook
 } from '$lib/server/v2/canal-whatsapp.js';
 
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
@@ -16,6 +17,9 @@ export async function load({ fetch, locals }) {
   return {
     canal,
     secretos,
+    //  La URL entera para Meta, con el dominio de la instalacion. Vacia si la
+    //  instalacion no lo declara: la pantalla pide el dominio a mano.
+    url_webhook: urlDelWebhook(canal?.tenant_slug),
     //  Sin await: le pregunta a Meta, y la pantalla no tiene por qué esperarlo
     //  para mostrar las credenciales (28/10/2026).
     salud: canal?.activo ? leerSaludWhatsapp(locals, fetch) : Promise.resolve(null),

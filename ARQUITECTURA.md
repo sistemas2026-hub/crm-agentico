@@ -45,7 +45,8 @@ nucleo/                    EL MOTOR — genérico, sin clientes
   ingesta/                 fragmentación, contextualización, versionado
   recuperacion/            búsqueda híbrida, ensamblado del prompt
   modelo/                  cliente LLM, selección por canal/rol, bucle de tool calling
-  canales/                 whatsapp, web
+  canales/                 whatsapp, web; los turnos en vuelo (un despliegue
+                            los espera antes de salir: en_vuelo, gunicorn_conf)
   persistencia/            repositorios sobre Supabase
   observabilidad/          auditoría, consumo, registro sin PII
   relevo/                  el traspaso IA ↔ humano: control, transiciones,
@@ -55,7 +56,8 @@ nucleo/                    EL MOTOR — genérico, sin clientes
   habilidades/             procedimientos que se cargan cuando hacen falta
   programador/             el reloj de tareas y su cola persistente
   conectores/ facturacion/ ingesta/  (ver el árbol real)
-  reloj.py                 el daemon de tareas periódicas
+  reloj.py                 el daemon de tareas periódicas; las empresas que
+                            atiende salen de asistente.tenant_config
 
 tenants/                   DATOS por empresa — sin código
   tenant.config.example.yaml    plantilla de alta

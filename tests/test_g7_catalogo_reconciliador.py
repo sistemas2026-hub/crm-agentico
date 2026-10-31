@@ -338,7 +338,12 @@ espiados: list[str] = []
 orig_ejecutor = worker._ejecutor_de
 orig_barrer = reconciliador.barrer_acciones
 orig_elegibles = reconciliador.db.sincronizaciones_elegibles
+orig_tenants = worker._tenants
 try:
+    # Que empresas atiende sale de la base desde el 31/10/2026 (ver
+    # tests/test_reloj_empresas_desde_la_base.py); aca se fija, porque lo que
+    # se mide es que la pasada seca no llame a nadie, no de donde sale la lista.
+    worker._tenants = lambda: [TENANT]
     worker._ejecutor_de = lambda t: espiados.append(f"ejecutor:{t}")
     reconciliador.barrer_acciones = lambda t, n: espiados.append(f"barrer:{t}") or {}
     reconciliador.db.sincronizaciones_elegibles = lambda t, n: []
@@ -361,6 +366,7 @@ finally:
     worker._ejecutor_de = orig_ejecutor
     reconciliador.barrer_acciones = orig_barrer
     reconciliador.db.sincronizaciones_elegibles = orig_elegibles
+    worker._tenants = orig_tenants
 
 revisar(worker.INTERVALO_SEGUNDOS == 300,
         f"la cadencia es de 300 s ({worker.INTERVALO_SEGUNDOS})",

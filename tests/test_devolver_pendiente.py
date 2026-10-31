@@ -105,7 +105,9 @@ afirmar('mensajes[-1] if mensajes else None' in codigo,
         "mira el ULTIMO mensaje del hilo, no 'algun mensaje sin contestar'")
 afirmar('ultimo.get("rol") == "user"' in codigo,
         "y solo si es del cliente: si despues hubo una respuesta, ya se contesto")
-afirmar("threading.Thread" in codigo,
+#  Por en_vuelo desde el 31/10/2026: sigue fuera del ciclo de respuesta, y
+#  ademas un despliegue lo espera (ver tests/test_turnos_en_vuelo.py).
+afirmar("en_vuelo.lanzar(_atender_pendiente_tras_devolver" in codigo,
         "atiende fuera del ciclo de respuesta -- llamar al modelo puede tardar "
         "segundos y un timeout haria parecer que fallo algo que ya se aplico")
 

@@ -46,6 +46,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
+from nucleo.canales import en_vuelo
 from nucleo.canales import media, transcripcion, vision, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
@@ -2043,7 +2044,11 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                 registrar("traza", "no se pudo guardar", error=e)
 
         if registro_herramientas:
-            threading.Thread(target=_guardar_traza, daemon=True).start()
+            # Por en_vuelo, como el turno: un despliegue espera a que la traza
+            # quede escrita en vez de cortarla a la mitad. La lanza el turno al
+            # terminar, y 'esperar' la ve igual: vuelve a mirar hasta que no
+            # quede nadie (tests/test_turnos_en_vuelo.py, parte 1b).
+            en_vuelo.lanzar(_guardar_traza, nombre="traza", ref=id_interno(conversation_id))
         # Mismo motivo que el bucle de arriba: un archivo generado por una
         # herramienta 'agregado' exportable (ver nucleo/herramientas/
         # informes.py) no se pudo guardar dentro de motor.responder() porque
@@ -9870,6 +9875,15 @@ def _lanzar_autonomas(config, tenant: str, canal: str, id_sesion: str, estado: d
     def correr():
         time.sleep(SEGUNDOS_ANTES_DE_LA_AUTONOMA)
         for accion_id, herr in pendientes:
+            # CON EL PROCESO SALIENDO NO SE EMPIEZA UN EFECTO. Un despliegue
+            # espera a los turnos en vuelo (en_vuelo), asi que este hilo puede
+            # despertar con el SIGTERM ya recibido; empezar ahi un reinicio y
+            # que lo corte el tope es la peor combinacion. La propuesta queda
+            # para una persona, igual que cuando no se puede medir el volumen.
+            if en_vuelo.apagando():
+                registrar("autonomia_ganada", "el motor se esta apagando: queda para una persona",
+                          tenant=tenant)
+                continue
             try:
                 if not _efecto_del_turno(tenant, canal, id_sesion, estado, "autonomia_ganada"):
                     continue
@@ -9877,7 +9891,9 @@ def _lanzar_autonomas(config, tenant: str, canal: str, id_sesion: str, estado: d
             except Exception as e:                               # noqa: BLE001
                 registrar("autonomia_ganada", "la ejecucion autonoma fallo", tenant=tenant, error=e)
 
-    threading.Thread(target=correr, name="autonomia-ganada", daemon=True).start()
+    # Por en_vuelo: una ejecucion ya empezada termina antes de que el proceso
+    # salga, en vez de quedar cortada a mitad del efecto.
+    en_vuelo.lanzar(correr, nombre="autonomia-ganada")
 
 
 def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -> dict | None:
@@ -11015,10 +11031,13 @@ def whatsapp_webhook(tenant):
                       tenant=tenant, wamid=ref_proveedor(wamid), error=e)
             continue
 
-        hilo = threading.Thread(
-            target=_procesar_mensaje_whatsapp,
-            args=(config, tenant, rol, entrante), daemon=True)
-        hilo.start()
+        # POR en_vuelo Y NO CON UN HILO SUELTO: Meta ya tiene su 200 y no va a
+        # reintentar, asi que si un despliegue corta este hilo el mensaje se
+        # pierde sin rastro. Medido el 31/10/2026 -- ver nucleo/canales/en_vuelo.py.
+        # El nombre lleva la huella del wamid: si hay que cortarlo, el log
+        # dice cual fue.
+        en_vuelo.lanzar(_procesar_mensaje_whatsapp, config, tenant, rol, entrante,
+                        nombre="turno-whatsapp", ref=ref_proveedor(wamid))
         atendidos += 1
 
     # Los acuses de entrega llegan por este mismo webhook y NO son
@@ -11411,8 +11430,8 @@ def conversaciones_devolver(id_conversacion):
     # convertiria "devolver" en una operacion lenta, y peor, un timeout del
     # navegador haria parecer que fallo algo que ya se aplico.
     if pendiente:
-        threading.Thread(target=_atender_pendiente_tras_devolver,
-                         args=(tenant, pendiente), daemon=True).start()
+        en_vuelo.lanzar(_atender_pendiente_tras_devolver, tenant, pendiente,
+                        nombre="turno-devuelto", ref=id_interno(id_conversacion))
 
     return jsonify({"devuelta": True, "relevo_version": r.version,
                     "reintento": r.motivo == "reintento",

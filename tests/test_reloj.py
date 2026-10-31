@@ -846,8 +846,18 @@ revisar("IMPORTACION_API_TOKEN" in necesarias,
 del_catalogo = {h.nombre for h in cfg_yaml.herramientas
                 if getattr(h, "auth_ref", "") == "IMPORTACION_API_TOKEN"}
 piden = set(necesarias.get("IMPORTACION_API_TOKEN", []))
-revisar(piden == del_catalogo and piden,
-        "las que piden la credencial son exactamente las que la declaran en el catalogo",
+# La credencial tambien la declaran herramientas que usa el TURNO y no el
+# reloj. Se nombran con donde se usan: una nueva con esta credencial obliga a
+# decidir de quien es, en vez de pasar callada. La igualdad que habia antes
+# quedo en rojo el 27/10/2026 con 'vincular_caso_externo' y nadie la miro.
+FUERA_DEL_RELOJ = {
+    #  la elige por su bandera 'vincula_caso_externo'
+    "vincular_caso_externo": "nucleo/seguimiento/ticket_desde_dexter.py",
+}
+revisar(piden and piden <= del_catalogo
+        and del_catalogo - piden == set(FUERA_DEL_RELOJ),
+        "las que piden la credencial la declaran en el catalogo, y las que no la "
+        "piden se usan fuera del reloj",
         f"deducidas={sorted(piden)}  catalogo={sorted(del_catalogo)}")
 revisar(piden <= io_mod.HERRAMIENTAS,
         "y todas son herramientas internas de Fase 2, ninguna ajena",

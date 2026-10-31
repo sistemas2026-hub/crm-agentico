@@ -321,6 +321,12 @@ services:
       # PRIVATE_ASISTENTE_TENANT), y desde el 31/10/2026 tampoco la declara
       # el backend. Una variable de empresa es una instalacion por empresa.
       PRIVATE_ASISTENTE_URL: http://motor:5000
+      # El dominio PUBLICO del webhook de WhatsApp (DESPLIEGUE.md 4.c), el de
+      # la instalacion y no el de una empresa: todas llegan por el mismo, cada
+      # una por /canales/whatsapp/<slug>. Con el, Ajustes -> WhatsApp muestra
+      # la URL entera para pegar en Meta; sin el, la pantalla pide el dominio
+      # a mano. Opcional (':-') a proposito: que falte no rompe nada.
+      PRIVATE_WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-}
       # El header que nucleo/canales/api.py exige cuando 'motor' (mas abajo)
       # tiene MOTOR_SERVICE_TOKEN puesto. Opcional a proposito -- ':-' y no
       # ':?': sin la variable, headersMotor() no manda nada y nada se rompe.
@@ -422,14 +428,22 @@ services:
       DB_APPLICATION_NAME: dexter-motor
     # APAGADO ORDENADO. Los dos tiempos van explicitos porque los dos defaults
     # se contradicen: Compose espera 10 s tras el SIGTERM y despues manda
-    # SIGKILL, mientras gunicorn se toma 30 s para cerrar sus workers. Con esos
+    # SIGKILL, mientras gunicorn se tomaba 30 s para cerrar sus workers. Con esos
     # valores, un despliegue mata procesos a mitad de una transaccion -- y
     #'sesion()' no alcanza a ejecutar su 'finally', asi que no hay commit,
     # rollback ni close. Medido el 15/09/2026: una transaccion asi sobrevivio
     # casi ocho dias del lado del pooler y bloqueo una migracion.
-    # 45 > 30 deja que gunicorn termine primero; el kill forzado queda como
-    # ultimo recurso y no como camino normal.
-    stop_grace_period: 45s
+    # Por eso este numero va POR ENCIMA del de gunicorn: que gunicorn termine
+    # primero, y el kill forzado quede como ultimo recurso y no como camino
+    # normal.
+    #
+    # Desde el 31/10/2026 son 55 > 40: gunicorn ademas espera a los TURNOS en
+    # vuelo antes de salir (lo que quede hasta los 40 s desde el SIGTERM, ver
+    # nucleo/canales/gunicorn_conf.py, donde vive su graceful_timeout). Sin eso, el SIGTERM de un despliegue
+    # mataba el turno a mitad y el mensaje del cliente se perdia sin rastro --
+    # medido, ver nucleo/canales/en_vuelo.py. Cuando no hay nadie en vuelo la
+    # espera vuelve en el acto: el despliegue no se alarga.
+    stop_grace_period: 55s
     # UN SOLO worker, y no es por memoria: nucleo/canales/api.py guarda el
     # historial de cada conversacion en '_sesiones', un diccionario en memoria
     # del proceso. Con varios workers -que son procesos, no hilos- cada uno
@@ -440,6 +454,14 @@ services:
     # Cuando el historial viva en asistente.conversations en vez de en RAM,
     # esto puede subir a varios workers.
     #
+    # Y NO HACE FALTA SUBIRLO TODAVIA (decidido el 31/10/2026, PRD 8.17): un
+    # turno pasa casi todo su tiempo esperando al modelo y a WispHub, y esa
+    # espera la absorben los hilos de un solo proceso. Varios procesos no
+    # agregan capacidad aca; obligan a mover a la base el candado por
+    # conversacion, el cupo por empresa y la coherencia del historial (ver
+    # CONTROL DE CONCURRENCIA en api.py). Se sube cuando se mida CPU
+    # saturada o cuando haga falta una segunda replica por disponibilidad.
+    #
     # EL REGISTRO DE ACCESO VA SIN QUERY STRING (%(U)s y no %(r)s, D20). El
     # formato por defecto escribe la URL entera, y el alta del webhook es
     # GET /canales/whatsapp/<tenant>?hub.verify_token=<secreto>: el token
@@ -447,11 +469,11 @@ services:
     # diagnosticar; ninguna ruta del motor lleva datos de cliente en el camino.
     command: >
       gunicorn nucleo.canales.api:app
+      --config python:nucleo.canales.gunicorn_conf
       --bind 0.0.0.0:5000
       --workers 1
       --threads 8
       --timeout 180
-      --graceful-timeout 30
       --access-logfile -
       --access-logformat '%(h)s %(t)s "%(m)s %(U)s" %(s)s %(b)s %(L)s'
       --error-logfile -

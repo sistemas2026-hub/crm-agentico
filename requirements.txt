@@ -30,7 +30,12 @@ python-docx
 
 # Servidor WSGI. El de Flask ('app.run') avisa el mismo que no es para
 # produccion; ver el comando del servicio 'motor' en docker-compose.prod.yml.
-gunicorn
+# FIJADO (31/10/2026): la espera de turnos en vuelo (nucleo/canales/
+# gunicorn_conf.py) depende del orden de apagado del worker gthread -- primero
+# las peticiones HTTP, despues 'worker_exit' --, medido en esta version. Otra
+# version puede cambiarlo; subirla es volver a correr tests/test_turnos_en_vuelo.py
+# en la imagen del motor.
+gunicorn==26.0.0
 
 # nucleo/seguridad/secretos.py, para cifrar las credenciales por empresa
 # (Fernet). El import es PEREZOSO: sin el paquete el motor arranca igual y solo

@@ -365,6 +365,36 @@ La autenticación de esa ruta no es un token de sesión sino **la firma del cuer
 
 En Meta, la URL de callback se registra como `https://motor.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
 
+**La URL ya no se arma a mano (31/10/2026).** Con `WEBHOOK_BASE_URL` cargada en Dokploy (el dominio de arriba, con o sin `https://`), Ajustes → WhatsApp le muestra a cada empresa su URL entera, lista para copiar. Sin ella, la pantalla vuelve a pedir el dominio. Es un dato de la **instalación**, no de la empresa: todas llegan por el mismo dominio, cada una por su slug.
+
+### 4.d Mudarse al dominio de Dexter — sin cortar nada
+
+Los dominios de arriba llevan la marca del primer cliente (`rapilinksas.co`). El cambio al dominio de Dexter es **solo de operación**: ningún dominio de producción está escrito en el código (medido el 31/10/2026, `grep` sobre `nucleo/`, `django-crm/` y la app). Lo que sí hay es gente y aparatos que conocen el dominio viejo, así que **el viejo y el nuevo conviven** hasta que nadie use el viejo.
+
+**Orden, y por qué ese orden:**
+
+1. **DNS** de los tres nombres nuevos (frontend, backend y webhook del motor) → la IP del servidor. `dig +short <nombre>` antes de seguir: sin DNS, Traefik no emite certificado.
+2. **Dokploy: agregar** el dominio nuevo a cada servicio, **sin borrar el viejo** (Traefik acepta varios por servicio). En `motor`, con el mismo formulario de §4.c: Path `/canales/whatsapp`, Strip Path apagado. Redesplegar.
+3. **Variables** en Dokploy. Las que aceptan lista llevan **los dos** dominios mientras dure la transición:
+
+   | Variable | Valor durante la transición |
+   |---|---|
+   | `ALLOWED_HOSTS` | backend viejo **y** nuevo, sin `https://` |
+   | `CSRF_TRUSTED_ORIGINS` | los cuatro (front y back, viejos y nuevos), con `https://` |
+   | `CORS_ALLOWED_ORIGINS` | frontend viejo **y** nuevo |
+   | `FRONTEND_URL` | el nuevo (va en los enlaces de los correos) |
+   | `PUBLIC_DJANGO_API_URL` | el backend nuevo. Se lee al arrancar (`$env/dynamic/public`), no hace falta recompilar |
+   | `SESSION_COOKIE_DOMAIN` | solo si estaba puesta: el dominio nuevo |
+   | `WEBHOOK_BASE_URL` | el webhook nuevo |
+   | `DEFAULT_FROM_EMAIL` | el remitente de Dexter. Su valor por defecto en el compose todavía es `noreply@rapilinksas.co`. El dominio del remitente necesita SPF/DKIM, o los correos caen en spam |
+
+4. **Meta, empresa por empresa.** En la App de cada una → WhatsApp → Configuration → Callback URL: la URL nueva (copiarla de Ajustes → WhatsApp), con el **mismo** verify token → «Verify and save». Meta hace el handshake en ese momento, y desde ahí entrega al dominio nuevo. Cuál empresa ya cambió se ve en el registro de acceso del motor: por qué dominio entra su `POST /canales/whatsapp/<slug>`.
+5. **App de campo.** La dirección del servidor **se guarda en cada teléfono** al iniciar sesión, y el botón «restablecer» vuelve al servidor con el que se compiló esa copia (`--dart-define=BACKEND_URL=...`). Recompilar con el backend nuevo y distribuirla. Los teléfonos que no actualicen siguen yendo al viejo, y por eso el viejo no se apaga todavía.
+6. **El enlace de los avisos al técnico** (`url_base_app`, en Ajustes → Canales → Avisos de cada organización): si apuntaba al dominio viejo, cambiarlo.
+7. **Recién entonces, retirar el viejo**: cuando su registro de acceso lleve días sin una entrega de Meta ni una petición de la app. Quitarlo primero de las variables y después del dominio en Dokploy, y redesplegar.
+
+Saltarse el paso 2 antes del 4 deja a Meta validando contra un host sin ruta: el handshake falla con el mensaje engañoso de §4.c.
+
 **Cómo saber en qué paso se quedó**, sin adivinar. Medido el 12/08/2026 con el dominio creado a medias:
 
 ```
@@ -824,7 +854,7 @@ Aislamientos, los cuatro medidos: una importación rota no impide reconciliar (e
 
 **Deuda anotada: `SystemExit` como error de configuración recuperable.** Los límites por tenant/tarea del reloj capturan `(Exception, SystemExit)`, y no por precaución genérica: hay **7 `raise SystemExit`** en su propia cadena de llamadas (5 en `importacion_io.py`, 2 en `conexion.py::dsn`). En un CLI eso está bien — el programa termina y lo explica. Dentro del reloj mataría el proceso, y un solo tenant mal configurado se llevaría puestos a los demás. La captura es correcta *ahí*; lo que está mal es el origen: infraestructura que señala configuración faltante debería levantar una excepción de dominio, no pedir la salida del proceso. No se refactoriza ahora para no ampliar el cambio. `KeyboardInterrupt` sigue propagándose: parar el proceso tiene que poder pararlo.
 
-**Qué tenants recorre, y cómo los descubre.** `tenants_conocidos()` lista los `tenants/*.config.yaml` de la imagen — hoy exactamente uno, `rapilink`, y `asistente.tenant_config` también tiene uno solo, así que coinciden. Es un acoplamiento a tener presente cuando entre el segundo ISP: un tenant creado solo en la base sería **invisible** para el reloj hasta que su semilla esté en la imagen.
+**Qué tenants recorre, y cómo los descubre.** Desde el 31/10/2026, las filas de `asistente.tenant_config` con `activo` (`db.tenants_activos`). Antes listaba los `tenants/*.config.yaml` de la imagen: una empresa dada de alta solo en la base era **invisible** para el reloj y el reconciliador hasta un commit y un redespliegue, y una dada de baja seguía recibiendo trabajos. **Sin base no atiende a nadie**: no cae al YAML, y lo dice en el log (`no se pudo listar las empresas`). Para comprobarlo después de un despliegue, dentro del contenedor `motor-reloj`: `RELOJ_HABILITADO=1 python -m nucleo.reloj --once --dry-run`, y la línea `ciclo inicio` tiene que nombrar a `rapilink`. Si sale vacía con la base arriba, el usuario del reloj no puede leer `tenant_config.activo`. Prueba: `tests/test_reloj_empresas_desde_la_base.py`.
 
 ### Para activarlo en producción
 
@@ -868,7 +898,7 @@ Fue semánticamente neutro —ninguna herramienta lo tenía, ninguna quedó en `
 
 Qué evaluar cuando se retome: `model_dump(exclude_unset=True)` en el camino de escritura, o —probablemente lo correcto— aplicar la mutación como **patch sobre el documento original** y usar el modelo solo para *validar* el resultado, no para producir lo que se guarda. Con una prueba que edite una sola clave y exija exactamente una hoja distinta en el diff.
 
-**Dar de alta un segundo ISP** — *lo que sigue es historia del 24/09/2026; el pegamento ya está*: el frontend saca la empresa de la sesión desde el 06/10 y el backend de la organización desde el 31/10/2026 (PRD §8.17, Ola 1), y el compose no declara ninguna variable de empresa. **Lo que queda** es lo de abajo: el dominio del webhook, `--workers 1`, y que el reloj del motor descubre las empresas en `tenants/*.config.yaml`.
+**Dar de alta un segundo ISP** — *lo que sigue es historia del 24/09/2026; el pegamento ya está*: el frontend saca la empresa de la sesión desde el 06/10 y el backend de la organización desde el 31/10/2026 (PRD §8.17, Ola 1), y el compose no declara ninguna variable de empresa. **Lo que quedaba** era lo de abajo, y se resolvió el 31/10/2026: el reloj descubre las empresas en la base (§ del reloj), el dominio del webhook es un dato de la instalación con su mudanza escrita en §4.d, y `--workers 1` se queda, con su motivo (abajo).
 
 **El motor está listo, el pegamento no** (24/09/2026). El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
@@ -885,8 +915,8 @@ Es una decisión de producto —¿se vende una instalación por ISP, o una plata
 
 Dos cosas que se deciden junto con eso:
 
-- **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
-- **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. Aguanta bien con hilos, pero es un techo real con varios ISPs, y se levanta el día que ese historial viva en `asistente.conversations` en vez de en memoria.
+- **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano. *Decidido el 31/10/2026: el dominio pasa a ser de Dexter al salir a producción; los pasos están en §4.d.*
+- **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. *Decidido el 31/10/2026 (PRD §8.17): se queda en un proceso.* Un turno pasa casi todo su tiempo esperando al modelo y a WispHub, y esa espera la absorben los hilos. Varios procesos no agregan capacidad y obligan a mover a la base el candado por conversación, el cupo por empresa y la coherencia del historial. Lo que sí se arregló es lo que ese proceso único perdía en cada despliegue: el SIGTERM mataba los turnos en vuelo y el mensaje se perdía sin rastro (medido). Ahora gunicorn los espera —hasta 35 s, o lo que quede hasta los 40 desde el SIGTERM— y nombra en el log al que tuvo que cortar (`nucleo/canales/en_vuelo.py`, `nucleo/canales/gunicorn_conf.py`). En el log del motor, al apagar: `apagado: esperando turnos en vuelo` y después `todos los turnos en vuelo terminaron` o `turnos cortados sin terminar` con sus huellas. Si aparece la primera sin ninguna de las otras dos, el proceso murió antes de escribir el resumen.
 
 **El 502 de `crm.rapilinksas.co` — ya no pasa (medido el 15/09/2026).** Ese dominio devolvía 502; hoy responde el Studio a través de Kong (`401` con basic-auth, ver §4.b). Lo que queda pendiente sobre ese dominio es otra cosa: que no publique más de lo necesario (§4.b.1).
 
