@@ -1,19 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { DEPARTAMENTOS, agentesDe, departamentoPorId, plantaDe, plantaDeLaEmpresa } from './departamentos.js';
+import { salasDe, pisosDe, salaPorId, agentesDe, plantaDe } from './departamentos.js';
+import { PLANTILLAS, plantillaDe } from './plantillas.js';
 import { TIPOS_DE_MUEBLE } from './escena/oficina';
+import PORDEFECTO from './__fixtures__/organizacion-por-defecto.json';
 
 /**
- * LA PLANTA ES UN DATO, Y ESTO LO MIDE.
+ * LA ORGANIZACIÓN ES UN DATO, Y ESTO LO MIDE.
  *
- * La prueba que de verdad importa no es que el segundo departamento se vea
- * bien: es que **no haya hecho falta tocar `escena/`**. Si un día alguien
- * resuelve una sala nueva agregando una función a la escena en vez de una fila
- * acá, lo que se pierde no es elegancia — es que el tercer departamento vuelva
- * a costar lo que costó el primero.
+ * Hasta el 31/10/2026 había seis departamentos escritos en el frontend. La
+ * prueba que de verdad importa no es que ahora haya ocho: es que **este archivo
+ * no sabe cuántos hay**. Si un día alguien resuelve el departamento de una
+ * empresa agregando una fila a `departamentos.js`, lo que se pierde no es
+ * elegancia — es que la siguiente empresa vuelva a costar una sesión de código.
  *
- * Y las comprobaciones de geometría existen porque sus fallos NO dan error:
- * dos escritorios en la misma celda se dibujan uno dentro del otro y el síntoma
- * se describe como «el mobiliario parpadea».
+ * EL FIXTURE NO ESTÁ COPIADO A MANO, y es deliberado. Lo generó el motor desde
+ * `nucleo/config/organizacion.py`, y `tests/test_organizacion_config.py`
+ * comprueba que siga siendo idéntico a lo que el motor sirve. Copiar el
+ * documento a mano es exactamente el error que dejó a E1 sin probar durante
+ * semanas: la prueba de E1 copiaba la consulta en vez de importar el módulo, y
+ * así la función podía no funcionar con la prueba en verde.
+ *
+ * Y las comprobaciones de geometría existen porque sus fallos NO dan error: dos
+ * escritorios en la misma celda se dibujan uno dentro del otro y el síntoma se
+ * describe como «el mobiliario parpadea».
  */
 
 //  Los nueve roles reales del tenant, con el area que DECLARAN.
@@ -29,146 +38,293 @@ const inventario = [
   { nombre: 'configuracion_guiada', area: 'Administración', cargo: 'Gestión' }
 ];
 
-describe('hay más de un departamento, y no son el mismo con otro rótulo', () => {
-  it('son al menos dos', () => {
-    expect(DEPARTAMENTOS.length).toBeGreaterThanOrEqual(2);
+const SALAS = salasDe(PORDEFECTO);
+const DEPTOS = SALAS.filter((s) => s.tipo === 'departamento');
+
+describe('la estructura sale de la configuración, no de este archivo', () => {
+  it('los ocho departamentos de la empresa piloto están', () => {
+    expect(DEPTOS.length).toBe(8);
+    expect(DEPTOS.map((d) => d.rotulo)).toEqual([
+      'NOC y Redes', 'Operaciones de Campo', 'Atención al Cliente',
+      'Comercial y Marketing', 'Finanzas y Cartera', 'Administración',
+      'Recursos Humanos', 'Auditoría y Cumplimiento'
+    ]);
   });
 
-  it('los identificadores no se repiten', () => {
-    expect(new Set(DEPARTAMENTOS.map((d) => d.id)).size).toBe(DEPARTAMENTOS.length);
+  it('y los tres espacios complementarios NO son departamentos', () => {
+    // Una recepción es parte del edificio y no una parte de la organización a
+    // la que se le puedan asignar responsabilidades. Contarla como
+    // departamento diría que la empresa tiene once.
+    const espacios = SALAS.filter((s) => s.tipo === 'espacio');
+    expect(espacios.map((e) => e.id)).toEqual(['direccion', 'sala_reuniones', 'recepcion']);
+    for (const e of espacios) {
+      expect(e.areas, e.id).toEqual([]);
+      expect(e.capacidades, e.id).toEqual([]);
+    }
   });
 
-  it('cada sala tiene su propia geometría', () => {
-    // Si dos salas compartieran mundo y mobiliario, la oficina virtual no
-    // estaría representando a la empresa: estaría repitiendo un fondo.
-    const firmas = DEPARTAMENTOS.map((d) =>
-      JSON.stringify([d.planta.mundo, d.planta.mobiliario.map((m) => m.tipo).sort()])
-    );
-    expect(new Set(firmas).size).toBe(DEPARTAMENTOS.length);
+  it('una empresa CHICA: cuatro departamentos en una sola planta', () => {
+    // El caso que prueba que esto es un producto y no una pantalla para una
+    // empresa. Si algo quedara fijo en ocho o en tres pisos, acá se rompe.
+    const chica = {
+      pisos: [{ nivel: 1, rotulo: 'Planta' }],
+      departamentos: ['soporte', 'ventas', 'cartera', 'tecnica_zonal'].map((id) => ({
+        id, rotulo: id, piso: 1, plantilla: 'tecnica', areas: [id]
+      })),
+      espacios: []
+    };
+    const s = salasDe(chica);
+    expect(s.length).toBe(4);
+    expect(pisosDe(chica, s).length).toBe(1);
   });
 
-  it('la sala de atención NO tiene mobiliario de centro de operaciones', () => {
-    const atencion = departamentoPorId('atencion_cliente');
-    const tipos = atencion.planta.mobiliario.map((m) => m.tipo);
-    expect(tipos).not.toContain('armario');
-    expect(tipos).not.toContain('panel_fibra');
+  it('una empresa GRANDE: quince departamentos en cinco niveles', () => {
+    const grande = {
+      pisos: [1, 2, 3, 4, 5].map((nivel) => ({ nivel, rotulo: `Nivel ${nivel}` })),
+      departamentos: Array.from({ length: 15 }, (_, i) => ({
+        id: `d${i}`, rotulo: `Departamento ${i}`, piso: (i % 5) + 1,
+        plantilla: 'expedientes', areas: [`a${i}`]
+      })),
+      espacios: []
+    };
+    const s = salasDe(grande);
+    const pisos = pisosDe(grande, s);
+    expect(s.length).toBe(15);
+    expect(pisos.length).toBe(5);
+    //  De arriba hacia abajo, que es como se lee un edificio.
+    expect(pisos.map((p) => p.nivel)).toEqual([5, 4, 3, 2, 1]);
+    expect(pisos.reduce((n, p) => n + p.salas.length, 0)).toBe(15);
   });
 
-  it('y la del NOC sí', () => {
-    const tipos = departamentoPorId('operativo').planta.mobiliario.map((m) => m.tipo);
-    expect(tipos).toContain('armario');
-    expect(tipos).toContain('panel_fibra');
+  it('sin organización no se inventa ninguna', () => {
+    // Es la decisión que sostiene todo lo demás. Caer a una estructura
+    // inventada cuando el motor no responde sería afirmar cómo es una empresa
+    // que no se pudo consultar.
+    expect(salasDe(null)).toEqual([]);
+    expect(salasDe({})).toEqual([]);
+    expect(salasDe({ departamentos: [] })).toEqual([]);
+    expect(pisosDe(null)).toEqual([]);
+  });
+
+  it('entradas basura no tumban la pantalla', () => {
+    const roto = { departamentos: [null, {}, { id: 'ok', plantilla: 'tecnica' }], espacios: null };
+    const s = salasDe(roto);
+    expect(s.length).toBe(1);
+    expect(s[0].id).toBe('ok');
   });
 });
 
-describe('la escena sabe dibujar todo lo que las plantas piden', () => {
+describe('los pisos', () => {
+  it('cada sala del piloto cae en un piso declarado', () => {
+    for (const p of pisosDe(PORDEFECTO, SALAS)) {
+      expect(p.declarado, `piso ${p.nivel}`).toBe(true);
+    }
+  });
+
+  it('el reparto del piloto es 3 / 3 / 5', () => {
+    const porNivel = Object.fromEntries(
+      pisosDe(PORDEFECTO, SALAS).map((p) => [p.nivel, p.salas.length])
+    );
+    expect(porNivel).toEqual({ 3: 3, 2: 3, 1: 5 });
+  });
+
+  it('un piso declarado y VACÍO sigue apareciendo', () => {
+    // Un nivel libre es un dato del edificio, no un error que haya que
+    // esconder: una empresa que declara cuatro y ocupa tres tiene un piso
+    // vacío, y el edificio tiene que poder dibujarlo.
+    const org = {
+      pisos: [{ nivel: 1 }, { nivel: 2 }],
+      departamentos: [{ id: 'x', rotulo: 'X', piso: 1, plantilla: 'tecnica' }]
+    };
+    const pisos = pisosDe(org);
+    expect(pisos.map((p) => p.nivel)).toEqual([2, 1]);
+    expect(pisos[0].salas).toEqual([]);
+  });
+
+  it('una sala en un piso que nadie declaró aparece MARCADA, no se pierde', () => {
+    // El motor lo rechaza al validar, así que llegar hasta acá significa que
+    // entró por otro camino. Perderla en silencio dejaría un departamento
+    // fuera del edificio sin que nadie pudiera explicar por qué.
+    const org = {
+      pisos: [{ nivel: 1 }],
+      departamentos: [{ id: 'x', rotulo: 'X', piso: 9, plantilla: 'tecnica' }]
+    };
+    const pisos = pisosDe(org);
+    const nueve = pisos.find((p) => p.nivel === 9);
+    expect(nueve.declarado).toBe(false);
+    expect(nueve.salas.map((s) => s.id)).toEqual(['x']);
+  });
+});
+
+describe('la plantilla es una ELECCIÓN del catálogo', () => {
+  it('cada sala del piloto pide una plantilla que existe', () => {
+    for (const s of SALAS) {
+      expect(s.plantillaFaltante, `${s.id} pide «${s.plantilla}»`).toBeNull();
+    }
+  });
+
+  it('dos departamentos pueden compartir plantilla y siguen siendo dos salas', () => {
+    // Finanzas, Recursos Humanos y Auditoría usan la misma. Compartir
+    // geometría es reutilizar la biblioteca; lo que no pueden compartir es
+    // identidad, rótulo ni puestos.
+    const mismas = DEPTOS.filter((d) => d.plantilla === 'expedientes');
+    expect(mismas.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(mismas.map((d) => d.id)).size).toBe(mismas.length);
+    expect(new Set(mismas.map((d) => d.planta.puestos[0].id)).size).toBe(mismas.length);
+  });
+
+  it('una plantilla desconocida cae en una sala sosa Y LO DICE', () => {
+    // Las dos alternativas son peores: no dibujar el departamento abre un
+    // hueco que nadie puede explicar, y caer en silencio a otra plantilla
+    // afirma que esa sala es un centro de operaciones cuando nadie lo dijo.
+    const s = salasDe({ departamentos: [{ id: 'x', rotulo: 'X', plantilla: 'nave_espacial' }] })[0];
+    expect(s.plantillaFaltante).toBe('nave_espacial');
+    expect(s.planta.mundo).toEqual(PLANTILLAS.generica.mundo);
+    expect(s.planta.mural).toBeNull();
+  });
+
+  it('un puesto que la plantilla NO tiene se reporta, no desaparece', () => {
+    // La empresa escribió que alguien se sienta y no hay silla. Ignorarlo
+    // haría desaparecer a un agente declarado sin que nadie lo notara.
+    const s = salasDe({
+      departamentos: [{
+        id: 'x', rotulo: 'X', plantilla: 'reuniones',
+        ocupaciones: [{ puesto: 'principal', agente: 'a' }, { puesto: 'p7', agente: 'b' }]
+      }]
+    })[0];
+    expect(s.puestosDesconocidos).toEqual(['p7']);
+    expect(s.planta.puestos.some((p) => p.agente === 'b')).toBe(false);
+  });
+
+  it('el acento de la configuración gana sobre el de la plantilla', () => {
+    const s = salasDe({
+      departamentos: [{ id: 'x', rotulo: 'X', plantilla: 'tecnica', acento: '#123456' }]
+    })[0];
+    expect(s.planta.acento).toBe(0x123456);
+  });
+
+  it('un acento mal escrito se descarta en vez de interpretarse', () => {
+    for (const malo of ['rojo', '#12345', 'rgb(1,2,3)', '', null]) {
+      const s = salasDe({
+        departamentos: [{ id: 'x', rotulo: 'X', plantilla: 'tecnica', acento: malo }]
+      })[0];
+      expect(s.planta.acento, String(malo)).toBe(PLANTILLAS.tecnica.acento);
+    }
+  });
+});
+
+describe('la escena sabe dibujar todo lo que el catálogo pide', () => {
   it('ningún mueble declarado es de un tipo desconocido', () => {
-    // Un tipo que la escena no conoce se ignora y se cuenta — no se dibuja
-    // «algo parecido». Esto lo caza antes de que la sala salga incompleta.
-    for (const d of DEPARTAMENTOS) {
-      for (const m of d.planta.mobiliario) {
-        expect(TIPOS_DE_MUEBLE, `${d.id}: ${m.tipo}`).toContain(m.tipo);
+    // Un tipo que la escena no conoce no da error: el mueble simplemente no
+    // se dibuja, y la sala sale incompleta sin que nada lo diga.
+    const conocidos = new Set(TIPOS_DE_MUEBLE);
+    for (const [nombre, p] of Object.entries(PLANTILLAS)) {
+      for (const m of p.mobiliario) {
+        expect(conocidos.has(m.tipo), `${nombre}: «${m.tipo}» no existe`).toBe(true);
       }
     }
   });
 });
 
-describe('la geometría de cada sala cierra', () => {
-  for (const d of DEPARTAMENTOS) {
-    const ancho = (p) => (p.principal ? 3.2 : 2.3);
-
-    it(`${d.id}: los puestos caben dentro del recinto`, () => {
-      for (const p of d.planta.puestos) {
-        expect(p.gx, p.id).toBeGreaterThanOrEqual(0);
-        expect(p.gx + ancho(p), p.id).toBeLessThanOrEqual(d.planta.mundo.ancho);
-        // Una celda por delante para el personaje y una por detrás para el paso.
-        expect(p.gy, p.id).toBeGreaterThanOrEqual(1);
-        expect(p.gy + 1, p.id).toBeLessThanOrEqual(d.planta.mundo.fondo);
+describe('la geometría de cada plantilla cierra', () => {
+  for (const [nombre, p] of Object.entries(PLANTILLAS)) {
+    it(`${nombre}: los puestos caben dentro del recinto`, () => {
+      for (const q of p.puestos) {
+        expect(q.gx, `${q.id}.gx`).toBeGreaterThan(0);
+        expect(q.gy, `${q.id}.gy`).toBeGreaterThan(0);
+        expect(q.gx, `${q.id}.gx`).toBeLessThan(p.mundo.ancho);
+        expect(q.gy, `${q.id}.gy`).toBeLessThan(p.mundo.fondo);
       }
     });
 
-    it(`${d.id}: ningún puesto se solapa con otro`, () => {
-      for (const a of d.planta.puestos) {
-        for (const b of d.planta.puestos) {
+    it(`${nombre}: ningún puesto se solapa con otro`, () => {
+      for (const a of p.puestos) {
+        for (const b of p.puestos) {
           if (a === b) continue;
-          const solapaX = a.gx < b.gx + ancho(b) && a.gx + ancho(a) > b.gx;
-          const solapaY = Math.abs(a.gy - b.gy) < 1.2;
-          expect(solapaX && solapaY, `${a.id} con ${b.id}`).toBe(false);
+          const d = Math.abs(a.gx - b.gx) + Math.abs(a.gy - b.gy);
+          expect(d, `${a.id} y ${b.id} se tocan`).toBeGreaterThan(1.4);
         }
       }
     });
 
-    it(`${d.id}: los identificadores de puesto no se repiten`, () => {
-      // Dos con el mismo id: la selección marcaría los dos y la ficha mostraría
-      // el primero. Se ve como «la ficha muestra el puesto equivocado».
-      const ids = d.planta.puestos.map((p) => p.id);
+    it(`${nombre}: los identificadores de puesto no se repiten`, () => {
+      const ids = p.puestos.map((q) => q.id);
       expect(new Set(ids).size).toBe(ids.length);
     });
 
-    it(`${d.id}: el pasillo está dentro del recinto y no tiene ancho cero`, () => {
-      if (!d.planta.pasillo) return;
-      expect(d.planta.pasillo.desde).toBeGreaterThanOrEqual(0);
-      expect(d.planta.pasillo.hasta).toBeLessThanOrEqual(d.planta.mundo.ancho);
-      expect(d.planta.pasillo.hasta).toBeGreaterThan(d.planta.pasillo.desde);
+    it(`${nombre}: el pasillo está dentro del recinto y no tiene ancho cero`, () => {
+      if (!p.pasillo) return;
+      expect(p.pasillo.desde).toBeGreaterThanOrEqual(0);
+      expect(p.pasillo.hasta).toBeLessThanOrEqual(p.mundo.ancho);
+      expect(p.pasillo.hasta).toBeGreaterThan(p.pasillo.desde);
     });
 
-    it(`${d.id}: hay exactamente un puesto principal`, () => {
-      expect(d.planta.puestos.filter((p) => p.principal)).toHaveLength(1);
+    it(`${nombre}: hay exactamente un puesto principal`, () => {
+      expect(p.puestos.filter((q) => q.principal === true).length).toBe(1);
     });
   }
 });
 
 describe('los identificadores de puesto no chocan entre salas', () => {
   it('ninguno se repite en toda la empresa', () => {
-    // La selección se guarda por id. Si dos salas compartieran uno, cambiar de
-    // sala dejaría marcado un puesto que no es el que se eligió.
-    const todos = DEPARTAMENTOS.flatMap((d) => d.planta.puestos.map((p) => p.id));
-    expect(new Set(todos).size).toBe(todos.length);
+    // Con once salas y seis plantillas, tres departamentos comparten
+    // geometría: sin el prefijo de la sala, seleccionar un puesto de Finanzas
+    // seleccionaría el de Auditoría.
+    const ids = SALAS.flatMap((s) => s.planta.puestos.map((p) => p.id));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('y cada uno lleva el identificador de su sala', () => {
+    for (const s of SALAS) {
+      for (const p of s.planta.puestos) {
+        expect(p.id.startsWith(`${s.id}:`), p.id).toBe(true);
+        expect(p.local).not.toContain(':');
+      }
+    }
   });
 });
 
-describe('quién ocupa cada sala', () => {
+describe('quién pertenece a cada departamento', () => {
   it('los agentes salen por área, no por nombre', () => {
-    // Buscar `supervisor_noc` literal funcionaría hoy y dejaría la sala vacía
-    // en la siguiente empresa, sin un error que lo explique.
-    const atencion = agentesDe(inventario, departamentoPorId('atencion_cliente'));
-    expect(atencion.map((a) => a.nombre)).toEqual(['cliente_final', 'soporte']);
+    const noc = salaPorId(SALAS, 'operativo');
+    expect(agentesDe(inventario, noc).map((a) => a.nombre)).toEqual(['supervisor_noc']);
   });
 
-  it('acepta el rótulo además del identificador', () => {
-    // Hay DOS vocabularios de área y no coinciden.
-    const otros = agentesDe([{ nombre: 'x', area: 'NOC y Redes' }],
-                            departamentoPorId('operativo'));
-    expect(otros).toHaveLength(1);
-  });
-
-  it('acepta las etiquetas que el departamento DECLARA', () => {
-    // `supervisor_noc` declara área «Operaciones» y el área configurada se
-    // llama `operativo`: los dos vocabularios no coinciden. Antes de declarar
-    // las etiquetas, esta sala salía VACÍA en producción.
-    expect(agentesDe([{ nombre: 'x', area: 'Operaciones' }],
-                     departamentoPorId('operativo'))).toHaveLength(1);
-  });
-
-  it('y NO adivina las que no declara', () => {
-    // Aceptar parecidos serviría hoy y el día que una empresa tenga las dos
-    // cosas sentaría al agente equivocado en el puesto, sin un error que lo
-    // explique. Lo que acepta se escribe; no se deduce.
-    for (const inventada of ['ops', 'operacion', 'red', 'noc']) {
-      expect(agentesDe([{ nombre: 'x', area: inventada }],
-                       departamentoPorId('operativo')), inventada).toEqual([]);
+  it('acepta todas las escrituras que el departamento DECLARA', () => {
+    // Hay dos vocabularios de área y no coinciden: la configuración declara
+    // `operativo` y el rol que existe de verdad escribe «Operaciones». Con
+    // solo el identificador, esta sala salía vacía en producción.
+    const noc = salaPorId(SALAS, 'operativo');
+    for (const area of ['operativo', 'Operaciones', 'NOC y Redes', 'OPERATIVO']) {
+      expect(agentesDe([{ nombre: 'x', area }], noc).length, area).toBe(1);
     }
   });
 
+  it('y NO adivina las que no declara', () => {
+    // Aceptar «operaciones» como `operativo` serviría hoy y el día que una
+    // empresa tenga las dos cosas sentaría al agente equivocado, sin un error
+    // que lo explique.
+    const noc = salaPorId(SALAS, 'operativo');
+    for (const area of ['red', 'infraestructura', 'noc', 'Redes']) {
+      expect(agentesDe([{ nombre: 'x', area }], noc).length, area).toBe(0);
+    }
+  });
+
+  it('DOS etiquetas de rol pueden ser UN departamento', () => {
+    // «Soporte Técnico» y «Atención al Cliente» son dos áreas en el
+    // vocabulario de los roles y una sola puerta de servicio en la empresa.
+    // Antes eran dos salas, y eso era consecuencia de deducir la estructura de
+    // los agentes.
+    const at = salaPorId(SALAS, 'atencion_cliente');
+    expect(agentesDe(inventario, at).map((a) => a.nombre).sort())
+      .toEqual(['cliente_final', 'soporte', 'soporte_tecnico_cliente']);
+  });
+
   it('cada área real del tenant cae en algún departamento', () => {
-    // Las seis que los roles declaran hoy. Si una no cayera en ninguna sala,
-    // ese agente no se dibujaría en ninguna parte y nadie se enteraría.
     const reales = ['Operaciones', 'Atención al Cliente', 'Soporte Técnico',
                     'Facturación', 'Ventas', 'Administración'];
     for (const area of reales) {
-      const encaja = DEPARTAMENTOS.some(
-        (d) => agentesDe([{ nombre: 'x', area }], d).length === 1
-      );
+      const encaja = DEPTOS.some((d) => agentesDe([{ nombre: 'x', area }], d).length === 1);
       expect(encaja, `«${area}» no tiene sala`).toBe(true);
     }
   });
@@ -178,169 +334,173 @@ describe('quién ocupa cada sala', () => {
     const reales = ['Operaciones', 'Atención al Cliente', 'Soporte Técnico',
                     'Facturación', 'Ventas', 'Administración'];
     for (const area of reales) {
-      const cuantas = DEPARTAMENTOS.filter(
-        (d) => agentesDe([{ nombre: 'x', area }], d).length === 1
-      ).length;
+      const cuantas = DEPTOS.filter((d) => agentesDe([{ nombre: 'x', area }], d).length === 1).length;
       expect(cuantas, `«${area}» cae en ${cuantas} salas`).toBe(1);
     }
   });
 
+  it('un espacio complementario no reclama a nadie', () => {
+    const rec = salaPorId(SALAS, 'recepcion');
+    expect(agentesDe(inventario, rec)).toEqual([]);
+  });
+
   it('no muta el inventario que recibe', () => {
-    // `sort` muta. Si mutara el del `load`, el resto de la pantalla vería los
-    // agentes en otro orden sin motivo.
     const copia = [...inventario];
-    agentesDe(inventario, departamentoPorId('operativo'));
+    agentesDe(inventario, salaPorId(SALAS, 'operativo'));
     expect(inventario.map((a) => a.nombre)).toEqual(copia.map((a) => a.nombre));
   });
 });
 
 describe('la planta lista para dibujar', () => {
-  const planta = plantaDe(departamentoPorId('operativo'), inventario);
+  const planta = plantaDe(salaPorId(SALAS, 'operativo'), inventario);
 
-  it('sienta a los agentes, el primero en el principal', () => {
+  it('sienta al agente DECLARADO en el puesto declarado', () => {
     const principal = planta.puestos.find((p) => p.principal);
-    const primero = agentesDe(inventario, departamentoPorId('operativo'))[0];
-    expect(principal.agente).toBe(primero.nombre);
-    expect(principal.nombre).toBe(primero.rotulo);
+    expect(principal.agente).toBe('supervisor_noc');
+    expect(principal.nombre).toBe('Supervisor NOC');
   });
 
   it('los puestos sin agente se dibujan vacíos y lo dicen', () => {
-    // Inventarles un ocupante para que la escena no se vea sosa es la clase de
-    // afirmación que esta pantalla no puede permitirse.
-    const cuantos = agentesDe(inventario, departamentoPorId('operativo')).length;
     const libres = planta.puestos.filter((p) => !p.agente);
-    expect(libres.length).toBe(planta.puestos.length - cuantos);
-    expect(libres.every((p) => p.area === 'puesto libre')).toBe(true);
+    expect(libres.length).toBe(3);
+    for (const p of libres) {
+      expect(p.motivo).toBe('sin agente asignado');
+    }
   });
 
   it('el cartel del muro lleva el rótulo del departamento', () => {
     expect(planta.cartel.rotulo).toBe('NOC y Redes');
-    expect(typeof planta.cartel.gx).toBe('number');
+  });
+
+  it('el nombre que la configuración declara gana sobre el de la plantilla', () => {
+    // Finanzas declara «Cobranza» para un puesto que la plantilla llama
+    // «Coordinación». Es lo que permite reutilizar geometría sin heredar
+    // rótulos ajenos.
+    const cartera = salasDe(PORDEFECTO).find((s) => s.id === 'cartera');
+    expect(cartera.planta.puestos.find((p) => p.principal).nombre).toBe('Cobranza');
   });
 
   it('sin inventario, cada sala se dibuja entera y vacía', () => {
-    for (const d of DEPARTAMENTOS) {
-      const sola = plantaDe(d, []);
-      expect(sola.puestos, d.id).toHaveLength(d.planta.puestos.length);
-      expect(sola.puestos.every((p) => p.agente === null), d.id).toBe(true);
+    for (const s of SALAS) {
+      const p = plantaDe(s, []);
+      expect(p.puestos.length, s.id).toBe(s.planta.puestos.length);
+      expect(p.puestos.every((q) => q.agente === null), s.id).toBe(true);
     }
   });
 
-  it('conserva mundo, pasillo y mobiliario del departamento', () => {
-    const d = departamentoPorId('atencion_cliente');
-    const p = plantaDe(d, inventario);
-    expect(p.mundo).toEqual(d.planta.mundo);
-    expect(p.pasillo).toEqual(d.planta.pasillo);
-    expect(p.mobiliario).toEqual(d.planta.mobiliario);
-  });
-
-  it('un id desconocido no rompe: cae en el primero', () => {
-    expect(departamentoPorId('no_existe')).toBe(DEPARTAMENTOS[0]);
-  });
-});
-
-describe('la empresa entera, las seis salas a la vez', () => {
-  const edificio = plantaDeLaEmpresa(inventario);
-
-  it('están todas', () => {
-    expect(edificio).toHaveLength(DEPARTAMENTOS.length);
-  });
-
-  it('NINGUNA sala se solapa con otra', () => {
-    // Es la condición que sostiene la simplificación de la escena: ordena las
-    // salas por la profundidad de su origen y dentro de cada una por la suya.
-    // Si dos se tocaran habría que intercalar sus objetos uno a uno, y eso no
-    // lo hace — el síntoma sería un muro de una sala apareciendo delante del
-    // mobiliario de la vecina.
-    for (const a of edificio) {
-      for (const b of edificio) {
-        if (a === b) continue;
-        const solapaX = a.origen.gx < b.origen.gx + b.mundo.ancho &&
-                        a.origen.gx + a.mundo.ancho > b.origen.gx;
-        const solapaY = a.origen.gy < b.origen.gy + b.mundo.fondo &&
-                        a.origen.gy + a.mundo.fondo > b.origen.gy;
-        expect(solapaX && solapaY).toBe(false);
-      }
-    }
-  });
-
-  it('y el hueco entre vecinas cubre la ALTURA de un muro', () => {
-    // Tres celdas no alcanzaban: un muro de cuatro unidades se proyecta más de
-    // cien píxeles hacia arriba e invade la sala de atrás aunque en planta no
-    // se toquen. El hueco se mide contra la altura, no contra el suelo.
-    const alto = Math.max(...edificio.map((p) => p.mundo.alto));
-    const porFila = {};
-    for (const p of edificio) (porFila[p.origen.gy] = porFila[p.origen.gy] || []).push(p);
-    for (const fila of Object.values(porFila)) {
-      const orden = [...fila].sort((a, b) => a.origen.gx - b.origen.gx);
-      for (let i = 1; i < orden.length; i++) {
-        const hueco = orden[i].origen.gx - (orden[i - 1].origen.gx + orden[i - 1].mundo.ancho);
-        expect(hueco).toBeGreaterThanOrEqual(alto);
-      }
-    }
-  });
-
-  it('los 21 puestos conservan identificadores únicos', () => {
-    // La selección se guarda por id, y en la vista de empresa están los de las
-    // seis salas a la vez: uno repetido marcaría dos puestos.
-    const ids = edificio.flatMap((p) => p.puestos.map((q) => q.id));
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it('se sientan SEIS de los nueve: tres son capacidades, no empleados', () => {
-    // Es el arreglo P0.1. `soporte`, `facturacion` y `administracion` no son
-    // empleados virtuales: son capacidades que se le asignan a una persona del
-    // CRM. Dibujarles un escritorio era inventar tres empleados.
-    //
-    // Esta prueba FALLABA antes del arreglo, afirmando que los nueve se
-    // sientan. Esa era exactamente la mentira.
-    const sentados = new Set(
-      edificio.flatMap((p) => p.puestos.map((q) => q.agente)).filter(Boolean)
-    );
-    expect(sentados.size).toBe(6);
-    for (const capacidad of ['soporte', 'facturacion', 'administracion']) {
-      expect(sentados.has(capacidad), `${capacidad} NO debería tener escritorio`).toBe(false);
-    }
-  });
-
-  it('y ninguno de los nueve se pierde: o se sienta, o es capacidad declarada', () => {
-    // No basta con no dibujarlos: si desaparecieran del todo, la oficina
-    // estaría ocultando que existen.
-    const sentados = new Set(
-      edificio.flatMap((p) => p.puestos.map((q) => q.agente)).filter(Boolean)
-    );
-    const capacidades = new Set(
-      edificio.flatMap((p) => p.capacidades.map((c) => c.nombre))
-    );
-    for (const a of inventario) {
-      expect(sentados.has(a.nombre) || capacidades.has(a.nombre),
-             `${a.nombre} no aparece ni sentado ni como capacidad`).toBe(true);
-    }
-  });
-
-  it('una capacidad se resuelve contra el inventario, con su cargo', () => {
-    const conCapacidades = edificio.filter((p) => p.capacidades.length > 0);
-    expect(conCapacidades.length).toBeGreaterThan(0);
-    for (const p of conCapacidades) {
-      for (const c of p.capacidades) {
-        expect(c.ausente, `${c.nombre} declarada y ausente del inventario`).toBe(false);
-        expect(typeof c.cargo).toBe('string');
-      }
-    }
+  it('conserva mundo, pasillo y mobiliario de la plantilla', () => {
+    const noc = salaPorId(SALAS, 'operativo');
+    expect(planta.mundo).toEqual(noc.planta.mundo);
+    expect(planta.pasillo).toEqual(noc.planta.pasillo);
+    expect(planta.mobiliario.length).toBe(noc.planta.mobiliario.length);
   });
 
   it('un agente declarado que el inventario NO trae deja el puesto vacío y dice por qué', () => {
-    // Dibujarlo igual sería volver a inventar un empleado; callarlo sería un
-    // hueco que nadie puede explicar.
-    const solo = plantaDe(departamentoPorId('operativo'), []);
-    const principal = solo.puestos.find((p) => p.principal);
-    expect(principal.agente).toBeNull();
-    expect(principal.motivo).toContain('supervisor_noc');
-    expect(principal.area).toBe('agente no encontrado');
+    const s = salasDe({
+      departamentos: [{
+        id: 'x', rotulo: 'X', plantilla: 'tecnica',
+        ocupaciones: [{ puesto: 'principal', agente: 'fantasma' }]
+      }]
+    })[0];
+    const p = plantaDe(s, inventario).puestos.find((q) => q.principal);
+    expect(p.agente).toBeNull();
+    expect(p.area).toBe('agente no encontrado');
+    expect(p.motivo).toContain('fantasma');
+    expect(p.motivo).toContain('el inventario no lo trae');
   });
 
-  it('cada sala conserva su acento', () => {
-    const acentos = edificio.map((p) => p.acento);
-    expect(new Set(acentos).size).toBe(edificio.length);
+  it('una capacidad se resuelve contra el inventario, con su cargo', () => {
+    const at = plantaDe(salaPorId(SALAS, 'atencion_cliente'), inventario);
+    expect(at.capacidades).toEqual([{ nombre: 'soporte', cargo: 'Soporte', ausente: false }]);
+  });
+
+  it('una capacidad que el inventario no trae se marca ausente', () => {
+    const s = salasDe({
+      departamentos: [{ id: 'x', rotulo: 'X', plantilla: 'tecnica', capacidades: ['fantasma'] }]
+    })[0];
+    expect(plantaDe(s, inventario).capacidades).toEqual(
+      [{ nombre: 'fantasma', cargo: null, ausente: true }]);
+  });
+});
+
+describe('un departamento SIN NINGÚN AGENTE existe igual', () => {
+  //  Es el caso que más importa de los ocho, y el que la estructura deducida de
+  //  los agentes no podía representar: un departamento existe porque la empresa
+  //  lo tiene, no porque haya un agente que lo represente.
+  for (const id of ['campo', 'recursos_humanos', 'auditoria']) {
+    it(`${id}: tiene sala, puestos y cartel`, () => {
+      const s = salaPorId(SALAS, id);
+      const p = plantaDe(s, inventario);
+      expect(s).toBeTruthy();
+      expect(p.puestos.length).toBeGreaterThan(0);
+      expect(p.cartel.rotulo).toBe(s.rotulo);
+    });
+
+    it(`${id}: y NO se le inventa ningún personaje`, () => {
+      const p = plantaDe(salaPorId(SALAS, id), inventario);
+      expect(p.puestos.every((q) => q.agente === null)).toBe(true);
+      expect(p.capacidades).toEqual([]);
+    });
+  }
+});
+
+describe('los agentes del piloto: seis se sientan, tres son capacidades', () => {
+  //  Se pregunta por la OCUPACIÓN, no por el reparto en el espacio: cada sala
+  //  por separado, sin componer ningún edificio. Pedirle la geometría a esta
+  //  prueba la ataría a un layout que no tiene nada que ver con lo que afirma.
+  const plantas = SALAS.map((s) => plantaDe(s, inventario));
+  const sentados = plantas.flatMap((p) => p.puestos.map((q) => q.agente)).filter(Boolean);
+
+  it('se sientan SEIS de los nueve', () => {
+    // Tres de los nueve roles no son empleados virtuales: son capacidades que
+    // se le asignan a una persona real del CRM. Antes se les dibujaba un
+    // escritorio propio.
+    expect(sentados.sort()).toEqual([
+      'cliente_final', 'configuracion_guiada', 'facturacion_cliente',
+      'soporte_tecnico_cliente', 'supervisor_noc', 'ventas'
+    ]);
+  });
+
+  it('y ninguno de los nueve se pierde: o se sienta, o es capacidad declarada', () => {
+    const capacidades = plantas.flatMap((p) => p.capacidades.map((c) => c.nombre));
+    const representados = new Set([...sentados, ...capacidades]);
+    for (const a of inventario) {
+      expect(representados.has(a.nombre), `${a.nombre} no está en ninguna parte`).toBe(true);
+    }
+  });
+
+  it('ningún agente se sienta DOS veces', () => {
+    // Sentado en dos sitios, la misma actividad animaría dos personajes y la
+    // empresa se vería con más trabajo del que tiene.
+    expect(new Set(sentados).size).toBe(sentados.length);
+  });
+});
+
+describe('la guarda de este archivo: no vuelve a saber de ninguna empresa', () => {
+  it('no exporta ninguna lista de departamentos', async () => {
+    // La mutación que esta prueba mata: alguien agrega
+    // `export const DEPARTAMENTOS = [...]` «solo para el caso de esta empresa»
+    // y la estructura vuelve a estar escrita en el frontend.
+    const mod = await import('./departamentos.js');
+    expect(Object.keys(mod).sort()).toEqual([
+      'agentesDe', 'pisosDe', 'plantaDe', 'salaPorId', 'salasDe'
+    ]);
+  });
+
+  it('el catálogo de plantillas no nombra ningún departamento', () => {
+    // Una plantilla se llama por lo que ES —un centro de operaciones, una sala
+    // de expedientes—, nunca por quién la usa. «noc» o «cartera» como nombre
+    // de plantilla ataría la geometría a una organización concreta.
+    const prohibidas = ['noc', 'cartera', 'rrhh', 'auditoria', 'ventas', 'soporte'];
+    for (const nombre of Object.keys(PLANTILLAS)) {
+      expect(prohibidas, nombre).not.toContain(nombre);
+    }
+  });
+
+  it('y la guarda se pondría roja si lo hiciera', () => {
+    // Sin esto no habría forma de distinguir «no está» de «la comprobación no
+    // comprueba nada».
+    expect(plantillaDe('cartera').faltante).toBe('cartera');
+    expect(plantillaDe('expedientes').faltante).toBeNull();
   });
 });

@@ -2066,6 +2066,286 @@ ajusta al contenedor, no hay desbordamiento horizontal, 144 fps en las dos.
   cada una borra `public.organization` al preparar, y la otra tiene filas que la
   referencian. Se corren en contenedores separados.
 
+---
+
+## P1.1 · La organización es configuración — 31/10/2026
+
+### El error que esto corrige, y no es el que parecía
+
+La oficina dibujaba **seis departamentos** y los seis estaban escritos en el
+frontend. Lo que importa es de dónde habían salido: de **agrupar el campo `area`
+de los roles configurados**. O sea que la pantalla no mostraba la organización de
+la empresa — mostraba **los grupos de sus agentes**, que es otra cosa.
+
+Tres consecuencias lo prueban:
+
+- **Un departamento sin ningún agente no existía.** Recursos Humanos y
+  Auditoría son departamentos reales de un ISP y no hay un agente que los
+  represente. Deducidos de los agentes, desaparecen. Una empresa que mira su
+  propia oficina y no ve a Recursos Humanos no está viendo su empresa.
+- **Dos etiquetas de rol que son un departamento salían como dos salas.**
+  «Soporte Técnico» y «Atención al Cliente» son dos áreas en el vocabulario de
+  los roles y **una sola puerta de servicio** en la empresa.
+- **La siguiente empresa necesitaba una sesión de código.**
+
+### El corte: qué declara la empresa y qué sabe el producto
+
+```
+CONFIGURACIÓN (TenantConfig.organizacion, por empresa, editable)
+   pisos           nivel + rótulo
+   departamentos   id · rótulo · dirección · piso · plantilla · areas[] ·
+                   capacidades[] · ocupaciones[] · acento
+   espacios        id · rótulo · piso · plantilla · acento   (sin areas ni agentes)
+
+PRODUCTO (plantillas.js, catálogo genérico que conoce la pantalla)
+   operaciones · atencion · tecnica · expedientes · comercial · reuniones
+   + generica (la de reserva)
+```
+
+**La geometría no es configuración, y el corte está puesto ahí a propósito.**
+Describir una sala isométrica son cuarenta números y equivocarse en uno **no da
+error**: los muebles se dibujan uno dentro del otro y el síntoma se describe
+como «parpadea». Lo que una empresa quiere decidir es *«esta sala es un centro
+de operaciones»*, no dónde va cada luminaria. Mismo reparto que
+`AreaDeTrabajo.icono`, que ya nombra un dibujo de un catálogo que el motor no
+tiene — y por eso el motor **no valida que la plantilla exista**: lo que valida
+es todo lo que, mal escrito, haría que la pantalla afirmara algo falso.
+
+### Por qué hay una estructura por defecto, y por qué no es el mismo error
+
+Una organización vacía significa **no declarada**. El motor sirve entonces la
+estructura genérica del producto **y lo dice**, en el mismo documento:
+
+```
+origen: "declarada"    la empresa la escribió. Es su organigrama.
+origen: "por_defecto"  no la escribió. Es la del producto, y la pantalla lo
+                       muestra: «estructura por defecto del producto».
+```
+
+Sin ese campo las dos se ven igual y una empresa creería que configuró algo que
+no configuró — el día que reorganice de verdad no entendería por qué «ya estaba
+bien». Un defecto **silencioso** sí sería el error anterior por la puerta de
+atrás.
+
+Lo que **no** se hace es caer a una estructura inventada cuando el motor no
+responde: ahí no se dibuja edificio y el pie lo explica. Dibujarlo sería afirmar
+cómo es una empresa que no se pudo consultar.
+
+### La estructura del piloto, servida por el motor
+
+| Piso | Salas |
+|---|---|
+| 3 · Tecnología y dirección | NOC y Redes · *Dirección* · *Sala de Reuniones* |
+| 2 · Operación y clientes | Operaciones de Campo · Atención al Cliente · Comercial y Marketing |
+| 1 · Administración | Finanzas y Cartera · Administración · Recursos Humanos · Auditoría y Cumplimiento · *Recepción* |
+
+En cursiva, los **espacios complementarios**: existen como tipo aparte y no como
+un departamento más, porque no agrupan áreas ni agentes. Meterlos en la misma
+lista obligaría a que todos los campos de un departamento fueran opcionales, y
+entonces un departamento mal cargado —sin áreas y sin puestos— pasaría la
+validación haciéndose pasar por un espacio.
+
+**Los acentos de las once salas se midieron, no se eligieron a ojo**: los once a
+más de 160 del rojo de alarma y a más de 70 entre sí, par más cercano **77**. La
+guarda de la pantalla ahora recorre las salas que llegan de la configuración, no
+una lista escrita — así que el día que una empresa elija un acento rojizo desde
+su formulario, esto lo encuentra.
+
+### Lo que la validación RECHAZA
+
+Cada una existe porque su ausencia haría mentir a la pantalla:
+
+| Rechaza | Qué pasaría si no |
+|---|---|
+| dos salas con el mismo id | seleccionar una selecciona la otra |
+| un espacio con el id de un departamento | lo mismo, entre tipos distintos |
+| una sala en un piso no declarado | un departamento fuera del edificio |
+| dos pisos con el mismo nivel | dos plantas que son una |
+| un área reclamada por **dos** departamentos | el mismo trabajo contado dos veces |
+| el mismo agente sentado en **dos** puestos | la misma actividad animando dos personajes |
+| un agente que es capacidad **y** ocupa un puesto | una cosa dice que tiene escritorio y la otra que no |
+| un id con mayúsculas o espacios | dos identificadores para la misma sala |
+| un acento que no es `#rrggbb` | la configuración escribiendo estilos en la interfaz de todos |
+
+### Medido
+
+```
+tests/test_organizacion_config.py          41 comprobaciones, todas en verde
+  · los ocho departamentos aprobados, en orden, reparto 3/3/5
+  · tres departamentos existen SIN agente: campo, recursos_humanos, auditoria
+  · seis agentes sentados, tres capacidades declaradas sin escritorio
+  · 12 invariantes RECHAZAN (el efecto, no la presencia del validador)
+  · 4 / 15 / 12 → cuatro departamentos en una planta, quince en cinco, doce pisos
+  · rapilink.config.yaml SIGUE CARGANDO con el campo nuevo
+
+departamentos.test.js                      90 pruebas
+tests/test_nucleo_sin_tenants.py           112 archivos, el núcleo no conoce clientes
+tests/test_editor_config.py                en verde
+```
+
+**Las dos mutaciones que lo hacen creíble:**
+
+```
+quitar el prefijo de sala del id de puesto   →  3 pruebas en rojo
+salasDe() ignora la configuración y devuelve
+la estructura fija del fixture               → 12 pruebas en rojo
+```
+
+La segunda es la que importa: es exactamente la regresión que devolvería la
+estructura al frontend, y se ve.
+
+### El fixture del frontend se GENERA, no se copia
+
+`vitest` no puede importar Python, así que la prueba de la pantalla necesita el
+documento como JSON. Copiarlo a mano es **el error que dejó a E1 sin probar**:
+su prueba copiaba la consulta en vez de importar el módulo, y la función no
+funcionaba con la prueba en verde.
+
+```
+cli/exportar_organizacion.py                 lo genera desde el motor
+tests/test_organizacion_config.py [6]        comprueba que siga coincidiendo
+```
+
+Si alguien cambia la estructura por defecto y no regenera, esa prueba se pone
+roja y nombra el comando.
+
+### Lo que queda fuera de P1.1, dicho
+
+- **El YAML de `rapilink` NO se tocó.** Declarar la organización ahí crearía la
+  divergencia que §6 llama peligrosa —«el repo lo declara y la base no»— y
+  cargar ese YAML está prohibido por otro motivo medido: apagaría la encuesta de
+  cierre, que vive en la base con un `solo_a` que el archivo no trae. El piloto
+  corre con `origen: por_defecto`, visible en pantalla, hasta que alguien decida
+  declararla desde la interfaz.
+- **El edificio sigue siendo una rejilla plana.** Los pisos ya son un dato y el
+  selector los agrupa, pero las once salas siguen una al lado de la otra sobre un
+  mismo plano. Apilarlos es P1.2.
+- **Los subdepartamentos** no se modelaron: no hay ninguno declarado y un nivel
+  de anidamiento sin un caso que lo use es una forma que después hay que
+  sostener.
+- **No hay editor de organización todavía.** Se edita por `tenant_config`; la
+  pantalla para hacerlo es P3.
+
+---
+
+## P1.2 · El edificio, y la aritmética que lo decide todo — 31/10/2026
+
+### El problema que la rejilla plana no tenía
+
+Apilar niveles introduce un fallo que **no se ve mirando una captura hasta que
+ya está mal**. En esta proyección `y = 16·(gx+gy) − 26·gz`, así que un nivel más
+alto se dibuja más arriba y tapa del de abajo la zona de `gx+gy` pequeño. Un
+escritorio tapado **no da error, no da aviso y la escena lo sigue animando**: un
+agente trabajando donde nadie lo ve.
+
+Así que la primera decisión fue medirlo, no mirarlo. Invirtiendo la proyección
+sobre el plano del nivel de arriba, un punto a altura `z` cae en la celda
+`GY + (H − z)·0,8125`, y para no quedar tapado tiene que caer pasado el frente
+de las salas de arriba. **Los dos desplazamientos del nivel se cancelan** y
+queda:
+
+```
+(H − z) · 0,8125  >  fondo de la sala − gy del puesto
+```
+
+Tres consecuencias, ninguna evidente antes de escribirla:
+
+1. **La profundidad del pasillo no interviene.** Lo que fija la separación es
+   cuánta sala queda DETRÁS del escritorio.
+2. Con salas de 10 celdas y puestos a 2,4, el mínimo es **13** — y lo manda la
+   **placa** de un puesto normal (z 3,65), no la silla: va más alta, y cuanto
+   más alto está un punto, más cerca queda del nivel de arriba.
+3. Separar más **no es** la solución: para que dos bandejas no se solapen en
+   nada harían falta más de treinta unidades, y eso son tres rebanadas
+   lejanísimas unidas por un hilo. Otra vez oficinas flotando.
+
+`ALTURA_DE_PISO = 15` deja 1,6 celdas de margen. **Y el aire que queda se llena
+de estructura**, que es lo que separa un edificio en sección de tres bandejas:
+
+```
+núcleo        una torre de la altura de piso entera, con dos tramos de
+              escalera, su ascensor y su columna. Apilados, se leen como una
+              caja continua
+columnas      cada 6 celdas en la franja de circulación, subiendo hasta la
+              losa de arriba
+losa          el canto del forjado, dos caras. Sin espesor un suelo no es una
+              planta: es una alfombra, y tres alfombras apiladas no son un
+              edificio
+baranda       el borde abierto. Sin ella el nivel parece cortado, no terminado
+```
+
+### Lo que el navegador corrigió, y las pruebas no podían ver
+
+Tres defectos salieron de mirar, no de medir — y los tres se convirtieron en
+comprobación:
+
+- **Cubiertas desiertas.** Todos los niveles compartían frente «para que la
+  fachada no fuera una escalera», así que los pisos de tres salas arrastraban
+  una losa tan larga como el de cinco. Ahora cada nivel mide lo suyo: un piso
+  con menos salas es más corto, y eso es información verdadera.
+- **Columnas que no sostenían nada.** El piso 1 tiene cinco salas y el 2 tiene
+  tres: las columnas del tramo largo subían quince unidades hasta el aire y
+  colgaban a la derecha. Ahora sólo las hay bajo la huella del nivel de arriba —
+  y «el nivel de arriba» es el **inmediato de los declarados**, no `nivel + 1`:
+  una empresa puede declarar el 1 y el 3.
+- **Mástiles en el nivel aislado.** Sin el piso de arriba en la escena, las
+  columnas se comían la sala. Cortadas a 2,5 siguen diciendo que el edificio
+  continúa, que es lo único que tienen que decir.
+
+### El nombre se mudó al canto de la losa
+
+Con la separación medida, el muro de fondo **sólo se ve hasta 2,7 de sus 4
+unidades** — y el cartel vive a 3,63. Un nombre que a veces se ve no es un
+nombre. El cartel del muro sigue ahí para la sala mirada sola; en el edificio el
+nombre va escrito en el canto del forjado, que además se lee de lejos, que es
+como se mira un edificio.
+
+### El zoom dejó de ser una constante
+
+Medido: once salas en tres niveles ocupan **3.552 × 2.946 px de mundo** y entran
+en una vista de 1.625 × 600 a escala **0,204**. El límite de la cámara era 0,4 y
+su motivo sigue siendo bueno —en una SALA, por debajo, el mobiliario es una
+mancha—. Ahora lo decide quien monta: el edificio pide 0,16, una sala no pide
+nada.
+
+---
+
+## P1.3 · Navegación: edificio → piso → sala — 31/10/2026
+
+Tres niveles de acercamiento, y el orden es el recorrido de quien busca algo. El
+botón del edificio es siempre la vuelta atrás.
+
+**Aislar un nivel lo BAJA al suelo.** Un piso flotando a dos pisos de altura no
+dice nada, y encuadrar sobre el vacío deja las salas en una esquina. Es el mismo
+compositor con `soloNivel`: tener una función para el edificio y otra para un
+piso sería tener dos geometrías que se van separando sin que nadie lo note.
+
+**Un nivel que no existe deja el edificio vacío, no el entero.** Caer a la vista
+completa sería mostrar otra cosa que la pedida sin decirlo.
+
+### Medido en el navegador (laboratorio aislado, 1.625 × 900)
+
+```
+El edificio          2.271 obj ·  97 fps   8 departamentos · 3 piso(s)
+Piso 2 aislado         712 obj · 144 fps   3 salas · 3 de 11 puestos ocupados
+NOC y Redes (sala)     293 obj · 144 fps   1 de 4 puestos · idéntica a antes
+ficha desde el piso    «Agente de Ventas Virtual · Agente IA · Comercial y Marketing»
+```
+
+La sala sola **no cambió**: mismos 293 objetos que antes del edificio. La losa y
+la baranda son dos campos de la planta que pone el compositor, justamente para
+que mirar una sala siga siendo lo que era.
+
+### Lo que NO se hizo en estas dos etapas
+
+- **Las placas no se leen en la vista de conjunto.** A escala 0,2 un rótulo de
+  13 px mide 2,6. Para el edificio hace falta texto en espacio de pantalla, que
+  no escale con la cámara. Es trabajo de P2.
+- **No hay puertas.** La circulación y las salas se tocan, pero el vano de paso
+  entre el pasillo y cada sala no está dibujado.
+- **Los subdepartamentos** siguen sin modelarse: no hay ninguno declarado.
+- **La escena sigue oscura** en la vista de conjunto. Es palette, y entra en P2.
+
 ## Qué NO hacer
 
 - **No construir los ocho departamentos a la vez.** Uno (NOC), de punta a punta,

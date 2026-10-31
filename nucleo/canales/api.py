@@ -58,6 +58,7 @@ from nucleo.relevo.control import control_efectivo
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
+from nucleo.config.organizacion import organizacion_de
 from nucleo.habilidades import analista
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
@@ -4182,6 +4183,19 @@ def centro_mando():
         # cara al cliente y el orden lo decidia un diccionario. Quien lo
         # consuma debe poder ver que falta, no recibir una suposicion.
         "rol_de_entrada": config.rol_de_entrada,
+        # LA ESTRUCTURA DE LA EMPRESA, con su procedencia.
+        #
+        # Viaja desde aqui y no se arma en la pantalla porque la pantalla
+        # la armaba agrupando el campo "area" de los roles, y eso no es el
+        # organigrama: es los GRUPOS DE LOS AGENTES. Medido el 30/10/2026,
+        # dibujaba seis departamentos y borraba los que no tienen ningun
+        # agente -- Recursos Humanos y Auditoria son departamentos reales
+        # de un ISP y no hay un agente que los represente.
+        #
+        # "origen" distingue la organizacion que la empresa DECLARO de la
+        # estructura por defecto del producto. Las dos se dibujan igual, y
+        # sin ese campo nadie podria saber cual esta mirando.
+        "organizacion": organizacion_de(config),
         "totales": {
             "conversaciones_activas": t.get("conversaciones_activas") or 0,
             "abiertas_total": t.get("abiertas_total") or 0,

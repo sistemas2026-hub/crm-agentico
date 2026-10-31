@@ -34,22 +34,55 @@
   import { crearDemostracion } from '$lib/centro-mando/demo.js';
   import { proyectar, vigentes } from '$lib/centro-mando/proyeccion.js';
   import { frescura } from '$lib/centro-mando/frescura.js';
-  import { DEPARTAMENTOS, plantaDe, plantaDeLaEmpresa } from '$lib/centro-mando/departamentos.js';
+  import { salasDe, pisosDe, salaPorId, plantaDe } from '$lib/centro-mando/departamentos.js';
+  import { edificioDe } from '$lib/centro-mando/edificio.js';
   import FichaDePuesto from '$lib/components/centro-mando/FichaDePuesto.svelte';
 
   let { data } = $props();
 
   /**
-   * El departamento que se está mirando.
+   * LAS SALAS SALEN DE LA CONFIGURACIÓN DE LA EMPRESA, no de este archivo.
    *
-   * Cambiarlo DESMONTA y vuelve a montar la escena: la sala entera es otra
-   * —otro mundo, otro mobiliario, otros puestos— y reconstruirla en caliente
-   * sería mantener dos caminos para el mismo resultado.
+   * Hasta el 31/10/2026 había seis departamentos escritos en el frontend, y se
+   * midió de dónde habían salido: de agrupar el campo `area` de los roles. O
+   * sea que esta pantalla mostraba los GRUPOS DE LOS AGENTES y los presentaba
+   * como el organigrama. Un departamento sin ningún agente no existía.
+   *
+   * Se lee una vez, al montar. Es estructura, no estado: cambia cuando alguien
+   * reorganiza la empresa, y entonces hay que remontar — que es lo que pasa al
+   * navegar.
    */
-  //  `null` significa LA EMPRESA ENTERA: las seis salas a la vez. No es un
-  //  departamento más — cambia qué se monta, no cuál se mira.
-  let deptoId = $state(DEPARTAMENTOS[0].id);
-  let depto = $derived(DEPARTAMENTOS.find((d) => d.id === deptoId) ?? DEPARTAMENTOS[0]);
+  const SALAS = salasDe(data.organizacion);
+  const PISOS = pisosDe(data.organizacion, SALAS);
+  /**
+   * De dónde salió la estructura, y por qué se muestra.
+   *
+   * `por_defecto` significa que la empresa no declaró su organización y se está
+   * viendo la estructura genérica del producto. Las dos se dibujan igual, así
+   * que sin decirlo una empresa creería que configuró algo que no configuró.
+   */
+  const ORIGEN = data.organizacion?.origen ?? null;
+
+  /**
+   * QUÉ SE ESTÁ MIRANDO. Tres cosas distintas, no una con variantes:
+   *
+   *   edificio   los niveles apilados, con su núcleo y su estructura
+   *   piso       un nivel aislado, bajado al suelo
+   *   sala       una sala sola, como estaba antes de que hubiera niveles
+   *
+   * Cambiarlo DESMONTA y vuelve a montar la escena. No es pereza: entre una
+   * sala y el edificio cambia el recinto, el mobiliario, el número de plantas y
+   * hasta el límite del zoom. Reconstruirlo en caliente sería mantener dos
+   * caminos para el mismo resultado, y el segundo nunca se prueba.
+   */
+  let vista = $state(
+    /** @type {{ tipo: 'edificio' } | { tipo: 'piso', nivel: number } | { tipo: 'sala', id: string }} */
+    (SALAS.length === 0 ? { tipo: 'edificio' } : { tipo: 'edificio' })
+  );
+  let sala = $derived(vista.tipo === 'sala' ? salaPorId(SALAS, vista.id) : null);
+  let pisoVisto = $derived(
+    vista.tipo === 'piso' ? (PISOS.find((p) => p.nivel === vista.nivel) ?? null) : null
+  );
 
   /**
    * El inventario se lee UNA vez, al montar. El compilador avisa de que esto
@@ -57,12 +90,64 @@
    * inventario cambiara habría que remontar, que es lo que pasa al navegar.
    */
   const inventario = data.agentes;
-  let planta = $derived(
-    deptoId === null ? plantaDeLaEmpresa(inventario) : plantaDe(depto, inventario)
+
+  /**
+   * El edificio, cuando lo que se mira es un edificio.
+   *
+   * `soloNivel` es lo único que cambia entre la vista de conjunto y un nivel
+   * aislado: el compositor ya sabe bajar el nivel al suelo y recalcular el
+   * recinto. Tener dos funciones —una para el edificio y otra para un piso—
+   * sería tener dos geometrías que se van separando sin que nadie lo note.
+   */
+  let edificio = $derived(
+    SALAS.length === 0 || vista.tipo === 'sala'
+      ? null
+      : edificioDe(SALAS, inventario, PISOS,
+                   { soloNivel: vista.tipo === 'piso' ? vista.nivel : null })
   );
-  /** Los puestos de lo que se esté mirando: una sala o las seis. */
+
+  let planta = $derived(
+    SALAS.length === 0
+      ? null
+      : vista.tipo === 'sala'
+        ? plantaDe(sala ?? SALAS[0], inventario)
+        : (edificio?.plantas?.length ? edificio.plantas : null)
+  );
+
+  /**
+   * Hasta dónde se puede alejar la cámara en lo que se está mirando.
+   *
+   * Medido: once salas en tres niveles ocupan 3.552 × 2.946 píxeles de mundo y
+   * caben en una vista de 1.625 × 600 a escala 0,204. Con el límite de una sala
+   * —0,4— la vista de conjunto nace recortada. Un nivel aislado entra a 0,42 y
+   * no necesita nada.
+   *
+   * No se baja para todos: en una sala el límite existe porque por debajo el
+   * mobiliario es una mancha, y eso no cambió.
+   */
+  let escalaMinima = $derived(vista.tipo === 'edificio' ? 0.16 : undefined);
+
+  /** Cómo se llama lo que se está mirando. */
+  let titulo = $derived(
+    SALAS.length === 0
+      ? 'Sin estructura'
+      : vista.tipo === 'edificio'
+        ? 'El edificio'
+        : vista.tipo === 'piso'
+          ? (pisoVisto?.rotulo || `Piso ${vista.nivel}`)
+          : (sala?.rotulo ?? 'Sala desconocida')
+  );
+  let subtitulo = $derived(
+    vista.tipo === 'edificio'
+      ? `${SALAS.filter((s) => s.tipo === 'departamento').length} departamentos · ${PISOS.length} piso(s)`
+      : vista.tipo === 'piso'
+        ? `Piso ${vista.nivel} · ${pisoVisto?.salas?.length ?? 0} sala(s)`
+        : (sala?.direccion || (sala?.tipo === 'espacio' ? 'Espacio complementario' : ''))
+  );
+
+  /** Los puestos de lo que se esté mirando: una sala, un nivel o el edificio. */
   let puestosVisibles = $derived(
-    Array.isArray(planta) ? planta.flatMap((p) => p.puestos) : planta.puestos
+    planta === null ? [] : Array.isArray(planta) ? planta.flatMap((p) => p.puestos) : planta.puestos
   );
   let agentesConPuesto = $derived(puestosVisibles.map((p) => p.agente).filter(Boolean));
 
@@ -142,7 +227,7 @@
    * contiene este puesto en vez de asumir la vigente.
    */
   let capacidadesDelPuesto = $derived.by(() => {
-    if (!puestoSeleccionado) return [];
+    if (!puestoSeleccionado || planta === null) return [];
     const plantas = Array.isArray(planta) ? planta : [planta];
     const suya = plantas.find((p) => p.puestos.some((q) => q.id === puestoSeleccionado.id));
     return suya?.capacidades ?? [];
@@ -237,9 +322,17 @@
   /* ── montaje ────────────────────────────────────────────────────────────── */
   $effect(() => {
     if (!lienzo) return;
-    //  Leer `planta` acá es lo que hace que cambiar de departamento vuelva a
-    //  ejecutar este efecto: la escena se destruye y se monta de nuevo.
+    //  Leer `planta` acá es lo que hace que cambiar de sala vuelva a ejecutar
+    //  este efecto: la escena se destruye y se monta de nuevo.
     const laPlanta = planta;
+    const elZoom = escalaMinima;
+    //  Sin estructura no se monta nada, y NO se cae a una inventada: dibujar
+    //  un edificio que nadie declaró sería afirmar cómo es una empresa que no
+    //  se pudo consultar. El aviso lo da el pie.
+    if (laPlanta === null) {
+      montando = false;
+      return;
+    }
     let vivo = true;
     /** @type {any} */
     let reloj = null;
@@ -255,7 +348,7 @@
         ]);
         if (!vivo) return;
         visualizar = adaptador.visualizar;
-        escena = await montarEscena({ contenedor: lienzo, planta: laPlanta });
+        escena = await montarEscena({ contenedor: lienzo, planta: laPlanta, escalaMinima: elZoom });
         if (!vivo) {
           escena.destruir();
           escena = null;
@@ -302,35 +395,56 @@
   }
 </script>
 
-<svelte:head><title>Oficina virtual · {deptoId === null ? 'La empresa' : depto.rotulo}</title></svelte:head>
+<svelte:head><title>Oficina virtual · {titulo}</title></svelte:head>
 
 <div class="pantalla">
   <header class="barra">
     <div class="donde">
-      <h1>{deptoId === null ? 'La empresa' : depto.rotulo}</h1>
+      <h1>{titulo}</h1>
       <p>
-        {deptoId === null
-          ? `${DEPARTAMENTOS.length} departamentos`
-          : depto.direccion} · prototipo de oficina virtual
+        {subtitulo}
+        {#if ORIGEN === 'por_defecto'}
+          · <span class="procedencia" data-prueba="origen-organizacion">estructura por defecto del producto</span>
+        {:else if ORIGEN === 'declarada'}
+          · <span data-prueba="origen-organizacion">organización declarada por la empresa</span>
+        {/if}
       </p>
     </div>
 
     <!-- El selector de sala. Cambiarlo remonta la escena entera: es otra
          planta, no el mismo recinto con otros muebles. -->
-    <nav class="salas" aria-label="Departamento">
+    <!-- Tres niveles de acercamiento, y el orden importa: se entra por el
+         edificio, se elige un piso y se entra a una sala. Es el recorrido que
+         una persona hace al buscar algo, y el botón del edificio es siempre la
+         vuelta atrás. -->
+    <nav class="salas" aria-label="Qué se mira">
       <button
         type="button"
-        class:activa={deptoId === null}
-        aria-pressed={deptoId === null}
-        onclick={() => { deptoId = null; seleccionado = null; }}
-      >La empresa</button>
-      {#each DEPARTAMENTOS as d (d.id)}
+        class:activa={vista.tipo === 'edificio'}
+        aria-pressed={vista.tipo === 'edificio'}
+        onclick={() => { vista = { tipo: 'edificio' }; seleccionado = null; }}
+      >El edificio</button>
+      <!-- De arriba hacia abajo, que es como se lee un edificio. El piso es un
+           dato de la organización: el botón aísla ese nivel y lo baja al suelo,
+           porque un piso flotando a dos pisos de altura no dice nada. -->
+      {#each PISOS as piso (piso.nivel)}
         <button
           type="button"
-          class:activa={d.id === deptoId}
-          aria-pressed={d.id === deptoId}
-          onclick={() => { deptoId = d.id; seleccionado = null; }}
-        >{d.rotulo}</button>
+          class="nivel"
+          class:activa={vista.tipo === 'piso' && vista.nivel === piso.nivel}
+          aria-pressed={vista.tipo === 'piso' && vista.nivel === piso.nivel}
+          title={piso.rotulo || `Piso ${piso.nivel}`}
+          onclick={() => { vista = { tipo: 'piso', nivel: piso.nivel }; seleccionado = null; }}
+        >P{piso.nivel}{#if !piso.declarado}<em title="Ningún piso declarado con este nivel">?</em>{/if}</button>
+        {#each piso.salas as s (s.id)}
+          <button
+            type="button"
+            class:activa={vista.tipo === 'sala' && vista.id === s.id}
+            class:espacio={s.tipo === 'espacio'}
+            aria-pressed={vista.tipo === 'sala' && vista.id === s.id}
+            onclick={() => { vista = { tipo: 'sala', id: s.id }; seleccionado = null; }}
+          >{s.rotulo}</button>
+        {/each}
       {/each}
     </nav>
 
@@ -395,10 +509,16 @@
   <footer class="pie">
     {#if data.error}
       <span class="alarma">Inventario de agentes: {data.error}</span>
+    {:else if SALAS.length === 0}
+      <span class="alarma">
+        No se pudo leer la estructura de la empresa: no se dibuja ningún edificio
+        a propósito, porque inventarlo afirmaría cómo es una empresa que no se
+        pudo consultar.
+      </span>
     {:else if agentesConPuesto.length === 0}
       <span class="alarma">
-        El inventario no trae ningún agente del área «{depto.id}»: los puestos se
-        dibujan vacíos a propósito.
+        Ningún puesto de «{titulo}» tiene un agente del inventario: se dibujan
+        vacíos a propósito.
       </span>
     {:else}
       <span>
@@ -425,6 +545,17 @@
     min-height: 520px;
     background: #0b0a1c;
     color: #e8e7f5;
+  }
+
+  /*  Un espacio complementario se ve distinto de un departamento porque NO es
+      uno: no agrupa areas ni agentes, y a una recepcion no se le asignan
+      responsabilidades. */
+  .salas button.espacio {
+    border-style: dashed;
+    opacity: 0.85;
+  }
+  .procedencia {
+    color: #ffd79a;
   }
 
   .barra {

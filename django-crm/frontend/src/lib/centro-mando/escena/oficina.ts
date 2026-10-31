@@ -70,8 +70,35 @@ export interface Planta {
    * el edificio la desplaza entera. Así una sala no necesita saber que hay
    * otras, que es lo que permitió montar las seis sin tocar nada de acá.
    */
-  origen?: { gx: number; gy: number };
+  origen?: { gx: number; gy: number; gz?: number };
   mundo: Mundo;
+  /**
+   * Si la sala lleva sus dos muros.
+   *
+   * `false` para una franja de circulación: un suelo por el que se pasa no
+   * tiene paredes, y ponérselas convertiría el edificio en un laberinto de
+   * tabiques que tapa justamente lo que hay que ver.
+   */
+  muros?: boolean;
+  /**
+   * Si se dibuja el canto del forjado por debajo del suelo.
+   *
+   * Es lo que convierte un suelo en una PLANTA. Sin él, un nivel apilado se ve
+   * como un tablero flotando a media altura — que es literalmente lo que la
+   * vista plana de la empresa parecía, y el motivo por el que se construyó
+   * esto.
+   */
+  losa?: boolean;
+  /** Baranda en los bordes abiertos: un suelo que termina en el aire. */
+  baranda?: boolean;
+  /** El nombre escrito en el canto del forjado, para leerlo de lejos. */
+  rotuloFrontal?: string;
+  /** En qué nivel del edificio está. Lo pone quien compone el edificio. */
+  nivel?: number;
+  /** Qué papel cumple: una sala, la circulación o el núcleo vertical. */
+  papel?: 'sala' | 'circulacion' | 'nucleo';
+  /** El identificador de la sala de la organización, si es una sala. */
+  sala?: string;
   /** El color propio del departamento. Tiñe la sala, nunca los estados. */
   acento?: number;
   /** La franja de suelo más clara que cruza el recinto. */
@@ -334,6 +361,205 @@ function construirSuelo(mundo: Mundo): Container {
   capa.addChild(marcas);
 
   return capa;
+}
+
+/**
+ * EL CANTO DEL FORJADO.
+ *
+ * Dos caras y nada mas: la del frente (gy = fondo) y la de la derecha
+ * (gx = ancho), que son las dos que mira el espectador en esta proyeccion. Las
+ * otras dos no se ven nunca, y dibujarlas seria pagar geometria por nada.
+ *
+ * POR QUE ESTO IMPORTA MAS DE LO QUE PARECE
+ * Un suelo isometrico sin canto no tiene espesor, y sin espesor no se lee como
+ * una planta de un edificio: se lee como una alfombra. Apilar tres alfombras no
+ * da un edificio, da tres alfombras apiladas -- que es exactamente la critica
+ * que trajo esta etapa. Son cuatro poligonos.
+ */
+function construirLosa(mundo: Mundo): Graphics {
+  const g = new Graphics();
+  const e = 0.6;
+
+  //  Cara frontal, a lo largo de gy = fondo.
+  g.poly(aplanar([
+    aPantalla(0, mundo.fondo, 0),
+    aPantalla(mundo.ancho, mundo.fondo, 0),
+    aPantalla(mundo.ancho, mundo.fondo, -e),
+    aPantalla(0, mundo.fondo, -e)
+  ])).fill({ color: PALETA.muroRemate });
+
+  //  Cara derecha, a lo largo de gx = ancho. Mas oscura: recibe menos luz, y
+  //  pintar las dos iguales es lo que hace que la esquina desaparezca.
+  g.poly(aplanar([
+    aPantalla(mundo.ancho, 0, 0),
+    aPantalla(mundo.ancho, mundo.fondo, 0),
+    aPantalla(mundo.ancho, mundo.fondo, -e),
+    aPantalla(mundo.ancho, 0, -e)
+  ])).fill({ color: tono(PALETA.muroRemate, -0.3) });
+
+  //  Una linea de luz en el borde superior del canto. Es el detalle que separa
+  //  la losa del aire que hay debajo.
+  for (const [a, b] of [
+    [aPantalla(0, mundo.fondo, 0), aPantalla(mundo.ancho, mundo.fondo, 0)],
+    [aPantalla(mundo.ancho, 0, 0), aPantalla(mundo.ancho, mundo.fondo, 0)]
+  ]) {
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  }
+  g.stroke({ width: 2, color: ACENTO_CLARO, alpha: 0.35 });
+
+  return g;
+}
+
+/**
+ * La baranda de los bordes abiertos.
+ *
+ * Un pasamanos y sus montantes, en las dos caras que se ven. No es adorno: un
+ * suelo que termina en el aire sin baranda se lee como un suelo CORTADO, y la
+ * diferencia entre «esta planta sigue y no la dibujamos» y «esta planta termina
+ * aqui» es justo lo que una seccion arquitectonica tiene que dejar claro.
+ */
+function construirBaranda(mundo: Mundo): Graphics {
+  const g = new Graphics();
+  const h = 0.8;
+
+  //  Los montantes, cada dos celdas y medio.
+  for (let gx = 0; gx <= mundo.ancho; gx += 2.5) {
+    const a = aPantalla(gx, mundo.fondo, 0);
+    const b = aPantalla(gx, mundo.fondo, h);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  }
+  for (let gy = 0; gy <= mundo.fondo; gy += 2.5) {
+    const a = aPantalla(mundo.ancho, gy, 0);
+    const b = aPantalla(mundo.ancho, gy, h);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  }
+  g.stroke({ width: 2, color: PALETA.metal, alpha: 0.5 });
+
+  //  El pasamanos.
+  const f0 = aPantalla(0, mundo.fondo, h);
+  const f1 = aPantalla(mundo.ancho, mundo.fondo, h);
+  const d1 = aPantalla(mundo.ancho, 0, h);
+  g.moveTo(d1.x, d1.y).lineTo(f1.x, f1.y).lineTo(f0.x, f0.y);
+  g.stroke({ width: 3, color: PALETA.metal, alpha: 0.75 });
+
+  return g;
+}
+
+/**
+ * Un tramo de escalera: peldanos que suben de verdad.
+ *
+ * Suben en `gz` uno a uno en vez de dibujar una rampa con una textura de
+ * rayas. Cuesta diez cajas y es la diferencia entre una escalera y un dibujo de
+ * una escalera -- en isometria una rampa lisa no tiene forma de nada.
+ */
+/** El fondo de la caja del nucleo, en celdas. Lo usa el reparto de peldanos. */
+const NUCLEO_FONDO = 4;
+
+function construirEscalera(gx: number, gy: number, alto = 4, peldanos = 9,
+                           desde = 0): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy) + 0.3;
+  const g = new Graphics();
+  const n = Math.max(2, Math.round(peldanos));
+  //  La huella de cada peldano se reparte, no se fija: un tramo que sube
+  //  quince unidades con peldanos de 0,3 saldria por fuera del nucleo.
+  const huella = (NUCLEO_FONDO - 1) / n;
+  for (let i = 0; i < n; i++) {
+    const z = desde + (i * alto) / n;
+    caja(g, gx, gy + i * huella, z, 1.7, huella * 1.05, alto / n, PALETA.muroRemate);
+  }
+  //  La zanca lateral, que es lo que le da el perfil inclinado.
+  g.poly(aplanar([
+    aPantalla(gx, gy, desde),
+    aPantalla(gx, gy + n * huella, desde + alto),
+    aPantalla(gx, gy + n * huella, desde + alto - 0.6),
+    aPantalla(gx, gy, desde - 0.6)
+  ])).fill({ color: tono(PALETA.muroRemate, -0.35) });
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * El ascensor: una caja con su puerta iluminada.
+ *
+ * La puerta lleva el acento del nivel, no un color propio. Un ascensor que
+ * brilla igual en los tres pisos deja de ser una referencia y pasa a ser un
+ * mueble repetido.
+ */
+function construirAscensor(gx: number, gy: number, alto = 3.6): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy) + 0.3;
+  const g = new Graphics();
+  caja(g, gx, gy, 0, 1.7, 1.7, alto, PALETA.muroLateral);
+  //  La puerta, en la cara que mira al espectador (+gy). Alta de 2,4 y no de
+  //  la altura del hueco: una puerta de quince unidades es un porton.
+  const h = Math.min(2.4, alto - 0.4);
+  g.poly(aplanar([
+    aPantalla(gx + 0.25, gy + 1.7, h),
+    aPantalla(gx + 1.45, gy + 1.7, h),
+    aPantalla(gx + 1.45, gy + 1.7, 0.15),
+    aPantalla(gx + 0.25, gy + 1.7, 0.15)
+  ])).fill({ color: tono(ACENTO, -0.45) });
+  //  La junta central: el trazo que lo convierte en una puerta.
+  const a = aPantalla(gx + 0.85, gy + 1.7, h);
+  const b = aPantalla(gx + 0.85, gy + 1.7, 0.15);
+  g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  g.stroke({ width: 2, color: ACENTO_CLARO, alpha: 0.7 });
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/** Una columna estructural. Es lo que hace que una losa parezca sostenida. */
+function construirColumna(gx: number, gy: number, alto = 4.6): Mueble {
+  const nodo = new Container();
+  //  Por DETRAS de todo lo demas de su celda: una columna que tapa un
+  //  escritorio es peor que ninguna columna.
+  nodo.zIndex = profundidad(gx, gy) - 0.4;
+  const g = new Graphics();
+  caja(g, gx, gy, -0.6, 0.7, 0.7, alto + 0.6, PALETA.muroRemate);
+  //  Una arista de luz: sin ella, a contraluz entre dos losas la columna se
+  //  pierde contra el fondo y el nivel vuelve a parecer que flota.
+  const a = aPantalla(gx + 0.7, gy + 0.7, -0.6);
+  const b = aPantalla(gx + 0.7, gy + 0.7, alto);
+  g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  g.stroke({ width: 2, color: tono(PALETA.muroRemate, 0.35), alpha: 0.8 });
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * El nombre de la sala, escrito en el canto del forjado.
+ *
+ * POR QUE AQUI Y NO EN EL MURO. El cartel del muro de fondo sigue existiendo y
+ * se lee al mirar una sala sola. En el edificio no: con la separacion medida
+ * entre niveles, el muro de fondo solo se ve hasta 2,7 de sus 4 unidades, y el
+ * cartel vive a 3,63. Un nombre que a veces se ve no es un nombre.
+ *
+ * En el canto se lee de lejos, que es como se mira un edificio entero. Es el
+ * directorio de la planta.
+ */
+function construirRotuloFrontal(rotulo: string, mundo: Mundo): Container {
+  const nodo = new Container();
+  const texto = new Text({
+    text: rotulo.toUpperCase(),
+    style: {
+      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      fontSize: 13,
+      fontWeight: '700',
+      fill: ACENTO_CLARO,
+      letterSpacing: 1.8
+    },
+    resolution: 2
+  });
+  texto.anchor.set(0.5, 0.5);
+  const centro = aPantalla(mundo.ancho / 2, mundo.fondo, -0.3);
+  texto.position.set(centro.x, centro.y);
+  //  Acostado sobre el plano del canto, igual que el cartel sobre el muro: sin
+  //  la inclinacion se ve pegado por delante, como una etiqueta de la interfaz
+  //  y no como algo escrito en el edificio.
+  texto.skew.y = -Math.atan2(BALDOSA.alto / 2, BALDOSA.ancho / 2);
+  nodo.addChild(texto);
+  return nodo;
 }
 
 function construirMuros(mundo: Mundo): Graphics {
@@ -1461,7 +1687,13 @@ const TIPOS: Record<string, (m: Mueble2D, tx: Texturas) => Mueble> = {
   dispensador: (m) => construirDispensador(m.gx ?? 0, m.gy ?? 0),
   mostrador: (m) => construirMostrador(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2),
   mesa: (m, tx) => construirMesa(m.gx ?? 0, m.gy ?? 0, tx),
-  estanteria: (m) => construirEstanteria(m.gy ?? 0, m.largo ?? 2)
+  estanteria: (m) => construirEstanteria(m.gy ?? 0, m.largo ?? 2),
+  //  Los tres del nucleo vertical. Entran al catalogo como cualquier otro: la
+  //  escena sabe dibujar TIPOS y no sabe que esto es un nucleo.
+  escalera: (m) => construirEscalera(m.gx ?? 0, m.gy ?? 0, m.alto ?? 4,
+                                     m.peldanos ?? 9, m.desde ?? 0),
+  ascensor: (m) => construirAscensor(m.gx ?? 0, m.gy ?? 0, m.alto ?? 3.6),
+  columna: (m) => construirColumna(m.gx ?? 0, m.gy ?? 0, m.alto ?? 4.6)
 };
 
 /** Los tipos de mueble que una planta puede pedir. Para probarlo desde fuera. */
@@ -1479,13 +1711,44 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   //  ancho cero, y así hay un solo camino de código.
   PASILLO = planta.pasillo ?? { desde: 0, hasta: 0 };
 
+  //  La losa va DEBAJO del suelo, y por eso su zIndex es el mas bajo de la
+  //  sala. Puesta por encima, el canto se dibuja sobre las baldosas y la
+  //  planta parece tener un reborde en vez de un espesor.
+  if (planta.losa) {
+    const losa = construirLosa(mundo);
+    losa.zIndex = -2500;
+    raiz.addChild(losa);
+  }
+
   const suelo = construirSuelo(mundo);
   suelo.zIndex = -2000;
   raiz.addChild(suelo);
 
-  const muros = construirMuros(mundo);
-  muros.zIndex = -1000;
-  raiz.addChild(muros);
+  //  Por defecto SI lleva muros: una sala sola es lo que habia antes de que
+  //  existieran los niveles, y tiene que seguir viendose igual.
+  if (planta.muros !== false) {
+    const muros = construirMuros(mundo);
+    muros.zIndex = -1000;
+    raiz.addChild(muros);
+  }
+
+  if (planta.rotuloFrontal) {
+    const rot = construirRotuloFrontal(planta.rotuloFrontal, mundo);
+    //  En la capa de rotulos no: esa va por encima de TODO, y el nombre de una
+    //  sala del fondo taparia el personaje de una sala de delante. Esto va
+    //  pegado a su propia losa, que es donde esta escrito.
+    rot.zIndex = -2400;
+    rot.eventMode = 'none';
+    raiz.addChild(rot);
+  }
+
+  if (planta.baranda) {
+    const baranda = construirBaranda(mundo);
+    //  Por encima del suelo y por debajo del mobiliario: una baranda delante
+    //  de un escritorio lo tacharia.
+    baranda.zIndex = -1500;
+    raiz.addChild(baranda);
+  }
 
   const animables: ((t: number, dt: number) => void)[] = [];
 

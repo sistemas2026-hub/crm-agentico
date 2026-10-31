@@ -34,6 +34,7 @@ export async function load({ locals, fetch }) {
     return {
       agentes: [],
       areas: [],
+      organizacion: null,
       error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL o la empresa de la sesión)'
     };
   }
@@ -50,6 +51,7 @@ export async function load({ locals, fetch }) {
       return {
         agentes: [],
         areas: areas.map((/** @type {any} */ a) => a?.nombre ?? a).filter(Boolean),
+        organizacion: null,
         error: datos.error || 'No se pudo leer el inventario de agentes'
       };
     }
@@ -67,12 +69,27 @@ export async function load({ locals, fetch }) {
         orientado_a: a.orientado_a ?? null
       })),
       areas: areas.map((/** @type {any} */ a) => a?.nombre ?? a).filter(Boolean),
+      //  LA ESTRUCTURA DE LA EMPRESA, tal como el motor la sirve: sus pisos,
+      //  sus departamentos, sus espacios y de donde salio (`origen`).
+      //
+      //  Viaja entera y sin recortar, al contrario que `agentes`. No es una
+      //  excepcion a <<solo viaja lo que se usa>>: aqui TODO se usa, porque
+      //  esto es justamente lo que la pantalla tiene que dibujar. Lo que se
+      //  recorta de los agentes es su actividad, que llega por el flujo
+      //  incremental con su propia lista blanca.
+      //
+      //  `null` cuando no se pudo leer, y eso NO se rellena con nada. Esta
+      //  pantalla dibujaba seis departamentos escritos en el frontend; si
+      //  ahora cayera a una estructura inventada cuando el motor no responde,
+      //  estaria afirmando como es una empresa que no pudo consultar.
+      organizacion: datos.organizacion ?? null,
       error: null
     };
   } catch (/** @type {any} */ err) {
     return {
       agentes: [],
       areas: areas.map((/** @type {any} */ a) => a?.nombre ?? a).filter(Boolean),
+      organizacion: null,
       error: err?.message || 'No se pudo contactar al asistente'
     };
   }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { COLOR_DE_ANIMACION, PIEL, PELO, ROPA, aspectoDe, coloresConAcento } from './paleta';
-import { DEPARTAMENTOS } from '../departamentos.js';
+import { salasDe } from '../departamentos.js';
+import PORDEFECTO from '../__fixtures__/organizacion-por-defecto.json';
 
 /**
  * QUE DOS AGENTES NO SEAN LA MISMA PERSONA, Y QUE UN ROJO SIGA SIENDO UN ROJO.
@@ -34,9 +35,9 @@ describe('el aspecto es estable', () => {
     // Por construcción, no por suerte. La primera versión lo dejaba al reparto
     // del hash y esta misma prueba la cazó: de cuatro puestos salían tres
     // aspectos, o sea dos agentes idénticos sentados en la misma sala.
-    for (const d of DEPARTAMENTOS) {
-      const camisas = d.planta.puestos.map((p, i) => aspectoDe(p.id, i).camisa);
-      expect(new Set(camisas).size, d.id).toBe(camisas.length);
+    for (const s of salasDe(PORDEFECTO)) {
+      const camisas = s.planta.puestos.map((p, i) => aspectoDe(p.id, i).camisa);
+      expect(new Set(camisas).size, s.id).toBe(camisas.length);
     }
   });
 
@@ -111,24 +112,41 @@ describe('el acento tiñe la sala, NUNCA los estados', () => {
   });
 });
 
-describe('cada departamento tiene su color, y ninguno choca con una alarma', () => {
-  it('todos declaran acento', () => {
-    for (const d of DEPARTAMENTOS) {
-      expect(typeof d.planta.acento, d.id).toBe('number');
+describe('cada sala tiene su color, y ninguno choca con una alarma', () => {
+  //  LAS SALAS SALEN DE LA CONFIGURACION (31/10/2026). Antes esta guarda
+  //  recorria una lista de seis departamentos escrita en el frontend; ahora
+  //  recorre las once salas que declara la organizacion de la empresa piloto,
+  //  leidas del mismo documento que sirve el motor.
+  //
+  //  Que la guarda siga siendo util con la lista llegando de fuera es parte de
+  //  lo que se compro: el dia que una empresa elija un acento rojizo desde su
+  //  configuracion, esto lo encuentra.
+  const SALAS = salasDe(PORDEFECTO);
+
+  it('hay salas que vigilar (si no, la guarda no prueba nada)', () => {
+    //  Una guarda que recorre una lista vacia pasa siempre, y ahora la lista
+    //  viene de un documento externo: si el fixture se vaciara, esta guarda se
+    //  volveria decorativa sin que nada se pusiera rojo.
+    expect(SALAS.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('todas declaran acento', () => {
+    for (const s of SALAS) {
+      expect(typeof s.planta.acento, s.id).toBe('number');
     }
   });
 
-  it('no se repiten entre departamentos', () => {
-    const acentos = DEPARTAMENTOS.map((d) => d.planta.acento);
+  it('no se repiten entre salas', () => {
+    const acentos = SALAS.map((s) => s.planta.acento);
     expect(new Set(acentos).size).toBe(acentos.length);
   });
 
-  it('se distinguen entre sí de un vistazo', () => {
-    // No es la garantía fuerte --esa es la distancia al rojo-- pero dos salas
-    // del mismo azul se leerían como la misma.
+  it('se distinguen entre si de un vistazo', () => {
+    // No es la garantia fuerte --esa es la distancia al rojo-- pero dos salas
+    // del mismo azul se leerian como la misma.
     const canales = (c) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
-    for (const a of DEPARTAMENTOS) {
-      for (const b of DEPARTAMENTOS) {
+    for (const a of SALAS) {
+      for (const b of SALAS) {
         if (a === b) continue;
         const [r1, g1, b1] = canales(a.planta.acento);
         const [r2, g2, b2] = canales(b.planta.acento);
@@ -139,14 +157,14 @@ describe('cada departamento tiene su color, y ninguno choca con una alarma', () 
   });
 
   it('ninguno se parece al rojo de un fallo', () => {
-    // Un acento rojizo haría que una sala tranquila se leyera como una sala en
+    // Un acento rojizo haria que una sala tranquila se leyera como una sala en
     // alarma. Se mide la distancia en los tres canales.
     const canales = (c) => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
     const [rr, rg, rb] = canales(COLOR_DE_ANIMACION.alerta);
-    for (const d of DEPARTAMENTOS) {
-      const [r, g, b] = canales(d.planta.acento);
+    for (const s of SALAS) {
+      const [r, g, b] = canales(s.planta.acento);
       const distancia = Math.abs(r - rr) + Math.abs(g - rg) + Math.abs(b - rb);
-      expect(distancia, `${d.id} se parece demasiado al rojo de alarma`).toBeGreaterThan(160);
+      expect(distancia, `${s.id} se parece demasiado al rojo de alarma`).toBeGreaterThan(160);
     }
   });
 });

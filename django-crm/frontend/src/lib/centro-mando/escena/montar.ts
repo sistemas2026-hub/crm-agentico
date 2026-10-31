@@ -98,6 +98,20 @@ export interface OpcionesDeEscena {
    * obligó a tocar nada de `oficina.ts`.
    */
   planta: Planta | Planta[];
+  /**
+   * Hasta dónde se puede alejar la cámara.
+   *
+   * El límite normal es 0,4 y su motivo sigue siendo bueno: por debajo, en una
+   * SALA, el mobiliario es una mancha y el texto no se lee. Un edificio entero
+   * es otro objeto — se midió: once salas en tres niveles ocupan 3.552 × 2.946
+   * píxeles de mundo, y caben en una vista de 1.625 × 600 a escala **0,204**.
+   * Con el límite de la sala, la vista de conjunto nace recortada y no hay
+   * forma de ver el edificio completo.
+   *
+   * Así que quien monta decide. No se baja el límite para todos: en una sala
+   * no hace falta y el motivo por el que existe no cambió.
+   */
+  escalaMinima?: number;
 }
 
 interface Habitante {
@@ -152,12 +166,27 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
    *  rejilla, habría que intercalar sus objetos y esto no lo hace. Por eso el
    *  reparto deja pasillo entre ellas. */
   const salas = plantas.map((planta) => {
-    const o = planta.origen ?? { gx: 0, gy: 0 };
+    const o = { gz: 0, ...(planta.origen ?? { gx: 0, gy: 0 }) };
     const oficina = construirOficina(planta, texturas);
     const caja = new Container();
-    const p = aPantalla(o.gx, o.gy, 0);
+    //  La altura entra en la posición, que es lo único que hace falta para
+    //  apilar un nivel: en esta proyección `gz` se RESTA de la `y`.
+    const p = aPantalla(o.gx, o.gy, o.gz);
     caja.position.set(p.x, p.y);
-    caja.zIndex = profundidad(o.gx, o.gy);
+    //  EL ORDEN ENTRE NIVELES NO ES EL ORDEN DENTRO DE UN NIVEL, y mezclarlos
+    //  es lo que rompe un edificio.
+    //
+    //  Dentro de un nivel manda la profundidad: lo de delante se dibuja
+    //  después. Entre niveles manda la ALTURA: el piso de arriba se dibuja
+    //  después del de abajo, porque su losa tapa el fondo del de abajo y eso
+    //  es justamente lo que hace que se lea como un edificio y no como tres
+    //  bandejas transparentes.
+    //
+    //  Por eso la altura multiplica: con `profundidad(gx, gy, gz)` —que pesa
+    //  `gz` por 0,001— un nivel entero quedaría intercalado con el de abajo
+    //  según su coordenada, y el resultado es un piso que asoma por dentro de
+    //  otro. Se midió al construirlo.
+    caja.zIndex = o.gz * 1000 + profundidad(o.gx, o.gy);
     caja.addChild(oficina.raiz);
     mundo.addChild(caja);
     return { oficina, origen: o };
@@ -168,7 +197,11 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     mundo: {
       ancho: Math.max(...salas.map((s) => s.origen.gx + s.oficina.mundo.ancho)),
       fondo: Math.max(...salas.map((s) => s.origen.gy + s.oficina.mundo.fondo)),
-      alto: Math.max(...salas.map((s) => s.oficina.mundo.alto))
+      //  La altura del edificio es la del nivel más alto MÁS su propio muro.
+      //  Tomar sólo el alto de las salas dejaba los pisos de arriba fuera del
+      //  encuadre: la cámara los limitaba contra un recinto de cuatro
+      //  unidades y el tercer piso quedaba cortado por arriba.
+      alto: Math.max(...salas.map((s) => s.origen.gz + s.oficina.mundo.alto))
     },
     puestos: salas.flatMap((s) => s.oficina.puestos),
     animar(t: number, dt: number) {
@@ -193,7 +226,13 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     ancho: contenedor.clientWidth || 960,
     alto: contenedor.clientHeight || 600
   });
-  const camara = new Camara(extension, vista(), LIMITES);
+  //  Los límites de ESTA escena. `escalaMinima` sólo afloja el piso del zoom;
+  //  todo lo demás —el tope, el paso de la rueda, el margen— es igual, porque
+  //  esos no dependen de qué se esté mirando.
+  const limites = opciones.escalaMinima
+    ? { ...LIMITES, escalaMin: Math.min(opciones.escalaMinima, LIMITES.escalaMin) }
+    : LIMITES;
+  const camara = new Camara(extension, vista(), limites);
 
   /* ── los habitantes ───────────────────────────────────────────────────── */
   const habitantes: Habitante[] = oficina.puestos.map((puesto, asiento) => {

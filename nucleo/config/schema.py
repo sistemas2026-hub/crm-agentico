@@ -2108,6 +2108,316 @@ class AreaDeTrabajo(Base):
         return v
 
 
+# =============================================================================
+#  LA ORGANIZACION DE LA EMPRESA
+# =============================================================================
+#
+#  POR QUE ESTO ES CONFIGURACION Y NO CODIGO
+#  ------------------------------------------
+#  La oficina virtual dibujaba SEIS departamentos, y los seis estaban escritos
+#  en el frontend. Se midio el 30/10/2026 de donde salian: de agrupar el campo
+#  'area' de los roles configurados. O sea que la pantalla no mostraba la
+#  organizacion de la empresa -- mostraba los GRUPOS DE SUS AGENTES, que es
+#  otra cosa.
+#
+#  La diferencia no es terminologica y por eso esto existe:
+#
+#    * Un departamento puede no tener NINGUN agente. Recursos Humanos y
+#      Auditoria son departamentos reales de un ISP y hoy no hay un agente que
+#      los represente. Deducidos de los agentes, no existen; y una empresa que
+#      mira su propia oficina y no ve a Recursos Humanos no esta viendo su
+#      empresa.
+#    * Dos areas distintas pueden ser UN departamento. 'Soporte Tecnico' y
+#      'Atencion al Cliente' son dos etiquetas de rol y una sola puerta de
+#      servicio.
+#    * El organigrama cambia sin que cambien los agentes, y al reves.
+#
+#  Y hay un motivo de producto que manda sobre los tres: este software conecta
+#  MUCHAS empresas. El ISP chico tiene cuatro departamentos en una planta; el
+#  grande, quince en cinco niveles. Deducir la estructura de los agentes obliga
+#  a una sesion de codigo por empresa nueva, que es exactamente lo que
+#  CLAUDE.md 3.3 prohibe.
+#
+#  QUE DECLARA LA EMPRESA Y QUE SABE EL PRODUCTO
+#  ----------------------------------------------
+#  La empresa declara su ORGANIZACION: que departamentos tiene, como se llaman,
+#  en que piso estan, que etiquetas de area les corresponden, que agente ocupa
+#  cada puesto.
+#
+#  El producto sabe dibujar SALAS: cuanto mide cada una, donde van los muebles,
+#  donde estan los escritorios. Eso es una biblioteca de plantillas genericas y
+#  vive en la pantalla, igual que 'AreaDeTrabajo.icono' nombra un dibujo de un
+#  catalogo que el motor no conoce. La empresa ELIGE una plantilla; no describe
+#  geometria, que no es una decision que nadie quiera tomar en un formulario.
+#
+#  Por eso aqui no se valida que la plantilla exista: el motor no tiene el
+#  catalogo. Lo que si se valida es todo lo que, mal escrito, haria que la
+#  pantalla afirmara algo falso -- un agente sentado en dos sitios, un area
+#  reclamada por dos departamentos, un piso que no existe.
+
+
+def _validar_id_de_sala(v: str) -> str:
+    """
+    Un identificador estable, en minusculas y sin espacios.
+
+    Es lo que se guarda y lo que se referencia, asi que cambiarlo rompe lo que
+    ya apuntaba al valor viejo -- mismo criterio que 'AreaDeTrabajo.nombre'.
+    Y se exige el formato porque este valor termina en una URL y en una clave
+    de diccionario: aceptar 'NOC y Redes' como id daria dos identificadores
+    distintos para la misma sala segun quien la escriba.
+    """
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", v):
+        raise ValueError(
+            f"organizacion: identificador '{v}' invalido -- se espera minusculas, "
+            f"numeros y '_', empezando por letra (ej. 'recursos_humanos')")
+    return v
+
+
+def _validar_acento(v: str) -> str:
+    """
+    El color de la sala, '#rrggbb' y nada mas.
+
+    Mismo motivo que 'AreaDeTrabajo.color': el valor acaba en la interfaz de
+    todos, y aceptar texto libre seria dejar que la configuracion de una
+    empresa escriba lo que quiera ahi. Vacio es valido: la pantalla tiene un
+    acento por defecto para la plantilla.
+    """
+    if v and not re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+        raise ValueError(
+            f"organizacion: acento '{v}' invalido -- se espera '#rrggbb' "
+            f"(ej. '#4f46e5')")
+    return v
+
+
+class Ocupacion(Base):
+    """
+    Quien ocupa un puesto de una sala. Se DECLARA, nunca se deduce.
+
+    El 30/10/2026 la oficina sentaba a todos los agentes del area en orden
+    hasta llenar los puestos, y dibujaba nueve empleados donde hay seis: tres
+    de esos nueve roles no son empleados virtuales, son CAPACIDADES que se le
+    asignan a una persona real del CRM. Se busco un campo que los distinguiera
+    y no lo hay: 'orientado_a' separa 4 de 5 porque su valor por defecto es
+    'colaborador'. Deducirlo de ahi habria cambiado una invencion por otra.
+
+    Asi que la ocupacion es una declaracion. Un puesto que nadie declara queda
+    vacio, y eso es informacion verdadera.
+    """
+    # El identificador del puesto DENTRO de la plantilla ('principal', 'p1').
+    # No es global: dos salas de la misma plantilla tienen los mismos.
+    puesto: str = Field(min_length=1, max_length=40)
+    # El nombre del agente del catalogo de roles. Vacio = el puesto existe y
+    # esta libre, que no es lo mismo que no existir.
+    agente: str = ""
+    # Como se rotula el puesto, si la empresa quiere otro nombre que el de la
+    # plantilla. Vacio = el de la plantilla.
+    nombre: str = ""
+
+    @field_validator("puesto")
+    @classmethod
+    def _identificador(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_\-]*", v):
+            raise ValueError(
+                f"organizacion: puesto '{v}' invalido -- se esperan minusculas, "
+                f"numeros, '_' o '-'")
+        return v
+
+
+class EspacioDeTrabajo(Base):
+    """
+    Una sala que NO es un departamento: recepcion, direccion, una sala de
+    reuniones.
+
+    Existe como tipo aparte y no como un departamento mas porque no tiene lo
+    que define a un departamento -- no agrupa areas de trabajo ni agentes -- y
+    meterlo en la misma lista obligaria a que todos los campos de un
+    departamento fueran opcionales. Entonces un departamento mal cargado, sin
+    areas y sin puestos, pasaria la validacion haciendose pasar por un espacio.
+    """
+    id: str
+    rotulo: str = Field(min_length=1, max_length=60)
+    # En que nivel del edificio esta. Tiene que ser uno de los declarados.
+    piso: int = Field(default=1, ge=-5, le=200)
+    # Que sala del catalogo de la pantalla se usa para dibujarlo.
+    plantilla: str = Field(min_length=1, max_length=40)
+    acento: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def _identificador(cls, v: str) -> str:
+        return _validar_id_de_sala(v)
+
+    @field_validator("plantilla")
+    @classmethod
+    def _plantilla(cls, v: str) -> str:
+        return _validar_id_de_sala(v)
+
+    @field_validator("acento")
+    @classmethod
+    def _color_hex(cls, v: str) -> str:
+        return _validar_acento(v)
+
+
+class Departamento(Base):
+    """
+    Un departamento de la empresa. Puede no tener a nadie, y eso es valido.
+
+    'areas' es la lista de etiquetas de area que caen en este departamento, y
+    es un DATO por una razon medida: hay dos vocabularios de area que no
+    coinciden. La configuracion declara identificadores ('operativo') y el
+    campo 'area' de cada rol es texto libre ('Operaciones'). Con solo el
+    identificador, el departamento del NOC salia vacio en produccion -- medido
+    contra el YAML del tenant el 30/10/2026, no deducido. Aceptar parecidos
+    seria peor: el dia que una empresa tenga las dos cosas sentaria al agente
+    equivocado sin un error que lo explique.
+    """
+    id: str
+    rotulo: str = Field(min_length=1, max_length=60)
+    # La direccion de la que depende. Informativo, para la ficha.
+    direccion: str = Field(default="", max_length=80)
+    piso: int = Field(default=1, ge=-5, le=200)
+    plantilla: str = Field(min_length=1, max_length=40)
+    # Las etiquetas de area que este departamento reclama.
+    areas: list[str] = Field(default_factory=list)
+    # Roles que pertenecen al departamento y NO tienen puesto propio: son
+    # capacidades asignadas a personas reales. Se muestran en la ficha, sin
+    # escritorio. Ocultarlas seria otra forma de mentir.
+    capacidades: list[str] = Field(default_factory=list)
+    ocupaciones: list[Ocupacion] = Field(default_factory=list)
+    acento: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def _identificador(cls, v: str) -> str:
+        return _validar_id_de_sala(v)
+
+    @field_validator("plantilla")
+    @classmethod
+    def _plantilla(cls, v: str) -> str:
+        return _validar_id_de_sala(v)
+
+    @field_validator("acento")
+    @classmethod
+    def _color_hex(cls, v: str) -> str:
+        return _validar_acento(v)
+
+    @model_validator(mode="after")
+    def _un_puesto_una_vez(self) -> "Departamento":
+        vistos: set[str] = set()
+        for o in self.ocupaciones:
+            if o.puesto in vistos:
+                raise ValueError(
+                    f"organizacion: el departamento '{self.id}' declara dos veces "
+                    f"el puesto '{o.puesto}'")
+            vistos.add(o.puesto)
+        return self
+
+
+class Piso(Base):
+    """
+    Un nivel del edificio.
+
+    Los pisos son DATOS y no una constante igual a tres: tres es la
+    configuracion de la empresa piloto. Un ISP de cuatro departamentos en una
+    planta y uno de quince en cinco niveles tienen que poder expresarse sin
+    tocar codigo, y por eso la cantidad no esta acotada aqui mas que por lo que
+    un edificio puede ser.
+    """
+    nivel: int = Field(ge=-5, le=200)
+    rotulo: str = Field(default="", max_length=60)
+
+
+class Organizacion(Base):
+    """
+    La estructura de la empresa: sus pisos, sus departamentos y sus espacios.
+
+    VACIA SIGNIFICA 'NO DECLARADA', y no 'una empresa sin departamentos'. Quien
+    la sirva decide que hacer con eso; lo que no puede hacer es deducirla de
+    los agentes, que es el error que este modelo vino a corregir.
+    """
+    pisos: list[Piso] = Field(default_factory=list)
+    departamentos: list[Departamento] = Field(default_factory=list)
+    espacios: list[EspacioDeTrabajo] = Field(default_factory=list)
+
+    def declarada(self) -> bool:
+        return bool(self.departamentos)
+
+    @model_validator(mode="after")
+    def _coherente(self) -> "Organizacion":
+        #  1. Un identificador, una sala. Dos salas con el mismo id hacen que
+        #     seleccionar una seleccione la otra, y que los puestos de las dos
+        #     se llamen igual.
+        ids: dict[str, str] = {}
+        for d in self.departamentos:
+            ids[d.id] = "departamento"
+        for e in self.espacios:
+            if e.id in ids:
+                raise ValueError(
+                    f"organizacion: '{e.id}' esta declarado como {ids[e.id]} y "
+                    f"como espacio")
+            ids[e.id] = "espacio"
+        if len({d.id for d in self.departamentos}) != len(self.departamentos):
+            raise ValueError("organizacion: hay departamentos con el mismo id")
+        if len({e.id for e in self.espacios}) != len(self.espacios):
+            raise ValueError("organizacion: hay espacios con el mismo id")
+
+        #  2. Un piso que no existe no se puede dibujar. Si la empresa declara
+        #     niveles, todo tiene que caer en uno; si no declara ninguno, no se
+        #     exige nada -- una organizacion de una sola planta es legitima y
+        #     no tiene por que escribir la planta.
+        if self.pisos:
+            niveles = {p.nivel for p in self.pisos}
+            if len(niveles) != len(self.pisos):
+                raise ValueError("organizacion: hay dos pisos con el mismo nivel")
+            for sala in [*self.departamentos, *self.espacios]:
+                if sala.piso not in niveles:
+                    raise ValueError(
+                        f"organizacion: '{sala.id}' esta en el piso {sala.piso} y "
+                        f"ese piso no esta declarado")
+
+        #  3. Un area, un departamento. Reclamada por dos, el mismo agente se
+        #     dibujaria en dos salas y su trabajo se contaria dos veces. Se
+        #     compara sin tildes ni mayusculas porque los dos vocabularios de
+        #     area se escriben distinto: 'Atención al Cliente' y
+        #     'atencion_cliente' son la misma etiqueta.
+        duenio: dict[str, str] = {}
+        for d in self.departamentos:
+            for a in d.areas:
+                clave = re.sub(r"[^a-z0-9]+", "_", _sin_tildes(a)).strip("_")
+                if not clave:
+                    continue
+                if clave in duenio and duenio[clave] != d.id:
+                    raise ValueError(
+                        f"organizacion: el area '{a}' la reclaman "
+                        f"'{duenio[clave]}' y '{d.id}'")
+                duenio[clave] = d.id
+
+        #  4. Un agente, un asiento. Sentado en dos sitios, la misma actividad
+        #     animaria dos personajes y la empresa se veria con mas trabajo del
+        #     que tiene. Tambien cubre el caso de sentarlo en dos
+        #     departamentos, que es el que de verdad pasa al reorganizar.
+        asiento: dict[str, str] = {}
+        for d in self.departamentos:
+            for o in d.ocupaciones:
+                if not o.agente:
+                    continue
+                if o.agente in asiento:
+                    raise ValueError(
+                        f"organizacion: el agente '{o.agente}' esta sentado en "
+                        f"'{asiento[o.agente]}' y en '{d.id}:{o.puesto}'")
+                asiento[o.agente] = f"{d.id}:{o.puesto}"
+
+        #  5. Sentado Y declarado como capacidad es una contradiccion: una cosa
+        #     dice que tiene escritorio y la otra que no lo tiene.
+        for d in self.departamentos:
+            for cap in d.capacidades:
+                if cap in asiento:
+                    raise ValueError(
+                        f"organizacion: '{cap}' es capacidad de '{d.id}' y a la vez "
+                        f"ocupa el puesto '{asiento[cap]}'")
+        return self
+
+
 class IdentidadExterna(Base):
     """
     Como se identifica a un colaborador en el sistema donde de verdad se
@@ -3325,6 +3635,19 @@ class TenantConfig(Base):
     identidad_externa: IdentidadExterna | None = None
     # Las areas de trabajo del equipo. Vacio = la pantalla no ofrece area.
     areas: list[AreaDeTrabajo] = Field(default_factory=list)
+    # La estructura de la empresa: sus pisos, sus departamentos y sus espacios.
+    #
+    # VACIA SIGNIFICA "NO DECLARADA", y quien la sirve lo dice. No se
+    # rellena con los grupos de los agentes: ese era el error que este
+    # campo vino a corregir, y un valor por defecto silencioso lo
+    # reintroduciria por la puerta de atras -- la pantalla no podria
+    # distinguir "la empresa decidio esto" de "nadie lo decidio".
+    #
+    # No se confunde con "areas": un area es donde trabaja una PERSONA y
+    # que agentes le precarga; un departamento es una parte de la EMPRESA,
+    # existe sin nadie dentro, y agrupa varias areas. Los dos conviven y
+    # "Departamento.areas" es el puente entre ambos vocabularios.
+    organizacion: Organizacion = Field(default_factory=Organizacion)
     conversaciones: Conversaciones = Field(default_factory=Conversaciones)
     # Los codigos de cierre propios de esta empresa (B6, §3.5). Vacio es el
     # caso normal y funciona: el catalogo base de plataforma alcanza para
