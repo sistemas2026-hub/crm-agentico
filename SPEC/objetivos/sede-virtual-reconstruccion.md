@@ -538,6 +538,68 @@ por ahí a partir de ahora.
 
 ---
 
+## Los personajes: lo que se arregló antes de tocar el dibujo
+
+El encargo decía *«movimientos naturales, no figuras rígidas que cambian de
+postura bruscamente»*. Antes de dibujar nada mejor, había un defecto de sistema
+que explicaba buena parte de esa sensación.
+
+### Treinta y siete personas respiraban a la vez
+
+`poseDe(animacion, t)` es una función pura del estado y del tiempo, y
+`Transicion.avanzar(dt, t)` recibía el tiempo **global**. Todos los personajes
+en el mismo estado devolvían la misma pose **al píxel**: respirando, girando la
+cabeza y tecleando al unísono.
+
+El movimiento de cada figura ya era orgánico —las frecuencias se eligieron no
+redondas justamente para que respiración y mirada nunca se sincronicen—. Lo que
+no era orgánico era **el conjunto**.
+
+Ahora cada persona lleva su reloj: un desfase y un tempo derivados del
+**asiento**, no de `Math.random()`. La escena tiene que verse igual en dos
+cargas seguidas, o una captura deja de poder compararse con la anterior. El
+tempo varía un ±8% y no más: por encima de eso alguien teclea al doble que su
+vecino y se lee como un error de reproducción.
+
+Medido: de 37 asientos, al menos 28 caen en posturas distintas. Y 1,37 y 0,37
+no son redondos a propósito — con un paso entero los desfases se repiten cada
+pocos asientos y vuelven a aparecer filas enteras sincronizadas.
+
+### El gesto ambiental, y lo que NO puede ser
+
+Respirar y mirar de lado son continuos, y un cuerpo que sólo hace cosas
+continuas se lee como un mecanismo bien hecho, no como alguien sentado. Falta un
+movimiento **discreto y poco frecuente**: estirarse en la silla, echarse atrás,
+levantar la cabeza, y volver.
+
+**No es actividad, y eso está medido.** El aura y el brillo de pantalla —las dos
+señales que dicen que algo está pasando— no se tocan, y hay una prueba que
+afirma que su recorrido en reposo es **cero**. Un gesto de ambiente que subiera
+el aura estaría afirmando trabajo que nadie hizo. Es la misma regla que prohíbe
+dibujar un agente ocupado sin un evento detrás.
+
+Y se mide que sea un gesto y no un tic: ocurre entre el 2% y el 30% del tiempo.
+
+### Lo que queda del encargo de personajes
+
+| Pedido | Estado |
+|---|---|
+| Trabajar en computadores · reposo · alerta · despacho · desconocido | **ya existía**, con transiciones interpoladas |
+| Transiciones suaves | **ya existía**: 20 transiciones por el precio de una |
+| Que el conjunto no se mueva al unísono | **hecho** |
+| Gestos ambientales discretos | **hecho** |
+| Señales de ejecución activa, alertas, desconocido | **ya existía** |
+| **Caminar · sentarse · levantarse** | **NO hecho**, y con motivo |
+
+**Por qué caminar no entró.** Una figura que se levanta y recorre el pasillo es
+el movimiento que más dice *«acá pasa algo»*, y ahí está el problema: no hay
+ningún evento del motor que signifique «fulano se levantó». Dibujarlo sería
+exactamente lo que este objetivo prohíbe — inventar actividad. Entra el día que
+haya un evento que lo respalde, o como recorrido explícitamente ambiental y
+marcado como tal, que es una decisión de producto y no de dibujo.
+
+---
+
 ## Criterios de aceptación del objetivo
 
 | # | Evidencia | Cómo se comprueba |

@@ -405,6 +405,19 @@ function construirBaranda(mundo: Mundo): Graphics {
   g.moveTo(d1.x, d1.y).lineTo(f1.x, f1.y).lineTo(f0.x, f0.y);
   g.stroke({ width: 3, color: PALETA.metal, alpha: 0.75 });
 
+  //  EL FILO DE LUZ DEL BORDE DE FORJADO.
+  //
+  //  Una linea azul a ras de suelo, siguiendo el mismo borde abierto. Es el
+  //  acento tecnologico de la referencia, y a escala de edificio es lo que mas
+  //  trabaja: recorre cada planta de punta a punta, asi que las tres se leen
+  //  como tres lineas horizontales paralelas. Un detalle que solo se ve de
+  //  cerca no sirve para una vista de conjunto.
+  const s0 = aPantalla(0, mundo.fondo, 0.06);
+  const s1 = aPantalla(mundo.ancho, mundo.fondo, 0.06);
+  const s2 = aPantalla(mundo.ancho, 0, 0.06);
+  g.moveTo(s2.x, s2.y).lineTo(s1.x, s1.y).lineTo(s0.x, s0.y);
+  g.stroke({ width: 2.4, color: PALETA.azulTecno, alpha: 0.85 });
+
   return g;
 }
 
@@ -918,9 +931,14 @@ function construirLuminaria(gx: number, gy: number, texturas: Texturas): Mueble 
   charco.position.set(suelo.x, suelo.y);
   charco.width = 330;
   charco.height = 165;
-  charco.tint = 0xcfd6ff;
+  //  CALIDA, Y NO AZULADA. El tono anterior estaba afinado para un suelo
+  //  oscuro: sobre el suelo claro de ahora, una luz fria aditiva no se ve. Y
+  //  la referencia pide justo lo contrario del gris — oficinas CALIDAS vistas
+  //  desde una noche azul. El contraste entre los dos es lo que hace que el
+  //  edificio parezca encendido.
+  charco.tint = PALETA.luzCalida;
   charco.blendMode = 'add';
-  charco.alpha = 0.075;
+  charco.alpha = 0.2;
   nodo.addChild(charco);
 
   const g = new Graphics();
@@ -932,7 +950,7 @@ function construirLuminaria(gx: number, gy: number, texturas: Texturas): Mueble 
     animar(t) {
       // Una luminaria perfectamente estable es correcta y muerta. Un 2% de
       // variación lenta es lo que la vuelve luz.
-      charco.alpha = 0.07 + Math.sin(t * 0.4 + gx) * 0.012;
+      charco.alpha = 0.19 + Math.sin(t * 0.4 + gx) * 0.025;
     }
   };
 }

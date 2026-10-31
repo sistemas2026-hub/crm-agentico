@@ -183,8 +183,18 @@
       : [
           ...edificio.niveles.map((n) => ({
             texto: n.rotulo ? `P${n.nivel} · ${n.rotulo}` : `Piso ${n.nivel}`,
-            gx: 0,
-            gy: 4,
+            //  FUERA DE LA HUELLA DEL EDIFICIO, no pegado a su borde.
+            //
+            //  Con `gx: 0` el ancla cae sobre el núcleo, y el rótulo del piso
+            //  se cruzaba con el de la primera sala de ese nivel: en la
+            //  captura del 31/10/2026 se leía «P2 · Operación y cliente.»
+            //  porque «NOC y Redes» se le montaba encima. Dos textos que se
+            //  pisan no es un detalle estético: es un nombre que deja de
+            //  decir lo que dice.
+            //
+            //  `-6` lo saca por delante del basamento, que llega a -3,2.
+            gx: -6,
+            gy: 9,
             gz: n.gz,
             hacia: /** @type {const} */ ('izquierda')
           })),
