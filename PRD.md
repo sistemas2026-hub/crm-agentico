@@ -881,7 +881,7 @@ lo diría sin cambiar nada más.
 
 - *Tablero*: `nucleo/persistencia/capacidad.py` (conteos en SQL) + `nucleo/observabilidad/capacidad.py` (tasas y minutos) + `GET /reportes/capacidad` + pantalla `/capacidad` (solo ADMIN). `tests/test_tablero_capacidad_base.py` contra PostgreSQL real afirma el número exacto de cada métrica, y caza tres mutaciones (sin filtro de canal real, ignorar las acciones aprobadas, la tasa de escalada vieja sin filtro). La cadena hasta la pantalla la cubre `capacidad-servidor.test.js`. Decisiones de esta sesión: "fin" de una conversación es su **último mensaje que no es una nota**, no el evento `cerrada` (los cierres de legado y T18 no lo dejan); cualquier acción propuesta cuenta como "con persona"; los minutos son **dos** parámetros (por conversación y por visita) y las personas del equipo un tercero, no "por tipo de caso", porque una conversación no tiene un tipo confiable; **Rapilink no tiene minutos declarados** y el tablero los muestra en null hasta que la empresa los dé.
 - *Falla de barrio*: `reiniciar_ont` exige `consultar_incidente_red` con `es_incidente_de_red: false` (`tests/test_reinicio_no_en_caida_de_barrio.py`). El motor la vuelve a medir al aprobar. **Lo que falta medir:** la batería de flujos (`cli/bateria_flujos.py`), que pasa por el turno y necesita la red de producción; el humo de `cli/evaluar.py` dio 8/9, igual a su línea base, pero no tiene caso de reinicio. El prompt no se tocó: el motor le dice al modelo qué previa falta.
-- *Backend*: los 9 respaldos y el buzón fijo, con su guarda de arquitectura (`common/tests/test_motor_tenant_falla_cerrado.py`). **Antes del deploy** hay que tener `SOLICITUDES_EMAIL_DESTINO` en Dokploy (DESPLIEGUE.md, Pendientes).
+- *Backend*: los 9 respaldos y el buzón fijo, con su guarda de arquitectura (`common/tests/test_motor_tenant_falla_cerrado.py`). El buzón que recibe las solicitudes es de cada empresa: `Org.correo_solicitudes`, que el administrador carga en Ajustes → Organización (31/10/2026; primero fue una variable de entorno, y una variable es una instalación por empresa). Sin cargarlo, la solicitud queda en `fallo_integracion` y no se pierde.
 
 **Lo que cambió la auditoría del mismo día** (`revisor-de-pii`, `auditor-de-frontera`, `auditor-independiente` sobre `20687706`). Dos hallazgos inflaban el tablero **a favor de Dexter**, que es justo el número que se le muestra a quien compra:
 
@@ -901,12 +901,12 @@ lo diría sin cambiar nada más.
 
 - *"No sé" pasa como "no hay caída".* `consultar_incidente_red` devuelve `es_incidente_de_red: false` también cuando no pudo ubicar la ONU, en los primeros minutos de una caída (SmartOLT agrupa con 2–5 min de demora) y ante un cuerpo inesperado. La previa acota y no autoriza —siguen la señal, el ping y la aprobación humana—, así que lo peor es un reinicio inútil. Cerrarlo exige que la herramienta distinga "sin dato" de `false`, y eso cambia lo que ve el modelo: queda para cuando se mida.
 - *Una visita cargada a mano en el sistema del ISP no se ve* desde Dexter: la visita evitada sigue siendo una estimación, y la pantalla lo dice.
-- *Una instalación sigue siendo de una empresa*: `MOTOR_TENANT` y `SOLICITUDES_EMAIL_DESTINO` son por proceso, y `docker-compose.prod.yml` trae `MOTOR_TENANT` con default `rapilink`. El código falla cerrado; la topología, todavía no. Es la Ola 4.
+- *Una instalación sigue siendo de una empresa*: `MOTOR_TENANT` es por proceso, y `docker-compose.prod.yml` trae `MOTOR_TENANT` con default `rapilink`. El código falla cerrado; la topología, todavía no. Es la Ola 4.
 
 **Para desplegar, en este orden** (lo decide una persona; push = deploy):
 
-1. `SOLICITUDES_EMAIL_DESTINO` cargada en Dokploy (DESPLIEGUE.md, Pendientes).
-2. Push, y que el motor y el backend levanten.
+1. Push, y que el motor y el backend levanten (el backend aplica la migración `common/0046`).
+2. El administrador de Rapilink carga en Ajustes → Organización el correo que recibe las solicitudes (hasta hoy `info.rapilinksas@gmail.com`, fijo en el código). Hasta que lo cargue, las solicitudes nuevas quedan en `fallo_integracion`.
 3. `py -3.13 cli/cargar_claves.py tenants/rapilink.config.yaml --clave capacidad --clave "herramientas[reiniciar_ont].exige_previas" --clave "herramientas[reiniciar_ont].descripcion"`: primero sin `--aplicar`, mirar, y después con `--aplicar`.
 4. `py -3.13 cli/diferencias_config.py rapilink` y `py -3.13 cli/evaluar.py rapilink --humo --base` (CLAUDE.md §6).
 5. Que la empresa declare en `/capacidad` sus minutos y sus personas.

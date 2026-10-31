@@ -650,14 +650,14 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
 
-**ANTES del próximo deploy del backend: dos variables que dejaron de tener valor por defecto (30/10/2026, PRD §8.17 Ola 1).** El backend Django caía a la empresa de siempre cuando faltaban, y eso con una segunda empresa le sirve a una los datos de la otra. Ahora sin ellas **no sale nada**, y el síntoma no señala la causa:
+**ANTES del próximo deploy del backend: una variable que dejó de tener valor por defecto, y un dato que ahora carga cada empresa (30-31/10/2026, PRD §8.17 Ola 1).** El backend Django caía a la empresa de siempre cuando faltaban, y eso con una segunda empresa le sirve a una los datos de la otra. Ahora sin ellos **no sale nada**, y el síntoma no señala la causa:
 
-| Variable (servicios `backend` y `celery-*`) | Si falta |
+| Qué | Si falta |
 |---|---|
-| `MOTOR_TENANT` | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `falta_motor_tenant`; Despacho no trae la ficha del cliente; el cierre de caso no le pide nada al motor. El `docker-compose.prod.yml` la trae con default `rapilink` (líneas 75 y 235), así que **debería estar**: comprobarlo en Dokploy igual |
-| `SOLICITUDES_EMAIL_DESTINO` | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. Hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). Cargarla en el Environment del despliegue en Dokploy con ese buzón, o el que la empresa diga, **antes** de desplegar. El `docker-compose.prod.yml` ya la pasa a `backend` y a `celery-worker` (31/10/2026: antes no la declaraba, y cargarla en Dokploy no habría alcanzado) |
+| `MOTOR_TENANT` (variable de los servicios `backend` y `celery-*`) | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `falta_motor_tenant`; Despacho no trae la ficha del cliente; el cierre de caso no le pide nada al motor. El `docker-compose.prod.yml` la trae con default `rapilink`, así que **debería estar**: comprobarlo en Dokploy igual |
+| El correo que recibe las solicitudes (**no es una variable**: `Org.correo_solicitudes`, migración `common/0046`) | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. Hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). **Después** del deploy, el administrador lo carga en Ajustes → Organización → Editar; la pantalla de Organización muestra «Falta» mientras esté vacío. Cada empresa nueva hace lo mismo al darse de alta. Nada de esto va en Dokploy |
 
-Cómo comprobar sin leer valores: `docker exec <backend> sh -c 'test -n "$MOTOR_TENANT" && test -n "$SOLICITUDES_EMAIL_DESTINO" && echo ok'`. Lo definitivo es que las dos sean configuración **por empresa** desde la interfaz (§3.3 de CLAUDE.md, Ola 4): una variable de entorno sigue siendo una instalación por empresa.
+Cómo comprobar sin leer valores: `docker exec <backend> sh -c 'test -n "$MOTOR_TENANT" && echo ok'`, y para el correo, la fila «Correo que recibe las solicitudes de servicio» de Ajustes → Organización. Lo definitivo para `MOTOR_TENANT` es derivarlo de la organización (§3.3 de CLAUDE.md, Ola 4): una variable de entorno sigue siendo una instalación por empresa.
 
 **La rama `producto/tesis-de-negocio` (30-31/10/2026, PRD §8.17 Olas 1 a 3) trae, además, cuatro cosas que no se aplican solas.** En este orden:
 

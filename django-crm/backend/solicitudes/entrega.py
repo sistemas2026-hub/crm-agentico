@@ -22,25 +22,30 @@ from __future__ import annotations
 import os
 import uuid
 
-from django.conf import settings
 from django.core.mail import EmailMessage
 from django.utils import timezone
 
-def _destino() -> list[str]:
-    """A donde llega la solicitud: el buzon que la empresa configura.
+def _destino(org) -> list[str]:
+    """A donde llega la solicitud: el buzon de SU empresa.
 
     SIN DEFAULT (30/10/2026). Hasta ese dia caia al buzon de UNA empresa, fijo
     en este archivo, y el correo lleva el PDF con documento, firma y GPS: con
     dos empresas en la instalacion, las solicitudes de la segunda llegaban al
-    buzon de la primera. Sin destino, lanza; 'entregar' lo anota en
-    'fallo_integracion' y la pantalla de solicitudes lo muestra.
+    buzon de la primera.
+
+    ES DE LA ORGANIZACION, NO DEL SERVIDOR (31/10/2026): lo edita su
+    administrador en Ajustes -> Organizacion (Org.correo_solicitudes). Una
+    variable de entorno es una por instalacion, y la segunda empresa habria
+    necesitado que alguien entrara al servidor (CLAUDE.md §3.3).
+
+    Sin destino, lanza; 'entregar' lo anota en 'fallo_integracion' y la
+    pantalla de solicitudes lo muestra.
     """
-    crudo = (getattr(settings, "SOLICITUDES_EMAIL_DESTINO", "")
-             or os.environ.get("SOLICITUDES_EMAIL_DESTINO", ""))
+    crudo = (getattr(org, "correo_solicitudes", "") or "") if org is not None else ""
     destino = [x.strip() for x in crudo.split(",") if x.strip()]
     if not destino:
-        raise RuntimeError("falta SOLICITUDES_EMAIL_DESTINO: sin buzon de la "
-                           "empresa la solicitud no se manda a ninguno")
+        raise RuntimeError("falta correo_solicitudes: la empresa no configuro a que "
+                           "buzon llegan sus solicitudes (Ajustes -> Organizacion)")
     return destino
 
 
@@ -106,7 +111,7 @@ def _enviar_correo(s) -> None:
     correo = EmailMessage(
         subject=f"Solicitud de servicio - {s.nombre_completo or s.telefono}",
         body=_cuerpo(s),
-        to=_destino(),
+        to=_destino(s.org),
     )
     if s.pdf:
         s.pdf.open("rb")

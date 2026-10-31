@@ -150,6 +150,13 @@ class Org(BaseModel):
     # post-close signal short-circuits before any survey email is sent.
     csat_enabled = models.BooleanField(default=True)
 
+    # A donde llega cada solicitud de servicio nueva con su PDF (31/10/2026,
+    # solicitudes/entrega.py). Uno o varios correos separados por coma. Lo
+    # edita el administrador de la empresa en Ajustes -> Organizacion: es un
+    # dato de ESTA empresa, no del servidor (CLAUDE.md §3.3). Vacio = el
+    # correo no sale y la solicitud queda con 'fallo_integracion'.
+    correo_solicitudes = models.CharField(max_length=500, blank=True, default="")
+
     # Tier 3 parent/child: when True, closing a parent case offers to
     # cascade-close any open descendants. The endpoint still requires an
     # explicit confirmation; this flag only controls the default state.

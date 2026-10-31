@@ -76,6 +76,7 @@
       default_currency: org.default_currency || 'USD',
       default_country: org.default_country ?? '',
       timezone: org.timezone || 'UTC',
+      correo_solicitudes: org.correo_solicitudes ?? '',
       // Booleans travel as strings so the select always submits an explicit value.
       csat_enabled: String(org.csat_enabled ?? true),
       auto_close_children_on_parent_close: String(org.auto_close_children_on_parent_close ?? false)
@@ -343,6 +344,23 @@
       </div>
 
       <div class="v2-label" style="margin:24px 0 12px">Comportamiento</div>
+
+      <div class="v2-field">
+        <label for="f-solicitudes">Correo que recibe las solicitudes de servicio</label>
+        <input
+          id="f-solicitudes"
+          name="correo_solicitudes"
+          class="v2-input"
+          type="text"
+          inputmode="email"
+          placeholder="ventas@tuempresa.com"
+          bind:value={form.correo_solicitudes}
+        />
+        <p class="v2-hint">
+          Cada solicitud nueva del formulario de contratación llega acá con su PDF. Podés poner varios
+          correos separados por coma. Vacío, el correo no sale y la solicitud queda marcada para revisar.
+        </p>
+      </div>
 
       <div class="v2-field">
         <label for="f-csat">Encuestas de satisfacción</label>

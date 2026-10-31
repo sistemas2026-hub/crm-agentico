@@ -120,19 +120,38 @@ def test_las_que_lanzan_si_falla_lanzan_sin_empresa_y_no_preguntan(
     assert sin_empresa == []
 
 
-def test_el_correo_de_una_solicitud_sin_destino_no_sale_a_un_buzon_fijo(monkeypatch, settings):
+@pytest.mark.django_db
+def test_el_correo_de_una_solicitud_va_al_buzon_de_SU_empresa_y_sin_buzon_no_sale(
+        monkeypatch, settings, org_a, org_b):
     """El correo lleva el PDF de la solicitud: documento, firma y GPS. Hasta el
     30/10/2026, sin destino configurado salia al buzon de UNA empresa, fijo en
-    el codigo: con dos empresas, las solicitudes de la segunda llegaban ahi."""
+    el codigo; el 31/10 se lo paso a una variable de entorno, que es una sola
+    por instalacion. Ahora es de cada ORGANIZACION, y lo edita su administrador
+    en Ajustes -> Organizacion (CLAUDE.md §3.3): la segunda empresa no necesita
+    que nadie entre al servidor. Una variable de entorno no lo reemplaza."""
     from solicitudes.entrega import _destino
 
-    monkeypatch.delenv("SOLICITUDES_EMAIL_DESTINO", raising=False)
-    settings.SOLICITUDES_EMAIL_DESTINO = ""
-    with pytest.raises(RuntimeError, match="SOLICITUDES_EMAIL_DESTINO"):
-        _destino()
+    monkeypatch.setenv("SOLICITUDES_EMAIL_DESTINO", "buzon-del-servidor@otra.co")
+    settings.SOLICITUDES_EMAIL_DESTINO = "buzon-del-servidor@otra.co"
+    org_a.correo_solicitudes = "a@empresa.co, b@empresa.co"
+    org_a.save(update_fields=["correo_solicitudes"])
+    assert _destino(org_a) == ["a@empresa.co", "b@empresa.co"]
+    with pytest.raises(RuntimeError, match="correo_solicitudes"):
+        _destino(org_b)
 
-    monkeypatch.setenv("SOLICITUDES_EMAIL_DESTINO", "a@empresa.co, b@empresa.co")
-    assert _destino() == ["a@empresa.co", "b@empresa.co"]
+
+@pytest.mark.django_db
+def test_el_administrador_edita_el_buzon_y_un_correo_invalido_no_entra(admin_client, org_a):
+    r = admin_client.patch("/api/org/settings/", {"correo_solicitudes": "ventas@empresa.co, jefe@empresa.co"},
+                           format="json")
+    assert r.status_code == 200, r.content
+    org_a.refresh_from_db()
+    assert org_a.correo_solicitudes == "ventas@empresa.co, jefe@empresa.co"
+    r = admin_client.patch("/api/org/settings/", {"correo_solicitudes": "ventas@empresa.co, no-es-un-correo"},
+                           format="json")
+    assert r.status_code == 400
+    org_a.refresh_from_db()
+    assert org_a.correo_solicitudes == "ventas@empresa.co, jefe@empresa.co"
 
 
 #  Un correo entre comillas que nombra a la empresa en CUALQUIER parte: antes o
@@ -164,3 +183,29 @@ def test_gestion_de_solicitudes_sin_empresa_lanza(sin_empresa):
 
     with pytest.raises(RuntimeError, match="MOTOR_TENANT"):
         _tenant()
+
+
+@pytest.mark.django_db
+def test_la_solicitud_de_cada_empresa_llega_a_su_buzon(org_a, org_b, mailoutbox):
+    """La cadena entera hasta el correo: la solicitud de la empresa A sale al
+    buzon de A, y la de B -- sin buzon configurado -- no sale a ninguno."""
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from solicitudes.entrega import _enviar_correo
+    from solicitudes.models import SolicitudServicio
+
+    org_a.correo_solicitudes = "ventas@empresa-a.co"
+    org_a.save(update_fields=["correo_solicitudes"])
+    ahora = timezone.now()
+
+    def solicitud(org, token):
+        return SolicitudServicio.objects.create(org=org, token_hash=token, expira_en=ahora + dt.timedelta(days=1),
+                                                nombre="Beatriz", telefono="3124558901", enviada_en=ahora)
+
+    _enviar_correo(solicitud(org_a, "a" * 64))
+    assert [m.to for m in mailoutbox] == [["ventas@empresa-a.co"]]
+    with pytest.raises(RuntimeError, match="correo_solicitudes"):
+        _enviar_correo(solicitud(org_b, "b" * 64))
+    assert len(mailoutbox) == 1, "la de la empresa sin buzon no sale a ningun otro"

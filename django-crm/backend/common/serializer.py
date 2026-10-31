@@ -134,6 +134,20 @@ class OrgSettingsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     member_count = serializers.SerializerMethodField()
 
+    def validate_correo_solicitudes(self, valor):
+        """Uno o varios correos separados por coma, cada uno valido. Vacio vale:
+        es 'todavia no configurado', y la solicitud lo dice en vez de perderse."""
+        from django.core.exceptions import ValidationError as ErrorDjango
+        from django.core.validators import validate_email
+
+        correos = [c.strip() for c in (valor or "").split(",") if c.strip()]
+        for c in correos:
+            try:
+                validate_email(c)
+            except ErrorDjango:
+                raise serializers.ValidationError(f"'{c}' no es un correo valido.")
+        return ", ".join(correos)
+
     class Meta:
         model = Org
         fields = [
@@ -159,6 +173,8 @@ class OrgSettingsSerializer(serializers.ModelSerializer):
             "timezone",
             # Case-handling behaviour (org-wide switches). Editable only here.
             "csat_enabled",
+            # Where new service requests are emailed (solicitudes/entrega.py).
+            "correo_solicitudes",
             "auto_close_children_on_parent_close",
             # Vertical pack. Read-only -- see the class docstring.
             "vertical",
