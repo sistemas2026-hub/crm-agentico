@@ -38,7 +38,8 @@ function ocupacionesOcultas(texto) {
       .map((o) => ({
         puesto: o.puesto,
         agente: typeof o.agente === 'string' ? o.agente : '',
-        nombre: typeof o.nombre === 'string' ? o.nombre : ''
+        nombre: typeof o.nombre === 'string' ? o.nombre : '',
+        persona: typeof o.persona === 'string' ? o.persona : ''
       }));
   } catch {
     return [];
@@ -65,13 +66,32 @@ function ocupacionesOcultas(texto) {
  * acaba de mirar.
  */
 function ocupacionesDe(campos) {
-  const enPantalla = Object.entries(campos)
-    .filter(([clave, valor]) => clave.startsWith('ocupa_') && valor)
-    .map(([clave, valor]) => ({ puesto: clave.slice('ocupa_'.length), agente: valor }));
+  //  Dos campos por silla: el agente (un desplegable) y la persona (texto).
+  //  Son EXCLUYENTES y el esquema del motor rechaza los dos a la vez; aqui no
+  //  se arbitra, porque arbitrar en silencio haria desaparecer lo que alguien
+  //  acaba de escribir sin un error que lo explique.
+  const enPantalla = [];
+  for (const [clave, valor] of Object.entries(campos)) {
+    if (!valor) continue;
+    if (clave.startsWith('ocupa_')) {
+      enPantalla.push({ puesto: clave.slice('ocupa_'.length), agente: valor });
+    } else if (clave.startsWith('persona_')) {
+      enPantalla.push({ puesto: clave.slice('persona_'.length), persona: valor });
+    }
+  }
+  //  Un puesto con las dos cosas se funde en UNA ocupacion con los dos campos:
+  //  asi el motor ve el documento que la pantalla mando y lo rechaza diciendo
+  //  cual es el problema, en vez de recibir dos ocupaciones del mismo puesto y
+  //  quejarse de otra cosa.
+  const fundidas = new Map();
+  for (const o of enPantalla) {
+    fundidas.set(o.puesto, { ...(fundidas.get(o.puesto) ?? { puesto: o.puesto }), ...o });
+  }
+  const enPantallaUnicas = [...fundidas.values()];
 
-  const declarados = new Set(enPantalla.map((o) => o.puesto));
+  const declarados = new Set(enPantallaUnicas.map((o) => o.puesto));
   return [
-    ...enPantalla,
+    ...enPantallaUnicas,
     ...ocupacionesOcultas(campos.otras).filter((o) => !declarados.has(o.puesto))
   ];
 }

@@ -87,6 +87,25 @@ export const FONDO_DE_CIRCULACION = 5;
 export const NUCLEO = { ancho: 6, fondo: 4 };
 
 /**
+ * Dónde se abre la puerta de una sala, en celdas del muro de fondo.
+ *
+ * A un cuarto del ancho y no en el centro: centrada queda detrás del puesto
+ * principal en casi todas las plantillas —que se dibujan con la coordinación
+ * al frente y al medio— y una puerta tapada por una silla no se lee como
+ * puerta. El cuarto izquierdo está despejado en las siete.
+ *
+ * `1.8` celdas es el ancho: dos personas no pasan, una sí, y a esta escala es
+ * lo que se distingue de una ventana.
+ *
+ * @param {number} ancho el ancho de la sala, en celdas
+ * @returns {[number, number]}
+ */
+function vanoDePuerta(ancho) {
+  const desde = Math.max(0.6, Math.round(ancho * 0.25 * 10) / 10);
+  return [desde, desde + 1.8];
+}
+
+/**
  * La franja de circulación de un nivel: una losa sin muros.
  *
  * NO es una sala y por eso no tiene puestos ni cartel: es el suelo por el que
@@ -278,8 +297,21 @@ export function edificioDe(salas, agentes, pisos, opciones = {}) {
     //  3. Las salas, al frente, una al lado de la otra.
     let gx = NUCLEO.ancho + SEPARACION_SALAS;
     for (const sala of suyas) {
+      const planta = plantaDe(sala, agentes);
       plantas.push({
-        ...plantaDe(sala, agentes),
+        ...planta,
+        //  LA PUERTA AL PASILLO.
+        //
+        //  Va en el muro de FONDO y no en el lateral porque es ese el que
+        //  separa la sala de la franja de circulación: la sala se coloca a
+        //  `gy = FONDO_DE_CIRCULACION`, así que su `gy = 0` local da justo al
+        //  pasillo. Una oficina a la que se entra atravesando la pared es un
+        //  decorado.
+        //
+        //  Y la pone el COMPOSITOR y no la plantilla: una sala no sabe si da a
+        //  un pasillo, y mirada sola no lleva puerta. Un hueco que no da a
+        //  ningún sitio es un agujero.
+        mundo: { ...planta.mundo, puerta: vanoDePuerta(planta.mundo.ancho) },
         origen: { gx, gy: FONDO_DE_CIRCULACION, gz },
         //  LOSA Y BARANDA SOLO EN EL EDIFICIO. Una sala mirada sola se sigue
         //  viendo exactamente como se veía: su suelo llega hasta el borde del

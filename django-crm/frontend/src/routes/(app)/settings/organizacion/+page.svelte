@@ -68,12 +68,36 @@
   }
 
   /**
+   * La PERSONA del equipo que ocupa ese puesto.
+   *
+   * Un escritorio donde trabaja alguien se veía idéntico a uno vacío hasta el
+   * 31/10/2026, así que la oficina decía que media empresa no existe. Es texto
+   * libre: el motor no conoce las cuentas del CRM, y atarlo a un usuario
+   * obligaría a que toda persona del organigrama tuviera cuenta — ya se midió
+   * que los auxiliares de campo no la tienen.
+   */
+  function ocupantePersona(dep, puesto) {
+    return (dep.ocupaciones ?? []).find((o) => o.puesto === puesto)?.persona ?? '';
+  }
+
+  /** Sentar (o levantar) a una persona. Mismo criterio que `sentar`. */
+  function sentarPersona(dep, puesto, persona) {
+    const otras = (dep.ocupaciones ?? []).filter((o) => o.puesto !== puesto);
+    const texto = String(persona ?? '').trim();
+    dep.ocupaciones = texto ? [...otras, { puesto, persona: texto }] : otras;
+  }
+
+  /**
    * Sentar (o desentar) a alguien. Vaciar QUITA la ocupación en vez de dejarla
    * con agente vacío: «ninguno» es la ausencia, y guardarla haría que un puesto
    * libre y uno que alguien vació se vieran distintos sin serlo.
    */
   function sentar(dep, puesto, agente) {
     const otras = (dep.ocupaciones ?? []).filter((o) => o.puesto !== puesto);
+    //  Elegir un agente DESALOJA a la persona de ese puesto. No es un arbitraje
+    //  silencioso: es lo que alguien acaba de pedir, en la silla que acaba de
+    //  mirar. Dejar las dos cosas mandaria un documento que el motor rechaza y
+    //  convertiria una eleccion normal en un error.
     dep.ocupaciones = agente ? [...otras, { puesto, agente }] : otras;
   }
 
@@ -210,7 +234,7 @@
               {:else}
                 <div class="fila">
                   {#each puestosDe(d.plantilla) as p (p.id)}
-                    <label>
+                    <label class="silla">
                       {p.nombre}{p.principal ? ' · principal' : ''}
                       <select name="dep:{i}:ocupa_{p.id}"
                               value={ocupante(d, p.id)}
@@ -220,6 +244,13 @@
                           <option value={a.nombre}>{a.cargo || a.nombre}</option>
                         {/each}
                       </select>
+                      <!-- O una persona. Son excluyentes y el motor lo
+                           rechaza diciendo cuál es el problema; la pantalla no
+                           arbitra en silencio. -->
+                      <input class="persona" name="dep:{i}:persona_{p.id}"
+                             placeholder="o una persona"
+                             value={ocupantePersona(d, p.id)}
+                             onchange={(e) => sentarPersona(d, p.id, e.currentTarget.value)} />
                     </label>
                   {/each}
                   <button type="button" class="proponer" onclick={() => proponer(i)}>
@@ -310,6 +341,8 @@
   button { padding: 0.35rem 0.7rem; border: 1px solid #d1d5db; background: #fff; border-radius: 6px; cursor: pointer; font-size: 0.82rem; }
   .agregar { border-style: dashed; }
   .puestos { border-top: 1px dashed #e5e7eb; padding-top: 0.6rem; margin-top: 0.2rem; }
+  label.silla { gap: 0.25rem; }
+  .persona { font-size: 0.78rem; max-width: 160px; }
   .proponer { align-self: flex-end; border-color: #4f46e5; color: #4f46e5; }
   .propuesta { font-size: 0.8rem; color: #374151; background: #f8fafc; padding: 0.5rem 0.7rem;
                border-radius: 6px; margin: 0.4rem 0 0; }

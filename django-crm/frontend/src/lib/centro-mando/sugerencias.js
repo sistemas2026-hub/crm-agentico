@@ -64,9 +64,20 @@ export function sugerirOcupantes(dep, agentes, puestos, sentadosEnOtras = []) {
   const porPuesto = new Map(
     (dep?.ocupaciones ?? [])
       .filter((o) => o && o.puesto)
-      .map((o) => [String(o.puesto), String(o.agente ?? '')])
+      .map((o) => [String(o.puesto), { ...o }])
   );
-  const yaSentadosAcá = new Set([...porPuesto.values()].filter(Boolean));
+  //  UNA SILLA CON UNA PERSONA NO ESTÁ LIBRE. Mirar sólo `agente` la daba por
+  //  vacía y la propuesta sentaba un agente encima de alguien del equipo: el
+  //  documento resultante declara las dos cosas en el mismo puesto y el motor
+  //  lo rechaza, así que el síntoma habría sido un error al guardar que no
+  //  nombra la silla que lo causó.
+  const libre = (id) => {
+    const o = porPuesto.get(id);
+    return !o || (!o.agente && !o.persona);
+  };
+  const yaSentadosAcá = new Set(
+    [...porPuesto.values()].map((o) => o.agente).filter(Boolean)
+  );
 
   const pertenecen = (Array.isArray(agentes) ? agentes : [])
     .filter((a) => a && a.nombre && areas.has(normalizar(a.area)))
@@ -85,13 +96,13 @@ export function sugerirOcupantes(dep, agentes, puestos, sentadosEnOtras = []) {
 
   const libres = (Array.isArray(puestos) ? puestos : [])
     .map((p) => String(p?.id ?? ''))
-    .filter((id) => id && !porPuesto.get(id));
+    .filter((id) => id && libre(id));
 
   const sentados = [];
   for (const id of libres) {
     const quien = candidatos.shift();
     if (!quien) break;
-    porPuesto.set(id, quien);
+    porPuesto.set(id, { puesto: id, agente: quien });
     sentados.push(quien);
   }
 
@@ -99,9 +110,10 @@ export function sugerirOcupantes(dep, agentes, puestos, sentadosEnOtras = []) {
     //  Se devuelve la lista ENTERA, no sólo lo agregado: es la que el
     //  formulario va a mandar, y armarla a medias es como se perdió un agente
     //  de verdad el 31/10/2026.
-    ocupaciones: [...porPuesto.entries()]
-      .filter(([, agente]) => agente)
-      .map(([puesto, agente]) => ({ puesto, agente })),
+    //  Se devuelven ENTERAS y tal como venían: una ocupación de persona
+    //  conserva su `persona`, y una de agente su `agente`. Reconstruirlas a
+    //  mano fue como se perdió un agente de verdad el 31/10/2026.
+    ocupaciones: [...porPuesto.values()].filter((o) => o.agente || o.persona),
     sentados,
     sinSilla: candidatos,
     ocupadoEnOtra

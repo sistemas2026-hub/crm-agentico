@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { leerAreas } from '$lib/server/v2/areas.js';
+import { leerAccionesDeAgentes } from '$lib/server/v2/acciones-de-agente.js';
 
 /**
  * Lo que la oficina virtual necesita saber ANTES de dibujarse: quién existe.
@@ -35,11 +36,17 @@ export async function load({ locals, fetch }) {
       agentes: [],
       areas: [],
       organizacion: null,
+      acciones: null,
       error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL o la empresa de la sesión)'
     };
   }
 
   const { areas } = await leerAreas(locals, fetch);
+
+  //  QUE PUEDE HACER HOY CADA AGENTE. Va en paralelo y degrada a `null`: la
+  //  oficina se dibuja igual sin esto, y la ficha dice que no lo pudo leer en
+  //  vez de mostrar una lista vacia, que se leeria como «no puede hacer nada».
+  const acciones = await leerAccionesDeAgentes(locals, fetch);
 
   try {
     const resp = await fetch(
@@ -52,6 +59,7 @@ export async function load({ locals, fetch }) {
         agentes: [],
         areas: areas.map((/** @type {any} */ a) => a?.nombre ?? a).filter(Boolean),
         organizacion: null,
+        acciones,
         error: datos.error || 'No se pudo leer el inventario de agentes'
       };
     }
@@ -83,6 +91,7 @@ export async function load({ locals, fetch }) {
       //  ahora cayera a una estructura inventada cuando el motor no responde,
       //  estaria afirmando como es una empresa que no pudo consultar.
       organizacion: datos.organizacion ?? null,
+      acciones,
       error: null
     };
   } catch (/** @type {any} */ err) {
@@ -90,6 +99,7 @@ export async function load({ locals, fetch }) {
       agentes: [],
       areas: areas.map((/** @type {any} */ a) => a?.nombre ?? a).filter(Boolean),
       organizacion: null,
+      acciones: null,
       error: err?.message || 'No se pudo contactar al asistente'
     };
   }

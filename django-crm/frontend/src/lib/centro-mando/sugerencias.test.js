@@ -155,3 +155,25 @@ describe('sentadosEnOtrosDepartamentos', () => {
     expect(sentadosEnOtrosDepartamentos(deps, 1)).toEqual([]);
   });
 });
+
+describe('la propuesta no desaloja a una persona', () => {
+  it('una silla con una persona del equipo NO está libre', () => {
+    //  Mirar solo `agente` la daba por vacia y la propuesta sentaba un agente
+    //  encima de alguien: el documento declara las dos cosas en el mismo
+    //  puesto, el motor lo rechaza, y el sintoma habria sido un error al
+    //  guardar que no nombra la silla que lo causo.
+    const r = sugerirOcupantes(
+      { areas: ['Operaciones'], ocupaciones: [{ puesto: 'principal', persona: 'Ana Gómez' }] },
+      AGENTES, PUESTOS);
+    const principal = r.ocupaciones.find((o) => o.puesto === 'principal');
+    expect(principal.persona).toBe('Ana Gómez');
+    expect(principal.agente).toBeUndefined();
+  });
+
+  it('y la conserva en la lista que se va a guardar', () => {
+    const r = sugerirOcupantes(
+      { areas: ['Comercial'], ocupaciones: [{ puesto: 'p2', persona: 'Luis' }] },
+      AGENTES, PUESTOS);
+    expect(r.ocupaciones.find((o) => o.puesto === 'p2')).toEqual({ puesto: 'p2', persona: 'Luis' });
+  });
+});

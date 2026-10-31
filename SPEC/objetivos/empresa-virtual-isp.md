@@ -2652,3 +2652,166 @@ rendimiento              el edificio con la sala grande: 2.373 obj a 144 fps
   una luminaria cada dos puestos; las estanterías y las plantas no se duplican.
 - **Dos tamaños y no cinco**, a propósito: veinte opciones en una lista
   desplegable no son más libertad, son veinte líneas para leer antes de elegir.
+
+---
+
+## P6 · Estabilización: la puerta del repositorio, la divergencia y el navegador — 31/10/2026
+
+### La trampa que imprime git
+
+Esta rama nace apuntando a `fix/integracion-wisphub`, que tiene autodeploy.
+`git push` a secas **falla**, pero no calla: git imprime, en su propio mensaje
+de error, la línea que despliega.
+
+```
+fatal: The upstream branch of your current branch does not match
+the name of your current branch.  To push to the upstream branch
+on the remote, use
+
+    git push origin HEAD:fix/integracion-wisphub      ← esto despliega
+```
+
+El camino más corto entre un push equivocado y un deploy no deseado es copiar
+lo que git acaba de ofrecer. Dos capas, las dos **locales**:
+
+| Qué | Efecto |
+|---|---|
+| `branch.<rama>.pushRemote = DEPLOY-BLOQUEADO` | `git push` a secas falla **sin** sugerir la línea de deploy |
+| `.githooks/pre-push` | rechaza cualquier push cuyo DESTINO sea la rama de deploy, venga de donde venga |
+
+Medido contra un remoto local de mentira, en las cuatro posiciones:
+
+```
+destino = rama de deploy                    BLOQUEA
+mi propia rama                              pasa
+rama local `fix/integracion-wisphub`        BLOQUEA
+DEPLOY_A_PRODUCCION=si                      pasa, y lo anuncia
+```
+
+`--dry-run` **no ejecuta el hook**: por eso la comprobación se hizo contra un
+remoto de verdad —uno local, desechable— y no simulando.
+
+### La divergencia, medida y no estimada
+
+```
+merge-base   4c96e67
+producción   39 commits · 179 archivos · +13.509
+nosotros     25 commits ·  70 archivos · +18.704
+```
+
+Siete archivos los tocan los dos lados. `git merge-tree` —que calcula la fusión
+sin escribir nada— dice que **sólo dos chocan**, y los dos son aditivos
+puros: cada lado agregó una entrada en la misma lista.
+
+| Archivo | Qué se pisa |
+|---|---|
+| `nucleo/config/editor.py` | `guardar_organizacion` (nuestro) junto a `guardar_reincidencia` (producción) |
+| `lib/server/v2/settings.js` | un import y una entrada en el `Promise.all` del hub |
+
+`api.py`, `db.py` y `schema.py` —los tres monolitos— **auto-fusionan**.
+
+**El riesgo que no es un conflicto.** `202610291700_tool_calls_cursor.sql` es
+nuestra y ordena ANTES de `202610301500` de producción. Si producción ya aplicó
+la suya, el ledger la ve como un **hueco** y `--aplicar` sale con 5 sin tocar
+nada. No se puede comprobar desde acá sin conectarse a producción, así que
+queda como condición a verificar en el momento de integrar; el remedio es
+renombrarla a una marca posterior, y sólo entonces.
+
+### El reinicio de Docker
+
+```
+04:58:17 UTC   Docker Desktop lanza com.docker.backend.exe
+04:58:28 UTC   dockerd: "Starting up"
+04:58:36 UTC   "Removing stale sandbox" ×N, endpoints que no se pudieron borrar
+```
+
+Son las 23:58 del 30/10 en Bogotá. **No hubo reinicio de Windows** (ningún
+evento 6005/6006/1074/41 en esa ventana) y **no hubo apagado ordenado** del
+demonio: no hay línea de *shutdown* antes del arranque, y los diez segundos de
+«stale sandbox» son la firma de una parada abrupta. El log del backend anterior
+se **trunca al arrancar**, así que la causa ya no está en ningún archivo.
+
+Lo que sí es accionable: los cinco contenedores del laboratorio tenían
+`restart: no`, y por eso quedaron abajo. Ahora tienen `unless-stopped`. No se
+tocó ningún contenedor ajeno: de los 44 del equipo, los otros 39 quedaron como
+estaban.
+
+### Qué puede hacer un agente, y qué no
+
+La lista blanca del rol **no** es lo que un agente puede hacer: es uno de los
+ocho pasos de la frontera. Mostrarla cruda diría que soporte puede reiniciar
+una ONU con la empresa detenida. `GET /agentes/acciones` la cruza con el
+interruptor y el techo vigentes —los dos leídos de la base, sin caché— y
+devuelve `disponible` con su motivo.
+
+**Dos errores propios, los dos cazados midiendo y no leyendo:**
+
+1. La primera versión marcaba «no disponible: la autonomía está detenida» las
+   ocho consultas de cada agente. Es falso, y lo dice el propio interruptor:
+   *«una consulta no es una acción: detener la autonomía no puede dejar ciego
+   al que atiende»*.
+2. Leía `v.permite` y el campo se llama `permitido`. Con `getattr(..., False)`,
+   `detenido` quedaba en `True` **siempre**: fail-closed escondía el defecto en
+   vez de delatarlo, y la ficha habría dicho «detenida» para siempre sin que
+   nada fallara.
+
+Medido en las tres posiciones del interruptor del laboratorio:
+
+```
+detenido                 todas las de efecto: no, por el interruptor
+activo + techo 2         las nueve de soporte: disponibles; las irreversibles
+                         añaden «solo con aprobación de una persona»
+activo + techo 1         `reiniciar_ont`: «exige nivel coordinar y el techo de
+                         la empresa es recomendar»
+en las tres              las consultas, disponibles. No las gobierna ninguno
+```
+
+### Personal humano en la oficina
+
+Hasta ahora la oficina sabía dibujar tres cosas —un agente, un agente declarado
+y ausente, y un puesto vacío—. Una empresa de internet no está hecha sólo de
+agentes, y **un escritorio donde trabaja alguien se veía exactamente igual que
+uno libre**: mirar la oficina decía que media empresa no existe.
+
+`Ocupacion.persona` lo arregla. Es texto libre a propósito: el motor no conoce
+las cuentas del CRM, y atarlo a un `user_id` obligaría a que toda persona del
+organigrama tuviera cuenta — ya se midió que los auxiliares de campo no la
+tienen (08/10/2026). No es un permiso ni una identidad: es un rótulo.
+
+- Un puesto con agente **y** persona se rechaza: un asiento, un ocupante.
+- La misma persona en dos puestos **se acepta**, deliberadamente: alguien de
+  verdad puede repartir su tiempo entre dos áreas.
+- Se dibuja como cualquiera, **sin halo y sin estado**: no hay flujo de eventos
+  que la represente, y animarla sería inventar actividad.
+- La propuesta de ocupantes no la desaloja.
+
+### Lo visual
+
+| Qué | Cómo |
+|---|---|
+| **Puertas** | vano real en el muro de fondo, con jambas, dintel y umbral. Lo pone el compositor, no la plantilla: una sala mirada sola no da a ningún pasillo |
+| **Iluminación** | un trapecio de luz que entra por la puerta, y una línea clara en el canto de cada losa — sin ella los cantos y el fondo son el mismo tono y los niveles se funden |
+| **Rótulos** | el nombre de cada sala pasa a letrero de pantalla. Medido: la vista de conjunto entra a escala 0,2 y un texto de 13 px mide 2,6 |
+| **Mobiliario** | las salas ampliadas repiten lo que se repite —estanterías, plantas— y **no** lo único: dos dispensadores no son más sala |
+
+La guarda de solapamiento volvió a cobrarse una: las copias se calculaban desde
+las posiciones de la sala base, así que caían encima del mueble original ya
+corrido — `operaciones_7` tenía **11 puntos distintos para 13 muebles**, y dos
+muebles en el mismo punto dibujan uno solo. A ojo no se habría visto nunca.
+
+### La suite de navegador
+
+Vive en `pruebas-navegador/`, **fuera** del frontend: sus dependencias no entran
+en la imagen que se despliega. Corre dentro del contenedor oficial de Playwright
+—nada se instala en Windows, que es la lección de `pnpm check`— y apunta a un
+puerto local: no sabe hablar con producción.
+
+Los puestos se abren **por enlace** (`?sala=`, `?puesto=`) y no a clics en el
+lienzo: adivinar en qué píxel cayó un escritorio depende de la cámara, del zoom
+y del tamaño de la ventana, y una prueba así falla por lo que no importa. El
+enlace directo es además una función real — una oficina sin enlaces no se puede
+mandar.
+
+Y **no afirma sobre píxeles**. De la escena sólo se afirma lo que la propia
+cabecera publica, objetos y fotogramas: una escena con cero objetos no se montó
+y a 0 fps no está corriendo, y las dos cosas se ven igual en un lienzo negro.

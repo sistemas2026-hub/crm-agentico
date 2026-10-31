@@ -80,6 +80,14 @@ export interface Mundo {
   ancho: number;
   fondo: number;
   alto: number;
+  /**
+   * El vano de la puerta en el muro lateral (`gx = 0`), en celdas `gy`.
+   *
+   * Lo pone el compositor del edificio y NO la plantilla: una sala no sabe si
+   * da a un pasillo. Mirada sola no lleva puerta, y es correcto — un hueco que
+   * no da a ningún sitio es un agujero, no una puerta.
+   */
+  puerta?: [number, number];
 }
 
 /**

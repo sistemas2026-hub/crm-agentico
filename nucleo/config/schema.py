@@ -2212,6 +2212,43 @@ class Ocupacion(Base):
     # Como se rotula el puesto, si la empresa quiere otro nombre que el de la
     # plantilla. Vacio = el de la plantilla.
     nombre: str = ""
+    # UNA PERSONA DEL EQUIPO (31/10/2026). El puesto lo ocupa alguien de carne
+    # y hueso, no un agente.
+    #
+    # Hace falta porque sin esto la oficina virtual solo sabia dibujar tres
+    # cosas --un agente, un agente declarado que el inventario no trae, y un
+    # puesto vacio-- y una empresa de internet no esta hecha solo de agentes.
+    # Un escritorio donde trabaja una persona se veia EXACTAMENTE IGUAL que uno
+    # libre, asi que mirar la oficina decia que media empresa no existe.
+    #
+    # Es texto libre y a proposito: el motor no conoce las cuentas del CRM --no
+    # puede, son dos sistemas-- y atarlo a un `user_id` obligaria a que toda
+    # persona del organigrama tuviera cuenta. Ya se midio que no la tienen: los
+    # auxiliares de campo no tienen celular asignado (08/10/2026). El nombre lo
+    # escribe la empresa en su propio organigrama.
+    #
+    # NO es un permiso ni una identidad: no autoriza nada, no se usa como clave
+    # y no entra en ninguna decision. Es un rotulo.
+    persona: str = Field(default="", max_length=80)
+
+    @model_validator(mode="after")
+    def _un_solo_ocupante(self):
+        """
+        Un asiento, un ocupante. Las dos cosas a la vez no es un caso raro que
+        haya que resolver: es un documento que no se puede dibujar, y la
+        pantalla tendria que elegir una callando la otra.
+        """
+        if self.agente.strip() and self.persona.strip():
+            raise ValueError(
+                f"organizacion: el puesto '{self.puesto}' declara a la vez el "
+                f"agente '{self.agente}' y la persona '{self.persona}': un "
+                f"puesto lo ocupa uno de los dos")
+        return self
+
+    @field_validator("persona")
+    @classmethod
+    def _persona(cls, v: str) -> str:
+        return v.strip()
 
     @field_validator("puesto")
     @classmethod

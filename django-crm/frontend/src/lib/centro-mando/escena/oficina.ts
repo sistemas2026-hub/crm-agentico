@@ -145,6 +145,15 @@ export interface DefinicionDePuesto {
   id: string;
   /** El agente que lo ocupa, o `null` si está vacío. */
   agente: string | null;
+  /**
+   * La persona del equipo que lo ocupa, o `null`.
+   *
+   * Excluyente con `agente` —el esquema del motor rechaza un puesto con los
+   * dos—, y la escena la dibuja igual que a un agente salvo en una cosa: sin
+   * halo y sin estado. No hay flujo de eventos que represente a una persona, y
+   * animarla sería inventar actividad.
+   */
+  persona?: string | null;
   /** Lo que se lee en la placa del puesto. */
   nombre: string;
   /** El área, para la placa. Dato de la empresa, no de la escena. */
@@ -325,6 +334,27 @@ function construirSuelo(mundo: Mundo): Container {
     }
   }
 
+  //  LA LUZ QUE ENTRA POR LA PUERTA.
+  //
+  //  Un trapecio que se abre desde el vano hacia dentro de la sala. Cuesta un
+  //  polígono y hace dos cosas: dice que el hueco del muro es una puerta y no
+  //  un trozo de pared que falta, y rompe la uniformidad del suelo, que es la
+  //  queja concreta de «el edificio se ve oscuro y plano».
+  //
+  //  Va DESPUÉS de las baldosas y ANTES de las juntas, para que el enrejado
+  //  siga leyéndose por encima: una mancha de luz que tapa las juntas se ve
+  //  como una mancha, no como luz.
+  if (mundo.puerta) {
+    const [a, b] = mundo.puerta;
+    const hasta = Math.min(mundo.fondo, 3.2);
+    g.poly(aplanar([
+      aPantalla(a, 0, 0.01),
+      aPantalla(b, 0, 0.01),
+      aPantalla(b + 0.9, hasta, 0.01),
+      aPantalla(a - 0.9, hasta, 0.01)
+    ])).fill({ color: PALETA.muroBanda, alpha: 0.16 });
+  }
+
   // Las juntas, en una sola pasada y por líneas completas: 24 trazos en vez de
   // 140 rombos con borde. A ojo es idéntico.
   for (let gx = 0; gx <= mundo.ancho; gx++) {
@@ -387,6 +417,17 @@ function construirLosa(mundo: Mundo): Graphics {
     aPantalla(mundo.ancho, mundo.fondo, -e),
     aPantalla(0, mundo.fondo, -e)
   ])).fill({ color: PALETA.muroRemate });
+
+  //  UNA LINEA CLARA EN EL BORDE SUPERIOR DEL CANTO. Es lo que separa un nivel
+  //  del siguiente cuando se miran los tres a la vez: sin ella los cantos y el
+  //  fondo son el mismo tono oscuro y las losas se funden. Dos puntos y un
+  //  trazo.
+  {
+    const a = aPantalla(0, mundo.fondo, 0);
+    const b = aPantalla(mundo.ancho, mundo.fondo, 0);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
+     .stroke({ width: 1.5, color: PALETA.muroBanda, alpha: 0.7 });
+  }
 
   //  Cara derecha, a lo largo de gx = ancho. Mas oscura: recibe menos luz, y
   //  pintar las dos iguales es lo que hace que la esquina desaparezca.
@@ -569,7 +610,32 @@ function construirMuros(mundo: Mundo): Graphics {
   // Muro de fondo (gy = 0) y muro lateral (gx = 0), cada uno con su propio tono:
   // el lateral recibe menos luz. Pintar los dos iguales es lo que hace que la
   // esquina desaparezca y la sala parezca un telón.
-  panelMuroFondo(g, 0, mundo.ancho, 0, h, PALETA.muroFondo);
+  //  EL MURO DE FONDO PUEDE TENER UN VANO: en el edificio es el que separa la
+  //  sala de la franja de circulación, y una oficina a la que se entra
+  //  atravesando la pared es un decorado. Se pinta en dos tramos, igual que
+  //  una mampara con su vano, y el dintel lo cierra por arriba.
+  //
+  //  Sin `puerta` se pinta entero, que es lo que hacía antes: una sala mirada
+  //  sola no da a ningún pasillo, así que abrirle un hueco al aire sería un
+  //  agujero, no una puerta. Lo decide el compositor del edificio.
+  const vano = mundo.puerta;
+  if (vano) {
+    panelMuroFondo(g, 0, Math.max(0, vano[0]), 0, h, PALETA.muroFondo);
+    panelMuroFondo(g, Math.min(mundo.ancho, vano[1]), mundo.ancho, 0, h, PALETA.muroFondo);
+    //  Dintel: el muro sigue por encima de la puerta.
+    panelMuroFondo(g, vano[0], vano[1], 2.2, h, PALETA.muroFondo);
+    //  Las jambas, un tono más claro: es lo que le da espesor al muro y hace
+    //  que el hueco se lea como una puerta y no como pared que falta.
+    panelMuroFondo(g, vano[0] - 0.12, vano[0], 0, 2.2, PALETA.muroRemate);
+    panelMuroFondo(g, vano[1], vano[1] + 0.12, 0, 2.2, PALETA.muroRemate);
+    //  El umbral en el suelo, que es lo que dice por dónde se entra.
+    const a = aPantalla(vano[0], 0, 0.02);
+    const b = aPantalla(vano[1], 0, 0.02);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
+     .stroke({ color: PALETA.muroBanda, width: 2, alpha: 0.8 });
+  } else {
+    panelMuroFondo(g, 0, mundo.ancho, 0, h, PALETA.muroFondo);
+  }
   panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
 
   // Sombra de contacto al pie de cada muro: sin esto los muros flotan y el
@@ -1522,7 +1588,10 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   // En la primera versión las cuatro pesaban lo mismo y las tres estaciones
   // libres se comían la atención del único puesto que tiene a alguien. El dato
   // es el mismo; lo que cambia es cuánto reclama.
-  const ocupado = !!def.agente;
+  //  OCUPADO ES OCUPADO, LO OCUPE QUIEN LO OCUPE. Un escritorio con una
+  //  persona del equipo pesa lo mismo que uno con un agente: los dos tienen a
+  //  alguien, y rotular mas tenue al humano diria que cuenta menos.
+  const ocupado = !!(def.agente || def.persona);
 
   const titulo = new Text({
     text: def.nombre,

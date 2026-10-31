@@ -31,7 +31,8 @@
         {
           "puesto": "principal",
           "agente": "supervisor_noc",
-          "nombre": ""
+          "nombre": "",
+          "persona": ""
         }
       ],
       "acento": "#4f46e5"
@@ -70,12 +71,14 @@
         {
           "puesto": "principal",
           "agente": "cliente_final",
-          "nombre": ""
+          "nombre": "",
+          "persona": ""
         },
         {
           "puesto": "p1",
           "agente": "soporte_tecnico_cliente",
-          "nombre": "Diagnóstico"
+          "nombre": "Diagnóstico",
+          "persona": ""
         }
       ],
       "acento": "#0ea5a4"
@@ -97,7 +100,8 @@
         {
           "puesto": "principal",
           "agente": "ventas",
-          "nombre": ""
+          "nombre": "",
+          "persona": ""
         }
       ],
       "acento": "#b8860b"
@@ -121,7 +125,8 @@
         {
           "puesto": "principal",
           "agente": "facturacion_cliente",
-          "nombre": "Cobranza"
+          "nombre": "Cobranza",
+          "persona": ""
         }
       ],
       "acento": "#a855f7"
@@ -143,7 +148,8 @@
         {
           "puesto": "principal",
           "agente": "configuracion_guiada",
-          "nombre": ""
+          "nombre": "",
+          "persona": ""
         }
       ],
       "acento": "#2563eb"

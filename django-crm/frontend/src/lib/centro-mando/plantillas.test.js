@@ -148,3 +148,49 @@ describe('plantillaDe', () => {
     expect(plantillaDe('tecnica_6').faltante).toBe(null);
   });
 });
+
+describe('la mitad agregada se amuebla', () => {
+  const variantes = Object.entries(PLANTILLAS).filter(([n]) => /_\d+$/.test(n));
+
+  it('una sala más grande tiene MÁS muebles, no los mismos repartidos', () => {
+    // Estirar la fila y correr lo de la derecha deja en medio una franja de
+    // suelo pelado del ancho de los puestos nuevos: se lee como un depósito.
+    for (const [nombre, p] of variantes) {
+      const base = PLANTILLAS[nombre.replace(/_\d+$/, '')];
+      expect(p.mobiliario.length, nombre).toBeGreaterThan(base.mobiliario.length);
+    }
+  });
+
+  it('ningún mueble queda fuera de la sala', () => {
+    for (const [nombre, p] of variantes) {
+      for (const m of p.mobiliario) {
+        if (typeof m.gx !== 'number') continue;
+        expect(m.gx, `${nombre}/${m.tipo}`).toBeGreaterThanOrEqual(-0.5);
+        expect(m.gx, `${nombre}/${m.tipo}`).toBeLessThanOrEqual(p.mundo.ancho);
+      }
+    }
+  });
+
+  it('lo ÚNICO no se duplica: un dispensador no se vuelve tres', () => {
+    // Dos dispensadores en una sala no son más sala. Sólo se repite lo que ya
+    // se repite a lo largo de una oficina: estanterías y plantas.
+    const unicos = ['dispensador', 'mostrador', 'armario', 'panel_fibra', 'tablero'];
+    for (const [nombre, p] of variantes) {
+      const base = PLANTILLAS[nombre.replace(/_\d+$/, '')];
+      for (const tipo of unicos) {
+        const antes = base.mobiliario.filter((m) => m.tipo === tipo).length;
+        const ahora = p.mobiliario.filter((m) => m.tipo === tipo).length;
+        expect(ahora, `${nombre}/${tipo}`).toBe(antes);
+      }
+    }
+  });
+
+  it('ningún mueble repetido cae encima de otro', () => {
+    for (const [nombre, p] of variantes) {
+      const puntos = p.mobiliario
+        .filter((m) => typeof m.gx === 'number' && typeof m.gy === 'number')
+        .map((m) => `${m.tipo}|${m.gx}|${m.gy}`);
+      expect(new Set(puntos).size, nombre).toBe(puntos.length);
+    }
+  });
+});

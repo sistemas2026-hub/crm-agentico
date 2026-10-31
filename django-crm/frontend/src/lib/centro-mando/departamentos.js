@@ -89,7 +89,11 @@ function componer(decl, tipo) {
       id: `${id}:${p.id}`,
       local: p.id,
       nombre: (o && o.nombre) || p.nombre,
-      agente: (o && o.agente) || null
+      agente: (o && o.agente) || null,
+      //  UNA PERSONA DEL EQUIPO. Sin esto, un escritorio donde trabaja alguien
+      //  se dibujaba EXACTAMENTE IGUAL que uno libre, y mirar la oficina decia
+      //  que media empresa no existe.
+      persona: (o && o.persona) || null
     };
   });
 
@@ -308,21 +312,30 @@ export function plantaDe(sala, agentes) {
   );
 
   const puestos = sala.planta.puestos.map((p) => {
+    //  UNA PERSONA VA PRIMERO. No se resuelve contra el inventario de agentes
+    //  --no esta ahi ni tiene por que estarlo-- y por eso tampoco puede estar
+    //  «ausente»: lo que la empresa escribio es lo que hay. El esquema del
+    //  motor ya garantiza que un puesto no tenga agente Y persona.
+    if (p.persona) {
+      return { ...p, agente: null, persona: p.persona, nombre: p.persona,
+               area: 'persona del equipo', motivo: null };
+    }
     if (!p.agente) {
-      return { ...p, agente: null, nombre: p.nombre || 'Puesto', area: 'puesto libre',
-               motivo: 'sin agente asignado' };
+      return { ...p, agente: null, persona: null, nombre: p.nombre || 'Puesto',
+               area: 'puesto libre', motivo: 'sin agente asignado' };
     }
     const real = inventario.get(p.agente);
     if (!real) {
       //  Declarado y ausente del inventario. No es lo mismo que un puesto
       //  libre, y la ficha lo dice con esas palabras.
-      return { ...p, agente: null, nombre: p.nombre || 'Puesto',
+      return { ...p, agente: null, persona: null, nombre: p.nombre || 'Puesto',
                area: 'agente no encontrado',
                motivo: `la configuración declara «${p.agente}» y el inventario no lo trae` };
     }
     return {
       ...p,
       agente: p.agente,
+      persona: null,
       nombre: real.cargo || p.nombre || p.agente,
       area: sala.rotulo,
       //  A quién atiende. Es información real y se muestra en la ficha; NO se

@@ -322,3 +322,73 @@ describe('las dos dimensiones, y lo que NO tiene escritorio', () => {
     expect(html).toContain('el inventario no lo trae');
   });
 });
+
+describe('qué puede hacer el agente', () => {
+  //  QUE VIGILA. La lista blanca del rol NO es lo que un agente puede hacer:
+  //  es uno de los ocho pasos de la frontera. Mostrarla cruda diría que este
+  //  agente puede reiniciar una ONU con la empresa detenida. Estas pruebas
+  //  afirman sobre lo que la ficha DICE en cada estado de la autonomía.
+  const leer = { nombre: 'consultar_cliente', descripcion: '', clase: 'consulta',
+                 nivel_requerido: 0, requiere_aprobacion: false, disponible: true, motivo: null };
+  const escribir = { nombre: 'crear_ticket', descripcion: '', clase: 'efecto',
+                     nivel_requerido: 2, requiere_aprobacion: false };
+  const romper = { nombre: 'reiniciar_ont', descripcion: '', clase: 'irreversible',
+                   nivel_requerido: 2, requiere_aprobacion: true };
+
+  it('NO se inventa una lista cuando no se pudo leer', () => {
+    // `null` y `[]` son cosas distintas: una lista vacía afirma «no puede
+    // hacer nada», y eso podría ser falso. La ficha dice cuál de las dos es.
+    const html = pintar({ puesto, veredicto: alDia, acciones: null });
+    expect(html).toContain('no se pudo consultar');
+    expect(html).not.toContain('reiniciar_ont');
+  });
+
+  it('una acción habilitada e irreversible dice que necesita una persona', () => {
+    // Esconder la aprobación dentro de «disponible» la haría parecer
+    // automática, que es lo contrario de lo que es.
+    const html = pintar({
+      puesto, veredicto: alDia,
+      autonomia: { detenido: false, techo: 2, techo_nombre: 'coordinar' },
+      acciones: [leer, { ...romper, disponible: true, motivo: null }]
+    });
+    expect(html).toContain('reiniciar_ont');
+    expect(html).toContain('aprobación de una persona');
+  });
+
+  it('una acción bloqueada dice POR QUÉ, con las palabras del motor', () => {
+    const html = pintar({
+      puesto, veredicto: alDia,
+      autonomia: { detenido: false, techo: 1, techo_nombre: 'recomendar' },
+      acciones: [{ ...escribir, disponible: false,
+                   motivo: 'exige nivel «coordinar» y el techo de la empresa es «recomendar»' }]
+    });
+    expect(html).toContain('el techo de la empresa es');
+  });
+
+  it('con la empresa detenida lo dice UNA vez, arriba, y no en cada consulta', () => {
+    // Una consulta no es una acción autónoma —lo dice el propio interruptor—,
+    // así que marcarla «detenida» sería falso. Fue el primer defecto de este
+    // camino y por eso tiene su afirmación.
+    const html = pintar({
+      puesto, veredicto: alDia,
+      autonomia: { detenido: true, techo: null, techo_nombre: null },
+      acciones: [leer, { ...escribir, disponible: false,
+                         motivo: 'la autonomia de la empresa esta detenida' }]
+    });
+    expect(html).toContain('La autonomía de la empresa está detenida');
+    expect(html).toContain('consulta');
+  });
+
+  it('un agente que solo consulta lo dice en vez de mostrar un hueco', () => {
+    const html = pintar({ puesto, veredicto: alDia, acciones: [leer],
+                          autonomia: { detenido: false, techo: 3, techo_nombre: 'ejecutar autorizado' } });
+    expect(html).toContain('solo consulta');
+  });
+
+  it('un puesto LIBRE no tiene bloque de acciones', () => {
+    // No hay agente: no hay nada que pueda hacer, y un bloque vacío se leería
+    // como un agente sin permisos.
+    const html = pintar({ puesto: vacio, veredicto: alDia, acciones: null });
+    expect(html).not.toContain('Qué puede hacer');
+  });
+});

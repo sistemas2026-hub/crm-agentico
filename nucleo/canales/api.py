@@ -58,6 +58,7 @@ from nucleo.relevo.control import control_efectivo
 from nucleo.conectores import catalogo as conectores
 from nucleo.config import editor, fuente
 from nucleo.config.fusion import fusionar_roles, modelo_fusionado
+from nucleo.canales import acciones_de_agente
 from nucleo.config.organizacion import PLANTILLAS_DE_SALA, organizacion_de
 
 #  Las salas que la pantalla sabe dibujar, para ofrecerlas al editar.
@@ -3292,6 +3293,37 @@ def agentes():
     if supervisor:
         salida.append(supervisor)
     return jsonify({"tenant": tenant, "agentes": salida})
+
+
+@app.get("/agentes/acciones")
+def agentes_acciones():
+    """
+    QUE PUEDE HACER HOY CADA AGENTE -- cruzado con el estado real.
+
+    No es la lista blanca del rol: es la lista blanca CRUZADA con el techo de
+    autonomia vigente y el interruptor, que es lo unico que se puede afirmar
+    sin mentir. Una herramienta permitida en la configuracion puede ser hoy
+    imposible porque la empresa esta detenida o porque su techo no alcanza, y
+    decir «permitida» en ese caso seria prometer lo que el backend no da.
+
+    Solo lectura. No autoriza nada: la garantia sigue en `frontera.exigir()`.
+    El estado se lee UNA vez para todos los agentes -- son dos consultas a la
+    base, no dos por rol.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    estado = acciones_de_agente.estado_de_autonomia(tenant)
+    salida = {}
+    for nombre, rol in config.roles.items():
+        salida[nombre] = [acciones_de_agente.disponibilidad(a, estado)
+                          for a in acciones_de_agente.acciones_de(config, rol)]
+    return jsonify({"tenant": tenant, "autonomia": estado, "acciones": salida})
 
 
 @app.get("/agentes/catalogo")

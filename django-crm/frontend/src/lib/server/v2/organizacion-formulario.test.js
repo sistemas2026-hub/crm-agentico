@@ -114,7 +114,10 @@ describe('el formulario se convierte en una organización', () => {
     }));
     expect(org.departamentos[0].ocupaciones).toEqual([
       { puesto: 'principal', agente: 'cliente_final' },
-      { puesto: 'p1', agente: 'soporte_tecnico_cliente', nombre: 'Diagnóstico' }
+      //  `persona: ''` viaja desde el 31/10/2026: el campo oculto conserva
+      //  tambien a las personas del equipo, y una ocupacion sin ella saldria
+      //  del formulario borrandola.
+      { puesto: 'p1', agente: 'soporte_tecnico_cliente', nombre: 'Diagnóstico', persona: '' }
     ]);
   });
 
@@ -202,5 +205,40 @@ describe('el formulario se convierte en una organización', () => {
       'dep:0:id': 'a', 'dep:0:plantilla': 'tecnica'
     }));
     expect(org.departamentos.map((d) => d.id)).toEqual(['a']);
+  });
+});
+
+describe('una persona del equipo ocupa su silla', () => {
+  it('el campo de persona se guarda como ocupación', () => {
+    // Hasta el 31/10/2026 un escritorio con alguien trabajando se veía
+    // idéntico a uno vacío: la oficina decía que media empresa no existe.
+    const org = organizacionDelFormulario(formDe({
+      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica',
+      'dep:0:persona_p1': 'Ana Gómez'
+    }));
+    expect(org.departamentos[0].ocupaciones).toEqual([
+      { puesto: 'p1', persona: 'Ana Gómez' }
+    ]);
+  });
+
+  it('agente y persona en la MISMA silla salen juntos, para que el motor lo rechace', () => {
+    // El traductor no arbitra: fundir las dos en UNA ocupación hace que el
+    // motor vea el documento que la pantalla mandó y conteste cuál es el
+    // problema. Mandar dos ocupaciones del mismo puesto lo haría quejarse de
+    // otra cosa, y quien lo lea arreglaría lo que no estaba mal.
+    const org = organizacionDelFormulario(formDe({
+      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica',
+      'dep:0:ocupa_p1': 'ventas', 'dep:0:persona_p1': 'Ana'
+    }));
+    expect(org.departamentos[0].ocupaciones).toEqual([
+      { puesto: 'p1', agente: 'ventas', persona: 'Ana' }
+    ]);
+  });
+
+  it('una persona en blanco NO se guarda', () => {
+    const org = organizacionDelFormulario(formDe({
+      'dep:0:id': 'x', 'dep:0:plantilla': 'tecnica', 'dep:0:persona_p1': ''
+    }));
+    expect(org.departamentos[0].ocupaciones).toEqual([]);
   });
 });

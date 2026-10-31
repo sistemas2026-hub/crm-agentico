@@ -80,6 +80,39 @@
     /** @type {{ tipo: 'edificio' } | { tipo: 'piso', nivel: number } | { tipo: 'sala', id: string }} */
     (SALAS.length === 0 ? { tipo: 'edificio' } : { tipo: 'edificio' })
   );
+  /**
+   * ENLACE DIRECTO A UNA SALA O A UN PUESTO.
+   *
+   * `?sala=cartera` abre esa sala; `?sala=cartera&puesto=cartera:p1` abre
+   * además su ficha; `?piso=2` abre ese nivel. Sin parámetros, el edificio.
+   *
+   * Hace falta por dos motivos distintos y los dos valen. Uno: una oficina sin
+   * enlaces no se puede mandar — «mirá el puesto de facturación» obliga a
+   * explicar cuatro clics. Dos: es la única forma de que una prueba de
+   * navegador llegue a un puesto sin adivinar en qué píxel del lienzo cayó,
+   * que es justo la clase de prueba que falla por lo que no importa.
+   *
+   * Se lee UNA vez, del `location` del navegador, y no se escribe de vuelta:
+   * sincronizar la URL con cada clic convertiría el historial del navegador en
+   * un registro de la cámara.
+   */
+  const DESDE_LA_URL = (() => {
+    if (typeof location === 'undefined' || SALAS.length === 0) return {};
+    const q = new URLSearchParams(location.search);
+    const pedida = q.get('sala');
+    const piso = Number(q.get('piso'));
+    //  Una sala que no existe se IGNORA en vez de abrir una vista rota: el
+    //  enlace puede ser viejo, y un edificio es una respuesta honesta.
+    if (pedida && salaPorId(SALAS, pedida)) {
+      return { vista: { tipo: 'sala', id: pedida }, puesto: q.get('puesto') };
+    }
+    if (Number.isFinite(piso) && PISOS.some((x) => x.nivel === piso)) {
+      return { vista: { tipo: 'piso', nivel: piso } };
+    }
+    return {};
+  })();
+  if (DESDE_LA_URL.vista) vista = DESDE_LA_URL.vista;
+
   let sala = $derived(vista.tipo === 'sala' ? salaPorId(SALAS, vista.id) : null);
   let pisoVisto = $derived(
     vista.tipo === 'piso' ? (PISOS.find((p) => p.nivel === vista.nivel) ?? null) : null
@@ -142,12 +175,33 @@
   let letreros = $derived(
     vista.tipo === 'sala' || !edificio
       ? []
-      : edificio.niveles.map((n) => ({
-          texto: n.rotulo ? `P${n.nivel} · ${n.rotulo}` : `Piso ${n.nivel}`,
-          gx: 0,
-          gy: 4,
-          gz: n.gz
-        }))
+      : [
+          ...edificio.niveles.map((n) => ({
+            texto: n.rotulo ? `P${n.nivel} · ${n.rotulo}` : `Piso ${n.nivel}`,
+            gx: 0,
+            gy: 4,
+            gz: n.gz,
+            hacia: /** @type {const} */ ('izquierda')
+          })),
+          //  EL NOMBRE DE CADA SALA, TAMBIEN A TAMAÑO DE PANTALLA.
+          //
+          //  Ya va escrito en el canto de su losa, y medido en el navegador no
+          //  se lee: la vista de conjunto entra a escala 0,2 y un texto de
+          //  13 px mide 2,6. Agrandarlo no sirve —en una sala quedaria
+          //  gigante— y es el mismo motivo por el que los pisos pasaron a ser
+          //  letreros. Lo que cambia es que hay once y no tres, asi que van
+          //  mas chicos y hacia la derecha, sobre su propia losa.
+          ...edificio.plantas
+            .filter((p) => p.papel === 'sala')
+            .map((p) => ({
+              texto: p.cartel?.rotulo ?? p.sala,
+              gx: p.origen.gx + 0.4,
+              gy: p.origen.gy + p.mundo.fondo + 0.6,
+              gz: p.origen.gz,
+              hacia: /** @type {const} */ ('derecha'),
+              cuerpo: 10
+            }))
+        ]
   );
 
   /** Cómo se llama lo que se está mirando. */
@@ -231,7 +285,7 @@
   let sinRepresentacion = $state(0);
 
   /** @type {string|null} */
-  let seleccionado = $state(null);
+  let seleccionado = $state(DESDE_LA_URL.puesto ?? null);
 
   //  El flujo pide TODOS los agentes de la empresa, no los de la sala que se
   //  está mirando: si filtrara por departamento, cambiar de sala tiraría el
@@ -253,6 +307,20 @@
 
   /** El puesto que está seleccionado, con su definición. */
   let puestoSeleccionado = $derived(puestosVisibles.find((p) => p.id === seleccionado) ?? null);
+
+  /**
+   * Que puede hacer HOY el agente de ese puesto.
+   *
+   * `null` -no se pudo leer- y `[]` -se leyo y no tiene ninguna- son cosas
+   * distintas y la ficha las muestra distinto, asi que no se colapsan aca: un
+   * agente sin entrada en el mapa es un agente del que no sabemos, no uno que
+   * no puede hacer nada.
+   */
+  let accionesDelPuesto = $derived(
+    !data.acciones || !puestoSeleccionado?.agente
+      ? null
+      : (data.acciones.acciones?.[puestoSeleccionado.agente] ?? null)
+  );
   let estadoSeleccionado = $derived(
     puestoSeleccionado?.agente
       ? (estados.find((e) => e.agente === puestoSeleccionado.agente) ?? null)
@@ -550,6 +618,8 @@
         historial={historialSeleccionado}
         capacidades={capacidadesDelPuesto}
         sala={salaDelPuesto}
+        acciones={accionesDelPuesto}
+        autonomia={data.acciones?.autonomia ?? null}
         simulado={demostracion}
         {diagnostico}
         alCerrar={() => {

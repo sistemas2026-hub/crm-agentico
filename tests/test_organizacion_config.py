@@ -234,6 +234,26 @@ def invariantes() -> None:
     except Exception as e:                                           # noqa: BLE001
         comprobar(False, f"rechazo algo valido: {type(e).__name__}: {e}")
 
+    #  UNA PERSONA DEL EQUIPO (31/10/2026)
+    rechaza("un puesto con agente Y persona a la vez",
+            lambda: Ocupacion(puesto="p1", agente="soporte", persona="Ana Gomez"))
+    try:
+        o = Ocupacion(puesto="p1", persona="  Ana Gomez  ")
+        comprobar(o.persona == "Ana Gomez",
+                  "una persona del equipo se sienta, y su nombre se limpia")
+    except Exception as e:                                           # noqa: BLE001
+        comprobar(False, f"rechazo algo valido: {type(e).__name__}: {e}")
+    try:
+        #  La MISMA persona en dos sitios NO se rechaza, y es deliberado: una
+        #  persona de verdad puede repartir su tiempo entre dos areas. Lo que
+        #  no puede es compartir una silla con un agente.
+        _depto(id="a", areas=["a"],
+               ocupaciones=[Ocupacion(puesto="principal", persona="Ana"),
+                            Ocupacion(puesto="p1", persona="Ana")])
+        comprobar(True, "la misma persona en dos puestos: valido a proposito")
+    except Exception as e:                                           # noqa: BLE001
+        comprobar(False, f"rechazo algo valido: {type(e).__name__}: {e}")
+
 
 # =============================================================================
 #  4. CANTIDADES VARIABLES: ESTO ES UN PRODUCTO, NO UNA PANTALLA

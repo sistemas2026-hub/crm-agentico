@@ -57,6 +57,25 @@
      * catálogo no tiene, un puesto declarado que la plantilla no trae.
      */
     sala = null,
+    /**
+     * QUE PUEDE HACER HOY ESTE AGENTE. No es la lista blanca de su rol.
+     *
+     * El motor la cruza con el interruptor de autonomía y el techo vigentes
+     * —los dos leídos de la base, sin caché— y manda `disponible` con su
+     * motivo. La lista blanca cruda diría que este agente puede reiniciar una
+     * ONU con la empresa detenida; esta no.
+     *
+     * `null` significa «no se pudo leer», que NO es lo mismo que una lista
+     * vacía: una lista vacía dice «no puede hacer nada» y eso sería una
+     * afirmación. Los dos casos se muestran distinto.
+     *
+     * @type {{nombre: string, descripcion: string, clase: string,
+     *         nivel_requerido: number, requiere_aprobacion: boolean,
+     *         disponible: boolean, motivo: string|null}[]|null}
+     */
+    acciones = null,
+    /** Techo e interruptor de la empresa, para explicar un bloqueo. */
+    autonomia = null,
     alCerrar = () => {}
   } = $props();
 
@@ -87,19 +106,26 @@
    * lo que hacía que la oficina dibujara nueve empleados donde hay seis.
    *
    *   agente        un agente IA ejecutable: tiene instancia en el motor
+   *   persona       alguien del equipo, de carne y hueso
    *   ausente       la configuración lo declara y el inventario no lo trae
    *   libre         el puesto existe y nadie lo ocupa
+   *
+   * `persona` va ANTES que `ausente` y que `libre` por lo mismo que existe:
+   * hasta el 31/10/2026 un escritorio con alguien trabajando se veía idéntico
+   * a uno vacío, así que la oficina decía que media empresa no existe.
    *
    * Las CAPACIDADES no aparecen acá y es a propósito: no ocupan un puesto, así
    * que no pueden ser el tipo de miembro de uno. Van en su propio bloque.
    */
   let tipo = $derived(
     puesto?.agente ? 'agente'
+      : puesto?.persona ? 'persona'
       : puesto?.motivo && puesto.motivo !== 'sin agente asignado' ? 'ausente'
       : 'libre'
   );
   const MIEMBRO = {
     agente: 'Agente IA ejecutable',
+    persona: 'Persona del equipo',
     ausente: 'Agente declarado, ausente del inventario',
     libre: 'Puesto libre'
   };
@@ -125,6 +151,21 @@
     if (tipo === 'ausente' && puesto?.motivo) avisos.push(puesto.motivo);
     return avisos;
   });
+
+  /**
+   * Las acciones partidas en MIRAR y HACER.
+   *
+   * Se separan porque no son lo mismo y la diferencia es la que importa:
+   * `consultar_cliente` lee, `reiniciar_ont` corta el servicio de una casa. En
+   * una lista plana se ven iguales, que es justo lo que hacía falta separar.
+   *
+   * Y las consultas NO las gobierna ni el interruptor ni el techo —una
+   * consulta no es una acción autónoma, lo dice el propio interruptor—, así
+   * que mezclarlas haría que un bloqueo pareciera alcanzar a todo.
+   */
+  let consultas = $derived((acciones ?? []).filter((a) => a.clase === 'consulta'));
+  let conEfecto = $derived((acciones ?? []).filter((a) => a.clase !== 'consulta'));
+  let bloqueadas = $derived(conEfecto.filter((a) => !a.disponible));
 
   let confiable = $derived(veredicto?.confiable === true);
   /** Hay un turno abierto AHORA, no un eco de uno que terminó. */
@@ -311,6 +352,87 @@
       </section>
     {/if}
 
+    {#if tipo === 'persona'}
+      <section class="acciones">
+        <h3>Qué puede hacer</h3>
+        <!-- Una persona no tiene lista blanca, ni techo, ni interruptor: lo
+             que hace no pasa por el motor. Decir «sin acciones» sería
+             describirla con el vocabulario de un agente. -->
+        <p class="vacio" data-prueba="persona-sin-acciones">
+          Lo que hace una persona del equipo no pasa por el motor: no tiene
+          herramientas habilitadas ni techo de autonomía.
+        </p>
+      </section>
+    {/if}
+
+    {#if tipo === 'agente'}
+      <section class="acciones">
+        <h3>Qué puede hacer</h3>
+        {#if acciones === null}
+          <!-- No se pudo leer. Una lista vacía diría «no puede hacer nada», que
+               es una afirmación distinta y podría ser falsa. -->
+          <p class="vacio" data-prueba="acciones-sin-leer">
+            No se pudo leer qué acciones tiene habilitadas este agente. No es
+            que no tenga: es que no se pudo consultar.
+          </p>
+        {:else}
+          <p class="nota-acciones">
+            Lo que la empresa le habilitó, cruzado con su autonomía de hoy.
+            {#if autonomia}
+              {#if autonomia.detenido}
+                <strong>La autonomía de la empresa está detenida.</strong>
+              {:else if autonomia.techo_nombre}
+                Techo: <strong>{autonomia.techo_nombre}</strong>.
+              {/if}
+            {/if}
+          </p>
+
+          {#if conEfecto.length > 0}
+            <ul class="lista-acciones" data-prueba="acciones-con-efecto">
+              {#each conEfecto as a (a.nombre)}
+                <li class:bloqueada={!a.disponible}>
+                  <code>{a.nombre}</code>
+                  <span class="etiqueta {a.clase}">
+                    {a.clase === 'irreversible' ? 'no se puede deshacer' : 'con efecto'}
+                  </span>
+                  {#if a.disponible}
+                    {#if a.requiere_aprobacion}
+                      <!-- Por separado y no dentro de «disponible»: una
+                           irreversible habilitada sigue necesitando que una
+                           persona la apruebe, y esconderlo en un booleano la
+                           haría parecer automática. -->
+                      <span class="aprobacion">solo con aprobación de una persona</span>
+                    {/if}
+                  {:else}
+                    <span class="motivo">{a.motivo}</span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="vacio">
+              Ninguna acción con efecto: este agente solo consulta.
+            </p>
+          {/if}
+
+          {#if consultas.length > 0}
+            <details>
+              <summary>{consultas.length} consulta(s)</summary>
+              <ul class="lista-acciones consultas" data-prueba="acciones-consulta">
+                {#each consultas as a (a.nombre)}
+                  <li><code>{a.nombre}</code></li>
+                {/each}
+              </ul>
+              <p class="vacio">
+                Una consulta no es una acción autónoma: ni el interruptor ni el
+                techo la gobiernan.
+              </p>
+            </details>
+          {/if}
+        {/if}
+      </section>
+    {/if}
+
     {#if capacidades.length > 0}
       <section>
         <h3>Capacidades del área <span class="cuenta">{capacidades.length}</span></h3>
@@ -369,6 +491,19 @@
 {/if}
 
 <style>
+  .acciones .nota-acciones { font-size: 0.74rem; color: #94a3b8; margin: 0 0 0.5rem; }
+  .lista-acciones { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.3rem; }
+  .lista-acciones li { font-size: 0.74rem; display: flex; gap: 0.4rem; align-items: baseline;
+                       flex-wrap: wrap; }
+  .lista-acciones li.bloqueada code { opacity: 0.55; text-decoration: line-through; }
+  .lista-acciones.consultas { margin-top: 0.4rem; opacity: 0.85; }
+  .etiqueta { font-size: 0.64rem; padding: 0.05rem 0.35rem; border-radius: 999px;
+              border: 1px solid currentColor; }
+  .etiqueta.efecto { color: #fbbf24; }
+  .etiqueta.irreversible { color: #fb7185; }
+  .aprobacion { font-size: 0.68rem; color: #fbbf24; }
+  .motivo { font-size: 0.68rem; color: #94a3b8; }
+  .acciones details summary { font-size: 0.72rem; color: #94a3b8; cursor: pointer; }
   .ficha {
     display: flex;
     flex-direction: column;

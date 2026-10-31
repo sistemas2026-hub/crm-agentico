@@ -124,7 +124,18 @@ export interface OpcionesDeEscena {
    * interactivos: si lo fueran se comerían los clics de los puestos que tienen
    * detrás.
    */
-  letreros?: { texto: string; gx: number; gy: number; gz: number }[];
+  letreros?: {
+    texto: string; gx: number; gy: number; gz: number;
+    /**
+     * Hacia dónde crece el letrero desde su ancla. Los de piso van a la
+     * izquierda —se anclan al borde del núcleo, que es la única franja del
+     * encuadre sin edificio— y los de sala van a la derecha, sobre su propia
+     * losa.
+     */
+    hacia?: 'izquierda' | 'derecha';
+    /** Cuerpo de letra. Los de sala son menores que los de piso: hay once. */
+    cuerpo?: number;
+  }[];
 }
 
 interface Habitante {
@@ -233,18 +244,21 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       text: l.texto,
       style: {
         fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-        fontSize: 13,
+        fontSize: l.cuerpo ?? 13,
         fontWeight: '700',
         fill: 0xe8e7f5,
-        letterSpacing: 1.4
+        letterSpacing: (l.cuerpo ?? 13) >= 13 ? 1.4 : 0.6
       },
       resolution: 2
     });
-    texto.anchor.set(1, 0.5);
+    const aLaDerecha = l.hacia === 'derecha';
+    texto.anchor.set(aLaDerecha ? 0 : 1, 0.5);
     //  Una placa detrás del texto: sobre el suelo oscuro se lee, pero sobre
     //  una pantalla encendida o una losa clara se pierde. Cuesta un polígono.
     const placa = new Graphics();
-    placa.roundRect(-texto.width - 14, -11, texto.width + 20, 22, 6)
+    const alto = Math.round((l.cuerpo ?? 13) * 1.7);
+    placa.roundRect(aLaDerecha ? -6 : -texto.width - 14, -alto / 2,
+                    texto.width + 20, alto, 6)
       .fill({ color: 0x0b0a1c, alpha: 0.72 })
       .stroke({ width: 1, color: 0x2c2a52, alpha: 0.9 });
     nodo.addChild(placa);
@@ -281,11 +295,16 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   /* ── los habitantes ───────────────────────────────────────────────────── */
   const habitantes: Habitante[] = oficina.puestos.map((puesto, asiento) => {
     let personaje: Personaje | null = null;
-    if (puesto.def.agente) {
+    //  UNA PERSONA DEL EQUIPO TAMBIEN SE DIBUJA, y su aspecto sale de su
+    //  nombre igual que el de un agente. Lo que NO tiene es halo ni estado: no
+    //  hay un flujo de eventos que la represente, y animarla seria inventar
+    //  actividad. Ver el bucle de abajo.
+    const quien = puesto.def.agente || puesto.def.persona;
+    if (quien) {
       //  El nombre del agente decide su aspecto: ropa, pelo y piel. Sin esto
       //  ocho departamentos son la misma persona clonada cuarenta veces, que
       //  es lo primero que delata que la oficina es un fondo repetido.
-      personaje = construirPersonaje(texturas, puesto.def.agente, asiento);
+      personaje = construirPersonaje(texturas, quien, asiento);
       // Un 18% más grande que las medidas de `personaje.ts`. En la primera
       // captura la figura era correcta y se perdía: la sala es de 14 × 10
       // celdas y una persona sentada a escala estricta ocupa 50 px de 1900. El
@@ -316,6 +335,12 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     if (!h.puesto.def.agente) {
       h.puesto.testigo.tint = PALETA.incognito;
       h.puesto.halo.alpha = 0;
+      //  UNA PERSONA DEL EQUIPO NO ENTRA AQUI EN `incognito`, y no hace falta
+      //  corregirlo: arriba ya quedo en `reposo` porque tiene personaje. El
+      //  signo de interrogacion dice «no se que pasa ahi»; de una persona se
+      //  sabe perfectamente -- esta sentada y el motor no la representa. Lo
+      //  que si se apaga es el halo, que es lo correcto: no hay flujo de
+      //  eventos que la anime, y animarla seria inventar actividad.
     }
   }
 

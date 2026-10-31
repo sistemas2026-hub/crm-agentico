@@ -460,3 +460,40 @@ describe('el recinto que la cámara encuadra', () => {
     expect(EDIFICIO.mundo.ancho).toBeLessThan(BALDOSA.ancho * 10);
   });
 });
+
+describe('las salas tienen puerta al pasillo', () => {
+  //  QUE VIGILA. Una oficina a la que se entra atravesando la pared es un
+  //  decorado. Y la puerta la pone el COMPOSITOR: una sala mirada sola no da a
+  //  ningun pasillo, asi que abrirle un hueco seria un agujero.
+  const SALAS = [
+    { id: 'a', rotulo: 'A', piso: 1, tipo: 'departamento', plantilla: 'tecnica',
+      planta: { mundo: { ancho: 11, fondo: 8, alto: 4 }, puestos: [], mobiliario: [],
+                cartel: {}, acento: 1 }, areas: [], capacidades: [] }
+  ];
+
+  it('toda sala del edificio lleva su vano', () => {
+    const { plantas } = edificioDe(SALAS, [], [{ nivel: 1, rotulo: 'P1' }]);
+    const sala = plantas.find((p) => p.papel === 'sala');
+    expect(sala.mundo.puerta).toBeTruthy();
+    expect(sala.mundo.puerta[1]).toBeGreaterThan(sala.mundo.puerta[0]);
+  });
+
+  it('el vano cae DENTRO del muro, no fuera', () => {
+    //  Un vano que empieza despues del ancho de la sala no abre nada: el muro
+    //  se pintaria entero y la puerta no existiria, sin un error.
+    const { plantas } = edificioDe(SALAS, [], [{ nivel: 1, rotulo: 'P1' }]);
+    for (const p of plantas.filter((x) => x.papel === 'sala')) {
+      expect(p.mundo.puerta[0]).toBeGreaterThanOrEqual(0);
+      expect(p.mundo.puerta[1]).toBeLessThanOrEqual(p.mundo.ancho);
+    }
+  });
+
+  it('ni el nucleo ni la circulacion llevan puerta', () => {
+    //  El nucleo es lo unico cerrado del edificio y la circulacion no tiene
+    //  muros: un vano ahi seria un hueco en una pared que no existe.
+    const { plantas } = edificioDe(SALAS, [], [{ nivel: 1, rotulo: 'P1' }]);
+    for (const p of plantas.filter((x) => x.papel !== 'sala')) {
+      expect(p.mundo.puerta, p.papel).toBeUndefined();
+    }
+  });
+});

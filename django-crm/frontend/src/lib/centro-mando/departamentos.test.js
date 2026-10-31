@@ -558,3 +558,49 @@ describe('ocupacionesSinSilla', () => {
     expect(ocupacionesSinSilla([null, undefined])).toEqual([]);
   });
 });
+
+describe('una persona del equipo ocupa su puesto', () => {
+  //  QUE VIGILA. Hasta el 31/10/2026 la oficina sabia dibujar tres cosas -un
+  //  agente, un agente declarado y ausente, y un puesto vacio- y una empresa
+  //  de internet no esta hecha solo de agentes. Un escritorio con alguien
+  //  trabajando se veia EXACTAMENTE IGUAL que uno libre.
+  const conPersona = {
+    departamentos: [{
+      id: 'campo', rotulo: 'Campo', piso: 1, plantilla: 'tecnica',
+      ocupaciones: [{ puesto: 'p1', persona: 'Ana Gómez' }]
+    }]
+  };
+
+  it('no se dibuja como un puesto libre', () => {
+    const planta = plantaDe(salasDe(conPersona)[0], []);
+    const p1 = planta.puestos.find((p) => p.local === 'p1');
+    expect(p1.persona).toBe('Ana Gómez');
+    expect(p1.area).not.toBe('puesto libre');
+  });
+
+  it('se rotula con su nombre', () => {
+    const planta = plantaDe(salasDe(conPersona)[0], []);
+    expect(planta.puestos.find((p) => p.local === 'p1').nombre).toBe('Ana Gómez');
+  });
+
+  it('NO se resuelve contra el inventario de agentes, así que no puede estar «ausente»', () => {
+    // No esta ahi ni tiene por que estarlo: el motor no conoce las cuentas del
+    // CRM. Buscarla en el inventario la dejaria para siempre como un agente
+    // que falta, que es una acusacion y no un dato.
+    const planta = plantaDe(salasDe(conPersona)[0], []);
+    const p1 = planta.puestos.find((p) => p.local === 'p1');
+    expect(p1.motivo).toBe(null);
+    expect(p1.agente).toBe(null);
+  });
+
+  it('un puesto con agente sigue sin persona, y al revés', () => {
+    // Las dos formas tienen que ser UNA: si un puesto a veces trae `persona` y
+    // a veces no trae la clave, quien lea `p.persona` acierta por casualidad.
+    const planta = plantaDe(salasDe({
+      departamentos: [{ id: 'x', rotulo: 'X', piso: 1, plantilla: 'tecnica',
+                        ocupaciones: [{ puesto: 'principal', agente: 'ventas' }] }]
+    })[0], [{ nombre: 'ventas', cargo: 'Ventas' }]);
+    for (const p of planta.puestos) expect(p).toHaveProperty('persona');
+    expect(planta.puestos.find((p) => p.local === 'principal').persona).toBe(null);
+  });
+});

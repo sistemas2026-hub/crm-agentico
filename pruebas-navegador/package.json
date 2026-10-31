@@ -1,0 +1,12 @@
+{
+  "name": "pruebas-navegador-oficina",
+  "private": true,
+  "type": "module",
+  "description": "Suite de navegador de la oficina virtual. Aparte del frontend a proposito: sus dependencias no entran en la imagen que se despliega.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}

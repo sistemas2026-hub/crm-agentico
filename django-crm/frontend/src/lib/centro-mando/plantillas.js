@@ -384,6 +384,37 @@ function ampliar(base, extra) {
     return { ...m };
   };
 
+  //  LA MITAD AGREGADA NO PUEDE QUEDAR VACIA. Estirar la fila y correr lo de
+  //  la derecha deja en medio una franja de suelo pelado del ancho de los
+  //  puestos nuevos: en el navegador se lee como un deposito, no como una
+  //  oficina. Asi que lo que se repite a lo largo de una oficina se repite:
+  //  estanterias y plantas. Lo UNICO -un dispensador, un mostrador, un rack-
+  //  no, porque dos dispensadores en una sala no son mas sala.
+  //
+  //  SE CALCULAN CONTRA LAS POSICIONES FINALES Y NO CONTRA LAS DE LA BASE.
+  //  Con las de la base, una copia caia exactamente encima del mueble original
+  //  ya corrido -- `operaciones_7` tenia 11 puntos distintos para 13 muebles,
+  //  y dos muebles en el mismo punto dibujan uno solo. Lo cazo la guarda de
+  //  solapamiento; a ojo no se habria visto nunca.
+  const REPETIBLES = new Set(['estanteria', 'planta']);
+  const finales = base.mobiliario.map(mueble);
+  const ocupados = finales
+    .filter((m) => typeof m.gx === 'number')
+    .map((m) => ({ tipo: m.tipo, gx: m.gx, gy: m.gy }));
+  const copias = [];
+  for (const m of finales) {
+    if (!REPETIBLES.has(m.tipo) || typeof m.gx !== 'number') continue;
+    for (let k = 1; k <= Math.ceil(extra / 3); k++) {
+      const gx = Number((m.gx + k * sep * 3).toFixed(2));
+      if (gx > ancho - 0.6) continue;
+      const choca = ocupados.some(
+        (o) => o.tipo === m.tipo && Math.abs(o.gx - gx) < 1 && o.gy === m.gy);
+      if (choca) continue;
+      ocupados.push({ tipo: m.tipo, gx, gy: m.gy });
+      copias.push({ ...m, gx });
+    }
+  }
+
   return {
     ...base,
     rotulo: `${base.rotulo} · ${base.puestos.length + extra} puestos`,
@@ -397,7 +428,7 @@ function ampliar(base, extra) {
     mural: base.mural
       ? { ...base.mural, paneles: base.mural.paneles.map((p) => ({ ...p, gx: correr(p.gx) })) }
       : base.mural,
-    mobiliario: [...base.mobiliario.map(mueble), ...lamparas],
+    mobiliario: [...finales, ...copias, ...lamparas],
     puestos: [
       ...base.puestos.map((p) => (enLaFila.has(p.id) ? { ...p } : { ...p, gx: correr(p.gx) })),
       ...nuevos
