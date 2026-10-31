@@ -194,3 +194,62 @@ describe('la autonomía ganada, de la respuesta del motor a la pantalla', () => 
     expect(d.errorAutonomia).toMatch(/autonomia ganada/);
   });
 });
+
+describe('darle y quitarle autonomía a una acción', () => {
+  /** @type {any[]} */
+  let pedidos;
+  /** @type {any} */
+  let contesta;
+  beforeEach(() => {
+    pedidos = [];
+    contesta = { ok: true, status: 201, json: async () => ({ estado: 'activa', id: 'p1' }) };
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url, opciones) => {
+      pedidos.push({ url: String(url), cuerpo: JSON.parse(opciones?.body ?? '{}') });
+      return contesta;
+    }));
+  });
+
+  /** @param {Record<string, string>} campos @param {string} [rol] */
+  function accion(campos, rol = 'ADMIN') {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) f.set(k, v);
+    return /** @type {any} */ ({
+      locals: { profile: { role: rol }, user: { id: '7c9e6679-7425-40de-944b-e07fc1f90ae7', name: 'Ana Perez' } },
+      fetch: globalThis.fetch,
+      request: new Request('http://crm/capacidad', { method: 'POST', body: f })
+    });
+  }
+
+  it('promover viaja con la acción y el autor de la SESIÓN', async () => {
+    const r = await actions.promover(accion({ accion: 'reiniciar_ont', confirmo: 'si' }));
+    expect(pedidos).toEqual([{ url: 'http://motor/autonomia-ganada/promover', cuerpo: {
+      tenant: 'rapilink', accion: 'reiniciar_ont', autor: 'Ana Perez',
+      autor_usuario_id: '7c9e6679-7425-40de-944b-e07fc1f90ae7' } }]);
+    expect(r).toEqual({ autonomia: { accion: 'reiniciar_ont', ok: 'promovida' } });
+  });
+
+  it('sin la confirmación marcada, o sin ser ADMIN, no viaja nada', async () => {
+    const r1 = /** @type {any} */ (await actions.promover(accion({ accion: 'reiniciar_ont' })));
+    const r2 = /** @type {any} */ (await actions.promover(accion({ accion: 'reiniciar_ont', confirmo: 'si' }, 'USER')));
+    expect(r1.status).toBe(400);
+    expect(r2.status).toBe(403);
+    expect(pedidos).toEqual([]);
+  });
+
+  it('si el motor dice que no alcanza la evidencia, se muestra lo que falta', async () => {
+    contesta = { ok: false, status: 409, json: async () => ({ error: 'SIN_EVIDENCIA',
+      faltan: [{ condicion: 'minimo_revisadas', tiene: 12, necesita: 30 }] }) };
+    const r = /** @type {any} */ (await actions.promover(accion({ accion: 'reiniciar_ont', confirmo: 'si' })));
+    expect(r.status).toBe(409);
+    expect(r.data.autonomia.faltan).toEqual([{ condicion: 'minimo_revisadas', tiene: 12, necesita: 30 }]);
+  });
+
+  it('retirar exige un motivo y lo manda', async () => {
+    const sin = /** @type {any} */ (await actions.retirar(accion({ accion: 'reiniciar_ont' })));
+    expect(sin.status).toBe(400);
+    expect(pedidos).toEqual([]);
+    await actions.retirar(accion({ accion: 'reiniciar_ont', motivo: ' la reviso ' }));
+    expect(pedidos[0].url).toBe('http://motor/autonomia-ganada/retirar');
+    expect(pedidos[0].cuerpo).toMatchObject({ accion: 'reiniciar_ont', motivo: 'la reviso', autor: 'Ana Perez' });
+  });
+});

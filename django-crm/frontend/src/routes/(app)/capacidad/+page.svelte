@@ -171,6 +171,34 @@
           {#each a.faltan as f, i (i)}
             <p class="pie falta">{textoDeFalta(f)}</p>
           {/each}
+          {#if form?.autonomia?.accion === a.accion && form.autonomia.error}
+            <p class="aviso-error">{form.autonomia.error}</p>
+            {#each form.autonomia.faltan ?? [] as f, i (i)}<p class="pie falta">{textoDeFalta(f)}</p>{/each}
+          {/if}
+          {#if a.autonomia?.autonoma}
+            <p class="pie"><strong>Se hace sola.</strong> Si una ejecución falla o un efecto no se confirma, vuelve sola a pedir aprobación.</p>
+            <form method="POST" action="?/retirar" use:enhance class="fila-accion">
+              <input type="hidden" name="accion" value={a.accion} />
+              <input name="motivo" class="v2-input" placeholder="Por qué se la quitás" required maxlength="500" />
+              <button class="v2-btn" type="submit">Quitarle la autonomía</button>
+            </form>
+          {:else}
+            {#if a.autonomia?.estado === 'degradada'}
+              <p class="pie falta">Tenía autonomía y la perdió sola: una ejecución falló o un efecto no se confirmó. Para volver a dársela, la evidencia tiene que alcanzar de nuevo.</p>
+            {/if}
+            {#if a.elegible}
+              <form method="POST" action="?/promover" use:enhance class="promover">
+                <input type="hidden" name="accion" value={a.accion} />
+                <label class="pie"><input type="checkbox" name="confirmo" value="si" required />
+                  Entiendo que {a.accion} va a ejecutarse sin que una persona lo apruebe, siempre después de
+                  comprobar sus condiciones en código, y que puedo quitársela en cualquier momento.</label>
+                <div><button class="v2-btn v2-btn-primary" type="submit">Darle autonomía</button></div>
+              </form>
+            {/if}
+          {/if}
+          {#if form?.autonomia?.accion === a.accion && form.autonomia.ok}
+            <p class="pie">{form.autonomia.ok === 'promovida' ? 'Listo: ahora se hace sola.' : 'Listo: vuelve a pedir aprobación.'}</p>
+          {/if}
         </div>
       {:else}
         <p class="pie">Ninguna acción cumple todavía las condiciones de código para ganar autonomía.</p>
@@ -218,4 +246,5 @@
   .estado { font-size: 12px; color: var(--v2-slate); }
   .estado.listo { color: var(--v2-ember); font-weight: 600; }
   .falta { color: var(--v2-rust); }
+  .promover { display: flex; flex-direction: column; gap: 6px; }
 </style>

@@ -168,6 +168,67 @@ try:
     vacia = medicion.medir("otra_empresa", "reiniciar_ont", hace(30), AHORA)
     comprobar(vacia["revisadas"] == 1 and vacia["no_confirmadas"] == 1,
               "la otra empresa ve solo lo suyo", str(vacia))
+
+    # ------------------------------------------------------------------
+    # FASE B: promover, retirar, degradar, vigente -- con los permisos reales
+    # ------------------------------------------------------------------
+    print()
+    from nucleo.persistencia import db                                  # noqa: E402
+    from nucleo.seguridad import autonomia_ganada as ag                 # noqa: E402
+
+    leer = medicion.vigente
+    comprobar(ag.vigente("rapilink", "reiniciar_ont", leer=leer)["estado"] == "sin_registro",
+              "sin fila, no es autonoma")
+    medicion.promover("rapilink", "reiniciar_ont", "Ana · u-1", "promovida", {"evidencia": {"revisadas": 40}})
+    v = ag.vigente("rapilink", "reiniciar_ont", leer=leer)
+    comprobar(v["autonoma"] and v["promocion_id"], "promovida por el operador: autonoma", str(v))
+    comprobar(ag.vigente("otra_empresa", "reiniciar_ont", leer=leer)["autonoma"] is False,
+              "la promocion de una empresa no le da autonomia a otra")
+    comprobar(ag.vigente("rapilink", "cambiar_tipo_onu", leer=leer)["autonoma"] is False,
+              "ni a otra herramienta")
+
+    # El runtime (app_backend) NO puede escribir 'activa'.
+    try:
+        with db.sesion("rapilink") as (cur, org):
+            cur.execute("""insert into asistente.autonomia_ganada (organization_id, herramienta, estado, actor)
+                           values (%s, 'cambiar_tipo_onu', 'activa', 'motor')""", (org,))
+        comprobar(False, "app_backend no puede insertar una promocion")
+    except Exception as e:                                              # noqa: BLE001
+        comprobar("permission denied" in str(e).lower() or "privilegio" in str(e).lower(),
+                  "app_backend no puede insertar una promocion (solo el operador)", type(e).__name__)
+    try:
+        with db.sesion("rapilink") as (cur, org):
+            cur.execute("update asistente.autonomia_ganada set estado = 'activa'")
+        comprobar(False, "nadie edita la historia")
+    except Exception as e:                                              # noqa: BLE001
+        comprobar("permission denied" in str(e).lower(), "nadie edita la historia (sin UPDATE)",
+                  type(e).__name__)
+
+    # El runtime SI puede degradar, solo lo activo, solo lo suyo.
+    d = medicion.degradar("rapilink", "reiniciar_ont", "una verificacion no confirmo",
+                          {"verificacion": "ACCION_NO_CONFIRMADA"})
+    comprobar(d is not None and d["estado"] == "degradada" and d["actor"] == "codigo",
+              "degradar: la baja el codigo, con su motivo", str(d))
+    comprobar(ag.vigente("rapilink", "reiniciar_ont", leer=leer)["autonoma"] is False,
+              "degradada: deja de ser autonoma desde la proxima consulta")
+    comprobar(medicion.degradar("rapilink", "reiniciar_ont", "otra vez", {}) is None,
+              "degradar lo que ya no esta activa no agrega ruido")
+    try:
+        with db.sesion("rapilink") as (cur, org):
+            cur.execute("select asistente.autonomia_ganada_degradar(%s, 'reiniciar_ont', 'x', '{}'::jsonb)",
+                        (otra,))
+        comprobar(False, "no se degrada la autonomia de otra empresa")
+    except Exception:                                                   # noqa: BLE001
+        comprobar(True, "no se degrada la autonomia de otra empresa")
+    medicion.promover("rapilink", "reiniciar_ont", "Ana · u-1", "otra vez", {})
+    medicion.retirar("rapilink", "reiniciar_ont", "Luis · u-2", "la quito para revisar")
+    v = medicion.vigente("rapilink", "reiniciar_ont")
+    comprobar(v["estado"] == "retirada" and v["actor"] == "Luis · u-2",
+              "retirada por una persona: la ultima fila manda", str(v))
+    historia = q("select estado from asistente.autonomia_ganada where organization_id = %s order by creado_en",
+                 (org,))
+    comprobar([h[0] for h in historia] == ["activa", "degradada", "activa", "retirada"],
+              "la historia completa queda: nada se borra", str(historia))
 finally:
     try:
         with psycopg.connect(f"host={HOST} port={PUERTO} dbname=postgres user={USUARIO} password={CLAVE} "

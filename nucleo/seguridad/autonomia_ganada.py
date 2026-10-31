@@ -18,7 +18,11 @@ ningun permiso: subir lo decide una persona viendo esto; bajar, el codigo.
      una persona reviso, una tasa de aprobacion por encima del umbral, CERO
      verificaciones no confirmadas y CERO ejecuciones fallidas.
 
-  4. (DEGRADACION SOLA) vive donde se ejecuta: es la Fase B.
+  4. (DEGRADACION SOLA) vive donde se ejecuta: Fases C y D.
+
+FASE B (31/10/2026): una persona promueve, con la evidencia medida en ese
+momento; una persona retira; el estado vigente se lee sin cache y falla
+cerrado. La tabla es de solo agregar (supabase/202610310200_autonomia_ganada.sql).
 
 EL PISO
 -------
@@ -94,11 +98,12 @@ def veredicto(medicion: dict, u: dict) -> dict:
             "faltan": faltan}
 
 
-def evaluar(config, tenant: str, ahora, *, medir) -> list[dict]:
+def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dict]:
     """
     Cada herramienta que hoy pide aprobacion humana, con si es candidata, su
-    evidencia en la ventana de la empresa y si es elegible. medir(tenant,
-    herramienta, desde, hasta) -> conteos (nucleo/persistencia/autonomia_ganada).
+    evidencia en la ventana de la empresa, si es elegible y -- con
+    leer_vigente -- si ya es autonoma. medir(tenant, herramienta, desde,
+    hasta) -> conteos (nucleo/persistencia/autonomia_ganada).
     """
     salida = []
     for h in config.herramientas:
@@ -112,7 +117,75 @@ def evaluar(config, tenant: str, ahora, *, medir) -> list[dict]:
             m = medir(tenant, h.nombre, desde, ahora)
             fila.update({"umbrales": u, "evidencia": m, "desde": desde.isoformat(),
                          **veredicto(m, u)})
+            if leer_vigente is not None:
+                fila["autonomia"] = vigente(tenant, h.nombre, leer=leer_vigente)
         else:
             fila["elegible"] = False
         salida.append(fila)
     return salida
+
+
+# =============================================================================
+#  FASE B  --  promover (una persona), retirar (una persona), y el estado vigente
+# =============================================================================
+
+class NoPromovible(Exception):
+    """Por que no se puede promover, con un codigo fijo y lo que falta."""
+
+    def __init__(self, codigo: str, faltan=None):
+        super().__init__(codigo)
+        self.codigo = codigo
+        self.faltan = faltan or []
+
+
+def vigente(tenant: str, herramienta: str, *, leer) -> dict:
+    """
+    Si la herramienta es autonoma AHORA en esta empresa. FALLA CERRADO, como
+    el interruptor: sin fila, con la base caida o con la tabla sin instalar,
+    NO es autonoma. Sin cache: cada consulta va a la base -- una degradacion
+    tiene que valer desde la proxima accion, no dentro de N segundos.
+
+    leer(tenant, herramienta) -> la ultima fila | None (puede lanzar).
+    {'autonoma', 'estado', 'promocion_id'}.
+    """
+    try:
+        fila = leer(tenant, herramienta)
+    except (Exception, SystemExit):                             # noqa: BLE001
+        #  SystemExit tambien: sin credenciales la capa de conexion lo lanza
+        #  (CLAUDE.md §13, D11), y no hereda de Exception. Una lectura de
+        #  seguridad falla CERRADO; nunca tumba el proceso.
+        return {"autonoma": False, "estado": "desconocido", "promocion_id": None}
+    if not fila:
+        return {"autonoma": False, "estado": "sin_registro", "promocion_id": None}
+    if fila.get("estado") != "activa":
+        return {"autonoma": False, "estado": str(fila.get("estado")), "promocion_id": None}
+    return {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id"))}
+
+
+def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escribir) -> dict:
+    """
+    Una PERSONA le da autonomia a una accion. Se vuelve a medir la evidencia
+    en este momento -- no la de la pantalla que la persona miro --, y si no
+    alcanza, no se promueve. Lo que se escribe lleva la evidencia que lo
+    justifico, para que la auditoria no tenga que reconstruirla.
+
+    escribir(tenant, accion, actor, motivo, evidencia) -> la fila.
+    """
+    if not (actor or "").strip():
+        raise NoPromovible("FALTA_QUIEN_PROMUEVE")
+    h = next((x for x in config.herramientas
+              if x.nombre == accion and getattr(x, "aprobacion_humana", False)), None)
+    if h is None:
+        raise NoPromovible("NO_ES_UNA_ACCION_CON_APROBACION")
+    no_candidata = por_que_no_es_candidata(h)
+    if no_candidata:
+        raise NoPromovible("NO_CANDIDATA", no_candidata)
+    u = umbrales(config, accion)
+    desde = ahora - timedelta(days=u["ventana_dias"])
+    m = medir(tenant, accion, desde, ahora)
+    v = veredicto(m, u)
+    if not v["elegible"]:
+        raise NoPromovible("SIN_EVIDENCIA", v["faltan"])
+    return escribir(tenant, accion, actor.strip(), "promovida con la evidencia de la ventana",
+                    {"evidencia": m, "umbrales": u, "desde": desde.isoformat(),
+                     "tasa_aprobacion": v["tasa_aprobacion"]})

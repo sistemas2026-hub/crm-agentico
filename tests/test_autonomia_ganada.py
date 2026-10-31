@@ -135,6 +135,67 @@ pago = next(f for f in filas if f["accion"] == "registrar_pago")
 comprobar(not pago["candidata"] and not pago["elegible"] and "evidencia" not in pago,
           "una no candidata no se mide ni puede ser elegible", str(pago))
 
+print("\nel estado vigente falla cerrado")
+
+
+def leer_lanza(t, h):
+    raise ConnectionError("la base no contesta")
+
+
+comprobar(ag.vigente("t", "reiniciar_ont", leer=lambda t, h: {"id": "p1", "estado": "activa"})
+          == {"autonoma": True, "estado": "activa", "promocion_id": "p1"}, "la ultima fila activa: autonoma")
+for fila, estado in ((None, "sin_registro"), ({"id": "p2", "estado": "degradada"}, "degradada"),
+                     ({"id": "p3", "estado": "retirada"}, "retirada")):
+    comprobar(ag.vigente("t", "x", leer=lambda t, h, f=fila: f)
+              == {"autonoma": False, "estado": estado, "promocion_id": None}, f"{estado}: NO autonoma")
+comprobar(ag.vigente("t", "x", leer=leer_lanza)
+          == {"autonoma": False, "estado": "desconocido", "promocion_id": None},
+          "con la base caida NO es autonoma (no se adivina)")
+
+
+def leer_sin_credenciales(t, h):
+    raise SystemExit("No hay datos de conexion")
+
+
+comprobar(ag.vigente("t", "x", leer=leer_sin_credenciales)["autonoma"] is False,
+          "sin credenciales (SystemExit) tampoco: falla cerrado y no tumba el proceso")
+
+print("\npromover")
+escritas: list[tuple] = []
+
+
+def escribir(tenant, accion, actor, motivo, evidencia):
+    escritas.append((tenant, accion, actor, evidencia))
+    return {"id": "nueva", "estado": "activa"}
+
+
+def intentar(accion="reiniciar_ont", actor="Ana · u-1", medicion=None):
+    escritas.clear()
+    try:
+        return ag.promover(RAPILINK, "rapilink", accion, actor, AHORA,
+                           medir=lambda *a: medicion or m(), escribir=escribir), None
+    except ag.NoPromovible as e:
+        return None, e
+
+
+fila, error = intentar()
+comprobar(fila == {"id": "nueva", "estado": "activa"} and escritas[0][:3] == ("rapilink", "reiniciar_ont", "Ana · u-1")
+          and escritas[0][3]["evidencia"]["revisadas"] == 40 and escritas[0][3]["tasa_aprobacion"] == 0.975,
+          "con evidencia, se promueve y queda escrita la evidencia que lo justifico", str(escritas))
+_, error = intentar(medicion=m(revisadas=10, rechazadas=0))
+comprobar(error is not None and error.codigo == "SIN_EVIDENCIA" and escritas == []
+          and error.faltan[0]["condicion"] == "minimo_revisadas",
+          "sin evidencia AHORA no se promueve, aunque la pantalla dijera otra cosa", str(error and error.faltan))
+_, error = intentar(accion="registrar_pago")
+comprobar(error is not None and error.codigo == "NO_CANDIDATA" and escritas == [],
+          "registrar_pago no se puede promover: su efecto no se mide", str(error and error.codigo))
+_, error = intentar(accion="consultar_cliente")
+comprobar(error is not None and error.codigo == "NO_ES_UNA_ACCION_CON_APROBACION",
+          "lo que no pide aprobacion no se promueve")
+_, error = intentar(actor="   ")
+comprobar(error is not None and error.codigo == "FALTA_QUIEN_PROMUEVE" and escritas == [],
+          "sin una persona que promueva, no")
+
 print("\nla ruta GET /reportes/autonomia-ganada")
 from nucleo.canales import api                               # noqa: E402
 from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
@@ -142,6 +203,7 @@ from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
 api._config_de = lambda tenant: RAPILINK
 api._TOKEN_SERVICIO = None
 medicion.medir = lambda tenant, h, desde, hasta: m(revisadas=10, rechazadas=0)
+medicion.vigente = lambda t, h: None
 http = api.app.test_client()
 r = http.get("/reportes/autonomia-ganada?tenant=rapilink")
 d = r.get_json() or {}
@@ -150,6 +212,40 @@ comprobar(r.status_code == 200 and d.get("piso") == ag.PISO and reinicio.get("el
           and reinicio["faltan"] == [{"condicion": "minimo_revisadas", "tiene": 10, "necesita": 30}],
           "devuelve cada accion con su veredicto y el piso", r.get_data(as_text=True)[:300])
 comprobar(http.get("/reportes/autonomia-ganada").status_code == 400, "sin tenant: 400")
+
+print("\nlas rutas de promover y retirar")
+escritas_ruta: list[tuple] = []
+medicion.promover = lambda t, a, actor, motivo, ev: escritas_ruta.append(("promover", a, actor)) or {
+    "id": "p9", "estado": "activa"}
+medicion.retirar = lambda t, a, actor, motivo: escritas_ruta.append(("retirar", a, actor, motivo)) or {
+    "id": "p10", "estado": "retirada"}
+medicion.vigente = lambda t, h: None
+medicion.medir = lambda tenant, h, desde, hasta: m()
+AUTOR = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
+comprobar(r.status_code == 201 and escritas_ruta[-1][:2] == ("promover", "reiniciar_ont")
+          and "Ana Perez" in escritas_ruta[-1][2], "con evidencia y autor: 201, y queda quien",
+          f"{r.status_code} {escritas_ruta}")
+n = len(escritas_ruta)
+r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont"})
+comprobar(r.status_code == 400 and len(escritas_ruta) == n, "sin autor de la sesion: 400 y nada escrito")
+medicion.medir = lambda tenant, h, desde, hasta: m(revisadas=5, rechazadas=0)
+r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
+comprobar(r.status_code == 409 and r.get_json()["error"] == "SIN_EVIDENCIA" and len(escritas_ruta) == n,
+          "sin evidencia: 409 con lo que falta, y nada escrito", r.get_data(as_text=True)[:200])
+r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                 "motivo": "la reviso", **AUTOR})
+comprobar(r.status_code == 201 and escritas_ruta[-1][0] == "retirar" and escritas_ruta[-1][3] == "la reviso",
+          "retirar: siempre se puede, con motivo", str(escritas_ruta[-1:]))
+comprobar(http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                        **AUTOR}).status_code == 400,
+          "retirar sin motivo: 400")
+medicion.vigente = lambda t, h: {"id": "p9", "estado": "activa"}
+medicion.medir = lambda tenant, h, desde, hasta: m()
+d = http.get("/reportes/autonomia-ganada?tenant=rapilink").get_json()
+reinicio = next(f for f in d["acciones"] if f["accion"] == "reiniciar_ont")
+comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "promocion_id": "p9"},
+          "el reporte dice si ya es autonoma", str(reinicio.get("autonomia")))
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

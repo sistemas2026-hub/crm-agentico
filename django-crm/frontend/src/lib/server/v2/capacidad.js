@@ -84,3 +84,31 @@ export async function leerAutonomiaGanada(locals, fetch) {
     return { autonomia: null, error: 'No se pudo contactar al asistente.' };
   }
 }
+
+/**
+ * Darle o quitarle autonomía a una acción (31/10/2026, PRD §2, Fase B). El
+ * autor sale de la SESIÓN, nunca del navegador. Promover: el motor vuelve a
+ * medir la evidencia y contesta 409 con lo que falta si no alcanza. Lanza un
+ * error con `.codigo` y `.faltan` si el motor rechaza.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @param {'promover' | 'retirar'} que
+ * @param {{ accion: string, motivo?: string }} datos
+ */
+export async function cambiarAutonomia(locals, fetch, que, datos) {
+  const { autorDeSesion } = await import('./autor.js');
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw Object.assign(new Error('Asistente no configurado para esta empresa.'), { codigo: 'NO_CONFIGURADO' });
+  const resp = await fetch(`${cfg.baseUrl}/autonomia-ganada/${que}`, {
+    method: 'POST',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, ...datos, ...autorDeSesion(locals) })
+  });
+  const cuerpo = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw Object.assign(new Error(cuerpo.error || 'El asistente rechazó el cambio.'),
+      { codigo: cuerpo.error || 'RECHAZADO', faltan: cuerpo.faltan ?? [] });
+  }
+  return cuerpo;
+}

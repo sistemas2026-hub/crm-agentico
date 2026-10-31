@@ -3878,11 +3878,68 @@ def reporte_autonomia_ganada():
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
     try:
         filas = autonomia_ganada.evaluar(_config_de(tenant), tenant, datetime.now(timezone.utc),
-                                         medir=medicion.medir)
+                                         medir=medicion.medir, leer_vigente=medicion.vigente)
     except Exception as e:
         registrar("reportes", "fallo al calcular la autonomia ganada", error=e)
         return jsonify({"error": "No se pudo calcular la autonomia ganada."}), 500
     return jsonify({"acciones": filas, "piso": autonomia_ganada.PISO}), 200
+
+
+@app.post("/autonomia-ganada/promover")
+def autonomia_ganada_promover():
+    """
+    Una PERSONA le da autonomia a una accion en su empresa (PRD §2, Fase B).
+    Cuerpo: {tenant, accion, autor, autor_usuario_id}. El autor lo arma el
+    proxy con la sesion autenticada. La evidencia se vuelve a medir aca: si
+    no alcanza AHORA, no se promueve (409 con lo que falta). Solo se escribe
+    la promocion; ejecutar sola sigue pasando por la frontera entera.
+    """
+    from nucleo.persistencia import autonomia_ganada as medicion
+    from nucleo.seguridad import autonomia_ganada
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, accion = cuerpo.get("tenant"), cuerpo.get("accion")
+    if not tenant or not accion:
+        return jsonify({"error": "Faltan 'tenant' o 'accion'."}), 400
+    try:
+        autor, usuario, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido:
+        return jsonify({"error": "FALTA_QUIEN_PROMUEVE"}), 400
+    try:
+        fila = autonomia_ganada.promover(
+            _config_de(tenant), tenant, str(accion), f"{autor} · {usuario}",
+            datetime.now(timezone.utc), medir=medicion.medir, escribir=medicion.promover)
+    except autonomia_ganada.NoPromovible as e:
+        return jsonify({"error": e.codigo, "faltan": e.faltan}), 409
+    except Exception as e:
+        return fallo(503, "autonomia_no_promovida", "No se pudo promover: no quedo registrada.",
+                     componente="autonomia_ganada", e=e)
+    registrar("autonomia_ganada", "accion promovida", tenant=tenant, accion=str(accion))
+    return jsonify({"estado": fila.get("estado"), "id": str(fila.get("id"))}), 201
+
+
+@app.post("/autonomia-ganada/retirar")
+def autonomia_ganada_retirar():
+    """Una PERSONA le quita la autonomia a una accion. Siempre se puede: bajar
+    es seguro. Cuerpo: {tenant, accion, autor, autor_usuario_id, motivo}."""
+    from nucleo.persistencia import autonomia_ganada as medicion
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, accion = cuerpo.get("tenant"), cuerpo.get("accion")
+    motivo = str(cuerpo.get("motivo") or "").strip()
+    if not tenant or not accion or not motivo:
+        return jsonify({"error": "Faltan 'tenant', 'accion' o 'motivo'."}), 400
+    try:
+        autor, usuario, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido:
+        return jsonify({"error": "FALTA_QUIEN_RETIRA"}), 400
+    try:
+        fila = medicion.retirar(tenant, str(accion), f"{autor} · {usuario}", motivo[:500])
+    except Exception as e:
+        return fallo(503, "autonomia_no_retirada", "No se pudo retirar: no quedo registrado.",
+                     componente="autonomia_ganada", e=e)
+    registrar("autonomia_ganada", "accion retirada", tenant=tenant, accion=str(accion))
+    return jsonify({"estado": fila.get("estado"), "id": str(fila.get("id"))}), 201
 
 
 @app.get("/reportes/capacidad")

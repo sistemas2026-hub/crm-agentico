@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import {
+  cambiarAutonomia,
   guardarDeclaracionCapacidad,
   leerAutonomiaGanada,
   leerTableroCapacidad,
@@ -67,5 +68,48 @@ export const actions = {
       return fail(502, { declarar: { error: e?.message || 'No se pudo guardar.' } });
     }
     return { declarar: { ok: true } };
+  },
+
+  /**
+   * Darle autonomía a una acción (31/10/2026, PRD §2, Fase B). Lo decide una
+   * persona ADMIN viendo la evidencia; el motor la vuelve a medir y no
+   * promueve si no alcanza AHORA. La casilla de confirmación es obligatoria:
+   * es una decisión que cambia qué hace Dexter solo.
+   */
+  async promover({ locals, fetch, request }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, { autonomia: { error: 'Solo un administrador puede dar autonomía.' } });
+    }
+    const form = await request.formData();
+    const accion = form.get('accion')?.toString() ?? '';
+    if (!/^[a-z0-9_]{1,64}$/.test(accion)) return fail(400, { autonomia: { error: 'Esa acción no se reconoce.' } });
+    if (form.get('confirmo') !== 'si') {
+      return fail(400, { autonomia: { accion, error: 'Marcá que entendés que la acción va a ejecutarse sola.' } });
+    }
+    try {
+      await cambiarAutonomia(locals, fetch, 'promover', { accion });
+    } catch (/** @type {any} */ e) {
+      return fail(e?.codigo === 'SIN_EVIDENCIA' ? 409 : 502,
+        { autonomia: { accion, error: e?.message || 'No se pudo promover.', faltan: e?.faltan ?? [] } });
+    }
+    return { autonomia: { accion, ok: 'promovida' } };
+  },
+
+  /** Quitarle la autonomía: siempre se puede, con un motivo. */
+  async retirar({ locals, fetch, request }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, { autonomia: { error: 'Solo un administrador puede quitar autonomía.' } });
+    }
+    const form = await request.formData();
+    const accion = form.get('accion')?.toString() ?? '';
+    const motivo = form.get('motivo')?.toString().trim() ?? '';
+    if (!/^[a-z0-9_]{1,64}$/.test(accion)) return fail(400, { autonomia: { error: 'Esa acción no se reconoce.' } });
+    if (!motivo) return fail(400, { autonomia: { accion, error: 'Decí por qué se la quitás.' } });
+    try {
+      await cambiarAutonomia(locals, fetch, 'retirar', { accion, motivo });
+    } catch (/** @type {any} */ e) {
+      return fail(502, { autonomia: { accion, error: e?.message || 'No se pudo retirar.' } });
+    }
+    return { autonomia: { accion, ok: 'retirada' } };
   }
 };
