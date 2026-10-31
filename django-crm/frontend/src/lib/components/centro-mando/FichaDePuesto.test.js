@@ -40,9 +40,60 @@ describe('la cabecera dice quién es', () => {
   });
 
   it('un puesto vacío lo dice y no se disfraza', () => {
+    // El rótulo pasó de «sin agente asignado» a «Puesto libre» al nombrar los
+    // tipos de miembro (P1.5). Lo que esta prueba afirma no es la frase: es
+    // que el panel declare que no hay nadie Y que eso no se lea como una
+    // avería del flujo.
     const html = pintar({ puesto: vacio, estado: null, veredicto: alDia });
-    expect(html).toContain('sin agente asignado');
+    expect(html).toContain('Puesto libre');
     expect(html).toContain('no es un fallo del flujo');
+    expect(html).not.toContain('Agente IA ejecutable');
+  });
+
+  it('distingue un puesto libre de un agente que el inventario no trae', () => {
+    // Son dos cosas distintas y la diferencia es una acusación: una dice que
+    // nadie fue asignado, la otra que la configuración declara a alguien que
+    // no existe. Mostrarlas igual escondería un error de configuración.
+    const ausente = {
+      id: 'cartera:p1', agente: null, nombre: 'Gestión 1', area: 'agente no encontrado',
+      motivo: 'la configuración declara «fantasma» y el inventario no lo trae'
+    };
+    const html = pintar({ puesto: ausente, estado: null, veredicto: alDia });
+    expect(html).toContain('ausente del inventario');
+    expect(html).toContain('fantasma');
+    expect(html).not.toContain('Puesto libre');
+  });
+
+  it('un agente trae su identificación verificable', () => {
+    // El nombre que se lee arriba es el CARGO, que una empresa cambia cuando
+    // quiere. Esto es lo que no cambia, y con lo que alguien puede ir a
+    // buscar.
+    const html = pintar({
+      puesto: { id: 'operativo:principal', agente: 'supervisor_noc',
+                nombre: 'Supervisor NOC', area: 'NOC y Redes', motivo: null },
+      estado: null, veredicto: alDia,
+      sala: { id: 'operativo', rotulo: 'NOC y Redes', direccion: 'Dirección de Operaciones',
+              piso: 3, tipo: 'departamento', plantillaFaltante: null, puestosDesconocidos: [] }
+    });
+    expect(html).toContain('Agente IA ejecutable');
+    expect(html).toContain('supervisor_noc');
+    expect(html).toContain('operativo:principal');
+    expect(html).toContain('Dirección de Operaciones');
+  });
+
+  it('una incoherencia de la configuración se ve, no se calla', () => {
+    // No es un fallo del flujo ni del motor: es que la organización declaró
+    // algo que el producto no sabe dibujar. Callarlo dejaría un hueco que
+    // nadie puede explicar.
+    const html = pintar({
+      puesto: { id: 'x:principal', agente: 'ventas', nombre: 'Cierre', area: 'X', motivo: null },
+      estado: null, veredicto: alDia,
+      sala: { id: 'x', rotulo: 'X', piso: 1, tipo: 'departamento',
+              plantillaFaltante: 'nave_espacial', puestosDesconocidos: ['p7'] }
+    });
+    expect(html).toContain('Advertencias');
+    expect(html).toContain('nave_espacial');
+    expect(html).toContain('p7');
   });
 
   it('sin puesto no dibuja nada', () => {

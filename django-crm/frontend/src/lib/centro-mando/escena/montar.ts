@@ -25,7 +25,7 @@
  *     igual a 30 y a 144 cuadros por segundo — solo con menos pasos.
  */
 
-import { Application, Container, Sprite } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { Camara, LIMITES, gesto, type Toque } from './camara';
 import { aPantalla, extensionDelMundo, profundidad } from './isometria';
 import { PALETA, coloresConAcento } from './paleta';
@@ -112,6 +112,19 @@ export interface OpcionesDeEscena {
    * no hace falta y el motivo por el que existe no cambió.
    */
   escalaMinima?: number;
+  /**
+   * Letreros anclados a un punto del mundo y dibujados en espacio de PANTALLA.
+   *
+   * No escalan con la cámara, y ese es todo el punto. Se midió: la vista de
+   * conjunto entra a escala 0,2, así que un rótulo de 13 píxeles mide 2,6 y no
+   * se lee. Agrandar la fuente no sirve —en una sala quedaría gigante—; lo que
+   * hace falta es texto que no participe del zoom.
+   *
+   * Van en el escenario y no en el mundo, igual que la viñeta, y no son
+   * interactivos: si lo fueran se comerían los clics de los puestos que tienen
+   * detrás.
+   */
+  letreros?: { texto: string; gx: number; gy: number; gz: number }[];
 }
 
 interface Habitante {
@@ -211,6 +224,37 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       for (const s of salas) s.oficina.destruir();
     }
   };
+
+  /* ── los letreros de pantalla ─────────────────────────────────────────── */
+  const letreros = (opciones.letreros ?? []).map((l) => {
+    const nodo = new Container();
+    nodo.eventMode = 'none';
+    const texto = new Text({
+      text: l.texto,
+      style: {
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        fontSize: 13,
+        fontWeight: '700',
+        fill: 0xe8e7f5,
+        letterSpacing: 1.4
+      },
+      resolution: 2
+    });
+    texto.anchor.set(1, 0.5);
+    //  Una placa detrás del texto: sobre el suelo oscuro se lee, pero sobre
+    //  una pantalla encendida o una losa clara se pierde. Cuesta un polígono.
+    const placa = new Graphics();
+    placa.roundRect(-texto.width - 14, -11, texto.width + 20, 22, 6)
+      .fill({ color: 0x0b0a1c, alpha: 0.72 })
+      .stroke({ width: 1, color: 0x2c2a52, alpha: 0.9 });
+    nodo.addChild(placa);
+    nodo.addChild(texto);
+    app.stage.addChild(nodo);
+    //  El punto del mundo al que queda atado, ya proyectado: no cambia nunca,
+    //  así que se calcula una vez.
+    const ancla = aPantalla(l.gx, l.gy, l.gz);
+    return { nodo, ancla };
+  });
 
   /* ── la viñeta ────────────────────────────────────────────────────────── */
   /* Va en el ESCENARIO y no en el mundo: oscurece las esquinas de la vista,
@@ -418,6 +462,12 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     const tr = camara.transformacion();
     mundo.position.set(tr.x, tr.y);
     mundo.scale.set(tr.escala);
+
+    //  Los letreros siguen a su punto del mundo SIN escalar: se aplica la
+    //  misma transformación al ancla y se deja el texto a tamaño de pantalla.
+    for (const l of letreros) {
+      l.nodo.position.set(l.ancla.x * tr.escala + tr.x, l.ancla.y * tr.escala + tr.y);
+    }
 
     oficina.animar(t, dt);
 

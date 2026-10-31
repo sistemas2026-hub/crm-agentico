@@ -46,6 +46,17 @@
     diagnostico = null,
     /** Roles del área que existen y no ocupan un puesto. */
     capacidades = [],
+    /**
+     * La sala a la que pertenece el puesto, tal como la declara la
+     * organización de la empresa: su rótulo, su piso, si es un departamento o
+     * un espacio, y qué plantilla pidió.
+     *
+     * Viaja entera y no sólo el rótulo porque la ficha tiene que poder decir
+     * DÓNDE está el puesto —un edificio tiene pisos— y porque las
+     * incoherencias de la configuración se ven desde acá: una plantilla que el
+     * catálogo no tiene, un puesto declarado que la plantilla no trae.
+     */
+    sala = null,
     alCerrar = () => {}
   } = $props();
 
@@ -70,6 +81,50 @@
     expediente: 'Derivación',
     escalada: 'Escalada a una persona'
   };
+
+  /**
+   * QUÉ es quien ocupa este puesto. Cuatro cosas distintas, y confundirlas es
+   * lo que hacía que la oficina dibujara nueve empleados donde hay seis.
+   *
+   *   agente        un agente IA ejecutable: tiene instancia en el motor
+   *   ausente       la configuración lo declara y el inventario no lo trae
+   *   libre         el puesto existe y nadie lo ocupa
+   *
+   * Las CAPACIDADES no aparecen acá y es a propósito: no ocupan un puesto, así
+   * que no pueden ser el tipo de miembro de uno. Van en su propio bloque.
+   */
+  let tipo = $derived(
+    puesto?.agente ? 'agente'
+      : puesto?.motivo && puesto.motivo !== 'sin agente asignado' ? 'ausente'
+      : 'libre'
+  );
+  const MIEMBRO = {
+    agente: 'Agente IA ejecutable',
+    ausente: 'Agente declarado, ausente del inventario',
+    libre: 'Puesto libre'
+  };
+
+  /**
+   * Lo que la configuración de la empresa declaró y la pantalla no pudo
+   * cumplir.
+   *
+   * No es un error del flujo ni del motor: es una incoherencia entre lo que la
+   * organización dice y lo que el producto sabe dibujar. Se muestra acá porque
+   * es el único sitio donde alguien que mira ese puesto puede entenderla.
+   */
+  let advertencias = $derived.by(() => {
+    const avisos = [];
+    if (sala?.plantillaFaltante) {
+      avisos.push(`La organización pide la plantilla «${sala.plantillaFaltante}» y el ` +
+                  'catálogo no la tiene: esta sala se dibuja con una genérica.');
+    }
+    for (const p of sala?.puestosDesconocidos ?? []) {
+      avisos.push(`La organización declara el puesto «${p}» y la plantilla de esta ` +
+                  'sala no lo tiene: lo que se declaró ahí no se dibuja.');
+    }
+    if (tipo === 'ausente' && puesto?.motivo) avisos.push(puesto.motivo);
+    return avisos;
+  });
 
   let confiable = $derived(veredicto?.confiable === true);
   /** Hay un turno abierto AHORA, no un eco de uno que terminó. */
@@ -113,10 +168,11 @@
       <div class="titulo">
         <h2>{puesto.nombre}</h2>
         <p class="rol">
-          {#if puesto.agente}
-            Agente IA · {puesto.area}
-          {:else}
-            Puesto sin agente asignado
+          {MIEMBRO[tipo]}
+          {#if sala}
+            · {sala.rotulo}{#if sala.tipo === 'espacio'} (espacio){/if}
+          {:else if puesto.agente}
+            · {puesto.area}
           {/if}
         </p>
       </div>
@@ -181,6 +237,33 @@
         {:else}
           <p class="vacio">En reposo: ningún evento vigente respalda una actividad.</p>
         {/if}
+      </section>
+
+      <section class="identidad">
+        <h3>Identificación</h3>
+        <!-- LO QUE PERMITE VERIFICAR, no lo que queda bonito. Cada línea es un
+             identificador con el que alguien puede ir a buscar: el nombre
+             técnico del rol en la configuración, el identificador del puesto
+             tal como lo conoce la escena, y dónde está en el edificio.
+
+             El nombre que se lee arriba es el CARGO, que una empresa puede
+             cambiar cuando quiera; esto es lo que no cambia. -->
+        <dl>
+          <dt>Agente</dt>
+          <dd><code>{puesto.agente}</code></dd>
+          <dt>Puesto</dt>
+          <dd><code>{puesto.id}</code></dd>
+          {#if sala}
+            <dt>Departamento</dt>
+            <dd>{sala.rotulo}{#if sala.direccion} · {sala.direccion}{/if}</dd>
+            <dt>Piso</dt>
+            <dd>{sala.piso}</dd>
+          {/if}
+          {#if puesto.orientado_a}
+            <dt>Atiende a</dt>
+            <dd>{puesto.orientado_a}</dd>
+          {/if}
+        </dl>
       </section>
 
       <section>
@@ -267,6 +350,19 @@
         {#if diagnostico.ultimoError}
           <p class="error">{diagnostico.ultimoError}</p>
         {/if}
+      </section>
+    {/if}
+  {#if advertencias.length}
+      <section class="advertencias">
+        <h3>Advertencias</h3>
+        <!-- No son fallos del flujo ni del motor: son incoherencias entre lo
+             que la organización declara y lo que el producto sabe dibujar.
+             Callarlas dejaría un hueco que nadie puede explicar. -->
+        <ul>
+          {#each advertencias as a (a)}
+            <li>{a}</li>
+          {/each}
+        </ul>
       </section>
     {/if}
   </aside>
@@ -406,6 +502,33 @@
     font-size: 12.5px;
   }
   .meta,
+  .identidad dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.25rem 0.75rem;
+    margin: 0;
+    font-size: 0.82rem;
+  }
+  .identidad dt {
+    color: #9a98c4;
+  }
+  .identidad dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .identidad code {
+    font-size: 0.78rem;
+  }
+  .advertencias ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.82rem;
+    color: #ffd79a;
+  }
+  .advertencias li + li {
+    margin-top: 0.35rem;
+  }
+
   .vacio {
     margin: 3px 0 0;
     color: #9a98bd;

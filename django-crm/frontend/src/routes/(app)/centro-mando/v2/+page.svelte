@@ -127,6 +127,28 @@
    */
   let escalaMinima = $derived(vista.tipo === 'edificio' ? 0.16 : undefined);
 
+  /**
+   * El nombre de cada nivel, atado al edificio y dibujado a tamaño de pantalla.
+   *
+   * Medido: la vista de conjunto entra a escala 0,2, así que el nombre que va
+   * escrito en el canto de la losa —13 px— mide 2,6 y no se lee. Agrandarlo no
+   * sirve: en una sala quedaría gigante. Lo que hace falta es texto que no
+   * participe del zoom, y eso es lo que la escena sabe hacer con `letreros`.
+   *
+   * Se ancla al borde izquierdo del núcleo de cada nivel y se dibuja hacia la
+   * izquierda, que es la única franja del encuadre donde no hay edificio.
+   */
+  let letreros = $derived(
+    vista.tipo === 'sala' || !edificio
+      ? []
+      : edificio.niveles.map((n) => ({
+          texto: n.rotulo ? `P${n.nivel} · ${n.rotulo}` : `Piso ${n.nivel}`,
+          gx: 0,
+          gy: 4,
+          gz: n.gz
+        }))
+  );
+
   /** Cómo se llama lo que se está mirando. */
   let titulo = $derived(
     SALAS.length === 0
@@ -226,6 +248,19 @@
    * En la vista de empresa hay varias plantas, así que se busca la que
    * contiene este puesto en vez de asumir la vigente.
    */
+  /**
+   * La sala a la que pertenece el puesto abierto.
+   *
+   * Sale del propio identificador del puesto, que se compone como
+   * `<sala>:<puesto>` justamente para que esto no necesite plumbing: en la
+   * vista de empresa hay once plantas y buscar «la vigente» no significa nada.
+   */
+  let salaDelPuesto = $derived(
+    puestoSeleccionado
+      ? (SALAS.find((s) => s.id === String(puestoSeleccionado.id).split(':')[0]) ?? null)
+      : null
+  );
+
   let capacidadesDelPuesto = $derived.by(() => {
     if (!puestoSeleccionado || planta === null) return [];
     const plantas = Array.isArray(planta) ? planta : [planta];
@@ -326,6 +361,7 @@
     //  este efecto: la escena se destruye y se monta de nuevo.
     const laPlanta = planta;
     const elZoom = escalaMinima;
+    const losLetreros = letreros;
     //  Sin estructura no se monta nada, y NO se cae a una inventada: dibujar
     //  un edificio que nadie declaró sería afirmar cómo es una empresa que no
     //  se pudo consultar. El aviso lo da el pie.
@@ -348,7 +384,8 @@
         ]);
         if (!vivo) return;
         visualizar = adaptador.visualizar;
-        escena = await montarEscena({ contenedor: lienzo, planta: laPlanta, escalaMinima: elZoom });
+        escena = await montarEscena({ contenedor: lienzo, planta: laPlanta,
+                                      escalaMinima: elZoom, letreros: losLetreros });
         if (!vivo) {
           escena.destruir();
           escena = null;
@@ -496,6 +533,7 @@
         veredicto={demostracion ? { confiable: true, motivo: 'al_dia', detalle: 'Guion de demostración en curso.' } : veredicto}
         historial={historialSeleccionado}
         capacidades={capacidadesDelPuesto}
+        sala={salaDelPuesto}
         simulado={demostracion}
         {diagnostico}
         alCerrar={() => {
