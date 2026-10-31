@@ -34,6 +34,8 @@ import { Container, Graphics, Sprite, Text, Polygon } from 'pixi.js';
 import { ALTURA_UNIDAD, BALDOSA, aPantalla, profundidad, rombo, type Mundo } from './isometria';
 import { PALETA, tono } from './paleta';
 import type { Texturas } from './texturas';
+import { construirNucleoAcristalado, construirPieza, type PiezaDeArquitectura } from './arquitectura';
+import { aplanar, caja, panelMuroFondo, panelMuroLateral } from './volumen';
 
 /**
  * UNA PLANTA ES UN DATO, NO CÓDIGO.
@@ -95,8 +97,27 @@ export interface Planta {
   rotuloFrontal?: string;
   /** En qué nivel del edificio está. Lo pone quien compone el edificio. */
   nivel?: number;
-  /** Qué papel cumple: una sala, la circulación o el núcleo vertical. */
-  papel?: 'sala' | 'circulacion' | 'nucleo';
+  /** Qué papel cumple: una sala, la circulación, el núcleo o la envolvente. */
+  papel?: 'sala' | 'circulacion' | 'nucleo' | 'arquitectura';
+  /**
+   * Una pieza del edificio que NO es una sala: basamento, fachada, extremo,
+   * cubierta o remate del núcleo.
+   *
+   * Cuando viene, esta planta no tiene suelo, ni muros, ni puestos: es sólo esa
+   * pieza, colocada por su origen. Se modeló así —una planta por pieza— y no
+   * como una lista dentro de la sala, porque el orden de pintado entre niveles
+   * lo decide el ORIGEN de la planta: la fachada tiene que ir detrás de las
+   * salas y el extremo delante, y eso es imposible si comparten contenedor.
+   */
+  arquitectura?: PiezaDeArquitectura;
+  /**
+   * Si el cerramiento de esta planta es de vidrio en vez de muro.
+   *
+   * Lo usa el núcleo vertical, y sólo él. Es lo que lo vuelve reconocible como
+   * ascensor a escala de conjunto, donde la escalera de dentro ya no se
+   * distingue de un mueble.
+   */
+  vidrio?: boolean;
   /** El identificador de la sala de la organización, si es una sala. */
   sala?: string;
   /** El color propio del departamento. Tiñe la sala, nunca los estados. */
@@ -213,105 +234,6 @@ export interface Oficina {
   /** Lo que se mueve por sí solo. `t` acumulado y `dt`, en segundos. */
   animar(t: number, dt: number): void;
   destruir(): void;
-}
-
-/* ════════════════════════════════════════════════════════════════════════════
-   Piezas elementales
-   ════════════════════════════════════════════════════════════════════════════ */
-
-/**
- * Una caja isométrica: tapa, canto derecho y canto izquierdo.
- *
- * Es la pieza con la que está hecho el 80% del mobiliario. Los dos cantos se
- * derivan de la tapa (-18% y -34%): declararlos a mano para cada mueble es cómo
- * termina habiendo un escritorio iluminado desde la izquierda en una sala
- * iluminada desde la derecha.
- */
-function caja(
-  g: Graphics,
-  gx: number,
-  gy: number,
-  gz: number,
-  ancho: number,
-  fondo: number,
-  alto: number,
-  color: number
-) {
-  const z = gz + alto;
-  const t = [
-    aPantalla(gx, gy + fondo, z),
-    aPantalla(gx, gy, z),
-    aPantalla(gx + ancho, gy, z),
-    aPantalla(gx + ancho, gy + fondo, z)
-  ];
-  // Canto que mira hacia el espectador por la derecha (+gx).
-  const d = [
-    aPantalla(gx + ancho, gy, z),
-    aPantalla(gx + ancho, gy + fondo, z),
-    aPantalla(gx + ancho, gy + fondo, gz),
-    aPantalla(gx + ancho, gy, gz)
-  ];
-  // Canto que mira hacia el espectador por la izquierda (+gy).
-  const i = [
-    aPantalla(gx, gy + fondo, z),
-    aPantalla(gx + ancho, gy + fondo, z),
-    aPantalla(gx + ancho, gy + fondo, gz),
-    aPantalla(gx, gy + fondo, gz)
-  ];
-  g.poly(aplanar(i)).fill({ color: tono(color, -0.34) });
-  g.poly(aplanar(d)).fill({ color: tono(color, -0.18) });
-  g.poly(aplanar(t)).fill({ color });
-}
-
-function aplanar(puntos: { x: number; y: number }[]): number[] {
-  const salida: number[] = [];
-  for (const p of puntos) salida.push(p.x, p.y);
-  return salida;
-}
-
-/**
- * Un panel plano pegado al muro de `gy = 0`, visto de frente.
- *
- * Las coordenadas son (gx, altura) porque un panel de pared no tiene fondo. Hay
- * una función por muro y no una genérica con un parámetro de orientación: la
- * versión genérica es la que termina con un panel espejado, y un texto espejado
- * dentro de una pared oscura no se ve en una captura.
- */
-function panelMuroFondo(
-  g: Graphics,
-  gx: number,
-  ancho: number,
-  z0: number,
-  z1: number,
-  color: number,
-  alpha = 1
-) {
-  const p = [
-    aPantalla(gx, 0, z1),
-    aPantalla(gx + ancho, 0, z1),
-    aPantalla(gx + ancho, 0, z0),
-    aPantalla(gx, 0, z0)
-  ];
-  g.poly(aplanar(p)).fill({ color, alpha });
-}
-
-/** Lo mismo, en el muro de `gx = 0`. */
-function panelMuroLateral(
-  g: Graphics,
-  gy: number,
-  ancho: number,
-  z0: number,
-  z1: number,
-  color: number,
-  alpha = 1
-) {
-  const p = [
-    aPantalla(0, gy, z1),
-    aPantalla(0, gy + ancho, z1),
-    aPantalla(0, gy + ancho, z0),
-    aPantalla(0, gy, z0)
-  ];
-  g.poly(aplanar(p)).fill({ color, alpha });
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -1773,6 +1695,29 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   raiz.sortableChildren = true;
 
   const mundo = planta.mundo;
+
+  //  UNA PIEZA DE EDIFICIO NO ES UNA SALA, y sale por acá antes de tocar nada.
+  //
+  //  Sin esta salida temprana habría que apagar a mano el suelo, los muros, la
+  //  losa, la baranda, el pasillo y los puestos para cada pieza, y el día que
+  //  alguien agregue un elemento nuevo a `construirOficina` se le colará a la
+  //  fachada. Una fachada con baldosas no da error: se ve rarísimo y no se
+  //  sabe de dónde salió.
+  if (planta.arquitectura) {
+    const pieza = construirPieza(planta.arquitectura);
+    if (pieza) raiz.addChild(pieza);
+    return {
+      raiz,
+      mundo,
+      puestos: [],
+      sinTipo: pieza ? 0 : 1,
+      animar() {},
+      destruir() {
+        raiz.destroy({ children: true });
+      }
+    };
+  }
+
   ACENTO = planta.acento ?? PALETA.ember;
   ACENTO_CLARO = tono(ACENTO, 0.28);
   //  Sin pasillo se fija una franja vacía en vez de un `if` repartido por el
@@ -1796,7 +1741,10 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   //  Por defecto SI lleva muros: una sala sola es lo que habia antes de que
   //  existieran los niveles, y tiene que seguir viendose igual.
   if (planta.muros !== false) {
-    const muros = construirMuros(mundo);
+    //  El núcleo no lleva muros opacos: lleva vidrio. Es un REEMPLAZO y no un
+    //  añadido — dos cerramientos en el mismo plano dan un vidrio que no es
+    //  transparente, y entonces no se ve la escalera que justifica la pieza.
+    const muros = planta.vidrio ? construirNucleoAcristalado(mundo) : construirMuros(mundo);
     muros.zIndex = -1000;
     raiz.addChild(muros);
   }

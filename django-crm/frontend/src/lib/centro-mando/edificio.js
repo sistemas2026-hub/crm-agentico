@@ -176,6 +176,10 @@ function nucleo(acento, altura) {
     //  CON muros: el núcleo es lo único cerrado del edificio, y esos dos
     //  paneles son los que le dan volumen a la caja vertical.
     muros: true,
+    //  Y DE VIDRIO. Con los mismos dos tonos que una sala cualquiera, el
+    //  núcleo existía y no se leía — medido contra la referencia el
+    //  31/10/2026. Lo que lo distingue no es el color, es el material.
+    vidrio: true,
     losa: true,
     baranda: false,
     mobiliario: [
@@ -243,6 +247,15 @@ export function edificioDe(salas, agentes, pisos, opciones = {}) {
 
   const plantas = [];
   const detalle = [];
+
+  //  Lo que hace falta para rematar el edificio, y que sólo se sabe al final:
+  //  la huella total para el basamento, y el nivel más alto para la cubierta.
+  let anchoFinal = 0;
+  let fondoFinal = 0;
+  let gzMasAlto = -Infinity;
+  let frenteMasAlto = 0;
+  let fondoMasAlto = 0;
+  let acentoMasAlto;
 
   for (const piso of niveles) {
     if (soloNivel !== null && piso.nivel !== soloNivel) continue;
@@ -339,12 +352,172 @@ export function edificioDe(salas, agentes, pisos, opciones = {}) {
       gx += sala.planta.mundo.ancho + SEPARACION_SALAS;
     }
 
+    //  4. LA ENVOLVENTE DEL NIVEL: la fachada de fondo y el extremo.
+    //
+    //     Las dos piezas que convierten una bandeja en una planta de edificio.
+    //     Son plantas propias y no parte de la circulación por el orden de
+    //     pintado: la fachada tiene que quedar DETRÁS de las salas y el extremo
+    //     DELANTE, y dentro de un mismo contenedor eso no se puede pedir.
+    const frente = (anchoDeNivel.get(piso.nivel) || NUCLEO.ancho) + SEPARACION_SALAS;
+    const fondoDelNivel = FONDO_DE_CIRCULACION + suyas.reduce(
+      (acc, s) => Math.max(acc, s.planta.mundo.fondo), 0);
+    //  AISLADO, LA FACHADA NO SUBE QUINCE UNIDADES. Mirando un piso solo no hay
+    //  nada encima que sostener: un muro de quince tapa la planta entera y es
+    //  el mismo error que ya cometieron las columnas.
+    const alturaEnvolvente = soloNivel !== null ? 5.6 : ALTURA_DE_PISO;
+    //  Y el nivel MÁS ALTO se sostiene a sí mismo: lo que tiene encima es su
+    //  cubierta. Sin esto la fachada del último piso remataba en peto a media
+    //  altura y la cubierta quedaba flotando sobre el vacío.
+    //  Y NUNCA MÁS ALLÁ DE SU PROPIO FRENTE. Un nivel más ancho arriba
+    //  —un voladizo— deja `sostiene` por encima de `frente`, y entonces el
+    //  dato dice que la fachada está sostenida en un tramo que no existe. El
+    //  dibujo lo recortaba igual, así que no se veía: lo que quedaba mal era
+    //  el dato, y un dato que miente es el que se cree la siguiente persona.
+    const sostenidaHasta = Math.min(
+      frente,
+      soloNivel !== null || encima === undefined ? frente : sostiene);
+
+    plantas.push({
+      mundo: { ancho: frente, fondo: 0.6, alto: alturaEnvolvente },
+      //  Medio paso POR DETRÁS del borde de la circulación: así la fachada no
+      //  empata en profundidad con la losa del pasillo. Dos objetos con la
+      //  misma profundidad se solapan de forma indefinida, y ahí es donde
+      //  aparece el parpadeo entre fotogramas.
+      origen: { gx: NUCLEO.ancho, gy: -0.6, gz },
+      nivel: piso.nivel,
+      papel: 'arquitectura',
+      //  EL CONTRATO DE UNA PLANTA SE CUMPLE ENTERO, aunque una pieza de
+      //  edificio no tenga nada de esto. La pantalla hace
+      //  `plantas.flatMap(p => p.puestos)`, y un `undefined` ahi no da error
+      //  donde ocurre: mete un hueco en la lista y revienta tres $derived mas
+      //  tarde, al buscar `.id` del puesto seleccionado. Costo un 500 el
+      //  31/10/2026.
+      pasillo: null,
+      mobiliario: [],
+      puestos: [],
+      arquitectura: {
+        tipo: 'fachada',
+        ancho: frente,
+        altura: alturaEnvolvente,
+        sostenidaHasta,
+        acento
+      }
+    });
+
+    plantas.push({
+      mundo: { ancho: 0.6, fondo: fondoDelNivel, alto: alturaEnvolvente },
+      origen: { gx: NUCLEO.ancho + frente, gy: 0, gz },
+      nivel: piso.nivel,
+      papel: 'arquitectura',
+      //  EL CONTRATO DE UNA PLANTA SE CUMPLE ENTERO, aunque una pieza de
+      //  edificio no tenga nada de esto. La pantalla hace
+      //  `plantas.flatMap(p => p.puestos)`, y un `undefined` ahi no da error
+      //  donde ocurre: mete un hueco en la lista y revienta tres $derived mas
+      //  tarde, al buscar `.id` del puesto seleccionado. Costo un 500 el
+      //  31/10/2026.
+      pasillo: null,
+      mobiliario: [],
+      puestos: [],
+      arquitectura: {
+        tipo: 'extremo',
+        fondo: fondoDelNivel,
+        //  El extremo sólo sube hasta la losa de arriba si hay losa de arriba
+        //  SOBRE ÉL. Un nivel más corto arriba deja este extremo al aire.
+        altura: sostenidaHasta >= frente - 0.5 ? alturaEnvolvente : 4.6,
+        acento
+      }
+    });
+
+    anchoFinal = Math.max(anchoFinal, NUCLEO.ancho + frente);
+    fondoFinal = Math.max(fondoFinal, fondoDelNivel);
+    if (gz >= gzMasAlto) {
+      gzMasAlto = gz;
+      frenteMasAlto = frente;
+      fondoMasAlto = fondoDelNivel;
+      acentoMasAlto = acento;
+    }
+
     detalle.push({
       nivel: piso.nivel,
       rotulo: piso.rotulo ?? '',
       declarado: piso.declarado !== false,
       gz,
       salas: ids
+    });
+  }
+
+  //  EL REMATE DEL EDIFICIO: suelo abajo, cubierta arriba.
+  //
+  //  Sólo con el edificio completo. Mirando un piso aislado no hay suelo ni
+  //  azotea que mostrar —se está mirando DENTRO— y dibujarlos ahí pondría una
+  //  explanada bajo una planta que está a dos pisos de altura.
+  if (soloNivel === null && gzMasAlto > -Infinity) {
+    const MARGEN = 3.2;
+    plantas.push({
+      mundo: { ancho: anchoFinal + MARGEN * 2, fondo: fondoFinal + MARGEN * 2, alto: 0 },
+      //  La esquina de AFUERA es el origen, y por eso esta planta tiene la
+      //  profundidad más baja de todas: se dibuja antes que nada, que es lo que
+      //  tiene que pasar con el suelo.
+      origen: { gx: -MARGEN, gy: -MARGEN, gz: 0 },
+      papel: 'arquitectura',
+      //  EL CONTRATO DE UNA PLANTA SE CUMPLE ENTERO, aunque una pieza de
+      //  edificio no tenga nada de esto. La pantalla hace
+      //  `plantas.flatMap(p => p.puestos)`, y un `undefined` ahi no da error
+      //  donde ocurre: mete un hueco en la lista y revienta tres $derived mas
+      //  tarde, al buscar `.id` del puesto seleccionado. Costo un 500 el
+      //  31/10/2026.
+      pasillo: null,
+      mobiliario: [],
+      puestos: [],
+      arquitectura: {
+        tipo: 'basamento',
+        ancho: anchoFinal + MARGEN * 2,
+        fondo: fondoFinal + MARGEN * 2
+      }
+    });
+
+    plantas.push({
+      mundo: { ancho: frenteMasAlto, fondo: fondoMasAlto, alto: 1.4 },
+      origen: { gx: NUCLEO.ancho, gy: 0, gz: gzMasAlto + ALTURA_DE_PISO },
+      papel: 'arquitectura',
+      //  EL CONTRATO DE UNA PLANTA SE CUMPLE ENTERO, aunque una pieza de
+      //  edificio no tenga nada de esto. La pantalla hace
+      //  `plantas.flatMap(p => p.puestos)`, y un `undefined` ahi no da error
+      //  donde ocurre: mete un hueco en la lista y revienta tres $derived mas
+      //  tarde, al buscar `.id` del puesto seleccionado. Costo un 500 el
+      //  31/10/2026.
+      pasillo: null,
+      mobiliario: [],
+      puestos: [],
+      arquitectura: {
+        tipo: 'cubierta',
+        ancho: frenteMasAlto,
+        fondo: fondoMasAlto,
+        acento: acentoMasAlto
+      }
+    });
+
+    plantas.push({
+      mundo: { ancho: 5.2, fondo: 3.4, alto: 3.4 },
+      //  Dos centésimas por encima de la cubierta. No es un número mágico: el
+      //  orden entre plantas lo decide `gz * 1000 + profundidad`, y el remate
+      //  tiene menos profundidad que la cubierta —está más al fondo—, así que
+      //  sin esto la losa de la azotea se dibujaría ENCIMA del ascensor. Dos
+      //  centésimas son medio píxel en pantalla y veinte puntos de orden.
+      origen: { gx: 0.5, gy: 0.3, gz: gzMasAlto + ALTURA_DE_PISO + 0.02 },
+      papel: 'arquitectura',
+      //  EL CONTRATO DE UNA PLANTA SE CUMPLE ENTERO, aunque una pieza de
+      //  edificio no tenga nada de esto. La pantalla hace
+      //  `plantas.flatMap(p => p.puestos)`, y un `undefined` ahi no da error
+      //  donde ocurre: mete un hueco en la lista y revienta tres $derived mas
+      //  tarde, al buscar `.id` del puesto seleccionado. Costo un 500 el
+      //  31/10/2026.
+      pasillo: null,
+      mobiliario: [],
+      puestos: [],
+      arquitectura: {
+        tipo: 'remate', ancho: 5.2, fondo: 3.4, alto: 3.4, acento: acentoMasAlto
+      }
     });
   }
 

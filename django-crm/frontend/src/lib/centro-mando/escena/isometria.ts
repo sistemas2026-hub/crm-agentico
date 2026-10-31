@@ -90,6 +90,65 @@ export interface Mundo {
   puerta?: [number, number];
 }
 
+/** Una caja ocupada de verdad: dónde empieza y cuánto mide. */
+export interface Volumen {
+  origen: { gx: number; gy: number; gz?: number };
+  mundo: { ancho: number; fondo: number; alto: number };
+}
+
+/**
+ * El rectángulo de pantalla que ocupan VARIOS volúmenes.
+ *
+ * EL DEFECTO QUE ESTO ARREGLA, medido el 31/10/2026: la cámara encuadraba el
+ * **cubo** que envuelve al edificio —de (0,0,0) a (ancho, fondo, alto)— y un
+ * edificio de tres niveles escalonados no llena ese cubo ni de lejos. La
+ * esquina (0, 0, alto) es aire: a treinta y cuatro unidades de altura, sobre
+ * el fondo del nivel más bajo, no hay nada. Esa esquina vacía estiraba la caja
+ * 884 píxeles hacia arriba, el encuadre ajustaba por ALTO, y el edificio
+ * quedaba ocupando el 40% del ancho de la pantalla con un vacío a cada lado.
+ *
+ * Esto mide lo que de verdad hay: cada planta con su origen y su tamaño. Una
+ * planta corta en el piso de arriba deja de inflar la caja.
+ *
+ * `extensionDelMundo` sigue existiendo para una sala sola, donde el recinto SÍ
+ * es un cubo lleno.
+ */
+export function extensionDeVolumenes(volumenes: Volumen[]) {
+  const esquinas: Punto[] = [];
+  for (const v of volumenes) {
+    const ox = v.origen.gx;
+    const oy = v.origen.gy;
+    const oz = v.origen.gz ?? 0;
+    const { ancho, fondo, alto } = v.mundo;
+    //  Las ocho esquinas de la caja. Se podrían deducir las cuatro extremas a
+    //  mano —mínimo de x en (0, fondo), máximo en (ancho, 0)…— y es justo el
+    //  atajo que se equivoca cuando alguien cambia el signo de la proyección.
+    for (const gx of [ox, ox + ancho]) {
+      for (const gy of [oy, oy + fondo]) {
+        for (const gz of [oz, oz + alto]) esquinas.push(aPantalla(gx, gy, gz));
+      }
+    }
+  }
+  if (esquinas.length === 0) {
+    return { minX: 0, maxX: 0, minY: 0, maxY: 0, ancho: 0, alto: 0, centro: { x: 0, y: 0 } };
+  }
+  const xs = esquinas.map((p) => p.x);
+  const ys = esquinas.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    ancho: maxX - minX,
+    alto: maxY - minY,
+    centro: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+  };
+}
+
 /**
  * El rectángulo de pantalla que ocupa un mundo completo, incluida la altura de
  * las paredes.

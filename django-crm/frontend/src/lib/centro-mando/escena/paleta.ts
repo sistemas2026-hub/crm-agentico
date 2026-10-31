@@ -22,46 +22,66 @@
  * donde hacían falta 4.5— se pagó una vez.
  */
 
+/*  EL GIRO DEL 31/10/2026: DENTRO SUBE, FUERA BAJA.
+ *
+ *  Esta tabla era una gama indigo oscura de arriba abajo, y tenia su motivo
+ *  escrito: un centro de operaciones de red es un sitio oscuro. Lo sigue
+ *  siendo —los racks no subieron— pero la referencia arquitectonica aprobada
+ *  pide otra cosa del conjunto: **oficinas encendidas vistas desde una noche
+ *  azul**. Un edificio con las luces apagadas no se lee como una empresa
+ *  trabajando, se lee como una maqueta.
+ *
+ *  Lo que NO se hizo, porque es lo que aplana: subirle el brillo a todo. Los
+ *  suelos, los muros y el mobiliario suben; el fondo BAJA, y la envolvente de
+ *  `arquitectura.ts` es hormigon y vidrio frio. El contraste entre esas dos
+ *  familias es lo que hace que el edificio se vea iluminado.
+ *
+ *  CONSECUENCIA QUE HAY QUE VIGILAR: el texto de la escena va en `textoClaro`
+ *  y ahora el suelo es claro. Sigue siendo legible porque TODO texto de la
+ *  escena va sobre su propia placa oscura —nunca sobre el suelo a pelo—, que
+ *  era ya la regla de este archivo. Si alguien pone un texto sin placa, se
+ *  volvera invisible, y ese es el precio de este cambio.
+ */
 export const PALETA = {
   /* ── el recinto ──────────────────────────────────────────────────────── */
   /** Fondo del lienzo, más oscuro que el suelo para que el recinto flote. */
-  fondo: 0x0b0a1c,
+  fondo: 0x060a1a,
   /** Suelo: dos tonos que alternan, muy cerca uno del otro. Un tablero de
    *  ajedrez marcado convierte el piso en el protagonista. */
-  pisoA: 0x1b1a33,
-  pisoB: 0x1f1e3a,
+  pisoA: 0xbfb9cf,
+  pisoB: 0xc9c3d8,
   /** Suelo del pasillo: un paso más claro, es lo que lo hace legible como paso
    *  y no como una franja pintada. */
-  pisoPasillo: 0x272645,
+  pisoPasillo: 0xdcd6e6,
   /** La línea entre baldosas. Casi igual al piso: un enrejado visible hace que
    *  la escena parezca papel milimetrado. */
-  junta: 0x16152b,
+  junta: 0xa8a2ba,
   /** Zócalo y oscurecimiento al pie de los muros (la sombra de contacto que
    *  hace que una pared se apoye en el piso en vez de flotar sobre él). */
-  pisoProfundo: 0x121124,
+  pisoProfundo: 0x3a3652,
 
   /* ── los muros ───────────────────────────────────────────────────────── */
-  muroFondo: 0x232245,
-  muroLateral: 0x1c1b38,
-  muroRemate: 0x343358,
+  muroFondo: 0x8a84a0,
+  muroLateral: 0x767090,
+  muroRemate: 0xb4aec6,
   /** Banda de luz indirecta a media altura: el detalle que más aporta a que un
    *  muro plano se lea como una pared de verdad. */
-  muroBanda: 0x3a3870,
+  muroBanda: 0xe0c89c,
 
   /* ── mobiliario ──────────────────────────────────────────────────────── */
-  escritorioTapa: 0x3b3a5e,
-  escritorioCanto: 0x2a2947,
-  escritorioPata: 0x1e1d36,
-  sillaTela: 0x2f2e52,
-  sillaBase: 0x191830,
-  rackCuerpo: 0x1a192f,
-  rackFrente: 0x24233f,
+  escritorioTapa: 0x9d96b4,
+  escritorioCanto: 0x7d7696,
+  escritorioPata: 0x5a5474,
+  sillaTela: 0x5f5a80,
+  sillaBase: 0x474263,
+  rackCuerpo: 0x2b2840,
+  rackFrente: 0x3a3754,
   pantallaMarco: 0x15142a,
   pantallaApagada: 0x101026,
   planta: 0x2b6e46,
   plantaOscura: 0x1d4d31,
-  maceta: 0x4a3a2e,
-  metal: 0x4d4c6e,
+  maceta: 0x6e5443,
+  metal: 0x9a95b0,
 
   /* ── luz y estado ────────────────────────────────────────────────────── */
   /** Acción: el índigo del producto. Es la luz «todo normal» de las pantallas. */
@@ -91,7 +111,49 @@ export const PALETA = {
   camisa: 0x4f46e5,
   camisaSombra: 0x3730a3,
   pantalon: 0x272644,
-  auricular: 0x15142a
+  auricular: 0x15142a,
+
+  /* ── la sede: exterior de noche, interiores encendidos ───────────────────
+   *
+   *  ESTOS COLORES NO SIGUEN LA REGLA DE LOS DE ARRIBA, Y ES DELIBERADO.
+   *
+   *  Todo lo anterior es una gama índigo oscura, de un centro de operaciones
+   *  visto por dentro. La referencia arquitectónica aprobada el 31/10/2026 pide
+   *  otra cosa: **exterior azul de noche, interiores cálidos y encendidos**, con
+   *  la estructura en tonos claros y grafito. El contraste entre los dos es lo
+   *  que hace que un edificio se lea como un edificio iluminado y no como una
+   *  maqueta gris.
+   *
+   *  Por eso no se sube el brillo de todo —eso aplana— sino que se separan dos
+   *  familias: lo que está fuera baja, lo que está dentro sube. */
+
+  /** La noche alrededor del edificio. Más azul y más profundo que `fondo`. */
+  noche: 0x060a1a,
+  /** El suelo urbano sobre el que se apoya la sede. */
+  explanada: 0x0e1430,
+  /** Hormigón visto: losas, petos, basamento. La estructura. */
+  hormigon: 0x4a5068,
+  hormigonClaro: 0x79819e,
+  /** El canto iluminado de una losa, lo que separa un nivel del de abajo. */
+  hormigonFilo: 0xa8b0c8,
+  /** Vidrio de fachada: azul frío, siempre con alfa. */
+  vidrio: 0x2b4a7a,
+  /** El reflejo en el vidrio, y los montantes que lo dividen. */
+  vidrioBrillo: 0x8fc2ff,
+  montante: 0x2a3048,
+  /** Luz de interior de oficina. Es el color que vuelve cálido lo de dentro. */
+  luzCalida: 0xffd9a8,
+  luzCalidaTenue: 0xc79a5e,
+  /** Madera del revestimiento del fondo: el único material templado del
+   *  exterior, y lo que impide que la fachada sea sólo vidrio y hormigón. */
+  madera: 0x5d4330,
+  maderaClara: 0x8a6442,
+  /** El acento tecnológico: la franja del ascensor, los testigos del núcleo. */
+  azulTecno: 0x3d9bff,
+  azulTecnoTenue: 0x1d5a9e,
+  /** Vegetación de las jardineras del basamento y las terrazas. */
+  seto: 0x2f6b47,
+  setoClaro: 0x55a371
 } as const;
 
 /**

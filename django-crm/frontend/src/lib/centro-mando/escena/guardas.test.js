@@ -96,10 +96,22 @@ describe('la escena no importa el motor gráfico donde no debe', () => {
   });
 
   it('y los que sí lo usan son los esperados', () => {
+    //  ESTA LISTA ES LA SUPERFICIE DE ACOPLAMIENTO CON EL MOTOR GRÁFICO, y por
+    //  eso se escribe a mano: es lo que habría que reescribir el día que el
+    //  motor cambie, y tiene que doler agregarle un archivo.
+    //
+    //  Pasó de cuatro a seis el 31/10/2026, con la reconstrucción
+    //  arquitectónica: `volumen.ts` son los primitivos que salieron de
+    //  `oficina.ts` para no copiar el signo de la luz, y `arquitectura.ts` es
+    //  la envolvente de la sede. Las dos dibujan, así que las dos importan el
+    //  motor; ninguna decisión se mudó ahí.
     const conPixi = fuentes
       .filter((f) => /from\s+['"]pixi\.js['"]/.test(f.texto))
       .map((f) => f.archivo)
       .sort();
-    expect(conPixi).toEqual(['montar.ts', 'oficina.ts', 'personaje.ts', 'texturas.ts']);
+    expect(conPixi).toEqual([
+      'arquitectura.ts', 'montar.ts', 'oficina.ts', 'personaje.ts',
+      'texturas.ts', 'volumen.ts'
+    ]);
   });
 });

@@ -209,12 +209,40 @@ describe('el edificio del piloto', () => {
   it('cada losa de nivel lleva canto, y las salas baranda', () => {
     // Un suelo sin espesor se lee como una alfombra, y tres alfombras apiladas
     // no son un edificio.
-    for (const p of EDIFICIO.plantas) {
+    //
+    // DESDE EL 31/10/2026 NO TODA PLANTA ES UN SUELO. La envolvente —fachada,
+    // extremo, basamento, cubierta, remate— son plantas porque el orden de
+    // pintado se decide por el origen de una planta, pero no tienen suelo: una
+    // fachada con baldosas no es un error que dé aviso, es una captura rarísima
+    // de la que nadie sabe de dónde salió. Se excluyen por papel y no por
+    // ausencia de `losa`, para que una sala a la que se le olvide siga cayendo.
+    for (const p of EDIFICIO.plantas.filter((q) => q.papel !== 'arquitectura')) {
       expect(p.losa, `${p.papel} del piso ${p.nivel}`).toBe(true);
     }
     for (const p of EDIFICIO.plantas.filter((q) => q.papel === 'sala')) {
       expect(p.baranda, p.sala).toBe(true);
     }
+  });
+
+  it('TODA planta cumple el contrato, incluida la que no tiene nada dentro', () => {
+    //  LA GUARDA QUE FALTABA, y costó un 500 el 31/10/2026.
+    //
+    //  Las piezas de arquitectura nacieron sin `puestos` porque una fachada no
+    //  tiene puestos. Parece inofensivo y no lo es: la pantalla hace
+    //  `plantas.flatMap((p) => p.puestos)`, y `flatMap` no aplana un
+    //  `undefined` — lo mete en la lista. El error no salta ahí: salta tres
+    //  `$derived` más tarde, buscando `.id` del puesto seleccionado, con una
+    //  traza que apunta a una línea que no tiene nada que ver.
+    //
+    //  Se afirma sobre el EFECTO —que aplanar no deja huecos— y no sobre la
+    //  presencia del campo, que es lo que una prueba floja habría hecho.
+    for (const p of EDIFICIO.plantas) {
+      expect(Array.isArray(p.puestos), `${p.papel}: puestos`).toBe(true);
+      expect(Array.isArray(p.mobiliario), `${p.papel}: mobiliario`).toBe(true);
+    }
+    const aplanados = EDIFICIO.plantas.flatMap((p) => p.puestos);
+    expect(aplanados.filter((x) => x === undefined)).toEqual([]);
+    expect(aplanados.every((x) => typeof x?.id === 'string')).toBe(true);
   });
 });
 
@@ -495,5 +523,149 @@ describe('las salas tienen puerta al pasillo', () => {
     for (const p of plantas.filter((x) => x.papel !== 'sala')) {
       expect(p.mundo.puerta, p.papel).toBeUndefined();
     }
+  });
+});
+
+describe('LA ENVOLVENTE NO ESTÁ ESCRITA PARA OCHO DEPARTAMENTOS EN TRES PISOS', () => {
+  //  EL RIESGO QUE ESTO MIDE, y es el más caro de este bloque: una sede que se
+  //  ve preciosa con la empresa piloto y se rompe con la siguiente. Basamento,
+  //  fachada, extremo, cubierta y remate se calculan de la organización —no hay
+  //  un número de pisos ni de departamentos escrito en ningún sitio— y eso sólo
+  //  vale si se comprueba con otras formas.
+  //
+  //  Cuatro formas, las que pidió el usuario el 31/10/2026.
+
+  /** La misma organización con los departamentos y pisos que se le pasen. */
+  function organizacion(pisos, departamentos) {
+    return { origen: 'prueba', pisos, departamentos, espacios: [] };
+  }
+
+  function edificioDeOrg(org) {
+    const salas = salasDe(org);
+    return edificioDe(salas, inventario, pisosDe(org, salas));
+  }
+
+  const piezas = (ed, tipo) =>
+    ed.plantas.filter((p) => p.arquitectura?.tipo === tipo);
+
+  it('una empresa de UN piso y TRES departamentos se remata igual', () => {
+    const ed = edificioDeOrg(organizacion(
+      [{ nivel: 1, rotulo: 'Planta única' }],
+      ['soporte', 'ventas', 'admin'].map((id, i) => ({
+        id, rotulo: id, piso: 1, plantilla: ['atencion', 'comercial', 'expedientes'][i],
+        areas: [id], capacidades: [], ocupaciones: [], acento: '#4f46e5'
+      }))
+    ));
+
+    //  Un edificio de un piso sigue teniendo suelo, fachada y cubierta.
+    expect(piezas(ed, 'basamento')).toHaveLength(1);
+    expect(piezas(ed, 'cubierta')).toHaveLength(1);
+    expect(piezas(ed, 'remate')).toHaveLength(1);
+    //  Una fachada y un extremo por nivel, y hay un nivel.
+    expect(piezas(ed, 'fachada')).toHaveLength(1);
+    expect(piezas(ed, 'extremo')).toHaveLength(1);
+
+    //  Y la cubierta va encima de ese único nivel, no en el aire.
+    const nivel = ed.plantas.find((p) => p.papel === 'circulacion');
+    expect(piezas(ed, 'cubierta')[0].origen.gz)
+      .toBe(nivel.origen.gz + ALTURA_DE_PISO);
+  });
+
+  it('con tres pisos hay una fachada y un extremo por piso, y un solo remate', () => {
+    expect(piezas(EDIFICIO, 'fachada')).toHaveLength(3);
+    expect(piezas(EDIFICIO, 'extremo')).toHaveLength(3);
+    expect(piezas(EDIFICIO, 'basamento')).toHaveLength(1);
+    expect(piezas(EDIFICIO, 'cubierta')).toHaveLength(1);
+    expect(piezas(EDIFICIO, 'remate')).toHaveLength(1);
+  });
+
+  it('la fachada sube hasta la losa de arriba, y sólo hasta donde esa losa llega', () => {
+    //  EL DEFECTO QUE ESTO MATA: una fachada de quince unidades donde no hay
+    //  nada encima es un muro colgado en el aire. Es exactamente el error que
+    //  ya se había cometido con las columnas y que se vio en el navegador.
+    const fachadas = piezas(EDIFICIO, 'fachada')
+      .sort((a, b) => a.origen.gz - b.origen.gz);
+    const anchoDe = (gz) => {
+      const c = EDIFICIO.plantas.find(
+        (p) => p.papel === 'circulacion' && p.origen.gz === gz);
+      return c ? c.mundo.ancho : 0;
+    };
+    for (let i = 0; i < fachadas.length; i++) {
+      const f = fachadas[i];
+      const arriba = fachadas[i + 1];
+      //  El último piso se sostiene a sí mismo: lo que tiene encima es su
+      //  cubierta, así que su fachada sube entera.
+      //  Acotado por el propio frente: un piso más ancho encima es un voladizo
+      //  y no sostiene nada de este tramo que no exista.
+      const esperado = arriba
+        ? Math.min(anchoDe(arriba.origen.gz), f.arquitectura.ancho)
+        : f.arquitectura.ancho;
+      expect(f.arquitectura.sostenidaHasta, `piso en gz=${f.origen.gz}`)
+        .toBeCloseTo(esperado, 5);
+      expect(f.arquitectura.sostenidaHasta)
+        .toBeLessThanOrEqual(f.arquitectura.ancho + 0.001);
+    }
+  });
+
+  it('un departamento VACÍO sigue teniendo su sala, y no cambia la envolvente', () => {
+    //  Un departamento sin nadie sentado es un caso real —Auditoría nace así— y
+    //  lo que no puede pasar es que desaparezca del edificio: un departamento
+    //  que la empresa declaró y la sede no dibuja es la sede mintiendo.
+    const org = organizacion(
+      [{ nivel: 1, rotulo: 'Única' }],
+      [
+        { id: 'lleno', rotulo: 'Lleno', piso: 1, plantilla: 'atencion', areas: ['lleno'],
+          capacidades: [], ocupaciones: [{ puesto: 'principal', agente: 'ventas' }],
+          acento: '#4f46e5' },
+        { id: 'vacio', rotulo: 'Vacío', piso: 1, plantilla: 'atencion', areas: ['vacio'],
+          capacidades: [], ocupaciones: [], acento: '#4f46e5' }
+      ]
+    );
+    const ed = edificioDeOrg(org);
+    const salas = ed.plantas.filter((p) => p.papel === 'sala');
+    expect(salas.map((p) => p.sala).sort()).toEqual(['lleno', 'vacio']);
+    //  Sus puestos existen y están libres: un puesto sin agente es un dato.
+    const vacia = salas.find((p) => p.sala === 'vacio');
+    expect(vacia.puestos.length).toBeGreaterThan(0);
+    expect(vacia.puestos.every((q) => !q.agente && !q.persona)).toBe(true);
+    //  Y la envolvente es la misma que con los dos llenos.
+    expect(piezas(ed, 'fachada')).toHaveLength(1);
+    expect(piezas(ed, 'extremo')).toHaveLength(1);
+  });
+
+  it('agrandar una sala ensancha la fachada de SU piso y mueve su extremo', () => {
+    //  El tamaño de sala es configurable desde la interfaz, así que la
+    //  envolvente tiene que seguirlo. Se mide la diferencia, no la presencia.
+    const base = (plantilla) => organizacion(
+      [{ nivel: 1, rotulo: 'Única' }],
+      [{ id: 'uno', rotulo: 'Uno', piso: 1, plantilla, areas: ['uno'],
+         capacidades: [], ocupaciones: [], acento: '#4f46e5' }]
+    );
+    const chica = edificioDeOrg(base('tecnica'));
+    const grande = edificioDeOrg(base('tecnica_9'));
+
+    const anchoFachada = (ed) => piezas(ed, 'fachada')[0].arquitectura.ancho;
+    const gxExtremo = (ed) => piezas(ed, 'extremo')[0].origen.gx;
+
+    const crecio = anchoFachada(grande) - anchoFachada(chica);
+    expect(crecio).toBeGreaterThan(0);
+    //  Y el extremo se corrió exactamente lo mismo: si creciera distinto, el
+    //  vidrio del final quedaría dentro de la última sala o flotando fuera.
+    expect(gxExtremo(grande) - gxExtremo(chica)).toBeCloseTo(crecio, 5);
+    //  La cubierta también, o la azotea sobraría o faltaría.
+    expect(piezas(grande, 'cubierta')[0].arquitectura.ancho
+           - piezas(chica, 'cubierta')[0].arquitectura.ancho).toBeCloseTo(crecio, 5);
+  });
+
+  it('un piso aislado no trae ni suelo ni azotea', () => {
+    //  Mirando un piso por dentro no hay explanada que mostrar: está a dos
+    //  pisos de altura. Dibujarla ahí pondría el jardín del edificio dentro de
+    //  una oficina.
+    const solo = edificioDe(SALAS, inventario, PISOS, { soloNivel: 2 });
+    expect(solo.plantas.filter((p) => p.arquitectura?.tipo === 'basamento')).toHaveLength(0);
+    expect(solo.plantas.filter((p) => p.arquitectura?.tipo === 'cubierta')).toHaveLength(0);
+    expect(solo.plantas.filter((p) => p.arquitectura?.tipo === 'remate')).toHaveLength(0);
+    //  Pero sí fachada: un piso sin cerramiento es una bandeja.
+    expect(solo.plantas.filter((p) => p.arquitectura?.tipo === 'fachada')).toHaveLength(1);
   });
 });

@@ -27,7 +27,7 @@
 
 import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { Camara, LIMITES, gesto, type Toque } from './camara';
-import { aPantalla, extensionDelMundo, profundidad } from './isometria';
+import { aPantalla, extensionDeVolumenes, extensionDelMundo, profundidad } from './isometria';
 import { PALETA, coloresConAcento } from './paleta';
 import { Transicion } from './pose';
 import { construirOficina, type Planta, type Puesto } from './oficina';
@@ -279,7 +279,15 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   vineta.eventMode = 'none';
   app.stage.addChild(vineta);
 
-  const extension = extensionDelMundo(oficina.mundo);
+  //  LA CÁMARA ENCUADRA LO QUE HAY, NO EL CUBO QUE LO ENVUELVE.
+  //
+  //  Con una sola planta las dos cosas coinciden y se usa la de siempre. Con un
+  //  edificio no: sus niveles están escalonados y la esquina alta del fondo es
+  //  aire. Medirla estiraba la caja casi 900 píxeles hacia arriba y el encuadre
+  //  terminaba ajustando por alto, con el edificio ocupando el 40% del ancho.
+  const extension = salas.length > 1
+    ? extensionDeVolumenes(salas.map((s) => ({ origen: s.origen, mundo: s.oficina.mundo })))
+    : extensionDelMundo(oficina.mundo);
   const vista = () => ({
     ancho: contenedor.clientWidth || 960,
     alto: contenedor.clientHeight || 600
