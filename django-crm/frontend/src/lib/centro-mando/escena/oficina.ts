@@ -1744,9 +1744,22 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
     //  El núcleo no lleva muros opacos: lleva vidrio. Es un REEMPLAZO y no un
     //  añadido — dos cerramientos en el mismo plano dan un vidrio que no es
     //  transparente, y entonces no se ve la escalera que justifica la pieza.
-    const muros = planta.vidrio ? construirNucleoAcristalado(mundo) : construirMuros(mundo);
-    muros.zIndex = -1000;
-    raiz.addChild(muros);
+    if (planta.vidrio) {
+      const { interior, piel } = construirNucleoAcristalado(mundo);
+      interior.zIndex = -1000;
+      raiz.addChild(interior);
+      //  LA PIEL VA POR DELANTE DE TODO LO DEL NÚCLEO, y por eso no puede ir
+      //  en el mismo nodo: un vidrio que se dibuja detrás de la escalera no es
+      //  un cerramiento, es un fondo. 900 lo deja sobre el mobiliario y bajo
+      //  la capa de rótulos, que es donde tiene que estar.
+      piel.zIndex = 900;
+      piel.eventMode = 'none';
+      raiz.addChild(piel);
+    } else {
+      const muros = construirMuros(mundo);
+      muros.zIndex = -1000;
+      raiz.addChild(muros);
+    }
   }
 
   if (planta.rotuloFrontal) {

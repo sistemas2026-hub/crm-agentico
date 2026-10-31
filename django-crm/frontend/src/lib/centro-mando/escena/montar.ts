@@ -336,6 +336,54 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     };
   });
 
+  /* ── los marcadores de presencia ──────────────────────────────────────── */
+
+  /**
+   * UN PUNTO DE PANTALLA POR PUESTO OCUPADO, SÓLO CUANDO SE MIRA DE LEJOS.
+   *
+   * EL PROBLEMA, medido el 31/10/2026 contra la referencia: la vista de
+   * conjunto entra a escala 0,2, y una persona sentada —que ya se dibuja un 18%
+   * más grande que su medida estricta— mide ahí diez píxeles. El edificio se
+   * lee, los departamentos se leen, y **la gente no**. Una sede donde no se ve
+   * a nadie no parece una empresa trabajando: parece una maqueta.
+   *
+   * Agrandar el personaje no sirve: a escala de sala quedaría gigante, que es
+   * la misma razón por la que los nombres de piso pasaron a ser letreros.
+   *
+   * Lo que NO es: un adorno ni una animación de ambiente. Cada punto marca una
+   * ocupación DECLARADA —el mismo dato que el pie cuenta— y toma el color del
+   * estado que ya tiene el halo de ese puesto. No inventa actividad: cuando el
+   * agente está en reposo, el punto está en reposo.
+   *
+   * Y desaparece al acercarse. A partir de cierto zoom el personaje ya se ve,
+   * y dejar el punto encima sería tapar justo lo que se vino a mirar.
+   */
+  const UMBRAL_PRESENCIA = 0.45;
+  const presencias = new Container();
+  presencias.eventMode = 'none';
+  app.stage.addChild(presencias);
+
+  const marcadores = new Map<string, { nodo: Graphics; ancla: { x: number; y: number } }>();
+  for (const s of salas) {
+    for (const p of s.oficina.puestos) {
+      if (!p.def.agente && !p.def.persona) continue;
+      const g = new Graphics();
+      //  Un punto con anillo: el anillo es lo que lo separa del fondo claro de
+      //  una oficina iluminada. Sin él, sobre el suelo nuevo, desaparecía.
+      g.circle(0, 0, 4.6).fill({ color: PALETA.placa, alpha: 0.72 });
+      g.circle(0, 0, 2.8).fill({ color: 0xffffff });
+      marcadores.set(p.def.id, {
+        nodo: g,
+        ancla: aPantalla(
+          s.origen.gx + p.def.gx + 1,
+          s.origen.gy + p.def.gy + 0.4,
+          (s.origen.gz ?? 0) + 2.9
+        )
+      });
+      presencias.addChild(g);
+    }
+  }
+
   /* Un puesto vacío no tiene estado que mostrar: su placa lo dice y su halo se
      queda apagado. Dejarlo en `incognito` con el signo de interrogación sería
      afirmar que no sabemos algo que sí sabemos — que ahí no hay nadie. */
@@ -502,6 +550,15 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       l.nodo.position.set(l.ancla.x * tr.escala + tr.x, l.ancla.y * tr.escala + tr.y);
     }
 
+    //  Los marcadores de presencia, con la misma transformación y el mismo
+    //  motivo: lo que tiene que leerse de lejos no puede encoger con el zoom.
+    presencias.visible = tr.escala < UMBRAL_PRESENCIA;
+    if (presencias.visible) {
+      for (const m of marcadores.values()) {
+        m.nodo.position.set(m.ancla.x * tr.escala + tr.x, m.ancla.y * tr.escala + tr.y);
+      }
+    }
+
     oficina.animar(t, dt);
 
     for (const h of habitantes) {
@@ -509,6 +566,11 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       h.personaje?.aplicar(pose);
 
       const color = colores[h.transicion.destino] ?? PALETA.ember;
+      //  EL MARCADOR TOMA EL ESTADO QUE YA TIENE EL HALO, no uno propio. Dos
+      //  sitios que deciden el color del mismo puesto es la forma más segura
+      //  de que un día digan cosas distintas, y el de lejos es el que se cree.
+      const marca = marcadores.get(h.puesto.def.id);
+      if (marca) marca.nodo.tint = h.puesto.def.agente ? color : PALETA.luzCalida;
       h.puesto.halo.tint = color;
       h.puesto.halo.alpha = h.puesto.def.agente ? pose.aura * 0.42 : 0;
       h.puesto.testigo.tint = color;

@@ -454,7 +454,7 @@ export function construirNucleoAcristalado(mundo: {
   ancho: number;
   fondo: number;
   alto: number;
-}): Container {
+}): { interior: Container; piel: Container } {
   const nodo = new Container();
   const g = new Graphics();
   const h = mundo.alto;
@@ -502,7 +502,46 @@ export function construirNucleoAcristalado(mundo: {
   caja(g, mundo.ancho, -0.42, 0, 0.42, 0.42, h, PALETA.hormigonClaro);
 
   nodo.addChild(g);
-  return nodo;
+
+  //  LA PIEL, Y POR QUE VA APARTE.
+  //
+  //  Lo de arriba son las caras del FONDO, que se ven por dentro. Las que
+  //  miran al espectador —`gx = ancho` y `gy = fondo`— son las que de verdad
+  //  convierten la caja en una torre de vidrio, y tienen que dibujarse DESPUES
+  //  de la escalera y del ascensor: delante de ellos, no detras. En el mismo
+  //  nodo que los muros eso es imposible, porque ese nodo va al fondo de la
+  //  sala entera.
+  //
+  //  Medido el 31/10/2026 contra la referencia: el nucleo existia, estaba
+  //  iluminado y SEGUIA sin leerse a escala de edificio. Lo que faltaba no era
+  //  luz: era el plano de vidrio por delante, que es lo que dice «esto es un
+  //  volumen cerrado» en vez de «esto es un hueco entre dos muros».
+  const piel = new Container();
+  const v = new Graphics();
+  //  El paño derecho, el que da al pasillo.
+  panelEnX(v, mundo.ancho, 0, mundo.fondo, 0.55, h, PALETA.vidrio, 0.3);
+  for (let y = 0; y <= mundo.fondo - 0.1; y += 1.5) {
+    panelEnX(v, mundo.ancho, y, 0.11, 0.55, h, PALETA.montante, 0.85);
+  }
+  //  El paño del frente, el que se ve de lleno desde la camara.
+  panelEnY(v, mundo.fondo, 0, mundo.ancho, 0.55, h, PALETA.vidrio, 0.3);
+  for (let x = 0; x <= mundo.ancho - 0.1; x += 1.5) {
+    panelEnY(v, mundo.fondo, x, 0.11, 0.55, h, PALETA.montante, 0.85);
+  }
+  //  Las lineas de planta, en las dos caras: apiladas, son las que atan los
+  //  tres pisos a la vista y las que mas hacen por leer la torre de lejos.
+  for (const z of [0.62, h - 0.42]) {
+    panelEnX(v, mundo.ancho, 0, mundo.fondo, z, z + 0.2, PALETA.azulTecno, 0.95);
+    panelEnY(v, mundo.fondo, 0, mundo.ancho, z, z + 0.2, PALETA.azulTecno, 0.8);
+  }
+  //  Y los montantes de esquina, opacos: el canto que recorta la torre contra
+  //  la noche.
+  caja(v, mundo.ancho, mundo.fondo, 0, 0.4, 0.4, h, PALETA.hormigonClaro);
+  caja(v, mundo.ancho, -0.4, 0, 0.4, 0.4, h, PALETA.hormigonClaro);
+  caja(v, -0.4, mundo.fondo, 0, 0.4, 0.4, h, PALETA.hormigonClaro);
+  piel.addChild(v);
+
+  return { interior: nodo, piel };
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
