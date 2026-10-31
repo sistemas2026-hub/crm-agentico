@@ -626,4 +626,18 @@ void main() {
       expect(find.text('NUEVO'), findsNothing);
     });
   });
+
+  group('el recordatorio del Supervisor vibra unos 30 s (30/10/2026)', () {
+    test('va por su propio canal; los demás avisos, por el de siempre', () {
+      expect(AvisosPush.canalPara('sin_reporte'), 'recordatorios_de_reporte');
+      expect(AvisosPush.canalPara('trabajo_asignado'), AvisosPush.canal);
+      expect(AvisosPush.canalPara(''), AvisosPush.canal);
+    });
+
+    test('el patrón dura 30 s, en pulsos y no continuo', () {
+      final List<int> p = AvisosPush.patronDeRecordatorio();
+      expect(p.fold<int>(0, (int a, int b) => a + b), 30000);
+      expect(p.skip(1).toSet(), <int>{1000, 500});
+    });
+  });
 }
