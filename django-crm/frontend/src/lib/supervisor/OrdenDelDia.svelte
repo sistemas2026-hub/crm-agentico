@@ -29,7 +29,8 @@
 
   //  Lo terminado se atenúa, salvo que espere que alguien lo revise
   //  (30/10/2026): eso es justo lo que hay que mirar.
-  let terminada = $derived(['completada_campo', 'cerrada'].includes(orden.estado) && !orden.revision);
+  let terminada = $derived(orden.estado === 'cerrada'
+    || (orden.estado === 'completada_campo' && !orden.revision && orden.validacion !== 'aprobado'));
   let tono = $derived(tonoDelVencimiento(orden.vence_en, dia));
   let aviso = $derived(textoDelAviso(orden.aviso));
   //  El seguimiento (30/10/2026): cuánto lleva y si dejó de reportar.
@@ -74,6 +75,21 @@
   {/if}
 
   <RevisionDelCierre {orden} />
+
+  <!-- COMPLETADA SIN REVISIÓN (30/10/2026): dice su validación, y si ya está
+       aprobada, solo falta cerrarla. -->
+  {#if orden.estado === 'completada_campo' && !orden.revision}
+    <div class="od-validacion">
+      <span>Validación: <strong>{orden.validacion_texto || orden.validacion || '—'}</strong></span>
+      {#if orden.validacion === 'aprobado'}
+        <form method="POST" action="?/cerrar">
+          <input type="hidden" name="orden" value={orden.id} />
+          <input type="hidden" name="vuelta" value={orden.vuelta ?? 1} />
+          <button type="submit" class="snoc-btn snoc-btn-primario">Cerrar</button>
+        </form>
+      {/if}
+    </div>
+  {/if}
 
   <footer class="od-pie">
     <span>
@@ -200,5 +216,16 @@
     gap: 4px 10px;
   }
   .od-seguimiento { font-weight: 600; }
+  .od-validacion {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--snoc-r-xl);
+    background: var(--snoc-surface-container);
+    font-size: 13px;
+  }
   .od-seguimiento-vencido { color: var(--snoc-error); }
 </style>

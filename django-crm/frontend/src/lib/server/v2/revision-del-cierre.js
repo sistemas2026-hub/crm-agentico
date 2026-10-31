@@ -34,6 +34,21 @@ export async function aprobarYCerrar(ctx, { orden, vuelta, observacion = '' }) {
 }
 
 /**
+ * Cierra una orden que ya estaba APROBADA y quedó sin cerrar (30/10/2026: la
+ * OT #3 en producción). Solo el cierre: la aprobación ya se hizo.
+ *
+ * @param {{ cookies: any }} ctx
+ * @param {{ orden: string, vuelta: string | number }} d
+ */
+export async function cerrarAprobada(ctx, { orden, vuelta }) {
+  return apiRequest(`/campo/trabajos/${encodeURIComponent(orden)}/cerrar/`, {
+    method: 'POST',
+    body: { observacion: 'Cerrada en Programación: estaba aprobada.' },
+    headers: { 'Idempotency-Key': `cerrar|${orden}|${vuelta}` }
+  }, ctx);
+}
+
+/**
  * Devuelve el trabajo al técnico: qué evidencia rehacer y por qué. Al técnico
  * le llega el aviso que ya existe (`avisos.avisar_devolucion`).
  *

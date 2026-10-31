@@ -125,6 +125,18 @@ describe('Programación: la persona confirma lo que revisó el Supervisor (30/10
     expect(apiRequest).not.toHaveBeenCalled();
   });
 
+  it('cerrar la aprobada: solo el cierre, con la clave de la vuelta', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({});
+    const r = /** @type {any} */ (await actions.cerrar(pedido('ADMIN', { orden: 'o-3', vuelta: '1' })));
+    expect(apiRequest.mock.calls.map((c) => c[0])).toEqual(['/campo/trabajos/o-3/cerrar/']);
+    expect(apiRequest.mock.calls[0][1].headers['Idempotency-Key']).toBe('cerrar|o-3|1');
+    expect(r.hecho).toContain('Cerradas');
+    apiRequest.mockReset();
+    expect((/** @type {any} */ (await actions.cerrar(pedido('USER', { orden: 'o-3' })))).status).toBe(403);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
   it('quien no gestiona no aprueba ni devuelve', async () => {
     apiRequest.mockReset();
 

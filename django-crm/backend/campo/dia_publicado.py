@@ -384,9 +384,15 @@ def del_dia(org, fecha) -> dict:
                     "detalle": str((ev.datos or {}).get("detalle") or ""),
                 } if ev else None)
             return r
-        except Exception:                                        # noqa: BLE001
-            logger.warning("Programacion: no se pudo revisar un cierre")
-            return None
+        except Exception as e:                                   # noqa: BLE001
+            #  Que se VEA: una revision que falla en silencio deja la tarjeta
+            #  sin botones y nadie sabe por que. El tipo, nunca el texto.
+            logger.warning("Programacion: no se pudo revisar un cierre (%s)", type(e).__name__)
+            return {"veredicto": "revisar", "texto": "No se pudo revisar el cierre",
+                    "puntos": [{"clave": "error", "ok": None,
+                                "texto": f"La revisión falló ({type(e).__name__}): miralo antes de cerrar."}],
+                    "evidencias": [], "sugeridas": [], "solucion": "",
+                    "supervisor_no_pudo": None}
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
@@ -492,6 +498,11 @@ def del_dia(org, fecha) -> dict:
             #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
             #  valido trae lo que dice el Supervisor. Indica, no decide.
             "revision": revision_de(o),
+            #  30/10/2026: una completada sin revision tiene que decir por que
+            #  (aprobada y sin cerrar, sin presentar): en produccion la OT #3
+            #  quedo asi, sin revision y sin poder llegar a Cerradas.
+            "validacion": o.estado_validacion,
+            "validacion_texto": o.get_estado_validacion_display(),
             #  La vuelta arma la clave de la decision: aprobar dos veces la
             #  misma vuelta es una sola decision; otra vuelta, otra.
             "vuelta": o.vuelta,

@@ -8,7 +8,7 @@ import {
   leerMaterialDelDia
 } from '$lib/server/v2/material-del-dia.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
-import { aprobarYCerrar, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
+import { aprobarYCerrar, cerrarAprobada, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
 import { leerCerradas } from '$lib/server/v2/cerradas.js';
 import { rangoDeCerradas } from '$lib/supervisor/dia-publicado.js';
 import {
@@ -143,6 +143,21 @@ export const actions = {
         : 'Aprobada y cerrada.' };
     } catch (e) {
       return fail(400, { de: 'revision', error: mensajeDeError(e, 'No se pudo aprobar.') });
+    }
+  },
+
+  //  APROBADA Y SIN CERRAR (30/10/2026): solo falta cerrarla.
+  cerrar: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'revision', error: 'Esto es para quien gestiona.' });
+    const f = await request.formData();
+    const orden = String(f.get('orden') ?? '');
+    if (!orden) return fail(400, { de: 'revision', error: 'Falta la orden.' });
+    try {
+      await cerrarAprobada({ cookies }, { orden, vuelta: String(f.get('vuelta') ?? '1') });
+      return { de: 'revision', hecho: 'Cerrada. Ya está en Cerradas.' };
+    } catch (e) {
+      return fail(400, { de: 'revision', error: mensajeDeError(e, 'No se pudo cerrar.') });
     }
   },
 

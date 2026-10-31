@@ -114,3 +114,22 @@ describe('las cerradas', () => {
     expect(rangoDeCerradas('7d', '2026-10-30')).toEqual({ desde: '2026-10-24', hasta: '2026-10-30' });
   });
 });
+
+describe('completada sin revisión (30/10/2026, la OT #3 en producción)', () => {
+  const tarjeta = (extra) => render(OrdenDelDia, {
+    props: { orden: { id: 'o3', numero: 3, vuelta: 1, estado: 'completada_campo', estado_texto: 'Completada en campo', tecnicos: [], revision: null, ...extra }, dia: '2026-10-30' }
+  }).body;
+
+  it('aprobada y sin cerrar: lo dice, ofrece Cerrar y no se atenúa', () => {
+    const h = tarjeta({ validacion: 'aprobado', validacion_texto: 'Aprobado' });
+    expect(h).toContain('Validación: <strong>Aprobado</strong>');
+    expect(h).toMatch(/action="\?\/cerrar"/);
+    expect(h).not.toMatch(/class="od[^"]*od-terminada/);
+  });
+
+  it('en otro estado dice cuál, sin botón', () => {
+    const h = tarjeta({ validacion: 'sin_evaluar', validacion_texto: 'Sin evaluar' });
+    expect(h).toContain('Validación: <strong>Sin evaluar</strong>');
+    expect(h).not.toContain('?/cerrar');
+  });
+});

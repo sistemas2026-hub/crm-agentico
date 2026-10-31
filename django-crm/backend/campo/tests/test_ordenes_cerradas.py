@@ -212,3 +212,28 @@ def test_c6_el_log_de_la_cuadrilla_deja_afuera_lo_terminado(org_a, terminada, us
     assert "Salió hacia OT #12" in textos
     assert not any("#3" in t for t in textos), textos
     assert c0["resumen_del_dia"]["hechas"] == 1, "lo terminado sigue contando en el avance"
+
+
+def test_c7_aprobada_y_sin_cerrar_lo_dice_y_una_revision_que_falla_se_ve(
+        org_a, terminada, user_profile, monkeypatch):
+    """En produccion la OT #3 quedo completada sin revision ni botones: la
+    tarjeta dice su validacion, y si la revision falla, lo dice."""
+    from campo import dia_publicado as D
+    from campo.cuadrillas import (Cuadrilla, IntegranteDeJornada,
+                                  JornadaDeCuadrilla, PersonaDeCampo)
+
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla #5")
+    j = JornadaDeCuadrilla.objects.create(org=org_a, cuadrilla=c, fecha=_hoy(),
+                                          labor=JornadaDeCuadrilla.CORRECTIVO)
+    persona = PersonaDeCampo.objects.create(org=org_a, profile=user_profile, nombre="T")
+    IntegranteDeJornada.objects.create(org=org_a, jornada=j, persona=persona, rol="tecnico")
+    OrdenTrabajo.objects.filter(pk=terminada.pk).update(estado_validacion=OrdenTrabajo.APROBADO)
+
+    f = D.del_dia(org_a, _hoy())["cuadrillas"][0]["ordenes"][0]
+    assert (f["revision"], f["validacion"], f["validacion_texto"]) == (None, "aprobado", "Aprobado")
+
+    OrdenTrabajo.objects.filter(pk=terminada.pk).update(estado_validacion=OrdenTrabajo.PENDIENTE)
+    monkeypatch.setattr(RC, "revisar", lambda o, pendientes=None: 1 / 0)
+    r = D.del_dia(org_a, _hoy())["cuadrillas"][0]["ordenes"][0]["revision"]
+    assert r["texto"] == "No se pudo revisar el cierre"
+    assert "ZeroDivisionError" in r["puntos"][0]["texto"]
