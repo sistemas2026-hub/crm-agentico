@@ -455,15 +455,21 @@ están en `.playwright-mcp/` (`v1-edificio-completo`, `v2-piso-aislado`,
 | 2 | Las oficinas se ven claramente desde la vista general | **CUMPLIDO** | `v1`: las nueve salas con su mobiliario y sus rótulos |
 | 3 | Ningún departamento queda oculto permanentemente | **CUMPLIDO** | Dos suites que invierten la proyección punto por punto: losas de nivel y, nueva, la envolvente. Con guarda de la guarda — una cubierta bajada a propósito SÍ acusa |
 | 4 | El edificio aprovecha el viewport sin recortarse | **CUMPLIDO** | `v1` y `v2`. Era un defecto real en el piso aislado: el suelo del zoom impedía el encuadre y «Encuadrar» no hacía nada. Arreglado y con prueba |
-| 5 | Existe un **núcleo vertical de circulación** | **PARCIAL** | Existe, acristalado, con luz dentro, franja azul por planta y remate sobre la cubierta. A escala de conjunto se reconoce, pero no domina como en la referencia |
+| 5 | Existe un **núcleo vertical de circulación** | **CUMPLIDO** (en la segunda pasada) | Primero quedó parcial, y lo que faltaba **no era luz**: eran las caras que miran al espectador. Se dibujaban sólo las del fondo, y una caja sin su cara frontal no es un volumen, es un hueco entre dos muros. Con su piel de vidrio por delante —pintada DESPUÉS de la escalera y del ascensor— se lee como torre. Verificado en `v6-nucleo-de-cerca.png` |
 | 6 | Se puede aislar un piso y acercarse a una sala | **CUMPLIDO** | `v2` (piso), `v3` (sala), `v4` (ficha abierta por enlace directo) |
 | 7 | Pisos y departamentos siguen siendo configurables | **CUMPLIDO** | Seis pruebas con **otras formas**: un piso con tres departamentos, uno vacío, una sala agrandada, un piso aislado |
-| 8 | Legibilidad, profundidad e iluminación | **PARCIAL** | Salto grande —interiores encendidos, atrio, lucernarios, cantos de losa claros— pero sigue más frío que la referencia, y a escala de edificio la gente casi no se distingue |
+| 8 | Legibilidad, profundidad e iluminación | **PARCIAL** | Salto grande: interiores encendidos, atrio, lucernarios, cantos de losa claros, luz de luminaria cálida y un filo azul recorriendo cada forjado. La gente ya se lee de lejos con los marcadores de presencia, y los rótulos de piso dejaron de pisarse con los de sala. **Lo que no se cierra** es la proporción: el edificio es una franja larga y no un bloque, y eso es estructural |
 
 ```
-cumplidos 6 · parciales 2 · incumplidos 0
-antes de esta sesion: cumplidos 3 · a medias 1 · incumplidos 4
+linea base de esa mañana    cumplidos 3 · a medias 1 · incumplidos 4
+tras la primera pasada      cumplidos 6 · parciales 2 · incumplidos 0
+tras cerrar los parciales   cumplidos 7 · parciales 1 · incumplidos 0
 ```
+
+El único que sigue parcial es el **8**, y su parte irreducible está en «La
+limitación estructural»: el edificio es una franja larga porque la oclusión no
+deja meter dos filas de salas en un nivel. Lo demás del 8 —interiores cálidos,
+filo azul en cada forjado, rótulos que ya no se pisan— está hecho.
 
 ### La comparación con la referencia, sin suavizar
 
@@ -709,6 +715,7 @@ usuario lo diga.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
+| 31/10/2026 | **Cierre de la validación y de los dos parciales.** El núcleo recibe su piel de vidrio por delante —le faltaba la cara frontal, no luz— y pasa a CUMPLIDO. Marcadores de presencia a tamaño de pantalla para que la gente se lea a escala de conjunto. Cada persona con su reloj: 37 poseían la misma postura al píxel. Gesto ambiental que NO toca el aura. Luz de interior cálida, filo azul en cada forjado, rótulos que dejan de pisarse. **7 de 8 cumplidos, 1 parcial** | El criterio 8: el edificio sigue siendo una franja larga, y eso es estructural. Caminar, cuando haya un evento que lo respalde | 4dfe4687 · 09097aff |
 | 31/10/2026 | **Reconstrucción arquitectonica con el motor actual, autorizada y hecha.** Basamento, fachada, extremo, cubierta con lucernarios, remate y núcleo acristalado; la luz separada en dos familias; el encuadre midiendo volúmenes y no un cubo. **6 de 8 criterios cumplidos, 2 parciales** (medido en el navegador, no deducido). 144 fps · mín 144 en las tres vistas con `bringToFront()`. Tres defectos propios cazados midiendo | Los dos parciales: el núcleo a escala de conjunto y los personajes. El eje 3 sigue siendo el que decide el motor | 9bb773bf · 894f0402 · 1ffff317 |
 | 31/10/2026 | **Primera referencia aprobada (eje 1)** y sus ocho criterios registrados. La escena de hoy cumple 3 de 8. Corregido un párrafo de esta misma ficha que el código desmiente: la desigualdad de oclusión no obliga a 3D, `edificio.js` ya la usó para colocar salas al frente y circulación al fondo | Las referencias de los ejes 3 y 6; son las que deciden el motor | — |
 | 31/10/2026 | Los seis ejes de la referencia quedan fijados y la carpeta preparada; **inventario de qué se conserva y qué se reconstruye, medido archivo por archivo**: 2.411 líneas se reconstruyen, 1.900 sobreviven, la capa de datos no se toca, y el motor gráfico tiene un solo consumidor. Ninguna garantía del SaaS está del lado que se reconstruye | Las imágenes. Sin ellas no se construye | — |
