@@ -58,6 +58,8 @@ ACCION = "accion"
 EVENTO_BLOQUEADO = "cierre_del_supervisor_bloqueado"
 EVENTO_CERRADA = "cerrada_por_el_supervisor"
 EVENTO_DIVERGENCIA = "ticket_cerrado_con_la_orden_cambiada"
+#: Se tomo ESTA orden para intentarla. Se escribe ANTES de hablarle al motor.
+EVENTO_INTENTO = "cierre_del_supervisor_en_curso"
 
 #: Cada cuanto se vuelve a intentar una orden que el motor no dejo cerrar. Una
 #: persona puede despertar el ciclo con el boton; esto evita que cada toque
@@ -98,39 +100,141 @@ def puertas(org) -> str:
     return ""
 
 
-def _intento_reciente(orden, ahora) -> bool:
+def _reclamar(orden, ahora) -> bool:
+    """Toma ESTA orden para intentarla, o dice que ya la tomo alguien.
+
+    POR QUE UN RECLAMO Y NO UN 'select' PREVIO  --  auditoria de frontera,
+    31/10/2026 (H6)
+    ----------------------------------------------------------------------
+    El reporte del tecnico y el "finalizar" son DOS peticiones, segundos
+    aparte, y cada una despierta esta fase. Los dos filtros que habia se
+    pueden pasar a la vez: `EVENTO_BLOQUEADO` solo existe si ya fallo, y el
+    `_ya_cerrado` de `cierre_en_isp` es un select cuyo evento se escribe
+    DESPUES del 200. La clave primaria del motor garantiza que a WispHub le
+    llegue un solo POST --eso ya andaba-- pero el desenlace de la segunda
+    tarea no era inocuo: escribia una alerta de divergencia falsa sobre el
+    camino feliz, o apagaba los reintentos una hora, o dejaba la clave
+    quemada y la orden sin poder cerrarse sola nunca mas.
+
+    Esto serializa las dos sobre la FILA de la orden: la segunda espera a que
+    la primera escriba su marca, la lee y se va. La transaccion se cierra
+    ANTES de hablarle al motor -- ninguna transaccion abierta mientras se
+    espera una operacion externa (CLAUDE.md §12).
+
+    LA MARCA CADUCA con la misma ventana que los bloqueos: una tarea que se
+    muera dejandola puesta no puede congelar la orden para siempre.
+    """
     from campo.models import EventoTrabajo
 
-    return EventoTrabajo.objects.filter(
-        org=orden.org, orden=orden, tipo=EVENTO_BLOQUEADO,
-        created_at__gte=ahora - timedelta(minutes=MINUTOS_ENTRE_INTENTOS)).exists()
+    desde = ahora - timedelta(minutes=MINUTOS_ENTRE_INTENTOS)
+    with transaction.atomic():
+        #  El lock es sobre la orden y no sobre los eventos: es la fila que
+        #  las dos tareas tienen en comun.
+        type(orden).objects.select_for_update().filter(pk=orden.pk).first()
+        if EventoTrabajo.objects.filter(
+                org=orden.org, orden=orden,
+                tipo__in=(EVENTO_BLOQUEADO, EVENTO_INTENTO),
+                created_at__gte=desde).exists():
+            return False
+        EventoTrabajo.objects.create(org=orden.org, orden=orden,
+                                     tipo=EVENTO_INTENTO, datos={})
+    return True
 
 
-def listas_para_cerrar(org, ahora) -> list | None:
+def listas_para_cerrar(org, ahora, *, solo=None) -> list | None:
     """[(orden, revision)] que dio por buenas, o None si no se pudo saber
-    cuales esperan medicion (y entonces no se cierra ninguna)."""
+    cuales esperan medicion (y entonces no se cierra ninguna).
+
+    `solo` acota a UNA orden (su pk) sin cambiar ni un criterio: lo usa el
+    disparo inmediato de `cerrar_esta_orden`. Que el filtro viva en UN solo
+    lugar es lo que evita que las dos entradas --el ciclo horario y el reporte
+    recien llegado-- se separen el dia que se agregue una condicion.
+    """
     from campo import revision_del_cierre as RC
     from campo.models import OrdenTrabajo
 
     pendientes = RC.pendientes_de_medir(org, ahora)
     if pendientes is None:
         return None
+    candidatas = OrdenTrabajo.objects.filter(
+        org=org, estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+        estado_validacion__in=(OrdenTrabajo.PENDIENTE, OrdenTrabajo.REQUIERE_REVISION),
+        vuelta__lte=1)
+    if solo is not None:
+        candidatas = candidatas.filter(pk=solo)
     salida = []
-    for orden in OrdenTrabajo.objects.filter(
-            org=org, estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
-            estado_validacion__in=(OrdenTrabajo.PENDIENTE, OrdenTrabajo.REQUIERE_REVISION),
-            vuelta__lte=1):
+    for orden in candidatas:
         revision = RC.revisar(orden, pendientes=pendientes)
         if revision and revision["veredicto"] == RC.CERRAR:
             salida.append((orden, revision))
     return salida
 
 
-def cerrar_lo_revisado(org, *, ahora=None) -> dict:
-    """La fase. `{"cierre_de_lo_revisado": {...}}` para el resumen del ciclo."""
+def _intentar(orden, revision, ahora) -> str:
+    """Cerrar UNA: afuera primero, adentro despues. Devuelve que paso.
+
+    'salteada' | 'cerrada' | 'bloqueada' | 'divergencia' | 'cambio'. Lo
+    comparten la fase horaria y el disparo inmediato: un camino nuevo que
+    repitiera estos pasos a mano es como se pierde una de las guardas.
+    """
     from campo.models import EventoTrabajo
     from campo.services import cierre_en_isp
 
+    if not _reclamar(orden, ahora):
+        return "salteada"
+    ticket = cierre_en_isp.cerrar_ticket_por_el_supervisor(orden, revision)
+    if ticket["estado"] not in SIGUE:
+        EventoTrabajo.objects.create(
+            org=orden.org, orden=orden, tipo=EVENTO_BLOQUEADO,
+            datos={"estado": ticket["estado"], "detalle": ticket.get("detalle", "")})
+        return "bloqueada"
+    if _aprobar_y_cerrar(orden, revision, ticket):
+        return "cerrada"
+    if ticket["estado"] == "cerrado":
+        EventoTrabajo.objects.create(
+            org=orden.org, orden=orden, tipo=EVENTO_DIVERGENCIA,
+            datos={"ticket_isp": ticket["estado"]})
+        return "divergencia"
+    return "cambio"
+
+
+def cerrar_esta_orden(orden, *, ahora=None) -> dict:
+    """EL MISMO CIERRE, APENAS LLEGA EL REPORTE  --  31/10/2026
+
+    El usuario: «que después que el supervisor revise el ticket que mandó el
+    técnico lo revise enseguida e indique si lo cierra o no». La fase de abajo
+    corre una vez por hora; esto corre a los segundos, para ESTA orden.
+
+    NO ES UNA SEGUNDA PUERTA. Pasa por `puertas()` y por `listas_para_cerrar`
+    igual que la fase, con los mismos filtros --la vuelta, la medicion que
+    falta, el veredicto-- y por `_intentar`, que es el mismo codigo. Lo unico
+    que cambia es QUIEN la despierta y CUANTAS mira.
+
+    Si todavia no corresponde --el reporte llego pero la orden aun no esta
+    completada, o espera la medicion-- no escribe nada y lo dice. El ciclo
+    horario la vuelve a mirar, que es la red de atras.
+    """
+    ahora = ahora or timezone.now()
+    motivo = puertas(orden.org)
+    if motivo:
+        logger.info("Supervisor: cierre inmediato en sombra (%s)", motivo)
+        return {"modo": SOMBRA, "por_que": motivo, "resultado": ""}
+    listas = listas_para_cerrar(orden.org, ahora, solo=orden.pk)
+    if listas is None:
+        return {"modo": ACCION, "por_que": "no se pudo saber si espera la medicion",
+                "resultado": ""}
+    if not listas:
+        #  TEXTO FIJO: puede ser que el veredicto no sea "se puede cerrar", que
+        #  ya este validada, o que sea una vuelta posterior. La tarjeta ya
+        #  muestra el veredicto con su detalle; aca solo interesa que no salio.
+        return {"modo": ACCION, "por_que": "la revision no la dio por buena ahora",
+                "resultado": ""}
+    una, revision = listas[0]
+    return {"modo": ACCION, "por_que": "", "resultado": _intentar(una, revision, ahora)}
+
+
+def cerrar_lo_revisado(org, *, ahora=None) -> dict:
+    """La fase. `{"cierre_de_lo_revisado": {...}}` para el resumen del ciclo."""
     ahora = ahora or timezone.now()
     listas = listas_para_cerrar(org, ahora)
     motivo = puertas(org)
@@ -146,21 +250,11 @@ def cerrar_lo_revisado(org, *, ahora=None) -> dict:
                                           "bloqueadas": 0}}
     cerradas = bloqueadas = 0
     for orden, revision in listas:
-        if _intento_reciente(orden, ahora):
-            continue
-        ticket = cierre_en_isp.cerrar_ticket_por_el_supervisor(orden)
-        if ticket["estado"] not in SIGUE:
-            EventoTrabajo.objects.create(
-                org=org, orden=orden, tipo=EVENTO_BLOQUEADO,
-                datos={"estado": ticket["estado"], "detalle": ticket.get("detalle", "")})
-            bloqueadas += 1
-            continue
-        if _aprobar_y_cerrar(orden, revision, ticket):
+        paso = _intentar(orden, revision, ahora)
+        if paso == "cerrada":
             cerradas += 1
-        elif ticket["estado"] == "cerrado":
-            EventoTrabajo.objects.create(
-                org=org, orden=orden, tipo=EVENTO_DIVERGENCIA,
-                datos={"ticket_isp": ticket["estado"]})
+        elif paso == "bloqueada":
+            bloqueadas += 1
     return {"cierre_de_lo_revisado": {"modo": ACCION, "por_que": "",
                                       "cerraria": len(listas), "cerradas": cerradas,
                                       "bloqueadas": bloqueadas}}

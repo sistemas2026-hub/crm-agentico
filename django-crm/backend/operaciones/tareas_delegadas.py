@@ -249,19 +249,21 @@ CATALOGO = {
     CERRAR_LO_REVISADO: {
         "nombre": "Aprobar y cerrar las órdenes terminadas que dé por buenas",
         "que_hace": (
-            "En cada vuelta revisa cada orden que el técnico terminó: el "
-            "checklist, el reporte de cierre, si el técnico afirmó que el "
-            "servicio quedó funcionando, la señal después del arreglo y el "
-            "material. Las que da por buenas las cierra en el sistema del ISP "
-            "y, solo si allá quedaron cerradas, las aprueba y las cierra en "
-            "Dexter."),
+            "Apenas el técnico manda su reporte revisa esa orden, y además "
+            "repasa todas una vez por hora: el checklist, el reporte de "
+            "cierre, si el técnico afirmó que el servicio quedó funcionando, "
+            "la señal después del arreglo y el material. Las que da por buenas "
+            "las cierra en el sistema del ISP —queda allá el resumen de lo que "
+            "se hizo, firmado por el Supervisor— y, solo si allá quedaron "
+            "cerradas, las aprueba y las cierra en Dexter."),
         "que_no_hace": (
             "No toca las que dejan dudas ni las que no están bien: esas las "
             "mira una persona. Tampoco una orden que ya fue devuelta al "
-            "técnico, ni una de falla cuya medición todavía no llegó. Y el "
-            "ticket del ISP solo lo cierra si el motor lo deja: hoy esa "
-            "herramienta exige aprobación humana, así que hasta que se levante "
-            "esa marca no cierra ninguna con ticket."),
+            "técnico, ni una de falla cuya medición todavía no llegó. Si el "
+            "ISP le avisa al cliente que su ticket se cerró, ese aviso no dice "
+            "quién lo cerró. Y si el motor no lo deja —el interruptor, el "
+            "techo o la autorización de la herramienta— no cierra nada y la "
+            "tarjeta dice qué lo frenó."),
         #  PROPIA, como las otras. Nivel 3 y no 4: lo que se cierra es lo que
         #  la revision dio por bueno en codigo, y el ticket pasa ademas por las
         #  compuertas del motor. Con el interruptor detenido no cierra nada.

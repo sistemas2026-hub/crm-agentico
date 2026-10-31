@@ -50,6 +50,7 @@ from campo.services.transiciones import (
     ejecutar_accion_operativa,
 )
 from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
+from campo import tasks as tareas_de_campo
 
 
 def _debe_estar_asignado(request) -> bool:
@@ -439,6 +440,14 @@ class SeguimientoDeOrdenView(APIView):
                  "campos": e.errores},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
+
+        #  EL REPORTE DE CIERRE DESPIERTA AL SUPERVISOR (31/10/2026). Es la
+        #  mitad de la condicion --la otra es que la orden quede completada--
+        #  y cual llega ultima depende de la app y de si venia offline. Por
+        #  eso se dispara desde las DOS y la tarea decide: la que llegue
+        #  primero no va a encontrar nada que hacer y no escribe nada.
+        if evento.tipo == seguimiento.TIPOS[seguimiento.CIERRE]:
+            tareas_de_campo.pedir_revision_del_cierre(orden)
 
         return Response(
             {
@@ -1292,6 +1301,11 @@ class CompletarTrabajoView(APIView):
                 {"error": "TRANSICION_INVALIDA", "detalle": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        #  LA OTRA MITAD (31/10/2026). Ver el comentario en SeguimientoView:
+        #  con la orden ya en 'completada_campo', si el reporte de cierre
+        #  llego antes, el Supervisor la revisa y decide en segundos.
+        tareas_de_campo.pedir_revision_del_cierre(orden)
 
         return Response({
             "ok": True,

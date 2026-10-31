@@ -171,7 +171,11 @@ def test_s2_el_motor_cierra_y_la_orden_queda_aprobada_y_cerrada(abierto, orden):
     assert (r["modo"], r["cerradas"], r["bloqueadas"]) == (CS.ACCION, 1, 0)
     url = post.call_args.args[0]
     assert url.endswith(f"/interno/orden/{orden.id}/cerrar-ticket-supervisor"), url
-    assert set(post.call_args.kwargs["json"]) == {"ticket", "texto"}, "sin actor"
+    #  'revision' desde el 31/10/2026 (H1): la ruta autonoma la exige. 'actor'
+    #  sigue sin estar -- quien cierra no lo elige el CRM.
+    cuerpo = post.call_args.kwargs["json"]
+    assert set(cuerpo) == {"ticket", "texto", "revision"}, cuerpo
+    assert "se_puede_cerrar" in cuerpo["revision"], cuerpo["revision"]
     orden.refresh_from_db()
     assert (orden.estado_operativo, orden.estado_validacion) == (
         OrdenTrabajo.CERRADA, OrdenTrabajo.APROBADO)
@@ -291,7 +295,11 @@ def test_l_programacion_dice_por_que_no_pudo_y_el_log_que_la_cerro(
     fila = D.del_dia(abierto, hoy)["cuadrillas"][0]["ordenes"][0]
     assert "APROBACION_HUMANA_REQUERIDA" in fila["revision"]["supervisor_no_pudo"]["detalle"]
 
-    EventoTrabajo.objects.filter(orden=orden, tipo=CS.EVENTO_BLOQUEADO).delete()
+    #  Se limpian las DOS marcas del intento: el bloqueo y el reclamo que
+    #  `_reclamar` escribe antes de hablarle al motor (H6, 31/10/2026). Las dos
+    #  apagan los reintentos la misma hora.
+    EventoTrabajo.objects.filter(
+        orden=orden, tipo__in=(CS.EVENTO_BLOQUEADO, CS.EVENTO_INTENTO)).delete()
     EventoTrabajo.objects.create(org=abierto, orden=orden, tipo="transicion",
                                  datos={"nuevo_estado": "completada_campo"})
     with mock.patch("requests.post", return_value=_Respuesta()):
@@ -388,3 +396,140 @@ def test_l3_sin_saber_que_espera_medicion_la_tarjeta_no_dice_se_puede_cerrar(
 
     assert r["veredicto"] == RC.REVISAR
     assert any(p["clave"] == "medicion" and p["ok"] is None for p in r["puntos"])
+
+
+# ---------------------------------------------------------------------------
+# I · ENSEGUIDA, no dentro de una hora  --  31/10/2026
+# ---------------------------------------------------------------------------
+#  El usuario: «que después que el supervisor revise el ticket que mandó el
+#  técnico lo revise enseguida e indique si lo cierra o no». La fase horaria
+#  sigue siendo la red de atrás; esto la adelanta para UNA orden.
+#
+#  Se afirma sobre el EFECTO en los dos tramos, que es donde se puede romper:
+#  que el reporte del técnico ENCOLE (I3/I4), y que lo encolado CIERRE (I1).
+#  Afirmar solo que la función existe la dejaría pasar sin llamador, que es
+#  exactamente el defecto que CLAUDE.md §6 llama «construido no es que corre».
+
+def test_i1_el_disparo_inmediato_cierra_esa_orden(abierto, orden):
+    with mock.patch("requests.post", return_value=_Respuesta()) as post:
+        r = CS.cerrar_esta_orden(orden)
+
+    assert (r["modo"], r["resultado"]) == (CS.ACCION, "cerrada"), r
+    assert post.call_args.args[0].endswith(
+        f"/interno/orden/{orden.id}/cerrar-ticket-supervisor")
+    orden.refresh_from_db()
+    assert (orden.estado_operativo, orden.estado_validacion) == (
+        OrdenTrabajo.CERRADA, OrdenTrabajo.APROBADO)
+
+
+def test_i2_el_disparo_inmediato_pasa_por_las_mismas_puertas(org_a, orden):
+    """Sin la tarea delegada no le pide NADA al motor. Si esto fallara, el
+    camino nuevo sería una puerta de atrás a la que no le aplican las puertas."""
+    with mock.patch("requests.post") as post:
+        r = CS.cerrar_esta_orden(orden)
+
+    assert r["modo"] == CS.SOMBRA, r
+    post.assert_not_called()
+    orden.refresh_from_db()
+    assert orden.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO
+
+
+def test_i2b_una_orden_que_la_revision_no_dio_por_buena_no_sale(abierto, orden):
+    """Mismo filtro que la fase: «Revisalo» no se cierra ni por este camino."""
+    EvidenciaTrabajo.objects.filter(orden_trabajo=orden).delete()
+    with mock.patch("requests.post") as post:
+        r = CS.cerrar_esta_orden(orden)
+
+    assert (r["modo"], r["resultado"]) == (CS.ACCION, ""), r
+    post.assert_not_called()
+
+
+def test_i3_el_reporte_de_cierre_del_tecnico_lo_encola(
+        user_client, orden, org_a, django_capture_on_commit_callbacks):
+    """El técnico manda el reporte por la app -> se despierta al Supervisor.
+
+    Se captura el `on_commit`: encolar ANTES del commit dejaría al worker
+    leyendo el estado viejo.
+    """
+    with mock.patch("campo.tasks.revisar_el_cierre_ya.delay") as delay:
+        with django_capture_on_commit_callbacks(execute=True):
+            r = user_client.post(
+                f"/api/campo/trabajos/{orden.id}/seguimiento/",
+                {"momento": "cierre",
+                 "respuestas": {"solucion": "Cambié el conector",
+                                "servicio_validado": True}},
+                format="json")
+
+    assert r.status_code == 201, r.content
+    delay.assert_called_once_with(str(org_a.id), str(orden.id))
+
+
+def test_i4_al_finalizar_en_campo_tambien_lo_encola(
+        user_client, orden, org_a, django_capture_on_commit_callbacks):
+    """La otra mitad: cuál de las dos llega última depende de la app."""
+    orden.estado_operativo = OrdenTrabajo.EN_SITIO
+    orden.save(update_fields=["estado_operativo"])
+    with mock.patch("campo.tasks.revisar_el_cierre_ya.delay") as delay:
+        with django_capture_on_commit_callbacks(execute=True):
+            r = user_client.post(f"/api/campo/trabajos/{orden.id}/completar/",
+                                 {}, format="json")
+
+    assert r.status_code == 200, r.content
+    delay.assert_called_once_with(str(org_a.id), str(orden.id))
+
+
+def test_i5_si_no_se_puede_encolar_el_tecnico_igual_reporto(abierto, orden):
+    """El broker caído no puede tumbar el reporte: ya es un hecho guardado."""
+    from campo import tasks as T
+
+    with mock.patch("campo.tasks.revisar_el_cierre_ya.delay",
+                    side_effect=RuntimeError("sin broker")):
+        with mock.patch("django.db.transaction.on_commit",
+                        side_effect=lambda fn, *a, **k: fn()):
+            T.pedir_revision_del_cierre(orden)   # no levanta
+
+
+def test_i6_la_tarea_con_una_orden_que_ya_no_esta_no_revienta(abierto):
+    import uuid as _uuid
+
+    from campo import tasks as T
+
+    r = T.revisar_el_cierre_ya(str(abierto.id), str(_uuid.uuid4()))
+    assert r["resultado"] == "" and r["por_que"], r
+
+
+def test_i7_una_orden_ya_reclamada_no_se_vuelve_a_intentar(abierto, orden):
+    """H6 (auditoría de frontera, 31/10/2026). El reporte y el «finalizar» son
+    dos peticiones segundos aparte, y las dos despiertan esta fase.
+
+    LO QUE ESTO MIDE, y lo que no. Mide que una orden ya reclamada no llega al
+    motor por segunda vez: se reclama a mano (como haría la tarea A) y se
+    corre la fase (la tarea B). Sin el reclamo, B le habla al motor.
+
+    NO reproduce el entrelazado real de dos conexiones a la vez. Esa parte la
+    sostiene el `select_for_update` de `_reclamar`, que serializa las dos
+    sobre la fila de la orden, y está verificada leyendo el código, no
+    corriendo la carrera. Se dice acá porque una prueba secuencial que diga
+    «la carrera está cerrada» sería el falso verde que §6 describe: con el
+    reclamo quitado, la segunda llamada secuencial no encuentra nada que
+    hacer igual --la orden ya quedó cerrada-- y la prueba pasaría sin medir.
+    """
+    assert CS._reclamar(orden, timezone.now()) is True, "la tarea A reclama"
+
+    with mock.patch("requests.post", return_value=_Respuesta()) as post:
+        r = CS.cerrar_esta_orden(orden)
+
+    post.assert_not_called()
+    assert r["resultado"] == "salteada", r
+    orden.refresh_from_db()
+    assert orden.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO
+
+
+def test_i8_el_reclamo_caduca_y_no_congela_la_orden(abierto, orden):
+    """Una tarea que se muera dejando la marca puesta no puede dejar la orden
+    sin cerrarse para siempre: la marca vence con la misma ventana."""
+    ahora = timezone.now()
+    assert CS._reclamar(orden, ahora) is True
+    assert CS._reclamar(orden, ahora + dt.timedelta(minutes=10)) is False
+    assert CS._reclamar(
+        orden, ahora + dt.timedelta(minutes=CS.MINUTOS_ENTRE_INTENTOS + 1)) is True

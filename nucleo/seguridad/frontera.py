@@ -120,6 +120,91 @@ IRREVERSIBLE_SIN_APROBACION = "IRREVERSIBLE_SIN_APROBACION_VINCULANTE"
 PERMISO_DE_OTRA_ACCION = "PERMISO_CRITICO_DE_OTRA_ACCION"
 #  Una herramienta que declara aprobacion humana llego con permiso autonomo.
 APROBACION_REQUERIDA = "APROBACION_HUMANA_REQUERIDA"
+#  Se abrio un permiso pidiendo una exencion con un nombre que el codigo no
+#  conoce. No se ignora: se rechaza al abrir la puerta.
+EXENCION_DESCONOCIDA = "EXENCION_DE_APROBACION_DESCONOCIDA"
+
+#  ===========================================================================
+#   LAS EXENCIONES DE 'aprobacion_humana'  --  31/10/2026
+#  ===========================================================================
+#  'aprobacion_humana' dice "esto no sale sin que una persona lo apruebe en el
+#  momento". Hay UN caso donde eso frena algo que YA fue revisado: el cierre de
+#  una orden de campo que el Supervisor reviso punto por punto EN CODIGO
+#  --checklist, reporte, servicio, medicion y material-- antes de pedir el
+#  efecto. Esa revision no es una frase del modelo: es una funcion que devuelve
+#  si o no, y su resultado queda guardado con la orden.
+#
+#  POR QUE UNA EXENCION CON NOMBRE Y NO QUITARLE LA MARCA A LA HERRAMIENTA.
+#  Quitar 'aprobacion_humana' la habilitaria para TODOS los caminos autonomos a
+#  la vez: la conversacion --el rol 'soporte' la tiene en 'roles_permitidos', y
+#  el "NO la llames tu" vive en la descripcion, que es prompt y no codigo
+#  (CLAUDE.md §4)-- y '/interno/herramienta' para cualquier servicio con token.
+#  Esto abre UNA puerta, nombrada, y deja las demas como estaban.
+#
+#  DOS LLAVES, Y HACEN FALTA LAS DOS:
+#    el CODIGO declara el motivo en este dict -- un nombre que no este aca no
+#                                               exime nada, y ademas rechaza
+#    el TENANT lo nombra en la herramienta, en 'aprobacion_humana_salvo'
+#  Una empresa que no quiera que su Supervisor cierre tickets no pone la linea
+#  y nada cambia para ella (CLAUDE.md §3.3).
+#
+#  QUE NO AFLOJA: el tenant, el interruptor, el techo, la etapa de Autonomia 2
+#  con B-7, la autorizacion granular y la idempotencia corren igual. Se acota
+#  UNA compuerta --la quinta-- y queda anotada en la bitacora con su motivo.
+#
+#  COMO SE REVOCA, Y COMO NO  --  auditoria de frontera, 31/10/2026 (H5)
+#  ---------------------------------------------------------------------
+#  La segunda llave vive en 'tenant_config', que es justo el almacen que
+#  CLAUDE.md §8 dice que no gobierna la autonomia, y por los dos caminos ya
+#  medidos: 'api.py::_config_de' sirve una copia cacheada cuando no puede
+#  comprobar la version, y 'fuente.cargar' cae al YAML de la imagen -- que
+#  desde este cambio tambien concede el salvo.
+#
+#  Lo acota que con la base ilegible el interruptor falla CERRADO y no se
+#  ejecuta nada; el hueco real es la ventana del cache con la base viva.
+#
+#      PARA CORTAR ESTO EN CALIENTE: el interruptor de autonomia, o la
+#      autorizacion granular de la herramienta. NUNCA borrar la linea del
+#      YAML y esperar que surta efecto ya -- esa revocacion falla ABIERTA.
+CIERRE_DE_ORDEN_REVISADA = "cierre_de_orden_revisada"
+
+EXENCIONES = {
+    CIERRE_DE_ORDEN_REVISADA: (
+        "el Supervisor reviso el cierre de la orden de campo en codigo, punto "
+        "por punto, y el tenant declaro esta herramienta en "
+        "'aprobacion_humana_salvo'"),
+}
+
+
+#: Que CAPACIDAD tiene que declarar la herramienta para que cada exencion le
+#: aplique. Sin esto, 'aprobacion_humana_salvo' en el YAML alcanzaba para
+#: eximir CUALQUIER escritura no irreversible: el emparejamiento entre la
+#: exencion y la herramienta que de verdad cierra tickets lo sostenia nada mas
+#: que el buen criterio de quien escribiera el YAML (auditoria de frontera,
+#: 31/10/2026, H2 -- medido con una sonda: una herramienta que no cierra
+#: tickets se eximia igual).
+CAPACIDAD_QUE_EXIGE = {
+    CIERRE_DE_ORDEN_REVISADA: "cierra_ticket_operativo",
+}
+
+
+def exime_la_aprobacion(herramienta, exencion: str) -> bool:
+    """Si ESTE permiso puede saltarse 'aprobacion_humana' de ESTA herramienta.
+
+    Falla cerrado en los cuatro frentes: sin motivo, con un motivo que el
+    codigo no declara, con uno que la herramienta no nombra, o sobre una
+    herramienta que no tiene la capacidad que ese motivo supone -> False.
+    """
+    motivo = (exencion or "").strip()
+    if not motivo or motivo not in EXENCIONES:
+        return False
+    declaradas = getattr(herramienta, "aprobacion_humana_salvo", None) or ()
+    if motivo not in tuple(declaradas):
+        return False
+    #  LA CAPACIDAD, no el nombre: cada empresa llama a sus herramientas como
+    #  quiere (mismo criterio que las banderas del reconciliador).
+    capacidad = CAPACIDAD_QUE_EXIGE.get(motivo)
+    return bool(capacidad is None or getattr(herramienta, capacidad, False))
 
 
 class AccionExternaNoAutorizada(Exception):
@@ -157,6 +242,11 @@ class _Permiso:
     herramienta: str = ""
     huella: str = ""
     aprobacion_id: str = ""
+    #  El motivo por el que este permiso puede saltarse 'aprobacion_humana',
+    #  si lo pidio quien lo abrio. Vacio en todos los demas -- que es el caso
+    #  de la conversacion, del reloj y de '/interno/herramienta'. Ver
+    #  EXENCIONES, arriba.
+    exencion: str = ""
 
 
 _PERMISO: contextvars.ContextVar = contextvars.ContextVar("permiso_externo",
@@ -209,7 +299,7 @@ def _tenant_valido(tenant) -> bool:
 @contextmanager
 def autonoma(tenant: str, herramienta: str, *, origen: str = "",
              actor: str = "motor", nivel_requerido: int | None = None,
-             efecto_externo: bool = True):
+             efecto_externo: bool = True, exencion: str = ""):
     """
     Abre permiso para una accion que NADIE pidio explicitamente.
 
@@ -226,6 +316,19 @@ def autonoma(tenant: str, herramienta: str, *, origen: str = "",
     abajo. Default True: lo que no lo declara se trata como externo, igual que
     antes de que el campo existiera.
     """
+    #  LA EXENCION SE VALIDA AL ABRIR, no al usarla. Un nombre mal escrito en
+    #  un llamador nuevo tiene que tumbar la accion con su codigo, no
+    #  degradarse en silencio a "sin exencion" -- ahi el sintoma seria
+    #  'APROBACION_HUMANA_REQUERIDA' y nadie miraria el typo.
+    exencion = (exencion or "").strip()
+    if exencion and exencion not in EXENCIONES:
+        _anotar(tenant, actor, herramienta,
+                f"{EXENCION_DESCONOCIDA}: '{exencion}'")
+        raise AccionExternaNoAutorizada(
+            herramienta, EXENCION_DESCONOCIDA,
+            f"'{exencion}' no es una exencion declarada en "
+            f"frontera.EXENCIONES: {sorted(EXENCIONES)}")
+
     nivel_requerido = _nivel_de_escritura(nivel_requerido)
     if not _tenant_valido(tenant):
         _anotar(tenant, actor, herramienta,
@@ -308,8 +411,15 @@ def autonoma(tenant: str, herramienta: str, *, origen: str = "",
               origen, autorizacion_id=permitida.autorizacion_id,
               nivel=permitida.nivel_efectivo, decision="permitida")
 
+    #  'herramienta' SE GUARDA SIEMPRE, aunque hasta hoy solo la mirara
+    #  'critica()': con una exencion puesta, el permiso tiene que valer para
+    #  ESTA herramienta y no para cualquiera que entre al mismo bloque
+    #  (auditoria de frontera, 31/10/2026, H2). Para un permiso autonomo sin
+    #  exencion no cambia nada: 'exigir' sigue sin compararla.
     testigo = _PERMISO.set(_Permiso(tenant=tenant.strip(), clase="autonoma",
-                                    actor=actor, origen=origen))
+                                    actor=actor, origen=origen,
+                                    herramienta=herramienta,
+                                    exencion=exencion))
     try:
         yield
     finally:
@@ -556,10 +666,30 @@ def exigir(herramienta, tenant=None, argumentos=None) -> _Permiso:
     #  herramienta con aprobacion es invocable por un servicio.
     if (getattr(herramienta, "aprobacion_humana", False)
             and permiso.clase == "autonoma"):
-        raise AccionExternaNoAutorizada(
-            nombre, APROBACION_REQUERIDA,
-            f"'{nombre}' declara aprobacion humana: no la ejecuta el sistema "
-            f"solo, tenga el techo que tenga")
+        #  LA UNICA SALIDA: una exencion nombrada por el codigo Y declarada
+        #  por el tenant en esta herramienta (31/10/2026, ver EXENCIONES). Un
+        #  permiso autonomo cualquiera --la conversacion, el reloj, una ruta de
+        #  servicio-- no trae ninguna y sigue frenado igual que antes.
+        #  LA EXENCION VALE PARA LA HERRAMIENTA CON LA QUE SE ABRIO EL PERMISO,
+        #  no para cualquiera que entre al bloque (H2). Es la misma regla que
+        #  'critica()' ya aplicaba, aca para la quinta compuerta: el permiso
+        #  del cierre del ticket no eximia ninguna otra escritura.
+        de_otra = permiso.herramienta and permiso.herramienta != nombre
+        if de_otra or not exime_la_aprobacion(herramienta, permiso.exencion):
+            raise AccionExternaNoAutorizada(
+                nombre, APROBACION_REQUERIDA,
+                f"'{nombre}' declara aprobacion humana: no la ejecuta el sistema "
+                f"solo, tenga el techo que tenga")
+        #  SE ANOTA SIEMPRE. Un control que se saltea en silencio es
+        #  indistinguible de uno que no existe -- el mismo criterio que la
+        #  exencion de etapa de 'autonoma()'.
+        #  '.get' y no '[]': escribir la bitacora no puede tumbar una accion
+        #  que la frontera ya decidio permitir. Con la regla de arriba la
+        #  clave siempre existe; si un cambio futuro la rompe, lo que queda
+        #  escrito es el nombre crudo y no una excepcion.
+        _bitacora(permiso.tenant, nombre, "aprobacion_humana_exenta",
+                  EXENCIONES.get(permiso.exencion, permiso.exencion),
+                  permiso.actor, permiso.origen, decision="permitida")
     return permiso
 
 

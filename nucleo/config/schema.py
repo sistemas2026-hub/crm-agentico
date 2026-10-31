@@ -955,6 +955,22 @@ class Herramienta(Base):
     # todo lo existente -- no cambia el comportamiento de ninguna
     # herramienta que no la declare explicitamente.
     aprobacion_humana: bool = False
+    #  LOS CAMINOS AUTONOMOS QUE SI PUEDEN EJECUTARLA  --  31/10/2026
+    #  -------------------------------------------------------------
+    #  Nombres de 'nucleo.seguridad.frontera.EXENCIONES'. Cada uno identifica
+    #  UN camino de codigo que revisa la accion antes de pedirla, y que por eso
+    #  no necesita que una persona la apruebe en el momento.
+    #
+    #  Hoy hay uno: 'cierre_de_orden_revisada' -- el Supervisor cierra el
+    #  ticket de una orden de campo cuya revision (checklist, reporte,
+    #  servicio, medicion y material) dio por buena en codigo.
+    #
+    #  Lo declara el TENANT y no el codigo porque es una decision de cada
+    #  empresa hasta donde deja llegar a su Supervisor (CLAUDE.md §3.3). Sin la
+    #  linea nada cambia: la herramienta sigue frenada para todo camino
+    #  autonomo. Y no alcanza con ponerla -- el nombre tiene que existir
+    #  tambien en el codigo, o la config no carga (validacion mas abajo).
+    aprobacion_humana_salvo: list[str] = Field(default_factory=list)
     # =========================================================================
     #  CAPACIDADES QUE EL RECONCILIADOR BUSCA POR BANDERA
     # =========================================================================
@@ -1862,6 +1878,28 @@ class Herramienta(Base):
                 f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
+
+        #  UNA EXENCION QUE EL CODIGO NO CONOCE NO EXIME NADA, Y CALLARLO
+        #  SERIA LO PEOR: el YAML diria que el Supervisor puede cerrar, la
+        #  frontera lo seguiria frenando, y el sintoma
+        #  --'APROBACION_HUMANA_REQUERIDA'-- no apuntaria al typo. Se rechaza
+        #  al CARGAR, como la contradiccion de 'efecto_externo' de mas abajo.
+        if self.aprobacion_humana_salvo:
+            from nucleo.seguridad.frontera import EXENCIONES
+
+            desconocidas = sorted(set(self.aprobacion_humana_salvo) - set(EXENCIONES))
+            if desconocidas:
+                raise ValueError(
+                    f"'{self.nombre}': 'aprobacion_humana_salvo' nombra "
+                    f"{desconocidas}, que no existen en "
+                    f"frontera.EXENCIONES ({sorted(EXENCIONES)}). Una exencion "
+                    f"que el codigo no declara no exime nada: el nombre tiene "
+                    f"que existir en los dos lados.")
+            if not self.aprobacion_humana:
+                raise ValueError(
+                    f"'{self.nombre}': declara 'aprobacion_humana_salvo' sin "
+                    f"'aprobacion_humana: true'. Eximir de una marca que no "
+                    f"esta puesta no hace nada, y deja escrito que si.")
 
         if self.aprobacion and not self.aprobacion_humana:
             raise ValueError(

@@ -3748,6 +3748,28 @@ herramientas:
     tipo: http
     multipart: true
     cierra_ticket_operativo: true
+    # 31/10/2026, DECISION DEL USUARIO: el aviso al cliente no importa para
+    # ESTE camino -- es la misma decision del 13/10 para la puerta humana
+    # ("se cierra aunque el ISP le avise, el aviso no dice quien lo cerro"),
+    # que habia quedado sin extender al Supervisor. Con esta linea el
+    # Supervisor cierra el ticket de una orden de campo que su revision dio
+    # por buena en codigo (checklist, reporte, servicio, medicion, material);
+    # sin ella, nada cambia.
+    #
+    # NO se le quito 'aprobacion_humana', que sigue abajo: quitarla la
+    # habilitaria tambien para la conversacion (el rol 'soporte' la tiene en
+    # 'roles_permitidos') y para cualquier servicio por /interno/herramienta.
+    # La exencion abre UN camino, nombrado. Ver nucleo/seguridad/frontera.py.
+    aprobacion_humana_salvo: [cierre_de_orden_revisada]
+    # EL TECHO TIENE QUE DECIR LO MISMO QUE LA DELEGACION (auditoria de
+    # frontera, 31/10/2026, H4). Sin esta linea, 'techo.nivel_requerido_de'
+    # cae en el default de escritura --2, "coordinar"-- y hasta hoy daba
+    # igual porque la quinta compuerta frenaba antes. Ahora que puede salir,
+    # el techo es una de las cuatro que quedan: una empresa en 2 ejecutaria
+    # sola una escritura sobre un tercero. El CRM ya exige 3 para delegar la
+    # tarea ('tareas_delegadas.CERRAR_LO_REVISADO.exige_nivel'); esto hace
+    # que la escala del motor diga lo mismo.
+    nivel_autonomia: 3
     descripcion: >
       Cierra el ticket de WispHub dejando escrito con que se cerro. NO la
       llames tu: la ejecuta el codigo cuando el caso termina.

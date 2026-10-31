@@ -4932,6 +4932,21 @@ def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
 
     No acepta `actor`: quien cierra es el Supervisor, y eso no lo elige quien
     llama. Una persona que valida usa la ruta de arriba.
+
+    `revision` ES OBLIGATORIA  --  auditoria de frontera, 31/10/2026 (H1)
+    --------------------------------------------------------------------
+    La premisa de la exencion que abre esta ruta es "el Supervisor reviso esta
+    orden punto por punto". Esa revision corre en el CRM, del otro lado de un
+    HTTP: aca NO se puede comprobar, y hasta el 31/10 tampoco se pedia nada que
+    la nombrara. El motor cerraba el ticket que le dijeran por la sola palabra
+    de quien llamaba.
+
+    Exigirla no PRUEBA la revision --nada de este lado puede-- y conviene
+    decirlo con todas las letras en vez de fingir lo contrario. Lo que si hace
+    es que la auditoria pueda contestar "que revision autorizo este cierre",
+    que antes no podia, y que un servicio que no tenga una no entre por
+    descuido. La garantia de verdad sigue siendo el token de servicio y que
+    este es el unico llamador.
     """
     tenant = request.args.get("tenant")
     if not tenant:
@@ -4939,13 +4954,20 @@ def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
     cuerpo = request.get_json(silent=True) or {}
     if not isinstance(cuerpo, dict):
         return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
-    permitidos = {"ticket", "texto"}
+    permitidos = {"ticket", "texto", "revision"}
     sobra = sorted(set(cuerpo) - permitidos)
     if sobra:
         return jsonify({
             "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
                      f"{sobra}: quien cierra es el Supervisor y el estado lo fija "
                      f"la herramienta."}), 400
+    revision = str(cuerpo.get("revision") or "").strip()
+    if not revision:
+        return jsonify({
+            "codigo": "SIN_REVISION", "cerrado": False, "referencia": "",
+            "motivo": "esta ruta cierra lo que el Supervisor reviso: hace falta "
+                      "'revision' (la orden, su vuelta y el veredicto). Sin eso "
+                      "no hay nada que la auditoria pueda mirar despues."}), 400
     try:
         config = _config_de(tenant)
     except Exception as e:                                    # noqa: BLE001
@@ -4954,7 +4976,8 @@ def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
     resultado = cierre_por_validacion.cerrar_ticket_por_el_supervisor(
         config, tenant, orden_id=orden_id,
         ticket=str(cuerpo.get("ticket") or ""),
-        texto=str(cuerpo.get("texto") or ""))
+        texto=str(cuerpo.get("texto") or ""),
+        revision=revision)
     if resultado.cerrado:
         codigo_http = 200
     elif resultado.codigo == cierre_por_validacion.FALLO:

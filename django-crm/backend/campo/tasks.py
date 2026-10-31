@@ -262,6 +262,71 @@ def recordar_reportes() -> dict:
     return salida
 
 
+@shared_task(name="campo.tasks.revisar_el_cierre_ya")
+def revisar_el_cierre_ya(org_id: str, orden_id: str) -> dict:
+    """El Supervisor mira ESTA orden apenas el tecnico manda su reporte.
+
+    POR QUE UNA TAREA Y NO DENTRO DE LA PETICION  --  31/10/2026
+    ------------------------------------------------------------
+    Este camino le habla al ISP por HTTP (`campo/services/cierre_en_isp.py`).
+    Hacerlo dentro del POST del tecnico lo dejaria esperando en la calle a que
+    WispHub conteste, y dejaria una transaccion de base abierta mientras se
+    espera una operacion externa -- lo que CLAUDE.md §12 prohibe con todas las
+    letras.
+
+    NUNCA LEVANTA. El reporte del tecnico ya quedo guardado (un hecho) y el
+    cierre es otro: que el segundo falle no puede hacer que la app reintente
+    el primero. Lo que pase queda en la bitacora de la orden, igual que en la
+    fase horaria.
+
+    ES UNA ACELERACION, NO UNA PUERTA: pasa por las mismas de siempre, y si
+    algo no da, el ciclo de cada hora la vuelve a mirar.
+    """
+    from campo.cierre_por_el_supervisor import cerrar_esta_orden
+    from campo.models import OrdenTrabajo
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        #  EL CONTEXTO ANTES DE LEER LA ORDEN: estas tablas tienen RLS, y sin
+        #  esto el `get` no encuentra nada y la tarea informaria "ya no esta"
+        #  siendo que no pudo verla.
+        set_rls_context(org_id)
+        try:
+            orden = OrdenTrabajo.objects.get(pk=orden_id, org_id=org_id)
+        except OrdenTrabajo.DoesNotExist:
+            return {"resultado": "", "por_que": "la orden ya no esta"}
+        return cerrar_esta_orden(orden)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("cierre inmediato: fallo (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        #  La variable es de SESION y la conexion vuelve al pool: mismo motivo
+        #  que el `finally` del ciclo del Supervisor.
+        clear_rls_context()
+
+
+def pedir_revision_del_cierre(orden) -> None:
+    """Despierta al Supervisor sobre esta orden, DESPUES del commit.
+
+    `on_commit` y no la llamada directa: la tarea vuelve a leer la orden de la
+    base, en otro proceso. Encolada antes del commit, el worker puede ganarle
+    a la escritura y leer el estado viejo -- el reporte que acaba de llegar no
+    estaria todavia, y la revision diria que falta.
+
+    NO TUMBA LA PETICION DEL TECNICO. Si el broker no esta --local sin Redis,
+    o una corrida de pruebas-- el tecnico igual reporto, que es lo que vino a
+    hacer. El ciclo horario es la red de atras.
+    """
+    def _encolar():
+        try:
+            revisar_el_cierre_ya.delay(str(orden.org_id), str(orden.id))
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("cierre inmediato: no se pudo encolar (%s)",
+                           type(e).__name__)
+
+    transaction.on_commit(_encolar)
+
+
 @shared_task(name="campo.tasks.ciclo_de_la_madrugada")
 def ciclo_de_la_madrugada() -> dict:
     """Recorre las empresas y corre el ciclo de las que les toca.

@@ -117,20 +117,36 @@ def cerrar_ticket_al_validar(orden, profile) -> dict:
         return {"estado": "no_cerrado", "detalle": type(e).__name__}
 
 
-def cerrar_ticket_por_el_supervisor(orden) -> dict:
+def cerrar_ticket_por_el_supervisor(orden, revision=None) -> dict:
     """El Supervisor cierra el ticket SOLO (30/10/2026,
     `campo/cierre_por_el_supervisor.py`). Por la ruta AUTONOMA del motor, que
     consulta el interruptor, el techo, Autonomia 2 con B-7 y la autorizacion de
     la herramienta. NUNCA lanza. Mismo contrato que `cerrar_ticket_al_validar`.
+
+    `revision` es la que autoriza el cierre. Viaja al motor porque alla no se
+    puede recalcular, y sin ella la ruta ahora RECHAZA (auditoria de frontera,
+    31/10/2026, H1): la bitacora de ejecucion autonoma tiene que poder decir
+    que revision autorizo cada cierre.
     """
     try:
-        return _cerrar(orden, None, ruta="cerrar-ticket-supervisor")
+        return _cerrar(orden, None, ruta="cerrar-ticket-supervisor",
+                       revision=_referencia_de(orden, revision))
     except Exception as e:  # noqa: BLE001
         logger.warning("cierre del Supervisor: fallo inesperado (%s)", type(e).__name__)
         return {"estado": "no_cerrado", "detalle": type(e).__name__}
 
 
-def _cerrar(orden, profile, ruta: str = "cerrar-ticket") -> dict:
+def _referencia_de(orden, revision) -> str:
+    """Como se nombra la revision en la auditoria: orden, vuelta y veredicto.
+
+    Nada del cliente ni texto libre: esto queda escrito en la bitacora del
+    motor, que no lleva datos de persona (CLAUDE.md §5).
+    """
+    veredicto = (revision or {}).get("veredicto") or "sin_veredicto"
+    return f"orden:{orden.id}|vuelta:{orden.vuelta}|{veredicto}"
+
+
+def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "") -> dict:
     if not _habilitado():
         return {"estado": "apagado", "detalle": f"{BANDERA}=0"}
     ticket = str((orden.contexto or {}).get("ticket") or "").strip()
@@ -164,6 +180,9 @@ def _cerrar(orden, profile, ruta: str = "cerrar-ticket") -> dict:
     cuerpo_pedido = {"ticket": ticket, "texto": resumen_de(orden, quien)}
     if ruta == "cerrar-ticket":
         cuerpo_pedido["actor"] = quien
+    else:
+        #  La ruta del Supervisor la exige: ver `_referencia_de` y H1.
+        cuerpo_pedido["revision"] = revision
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
