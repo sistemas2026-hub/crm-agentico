@@ -24,7 +24,10 @@ LAS TRES BUSQUEDAS
 
 EL PADRON
 ---------
-Servicio, nombre y estado de cada cliente -- nada mas --, recorriendo el
+Servicio, nombre y estado de cada cliente, y desde el 30/10/2026 el SERIAL de
+su equipo (para el aviso de caida: aviso_de_caida.py; no sale en ninguna
+busqueda). El aviso de caida lo arma aunque la empresa no busque por nombre.
+Se recorre el
 listado paginado del proveedor (26 paginas de 300, cerca de un minuto en
 Rapilink). Vive en la RAM del proceso y no se escribe a disco ni a la base.
 Se arma la primera vez que alguien busca por nombre, en un hilo aparte: esa
@@ -160,10 +163,15 @@ def padron_por_serial(config, tenant: str) -> dict[str, dict] | None:
         sn = f.get("_sn") or ""
         if not sn:
             continue
-        indice.setdefault(sn, f)
         hexa = ejecutor_http._gpon_hex(sn)
-        if hexa:
-            indice.setdefault(str(hexa).upper(), f)
+        for forma in {sn, str(hexa).upper()} if hexa else {sn}:
+            otra = indice.get(forma)
+            if otra is not None and otra.get("servicio") != f.get("servicio"):
+                #  El mismo equipo en dos fichas (una ONU reasignada sin
+                #  limpiar la anterior): no se elige una.
+                indice[forma] = {"_duplicado": True}
+            elif otra is None:
+                indice[forma] = f
     return indice
 
 

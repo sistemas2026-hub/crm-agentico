@@ -123,7 +123,8 @@ def test_c_aprobar_deja_escrito_quien_y_arranca_despues_del_commit(
     assert aviso.pendientes == AFECTADOS["servicios"] and aviso.lote == 2
     ev = SituacionEvento.objects.filter(situacion=s, tipo=TipoEvento.COORDINACION).get()
     assert ev.actor == admin_profile and ev.datos["clientes"] == 5
-    assert vuelta.call_args.kwargs == {"args": [str(aviso.id), str(org_a.id)], "countdown": 0}
+    assert vuelta.call_args.kwargs == {"args": [str(aviso.id), str(org_a.id), str(aviso.turno)],
+                                       "countdown": 0}
 
 
 def test_c2_una_sola_vez_por_situacion_y_nunca_sin_clientes(org_a, admin_profile, motor):
@@ -206,10 +207,82 @@ def test_d4_motor_caido_vuelve_despues_y_un_rechazo_detiene(org_a, admin_profile
         assert A.avanzar(aviso) == A.ESPERA_SI_EL_MOTOR_NO_CONTESTA_S
     aviso.refresh_from_db()
     assert aviso.pendientes == ["101", "102", "103"] and aviso.estado == AvisoDeCaida.EN_CURSO
-    with mock.patch("requests.post", return_value=_R({"error": "NO_CONFIGURADO"}, status=400)):
+    with mock.patch("requests.post", return_value=_R({"error": "AVISO_APAGADO"}, status=409)):
         assert A.avanzar(aviso) is None
     aviso.refresh_from_db()
-    assert aviso.estado == AvisoDeCaida.DETENIDO
+    assert aviso.estado == AvisoDeCaida.DETENIDO and aviso.motivo_detencion == "AVISO_APAGADO"
+    assert A.resumen(aviso)["motivo_detencion"] == "AVISO_APAGADO", "la pantalla dice por que"
+
+
+def test_d5_un_corte_breve_al_resolver_la_empresa_no_detiene_el_envio(org_a, admin_profile, motor):
+    aviso = _aviso(org_a, admin_profile, _situacion(org_a))
+    motor.return_value = ""                 # el motor se esta reiniciando
+    with mock.patch("requests.post") as post:
+        assert A.avanzar(aviso) == A.ESPERA_SI_EL_MOTOR_NO_CONTESTA_S
+    aviso.refresh_from_db()
+    assert aviso.estado == AvisoDeCaida.EN_CURSO and aviso.vueltas == 1 and post.call_count == 0
+
+
+def test_d6_un_lote_mas_chico_se_adopta_y_el_tope_detiene(org_a, admin_profile, motor):
+    aviso = _aviso(org_a, admin_profile, _situacion(org_a))
+    with mock.patch("requests.post", return_value=_R({"error": "LOTE_GRANDE", "lote": 1}, status=400)):
+        assert A.avanzar(aviso) == 5
+    aviso.refresh_from_db()
+    assert aviso.lote == 1 and aviso.estado == AvisoDeCaida.EN_CURSO
+    AvisoDeCaida.objects.filter(id=aviso.id).update(vueltas=A.MAX_VUELTAS)
+    aviso.refresh_from_db()
+    assert A.avanzar(aviso) is None
+    aviso.refresh_from_db()
+    assert aviso.estado == AvisoDeCaida.DETENIDO and aviso.motivo_detencion == "TOPE_DE_VUELTAS"
+
+
+def test_d7_una_espera_larga_se_parte_sin_preguntarle_al_motor(org_a, admin_profile, motor):
+    from datetime import timedelta
+    aviso = _aviso(org_a, admin_profile, _situacion(org_a))
+    aviso.proxima_vuelta_en = timezone.now() + timedelta(hours=9)
+    aviso.save()
+    with mock.patch("requests.post") as post:
+        espera = A.avanzar(aviso)
+    assert post.call_count == 0 and 9 * 3600 - 60 < espera <= 9 * 3600
+
+
+# ---------------------------------------------------------------------------
+# F · la ficha del turno y la retoma
+# ---------------------------------------------------------------------------
+
+def test_f_de_dos_copias_de_la_misma_vuelta_trabaja_una(org_a, admin_profile, motor):
+    from operaciones import tasks
+    aviso = _aviso(org_a, admin_profile, _situacion(org_a))
+    turno = str(aviso.turno)
+    contesta = {"enviados": 2, "descartados": 0, "motivos": {}, "pendientes": [], "reintentar_en": None}
+    with mock.patch("requests.post", return_value=_R(contesta)) as post, \
+            mock.patch.object(tasks.avanzar_aviso_de_caida, "apply_async") as reagendar:
+        tasks.avanzar_aviso_de_caida(str(aviso.id), str(org_a.id), turno)
+        tasks.avanzar_aviso_de_caida(str(aviso.id), str(org_a.id), turno)   # la copia reentregada
+        tasks.avanzar_aviso_de_caida(str(aviso.id), str(org_a.id), None)    # una vuelta sin ficha
+    assert post.call_count == 1, "la copia con la ficha vieja no le pide nada al motor"
+    reagendado = reagendar.call_args.kwargs["args"]
+    aviso.refresh_from_db()
+    assert reagendado[2] == str(aviso.turno) != turno, "la siguiente vuelta lleva la ficha nueva"
+    assert aviso.enviados == 2
+
+
+def test_f2_retomar_reagenda_lo_que_la_cola_perdio_y_nada_mas(org_a, admin_profile, motor):
+    from datetime import timedelta
+    from operaciones import tasks
+    perdido = _aviso(org_a, admin_profile, _situacion(org_a))
+    AvisoDeCaida.objects.filter(id=perdido.id).update(
+        proxima_vuelta_en=timezone.now() - timedelta(minutes=30))
+    al_dia = _aviso(org_a, admin_profile, _situacion(org_a, codigo="S-002", pon="3/2/12"))
+    AvisoDeCaida.objects.filter(id=al_dia.id).update(
+        proxima_vuelta_en=timezone.now() + timedelta(minutes=5))
+    terminado = _aviso(org_a, admin_profile, _situacion(org_a, codigo="S-003", pon="3/2/13"))
+    AvisoDeCaida.objects.filter(id=terminado.id).update(
+        estado=AvisoDeCaida.TERMINADO, proxima_vuelta_en=timezone.now() - timedelta(hours=2))
+    with mock.patch.object(tasks.avanzar_aviso_de_caida, "apply_async") as vuelta:
+        assert A.retomar() == 1
+    perdido.refresh_from_db()
+    assert vuelta.call_args.kwargs["args"] == [str(perdido.id), str(org_a.id), str(perdido.turno)]
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +326,16 @@ def test_e3_solo_gestion_y_solo_la_propia_empresa(user_client, admin_client, org
     ajena = _situacion(org_b, codigo="S-009")
     r = admin_client.post(f"{LISTA}{ajena.id}/aviso/", {"accion": "preparar"}, format="json")
     assert r.status_code == 404
+
+
+def test_f3_dos_copias_a_la_vez_con_la_misma_ficha_gana_una_sola(org_a, admin_profile):
+    """Las copias que Redis reentrega despiertan juntas: la secuencial de
+    arriba no lo ve, porque la segunda ya encuentra la vuelta reprogramada.
+    Aca las dos toman el turno ANTES de que ninguna avance."""
+    aviso = _aviso(org_a, admin_profile, _situacion(org_a))
+    turno = str(aviso.turno)
+    primera = A.tomar_turno(aviso.id, turno)
+    segunda = A.tomar_turno(aviso.id, turno)
+    assert primera is not None and segunda is None
+    AvisoDeCaida.objects.filter(id=aviso.id).update(estado=AvisoDeCaida.DETENIDO)
+    assert A.tomar_turno(aviso.id, primera) is None, "un envio detenido no se toma"

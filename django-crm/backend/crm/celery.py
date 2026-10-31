@@ -178,4 +178,12 @@ app.conf.beat_schedule = {
         "task": "operaciones.tasks.ciclo_del_supervisor",
         "schedule": crontab(minute=7),
     },
+    # Un aviso de caida en curso cuya vuelta se perdio en la cola (un reinicio
+    # de Redis, un broker caido al aprobar) se reagenda: sin esto quedaba "en
+    # curso" para siempre con la aprobacion gastada (auditor de frontera,
+    # 31/10/2026). Barato: lee los avisos en curso, que son casi siempre cero.
+    "retomar-avisos-de-caida": {
+        "task": "operaciones.tasks.retomar_avisos_de_caida",
+        "schedule": crontab(minute="*/10"),
+    },
 }

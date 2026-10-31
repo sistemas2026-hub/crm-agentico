@@ -51,6 +51,14 @@ ESPERA_ENTRE_LOTES_S = 60
 ESPERA_SI_EL_MOTOR_NO_CONTESTA_S = 300
 #: Tope de vueltas: un envio que no termina no queda vivo para siempre.
 MAX_VUELTAS = 60
+#: Una espera mas larga que esto se parte: Redis reentrega cada hora una tarea
+#: con ETA mas lejana que su 'visibility_timeout' (3600 s por defecto).
+ESPERA_MAXIMA_EN_COLA_S = 45 * 60
+#: Cuanto puede atrasarse una vuelta antes de que 'retomar' la reagende.
+GRACIA_PARA_RETOMAR_S = 10 * 60
+#: Lo que el motor tarda en una tanda: 25 clientes, cada uno con su ficha y
+#: su envio a Meta. Gunicorn corta a los 180 s.
+TIMEOUT_LOTE_S = 170
 
 
 class NoAvisable(Exception):
@@ -110,7 +118,7 @@ def _pedir(url, ruta, cuerpo):
     if token:
         cabeceras["X-Servicio-Token"] = token
     try:
-        r = requests.post(f"{url}{ruta}", json=cuerpo, headers=cabeceras, timeout=60)
+        r = requests.post(f"{url}{ruta}", json=cuerpo, headers=cabeceras, timeout=TIMEOUT_LOTE_S)
         return r.status_code, (r.json() if r.content else {})
     except Exception:  # noqa: BLE001 -- un motor caido no rompe la pantalla
         logger.warning("aviso de caida: el motor no contesto (%s)", ruta)
@@ -189,53 +197,113 @@ def aprobar(situacion, profile) -> AvisoDeCaida:
     except IntegrityError:
         #  Dos personas aprobaron a la vez: decide la base, y es la misma respuesta.
         raise NoAvisable("YA_APROBADO")
-    aviso_id, org_id = str(aviso.id), str(situacion.org_id)
-    transaction.on_commit(lambda: _pedir_vuelta(aviso_id, org_id, 0))
+    aviso_id, org_id, turno = str(aviso.id), str(situacion.org_id), str(aviso.turno)
+    transaction.on_commit(lambda: pedir_vuelta(aviso_id, org_id, turno, 0))
     return aviso
 
 
-def _pedir_vuelta(aviso_id, org_id, espera):
+def pedir_vuelta(aviso_id, org_id, turno, espera):
+    """Agenda la vuelta con su ficha. Si el broker no contesta no se pierde
+    nada: 'retomar' la vuelve a agendar cuando venza 'proxima_vuelta_en'."""
     try:
         from operaciones.tasks import avanzar_aviso_de_caida
 
-        avanzar_aviso_de_caida.apply_async(args=[aviso_id, org_id], countdown=espera)
+        avanzar_aviso_de_caida.apply_async(args=[aviso_id, org_id, turno],
+                                           countdown=min(espera, ESPERA_MAXIMA_EN_COLA_S))
     except Exception:  # noqa: BLE001 -- un broker caido no deshace la aprobacion
         logger.exception("aviso de caida: no se pudo agendar la vuelta (%s)", aviso_id)
+
+
+def tomar_turno(aviso_id, turno) -> str | None:
+    """
+    La ficha nueva si ESTA vuelta es la vigente; None si no. Compara y cambia
+    en una sola escritura: de dos copias de la misma tarea, una sola gana.
+    """
+    import uuid
+
+    nueva = uuid.uuid4()
+    ganadas = (AvisoDeCaida.objects
+               .filter(id=aviso_id, turno=turno, estado=AvisoDeCaida.EN_CURSO)
+               .update(turno=nueva))
+    return str(nueva) if ganadas == 1 else None
+
+
+def programar(aviso, espera: int) -> str:
+    """Anota cuando toca la proxima vuelta y con que ficha. Devuelve la ficha."""
+    import uuid
+    from datetime import timedelta
+
+    aviso.turno = uuid.uuid4()
+    aviso.proxima_vuelta_en = timezone.now() + timedelta(seconds=espera)
+    aviso.save(update_fields=["turno", "proxima_vuelta_en", "updated_at"])
+    return str(aviso.turno)
+
+
+def retomar(ahora=None) -> int:
+    """Reagenda los envios en curso cuya vuelta se perdio. Cuantos retomo."""
+    from datetime import timedelta
+
+    ahora = ahora or timezone.now()
+    limite = ahora - timedelta(seconds=GRACIA_PARA_RETOMAR_S)
+    from django.db.models import Q
+    perdidos = (AvisoDeCaida.objects
+                .filter(estado=AvisoDeCaida.EN_CURSO)
+                .filter(Q(proxima_vuelta_en__lt=limite) |
+                        Q(proxima_vuelta_en__isnull=True, aprobado_en__lt=limite)))
+    n = 0
+    for aviso in perdidos:
+        turno = programar(aviso, 0)
+        pedir_vuelta(str(aviso.id), str(aviso.org_id), turno, 0)
+        n += 1
+    return n
 
 
 def avanzar(aviso: AvisoDeCaida) -> int | None:
     """
     Manda el siguiente lote. Devuelve en cuantos segundos volver, o None si el
-    envio termino (o se detuvo).
+    envio termino (o se detuvo). Quien llama ya tomo el turno (tomar_turno).
     """
     if aviso.estado != AvisoDeCaida.EN_CURSO:
         return None
+    if aviso.proxima_vuelta_en and aviso.proxima_vuelta_en > timezone.now():
+        #  Una espera larga partida en tramos: todavia no toca.
+        return max(int((aviso.proxima_vuelta_en - timezone.now()).total_seconds()), 1)
     situacion = aviso.situacion
     if situacion.estado not in VIVOS:
-        return _cerrar(aviso, AvisoDeCaida.DETENIDO)
+        return _cerrar(aviso, AvisoDeCaida.DETENIDO, "SITUACION_RESUELTA")
     if not aviso.pendientes:
         return _cerrar(aviso, AvisoDeCaida.TERMINADO)
     if aviso.vueltas >= MAX_VUELTAS:
         logger.warning("aviso de caida: tope de vueltas (%s), quedan %s", aviso.id, len(aviso.pendientes))
-        return _cerrar(aviso, AvisoDeCaida.TERMINADO)
+        return _cerrar(aviso, AvisoDeCaida.DETENIDO, "TOPE_DE_VUELTAS")
     try:
         url, tenant = _motor_y_empresa(aviso.org_id)
     except NoAvisable:
-        return _cerrar(aviso, AvisoDeCaida.DETENIDO)
+        #  Pasajero: el motor se reinicia en cada despliegue, y el tenant de la
+        #  org se le pregunta a el. Se vuelve despues, contando la vuelta.
+        aviso.vueltas += 1
+        aviso.save(update_fields=["vueltas", "updated_at"])
+        return ESPERA_SI_EL_MOTOR_NO_CONTESTA_S
     lote, resto = aviso.pendientes[:aviso.lote], aviso.pendientes[aviso.lote:]
     respuesta = _pedir(url, "/avisos/caida/lote", {
         "tenant": tenant, "olt": aviso.olt, "board": aviso.board, "port": aviso.port,
         "situacion": str(situacion.id), "servicios": lote,
-        #  Quien aprobo, por su id: el motor exige una persona, no su nombre.
+        #  Quien aprobo, por su id y no por su nombre: el motor lo exige no
+        #  vacio y lo deja en el log de cada tanda.
         "autor": f"profile:{aviso.aprobado_por_id}"})
     aviso.vueltas += 1
     if respuesta is None or respuesta[0] >= 500:
         aviso.save(update_fields=["vueltas", "updated_at"])
         return ESPERA_SI_EL_MOTOR_NO_CONTESTA_S
     http, datos = respuesta
+    if http == 400 and datos.get("error") == "LOTE_GRANDE" and int(datos.get("lote") or 0) > 0:
+        #  La empresa bajo el tamaño de la tanda despues de aprobar.
+        aviso.lote = int(datos["lote"])
+        aviso.save(update_fields=["lote", "vueltas", "updated_at"])
+        return 5
     if http >= 400:
         logger.warning("aviso de caida: el motor rechazo el lote (%s): %s", aviso.id, datos.get("error"))
-        return _cerrar(aviso, AvisoDeCaida.DETENIDO)
+        return _cerrar(aviso, AvisoDeCaida.DETENIDO, str(datos.get("error") or f"HTTP_{http}"))
     aviso.enviados += int(datos.get("enviados") or 0)
     aviso.descartados += int(datos.get("descartados") or 0)
     motivos = dict(aviso.motivos or {})
@@ -253,10 +321,13 @@ def avanzar(aviso: AvisoDeCaida) -> int | None:
     return ESPERA_ENTRE_LOTES_S
 
 
-def _cerrar(aviso, estado) -> None:
+def _cerrar(aviso, estado, motivo: str = "") -> None:
     aviso.estado = estado
     aviso.terminado_en = timezone.now()
-    aviso.save(update_fields=["estado", "terminado_en", "updated_at"])
+    aviso.motivo_detencion = motivo[:48]
+    aviso.proxima_vuelta_en = None
+    aviso.save(update_fields=["estado", "terminado_en", "motivo_detencion", "proxima_vuelta_en",
+                              "updated_at"])
     return None
 
 
@@ -269,6 +340,7 @@ def resumen(aviso: AvisoDeCaida | None) -> dict | None:
             "pendientes": len(aviso.pendientes or []), "motivos": aviso.motivos or {},
             "aprobado_en": aviso.aprobado_en.isoformat(),
             "aprobado_por": _nombre(aviso.aprobado_por),
+            "motivo_detencion": aviso.motivo_detencion or None,
             "terminado_en": aviso.terminado_en.isoformat() if aviso.terminado_en else None}
 
 

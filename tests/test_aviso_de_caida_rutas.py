@@ -45,6 +45,7 @@ api._TOKEN_SERVICIO = None
 lecturas: list[tuple] = []
 vigentes = {"servicios": ["101", "102", "103", "104"], "equipos_en_falla": 5, "sin_cliente": 1,
             "fuera_de_estado": 0, "desde": "2026-10-30 07:16:44"}
+PUBLICO = dict(vigentes)
 
 
 def falso_afectados(config, tenant, olt, board, port, leer=None):
@@ -73,9 +74,11 @@ http = api.app.test_client()
 PUERTO = {"olt": "3", "board": "2", "port": "11"}
 
 print("\nafectados")
+vigentes = {**vigentes, "cayo": {"101": "x"}}
 r = http.post("/avisos/caida/afectados", json={"tenant": "rapilink", **PUERTO})
+comprobar("cayo" not in (r.get_json() or {}), "cuando cayo cada equipo no sale del motor", str(r.get_json()))
 comprobar(r.status_code == 200
-          and r.get_json() == {**vigentes, "lote": 3, "no_listo": None, "modo_prueba": False}
+          and r.get_json() == {**PUBLICO, "lote": 3, "no_listo": None, "modo_prueba": False}
           and lecturas[-1] == ("rapilink", "3", "2", "11"),
           "un puerto valido devuelve conteos, servicios, el lote y si el aviso puede salir",
           r.get_data(as_text=True)[:200])
@@ -97,7 +100,8 @@ comprobar(r.status_code == 503 and r.get_json() == {"error": "NO_CONFIGURADO"},
           "sin configurar: 503 con el codigo", str(r.get_json()))
 
 print("\nlote")
-vigentes = {"servicios": ["101", "102", "104"], "equipos_en_falla": 3}
+vigentes = {"servicios": ["101", "102", "104"], "equipos_en_falla": 3,
+            "cayo": {"101": "2026-10-30 07:16:44", "102": "2026-10-30 07:16:44", "104": "2026-10-30 07:17:02"}}
 pedidos.clear()
 cuerpo = {"tenant": "rapilink", **PUERTO, "situacion": "sit-9", "autor": "Ana NOC",
           "servicios": ["101", "103", "104"], "contexto": {"cliente_nombre": "Inventado"}}
@@ -108,7 +112,8 @@ comprobar(r.status_code == 200 and [p["servicio"] for p in pedidos] == ["101", "
           f"{r.status_code} {[p.get('servicio') for p in pedidos]}")
 comprobar(d.get("enviados") == 2 and d.get("descartados") == 1,
           "y dice cuantos descarto", str(d))
-comprobar(all(p["clave"] == f"caida:sit-9:{p['servicio']}" and p["evento"] == "caida_masiva"
+comprobar(all(p["clave"] == f"caida:{p['servicio']}:{vigentes['cayo'][p['servicio']]}"
+              and p["evento"] == "caida_masiva"
               and p["contexto"] == {} and p["telefono_crudo"] is None and p["caso_id"] is None
               for p in pedidos),
           "cada uno con su clave, sin contexto ni destino de afuera", str(pedidos[:1]))
@@ -118,8 +123,20 @@ for falta in ("autor", "situacion", "servicios"):
     comprobar(http.post("/avisos/caida/lote", json=c).status_code == 400, f"sin '{falta}': 400")
 comprobar(http.post("/avisos/caida/lote", json={**cuerpo, "autor": "   "}).status_code == 400,
           "un autor en blanco no es una persona: 400")
-comprobar(http.post("/avisos/caida/lote", json={**cuerpo, "servicios": ["1", "2", "3", "4"]}).status_code == 400,
-          "mas que el lote de la empresa: 400")
+r = http.post("/avisos/caida/lote", json={**cuerpo, "servicios": ["1", "2", "3", "4"]})
+comprobar(r.status_code == 400 and r.get_json() == {"error": "LOTE_GRANDE", "lote": 3},
+          "mas que el lote de la empresa: 400, y dice de cuanto es", str(r.get_json()))
+pedidos.clear()
+r = http.post("/avisos/caida/lote", json={**cuerpo, "situacion": "otra-situacion"})
+comprobar([p["clave"] for p in pedidos] == ["caida:101:2026-10-30 07:16:44", "caida:104:2026-10-30 07:17:02"],
+          "cambiar la situacion del pedido NO cambia la clave: no se repite el aviso", str(pedidos))
+estado_aviso["listo"] = "apagado"
+pedidos.clear()
+n = len(lecturas)
+r = http.post("/avisos/caida/lote", json=cuerpo)
+comprobar(r.status_code == 409 and r.get_json() == {"error": "AVISO_APAGADO"} and pedidos == []
+          and len(lecturas) == n, "apagado a mitad del envio: 409 y no se lee nada", str(r.get_json()))
+estado_aviso["listo"] = None
 comprobar(http.post("/avisos/caida/lote", json={**cuerpo, "servicios": ["10 1"]}).status_code == 400,
           "un servicio que no es un numero: 400")
 comprobar(http.post("/avisos/caida/lote", json={**cuerpo, "situacion": "a b/c"}).status_code == 400,

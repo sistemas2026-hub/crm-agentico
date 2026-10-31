@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { avance, motivosLegibles, textoDelError } from './fallas.js';
+import { avance, motivosLegibles, textoDeDetencion, textoDelError } from './fallas.js';
 
 /**
  * «Fallas de red»: lo que lee quien aprueba el aviso (30/10/2026).
@@ -33,6 +33,15 @@ describe('motivosLegibles', () => {
 
   it('un motivo nuevo se muestra con su código', () => {
     expect(motivosLegibles({ otro: 1 })).toEqual(['1 otro']);
+  });
+});
+
+describe('textoDeDetencion', () => {
+  it('dice por qué se detuvo un envío aprobado', () => {
+    expect(textoDeDetencion('SITUACION_RESUELTA')).toMatch(/se resolvió/);
+    expect(textoDeDetencion('AVISO_APAGADO')).toMatch(/apagado.*no recibieron/);
+    expect(textoDeDetencion('')).toBe('');
+    expect(textoDeDetencion('OTRO')).toBe('OTRO');
   });
 });
 

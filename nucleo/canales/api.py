@@ -7525,6 +7525,8 @@ def aviso_caida_afectados():
     try:
         config = _config_de(tenant)
         resultado = aviso_de_caida.afectados(config, tenant, *puerto)
+        #  Cuando cayo cada equipo es para armar la clave del lote: no sale.
+        resultado = {k: v for k, v in resultado.items() if k != "cayo"}
         if not resultado.get("cargando"):
             from nucleo.seguimiento import mensajes_automaticos
 
@@ -7549,8 +7551,10 @@ def aviso_caida_lote():
     Cuerpo: {tenant, olt, board, port, situacion, autor, servicios[]}. La
     lista NO se le cree a quien la manda: se cruza con los afectados que el
     motor lee en este momento (aviso_de_caida.lote_confirmado). Cada aviso
-    sale por la puerta comun con la clave (situacion, servicio) -- confirmar
-    dos veces no avisa dos veces --, sin contexto ni destino de afuera.
+    sale por la puerta comun con una clave que arma el motor con lo que el
+    mismo midio -- el servicio y la hora en que cayo su equipo --, sin
+    contexto ni destino de afuera: cambiar 'situacion' no repite un aviso.
+    Si el aviso ya no puede salir (se apago a mitad), 409 y no se lee nada.
     Contesta {enviados, motivos, pendientes, reintentar_en, descartados}.
     """
     from nucleo.persistencia import mensajes_automaticos as registro_avisos
@@ -7570,17 +7574,26 @@ def aviso_caida_lote():
     try:
         config = _config_de(tenant)
         if len(servicios) > config.aviso_de_caida.lote:
-            return jsonify({"error": f"El lote es de hasta {config.aviso_de_caida.lote}."}), 400
+            #  La empresa bajo el lote despues de aprobar: se dice cuanto es,
+            #  y quien manda achica la tanda en vez de detenerse.
+            return jsonify({"error": "LOTE_GRANDE", "lote": config.aviso_de_caida.lote}), 400
+        no_listo = mensajes_automaticos.listo(config, tenant, aviso_de_caida.EVENTO)
+        if no_listo:
+            #  Se apago (o se desaprobo la plantilla) a mitad del envio: no se
+            #  lee SmartOLT ni una ficha para contestar 'apagado' 25 veces.
+            return jsonify({"error": f"AVISO_{no_listo.upper()}"}), 409
         vigentes = aviso_de_caida.afectados(config, tenant, *puerto)
         if vigentes.get("cargando"):
             return jsonify({"enviados": 0, "motivos": {}, "pendientes": servicios,
                             "reintentar_en": 60, "descartados": 0}), 200
         lote, descartados = aviso_de_caida.lote_confirmado(servicios, vigentes)
+        cayo = vigentes.get("cayo") or {}
         ahora = datetime.now(timezone.utc)
 
         def avisar_uno(servicio):
             return avisos_proactivos.avisar(
-                config, tenant, aviso_de_caida.EVENTO, aviso_de_caida.clave(situacion, servicio),
+                config, tenant, aviso_de_caida.EVENTO,
+                aviso_de_caida.clave(servicio, cayo.get(servicio, "")),
                 servicio=servicio,
                 ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
                 caso_id=None, telefono_crudo=None, contexto={}, ahora=ahora,
@@ -7598,7 +7611,10 @@ def aviso_caida_lote():
         #  La base no contesto (la baja o la reserva): no sale nada.
         return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
                      componente="avisos", e=e)
-    registrar("avisos", "lote de aviso de caida", tenant=tenant, enviados=resultado["enviados"],
+    #  Quien aprobo viaja como 'profile:<id>' -- un id, no un nombre --, y
+    #  queda en el log de cada tanda junto a la situacion que la origino.
+    registrar("avisos", "lote de aviso de caida", tenant=tenant, situacion=situacion,
+              aprobo=autor[:64], enviados=resultado["enviados"],
               descartados=descartados, pendientes=len(resultado["pendientes"]))
     return jsonify({**resultado, "descartados": descartados}), 200
 

@@ -54,6 +54,27 @@ export const MOTIVOS = /** @type {Record<string, string>} */ ({
   ...Object.fromEntries(Object.entries(NO_LISTO).map(([k, v]) => [k, v.toLowerCase()]))
 });
 
+/** Por qué se detuvo un envío ya aprobado (backend: AvisoDeCaida.motivo_detencion). */
+export const DETENCION = /** @type {Record<string, string>} */ ({
+  SITUACION_RESUELTA: 'La caída se resolvió antes de terminar: no se le escribe a nadie más.',
+  TOPE_DE_VUELTAS: 'Se agotaron los reintentos; los que faltaban no recibieron el aviso.'
+});
+
+/**
+ * Por qué se detuvo un envío, dicho para una persona.
+ * @param {string | null | undefined} codigo
+ */
+export function textoDeDetencion(codigo) {
+  const c = String(codigo ?? '');
+  if (!c) return '';
+  if (DETENCION[c]) return DETENCION[c];
+  if (c.startsWith('AVISO_')) {
+    const motivo = c.slice('AVISO_'.length).toLowerCase();
+    if (NO_LISTO[motivo]) return `${NO_LISTO[motivo]} Los que faltaban no recibieron el aviso.`;
+  }
+  return c;
+}
+
 /** @param {string | null | undefined} codigo */
 export function textoDelError(codigo) {
   const c = String(codigo ?? '');

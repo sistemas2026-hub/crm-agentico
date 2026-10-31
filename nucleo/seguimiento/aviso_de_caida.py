@@ -25,10 +25,13 @@ A QUIEN, Y A QUIEN NO
 EL ENVIO
 --------
 Por la puerta comun (avisos.py): horario, baja, interruptor, modo prueba,
-plantilla aprobada, una vez por clave. La clave es (situacion, servicio):
-confirmar dos veces, o reintentar un lote, no avisa dos veces. Fuera del
-horario el lote entero espera; un ISP que no contesta deja ese servicio
-pendiente para la proxima vuelta.
+plantilla aprobada, una vez por clave. LA CLAVE LA ARMA EL MOTOR con lo que el
+mismo midio (auditor de frontera, 31/10/2026): el servicio y la hora en que
+SU equipo cayo. Es estable mientras ese cliente sigue caido -- aprobar dos
+situaciones de la misma falla, o reintentar una tanda, no avisa dos veces -- y
+cambia solo si el equipo volvio y se cayo otra vez, que para el es otra falla.
+Fuera del horario el lote entero espera; un ISP o un Meta que no contestan
+dejan ese servicio pendiente para la proxima vuelta.
 
 La respuesta nunca lleva seriales ni telefonos: servicios y conteos.
 ================================================================================
@@ -62,14 +65,28 @@ class CaidaNoAvisable(Exception):
         self.http = http
 
 
-def clave(situacion: str, servicio: str) -> str:
-    return f"caida:{situacion}:{servicio}"
+#: Motivos por los que un aviso no salio y conviene volver a intentarlo.
+REINTENTABLES = {"meta_no_contesta": 300}
 
 
-def grupo_de_la_falla(filas, ventana_minutos: int) -> tuple[list[str], str | None]:
+def clave(servicio: str, cayo: str) -> str:
+    """La clave del aviso: el servicio y la hora en que cayo su equipo."""
+    return f"caida:{servicio}:{cayo}"
+
+
+def grupo_de_la_falla(filas, ventana_minutos: int, minimo: int = 2) -> tuple[list[tuple[str, str]], str | None]:
     """
-    Los seriales del grupo de caidas mas grande dentro de una ventana, y desde
-    cuando. A igual tamaño, el mas reciente (la falla en curso). Solo LOS.
+    El grupo de caidas que es LA FALLA EN CURSO: el mas reciente que junta al
+    menos 'minimo' equipos dentro de la ventana. Si ninguno llega, el mas
+    grande (para contar, no para avisar). Solo LOS.
+
+    El mas reciente y no el mas grande (auditor de frontera, 31/10/2026): un
+    corte viejo deja equipos muertos juntos para siempre, y si son mas que los
+    de hoy, el aviso le llegaria a ellos y no a los afectados de verdad. Con
+    el puerto cortado, sus equipos ya no pueden caer despues: lo mas nuevo es
+    lo que esta pasando.
+
+    Devuelve ([(serial, hora en que cayo)], desde).
     """
     caidas = []
     for f in filas or []:
@@ -85,17 +102,23 @@ def grupo_de_la_falla(filas, ventana_minutos: int) -> tuple[list[str], str | Non
         return [], None
     caidas.sort()
     ventana = timedelta(minutes=ventana_minutos)
-    mejor: tuple[int, int, int] = (0, 0, 0)          # (tamaño, fin, inicio)
+    grande: tuple[int, int, int] = (0, 0, 0)          # (tamaño, fin, inicio)
+    reciente: tuple[int, int] | None = None           # (fin, inicio)
     inicio = 0
     for fin in range(len(caidas)):
         while caidas[fin][0] - caidas[inicio][0] > ventana:
             inicio += 1
-        candidato = (fin - inicio + 1, fin, inicio)
-        if candidato[:2] >= mejor[:2]:
-            mejor = candidato
-    _, fin, inicio = mejor
+        tam = fin - inicio + 1
+        if (tam, fin) >= grande[:2]:
+            grande = (tam, fin, inicio)
+        if tam >= minimo:
+            #  El grupo que termina en 'fin' arranca en el primero que entra
+            #  en la ventana: se queda el que termina mas tarde.
+            reciente = (fin, inicio)
+    fin, inicio = reciente if reciente else (grande[1], grande[2])
     grupo = caidas[inicio:fin + 1]
-    return [sn for _, sn in grupo], grupo[0][0].strftime("%Y-%m-%d %H:%M:%S")
+    return ([(sn, cuando.strftime("%Y-%m-%d %H:%M:%S")) for cuando, sn in grupo],
+            grupo[0][0].strftime("%Y-%m-%d %H:%M:%S"))
 
 
 def _herramienta_optica(config):
@@ -131,10 +154,18 @@ def _buscar(indice: dict, sn: str) -> dict | None:
 
 def afectados(config, tenant: str, olt, board, port, *, leer=None) -> dict:
     """
-    {'servicios', 'equipos_en_falla', 'sin_cliente', 'fuera_de_estado', 'desde'}
-    o {'cargando': True} si el padron del ISP todavia se esta armando. Lanza
-    CaidaNoAvisable si la empresa no lo configuro, o si SmartOLT no contesto.
+    {'servicios', 'cayo', 'equipos_en_falla', 'sin_cliente', 'fuera_de_estado',
+    'desde'} o {'cargando': True} si el padron del ISP todavia se esta armando.
+    'cayo' es {servicio: hora en que cayo su equipo}: con eso arma la clave el
+    lote, y no sale del motor. Lanza CaidaNoAvisable si la empresa no lo
+    configuro, o si SmartOLT no contesto.
+
+    Quedan afuera (como 'sin_cliente'): el servicio ficticio de instalaciones
+    -- su ficha no es de una persona -- y un serial que el padron tiene en dos
+    fichas: elegir una seria adivinar de quien es el equipo (revisor de PII).
     """
+    from nucleo.seguimiento.avisos import servicios_sin_titular
+
     aviso = config.aviso_de_caida
     if not aviso.estados_que_se_avisan:
         raise CaidaNoAvisable("NO_CONFIGURADO", 503)
@@ -154,21 +185,23 @@ def afectados(config, tenant: str, olt, board, port, *, leer=None) -> dict:
         registrar("aviso_de_caida", "no se pudo leer el puerto en SmartOLT", error=e)
         raise CaidaNoAvisable("OPTICO_NO_CONTESTA", 502)
 
-    grupo, desde = grupo_de_la_falla(filas, aviso.ventana_misma_falla_minutos)
+    grupo, desde = grupo_de_la_falla(filas, aviso.ventana_misma_falla_minutos,
+                                     aviso.minimo_equipos)
     base = {"equipos_en_falla": len(grupo), "sin_cliente": 0, "fuera_de_estado": 0,
             "desde": desde}
     if len(grupo) < aviso.minimo_equipos:
-        return {**base, "servicios": [], "motivo": "sin_falla_comun"}
-    servicios: set[str] = set()
-    for sn in grupo:
+        return {**base, "servicios": [], "cayo": {}, "motivo": "sin_falla_comun"}
+    ficticios = servicios_sin_titular(config)
+    cayo: dict[str, str] = {}
+    for sn, cuando in grupo:
         fila = _buscar(indice, sn)
-        if fila is None:
+        if fila is None or fila.get("_duplicado") or str(fila.get("servicio")) in ficticios:
             base["sin_cliente"] += 1
         elif fila.get("estado") not in aviso.estados_que_se_avisan:
             base["fuera_de_estado"] += 1
         else:
-            servicios.add(str(fila["servicio"]))
-    return {**base, "servicios": sorted(servicios, key=lambda s: (len(s), s))}
+            cayo.setdefault(str(fila["servicio"]), cuando)
+    return {**base, "servicios": sorted(cayo, key=lambda s: (len(s), s)), "cayo": cayo}
 
 
 def lote_confirmado(pedidos: list[str], vigentes: dict) -> tuple[list[str], int]:
@@ -203,8 +236,11 @@ def avisar_lote(servicios: list[str], avisar_uno) -> dict:
             continue
         motivo = str(r.get("motivo") or "desconocido")
         motivos[motivo] = motivos.get(motivo, 0) + 1
-        if r.get("reintentar_en") is not None:
+        vuelta = r.get("reintentar_en")
+        if vuelta is None:
+            vuelta = REINTENTABLES.get(motivo)
+        if vuelta is not None:
             pendientes.append(servicio)
-            reintentar = max(reintentar or 0, int(r["reintentar_en"]))
+            reintentar = max(reintentar or 0, int(vuelta))
     return {"enviados": enviados, "motivos": motivos, "pendientes": pendientes,
             "reintentar_en": reintentar}

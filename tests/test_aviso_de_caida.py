@@ -66,7 +66,7 @@ PUERTO = [
 
 print("\nel grupo de la falla")
 grupo, desde = aviso_de_caida.grupo_de_la_falla(PUERTO, ventana_minutos=20)
-comprobar(sorted(grupo) == ["HWTC00000001", "HWTC00000002", "HWTC00000003", "HWTC00000004"],
+comprobar(sorted(sn for sn, _ in grupo) == ["HWTC00000001", "HWTC00000002", "HWTC00000003", "HWTC00000004"],
           "solo los que cayeron juntos: ni los muertos de meses ni el que cayo solo despues", str(grupo))
 comprobar(desde == "2026-10-30 07:16:44", "desde la primera caida del grupo", str(desde))
 comprobar("HWTC00000008" not in grupo, "uno en linea no es parte de la falla")
@@ -74,7 +74,17 @@ grupo, _ = aviso_de_caida.grupo_de_la_falla([onu("A1", "2026-10-30 07:00:00"),
                                              onu("A2", "2026-10-30 07:05:00"),
                                              onu("B1", "2026-10-30 10:00:00"),
                                              onu("B2", "2026-10-30 10:01:00")], ventana_minutos=20)
-comprobar(sorted(grupo) == ["B1", "B2"], "a igual tamaño gana el grupo mas reciente", str(grupo))
+comprobar(sorted(sn for sn, _ in grupo) == ["B1", "B2"], "a igual tamaño gana el grupo mas reciente",
+          str(grupo))
+comprobar(dict(grupo)["B1"] == "2026-10-30 10:00:00", "cada equipo con la hora en que cayo", str(grupo))
+grupo, _ = aviso_de_caida.grupo_de_la_falla([onu("V1", "2026-09-01 07:00:00"),
+                                             onu("V2", "2026-09-01 07:00:00"),
+                                             onu("V3", "2026-09-01 07:01:00"),
+                                             onu("V4", "2026-09-01 07:02:00"),
+                                             onu("N1", "2026-10-30 10:00:00"),
+                                             onu("N2", "2026-10-30 10:00:30")], ventana_minutos=20, minimo=2)
+comprobar(sorted(sn for sn, _ in grupo) == ["N1", "N2"],
+          "un corte viejo con mas equipos muertos NO le gana a la falla de hoy", str(grupo))
 comprobar(aviso_de_caida.grupo_de_la_falla([onu("X", "basura"), onu("Y", "")], 20) == ([], None),
           "sin horas legibles no hay grupo")
 
@@ -88,7 +98,8 @@ CONFIG = SimpleNamespace(
     tickets_desde_dexter=SimpleNamespace(padron_vigencia_horas=6),
     aviso_de_caida=SimpleNamespace(estados_que_se_avisan=["Activo"], ventana_misma_falla_minutos=20,
                                    minimo_equipos=2, lote=25),
-    herramientas=[SimpleNamespace(nombre="consultar_incidente_red", detecta_incidente=True)])
+    herramientas=[SimpleNamespace(nombre="consultar_incidente_red", detecta_incidente=True)],
+    variables_tenant={"WISPHUB_ID_SERVICIO_INSTALACIONES": "3545"})
 buscar_cliente._PADRONES["prueba"] = {"filas": filas, "cuando": time.monotonic()}
 indice = buscar_cliente.padron_por_serial(CONFIG, "prueba")
 comprobar(indice is not None and indice.get("HWTC00000001", {}).get("servicio") == "101",
@@ -101,6 +112,8 @@ buscar_cliente._PADRONES.pop("prueba")
 print("\nlos afectados")
 buscar_cliente._PADRONES["prueba"] = {"filas": filas, "cuando": time.monotonic()}
 r = aviso_de_caida.afectados(CONFIG, "prueba", "3", "2", "11", leer=lambda: PUERTO)
+comprobar(r.get("cayo") == {"101": "2026-10-30 07:16:44", "102": "2026-10-30 07:16:44"},
+          "con la hora en que cayo cada uno (para la clave)", str(r.get("cayo")))
 comprobar(r.get("servicios") == ["101", "102"],
           "avisa a los clientes activos del grupo, y a nadie mas", str(r))
 comprobar(r.get("equipos_en_falla") == 4 and r.get("fuera_de_estado") == 1 and r.get("sin_cliente") == 1,
@@ -153,8 +166,23 @@ r = aviso_de_caida.avisar_lote(["101", "102"], uno({
     "101": {"enviado": False, "motivo": "todavia_no", "reintentar_en": 3600}}))
 comprobar(pedidos == ["101"] and r["pendientes"] == ["101", "102"] and r["reintentar_en"] == 3600,
           "fuera del horario el lote entero espera, sin preguntar por los demas", str(r))
-comprobar(aviso_de_caida.clave("sit-9", "101") == "caida:sit-9:101",
-          "la clave es por situacion y servicio: confirmar dos veces no avisa dos veces")
+comprobar(aviso_de_caida.clave("101", "2026-10-30 07:16:44") == "caida:101:2026-10-30 07:16:44",
+          "la clave es el servicio y la hora en que cayo SU equipo: la arma el motor")
+pedidos.clear()
+r = aviso_de_caida.avisar_lote(["101"], uno({"101": {"enviado": False, "motivo": "meta_no_contesta"}}))
+comprobar(r["pendientes"] == ["101"] and r["reintentar_en"] == 300,
+          "si Meta no contesta, el cliente queda pendiente en vez de perder el aviso", str(r))
+
+print("\nlo que el padron no puede decidir")
+filas2 = [{"servicio": "3545", "nombre": "INSTALACIONES NUEVAS", "estado": "Activo", "_sn": "HWTC00000001"},
+          {"servicio": "201", "nombre": "A", "estado": "Activo", "_sn": "HWTC00000002"},
+          {"servicio": "202", "nombre": "B", "estado": "Activo", "_sn": "HWTC00000002"},
+          {"servicio": "203", "nombre": "C", "estado": "Activo", "_sn": "HWTC00000003"}]
+buscar_cliente._PADRONES["prueba"] = {"filas": filas2, "cuando": time.monotonic()}
+r = aviso_de_caida.afectados(CONFIG, "prueba", "3", "2", "11", leer=lambda: PUERTO)
+comprobar(r.get("servicios") == ["203"] and r.get("sin_cliente") == 3,
+          "ni el cliente ficticio de instalaciones ni un equipo que figura en dos fichas", str(r))
+buscar_cliente._PADRONES.pop("prueba")
 
 print("\nsi el aviso puede salir, ANTES de aprobar (mensajes_automaticos.listo)")
 from nucleo.seguimiento import mensajes_automaticos as ma  # noqa: E402

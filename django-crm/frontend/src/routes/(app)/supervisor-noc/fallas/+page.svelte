@@ -14,7 +14,7 @@
   import { invalidateAll } from '$app/navigation';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import '../supervisor-noc.css';
-  import { avance, motivosLegibles, NO_LISTO, POR_QUE_NO } from '$lib/supervisor/fallas.js';
+  import { avance, motivosLegibles, NO_LISTO, POR_QUE_NO, textoDeDetencion } from '$lib/supervisor/fallas.js';
 
   let { data, form } = $props();
 
@@ -137,6 +137,11 @@
                   >
                     <div style="height:100%; width:{pct}%; background:var(--snoc-secundario, #2563eb);"></div>
                   </div>
+                  {#if f.aviso.motivo_detencion}
+                    <p class="snoc-body-sm snoc-error-txt" style="margin:0;">
+                      {textoDeDetencion(f.aviso.motivo_detencion)}
+                    </p>
+                  {/if}
                   {#each motivosLegibles(f.aviso.motivos) as m, i (i)}
                     <p class="snoc-body-sm snoc-tenue" style="margin:0;">No salió: {m}</p>
                   {/each}

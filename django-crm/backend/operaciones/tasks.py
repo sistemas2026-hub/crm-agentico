@@ -311,21 +311,36 @@ def ciclo_a_pedido(org_id: str) -> dict:
 
 
 @shared_task(name="operaciones.tasks.avanzar_aviso_de_caida")
-def avanzar_aviso_de_caida(aviso_id: str, org_id: str):
+def avanzar_aviso_de_caida(aviso_id: str, org_id: str, turno: str | None = None):
     """Un lote del aviso de una caida a sus clientes (PRD §8.17). Ver
-    operaciones/aviso_de_caida.py: decide si sigue, se detiene o termina."""
+    operaciones/aviso_de_caida.py: decide si sigue, se detiene o termina.
+
+    Solo trabaja la vuelta con la ficha VIGENTE: una copia reentregada por la
+    cola, o una vuelta vieja, no hace nada."""
     from operaciones import aviso_de_caida
     from operaciones.aviso_de_caida_modelos import AvisoDeCaida
 
     set_rls_context(org_id)
     try:
+        if not turno or aviso_de_caida.tomar_turno(aviso_id, turno) is None:
+            return None
         aviso = (AvisoDeCaida.objects.select_related("situacion")
                  .filter(id=aviso_id, org_id=org_id).first())
         if aviso is None:
             return None
         espera = aviso_de_caida.avanzar(aviso)
+        siguiente = aviso_de_caida.programar(aviso, espera) if espera is not None else None
     finally:
         clear_rls_context()
-    if espera is not None:
-        avanzar_aviso_de_caida.apply_async(args=[aviso_id, org_id], countdown=espera)
+    if siguiente is not None:
+        aviso_de_caida.pedir_vuelta(aviso_id, org_id, siguiente, espera)
     return espera
+
+
+@shared_task(name="operaciones.tasks.retomar_avisos_de_caida")
+def retomar_avisos_de_caida():
+    """Reagenda los avisos de caida en curso cuya vuelta se perdio en la cola.
+    Recorre todas las empresas: cada aviso lleva la suya."""
+    from operaciones import aviso_de_caida
+
+    return aviso_de_caida.retomar()

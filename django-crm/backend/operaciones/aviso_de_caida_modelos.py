@@ -18,6 +18,8 @@ telefonos: esos los lee el motor en el momento de mandar y no se guardan.
 SIN RLS, con el filtro por empresa explicito: el mismo patron que las tablas
 de situaciones de las que cuelga.
 """
+import uuid
+
 from django.db import models
 
 from common.base import BaseModel
@@ -62,6 +64,19 @@ class AvisoDeCaida(BaseModel):
     estado = models.CharField(max_length=12, choices=ESTADOS, default=EN_CURSO)
     vueltas = models.PositiveIntegerField(default=0)
     terminado_en = models.DateTimeField(null=True, blank=True)
+    #  Por que se detuvo, con el codigo del motor ('AVISO_APAGADO', ...).
+    motivo_detencion = models.CharField(max_length=48, blank=True, default="")
+
+    #  LA FICHA DEL TURNO (auditor de frontera, 31/10/2026). Cada vuelta
+    #  agendada lleva la ficha vigente; la que la cola entrega dos veces (Redis
+    #  reentrega una tarea con espera larga cada hora) llega con una ficha
+    #  vieja y no hace nada. Sin esto, una noche de espera despertaba diez
+    #  copias leyendo las mismas fichas del ISP a la vez.
+    turno = models.UUIDField(default=uuid.uuid4)
+    #  Cuando toca la proxima vuelta. Si la cola la pierde (un reinicio de
+    #  Redis), 'retomar' la vuelve a agendar: un envio no queda "en curso"
+    #  para siempre con la aprobacion ya gastada.
+    proxima_vuelta_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "operaciones_aviso_de_caida"
