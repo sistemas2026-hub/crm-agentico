@@ -71,6 +71,49 @@ reconstruir sea pagable. Queda congelada abajo.
 
 ---
 
+## Qué se conserva y qué se reconstruye
+
+Pedido por el usuario el 31/10/2026: *«Mantén la arquitectura operativa
+existente hasta determinar qué componentes gráficos debemos conservar o
+reconstruir.»* Esto es esa determinación. **No depende de la referencia
+visual**: depende de dónde están los contratos, y eso ya se puede leer.
+
+Medido archivo por archivo, leyendo lo que cada uno declara hacer.
+
+| Módulo | Líneas | Qué es | Veredicto |
+|---|---|---|---|
+| `adaptador.ts` | 321 | la frontera entre el contrato de datos y la animación; sostiene *«no saber gana siempre»* | **se conserva entero.** No importa el motor gráfico, y es donde vive la regla de frescura |
+| `pose.ts` | 258 | la animación como números; las 20 transiciones salen de interpolar, no de escribirlas | **se conserva el contrato.** Un esqueleto en volumen también se anima con números por pieza |
+| `paleta.ts` | 243 | los colores de la paleta Fibra del producto, con el contraste medido | **se conserva.** Lo que de verdad se conserva no son los enteros: es el contraste ya medido |
+| `camara.ts` | 278 | tres números y `gesto()`, que separa un clic de un arrastre | **se conserva la decisión.** `gesto()` vale en cualquier motor: es el defecto de `setPointerCapture` ya pagado una vez. La transformación cambia sólo si cambia la proyección |
+| `montar.ts` | 658 | la única puerta: cuatro verbos y ni una palabra de PixiJS | **se conserva la interfaz, se reescribe el cuerpo.** Tiene **un solo consumidor**: `v2/+page.svelte` |
+| `isometria.ts` | 142 | la proyección 2:1, aritmética pura | **depende de la referencia.** Con volumen real la reemplaza la cámara; si la sede se queda en 2.5D se conserva entera |
+| `oficina.ts` | 1.880 | suelo, muros, mobiliario y mural: 32 funciones de geometría | **se reconstruye** |
+| `personaje.ts` | 349 | una figura sentada de primitivas, articulada por piezas con nombre | **se reconstruye** si hay volumen real; el nombrado de piezas y su contrato con `pose.ts` sobreviven |
+| `texturas.ts` | 182 | halos y sombras generadas con `canvas` una vez al montar | **se reconstruye o se descarta**, según el motor |
+
+```
+se reconstruye            2.411 lineas   (oficina + personaje + texturas)
+sobrevive                 1.900 lineas   (contratos, decisiones y la puerta)
+capa de datos             3.258 lineas   intacta, 0 importan el motor grafico
+───────────────────────────────────────────────────────────────────────────
+el rediseno toca a lo sumo el 32% de centro-mando
+```
+
+**Y el reparto no lo invento yo: lo escribió `oficina.ts` el día que nació.** Su
+encabezado dice, textual: *«Esto no es arte definitivo. (…) El día que haya
+ilustración, lo que se reemplaza es el cuerpo de estas funciones: la rejilla, el
+orden de pintado, la cámara y la frontera con los datos no se tocan. Ese reparto
+es el verdadero entregable.»* La arquitectura anticipó su propia reconstrucción,
+y por eso hoy se puede pagar.
+
+**Lo que esto cierra como pregunta:** ninguna garantía del SaaS está del lado
+que se reconstruye. Aislamiento por empresa, permisos, auditoría, eventos
+verificables y protección de datos viven en `nucleo/` y en los `load` del
+servidor — y el motor gráfico tiene un consumidor, que es una pantalla.
+
+---
+
 ## La evaluación de motor
 
 ### El conflicto estructural que obliga a decidir
@@ -157,12 +200,34 @@ tercero nuevo se resuelve antes de activarse, no después.
 
 ---
 
+## Los seis ejes de la referencia
+
+Los fijó el usuario el 31/10/2026, y ordenan tanto las imágenes como la lista
+con la que se juzga cada captura. Detalle operativo y carpetas en
+[documentos/sede/referencia/LEEME.md](../../documentos/sede/referencia/LEEME.md).
+
+| # | Eje | Qué decide |
+|---|---|---|
+| 1 | Arquitectura general y los tres pisos | la silueta del edificio y cuánto se ve de cada nivel a la vez |
+| 2 | Conexiones: oficinas, pasillos, puertas, núcleo vertical | si la sede es un edificio o un apilado de salas |
+| 3 | Personajes, mobiliario y animaciones | el nivel de detalle, y si una caminata se lee como caminata |
+| 4 | Iluminación, materiales, profundidad y paleta corporativa | de dónde entra la luz y qué parte de la paleta Fibra sobrevive |
+| 5 | Legibilidad de departamentos y estados | cómo se nombra una sala sin tapar la escena |
+| 6 | Cámara y navegación | el ángulo, el acercamiento, si gira, y cómo se baja de edificio a sala |
+
+**Los criterios visuales definitivos NO están congelados**, por pedido expreso:
+se escriben cuando lleguen las imágenes, uno por eje, como afirmaciones
+comprobables mirando una captura. Lo de abajo son los criterios del objetivo,
+que es otra cosa: dicen con qué evidencia se cierra, no cómo se ve.
+
+---
+
 ## Criterios de aceptación del objetivo
 
 | # | Evidencia | Cómo se comprueba |
 |---|---|---|
 | 1 | El spike cumple S1–S7, o queda escrito cuál falló y qué se decidió | tabla de arriba, con capturas y salidas pegadas |
-| 2 | La imagen de referencia está fijada y acordada antes de la reconstrucción grande | archivo en `documentos/sede/referencia/` + la lista legible derivada de ella |
+| 2 | Las imágenes de referencia están puestas y de cada uno de los seis ejes salió su lista legible | los archivos en `documentos/sede/referencia/` + la lista versionada al lado |
 | 3 | `cd pruebas-navegador && ./correr.sh` → 18/18 en verde, dos corridas seguidas | salida pegada |
 | 4 | `py -3.13 tests/test_nucleo_sin_tenants.py` pasa | salida pegada |
 | 5 | La suite de `vitest` de `centro-mando` en verde, y los rojos preexistentes sin crecer (línea base: 62) | salida pegada |
@@ -194,6 +259,10 @@ Y las propias de esta fase:
 - **La capa de datos no se reescribe de paso.** `departamentos.js`,
   `plantillas.js`, `sugerencias.js`, `edificio.js` y el contrato de
   `/agentes/acciones` se conservan: son lo que hace pagable esta reconstrucción.
+- **La arquitectura operativa actual se mantiene intacta** hasta que la
+  referencia esté fijada. Pedido textual del usuario, y además es lo
+  correcto: el inventario de arriba se escribió leyendo código que sigue
+  corriendo, no reconstruyéndolo para ver qué se rompía.
 - No se tocan contenedores ajenos ni volúmenes del laboratorio.
 
 ---
@@ -238,7 +307,7 @@ Y las propias de esta fase:
 
 | # | Qué | Por qué bloquea |
 |---|---|---|
-| B1 | **La imagen de referencia no está fijada.** Es decisión del usuario, y él mismo la puso como condición previa a una reconstrucción grande | Sin ella, «calidad comercial» se interpreta cada sesión distinto y no hay contra qué comparar una captura. El spike **sí** puede arrancar sin ella: S1–S7 son técnicos y no dependen del estilo |
+| B1 | **Las imágenes de referencia todavía no llegaron.** Resuelto quién las pone: el usuario, decidido el 31/10/2026. Van a `documentos/sede/referencia/`, clasificadas por los seis ejes | Sin ellas, «calidad comercial» se interpreta cada sesión distinto y no hay contra qué comparar una captura. **Bloquea construir**, por pedido expreso. NO bloquea el inventario (hecho) ni S1–S7, que son técnicos |
 
 Hay material previo sin revisar que puede servir de referencia, sin seguimiento
 de git en el árbol principal: `documentos/command-center/oficina-*.png`,
@@ -262,4 +331,5 @@ usuario lo diga.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
+| 31/10/2026 | Los seis ejes de la referencia quedan fijados y la carpeta preparada; **inventario de qué se conserva y qué se reconstruye, medido archivo por archivo**: 2.411 líneas se reconstruyen, 1.900 sobreviven, la capa de datos no se toca, y el motor gráfico tiene un solo consumidor. Ninguna garantía del SaaS está del lado que se reconstruye | Las imágenes. Sin ellas no se construye | — |
 | 31/10/2026 | Rama aislada `spec/sede-virtual-3d` + tag recuperable `sede-pixi-2026-10-31`; guarda de push medida desde la rama nueva; acoplamiento medido (4 de 32 archivos; 16 de 18 pruebas agnósticas); evaluación de motor con recomendación y criterios de muerte del spike escritos antes de construirlo | B1: fijar la imagen de referencia. Después: el spike | esta ficha |
