@@ -75,6 +75,7 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
+from nucleo.seguimiento import avisos as avisos_proactivos
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import buscar_cliente, encuesta, ticket_desde_dexter
@@ -7426,6 +7427,48 @@ def caso_enviar_encuesta(caso_id):
         #  reservar): no sale nada -- falla cerrado.
         return fallo(503, "encuesta_no_enviada", "No se pudo decidir si mandar la encuesta.",
                      componente="encuesta", e=e)
+    return jsonify(resultado), 200
+
+
+@app.post("/avisos/evento")
+def aviso_proactivo():
+    """
+    Un aviso que Dexter le manda a un cliente por iniciativa propia (PRD
+    §8.17, Ola 2): lo pide quien detecto el hecho -- el CRM al publicar el dia.
+
+    Cuerpo: {tenant, evento, clave, caso_id?, telefono?, contexto?}. 'clave'
+    identifica el HECHO (una orden en una fecha): con la misma clave el aviso
+    sale una sola vez, aunque el pedido llegue dos veces. 'telefono' es el
+    campo crudo del ISP; el motor lo normaliza. Decide
+    nucleo/seguimiento/avisos.py; esta ruta solo valida y pasa.
+    """
+    from nucleo.config.mensajes_catalogo import PROACTIVOS
+    from nucleo.persistencia import mensajes_automaticos as registro_avisos
+    from nucleo.seguimiento import mensajes_automaticos
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, evento, clave = cuerpo.get("tenant"), cuerpo.get("evento"), cuerpo.get("clave")
+    if not tenant or not evento or not clave:
+        return jsonify({"error": "Faltan 'tenant', 'evento' o 'clave'."}), 400
+    if evento not in PROACTIVOS:
+        return jsonify({"error": f"'{evento}' no se pide por esta ruta."}), 400
+    try:
+        config = _config_de(tenant)
+        resultado = avisos_proactivos.avisar(
+            config, tenant, evento, str(clave),
+            caso_id=cuerpo.get("caso_id"), telefono_crudo=cuerpo.get("telefono"),
+            contexto=cuerpo.get("contexto") or {}, ahora=datetime.now(timezone.utc),
+            conversacion_de=lambda caso: encuestas_db.destino_del_caso(tenant, caso),
+            ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
+            de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),
+            enviar=mensajes_automaticos.enviar)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        #  La base no contesto (la baja no se pudo comprobar, o no se pudo
+        #  reservar): no sale nada -- falla cerrado.
+        return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
+                     componente="avisos", e=e)
     return jsonify(resultado), 200
 
 

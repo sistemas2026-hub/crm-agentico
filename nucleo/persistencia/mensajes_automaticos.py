@@ -31,3 +31,14 @@ def marcar(tenant: str, reserva_id: str, estado: str, wamid: str | None = None) 
                       enviado_en = case when %s::text = 'enviado' then now() else enviado_en end
                 where organization_id = %s and id = %s and estado = 'reservado'""",
             (estado, wamid, estado, org, reserva_id))
+
+
+def ya_escribio(tenant: str, numero: str) -> bool:
+    """Si este numero tiene alguna conversacion de WhatsApp con la empresa.
+    Desempata a quien escribirle cuando el ISP guarda varios moviles."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select 1 from asistente.conversations
+                where organization_id = %s and canal = 'whatsapp' and usuario_externo = %s
+                limit 1""", (org, numero))
+        return cur.fetchone() is not None

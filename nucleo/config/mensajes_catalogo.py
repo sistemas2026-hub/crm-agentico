@@ -35,6 +35,7 @@ CAMPOS: dict[str, tuple[str, str]] = {
     "tecnico_nombre": ("Nombre del técnico", "Luis"),
     "fecha": ("Fecha de hoy", "28/10/2026"),
     "fecha_visita": ("Fecha de la visita", "30/10/2026"),
+    "franja": ("Franja horaria de la visita", "8:00 a 12:00"),
     "factura_numero": ("Número de factura", "F-10234"),
     "total": ("Total a pagar", "$ 85.000"),
     "fecha_corte": ("Fecha de corte", "05/11/2026"),
@@ -70,6 +71,16 @@ EVENTOS: dict[str, dict] = {
         "campos": ["tecnico_nombre", "cliente_nombre", "cliente_apellidos", "cliente_nombre_completo",
                    "cliente_direccion", "servicio", "ticket_numero", "ticket_asunto",
                    "fecha_visita", "empresa", "fecha"]},
+    # 30/10/2026 (PRD §8.17, Ola 2): "a que hora viene el tecnico" es de lo que
+    # mas pregunta un cliente. Lo dispara el CRM al publicar el dia (Supervisor
+    # o madrugada), una vez por orden y fecha, dentro del horario de avisos.
+    "visita_programada": {
+        "grupo": "Tickets", "etiqueta": "Visita programada",
+        "descripcion": "Al cliente, cuando su visita queda programada para un dia, con la franja.",
+        "destinatario": "cliente", "disparo": "dexter",
+        #  Sin la direccion: junto con la hora diria donde y cuando hay alguien
+        #  esperando a un tecnico (revisor de PII, 30/10/2026).
+        "campos": _CLIENTE + ["ticket_numero", "ticket_asunto", "fecha_visita", "franja"]},
     "seguimiento_ticket": {
         "grupo": "Tickets", "etiqueta": "Seguimiento desde el ticket",
         "descripcion": "La que se manda a mano desde un ticket cuando pasaron más de 24 h.",
@@ -119,6 +130,12 @@ EVENTOS: dict[str, dict] = {
 #: en "usted". Se pueden cambiar antes de mandarlas a Meta; Meta revisa igual.
 #: Cada una pasa por armar_plantilla_nueva en tests/test_plantillas_whatsapp.py.
 SUGERENCIAS: dict[str, dict] = {
+    "visita_programada": {
+        "nombre": "visita_programada", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, su visita técnica quedó programada para el {{2}}, "
+                  "en este horario: {{3}}. Si no va a estar, responda este mensaje "
+                  "y la reprogramamos.",
+        "datos": ["cliente_nombre", "fecha_visita", "franja"]},
     "ticket_creado_cliente": {
         "nombre": "ticket_creado", "categoria": "UTILITY",
         "cuerpo": "Hola {{1}}, registramos su solicitud con el número {{2}}: {{3}}. "
@@ -195,10 +212,19 @@ def sugerencia(evento: str) -> dict | None:
 #: Los momentos cuyo DISPARADOR ya esta construido. Los demas se pueden dejar
 #: configurados desde la pantalla, que dice que todavia no se mandan: un aviso
 #: encendido que nunca sale es peor que uno que dice "todavia no".
-LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre"})
+LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada"})
+
+#: Los avisos que se piden desde afuera por POST /avisos/evento (30/10/2026).
+#: Lista CERRADA: esa ruta recibe contexto libre, y abrirla a cualquier aviso
+#: de cliente dejaria mandar una "confirmacion de pago" con un monto
+#: inventado a cualquier numero (auditor de frontera). Se suma uno cuando su
+#: disparador existe y se audito.
+PROACTIVOS: frozenset[str] = frozenset({"visita_programada"})
 
 RESPALDOS_POR_DEFECTO: dict[str, str] = {
     "cliente_nombre": "cliente",
     "cliente_nombre_completo": "cliente",
     "tecnico_nombre": "técnico",
+    #  Una orden sin franja prometida: no se inventa una hora.
+    "franja": "durante el día",
 }

@@ -680,6 +680,7 @@ def publicar(org, asignaciones, *, mover: bool = True,
     #  {fecha: {Profile: [OrdenTrabajo]}}: lo que cada persona recibe por
     #  primera vez en esta publicacion, para avisarle una sola vez.
     nuevas: dict = {}
+    para_el_cliente: dict = {}   # fecha -> [orden_id]: el aviso de visita al cliente
     #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
     #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
     auxiliares = 0
@@ -820,6 +821,12 @@ def publicar(org, asignaciones, *, mover: bool = True,
                         datos={"cuadrilla": jornada.cuadrilla.nombre,
                                "jornada": str(jornada.id)})
                 publicadas += 1
+                para_el_cliente.setdefault(jornada.fecha, []).append(orden.id)
+
+        #  EL AVISO AL CLIENTE (30/10/2026, PRD §8.17 Ola 2): se pide despues
+        #  del commit, por orden y fecha. El motor decide si sale y cuando.
+        from campo.services.aviso_de_visita import pedir_despues_del_commit
+        pedir_despues_del_commit(org, para_el_cliente)
 
         #  EL AVISO AL TELEFONO (3.1): dentro de la transaccion se escribe la
         #  notificacion --es parte del hecho--, y el envio sale despues del

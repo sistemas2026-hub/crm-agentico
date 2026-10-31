@@ -311,6 +311,12 @@ class Autenticacion(Base):
     # 55% de los casos ("3001234567, 3109876543"). Hay que extraerlos todos:
     # leerlo como valor unico baja la cobertura de 98.7% a 43%.
     patron_extraccion: str = r"(?<!\d)3\d{9}(?!\d)"
+    # Lo que se le antepone a cada movil extraido para llegar a la forma de
+    # WhatsApp (30/10/2026): los avisos proactivos le escriben a quien no esta
+    # chateando, y su numero sale del ISP sin indicativo. SIN DEFAULT: es del
+    # pais de la empresa, y sin el no se adivina -- el aviso no sale. Ver
+    # nucleo/seguimiento/destino.py.
+    indicativo_pais: Annotated[str, Field(pattern=r"^\d{1,4}$")] | None = None
     # Cuando el numero no coincide (celular nuevo). Ninguno debe ser publico.
     retos_nivel_2: list[str] = Field(default_factory=list)
     # Un numero que apunta a varios clientes no es fallo de autenticacion:
@@ -3151,6 +3157,22 @@ class ImportacionTickets(Base):
 #  RAIZ
 # =============================================================================
 
+class HorarioAvisos(Base):
+    """
+    Entre que horas Dexter le escribe a un cliente por iniciativa propia
+    (30/10/2026). Un aviso que nace afuera --el dia se publica de madrugada--
+    espera a la apertura. Hora local de la empresa; 'hasta' no incluido.
+    """
+    desde: int = Field(default=7, ge=0, le=23)
+    hasta: int = Field(default=20, ge=1, le=24)
+
+    @model_validator(mode="after")
+    def _orden(self):
+        if self.desde >= self.hasta:
+            raise ValueError("horario_avisos: 'desde' tiene que ser antes que 'hasta'")
+        return self
+
+
 class Capacidad(Base):
     """
     Lo que el tablero de capacidad necesita saber de ESTA empresa (30/10/2026,
@@ -3407,6 +3429,8 @@ class TenantConfig(Base):
     plantillas_desactivadas: list[str] = Field(default_factory=list)
     #: Que mide el tablero de capacidad y como lo traduce a minutos (PRD §2).
     capacidad: Capacidad = Field(default_factory=Capacidad)
+    #: Entre que horas salen los avisos proactivos (nucleo/seguimiento/avisos.py).
+    horario_avisos: HorarioAvisos = Field(default_factory=HorarioAvisos)
 
     @field_validator("mensajes_automaticos")
     @classmethod

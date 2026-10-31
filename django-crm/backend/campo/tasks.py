@@ -304,3 +304,73 @@ def ciclo_de_la_madrugada() -> dict:
     finally:
         clear_rls_context()
     return salida
+
+
+#: Cuantas veces se reagenda un aviso que el motor dejo para mas tarde (fuera
+#: del horario de la empresa). Una noche alcanza con una vuelta.
+AVISO_MAX_VUELTAS = 3
+
+
+@shared_task(name="campo.tasks.avisar_visita_al_cliente")
+def avisar_visita_al_cliente(orden_id, org_id, fecha_iso, vuelta=0):
+    """Le pide al motor el aviso de visita programada de una orden (PRD §8.17).
+
+    Decide el motor (nucleo/seguimiento/avisos.py). Si contesta 'todavia_no'
+    --la publicacion fue de madrugada--, se reagenda para cuando abre el
+    horario. Un motor caido no rompe nada: el aviso no sale y queda en el log.
+    """
+    import datetime as dt
+    import os
+
+    import requests
+
+    from campo.models import OrdenTrabajo
+    from campo.services.aviso_de_visita import pedido, por_que_no_avisar
+    from common.tasks import _motor, clear_rls_context, set_rls_context
+    from operaciones import areas_del_tenant
+
+    url, _ = _motor()
+    if not url:
+        logger.info("avisar_visita_al_cliente: el asistente no esta configurado")
+        return None
+    #  LA EMPRESA DE LA ORDEN, no la del entorno: con dos empresas en la
+    #  instalacion, el aviso de un cliente de la segunda saldria desde el
+    #  WhatsApp de la primera. Sin empresa resuelta no se pide nada.
+    tenant = areas_del_tenant.tenant_de_organizacion(org_id)
+    if not tenant:
+        logger.info("avisar_visita_al_cliente: sin empresa para la org, no se pide (orden=%s)", orden_id)
+        return None
+    set_rls_context(org_id)
+    try:
+        orden = OrdenTrabajo.objects.select_related("org").filter(id=orden_id, org_id=org_id).first()
+        if orden is None:
+            return None
+        fecha = dt.date.fromisoformat(fecha_iso)
+        motivo = por_que_no_avisar(orden, fecha)
+        if motivo:
+            logger.info("avisar_visita_al_cliente: orden=%s no se avisa (%s)", orden_id, motivo)
+            return {"enviado": False, "motivo": motivo}
+        cuerpo = pedido(orden, fecha, tenant)
+    finally:
+        clear_rls_context()
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    try:
+        r = requests.post(f"{url.rstrip('/')}/avisos/evento", json=cuerpo,
+                          headers=cabeceras, timeout=30)
+        datos = r.json() if r.content else {}
+    except Exception:  # noqa: BLE001 -- un motor caido no rompe la publicacion
+        logger.warning("avisar_visita_al_cliente: el motor no contesto (orden=%s)", orden_id)
+        return None
+    logger.info("avisar_visita_al_cliente: orden=%s http=%s enviado=%s motivo=%s",
+                orden_id, r.status_code, datos.get("enviado"), datos.get("motivo"))
+    if datos.get("motivo") == "todavia_no" and vuelta < AVISO_MAX_VUELTAS:
+        try:
+            espera = min(max(int(datos.get("reintentar_en") or 60), 5), 24 * 3600)
+        except (TypeError, ValueError):
+            espera = 60
+        avisar_visita_al_cliente.apply_async(
+            args=[orden_id, org_id, fecha_iso, vuelta + 1], countdown=espera)
+    return datos

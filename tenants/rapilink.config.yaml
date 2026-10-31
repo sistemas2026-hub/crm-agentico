@@ -1982,6 +1982,9 @@ autenticacion:
   # de los casos. Medido sobre 600 clientes: extrayendo todos los moviles la
   # cobertura es 98.7%; leyendolo como valor unico, 43%.
   patron_extraccion: '(?<!\d)3\d{9}(?!\d)'
+  # Para los avisos proactivos: el movil del ISP + este indicativo = el numero
+  # de WhatsApp (nucleo/seguimiento/destino.py). Colombia.
+  indicativo_pais: "57"
   # Para cuando el numero no coincide (celular nuevo). Ninguno es publico:
   # la cedula NO sirve como reto porque esta en la factura y el contrato.
   retos_nivel_2:

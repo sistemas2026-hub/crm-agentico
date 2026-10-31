@@ -1,0 +1,62 @@
+# Objetivo · Dexter avisa antes de que el cliente pregunte
+
+> Abierto el 30/10/2026. Estado: **abierto**.
+> El **qué** y el **por qué** viven en [PRD.md §8.17](../../PRD.md) (Ola 2) y no se
+> repiten acá. Si difieren, manda el PRD.
+
+## Qué significa terminado
+
+Cuando ocurre un hecho que el cliente va a preguntar —su visita es hoy, se le
+abrió un ticket, hay una caída en su zona—, Dexter le escribe primero por
+WhatsApp, una sola vez, solo si la empresa encendió ese aviso, y nunca a quien
+pidió la baja.
+
+## Lo medido que define el orden (30/10/2026)
+
+```
+El envio ya existe y es robusto: nucleo/seguimiento/mensajes_automaticos.enviar
+  interruptor por aviso, modo prueba por numeros, baja (Ley 1581), plantilla
+  aprobada, reserva por (evento, clave) antes de mandar.
+Solo la encuesta tiene disparador. Patron: post_save del Case en el CRM ->
+  tarea Celery -> POST al motor -> enviar.
+El telefono de un cliente sin chat sale de WispHub CRUDO: sin indicativo y con
+  varios numeros en el 55% de los casos. Sin normalizar, la baja no lo reconoce.
+```
+
+## Orden
+
+| # | Qué | Por qué en este lugar |
+|---|---|---|
+| 1 | Resolver el destino: conversación del caso, o WispHub normalizado con `autenticacion.indicativo_pais` | Prerrequisito de todo aviso a quien no está chateando, y de que la baja funcione |
+| 2 | `visita_programada`: al publicar el día, al cliente con su franja | "¿A qué hora viene el técnico?" es de las preguntas que más entran |
+| 3 | `ticket_creado_cliente` desde "Nuevo ticket" de Dexter | El cliente no está en el chat cuando una persona le abre el ticket |
+| 4 | Caída masiva, con aprobación humana antes de mandar, en lotes | Mayor reducción de volumen; ya estaba decidido que la apruebe una persona |
+| 5 | Confirmación y promesa de pago (en la aprobación de la acción) | |
+| 6 | Recordatorio de pago y suspensión (diario) | Necesita un lector de facturas de WispHub que hoy no existe |
+
+## Qué NO hacer
+
+- **No avisar el cierre del ticket aparte.** Al cerrar ya sale la encuesta: serían dos plantillas seguidas al mismo cliente.
+- **No avisar los tickets importados de WispHub.** Los abrió una persona en el sistema del ISP; avisarlos duplicaría lo que el ISP ya hace o no hace a propósito.
+- **No encender ningún aviso desde el código.** Todos nacen apagados; los enciende la empresa, primero en modo prueba.
+
+## Criterios de aceptación
+
+| # | Evidencia | Cómo se comprueba |
+|---|---|---|
+| A1 | El resolvedor saca el número de WhatsApp de un campo crudo con varios números, y sin indicativo declarado no inventa uno | `py -3.13 tests/test_destino_de_aviso.py` |
+| A2 | La baja se respeta sobre el número normalizado | misma prueba |
+| A3 | Publicar el día dispara `visita_programada` una sola vez por orden y revisión | prueba del backend contra Postgres |
+| A4 | `auditor-de-frontera` y `revisor-de-pii` corrieron | hallazgos resueltos o anotados |
+
+## Restricciones
+
+- **NO push** — es deploy.
+- **NO escribir `tenant_config`** fuera de la base efímera de las pruebas.
+
+## Bitácora
+
+| Fecha | Qué avanzó | Qué falta | Commit |
+|---|---|---|---|
+| 30/10/2026 | Mapa de disparadores; orden decidido | 1 a 6 | — |
+| 30/10/2026 | **1 y 2 en código.** Resolvedor de destino (`indicativo_pais`, sin default), puerta común `POST /avisos/evento` con horario de la empresa, evento `visita_programada` disparado al publicar el día. Auditorías de frontera y PII corridas: 3 hallazgos altos y 2 medios resueltos (BSUID, empresa de la org, visita que ya no existe, ruta abierta a cualquier aviso, dirección de más) | 3 a 6; medir cuántos avisos caerían en "primero del ISP" antes de encender; la asignación a mano desde Despacho todavía no avisa | (este commit) |
