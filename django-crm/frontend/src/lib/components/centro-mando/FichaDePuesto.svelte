@@ -344,10 +344,21 @@
             inventar un empleado.
           </p>
         {:else}
-          <p class="vacio">
-            Esta estación existe en la sala y no tiene agente. No hay actividad
-            que mostrar, y no es un fallo del flujo.
-          </p>
+          {#if tipo === 'persona'}
+            <!-- Una persona NO es un puesto vacío, y decirle lo mismo sería
+                 borrarla. Lo que es cierto es que el motor no la representa:
+                 no hay flujo de eventos de una persona, y dibujar actividad
+                 por ella sería inventarla. -->
+            <p class="vacio">
+              Lo que hace una persona del equipo no lo registra el motor. No es
+              que no esté pasando nada: es que esta pantalla no lo ve.
+            </p>
+          {:else}
+            <p class="vacio">
+              Esta estación existe en la sala y no tiene agente. No hay actividad
+              que mostrar, y no es un fallo del flujo.
+            </p>
+          {/if}
         {/if}
       </section>
     {/if}

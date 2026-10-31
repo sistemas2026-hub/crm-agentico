@@ -37,7 +37,16 @@ export async function load({ locals, fetch }) {
       areas: [],
       organizacion: null,
       acciones: null,
-      error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL o la empresa de la sesión)'
+      //  DOS CAUSAS DISTINTAS, DOS MENSAJES. Decirle «falta
+      //  PRIVATE_ASISTENTE_URL» a quien abre la oficina de una empresa que no
+      //  tiene asistente es nombrarle una variable de entorno que no puede
+      //  tocar y, peor, culpar al despliegue de algo que es un hecho del
+      //  producto. Pasó el 31/10/2026: la pantalla decía eso y mandó a buscar
+      //  un problema de configuración donde lo que había era una empresa sin
+      //  asistente.
+      error: !baseUrl
+        ? 'No hay un asistente desplegado para esta instalación.'
+        : 'Esta empresa todavía no tiene un asistente configurado.'
     };
   }
 

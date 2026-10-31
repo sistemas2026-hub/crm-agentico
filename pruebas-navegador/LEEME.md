@@ -83,3 +83,37 @@ que no importa.
 
 Y consecuencia para cualquier comparación de rendimiento: **dos medidas tomadas
 sin controlar el foco de la ventana no se pueden comparar.**
+
+## Un laboratorio recién reiniciado hay que calentarlo
+
+Vite compila bajo demanda. La primera petición a cada ruta después de reiniciar
+el contenedor tarda decenas de segundos, y la preparación de sesión muere con
+`Target page, context or browser has been closed` —que no se parece en nada a
+«el servidor todavía está compilando»—.
+
+Antes de la primera corrida tras un reinicio:
+
+```
+for r in /login /org /centro-mando/v2 /settings/organizacion /; do
+  curl -s -o /dev/null -w "$r %{http_code}\n" -m 120 "http://localhost:55600$r"
+done
+```
+
+Con eso, la suite entera corre en unos 6 minutos.
+
+## Lo que esta suite encontró la primera vez que corrió
+
+Dos defectos que ninguna prueba de módulo podía ver, y los dos del tipo que
+esta cadena existe para cazar — la pantalla decía algo que no era cierto:
+
+1. **Un enlace a una sala que no existe abría otra sala.**
+   `salaPorId` cae a la primera sala cuando no encuentra el id, que es correcto
+   para el selector y es justo lo que no se puede hacer con un enlace: un
+   enlace viejo a Cartera mostraba NOC y Redes sin decir que no era lo pedido.
+
+2. **La oficina de una empresa sin asistente culpaba al despliegue.**
+   Decía «falta PRIVATE_ASISTENTE_URL o la empresa de la sesión»: le nombraba a
+   quien mira una variable de entorno que no puede tocar, y presentaba como
+   error de configuración lo que es un hecho del producto —esa empresa todavía
+   no tiene asistente—. Es exactamente el mensaje que el 31/10/2026 mandó a
+   buscar el problema al sitio equivocado.

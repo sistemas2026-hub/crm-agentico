@@ -392,3 +392,29 @@ describe('qué puede hacer el agente', () => {
     expect(html).not.toContain('Qué puede hacer');
   });
 });
+
+describe('una persona del equipo no es un puesto vacío', () => {
+  const persona = { id: 'p1', agente: null, persona: 'Laura Ruiz',
+                    nombre: 'Laura Ruiz', area: 'persona del equipo', motivo: null };
+
+  it('se la nombra como lo que es', () => {
+    const html = pintar({ puesto: persona, veredicto: alDia });
+    expect(html).toContain('Persona del equipo');
+    expect(html).not.toContain('Puesto libre');
+  });
+
+  it('no se le describe con el vocabulario de un agente', () => {
+    // «Sin acciones» diría que es un agente al que no le habilitaron ninguna.
+    const html = pintar({ puesto: persona, veredicto: alDia, acciones: null });
+    expect(html).toContain('no pasa por el motor');
+    expect(html).not.toContain('no se pudo consultar');
+  });
+
+  it('y su falta de actividad se explica sin borrarla', () => {
+    // «Esta estación existe y no tiene agente» es el texto de un puesto vacío:
+    // aplicado a alguien que está sentado ahí, lo borra.
+    const html = pintar({ puesto: persona, veredicto: alDia });
+    expect(html).toContain('no lo registra el motor');
+    expect(html).not.toContain('Esta estación existe en la sala y no tiene agente');
+  });
+});

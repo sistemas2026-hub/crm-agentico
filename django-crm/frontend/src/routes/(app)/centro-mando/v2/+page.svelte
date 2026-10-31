@@ -101,9 +101,14 @@
     const q = new URLSearchParams(location.search);
     const pedida = q.get('sala');
     const piso = Number(q.get('piso'));
-    //  Una sala que no existe se IGNORA en vez de abrir una vista rota: el
-    //  enlace puede ser viejo, y un edificio es una respuesta honesta.
-    if (pedida && salaPorId(SALAS, pedida)) {
+    //  UNA SALA QUE NO EXISTE SE IGNORA, y se comprueba con una busqueda
+    //  EXACTA y no con `salaPorId`: esa funcion cae a la primera sala cuando
+    //  no encuentra el id, que es lo correcto para el selector -lo que se
+    //  selecciona siempre existe- y es justo lo que no se puede hacer con un
+    //  enlace. Medido: `?sala=departamento-que-no-existe` abria NOC y Redes
+    //  en silencio, asi que un enlace viejo a Cartera te mostraba otro
+    //  departamento y nada decia que no era el que pediste.
+    if (pedida && SALAS.some((s) => s.id === pedida)) {
       return { vista: { tipo: 'sala', id: pedida }, puesto: q.get('puesto') };
     }
     if (Number.isFinite(piso) && PISOS.some((x) => x.nivel === piso)) {
@@ -227,6 +232,19 @@
     planta === null ? [] : Array.isArray(planta) ? planta.flatMap((p) => p.puestos) : planta.puestos
   );
   let agentesConPuesto = $derived(puestosVisibles.map((p) => p.agente).filter(Boolean));
+  /**
+   * Las personas del equipo sentadas en lo que se esta mirando.
+   *
+   * Van APARTE de `agentesConPuesto` y no sumadas a la misma lista: ese arreglo
+   * alimenta el adaptador de actividad, y meter ahi a alguien que el motor no
+   * representa haria que la escena buscara eventos de una persona.
+   *
+   * Pero SI cuentan como puesto ocupado. Sin esto el pie decia «1 de 4 puestos
+   * ocupados» con tres personas dibujadas en la sala: la oficina se
+   * contradecia a si misma, y el numero es justo lo que alguien lee para saber
+   * cuanta gente hay.
+   */
+  let personasConPuesto = $derived(puestosVisibles.map((p) => p.persona).filter(Boolean));
 
   /**
    * Las ocupaciones que la sala vista no puede dibujar. El cálculo vive en
@@ -639,15 +657,20 @@
         a propósito, porque inventarlo afirmaría cómo es una empresa que no se
         pudo consultar.
       </span>
-    {:else if agentesConPuesto.length === 0}
+    {:else if agentesConPuesto.length === 0 && personasConPuesto.length === 0}
       <span class="alarma">
-        Ningún puesto de «{titulo}» tiene un agente del inventario: se dibujan
-        vacíos a propósito.
+        Ningún puesto de «{titulo}» tiene un agente del inventario ni una
+        persona del equipo: se dibujan vacíos a propósito.
       </span>
     {:else}
       <span>
-        {agentesConPuesto.length} de {puestosVisibles.length} puestos ocupados:
-        <code>{agentesConPuesto.join(', ')}</code>
+        {agentesConPuesto.length + personasConPuesto.length}
+        de {puestosVisibles.length} puestos ocupados{#if agentesConPuesto.length > 0}:
+          <code>{agentesConPuesto.join(', ')}</code>{/if}{#if personasConPuesto.length > 0}
+          <!-- Se nombran aparte porque son otra cosa: un agente lo ejecuta el
+               motor y una persona no, y mezclarlos en una lista haría que
+               quien la lea no pueda distinguirlos. -->
+          · {personasConPuesto.length} persona(s) del equipo{/if}
       </span>
     {/if}
     {#if sinSilla.length > 0}
