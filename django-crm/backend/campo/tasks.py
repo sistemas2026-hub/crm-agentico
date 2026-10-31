@@ -275,7 +275,7 @@ def ciclo_de_la_madrugada() -> dict:
     from campo.cuadrillas import configuracion_de_reparto
     from common.tasks import clear_rls_context, set_rls_context
 
-    salida = {"corridas": [], "salteadas": 0, "errores": []}
+    salida = {"corridas": [], "salteadas": 0, "errores": [], "posiciones_borradas": 0}
     #  EL CONTEXTO DE CADA EMPRESA  --  auditor de frontera, 17/10/2026. Esta
     #  tarea nunca lo fijaba: las tablas de Cuadrillas no tienen RLS y por eso
     #  la jornada se armaba igual, pero las ausencias, los casos de Despacho y
@@ -287,6 +287,15 @@ def ciclo_de_la_madrugada() -> dict:
         for org in Org.objects.filter(is_active=True):
             set_rls_context(org.id)
             try:
+                #  DONDE ESTUVO CADA TECNICO NO VIVE PARA SIEMPRE (revisor
+                #  de PII, 31/10/2026). Va ANTES del `_le_toca`: si colgara
+                #  del ciclo que si le toca, la empresa cuyo ciclo no corre
+                #  hoy no barreria nunca, que es justo el caso que deja una
+                #  posicion vieja años. Barrer de mas no cuesta: es un delete
+                #  por fecha sobre una tabla de una fila por persona.
+                from campo.ubicacion_de_cuadrilla import purgar
+                salida["posiciones_borradas"] += purgar(org)
+
                 config = configuracion_de_reparto(org)
                 ahora_local = _ahora_local(org)
                 if not _le_toca(config, ahora_local):

@@ -18,6 +18,7 @@ from campo import (
     novedades_views,
     pedidos_views,
     plantillas_views,
+    ubicacion_views,
     recepcion_views,
     views,
 )
@@ -103,6 +104,10 @@ urlpatterns = [
     path("material-del-dia/configuracion/",
          material_del_dia_views.ConfiguracionDeMaterialView.as_view(),
          name="material_del_dia_configuracion"),
+    #  Donde esta el telefono del tecnico (31/10/2026). El servidor rechaza
+    #  la de quien no sale hoy: ver `campo/ubicacion_de_cuadrilla.py`.
+    path("ubicacion/", ubicacion_views.UbicacionDelTecnicoView.as_view(),
+         name="ubicacion_del_tecnico"),
     #  Lo que el Supervisor hace solo con el seguimiento (30/10/2026).
     path("seguimiento/configuracion/",
          configuracion_de_seguimiento_views.ConfiguracionDeSeguimientoView.as_view(),
