@@ -394,6 +394,19 @@ def test_a6_el_canal_de_android_es_el_que_declara_el_manifest(orden, tecnico):
     assert android["priority"] == "high"
 
 
+def test_a6b_el_recordatorio_va_por_el_canal_que_vibra_30_segundos():
+    """30/10/2026: el recordatorio del Supervisor vibra unos 30 s para que se
+    note; los demas avisos siguen en el canal de siempre."""
+    entorno, credencial, post = _con_fcm(_ok())
+    with entorno, credencial, post as espia:
+        push_fcm.mandar_a_un_telefono("tok", "OT #4 sin reporte", "x", "/ot/1",
+                                      verbo="sin_reporte")
+        push_fcm.mandar_a_un_telefono("tok", "OT #4 asignada", "x", "/ot/1",
+                                      verbo="trabajo_asignado")
+    canales = [c["android"]["notification"]["channel_id"] for c in _cuerpos(espia)]
+    assert canales == ["recordatorios_de_reporte", "avisos_de_campo"]
+
+
 def test_a7_el_push_registra_que_llego(orden, tecnico):
     _telefono(orden.org, tecnico[1], "tok-registro")
     _mandar(orden, tecnico)

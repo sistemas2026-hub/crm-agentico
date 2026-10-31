@@ -78,6 +78,15 @@ SEGUNDOS_DE_ESPERA = 10
 #: aviso en un canal "Miscellaneous" sin sonido y el tecnico no se entera.
 CANAL_ANDROID = "avisos_de_campo"
 
+#: El recordatorio del Supervisor (`avisos.VERBO_SIN_REPORTE`) va por un canal
+#: propio que hace vibrar el telefono unos 30 s (30/10/2026, el usuario: «que
+#: la app haga vibrar durante unos 30 segundos para que sea notable», en vez de
+#: una llamada). El patron vive en la app, que crea el canal; aca solo se
+#: elige. Una app vieja que no lo tiene lo muestra en el canal por omision del
+#: manifest: el aviso llega igual, con la vibracion normal.
+CANAL_RECORDATORIO = "recordatorios_de_reporte"
+VERBOS_QUE_VIBRAN = frozenset({"sin_reporte"})
+
 #: Los tres resultados posibles. Son cadenas y no un Enum porque cruzan al log y
 #: a una comparacion en `avisos.py`, y ahi un Enum solo agrega ceremonia.
 ENTREGADO = "entregado"
@@ -211,7 +220,9 @@ def mandar_a_un_telefono(
                 # trabajo devuelto que aparece dos horas tarde no sirve: el
                 # tecnico ya se fue del barrio.
                 "priority": "high",
-                "notification": {"channel_id": CANAL_ANDROID},
+                "notification": {"channel_id": (CANAL_RECORDATORIO
+                                                if verbo in VERBOS_QUE_VIBRAN
+                                                else CANAL_ANDROID)},
             },
         }
     }
