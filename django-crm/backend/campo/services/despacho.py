@@ -224,6 +224,14 @@ def asignar(orden: OrdenTrabajo, profile_tecnico, profile_actor,
         from campo.services.avisos import avisar_asignacion
         avisar_asignacion(orden, [profile_tecnico])
 
+    #  Al cliente: su visita quedo con alguien (31/10/2026, PRD §8.17). Solo
+    #  si la orden tiene dia: sin fecha programada no hay que avisar.
+    if orden.programada_para:
+        from campo import reparto
+        from campo.services.aviso_de_visita import pedir_despues_del_commit
+        dia = orden.programada_para.astimezone(reparto._zona_de(orden.org)).date()
+        pedir_despues_del_commit(orden.org, {dia: [orden.id]})
+
     EventoTrabajo.objects.create(
         org=orden.org, orden=orden,
         tipo="asignacion" if anterior is None else "reasignacion",
@@ -276,6 +284,10 @@ def asignar_a_jornada(orden: OrdenTrabajo, jornada, profile_actor) -> dict:
     from campo.services.avisos import avisar_asignacion
     avisar_asignacion(orden, [r["profile"] for r in d["reciben"]
                               if r["profile"].id not in antes])
+    #  Y al cliente, como al publicar el dia (31/10/2026, PRD §8.17): misma
+    #  clave (orden, fecha), asi que si despues se publica no sale dos veces.
+    from campo.services.aviso_de_visita import pedir_despues_del_commit
+    pedir_despues_del_commit(orden.org, {jornada.fecha: [orden.id]})
     EventoTrabajo.objects.create(
         org=orden.org, orden=orden, tipo="asignacion", profile=profile_actor,
         datos={"a_cuadrilla": jornada.cuadrilla.nombre,

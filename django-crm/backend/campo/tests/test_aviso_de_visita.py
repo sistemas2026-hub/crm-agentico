@@ -236,3 +236,51 @@ def test_c2_el_motor_caido_no_rompe_y_sin_motor_no_se_pide(org_a, user_profile, 
     monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000")
     with mock.patch("requests.post", side_effect=ConnectionError("caido")):
         assert tasks.avisar_visita_al_cliente(str(o.id), str(org_a.id), fecha) is None
+
+
+# ---------------------------------------------------------------------------
+# D · la asignacion a mano desde Despacho tambien avisa (31/10/2026)
+# ---------------------------------------------------------------------------
+#  Hasta hoy solo avisaba publicar el dia. Una orden que una persona le da a
+#  una cuadrilla, o a un tecnico con fecha, es la misma visita: mismo aviso,
+#  misma clave (orden, fecha) -- si despues se publica, no sale dos veces.
+
+def test_d_dar_la_orden_a_una_cuadrilla_pide_el_aviso_con_la_fecha_de_la_jornada(
+        org_a, user_profile, admin_profile, version, norte, django_capture_on_commit_callbacks):
+    from campo.services import despacho
+    j = _jornada(org_a, [norte], user_profile)
+    o = _orden(org_a, version, 920)
+    with mock.patch.object(tasks.avisar_visita_al_cliente, "delay") as pedir:
+        with django_capture_on_commit_callbacks(execute=True):
+            despacho.asignar_a_jornada(o, j, admin_profile)
+    assert [c.args for c in pedir.call_args_list] == [(str(o.id), str(org_a.id), LUNES.isoformat())]
+
+
+def test_d2_dar_la_orden_a_un_tecnico_avisa_solo_si_tiene_fecha(
+        org_a, user_profile, admin_profile, version, bogota, django_capture_on_commit_callbacks):
+    from campo.services import despacho
+    con = _orden(org_a, version, 921,
+                 programada_para=dt.datetime(2026, 10, 5, 15, 0, tzinfo=UTC))   # 10:00 en Bogota
+    sin = _orden(org_a, version, 922)
+    with mock.patch.object(tasks.avisar_visita_al_cliente, "delay") as pedir:
+        with django_capture_on_commit_callbacks(execute=True):
+            despacho.asignar(con, user_profile, admin_profile)
+            despacho.asignar(sin, user_profile, admin_profile)
+    assert [c.args for c in pedir.call_args_list] == [(str(con.id), str(org_a.id), "2026-10-05")], \
+        "sin fecha programada no hay dia que avisar"
+
+
+def test_d3_si_la_asignacion_se_deshace_no_se_pide_nada(
+        org_a, user_profile, admin_profile, version, norte, django_capture_on_commit_callbacks):
+    from campo.services import despacho
+    j = _jornada(org_a, [norte], user_profile)
+    o = _orden(org_a, version, 923)
+    with mock.patch.object(tasks.avisar_visita_al_cliente, "delay") as pedir:
+        with django_capture_on_commit_callbacks(execute=True):
+            try:
+                with transaction.atomic():
+                    despacho.asignar_a_jornada(o, j, admin_profile)
+                    raise RuntimeError("se deshace")
+            except RuntimeError:
+                pass
+    assert pedir.call_count == 0
