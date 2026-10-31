@@ -3,6 +3,8 @@ import {
   Camara,
   GESTO,
   LIMITES,
+  Camara,
+  conSueloQueDejaVerTodo,
   acotarCentro,
   acotarEscala,
   escalaDeEncuadre,
@@ -180,5 +182,47 @@ describe('la cámara', () => {
     const a = c.estado().actual;
     expect(a.x * tr.escala + tr.x).toBeCloseTo(vista.ancho / 2, 4);
     expect(a.y * tr.escala + tr.y).toBeCloseTo(vista.alto / 2, 4);
+  });
+});
+
+describe('EL SUELO DEL ZOOM NO PUEDE IMPEDIR VER EL CONJUNTO', () => {
+  //  EL DEFECTO, medido en el navegador el 31/10/2026: al aislar el piso de
+  //  cinco salas el encuadre necesitaba bajar del suelo de zoom, `acotarEscala`
+  //  lo subía, el núcleo quedaba cortado por arriba y pulsar «Encuadrar» no
+  //  cambiaba NADA — la cámara ya estaba donde podía. Un botón que no hace nada
+  //  es peor que no tenerlo: quien lo pulsa cree que eso es todo lo que hay.
+
+  /** Un recinto que NO cabe a la escala mínima por defecto. */
+  const enorme = {
+    minX: 0, maxX: 12000, minY: 0, maxY: 4000,
+    ancho: 12000, alto: 4000, centro: { x: 6000, y: 2000 }
+  };
+  const vista = { ancho: 1365, alto: 690 };
+
+  it('se afloja sólo cuando hace falta, y lo justo', () => {
+    const aflojado = conSueloQueDejaVerTodo(enorme, vista);
+    expect(aflojado.escalaMin).toBeLessThan(LIMITES.escalaMin);
+    //  Y es EXACTAMENTE la que hace falta: aflojarlo de más deja alejarse
+    //  hasta que la escena es un punto.
+    expect(aflojado.escalaMin)
+      .toBeCloseTo((vista.ancho * 0.9) / enorme.ancho, 6);
+  });
+
+  it('y no se toca cuando lo que se mira sí cabe', () => {
+    const chico = {
+      minX: 0, maxX: 900, minY: 0, maxY: 500,
+      ancho: 900, alto: 500, centro: { x: 450, y: 250 }
+    };
+    expect(conSueloQueDejaVerTodo(chico, vista).escalaMin).toBe(LIMITES.escalaMin);
+  });
+
+  it('EL EFECTO: la cámara encuadra el conjunto entero, no un trozo', () => {
+    //  La afirmación que de verdad importa, y es sobre el EFECTO: lo que la
+    //  cámara abarca a su escala tiene que cubrir el recinto completo. Afirmar
+    //  que `escalaMin` bajó no prueba que algo se vea.
+    const camara = new Camara(enorme, vista);
+    const { escala } = camara.estado().actual;
+    expect(vista.ancho / escala).toBeGreaterThanOrEqual(enorme.ancho);
+    expect(vista.alto / escala).toBeGreaterThanOrEqual(enorme.alto);
   });
 });

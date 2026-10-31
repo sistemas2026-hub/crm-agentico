@@ -80,6 +80,35 @@ export function acotarEscala(escala: number, limites = LIMITES): number {
  * milímetro deja el recinto tocando los cuatro bordes y la escena parece
  * recortada aunque esté entera.
  */
+/**
+ * EL SUELO DEL ZOOM NUNCA PUEDE IMPEDIR VER LO QUE SE ESTÁ MIRANDO.
+ *
+ * `escalaMin` existe por un motivo bueno: por debajo de cierto tamaño el
+ * mobiliario de una sala es una mancha y acercarse deja de servir. Pero es un
+ * número fijo, y lo que hay que encuadrar no lo es.
+ *
+ * EL DEFECTO, medido el 31/10/2026: al aislar el piso 1 —cinco salas, el frente
+ * más largo del edificio— el encuadre necesitaba una escala por debajo del
+ * suelo. `acotarEscala` la subía al suelo, el núcleo quedaba cortado por arriba
+ * y pulsar «Encuadrar» no cambiaba nada, porque la cámara ya estaba donde
+ * podía. Un botón que no hace nada es peor que no tenerlo: quien lo pulsa cree
+ * que lo que ve es todo lo que hay.
+ *
+ * La regla correcta no es «no bajar de 0,4» sino **«no bajar de 0,4, salvo que
+ * haga falta para ver el conjunto»**. Así el límite sigue protegiendo el caso
+ * para el que se escribió —una sala— y deja de estorbar en el que no.
+ */
+export function conSueloQueDejaVerTodo(
+  ext: Extension,
+  vista: Vista,
+  limites = LIMITES
+): typeof LIMITES {
+  //  Lo que haría falta SIN suelo. `escalaMin: 0` no desactiva el techo.
+  const necesaria = escalaDeEncuadre(ext, vista, { ...limites, escalaMin: 0 });
+  if (!necesaria || necesaria >= limites.escalaMin) return limites;
+  return { ...limites, escalaMin: necesaria };
+}
+
 export function escalaDeEncuadre(ext: Extension, vista: Vista, limites = LIMITES): number {
   if (!vista.ancho || !vista.alto || !ext.ancho || !ext.alto) return 1;
   const porAncho = (vista.ancho * 0.9) / ext.ancho;
@@ -188,8 +217,8 @@ export class Camara {
   constructor(ext: Extension, vista: Vista, limites = LIMITES) {
     this.ext = ext;
     this.vista = vista;
-    this.limites = limites;
-    const escala = escalaDeEncuadre(ext, vista, limites);
+    this.limites = conSueloQueDejaVerTodo(ext, vista, limites);
+    const escala = escalaDeEncuadre(ext, vista, this.limites);
     const centro = acotarCentro(ext.centro, escala, ext, vista, limites);
     this.actual = { x: centro.x, y: centro.y, escala };
     this.destino = { ...this.actual };
@@ -198,6 +227,9 @@ export class Camara {
   /** El tamaño de la vista cambió (la ventana, el panel lateral). */
   redimensionar(vista: Vista) {
     this.vista = vista;
+    //  El suelo del zoom depende del tamaño de la vista: una ventana más
+    //  estrecha necesita alejarse más para que quepa lo mismo.
+    this.limites = conSueloQueDejaVerTodo(this.ext, vista, this.limites);
     this.encuadrar();
   }
 
