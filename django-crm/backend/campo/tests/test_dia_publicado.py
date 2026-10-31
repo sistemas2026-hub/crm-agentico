@@ -16,6 +16,8 @@ publicado un dia, para la pantalla de Programacion. Cada punto, con su prueba:
   D  el DIA: lo programado para otro dia no entra; lo terminado ese dia si,
      lo terminado otro dia no.
   P  solo quien gestiona, con fecha, y solo su empresa.
+  I  LOS INDICADORES (31/10/2026): cuadrillas, en camino, completadas,
+     pendientes, el cumplimiento y las que tienen novedad, calculados aca.
   R  POR REVISAR (31/10/2026): lo terminado en campo y sin cerrar de un dia
      anterior sale aparte, hasta que alguien lo apruebe y lo cierre. Y cada
      orden trae los recordatorios que el Supervisor le mando, terminada o no.
@@ -589,6 +591,58 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     assert _filas(d)[asignada.numero]["direccion"] == "Calle 38 # 78-33"
     assert texto.count("Calle 38") == 1, "la direccion, solo en la orden asignada"
     assert "3113683499" not in texto, "el telefono, nunca"
+
+
+# ---------------------------------------------------------------------------
+# I · la franja de indicadores
+# ---------------------------------------------------------------------------
+
+def test_i_la_franja_de_indicadores_la_calcula_el_servidor(
+        org_a, version, norte, admin_profile, user_profile):
+    """31/10/2026: la pantalla muestra, no suma. Una cuenta hecha en el
+    navegador no se puede probar y cada pantalla la sumaria distinto."""
+    from campo import novedades as N
+
+    j1 = _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    _jornada(org_a, [norte], "Cuadrilla #2", user_profile)
+    #  DOS en camino en la MISMA cuadrilla: asi «en_camino» cuenta cuadrillas
+    #  y no ordenes. Con una sola, las dos cuentas dan igual y la prueba no
+    #  distingue --sobrevivio a esa mutacion hasta que se midio (31/10/2026)--.
+    _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    _orden(org_a, version, de=admin_profile)                      # asignada
+    _orden(org_a, version, de=user_profile, estado=OrdenTrabajo.EN_SITIO)
+    hecha = _orden(org_a, version, de=user_profile,
+                   estado=OrdenTrabajo.COMPLETADA_CAMPO)
+    OrdenTrabajo.objects.filter(pk=hecha.pk).update(
+        completada_campo_en=timezone.make_aware(
+            dt.datetime.combine(LUNES, dt.time(14, 0))))
+    N.NovedadDeCuadrilla.objects.create(
+        org=org_a, profile=admin_profile, jornada=j1, tipo=N.LLANTA,
+        afecta=N.UNA_HORA, fecha=LUNES,
+        avisada_en=timezone.make_aware(dt.datetime.combine(LUNES, dt.time(9, 0))),
+        clave=f"nov|{j1.id}|1")
+
+    c = D.del_dia(org_a, LUNES)["cuentas"]
+
+    assert c["cuadrillas"] == 2
+    assert c["en_camino"] == 1, "UNA cuadrilla en ruta, aunque lleve DOS en camino"
+    assert c["completadas"] == 1
+    assert c["pendientes"] == 4, "dos en camino, una asignada y una en sitio"
+    assert c["cumplimiento"] == 20, "1 de 5, redondeado"
+    assert c["con_novedad"] == 1
+    assert c["publicadas"] == 5
+
+
+def test_i2_sin_ordenes_el_cumplimiento_es_cero_y_no_revienta(
+        org_a, version, norte, admin_profile):
+    """Dividir por cero es la forma mas facil de tumbar Programacion entera."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+
+    c = D.del_dia(org_a, LUNES)["cuentas"]
+
+    assert (c["publicadas"], c["cumplimiento"], c["completadas"]) == (0, 0, 0)
+    assert c["cuadrillas"] == 1 and c["en_camino"] == 0 and c["con_novedad"] == 0
 
 
 # ---------------------------------------------------------------------------

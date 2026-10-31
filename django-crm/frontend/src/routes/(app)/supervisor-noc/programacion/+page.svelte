@@ -16,6 +16,9 @@
   import SeguimientoDeCuadrillas from '$lib/supervisor/SeguimientoDeCuadrillas.svelte';
   import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
   import PorRevisar from '$lib/supervisor/PorRevisar.svelte';
+  import FranjaDeIndicadores from '$lib/supervisor/FranjaDeIndicadores.svelte';
+  import AlertasDelDia from '$lib/supervisor/AlertasDelDia.svelte';
+  import ResumenDelDia from '$lib/supervisor/ResumenDelDia.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
     lineaDePersona,
@@ -97,6 +100,12 @@
     (material?.bodegas ?? []).filter((/** @type {any} */ b) => Number(b.falta) > 0)
   );
   const conf = $derived(data.configuracion);
+  //  LOS KITS INCOMPLETOS (31/10/2026): si el material no se pudo leer es
+  //  `null`, y la franja NO muestra la ficha. Un 0 ahi diria «estan todos
+  //  completos», que es justo lo que no se sabe.
+  const kitsIncompletos = $derived(
+    data.errorMaterial || !material ? null : (material?.cuentas?.con_faltantes ?? 0)
+  );
 
   /** @param {Event} e */
   function cambiarDia(e) {
@@ -182,6 +191,23 @@
         {#if form?.de === 'revision'}
           <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">{form?.hecho ?? form?.error}</p>
         {/if}
+        <!-- LA FRANJA DE INDICADORES (31/10/2026): lo primero que se lee.
+             Los números los calcula el servidor; acá solo se muestran. -->
+        {#if publicado}
+          <FranjaDeIndicadores {cuentas} {kitsIncompletos} />
+
+          <!-- LO QUE NECESITA QUE ALGUIEN HAGA ALGO, junto; y cuánto se lleva
+               del día. Los dos salen de lo que la página ya cargó. -->
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap:var(--snoc-sm);">
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
+              <AlertasDelDia {publicado} {material} />
+            </section>
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
+              <ResumenDelDia {cuentas} />
+            </section>
+          </div>
+        {/if}
+
         <!-- POR REVISAR (31/10/2026): lo terminado de días anteriores que nadie
              cerró. Antes no salía en ningún lado (la OT #4 en producción). -->
         <PorRevisar ordenes={publicado?.por_revisar ?? []} dia={data.dia} />

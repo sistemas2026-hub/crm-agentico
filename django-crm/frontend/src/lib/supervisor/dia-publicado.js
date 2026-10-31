@@ -326,3 +326,104 @@ function vencimiento(iso, dia) {
   if (dias === 1) return { texto: 'Vence mañana', tono: 'proxima' };
   return { texto: `Vence el ${corta}`, tono: 'proxima' };
 }
+
+/**
+ * LAS ALERTAS DEL DÍA (31/10/2026). Lo que necesita que alguien actúe, junto y
+ * ordenado por gravedad. No pide nada nuevo al servidor: se arma con lo que la
+ * pantalla ya cargó (`del_dia` y el material), así que no puede decir algo que
+ * las tarjetas no digan.
+ *
+ * Cada alerta: `{ clave, tono, texto, donde }`. `tono` manda el orden —
+ * 'grave' antes que 'avisa' antes que 'dato'— y dentro de un tono se respeta
+ * el orden en que se descubrieron.
+ *
+ * @param {any} publicado lo que devuelve `campo/dia_publicado.py::del_dia`
+ * @param {any} material lo del material del día, o null si no se pudo leer
+ * @returns {{ clave: string, tono: 'grave'|'avisa'|'dato', texto: string, donde: string }[]}
+ */
+export function alertasDelDia(publicado, material) {
+  /** @type {{ clave: string, tono: 'grave'|'avisa'|'dato', texto: string, donde: string }[]} */
+  const salida = [];
+  for (const c of publicado?.cuadrillas ?? []) {
+    const donde = c.cuadrilla ?? '';
+    //  DEJÓ DE REPORTAR: lo más grave, porque nadie sabe qué pasa.
+    if (c.sin_reporte) {
+      salida.push({
+        clave: `sin_reporte|${c.jornada}`,
+        tono: 'grave',
+        texto: `OT #${c.sin_reporte.numero} sin reporte hace ${c.sin_reporte.minutos} min`,
+        donde
+      });
+    }
+    //  SIN APP: no recibe órdenes ni recordatorios. Se nombra a quién.
+    const sinApp = (c.personas ?? []).filter((p) => !p.telefono || !p.ultimo_contacto);
+    if (sinApp.length) {
+      salida.push({
+        clave: `sin_app|${c.jornada}`,
+        tono: 'grave',
+        texto: sinApp.length === 1
+          ? `${sinApp[0].nombre} no tiene la app: no le llegan las órdenes ni los avisos`
+          : `${sinApp.length} técnicos sin la app: no les llegan las órdenes ni los avisos`,
+        donde
+      });
+    }
+    //  SOBRECARGADA: más órdenes que su tope del día.
+    const cuantas = (c.ordenes ?? []).length;
+    if (c.tope && cuantas > c.tope) {
+      salida.push({
+        clave: `sobrecarga|${c.jornada}`,
+        tono: 'grave',
+        texto: `${cuantas} órdenes para un tope de ${c.tope}`,
+        donde
+      });
+    }
+    //  NOVEDAD VIGENTE: la cuadrilla avisó algo y el reloj no corre. Solo las
+    //  vigentes: una resuelta hace tres horas no es algo que atender.
+    for (const n of c.novedades ?? []) {
+      if (!n.vigente) continue;
+      salida.push({
+        clave: `novedad|${n.id ?? `${c.jornada}|${salida.length}`}`,
+        tono: 'avisa',
+        texto: [n.tipo_texto || 'Avisó una novedad', textoDeNovedad(n)].filter(Boolean).join(' · '),
+        donde
+      });
+    }
+  }
+  //  MATERIAL: una sola línea, no una por bodega.
+  const faltan = material?.cuentas?.con_faltantes ?? 0;
+  if (faltan) {
+    salida.push({
+      clave: 'material',
+      tono: 'avisa',
+      texto: faltan === 1 ? '1 cuadrilla sale con material faltante'
+        : `${faltan} cuadrillas salen con material faltante`,
+      donde: 'Material del día'
+    });
+  }
+  //  TERMINADAS SIN CERRAR: esperan que alguien las apruebe.
+  const porRevisar = (publicado?.por_revisar ?? []).length;
+  if (porRevisar) {
+    salida.push({
+      clave: 'por_revisar',
+      tono: 'avisa',
+      texto: porRevisar === 1 ? '1 orden terminada espera que la aprueben'
+        : `${porRevisar} órdenes terminadas esperan que las aprueben`,
+      donde: 'Por revisar'
+    });
+  }
+  //  ESPERAN CUADRILLA: no es una falla, es trabajo sin repartir.
+  const esperan = publicado?.cuentas?.esperan ?? 0;
+  if (esperan) {
+    salida.push({
+      clave: 'esperan',
+      tono: 'dato',
+      texto: `${esperan} ${esperan === 1 ? 'orden espera' : 'órdenes esperan'} cuadrilla`,
+      donde: 'Sin repartir'
+    });
+  }
+  const rango = { grave: 0, avisa: 1, dato: 2 };
+  return salida
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => rango[x.a.tono] - rango[y.a.tono] || x.i - y.i)
+    .map(({ a }) => a);
+}

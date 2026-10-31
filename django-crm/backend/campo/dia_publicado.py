@@ -313,7 +313,9 @@ def del_dia(org, fecha) -> dict:
          "con_alguien_que_no_sale": [fila], "esperan": [orden],
          "por_revisar": [fila],
          "cuentas": {publicadas, por_el_supervisor, por_personas,
-                     sin_registro, avisadas, esperan, por_revisar}}
+                     sin_registro, avisadas, esperan, por_revisar,
+                     cuadrillas, en_camino, completadas, pendientes,
+                     cumplimiento, con_novedad}}
     """
     from django.db.models import Q
     from django.utils import timezone
@@ -659,6 +661,22 @@ def del_dia(org, fecha) -> dict:
             if o.completada_campo_en else "")} for o in por_revisar],
         "cuentas": {
             "publicadas": len(filas),
+            #  LA FRANJA DE INDICADORES (31/10/2026). El codigo calcula, la
+            #  pantalla muestra: una cuenta sumada en el navegador no se puede
+            #  probar y cada pantalla la sumaria distinto.
+            "cuadrillas": len(jornadas),
+            #  Cuadrillas EN CAMINO, no ordenes: la pregunta es cuantas
+            #  cuadrillas van en ruta.
+            "en_camino": sum(1 for j in jornadas
+                             if any(o.estado_operativo == OrdenTrabajo.EN_CAMINO
+                                    for o in por_jornada[j.id])),
+            "completadas": sum(1 for f in filas if f["estado"] in _terminadas()),
+            "pendientes": sum(1 for f in filas if f["estado"] in _activas()),
+            #  Entero, redondeado: el porcentaje se calcula UNA vez, aca.
+            "cumplimiento": (round(100 * sum(1 for f in filas
+                                             if f["estado"] in _terminadas()) / len(filas))
+                             if filas else 0),
+            "con_novedad": sum(1 for j in jornadas if novedades_de.get(j.id)),
             "por_el_supervisor": sum(1 for f in filas if f["asignada_por"] == SUPERVISOR),
             "por_personas": sum(1 for f in filas if f["asignada_por"] == PERSONA),
             "sin_registro": sum(1 for f in filas if not f["asignada_por"]),
