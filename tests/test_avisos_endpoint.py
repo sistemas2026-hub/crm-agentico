@@ -79,6 +79,27 @@ comprobar(http.post("/avisos/evento", json={"tenant": "rapilink", "evento": "tic
                                              "clave": "k"}).status_code == 400,
           "un aviso para el tecnico no entra por la ruta de clientes: 400")
 
+print("\nel ticket creado desde Dexter, con el servicio y sin telefono")
+respuesta = {"enviado": True, "motivo": None}
+lecturas_ficha: list[tuple] = []
+api.importacion_io.contacto_del_servicio = (
+    lambda config, tenant, s: lecturas_ficha.append((tenant, s)) or {"nombre": "X", "telefono": "3001234567"})
+r = http.post("/avisos/evento", json={"tenant": "rapilink", "evento": "ticket_creado_cliente",
+                                       "clave": "ticket:wisphub:95001", "caso_id": "c-2",
+                                       "servicio": "5832", "contexto": {"ticket_numero": "95001"}})
+comprobar(r.status_code == 200 and llamadas[-1]["evento"] == "ticket_creado_cliente"
+          and llamadas[-1].get("servicio") == "5832",
+          "ticket_creado_cliente entra, y el servicio pasa a la decision", str(llamadas[-1:]))
+ficha_de = llamadas[-1].get("ficha_de")
+comprobar(callable(ficha_de) and ficha_de("5832") == {"nombre": "X", "telefono": "3001234567"}
+          and lecturas_ficha == [("rapilink", "5832")],
+          "y la ficha la lee el motor para ESE tenant, solo cuando la decision la pide",
+          str(lecturas_ficha))
+for malo in ("58 32", "5832; drop", "abc", "1" * 40):
+    comprobar(http.post("/avisos/evento", json={"tenant": "rapilink", "evento": "ticket_creado_cliente",
+                                                 "clave": "k", "servicio": malo}).status_code == 400,
+              f"un servicio que no es un numero no entra: {malo[:12]!r}")
+
 print("\nlo que contesta")
 respuesta = {"enviado": False, "motivo": "todavia_no", "reintentar_en": 3600}
 r = http.post("/avisos/evento", json={"tenant": "rapilink", "evento": "visita_programada", "clave": "k"})

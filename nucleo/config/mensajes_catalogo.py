@@ -212,14 +212,15 @@ def sugerencia(evento: str) -> dict | None:
 #: Los momentos cuyo DISPARADOR ya esta construido. Los demas se pueden dejar
 #: configurados desde la pantalla, que dice que todavia no se mandan: un aviso
 #: encendido que nunca sale es peor que uno que dice "todavia no".
-LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada"})
+LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada",
+                                   "ticket_creado_cliente"})
 
 #: Los avisos que se piden desde afuera por POST /avisos/evento (30/10/2026).
 #: Lista CERRADA: esa ruta recibe contexto libre, y abrirla a cualquier aviso
 #: de cliente dejaria mandar una "confirmacion de pago" con un monto
 #: inventado a cualquier numero (auditor de frontera). Se suma uno cuando su
 #: disparador existe y se audito.
-PROACTIVOS: frozenset[str] = frozenset({"visita_programada"})
+PROACTIVOS: frozenset[str] = frozenset({"visita_programada", "ticket_creado_cliente"})
 
 RESPALDOS_POR_DEFECTO: dict[str, str] = {
     "cliente_nombre": "cliente",

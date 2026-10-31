@@ -79,6 +79,7 @@ from nucleo.seguimiento import avisos as avisos_proactivos
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import buscar_cliente, encuesta, ticket_desde_dexter
+from nucleo.seguimiento import importacion_io
 from nucleo.persistencia import encuestas as encuestas_db
 from nucleo.config.schema import MensajeAutomatico as _MensajeAutomatico
 
@@ -7434,13 +7435,15 @@ def caso_enviar_encuesta(caso_id):
 def aviso_proactivo():
     """
     Un aviso que Dexter le manda a un cliente por iniciativa propia (PRD
-    §8.17, Ola 2): lo pide quien detecto el hecho -- el CRM al publicar el dia.
+    §8.17, Ola 2): lo pide quien detecto el hecho -- el CRM al publicar el dia,
+    o al atar un caso de "Nuevo ticket" a su ticket del ISP.
 
-    Cuerpo: {tenant, evento, clave, caso_id?, telefono?, contexto?}. 'clave'
-    identifica el HECHO (una orden en una fecha): con la misma clave el aviso
-    sale una sola vez, aunque el pedido llegue dos veces. 'telefono' es el
-    campo crudo del ISP; el motor lo normaliza. Decide
-    nucleo/seguimiento/avisos.py; esta ruta solo valida y pasa.
+    Cuerpo: {tenant, evento, clave, caso_id?, telefono?, servicio?, contexto?}.
+    'clave' identifica el HECHO (una orden en una fecha): con la misma clave el
+    aviso sale una sola vez, aunque el pedido llegue dos veces. 'telefono' es
+    el campo crudo del ISP; el motor lo normaliza. 'servicio' es para quien no
+    tiene el telefono: el motor lee la ficha del ISP, solo si le hace falta.
+    Decide nucleo/seguimiento/avisos.py; esta ruta solo valida y pasa.
     """
     from nucleo.config.mensajes_catalogo import PROACTIVOS
     from nucleo.persistencia import mensajes_automaticos as registro_avisos
@@ -7452,10 +7455,15 @@ def aviso_proactivo():
         return jsonify({"error": "Faltan 'tenant', 'evento' o 'clave'."}), 400
     if evento not in PROACTIVOS:
         return jsonify({"error": f"'{evento}' no se pide por esta ruta."}), 400
+    servicio = cuerpo.get("servicio")
+    if servicio is not None and not re.fullmatch(r"\d{1,20}", str(servicio)):
+        return jsonify({"error": "'servicio' va solo con digitos."}), 400
     try:
         config = _config_de(tenant)
         resultado = avisos_proactivos.avisar(
             config, tenant, evento, str(clave),
+            servicio=str(servicio) if servicio is not None else None,
+            ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
             caso_id=cuerpo.get("caso_id"), telefono_crudo=cuerpo.get("telefono"),
             contexto=cuerpo.get("contexto") or {}, ahora=datetime.now(timezone.utc),
             conversacion_de=lambda caso: encuestas_db.destino_del_caso(tenant, caso),

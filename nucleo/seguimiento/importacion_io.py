@@ -254,6 +254,32 @@ def resolver_servicios(config, tenant):
     return resolver
 
 
+def contacto_del_servicio(config, tenant: str, servicio: str) -> dict | None:
+    """
+    Nombre y telefono CRUDO del titular de un servicio, para un aviso
+    proactivo (30/10/2026, PRD §8.17). None si el servicio no existe; lanza si
+    el ISP no contesta (quien llama decide si reintenta).
+
+    Es la otra mitad de lo que resolver_servicios deja afuera a proposito: el
+    telefono. Sale para UNA cosa -- saber a que movil mandar el aviso -- y por
+    eso no pasa por el importador ni por ninguna fila: lo usa
+    nucleo/seguimiento/avisos.py en memoria y lo descarta. El campo es el que
+    la empresa declara como su identidad (autenticacion.campo_identidad).
+    """
+    herr = next((h for h in config.herramientas
+                 if h.tipo == "http" and "id_servicio" in (h.filtros_verificados or {})),
+                None)
+    if herr is None:
+        return None
+    datos = ejecutor_http.ejecutar(herr, {"id_servicio": str(servicio)}, tenant,
+                                   variables_tenant=config.variables_tenant)
+    fila = (datos.get("results") or [None])[0] if isinstance(datos, dict) else None
+    if not isinstance(fila, dict):
+        return None
+    return {"nombre": fila.get("nombre") or "",
+            "telefono": fila.get(config.autenticacion.campo_identidad) or ""}
+
+
 def casos_de_este_proveedor(config, tenant: str) -> list[dict]:
     """Los casos con referencia externa, para reconciliar. Por la API, no por SQL."""
     herr = _herramienta(config, "consultar_casos_externos")

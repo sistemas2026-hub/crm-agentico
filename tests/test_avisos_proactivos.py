@@ -50,10 +50,12 @@ CONFIG = SimpleNamespace(
     autenticacion=SimpleNamespace(patron_extraccion=r"(?<!\d)3\d{9}(?!\d)", indicativo_pais="57"),
     horario_avisos=SimpleNamespace(desde=7, hasta=20))
 enviados: list[tuple] = []
+contextos: list[dict] = []
 
 
 def enviar(config, tenant, evento, para, contexto, clave):
     enviados.append((evento, para, clave))
+    contextos.append(dict(contexto or {}))
     return {"enviado": True, "motivo": None}
 
 
@@ -98,6 +100,90 @@ comprobar(r == {"enviado": False, "motivo": "de_baja"} and enviados == [],
 r = llamar(datetime(2026, 10, 31, 9, 0, tzinfo=BOGOTA), conversacion=BSUID, telefono="3001234567")
 comprobar(enviados and enviados[0][1] == "573001234567",
           "sin baja, el BSUID no se usa como numero: sale al movil del ISP", str(enviados))
+
+print("\nla ficha del ISP: se lee solo si hace falta, y no se inventa")
+lecturas: list[str] = []
+
+
+def ficha(servicio):
+    lecturas.append(servicio)
+    return {"nombre": "BEATRIZ PINZON RUIZ", "telefono": "+57 312 455 8901 / 6051234567"}
+
+
+def caida(servicio):
+    lecturas.append(servicio)
+    raise ConnectionError("el ISP no contesta")
+
+
+def con_servicio(ahora, *, conversacion=None, contexto=None, ficha_de=ficha, telefono=None):
+    enviados.clear(); contextos.clear(); lecturas.clear()
+    return avisos.avisar(CONFIG, "rapilink", "ticket_creado_cliente", "ticket:wisphub:95001",
+                         caso_id="caso-2", telefono_crudo=telefono, contexto=contexto or {},
+                         ahora=ahora, conversacion_de=lambda caso: conversacion,
+                         ya_escribio=lambda n: False, de_baja=lambda i: False,
+                         enviar=enviar, servicio="5832", ficha_de=ficha_de)
+
+
+NUEVE = datetime(2026, 10, 31, 9, 0, tzinfo=BOGOTA)
+r = con_servicio(NUEVE, contexto={"ticket_numero": "95001"})
+comprobar(bool(enviados) and enviados[0][1] == "573124558901" and lecturas == ["5832"],
+          "sin chat ni telefono, el movil sale de la ficha del servicio (una lectura)",
+          f"{enviados} {lecturas}")
+comprobar(bool(contextos) and contextos[0].get("cliente_nombre") == "Beatriz"
+          and contextos[0].get("cliente_apellidos") == "Pinzon Ruiz"
+          and contextos[0].get("cliente_nombre_completo") == "Beatriz Pinzon Ruiz"
+          and contextos[0].get("ticket_numero") == "95001",
+          "y el nombre se completa desde la ficha, legible", str(contextos))
+comprobar(not any("telefono" in c for c in contextos),
+          "el telefono NO viaja en los datos de la plantilla", str(contextos))
+r = con_servicio(NUEVE, conversacion={"canal": "whatsapp", "usuario_externo": "573155550000"},
+                 contexto={"cliente_nombre": "Bea"})
+comprobar(lecturas == [] and bool(enviados) and enviados[0][1] == "573155550000"
+          and contextos[0]["cliente_nombre"] == "Bea",
+          "con chat real y nombre en mano, NO se lee el ISP", f"{lecturas} {contextos}")
+r = con_servicio(datetime(2026, 10, 31, 22, 0, tzinfo=BOGOTA))
+comprobar(r["motivo"] == "todavia_no" and lecturas == [],
+          "fuera del horario no se lee nada", str(r))
+r = con_servicio(NUEVE, ficha_de=caida)
+comprobar(r.get("enviado") is False and r.get("motivo") == "isp_no_contesta"
+          and r.get("reintentar_en") == getattr(avisos, "REINTENTO_ISP_S", -1) and enviados == [],
+          "si el ISP no contesta, no sale y pide volver", str(r))
+r = con_servicio(NUEVE, ficha_de=lambda s: None)
+comprobar(r == {"enviado": False, "motivo": "sin_movil"} and enviados == [],
+          "un servicio que no existe no inventa destino", str(r))
+r = con_servicio(NUEVE, contexto={"cliente_nombre": "Bea"},
+                 conversacion={"canal": "whatsapp", "usuario_externo": "573155550000"},
+                 ficha_de=caida)
+comprobar(bool(r.get("enviado")) and lecturas == [],
+          "si no hace falta la ficha, un ISP caido no frena el aviso", str(r))
+
+print("\nel lector de la ficha (importacion_io.contacto_del_servicio)")
+from nucleo.seguimiento import importacion_io             # noqa: E402
+
+FILA = {"nombre": "BEATRIZ PINZON", "movil_principal": "3124558901", "telefono": "6051234567",
+        "cedula": "1098765432", "password_router": "x"}
+pedidos: list[dict] = []
+
+
+def falso_ejecutar(herr, args, tenant, variables_tenant=None):
+    pedidos.append(args)
+    return {"results": [FILA] if args["id_servicio"] == "5832" else []}
+
+
+importacion_io.ejecutor_http.ejecutar = falso_ejecutar
+HERR = SimpleNamespace(tipo="http", filtros_verificados={"id_servicio": "2026-09-10"})
+CONF_ISP = SimpleNamespace(herramientas=[HERR], variables_tenant={},
+                           autenticacion=SimpleNamespace(campo_identidad="movil_principal"))
+c = importacion_io.contacto_del_servicio(CONF_ISP, "rapilink", "5832")
+comprobar(c == {"nombre": "BEATRIZ PINZON", "telefono": "3124558901"},
+          "devuelve nombre y el campo de identidad QUE DECLARA LA EMPRESA, y nada mas", str(c))
+comprobar(pedidos == [{"id_servicio": "5832"}], "filtrando por el servicio", str(pedidos))
+comprobar(importacion_io.contacto_del_servicio(CONF_ISP, "rapilink", "9999") is None,
+          "un servicio que no existe: None")
+sin_herr = SimpleNamespace(herramientas=[SimpleNamespace(tipo="http", filtros_verificados={})],
+                           variables_tenant={}, autenticacion=CONF_ISP.autenticacion)
+comprobar(importacion_io.contacto_del_servicio(sin_herr, "rapilink", "5832") is None,
+          "sin una herramienta con el filtro verificado, no lee la primera que encuentre")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")
