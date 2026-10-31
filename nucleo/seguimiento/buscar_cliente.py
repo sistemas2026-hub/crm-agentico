@@ -116,6 +116,11 @@ def _cargar(config, tenant: str) -> None:
                 f = _fila(x) if isinstance(x, dict) else None
                 if f:
                     f["_clave"] = _normal(f["nombre"])
+                    #  El serial del equipo, para saber de quien es cada ONU
+                    #  de una caida (aviso_de_caida.py, 30/10/2026). Es del
+                    #  equipo, no de la persona, y no sale en ninguna busqueda:
+                    #  'buscar' devuelve servicio, nombre y estado, nada mas.
+                    f["_sn"] = str(x.get("sn_onu") or "").strip().upper()
                     filas.append(f)
             desde += PAGINA
             if not pagina or (total is not None and desde >= total):
@@ -141,6 +146,25 @@ def _padron(config, tenant: str) -> list[dict] | None:
             threading.Thread(target=_cargar, args=(config, tenant),
                              name=f"padron-{tenant}", daemon=True).start()
     return p["filas"] if p else None
+
+
+def padron_por_serial(config, tenant: str) -> dict[str, dict] | None:
+    """{serial: fila del padron}, con cada serial en su forma guardada y en
+    hexadecimal (68 equipos de Rapilink solo existen en esa forma). None si el
+    padron todavia se esta armando. Lo usa aviso_de_caida.py."""
+    filas = _padron(config, tenant)
+    if filas is None:
+        return None
+    indice: dict[str, dict] = {}
+    for f in filas:
+        sn = f.get("_sn") or ""
+        if not sn:
+            continue
+        indice.setdefault(sn, f)
+        hexa = ejecutor_http._gpon_hex(sn)
+        if hexa:
+            indice.setdefault(str(hexa).upper(), f)
+    return indice
 
 
 def _por_nombre(filas: list[dict], texto: str) -> list[dict]:

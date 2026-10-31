@@ -103,6 +103,41 @@ def plantilla_aprobada(config, tenant: str, nombre: str) -> dict | None:
                 None)
 
 
+def listo(config, tenant: str, evento: str) -> str | None:
+    """
+    None si el momento PUEDE salir; si no, el mismo motivo que daria 'enviar'.
+    Sin destinatario ni envio (30/10/2026): un aviso que aprueba una persona
+    para cientos de clientes (la caida de red) tiene que decir que esta
+    apagado ANTES de aprobar, no consumir la aprobacion contestando 'apagado'
+    cliente por cliente. Las mismas reglas y en el mismo orden que 'enviar'.
+    """
+    if evento not in EVENTOS:
+        return "evento_desconocido"
+    m = config.mensajes_automaticos.get(evento)
+    if not m or not m.activo:
+        return "apagado"
+    if m.plantilla in (config.plantillas_desactivadas or []):
+        return "plantilla_desactivada"
+    if not whatsapp.activo(config):
+        return "canal_apagado"
+    try:
+        ficha = plantilla_aprobada(config, tenant, m.plantilla)
+    except Exception as e:                                       # noqa: BLE001
+        registrar("mensajes", "no se pudieron leer las plantillas", tenant=tenant, evento=evento, error=e)
+        return "meta_no_contesta"
+    if ficha is None:
+        return "plantilla_no_aprobada"
+    if ficha.get("variables") != len(m.datos) or ficha.get("formato_variables") == "mixto":
+        return "plantilla_no_coincide"
+    return None
+
+
+def en_prueba(config, evento: str) -> bool:
+    """True si el momento esta en modo prueba (sale solo a sus numeros)."""
+    m = config.mensajes_automaticos.get(evento)
+    return bool(m and getattr(m, "solo_a", None))
+
+
 def enviar(config, tenant: str, evento: str, para: str | None, contexto: dict | None,
            clave: str) -> dict:
     """{'enviado': bool, 'motivo': str|None}. Ver el encabezado del modulo."""

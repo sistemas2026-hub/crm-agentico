@@ -116,6 +116,15 @@ EVENTOS: dict[str, dict] = {
         "descripcion": "Al cliente, cuando su servicio pasa a suspendido.",
         "destinatario": "cliente", "disparo": "diario",
         "campos": _CLIENTE + ["servicio", "total", "fecha_corte"]},
+    # 30/10/2026 (PRD §8.17, Ola 2): cuando se cae un PON, sus clientes
+    # escriben todos a la vez. Lo APRUEBA una persona desde "Fallas de red" y
+    # sale por lotes; ver nucleo/seguimiento/aviso_de_caida.py. Solo el
+    # nombre: ni la zona ni la causa (la causa es una hipotesis, no un hecho).
+    "caida_masiva": {
+        "grupo": "Servicio", "etiqueta": "Falla en la red",
+        "descripcion": "A los clientes afectados por una caída de red, cuando una persona aprueba el aviso desde Fallas de red.",
+        "destinatario": "cliente", "disparo": "dexter",
+        "campos": list(_CLIENTE)},
     "bienvenida": {
         "grupo": "Servicio", "etiqueta": "Bienvenida",
         "descripcion": "Al cliente, cuando queda activo su servicio nuevo.",
@@ -190,6 +199,12 @@ SUGERENCIAS: dict[str, dict] = {
         "cuerpo": "Hola {{1}}, su servicio {{2}} fue suspendido por un saldo pendiente de {{3}}. "
                   "Si ya pagó, responda este mensaje con el comprobante y lo revisamos.",
         "datos": ["cliente_nombre", "servicio", "total"]},
+    "caida_masiva": {
+        "nombre": "falla_en_la_red", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, detectamos una falla en la red que afecta su servicio de internet. "
+                  "Nuestro equipo técnico ya está trabajando para solucionarla: no hace falta que "
+                  "nos reporte el daño. Si después de restablecido sigue sin servicio, responda este mensaje.",
+        "datos": ["cliente_nombre"]},
     "bienvenida": {
         "nombre": "bienvenida_servicio", "categoria": "UTILITY",
         "cuerpo": "Hola {{1}}, bienvenido a {{2}}. Su servicio {{3}} con el plan {{4}} ya está activo. "
@@ -213,7 +228,7 @@ def sugerencia(evento: str) -> dict | None:
 #: configurados desde la pantalla, que dice que todavia no se mandan: un aviso
 #: encendido que nunca sale es peor que uno que dice "todavia no".
 LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada",
-                                   "ticket_creado_cliente"})
+                                   "ticket_creado_cliente", "caida_masiva"})
 
 #: Los avisos que se piden desde afuera por POST /avisos/evento (30/10/2026).
 #: Lista CERRADA: esa ruta recibe contexto libre, y abrirla a cualquier aviso

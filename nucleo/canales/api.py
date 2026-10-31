@@ -7502,6 +7502,107 @@ def aviso_proactivo():
     return jsonify(resultado), 200
 
 
+def _puerto_de(cuerpo):
+    """(olt, board, port) si los tres son digitos; None si no."""
+    partes = tuple(str(cuerpo.get(c) or "") for c in ("olt", "board", "port"))
+    return partes if all(re.fullmatch(r"\d{1,6}", x) for x in partes) else None
+
+
+@app.post("/avisos/caida/afectados")
+def aviso_caida_afectados():
+    """
+    A quien se le avisaria una caida de un puerto (PRD §8.17, Ola 2). Solo
+    LEE: es lo que la persona mira antes de aprobar. Cuerpo: {tenant, olt,
+    board, port}. Conteos y servicios, nunca seriales. Ver
+    nucleo/seguimiento/aviso_de_caida.py.
+    """
+    from nucleo.seguimiento import aviso_de_caida
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, puerto = cuerpo.get("tenant"), _puerto_de(cuerpo)
+    if not tenant or puerto is None:
+        return jsonify({"error": "Faltan 'tenant' u 'olt', 'board', 'port' (digitos)."}), 400
+    try:
+        config = _config_de(tenant)
+        resultado = aviso_de_caida.afectados(config, tenant, *puerto)
+        if not resultado.get("cargando"):
+            from nucleo.seguimiento import mensajes_automaticos
+
+            #  Cuantos por tanda (de la empresa), y si el aviso PUEDE salir:
+            #  apagado o sin plantilla aprobada se dice antes de aprobar, no
+            #  consumiendo la aprobacion cliente por cliente.
+            resultado = {**resultado, "lote": config.aviso_de_caida.lote,
+                         "no_listo": mensajes_automaticos.listo(config, tenant, aviso_de_caida.EVENTO),
+                         "modo_prueba": mensajes_automaticos.en_prueba(config, aviso_de_caida.EVENTO)}
+    except aviso_de_caida.CaidaNoAvisable as e:
+        return jsonify({"error": e.codigo}), e.http
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(resultado), (202 if resultado.get("cargando") else 200)
+
+
+@app.post("/avisos/caida/lote")
+def aviso_caida_lote():
+    """
+    Manda el aviso de caida a un lote que una PERSONA aprobo (PRD §8.17).
+
+    Cuerpo: {tenant, olt, board, port, situacion, autor, servicios[]}. La
+    lista NO se le cree a quien la manda: se cruza con los afectados que el
+    motor lee en este momento (aviso_de_caida.lote_confirmado). Cada aviso
+    sale por la puerta comun con la clave (situacion, servicio) -- confirmar
+    dos veces no avisa dos veces --, sin contexto ni destino de afuera.
+    Contesta {enviados, motivos, pendientes, reintentar_en, descartados}.
+    """
+    from nucleo.persistencia import mensajes_automaticos as registro_avisos
+    from nucleo.seguimiento import aviso_de_caida, mensajes_automaticos
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, puerto = cuerpo.get("tenant"), _puerto_de(cuerpo)
+    situacion = str(cuerpo.get("situacion") or "")
+    autor = str(cuerpo.get("autor") or "").strip()
+    servicios = cuerpo.get("servicios")
+    if not tenant or puerto is None or not autor or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", situacion):
+        return jsonify({"error": "Faltan 'tenant', el puerto, 'situacion' o 'autor'."}), 400
+    if not isinstance(servicios, list) or not servicios or not all(
+            re.fullmatch(r"\d{1,20}", str(x)) for x in servicios):
+        return jsonify({"error": "'servicios' es una lista de numeros."}), 400
+    servicios = [str(x) for x in servicios]
+    try:
+        config = _config_de(tenant)
+        if len(servicios) > config.aviso_de_caida.lote:
+            return jsonify({"error": f"El lote es de hasta {config.aviso_de_caida.lote}."}), 400
+        vigentes = aviso_de_caida.afectados(config, tenant, *puerto)
+        if vigentes.get("cargando"):
+            return jsonify({"enviados": 0, "motivos": {}, "pendientes": servicios,
+                            "reintentar_en": 60, "descartados": 0}), 200
+        lote, descartados = aviso_de_caida.lote_confirmado(servicios, vigentes)
+        ahora = datetime.now(timezone.utc)
+
+        def avisar_uno(servicio):
+            return avisos_proactivos.avisar(
+                config, tenant, aviso_de_caida.EVENTO, aviso_de_caida.clave(situacion, servicio),
+                servicio=servicio,
+                ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
+                caso_id=None, telefono_crudo=None, contexto={}, ahora=ahora,
+                conversacion_de=lambda caso: None,
+                ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
+                de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),
+                enviar=mensajes_automaticos.enviar)
+
+        resultado = aviso_de_caida.avisar_lote(lote, avisar_uno)
+    except aviso_de_caida.CaidaNoAvisable as e:
+        return jsonify({"error": e.codigo}), e.http
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        #  La base no contesto (la baja o la reserva): no sale nada.
+        return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
+                     componente="avisos", e=e)
+    registrar("avisos", "lote de aviso de caida", tenant=tenant, enviados=resultado["enviados"],
+              descartados=descartados, pendientes=len(resultado["pendientes"]))
+    return jsonify({**resultado, "descartados": descartados}), 200
+
+
 @app.get("/encuestas/resumen")
 def encuestas_resumen():
     """

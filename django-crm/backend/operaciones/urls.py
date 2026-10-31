@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Rutas del modulo de operaciones. Ninguna ejecuta acciones externas."""
+"""Rutas del modulo de operaciones. Ninguna ejecuta acciones externas, salvo
+el aviso de una caida a sus clientes: lo aprueba una persona y lo manda el
+motor por lotes (aviso_de_caida_views.py)."""
 
 from django.urls import path
 
 from operaciones import views
 from operaciones.ajustes_views import AjustesSupervisorView
+from operaciones.aviso_de_caida_views import AvisoDeCaidaView, FallasDeRedView
 from operaciones.vista_previa_views import (
     VistaPreviaDeLaJornadaView,
     SimulacionDelDiaView,
@@ -143,4 +146,9 @@ urlpatterns = [
     #  motivo. Escribe por 'td.delegar'/'td.quitar', las mismas que el chat.
     path("supervisor/ajustes/", AjustesSupervisorView.as_view(),
          name="supervisor-ajustes"),
+    #  30/10/2026 (PRD §8.17). Las caidas de PON vivas, y avisarle a sus
+    #  clientes con la aprobacion de una persona.
+    path("fallas-de-red/", FallasDeRedView.as_view(), name="fallas-de-red"),
+    path("fallas-de-red/<uuid:situacion_id>/aviso/", AvisoDeCaidaView.as_view(),
+         name="fallas-de-red-aviso"),
 ]

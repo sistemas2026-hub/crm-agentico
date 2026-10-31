@@ -3173,6 +3173,26 @@ class HorarioAvisos(Base):
         return self
 
 
+class AvisoDeCaida(Base):
+    """
+    A quien se le avisa una caida de red (30/10/2026, PRD §8.17, Ola 2). Ver
+    nucleo/seguimiento/aviso_de_caida.py. Lo aprueba una persona antes de mandar.
+    """
+    # El estado del cliente en el sistema del ISP, tal cual lo devuelve
+    # ('Activo' en WispHub). Un suspendido no tiene servicio que restablecer.
+    # SIN DEFAULT: el vocabulario es del ISP, y sin el no se arma ninguna lista.
+    estados_que_se_avisan: list[str] = Field(default_factory=list)
+    # Cuanto pueden separarse dos caidas para ser la MISMA falla. Mismo numero
+    # medido que incidentes.VENTANA_MISMA_FALLA_MINUTOS (21/08/2026: siete ONU
+    # en el mismo instante).
+    ventana_misma_falla_minutos: int = Field(default=20, ge=1, le=240)
+    # Desde cuantos equipos caidos juntos es una caida y no un cliente suelto.
+    minimo_equipos: int = Field(default=2, ge=2, le=1000)
+    # Cuantos avisos por tanda: la calidad del numero de la empresa en Meta
+    # baja si salen cientos de golpe.
+    lote: int = Field(default=25, ge=1, le=100)
+
+
 class Capacidad(Base):
     """
     Lo que el tablero de capacidad necesita saber de ESTA empresa (30/10/2026,
@@ -3431,6 +3451,7 @@ class TenantConfig(Base):
     capacidad: Capacidad = Field(default_factory=Capacidad)
     #: Entre que horas salen los avisos proactivos (nucleo/seguimiento/avisos.py).
     horario_avisos: HorarioAvisos = Field(default_factory=HorarioAvisos)
+    aviso_de_caida: AvisoDeCaida = Field(default_factory=AvisoDeCaida)
 
     @field_validator("mensajes_automaticos")
     @classmethod

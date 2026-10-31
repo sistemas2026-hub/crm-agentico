@@ -7538,3 +7538,11 @@ tickets_desde_dexter:
 capacidad:
   acciones_que_evitan_visita: [reiniciar_ont]
   herramientas_de_visita: [agendar_visita_tecnica, agendar_visita_internet]
+
+# A quien se le avisa una caida de red (30/10/2026, PRD §8.17, Ola 2). Lo
+# aprueba una persona desde Supervisor NOC -> Fallas de red, y sale por tandas.
+# 'Activo' es el estado de cliente que devuelve WispHub ('estado' en
+# /api/clientes/, el mismo texto que ya lee nucleo/facturacion/politicas.py):
+# un suspendido no tiene servicio que restablecer.
+aviso_de_caida:
+  estados_que_se_avisan: [Activo]

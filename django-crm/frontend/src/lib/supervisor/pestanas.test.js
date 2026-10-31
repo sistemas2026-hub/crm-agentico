@@ -18,13 +18,15 @@ const PANTALLAS = [
   'programacion/+page.svelte',
   'planes-semanales/+page.svelte',
   'plantillas/+page.svelte',
-  'ajustes/+page.svelte'
+  'ajustes/+page.svelte',
+  'fallas/+page.svelte'
 ];
 
 describe('las pestañas de Supervisor NOC', () => {
-  it('Programación va después de Despacho, y están todas', () => {
+  it('Programación va después de Despacho, Fallas de red junto a lo que hay que revisar, y están todas', () => {
     expect(PESTANAS_NOC.map((p) => p.id)).toEqual([
       'pendientes',
+      'fallas',
       'cuadrillas',
       'despacho',
       'programacion',
