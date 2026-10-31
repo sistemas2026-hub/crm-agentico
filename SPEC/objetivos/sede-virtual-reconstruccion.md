@@ -297,7 +297,12 @@ Los fijó el usuario. Se comprueban mirando una captura.
 departamentos** mientras Rapilink usa tres pisos y ocho. Ningún criterio de
 arriba se cumple a costa del 7.
 
-### La escena de hoy contra esos ocho criterios
+### La escena ANTES de la reconstrucción, contra esos ocho criterios
+
+> Lo de abajo es la medición del 31/10/2026 **antes** de construir la
+> envolvente. Se conserva porque es la línea base contra la que se compara
+> todo lo demás. La medición de **después** está en «La matriz de los ocho
+> criterios», más abajo.
 
 Medido sobre la captura `p7-1-edificio-final.png` (31/10/2026, 2.353 objetos,
 97 fps), no sobre lo que debería verse.
@@ -327,7 +332,11 @@ cumplen**, y el 3 lo garantiza la aritmética de la proyección con margen medid
 
 **Con el eje 1 sobre la mesa, cambiar de motor no es lo que falta.** Lo que
 falta es reconstruir `oficina.ts` —las 1.880 líneas que el inventario ya marcó
-como «se reconstruye»— más el encuadre de la cámara. Three.js aportaría luz
+como «se reconstruye»— más el encuadre de la cámara.
+
+> **Y así fue.** Eso es exactamente lo que se hizo el mismo día, y el resultado
+> —seis criterios cumplidos, dos parciales, ninguno pendiente por culpa del
+> motor— está abajo. Three.js aportaría luz
 real (criterio 8) a cambio de **volver a resolver desde cero el criterio 3**,
 que hoy sale gratis.
 
@@ -339,6 +348,195 @@ un trámite: son las que deciden.
 
 ---
 
+
+## La reconstrucción arquitectónica con el motor actual
+
+Autorizada por el usuario el 31/10/2026, con una condición textual: *«no vamos
+a conservar PixiJS por comodidad ni cambiar a Three.js por entusiasmo»*. Esto
+**no adopta** PixiJS: lo pone a prueba contra la referencia congelada.
+
+### El problema, y por qué no se arreglaba acercando los pisos
+
+Entre la losa de un nivel y la del siguiente hay quince unidades que la
+desigualdad de oclusión obliga a dejar, y los muros de una sala miden cuatro.
+**Once unidades de aire por planta, tres plantas: casi novecientos píxeles de
+nada.** Eso era lo que se leía como bandejas flotando, y bajar la separación
+esconde escritorios — ya estaba medido.
+
+Así que lo que cambió no es la distancia entre pisos: es **qué hay** en ella.
+
+### Lo que se construyó
+
+`escena/arquitectura.ts`, módulo nuevo, con las piezas que el edificio no tenía:
+
+| Pieza | Qué resuelve |
+|---|---|
+| **Basamento** | explanada, zócalo, escalinata y jardineras. El nivel más bajo dejaba de flotar |
+| **Fachada de fondo** | cerramiento continuo de suelo a suelo, con machones, vidrio y revestimiento de madera |
+| **Extremo** | el paño de vidrio que cierra el volumen por su lado largo |
+| **Cubierta** | losa, peto, equipos de clima, jardineras y **lucernarios** |
+| **Remate** | la caja del ascensor que sobresale de la azotea |
+| **Núcleo acristalado** | reemplaza los muros opacos del núcleo por vidrio con luz dentro y una franja azul por planta |
+
+Y dos piezas de apoyo: `escena/volumen.ts`, con los primitivos que salieron de
+`oficina.ts` —**para no copiar el signo de la luz en dos archivos**, que es cómo
+termina habiendo una fachada iluminada al revés— y la extensión de cámara que
+mide volúmenes en vez de un cubo.
+
+### Dónde puede ir una fachada en una sección isométrica
+
+En el fondo (`gy = 0`) y en el extremo (`gx = ancho`), **nunca en el frente**:
+el frente es el corte de la sección, y taparlo es taparlo todo. Es la misma
+razón por la que la franja de circulación nunca tuvo muros.
+
+### El atrio: lo que se aprendió mirando
+
+El primer intento pintó esas once unidades como vidrio apagado —*«ahí arriba no
+trabaja nadie»*— y en el navegador se vio exactamente eso: **una banda muerta
+por planta, tres apiladas**, y el edificio volviendo a parecer bandejas. Lo que
+ese hueco es de verdad es un **atrio**, y un atrio de noche se ve encendido.
+
+El hueco que la geometría impone pasó a ser lo que mejor dice «edificio de
+oficinas» desde lejos. No se puede quitar; se puede habitar.
+
+### La luz: dentro sube, fuera baja
+
+La paleta era índigo oscuro de arriba abajo, con su motivo escrito: un centro de
+operaciones es un sitio oscuro. Lo sigue siendo —**los racks no subieron**, que
+es lo que mantiene al NOC distinto de administración— pero el conjunto pedía
+otra cosa: oficinas encendidas vistas desde una noche azul.
+
+Suben suelos, muros y mobiliario. Baja el fondo. **No se subió el brillo de
+todo**, que es lo que aplana y lo que el usuario pidió explícitamente no hacer.
+
+### Tres defectos propios, cazados midiendo
+
+1. **Un 500 en la pantalla.** Las piezas de arquitectura nacieron sin `puestos`
+   —una fachada no tiene puestos—. La pantalla hace
+   `plantas.flatMap((p) => p.puestos)` y `flatMap` **no aplana un `undefined`:
+   lo mete en la lista**. El error no salta ahí; salta tres `$derived` más
+   tarde buscando `.id`, con una traza que apunta a una línea sin relación.
+   Guarda nueva que afirma sobre el efecto: que aplanar no deje huecos.
+
+2. **Un dato que mentía.** Un piso más ancho encima dejaba `sostenidaHasta` por
+   encima del propio frente de la fachada. El dibujo lo recortaba igual, así que
+   no se veía: lo que quedaba mal era el dato, y un dato que miente es el que se
+   cree la siguiente persona. Lo encontró la prueba de configurabilidad.
+
+3. **Un botón de «Encuadrar» que no hacía nada.** El suelo del zoom era un
+   número fijo; al aislar el piso de cinco salas el encuadre necesitaba bajar de
+   él, el núcleo quedaba cortado y pulsar el botón no cambiaba nada porque la
+   cámara ya estaba donde podía. Ahora el suelo se deriva: *no bajar de 0,4,
+   salvo que haga falta para ver el conjunto*.
+
+### La envolvente no está escrita para ocho departamentos en tres pisos
+
+Seis pruebas con otras formas, que es lo que separa una sede configurable de una
+sede que se ve bien con la empresa piloto:
+
+```
+un piso con tres departamentos        remate completo, cubierta sobre ese nivel
+tres pisos y ocho departamentos       una fachada y un extremo por piso
+la fachada sostenida                  sube hasta la losa de arriba, y no mas
+un departamento VACIO                 sigue teniendo su sala y sus puestos
+una sala agrandada                    fachada, extremo y cubierta crecen LO MISMO
+un piso aislado                       sin explanada ni azotea: se mira por dentro
+```
+
+### La matriz de los ocho criterios
+
+Medida en el navegador el 31/10/2026, no deducida del código. Las capturas
+están en `.playwright-mcp/` (`v1-edificio-completo`, `v2-piso-aislado`,
+`v3-noc-ampliado`, `v4-ficha-agente`).
+
+| # | Criterio | Estado | Evidencia |
+|---|---|---|---|
+| 1 | Los pisos forman un **único edificio conectado** | **CUMPLIDO** | `v1`: basamento con explanada, fachada continua de suelo a suelo, cubierta con peto, núcleo y columnas. Ya no hay tres losas sueltas |
+| 2 | Las oficinas se ven claramente desde la vista general | **CUMPLIDO** | `v1`: las nueve salas con su mobiliario y sus rótulos |
+| 3 | Ningún departamento queda oculto permanentemente | **CUMPLIDO** | Dos suites que invierten la proyección punto por punto: losas de nivel y, nueva, la envolvente. Con guarda de la guarda — una cubierta bajada a propósito SÍ acusa |
+| 4 | El edificio aprovecha el viewport sin recortarse | **CUMPLIDO** | `v1` y `v2`. Era un defecto real en el piso aislado: el suelo del zoom impedía el encuadre y «Encuadrar» no hacía nada. Arreglado y con prueba |
+| 5 | Existe un **núcleo vertical de circulación** | **PARCIAL** | Existe, acristalado, con luz dentro, franja azul por planta y remate sobre la cubierta. A escala de conjunto se reconoce, pero no domina como en la referencia |
+| 6 | Se puede aislar un piso y acercarse a una sala | **CUMPLIDO** | `v2` (piso), `v3` (sala), `v4` (ficha abierta por enlace directo) |
+| 7 | Pisos y departamentos siguen siendo configurables | **CUMPLIDO** | Seis pruebas con **otras formas**: un piso con tres departamentos, uno vacío, una sala agrandada, un piso aislado |
+| 8 | Legibilidad, profundidad e iluminación | **PARCIAL** | Salto grande —interiores encendidos, atrio, lucernarios, cantos de losa claros— pero sigue más frío que la referencia, y a escala de edificio la gente casi no se distingue |
+
+```
+cumplidos 6 · parciales 2 · incumplidos 0
+antes de esta sesion: cumplidos 3 · a medias 1 · incumplidos 4
+```
+
+### La comparación con la referencia, sin suavizar
+
+Lo que la sede **ya tiene** y antes no: volumen cerrado con basamento, fachada y
+cubierta; sección abierta al frente; vidrio con montantes; interiores
+encendidos sobre noche azul; núcleo acristalado con su remate; azotea con
+lucernarios, equipos y jardineras; explanada con setos y balizas.
+
+Lo que **todavía la separa** de la imagen aprobada:
+
+| Diferencia | Por qué |
+|---|---|
+| El núcleo no domina la composición | En la referencia la torre de escaleras y ascensor ocupa el tercio izquierdo. Acá mide 6×4 celdas sobre un frente de ~58 |
+| El conjunto es más frío y más oscuro | La referencia tiene suelos casi blancos; acá son gris lila. Subir más obliga a revisar el contraste de todo el mobiliario |
+| Los personajes no se leen a escala de edificio | Diez píxeles por figura. No se arregla agrandándolos: a escala de sala quedarían gigantes |
+| El edificio es una franja larga, no un bloque | Cinco salas en fila en P1. Es consecuencia de la oclusión: la profundidad de un nivel está acotada y no caben dos filas |
+
+**Ninguna de las cuatro es un defecto de PixiJS.** Tres son composición y
+paleta. La cuarta —la franja larga— sí es estructural y se analiza abajo.
+
+### La limitación estructural, con su aritmética
+
+Un punto de un nivel queda tapado por el nivel de arriba cuando
+`gy + (H − z)·0,8125 ≤ fondo_de_arriba`. Despejando para que el escritorio más
+retrasado de una sala se vea:
+
+```
+H > z_placa + (P − d) / 0,8125
+```
+
+con `P` la profundidad de la sala y `d` la distancia del puesto a su muro de
+fondo. Con `P = 10` y `d = 2,4`: **H > 12,75**, y está en 15.
+
+De ahí salen las dos consecuencias que se ven en la captura:
+
+1. **Un nivel no puede tener dos filas de salas.** Dos filas piden `P ≈ 28` y
+   entonces `H > 28,7`: el edificio se vuelve una torre de 86 unidades. Por eso
+   los ocho departamentos van en fila y el edificio es largo.
+2. **Entre el techo de una planta (4) y la losa de arriba (15) hay once
+   unidades de aire.** No se pueden quitar. Se habitaron: son el atrio.
+
+**Qué haría Three.js distinto, y qué costaría.** Con buffer de profundidad el
+piso de arriba no tapa: se oculta o se recorta por cámara, y entonces `H` lo
+decide la arquitectura (≈5) y no la aritmética. El edificio sería compacto y
+sin atrio forzado. A cambio hay que **volver a garantizar desde cero** lo que
+hoy sale gratis —que ningún puesto quede oculto— y resolver materiales, luz
+horneada y post-proceso, que es donde un 3D mal dirigido se ve peor que un buen
+2.5D.
+
+**La decisión sigue sin tomarse**, y el eje 3 —personajes y animación— es donde
+de verdad se decide: es la única diferencia de las cuatro que el motor explica.
+
+### Rendimiento, medido con la ventana al frente
+
+El agujero de medición anterior está cerrado: `page.bringToFront()` de
+Playwright trae la ventana y elimina el estrangulamiento de `requestAnimationFrame`.
+
+| Vista | Objetos | fps |
+|---|---|---|
+| El edificio | 2.397 | **144 · mín 144** |
+| Un piso | 1.003 | **144 · mín 144** |
+| Una sala | 333 | **144 · mín 144** |
+
+Ni un fotograma por debajo del refresco de la pantalla, con un 2% más de
+objetos que antes de la reconstrucción (2.353 → 2.397). **El rendimiento no es
+el límite de este trabajo.**
+
+Y el dato de método, que vale más que los números: sin `bringToFront()` la
+misma escena marcaba **10 fps**, y `document.visibilityState` decía `visible` y
+`hasFocus()` decía `true`. Toda medición de fotogramas de este repositorio pasa
+por ahí a partir de ahora.
+
+---
 
 ## Criterios de aceptación del objetivo
 
@@ -449,6 +647,7 @@ usuario lo diga.
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
+| 31/10/2026 | **Reconstrucción arquitectonica con el motor actual, autorizada y hecha.** Basamento, fachada, extremo, cubierta con lucernarios, remate y núcleo acristalado; la luz separada en dos familias; el encuadre midiendo volúmenes y no un cubo. **6 de 8 criterios cumplidos, 2 parciales** (medido en el navegador, no deducido). 144 fps · mín 144 en las tres vistas con `bringToFront()`. Tres defectos propios cazados midiendo | Los dos parciales: el núcleo a escala de conjunto y los personajes. El eje 3 sigue siendo el que decide el motor | 9bb773bf · 894f0402 · 1ffff317 |
 | 31/10/2026 | **Primera referencia aprobada (eje 1)** y sus ocho criterios registrados. La escena de hoy cumple 3 de 8. Corregido un párrafo de esta misma ficha que el código desmiente: la desigualdad de oclusión no obliga a 3D, `edificio.js` ya la usó para colocar salas al frente y circulación al fondo | Las referencias de los ejes 3 y 6; son las que deciden el motor | — |
 | 31/10/2026 | Los seis ejes de la referencia quedan fijados y la carpeta preparada; **inventario de qué se conserva y qué se reconstruye, medido archivo por archivo**: 2.411 líneas se reconstruyen, 1.900 sobreviven, la capa de datos no se toca, y el motor gráfico tiene un solo consumidor. Ninguna garantía del SaaS está del lado que se reconstruye | Las imágenes. Sin ellas no se construye | — |
 | 31/10/2026 | Rama aislada `spec/sede-virtual` + tag recuperable `sede-pixi-2026-10-31`; guarda de push medida desde la rama nueva; acoplamiento medido (4 de 32 archivos; 16 de 18 pruebas agnósticas); evaluación de motor con recomendación y criterios de muerte del spike escritos antes de construirlo | B1: fijar la imagen de referencia. Después: el spike | esta ficha |
