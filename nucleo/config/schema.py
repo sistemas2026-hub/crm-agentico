@@ -3164,6 +3164,10 @@ class Capacidad(Base):
     """
     minutos_por_conversacion: int | None = Field(default=None, ge=1, le=600)
     minutos_por_visita: int | None = Field(default=None, ge=1, le=1440)
+    #: Cuantas personas atienden a los clientes (el divisor de la metrica
+    #: norte, PRD §2). Lo declara la empresa por la misma razon que los
+    #: minutos: contar a quien toco la bandeja deja afuera a quien no la toca.
+    personas_del_equipo: int | None = Field(default=None, ge=1, le=10000)
     #: Acciones remotas que, confirmadas, pueden ahorrar una visita (p. ej. un
     #: reinicio). Tienen que declarar 'verificacion': sin ella no hay
     #: ACCION_CONFIRMADA que contar.

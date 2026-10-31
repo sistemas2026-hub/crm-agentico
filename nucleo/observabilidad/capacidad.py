@@ -37,21 +37,23 @@ def _tasa(parte, todo):
 
 
 def componer(m: dict, minutos_por_conversacion: int | None,
-             minutos_por_visita: int | None) -> dict:
+             minutos_por_visita: int | None, personas_del_equipo: int | None = None) -> dict:
     cerradas = m["cerradas"]
     resueltas = m["resueltas_sin_persona"]
-    personas = m["personas_que_atendieron"]
     evitadas = m.get("visitas_evitadas")
 
-    por_persona = {"valor": round(cerradas / personas, 2) if personas else None,
-                   "casos": cerradas, "personas": personas}
-    if not personas:
-        por_persona["motivo"] = "ninguna persona atendio una conversacion en el periodo"
+    por_persona = {"valor": round(cerradas / personas_del_equipo, 2) if personas_del_equipo else None,
+                   "casos": cerradas, "personas": personas_del_equipo,
+                   "personas_que_atendieron": m.get("personas_que_atendieron")}
+    if not personas_del_equipo:
+        por_persona["motivo"] = "la empresa no declaro cuantas personas atienden a sus clientes"
 
     visitas = {"valor": evitadas, "reinicios_confirmados": m.get("reinicios_confirmados"),
+               "reinicios_en_ventana": m.get("reinicios_en_ventana"),
                "dias_sin_visita": m.get("dias_sin_visita"),
-               "definicion": "accion remota confirmada sin visita al mismo cliente "
-                             "en los dias siguientes; es una estimacion"}
+               "definicion": "accion remota confirmada sin visita ni ticket operativo para el "
+                             "mismo cliente en los dias siguientes; solo cuenta cuando esos dias "
+                             "ya pasaron. Es una estimacion"}
     if evitadas is None:
         visitas["motivo"] = ("la empresa no declaro que acciones evitan una visita "
                              "ni que herramientas la agendan")
@@ -67,18 +69,24 @@ def componer(m: dict, minutos_por_conversacion: int | None,
         faltan.append("minutos por conversacion")
     if not minutos_por_visita:
         faltan.append("minutos por visita")
+    elif evitadas is None:
+        faltan.append("que acciones evitan una visita")
     if faltan:
         minutos["motivo"] = "la empresa no declaro: " + ", ".join(faltan)
 
     return {
         "casos_por_persona": por_persona,
         "resolucion_sin_persona": {"tasa": _tasa(resueltas, cerradas),
-                                   "resueltas": resueltas, "cerradas": cerradas},
+                                   "resueltas": resueltas, "cerradas": cerradas,
+                                   "por_inactividad": m.get("por_inactividad")},
         "recontacto": {"ventana_horas": m.get("ventana_recontacto_horas"),
-                       "tasa": _tasa(m["recontactos"], cerradas),
-                       "tasa_sin_persona": _tasa(m["recontactos_sin_persona"], resueltas),
+                       "tasa": _tasa(m["recontactos"], m["evaluables_recontacto"]),
+                       "tasa_sin_persona": _tasa(m["recontactos_sin_persona"],
+                                                 m["evaluables_sin_persona"]),
                        "recontactos": m["recontactos"],
-                       "recontactos_sin_persona": m["recontactos_sin_persona"]},
+                       "recontactos_sin_persona": m["recontactos_sin_persona"],
+                       "evaluadas": m["evaluables_recontacto"],
+                       "evaluadas_sin_persona": m["evaluables_sin_persona"]},
         "satisfaccion": {"promedio": (round(m["satisfaccion_promedio"], 2)
                                       if m["satisfaccion_promedio"] is not None else None),
                          "respondidas": m["encuestas_respondidas"],

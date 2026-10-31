@@ -1416,6 +1416,32 @@ def _mutar_espera_encuesta(doc: dict, minutos: int) -> None:
     doc.setdefault("encuesta_whatsapp", {})["espera_minutos"] = int(minutos)
 
 
+#: Lo que la empresa declara para el tablero de capacidad (PRD §2). Las
+#: acciones que evitan una visita no van aca: nombran herramientas del
+#: catalogo y se cargan con la config (cli/cargar_claves.py).
+DECLARABLES_CAPACIDAD = ("minutos_por_conversacion", "minutos_por_visita", "personas_del_equipo")
+
+
+def _mutar_capacidad_declarada(doc: dict, valores: dict) -> None:
+    """None borra lo declarado (vuelve a 'sin declarar'); el resto de
+    'capacidad' queda como estaba. El rango lo valida TenantConfig."""
+    cap = dict(doc.get("capacidad") or {})
+    for clave in DECLARABLES_CAPACIDAD:
+        if valores[clave] is None:
+            cap.pop(clave, None)
+        else:
+            cap[clave] = valores[clave]
+    doc["capacidad"] = cap
+
+
+def guardar_capacidad_declarada(tenant: str, valores: dict) -> TenantConfig:
+    faltan = [c for c in DECLARABLES_CAPACIDAD if c not in valores]
+    if faltan:
+        raise ErrorEdicion("faltan " + ", ".join(faltan) + ": para borrar un valor se "
+                           "manda en null, no se omite.")
+    return _editar(tenant, lambda doc: _mutar_capacidad_declarada(doc, valores))
+
+
 def guardar_espera_encuesta(tenant: str, minutos: int) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_espera_encuesta(doc, minutos))
 

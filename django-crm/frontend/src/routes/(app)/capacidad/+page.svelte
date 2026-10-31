@@ -11,11 +11,12 @@
    *     nunca un 0. Un cero se lee como un resultado.
    *   - Los números los calcula el motor. Acá solo se formatean.
    */
+  import { enhance } from '$app/forms';
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import { Info } from '@lucide/svelte';
 
-  /** @type {{ data: any }} */
-  let { data } = $props();
+  /** @type {{ data: any, form: any }} */
+  let { data, form } = $props();
 
   const t = $derived(data.tablero);
   const pct = (/** @type {number|null|undefined} */ x) =>
@@ -116,6 +117,25 @@
         <div class="pie">mediana, del primer al último mensaje de cada conversación cerrada</div>
       </div>
     </div>
+
+    <form method="POST" action="?/declarar" use:enhance class="v2-card declarar">
+      <div class="rotulo">Lo que declara la empresa</div>
+      <p class="pie">Sin estos números el tablero no inventa: muestra "—". Los minutos son cuánto le cuesta al equipo atender una conversación o hacer una visita; las personas, cuántas atienden a los clientes.</p>
+      <div class="campos">
+        <label>Minutos por conversación
+          <input type="number" min="1" name="minutos_por_conversacion" class="v2-input"
+                 value={t.declarado?.minutos_por_conversacion ?? ''} /></label>
+        <label>Minutos por visita
+          <input type="number" min="1" name="minutos_por_visita" class="v2-input"
+                 value={t.declarado?.minutos_por_visita ?? ''} /></label>
+        <label>Personas del equipo
+          <input type="number" min="1" name="personas_del_equipo" class="v2-input"
+                 value={t.declarado?.personas_del_equipo ?? ''} /></label>
+      </div>
+      {#if form?.declarar?.error}<p class="aviso-error">{form.declarar.error}</p>{/if}
+      {#if form?.declarar?.ok}<p class="pie">Guardado. El tablero ya lo usa.</p>{/if}
+      <div><button class="v2-btn v2-btn-primary" type="submit">Guardar</button></div>
+    </form>
   {/if}
 </div>
 
@@ -141,4 +161,7 @@
   .cifra { font-size: 26px; font-weight: 700; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
   .cifra.apagada { color: var(--v2-slate); font-size: 22px; }
   .pie { margin: 0; font-size: 11.5px; color: var(--v2-slate); line-height: 1.45; }
+  .declarar { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .campos label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 </style>

@@ -28,6 +28,8 @@ mueve.
 
 from datetime import timedelta
 
+import os
+
 import pytest
 from django.utils import timezone
 
@@ -856,6 +858,11 @@ def test_18_el_cierre_no_llama_a_wisphub_por_ningun_lado(org_a, user_profile,
     cierres = [(v, u) for v, u in urls if f"/interno/propuesta/{p.id}/cerrar-caso" in u]
     assert len(cierres) == 1, f"se esperaba UN solo pedido de cierre: {urls}"
     assert cierres[0][0] == "post", cierres
+    #  Todas van al motor y a nada mas: se comprueba el destino, no solo la
+    #  ausencia de dos nombres de proveedor (un tercero con otro dominio
+    #  pasaria esa sola).
+    motor = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    assert all(u.startswith(motor + "/") for _v, u in urls), f"salio fuera del motor: {urls}"
     #  Y nada sale a un proveedor, en NINGUNA de las llamadas.
     for _verbo, url in urls:
         for prohibido in ("wisphub", "api.wisphub", "smartolt"):

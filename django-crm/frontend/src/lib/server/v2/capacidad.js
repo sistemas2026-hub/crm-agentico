@@ -34,3 +34,26 @@ export async function leerTableroCapacidad(locals, fetch, dias) {
     return { tablero: null, error: 'No se pudo contactar al asistente.' };
   }
 }
+
+/**
+ * Lo que declara la empresa para que el tablero pueda traducir a minutos y a
+ * casos por persona. `null` = sin declarar: el tablero muestra "—" con el
+ * motivo, nunca un número supuesto. Lanza si el motor rechaza.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @param {{ minutos_por_conversacion: number|null, minutos_por_visita: number|null,
+ *           personas_del_equipo: number|null }} valores
+ */
+export async function guardarDeclaracionCapacidad(locals, fetch, valores) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw new Error('Asistente no configurado para esta empresa.');
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/capacidad`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, ...valores })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(datos.error || 'El asistente rechazó el cambio.');
+  return datos;
+}

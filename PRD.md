@@ -879,9 +879,37 @@ lo diría sin cambiar nada más.
 
 **Ola 1 hecha en código el 30/10/2026 (rama `producto/tesis-de-negocio`, sin desplegar).** Lo medido:
 
-- *Tablero*: `nucleo/persistencia/capacidad.py` (conteos en SQL) + `nucleo/observabilidad/capacidad.py` (tasas y minutos) + `GET /reportes/capacidad` + pantalla `/capacidad` (solo ADMIN). `tests/test_tablero_capacidad_base.py` contra PostgreSQL real afirma el número exacto de cada métrica, y caza tres mutaciones (sin filtro de canal real, ignorar las acciones aprobadas, la tasa de escalada vieja sin filtro). La cadena hasta la pantalla la cubre `capacidad-servidor.test.js`. Decisiones de esta sesión: "fin" de una conversación es su **último mensaje**, no el evento `cerrada` (los cierres de legado y T18 no lo dejan); cualquier acción propuesta cuenta como "con persona"; los minutos son **dos** parámetros (por conversación y por visita), no "por tipo de caso", porque una conversación no tiene un tipo confiable; **Rapilink no tiene minutos declarados** y el tablero los muestra en null hasta que la empresa los dé.
+- *Tablero*: `nucleo/persistencia/capacidad.py` (conteos en SQL) + `nucleo/observabilidad/capacidad.py` (tasas y minutos) + `GET /reportes/capacidad` + pantalla `/capacidad` (solo ADMIN). `tests/test_tablero_capacidad_base.py` contra PostgreSQL real afirma el número exacto de cada métrica, y caza tres mutaciones (sin filtro de canal real, ignorar las acciones aprobadas, la tasa de escalada vieja sin filtro). La cadena hasta la pantalla la cubre `capacidad-servidor.test.js`. Decisiones de esta sesión: "fin" de una conversación es su **último mensaje que no es una nota**, no el evento `cerrada` (los cierres de legado y T18 no lo dejan); cualquier acción propuesta cuenta como "con persona"; los minutos son **dos** parámetros (por conversación y por visita) y las personas del equipo un tercero, no "por tipo de caso", porque una conversación no tiene un tipo confiable; **Rapilink no tiene minutos declarados** y el tablero los muestra en null hasta que la empresa los dé.
 - *Falla de barrio*: `reiniciar_ont` exige `consultar_incidente_red` con `es_incidente_de_red: false` (`tests/test_reinicio_no_en_caida_de_barrio.py`). El motor la vuelve a medir al aprobar. **Lo que falta medir:** la batería de flujos (`cli/bateria_flujos.py`), que pasa por el turno y necesita la red de producción; el humo de `cli/evaluar.py` dio 8/9, igual a su línea base, pero no tiene caso de reinicio. El prompt no se tocó: el motor le dice al modelo qué previa falta.
 - *Backend*: los 9 respaldos y el buzón fijo, con su guarda de arquitectura (`common/tests/test_motor_tenant_falla_cerrado.py`). **Antes del deploy** hay que tener `SOLICITUDES_EMAIL_DESTINO` en Dokploy (DESPLIEGUE.md, Pendientes).
+
+**Lo que cambió la auditoría del mismo día** (`revisor-de-pii`, `auditor-de-frontera`, `auditor-independiente` sobre `20687706`). Dos hallazgos inflaban el tablero **a favor de Dexter**, que es justo el número que se le muestra a quien compra:
+
+| Hallazgo | Qué se hizo |
+|---|---|
+| La visita que agenda el código no pasa por `tool_calls` (queda en `conversations.ticket_operativo`), así que un reinicio seguido de visita automática contaba como visita evitada. La prueba lo escondía: fabricaba el evento en `tool_calls` | Un `ticket_operativo` del mismo cliente en la ventana también desmiente la visita evitada; la prueba siembra ese caso por la columna real |
+| Ventanas incompletas contaban como resultado: un reinicio de ayer como visita evitada, una conversación cerrada hace una hora como "sin recontacto" | Solo se evalúan reinicios con sus días ya cumplidos y conversaciones con sus 72 h ya cumplidas; los que siguen en ventana se informan aparte |
+| Una conversación que abre un operador (T21) contaba como recontacto | Recontacto = un mensaje **del cliente** en otra conversación |
+| Una nota interna corría el fin y volvía "con persona" a la conversación | Las notas (`rol = 'nota'`) no cuentan para ninguna de las dos cosas |
+| Visita automática y cierre por inactividad contaban como "resueltas sin persona" | Un ticket operativo es "con persona"; las cerradas por inactividad van aparte (`por_inactividad`), porque un cliente que dejó de contestar no confirma que esté resuelto |
+| El divisor de la métrica norte eran los operadores que tocaron la bandeja | Pasa a `capacidad.personas_del_equipo`, declarado por la empresa como los minutos; lo medido queda como dato informativo |
+| La guarda M06-A del reinicio quedó con 6 fallos nuevos (el doble de prueba no preparaba la previa nueva) | Corregido: vuelve a sus 2 fallos preexistentes. **Error de método propio**: comparé las suites por archivo y M06-A ya estaba en rojo, así que el aumento no se vio. Desde acá se comparan por comprobación |
+| Lo nuevo de la config solo vivía en el YAML, y el YAML de Rapilink no se puede cargar entero (pisaría la encuesta en modo prueba) | `cli/cargar_claves.py`: sube **solo** las claves nombradas, por el mismo camino validado del editor. Y los tres números que declara la empresa se editan desde `/capacidad` (§3.3), `PUT /configuracion/capacidad` |
+| Un cierre de caso sin empresa quedaba rotulado "el motor no respondió" | Motivo propio, `FALTA_MOTOR_TENANT`: se sabe que no salió nada |
+
+**Límites que quedan escritos, no resueltos:**
+
+- *"No sé" pasa como "no hay caída".* `consultar_incidente_red` devuelve `es_incidente_de_red: false` también cuando no pudo ubicar la ONU, en los primeros minutos de una caída (SmartOLT agrupa con 2–5 min de demora) y ante un cuerpo inesperado. La previa acota y no autoriza —siguen la señal, el ping y la aprobación humana—, así que lo peor es un reinicio inútil. Cerrarlo exige que la herramienta distinga "sin dato" de `false`, y eso cambia lo que ve el modelo: queda para cuando se mida.
+- *Una visita cargada a mano en el sistema del ISP no se ve* desde Dexter: la visita evitada sigue siendo una estimación, y la pantalla lo dice.
+- *Una instalación sigue siendo de una empresa*: `MOTOR_TENANT` y `SOLICITUDES_EMAIL_DESTINO` son por proceso, y `docker-compose.prod.yml` trae `MOTOR_TENANT` con default `rapilink`. El código falla cerrado; la topología, todavía no. Es la Ola 4.
+
+**Para desplegar, en este orden** (lo decide una persona; push = deploy):
+
+1. `SOLICITUDES_EMAIL_DESTINO` cargada en Dokploy (DESPLIEGUE.md, Pendientes).
+2. Push, y que el motor y el backend levanten.
+3. `py -3.13 cli/cargar_claves.py tenants/rapilink.config.yaml --clave capacidad --clave "herramientas[reiniciar_ont].exige_previas" --clave "herramientas[reiniciar_ont].descripcion"`: primero sin `--aplicar`, mirar, y después con `--aplicar`.
+4. `py -3.13 cli/diferencias_config.py rapilink` y `py -3.13 cli/evaluar.py rapilink --humo --base` (CLAUDE.md §6).
+5. Que la empresa declare en `/capacidad` sus minutos y sus personas.
 
 **Ola 2 — que la IA inicie, no solo responda**
 

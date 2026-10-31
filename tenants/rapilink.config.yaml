@@ -6142,6 +6142,12 @@ herramientas:
     # caida general, treinta reinicios por una falla que no esta en ninguna
     # casa. Va aca y no en el prompt porque el motor vuelve a medir las previas
     # al aprobar: la caida se comprueba al proponer Y al aprobar.
+    # LIMITE, escrito por la auditoria del mismo dia: la herramienta devuelve
+    # 'false' tambien cuando NO PUDO mirar (ONU sin ubicar en la OLT, los
+    # primeros 2-5 min de una caida que SmartOLT todavia no agrupo, un cuerpo
+    # inesperado). La previa acota, no autoriza: siguen la senal, el ping y la
+    # aprobacion humana, asi que lo peor es un reinicio inutil. Cerrarlo pide
+    # que la herramienta distinga "sin dato" de 'false' (PRD §8.17).
     # Guarda: tests/test_reinicio_no_en_caida_de_barrio.py
     exige_previas:
       - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}

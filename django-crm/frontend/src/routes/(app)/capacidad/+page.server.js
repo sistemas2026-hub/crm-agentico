@@ -1,5 +1,5 @@
-import { redirect } from '@sveltejs/kit';
-import { leerTableroCapacidad, PERIODOS } from '$lib/server/v2/capacidad.js';
+import { fail, redirect } from '@sveltejs/kit';
+import { guardarDeclaracionCapacidad, leerTableroCapacidad, PERIODOS } from '$lib/server/v2/capacidad.js';
 
 /**
  * Capacidad: cuánto trabajo le resolvió Dexter a la empresa (PRD §2).
@@ -23,3 +23,36 @@ export async function load({ locals, fetch, url }) {
   const { tablero, error } = await leerTableroCapacidad(locals, fetch, dias);
   return { tablero, dias, periodos: PERIODOS, error };
 }
+
+/** Los tres números que declara la empresa. Vacío = null = sin declarar. */
+const DECLARABLES = ['minutos_por_conversacion', 'minutos_por_visita', 'personas_del_equipo'];
+
+/** @type {import('./$types').Actions} */
+export const actions = {
+  async declarar({ locals, fetch, request }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, { declarar: { error: 'Solo un administrador puede cambiar esto.' } });
+    }
+    const form = await request.formData();
+    /** @type {Record<string, number|null>} */
+    const valores = {};
+    for (const campo of DECLARABLES) {
+      const crudo = form.get(campo)?.toString().trim() ?? '';
+      if (crudo === '') {
+        valores[campo] = null;
+        continue;
+      }
+      const n = Number(crudo);
+      if (!Number.isInteger(n) || n < 1) {
+        return fail(400, { declarar: { error: 'Cada valor tiene que ser un número entero mayor que cero, o quedar vacío.' } });
+      }
+      valores[campo] = n;
+    }
+    try {
+      await guardarDeclaracionCapacidad(locals, fetch, /** @type {any} */ (valores));
+    } catch (/** @type {any} */ e) {
+      return fail(502, { declarar: { error: e?.message || 'No se pudo guardar.' } });
+    }
+    return { declarar: { ok: true } };
+  }
+};

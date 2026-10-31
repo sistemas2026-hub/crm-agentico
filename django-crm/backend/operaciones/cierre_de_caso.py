@@ -71,6 +71,13 @@ SIN_FECHA_DE_CIERRE = "SIN_FECHA_DE_CIERRE_DEL_PROVEEDOR"
 LECTURA_VIEJA = "LECTURA_EXTERNA_FUERA_DE_FRESCURA"
 LECTURA_CON_ERROR = "LA_ULTIMA_LECTURA_FALLO"
 RESPUESTA_POSTERIOR = "HAY_RESPUESTA_POSTERIOR_AL_CIERRE"
+#  Sin MOTOR_TENANT no se pregunta (30/10/2026). Distinto de MOTOR_NO_RESPONDIO:
+#  aca se SABE que no salio nada, y reintentar no sirve hasta configurarla.
+SIN_EMPRESA = "FALTA_MOTOR_TENANT"
+
+
+class SinEmpresa(RuntimeError):
+    """No se sabe de que empresa es el caso: no se le pidio nada al motor."""
 MOTOR_NO_RESPONDIO = "EL_MOTOR_NO_RESPONDIO"
 
 #  Lo que el motor contesta cuando no cerro por el interruptor. Se reconoce para
@@ -253,7 +260,7 @@ def _pedirle_al_motor(propuesta_id: str, id_caso: str) -> dict:
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
     if not tenant:
-        raise RuntimeError("falta MOTOR_TENANT: sin saber de que empresa es el "
+        raise SinEmpresa("falta MOTOR_TENANT: sin saber de que empresa es el "
                            "caso no se le pide al motor que lo cierre")
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -322,6 +329,10 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
     #  --- fuera de la transaccion: aca ocurre la llamada de red --------------
     try:
         respuesta = _pedirle_al_motor(str(propuesta.id), str(caso.id))
+    except SinEmpresa:
+        _anotar(propuesta, caso=caso, motivo=SIN_EMPRESA,
+                detalle="falta MOTOR_TENANT", actor=actor)
+        return {"cerrado": False, "motivo": SIN_EMPRESA, "detalle": "", "referencia": ""}
     except Exception as e:                                    # noqa: BLE001
         #  El motor no contesto. NO se sabe si el cierre salio o no: pudo llegar
         #  y perderse la respuesta. Reintentar es legitimo, y lo que garantiza

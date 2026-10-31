@@ -3905,10 +3905,53 @@ def reporte_capacidad():
 
     cuerpo = {"dias": dias, "desde": desde.isoformat(), "hasta": hasta.isoformat(),
               "canales": sorted(canales.REALES),
-              **tablero.componer(m, cap.minutos_por_conversacion, cap.minutos_por_visita)}
+              # Lo que declaro la empresa, para que la pantalla lo muestre en el
+              # formulario sin una segunda ida y vuelta.
+              "declarado": {"minutos_por_conversacion": cap.minutos_por_conversacion,
+                            "minutos_por_visita": cap.minutos_por_visita,
+                            "personas_del_equipo": cap.personas_del_equipo},
+              **tablero.componer(m, cap.minutos_por_conversacion, cap.minutos_por_visita,
+                                cap.personas_del_equipo)}
     if aviso:
         cuerpo["aviso"] = aviso
     return jsonify(cuerpo)
+
+
+@app.put("/configuracion/capacidad")
+def configuracion_capacidad_guardar():
+    """
+    Los tres numeros que declara la empresa para el tablero de capacidad:
+    minutos por conversacion, minutos por visita y personas del equipo (§3.3:
+    lo que varia por empresa se edita desde la interfaz).
+
+    LAS TRES CLAVES TIENEN QUE VENIR, aunque sea en null. 'No vino' y 'borralo'
+    no son lo mismo: un formulario que mande menos campos borraria lo
+    declarado sin pedirlo (misma razon que 'sin_gestion_horas' en la Bandeja).
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    valores = {}
+    for clave in editor.DECLARABLES_CAPACIDAD:
+        if clave not in cuerpo:
+            return jsonify({"error": f"Falta '{clave}'. Para borrarlo, mandalo en null."}), 400
+        crudo = cuerpo[clave]
+        if crudo in (None, ""):
+            valores[clave] = None
+            continue
+        try:
+            valores[clave] = int(crudo)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"'{clave}' tiene que ser un numero entero."}), 400
+    try:
+        editor.guardar_capacidad_declarada(tenant, valores)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"ok": True, "declarado": valores})
 
 
 @app.get("/centro-mando")

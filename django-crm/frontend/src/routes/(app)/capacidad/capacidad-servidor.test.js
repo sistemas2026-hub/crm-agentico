@@ -5,7 +5,7 @@ vi.mock('$lib/server/v2/tenant.js', () => ({
 }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
-const { load } = await import('./+page.server.js');
+const { load, actions } = await import('./+page.server.js');
 /** @param {any} e */
 const cargar = async (e) => /** @type {any} */ (await load(e));
 
@@ -95,5 +95,55 @@ describe('el tablero de capacidad, de la respuesta del motor a la pantalla', () 
 
   it('solo ADMIN: son cifras de negocio de la empresa', async () => {
     await expect(cargar(evento({ rol: 'USER' }))).rejects.toMatchObject({ status: 303 });
+  });
+});
+
+/** @param {Record<string, string>} campos @param {string} [rol] */
+function envio(campos, rol = 'ADMIN') {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(campos)) f.set(k, v);
+  return /** @type {any} */ ({ locals: { profile: { role: rol } }, request: { formData: async () => f },
+                               fetch: globalThis.fetch });
+}
+
+describe('lo que declara la empresa: minutos y personas del equipo (§3.3)', () => {
+  /** @type {any} */
+  let cuerpo;
+  beforeEach(() => {
+    cuerpo = null;
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url, opciones) => {
+      cuerpo = { url: String(url), metodo: opciones?.method, datos: JSON.parse(opciones?.body || '{}') };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }));
+  });
+
+  it('manda los tres números al motor, para la empresa de la sesión', async () => {
+    await actions.declarar(envio({ minutos_por_conversacion: '12', minutos_por_visita: '90',
+                                   personas_del_equipo: '4' }));
+    expect(cuerpo.url).toContain('/configuracion/capacidad');
+    expect(cuerpo.metodo).toBe('PUT');
+    expect(cuerpo.datos).toEqual({ tenant: 'rapilink', minutos_por_conversacion: 12,
+                                   minutos_por_visita: 90, personas_del_equipo: 4 });
+  });
+
+  it('un campo vacío se manda como null: "sin declarar", nunca un 0', async () => {
+    await actions.declarar(envio({ minutos_por_conversacion: '', minutos_por_visita: '90',
+                                   personas_del_equipo: '' }));
+    expect(cuerpo.datos.minutos_por_conversacion).toBeNull();
+    expect(cuerpo.datos.personas_del_equipo).toBeNull();
+  });
+
+  it('un número que no es entero positivo no viaja', async () => {
+    const r = /** @type {any} */ (await actions.declarar(envio({ minutos_por_conversacion: '-3',
+      minutos_por_visita: '', personas_del_equipo: '' })));
+    expect(r.status).toBe(400);
+    expect(cuerpo).toBeNull();
+  });
+
+  it('solo ADMIN', async () => {
+    const r = /** @type {any} */ (await actions.declarar(envio({ minutos_por_conversacion: '12',
+      minutos_por_visita: '', personas_del_equipo: '' }, 'USER')));
+    expect(r.status).toBe(403);
+    expect(cuerpo).toBeNull();
   });
 });
