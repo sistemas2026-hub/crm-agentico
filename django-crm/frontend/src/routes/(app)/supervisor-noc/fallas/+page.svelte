@@ -137,6 +137,14 @@
                   >
                     <div style="height:100%; width:{pct}%; background:var(--snoc-secundario, #2563eb);"></div>
                   </div>
+                  {#if f.aviso.fase === 'restablecido' || f.aviso.restablecidos}
+                    <p class="snoc-body-sm" style="margin:0;">
+                      Ya volvió: <strong>{f.aviso.restablecidos}</strong> avisados de que quedó restablecido
+                      {#if f.aviso.fase === 'restablecido' && f.aviso.estado === 'en_curso' && f.aviso.pendientes}
+                        · {f.aviso.pendientes} esperando a que vuelva su equipo
+                      {/if}
+                    </p>
+                  {/if}
                   {#if f.aviso.motivo_detencion}
                     <p class="snoc-body-sm snoc-error-txt" style="margin:0;">
                       {textoDeDetencion(f.aviso.motivo_detencion)}
@@ -166,6 +174,10 @@
                         Quedan afuera {previa.sin_cliente} equipos sin cliente y {previa.fuera_de_estado}
                         de clientes que no están activos.
                       {/if}
+                    </p>
+                    <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                      Cuando la falla se resuelva, Dexter les avisa que quedó restablecido a los que
+                      recibieron este aviso y cuyo equipo ya volvió.
                     </p>
                     {#if previa.modo_prueba}
                       <p class="snoc-body-sm snoc-tenue" style="margin:0;">

@@ -184,6 +184,31 @@ comprobar(r.get("servicios") == ["203"] and r.get("sin_cliente") == 3,
           "ni el cliente ficticio de instalaciones ni un equipo que figura en dos fichas", str(r))
 buscar_cliente._PADRONES.pop("prueba")
 
+print("\n'ya quedo restablecido': solo a quien se le aviso la falla y ya no esta en LOS")
+filas3 = [{"servicio": "301", "nombre": "A", "estado": "Activo", "_sn": "HWTC00000001"},
+          {"servicio": "302", "nombre": "B", "estado": "Activo", "_sn": "HWTC00000002"},
+          {"servicio": "303", "nombre": "C", "estado": "Activo", "_sn": "HWTC00000003"}]
+buscar_cliente._PADRONES["prueba"] = {"filas": filas3, "cuando": time.monotonic()}
+pedidas: list = []
+
+
+def avisadas(servicios):
+    pedidas.append(list(servicios))
+    return {"301": "2026-10-30 07:16:44", "302": "2026-10-30 07:16:44"}   # al 303 no le salio
+
+
+AHORA_LOS = [onu("HWTC00000002", "2026-10-30 07:16:44")]                 # el 302 sigue caido
+r = aviso_de_caida.restablecidos(CONFIG, "prueba", "3", "2", "11", ["301", "302", "303"],
+                                 avisadas=avisadas, leer=lambda: AHORA_LOS)
+comprobar(r["listos"] == {"301": "2026-10-30 07:16:44"},
+          "solo el que recibio el aviso y cuyo equipo ya volvio", str(r))
+comprobar(r["siguen_caidos"] == ["302"] and r["sin_aviso_previo"] == 1,
+          "el que sigue caido espera; al que no se le aviso la falla no se le avisa la vuelta", str(r))
+comprobar(pedidas == [["301", "302", "303"]], "se pregunta por los aprobados, no por todo el padron")
+comprobar(aviso_de_caida.clave_restablecida("301", "2026-10-30 07:16:44")
+          == "restablecida:301:2026-10-30 07:16:44", "una vuelta por falla: la clave lleva la hora de la caida")
+buscar_cliente._PADRONES.pop("prueba")
+
 print("\nsi el aviso puede salir, ANTES de aprobar (mensajes_automaticos.listo)")
 from nucleo.seguimiento import mensajes_automaticos as ma  # noqa: E402
 

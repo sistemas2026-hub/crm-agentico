@@ -61,6 +61,15 @@ class AvisoDeCaida(BaseModel):
     #  Por que no salio el resto: {'de_baja': 3, 'sin_movil': 5, ...}.
     motivos = models.JSONField(default=dict)
 
+    #  DOS FASES (31/10/2026): primero "se cayo"; cuando la situacion deja de
+    #  estar activa, "ya volvio" a los que recibieron el primero y cuyo equipo
+    #  volvio. Misma fila, misma ficha de turno, misma retoma.
+    CAIDA = "caida"
+    RESTABLECIDO = "restablecido"
+    FASES = ((CAIDA, "Aviso de la caida"), (RESTABLECIDO, "Aviso de restablecido"))
+    fase = models.CharField(max_length=12, choices=FASES, default=CAIDA)
+    restablecidos = models.PositiveIntegerField(default=0)
+
     estado = models.CharField(max_length=12, choices=ESTADOS, default=EN_CURSO)
     vueltas = models.PositiveIntegerField(default=0)
     terminado_en = models.DateTimeField(null=True, blank=True)

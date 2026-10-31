@@ -57,7 +57,8 @@ export const MOTIVOS = /** @type {Record<string, string>} */ ({
 /** Por qué se detuvo un envío ya aprobado (backend: AvisoDeCaida.motivo_detencion). */
 export const DETENCION = /** @type {Record<string, string>} */ ({
   SITUACION_RESUELTA: 'La caída se resolvió antes de terminar: no se le escribe a nadie más.',
-  TOPE_DE_VUELTAS: 'Se agotaron los reintentos; los que faltaban no recibieron el aviso.'
+  TOPE_DE_VUELTAS: 'Se agotaron los reintentos; los que faltaban no recibieron el aviso.',
+  VOLVIO_A_CAER: 'La falla volvió antes de avisar que estaba resuelta: no se le dijo a nadie que volvió.'
 });
 
 /**

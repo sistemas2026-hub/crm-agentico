@@ -147,6 +147,28 @@ r = http.post("/avisos/caida/lote", json=cuerpo)
 comprobar(r.get_json().get("reintentar_en") and r.get_json().get("pendientes") == cuerpo["servicios"]
           and pedidos == [], "con el padron armandose, el lote entero vuelve despues", str(r.get_json()))
 
+print("\nrestablecida")
+from nucleo.persistencia import mensajes_automaticos as registro_avisos    # noqa: E402
+
+aviso_de_caida.restablecidos = lambda config, tenant, olt, board, port, pedidos, avisadas, leer=None: {
+    "listos": {"101": "2026-10-30 07:16:44"}, "siguen_caidos": ["104"], "sin_aviso_previo": 1}
+pedidos.clear()
+r = http.post("/avisos/caida/restablecida", json={**cuerpo, "servicios": ["101", "104", "105"]})
+d = r.get_json() or {}
+comprobar(r.status_code == 200 and [p["servicio"] for p in pedidos] == ["101"]
+          and pedidos[0]["clave"] == "restablecida:101:2026-10-30 07:16:44"
+          and pedidos[0]["evento"] == "caida_restablecida" and pedidos[0]["contexto"] == {},
+          "manda solo a los listos, con la clave de su caida y sin contexto de afuera", str(pedidos))
+comprobar(d.get("siguen_caidos") == ["104"] and d.get("sin_aviso_previo") == 1,
+          "y devuelve los que siguen caidos para pedirlos despues", str(d))
+estado_aviso["listo"] = "plantilla_no_aprobada"
+pedidos.clear()
+r = http.post("/avisos/caida/restablecida", json={**cuerpo, "servicios": ["101"]})
+comprobar(r.status_code == 409 and pedidos == [], "sin plantilla aprobada: 409 y nada sale", str(r.get_json()))
+estado_aviso["listo"] = None
+comprobar(http.post("/avisos/caida/restablecida", json={**cuerpo, "autor": ""}).status_code == 400,
+          "sin autor: 400")
+
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")
     for f in fallos:

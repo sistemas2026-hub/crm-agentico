@@ -7723,6 +7723,72 @@ def aviso_caida_lote():
     return jsonify({**resultado, "descartados": descartados}), 200
 
 
+@app.post("/avisos/caida/restablecida")
+def aviso_caida_restablecida():
+    """
+    "Ya quedo restablecido" a los clientes de una caida avisada (31/10/2026).
+    Cuerpo: {tenant, olt, board, port, situacion, autor, servicios[]} -- los
+    que la persona aprobo para el aviso de caida. El motor manda SOLO a los
+    que recibieron ese aviso y cuyo equipo ya no esta en LOS; los que siguen
+    caidos vuelven en 'siguen_caidos' para pedirlos despues.
+    """
+    from nucleo.persistencia import mensajes_automaticos as registro_avisos
+    from nucleo.seguimiento import aviso_de_caida, mensajes_automaticos
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, puerto = cuerpo.get("tenant"), _puerto_de(cuerpo)
+    situacion = str(cuerpo.get("situacion") or "")
+    autor = str(cuerpo.get("autor") or "").strip()
+    servicios = cuerpo.get("servicios")
+    if not tenant or puerto is None or not autor or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", situacion):
+        return jsonify({"error": "Faltan 'tenant', el puerto, 'situacion' o 'autor'."}), 400
+    if not isinstance(servicios, list) or not servicios or not all(
+            re.fullmatch(r"\d{1,20}", str(x)) for x in servicios):
+        return jsonify({"error": "'servicios' es una lista de numeros."}), 400
+    servicios = [str(x) for x in servicios]
+    try:
+        config = _config_de(tenant)
+        if len(servicios) > config.aviso_de_caida.lote:
+            return jsonify({"error": "LOTE_GRANDE", "lote": config.aviso_de_caida.lote}), 400
+        no_listo = mensajes_automaticos.listo(config, tenant, aviso_de_caida.EVENTO_RESTABLECIDO)
+        if no_listo:
+            return jsonify({"error": f"AVISO_{no_listo.upper()}"}), 409
+        r = aviso_de_caida.restablecidos(
+            config, tenant, *puerto, servicios,
+            avisadas=lambda s: registro_avisos.caidas_avisadas(tenant, s, dias=7))
+        if r.get("cargando"):
+            return jsonify({"enviados": 0, "motivos": {}, "pendientes": servicios,
+                            "reintentar_en": 60, "siguen_caidos": []}), 200
+        listos = r["listos"]
+        ahora = datetime.now(timezone.utc)
+
+        def avisar_uno(servicio):
+            return avisos_proactivos.avisar(
+                config, tenant, aviso_de_caida.EVENTO_RESTABLECIDO,
+                aviso_de_caida.clave_restablecida(servicio, listos[servicio]),
+                servicio=servicio,
+                ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
+                caso_id=None, telefono_crudo=None, contexto={}, ahora=ahora,
+                conversacion_de=lambda caso: None,
+                ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
+                de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),
+                enviar=mensajes_automaticos.enviar)
+
+        resultado = aviso_de_caida.avisar_lote(sorted(listos), avisar_uno)
+    except aviso_de_caida.CaidaNoAvisable as e:
+        return jsonify({"error": e.codigo}), e.http
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
+                     componente="avisos", e=e)
+    registrar("avisos", "lote de aviso de caida restablecida", tenant=tenant, situacion=situacion,
+              aprobo=autor[:64], enviados=resultado["enviados"],
+              siguen_caidos=len(r["siguen_caidos"]), sin_aviso_previo=r["sin_aviso_previo"])
+    return jsonify({**resultado, "siguen_caidos": r["siguen_caidos"],
+                    "sin_aviso_previo": r["sin_aviso_previo"]}), 200
+
+
 @app.get("/encuestas/resumen")
 def encuestas_resumen():
     """

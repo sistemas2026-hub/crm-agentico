@@ -659,6 +659,17 @@ Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se de
 
 Cómo comprobar sin leer valores: `docker exec <backend> sh -c 'test -n "$MOTOR_TENANT" && test -n "$SOLICITUDES_EMAIL_DESTINO" && echo ok'`. Lo definitivo es que las dos sean configuración **por empresa** desde la interfaz (§3.3 de CLAUDE.md, Ola 4): una variable de entorno sigue siendo una instalación por empresa.
 
+**La rama `producto/tesis-de-negocio` (30-31/10/2026, PRD §8.17 Olas 1 a 3) trae, además, cuatro cosas que no se aplican solas.** En este orden:
+
+| # | Qué | Cómo | Si se saltea |
+|---|---|---|---|
+| 1 | Migración del **ledger del motor** `202610310200_autonomia_ganada.sql` | `py -3.13 cli/migrar_asistente.py --estado` y `--aplicar`, con la credencial de la memoria `ledger_motor_credencial_dbuser` | Sin la tabla, `vigente()` falla cerrado: **ninguna** acción es autónoma y promover devuelve 503. No rompe nada más. Va ANTES del push (las migraciones primero, después el código que las consulta) |
+| 2 | Migración del **CRM** `operaciones/0029_aviso_de_caida` | La aplica el arranque del backend como las demás de Django | «Fallas de red» da error al listar y al aprobar |
+| 3 | Claves nuevas de la config de Rapilink: `aviso_de_caida` (`estados_que_se_avisan: [Activo]`), `autenticacion.indicativo_pais`, `horario_avisos`, y lo de la Ola 1 (capacidad, previa de `reiniciar_ont`) | `cli/cargar_claves.py` con esas claves, **no** `cargar_config.py` (cargar el YAML entero apaga la encuesta `solo_a`) | Sin `estados_que_se_avisan` el aviso de caída no arma ninguna lista (`NO_CONFIGURADO`); sin `indicativo_pais` ningún aviso sale a un móvil del ISP. Fallan cerrado |
+| 4 | Plantillas en Meta: `visita_programada`, `ticket_creado`, `falla_en_la_red`, `falla_resuelta` (sugeridas en el catálogo) | Crearlas desde Ajustes → WhatsApp → Plantillas y esperar la aprobación | Los avisos quedan apagados o dicen `plantilla_no_aprobada`. Nacen apagados igual: se encienden en Mensajes automáticos, primero en modo prueba |
+
+Y una tarea periódica nueva del CRM, `retomar-avisos-de-caida` (cada 10 min, en `crm/celery.py`): la levanta el beat que ya corre, sin variable nueva. **Nada de esto da autonomía**: una acción solo se hace sola cuando un ADMIN la promueve desde `/capacidad` con la evidencia a la vista.
+
 **Decisión revertida a propósito: la descripción del ticket SÍ se copia, aunque pueda traer PII (10/09/2026).** El importador la excluía, y el motivo está escrito en `importacion_io.py`: *«ese campo es texto libre de un operador y ya se sabe que trae PII embebida (PRD §7.4); lo que se guarda es la referencia para ir a buscarla»*. Ese motivo **sigue siendo cierto**. Se acepta el riesgo igual.
 
 Lo que lo cambió fue mirar la pantalla al lado de la de WispHub: el ticket decía *«Pago reconexión en factura»* y el caso en Dexter no lo tenía, así que quien atendía no sabía por qué el cliente estaba sin servicio y tenía que saltar al otro sistema para enterarse. El contexto operativo pesa más que el riesgo — y es una decisión de producto tomada con el riesgo a la vista, no un descuido.

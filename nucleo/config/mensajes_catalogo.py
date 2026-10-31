@@ -125,6 +125,13 @@ EVENTOS: dict[str, dict] = {
         "descripcion": "A los clientes afectados por una caída de red, cuando una persona aprueba el aviso desde Fallas de red.",
         "destinatario": "cliente", "disparo": "dexter",
         "campos": list(_CLIENTE)},
+    # 31/10/2026: cierra el aviso de caida. Sale solo a quien recibio el de
+    # la falla y cuyo equipo ya no esta en LOS (aviso_de_caida.restablecidos).
+    "caida_restablecida": {
+        "grupo": "Servicio", "etiqueta": "Falla de red resuelta",
+        "descripcion": "A los clientes que recibieron el aviso de una caída, cuando su equipo volvió.",
+        "destinatario": "cliente", "disparo": "dexter",
+        "campos": list(_CLIENTE)},
     "bienvenida": {
         "grupo": "Servicio", "etiqueta": "Bienvenida",
         "descripcion": "Al cliente, cuando queda activo su servicio nuevo.",
@@ -205,6 +212,12 @@ SUGERENCIAS: dict[str, dict] = {
                   "Nuestro equipo técnico ya está trabajando para solucionarla: no hace falta que "
                   "nos reporte el daño. Si después de restablecido sigue sin servicio, responda este mensaje.",
         "datos": ["cliente_nombre"]},
+    "caida_restablecida": {
+        "nombre": "falla_resuelta", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, la falla en la red que afectaba su servicio de internet ya quedó "
+                  "resuelta. Si todavía no tiene servicio, apague y encienda su equipo; si sigue "
+                  "igual, responda este mensaje.",
+        "datos": ["cliente_nombre"]},
     "bienvenida": {
         "nombre": "bienvenida_servicio", "categoria": "UTILITY",
         "cuerpo": "Hola {{1}}, bienvenido a {{2}}. Su servicio {{3}} con el plan {{4}} ya está activo. "
@@ -228,7 +241,7 @@ def sugerencia(evento: str) -> dict | None:
 #: configurados desde la pantalla, que dice que todavia no se mandan: un aviso
 #: encendido que nunca sale es peor que uno que dice "todavia no".
 LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada",
-                                   "ticket_creado_cliente", "caida_masiva"})
+                                   "ticket_creado_cliente", "caida_masiva", "caida_restablecida"})
 
 #: Los avisos que se piden desde afuera por POST /avisos/evento (30/10/2026).
 #: Lista CERRADA: esa ruta recibe contexto libre, y abrirla a cualquier aviso

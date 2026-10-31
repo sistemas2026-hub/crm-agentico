@@ -59,6 +59,10 @@ GRACIA_PARA_RETOMAR_S = 10 * 60
 #: Lo que el motor tarda en una tanda: 25 clientes, cada uno con su ficha y
 #: su envio a Meta. Gunicorn corta a los 180 s.
 TIMEOUT_LOTE_S = 170
+#: "Ya volvio": cada cuanto se vuelve a preguntar por los que siguen caidos,
+#: y cuantas veces (12 x 30 min = 6 h). Despues se deja de esperar.
+ESPERA_SIGUEN_CAIDOS_S = 30 * 60
+MAX_VUELTAS_RESTABLECIDO = 12
 
 
 class NoAvisable(Exception):
@@ -255,6 +259,15 @@ def retomar(ahora=None) -> int:
         turno = programar(aviso, 0)
         pedir_vuelta(str(aviso.id), str(aviso.org_id), turno, 0)
         n += 1
+    #  Los que terminaron la primera fase con la falla todavia viva: cuando la
+    #  situacion se resuelve, pasan a "ya volvio".
+    for aviso in (AvisoDeCaida.objects.select_related("situacion")
+                  .filter(estado=AvisoDeCaida.TERMINADO, fase=AvisoDeCaida.CAIDA, enviados__gt=0)
+                  .exclude(situacion__estado__in=VIVOS)):
+        pasar_a_restablecido(aviso)
+        turno = programar(aviso, 0)
+        pedir_vuelta(str(aviso.id), str(aviso.org_id), turno, 0)
+        n += 1
     return n
 
 
@@ -269,7 +282,13 @@ def avanzar(aviso: AvisoDeCaida) -> int | None:
         #  Una espera larga partida en tramos: todavia no toca.
         return max(int((aviso.proxima_vuelta_en - timezone.now()).total_seconds()), 1)
     situacion = aviso.situacion
+    if aviso.fase == AvisoDeCaida.RESTABLECIDO:
+        return _avanzar_restablecido(aviso, situacion)
     if situacion.estado not in VIVOS:
+        #  La falla termino: los que se enteraron de la caida se enteran de la
+        #  vuelta. Si a nadie le salio el aviso, no hay nada que cerrar.
+        if aviso.enviados > 0:
+            return pasar_a_restablecido(aviso)
         return _cerrar(aviso, AvisoDeCaida.DETENIDO, "SITUACION_RESUELTA")
     if not aviso.pendientes:
         return _cerrar(aviso, AvisoDeCaida.TERMINADO)
@@ -321,6 +340,65 @@ def avanzar(aviso: AvisoDeCaida) -> int | None:
     return ESPERA_ENTRE_LOTES_S
 
 
+def pasar_a_restablecido(aviso) -> int:
+    """La segunda fase: se le pregunta al motor por los aprobados; el motor
+    manda solo a los que recibieron el aviso y cuyo equipo volvio."""
+    aviso.fase = AvisoDeCaida.RESTABLECIDO
+    aviso.estado = AvisoDeCaida.EN_CURSO
+    aviso.pendientes = list(aviso.servicios or [])
+    aviso.vueltas = 0
+    aviso.terminado_en = None
+    aviso.motivo_detencion = ""
+    aviso.save(update_fields=["fase", "estado", "pendientes", "vueltas", "terminado_en",
+                              "motivo_detencion", "updated_at"])
+    return ESPERA_ENTRE_LOTES_S
+
+
+def _avanzar_restablecido(aviso, situacion) -> int | None:
+    if situacion.estado in VIVOS:
+        #  Volvio a caer (o se reabrio): no se le dice a nadie que ya volvio.
+        return _cerrar(aviso, AvisoDeCaida.DETENIDO, "VOLVIO_A_CAER")
+    if not aviso.pendientes:
+        return _cerrar(aviso, AvisoDeCaida.TERMINADO)
+    if aviso.vueltas >= MAX_VUELTAS_RESTABLECIDO:
+        return _cerrar(aviso, AvisoDeCaida.TERMINADO)
+    try:
+        url, tenant = _motor_y_empresa(aviso.org_id)
+    except NoAvisable:
+        aviso.vueltas += 1
+        aviso.save(update_fields=["vueltas", "updated_at"])
+        return ESPERA_SI_EL_MOTOR_NO_CONTESTA_S
+    lote, resto = aviso.pendientes[:aviso.lote], aviso.pendientes[aviso.lote:]
+    respuesta = _pedir(url, "/avisos/caida/restablecida", {
+        "tenant": tenant, "olt": aviso.olt, "board": aviso.board, "port": aviso.port,
+        "situacion": str(situacion.id), "servicios": lote,
+        "autor": f"profile:{aviso.aprobado_por_id}"})
+    aviso.vueltas += 1
+    if respuesta is None or respuesta[0] >= 500:
+        aviso.save(update_fields=["vueltas", "updated_at"])
+        return ESPERA_SI_EL_MOTOR_NO_CONTESTA_S
+    http, datos = respuesta
+    if http == 400 and datos.get("error") == "LOTE_GRANDE" and int(datos.get("lote") or 0) > 0:
+        aviso.lote = int(datos["lote"])
+        aviso.save(update_fields=["lote", "vueltas", "updated_at"])
+        return 5
+    if http >= 400:
+        return _cerrar(aviso, AvisoDeCaida.DETENIDO, str(datos.get("error") or f"HTTP_{http}"))
+    aviso.restablecidos += int(datos.get("enviados") or 0)
+    del_lote = set(lote)
+    siguen = [str(s) for s in (datos.get("siguen_caidos") or []) if str(s) in del_lote]
+    pendientes_motor = [str(s) for s in (datos.get("pendientes") or []) if str(s) in del_lote]
+    aviso.pendientes = list(dict.fromkeys(pendientes_motor + siguen)) + resto
+    aviso.save(update_fields=["restablecidos", "pendientes", "vueltas", "updated_at"])
+    if not aviso.pendientes:
+        return _cerrar(aviso, AvisoDeCaida.TERMINADO)
+    if resto:
+        return ESPERA_ENTRE_LOTES_S
+    if datos.get("reintentar_en") and not siguen:
+        return max(int(datos["reintentar_en"]), ESPERA_ENTRE_LOTES_S)
+    return ESPERA_SIGUEN_CAIDOS_S
+
+
 def _cerrar(aviso, estado, motivo: str = "") -> None:
     aviso.estado = estado
     aviso.terminado_en = timezone.now()
@@ -341,6 +419,7 @@ def resumen(aviso: AvisoDeCaida | None) -> dict | None:
             "aprobado_en": aviso.aprobado_en.isoformat(),
             "aprobado_por": _nombre(aviso.aprobado_por),
             "motivo_detencion": aviso.motivo_detencion or None,
+            "fase": aviso.fase, "restablecidos": aviso.restablecidos,
             "terminado_en": aviso.terminado_en.isoformat() if aviso.terminado_en else None}
 
 

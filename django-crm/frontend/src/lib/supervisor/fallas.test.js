@@ -39,6 +39,7 @@ describe('motivosLegibles', () => {
 describe('textoDeDetencion', () => {
   it('dice por qué se detuvo un envío aprobado', () => {
     expect(textoDeDetencion('SITUACION_RESUELTA')).toMatch(/se resolvió/);
+    expect(textoDeDetencion('VOLVIO_A_CAER')).toMatch(/no se le dijo a nadie que volvió/);
     expect(textoDeDetencion('AVISO_APAGADO')).toMatch(/apagado.*no recibieron/);
     expect(textoDeDetencion('')).toBe('');
     expect(textoDeDetencion('OTRO')).toBe('OTRO');

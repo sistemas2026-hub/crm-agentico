@@ -244,3 +244,60 @@ def avisar_lote(servicios: list[str], avisar_uno) -> dict:
             reintentar = max(reintentar or 0, int(vuelta))
     return {"enviados": enviados, "motivos": motivos, "pendientes": pendientes,
             "reintentar_en": reintentar}
+
+
+# =============================================================================
+#  "YA QUEDO RESTABLECIDO"  --  31/10/2026
+# =============================================================================
+#  Cierra lo que abrio el aviso de caida: el cliente que recibio "se cayo"
+#  recibe "ya volvio" cuando su equipo volvio, y deja de escribir para
+#  preguntar. Dos condiciones, las dos medidas por el motor:
+#    1. el aviso de caida le SALIO (mensajes_automaticos.caidas_avisadas): a
+#       quien no se le aviso la falla no se le avisa la vuelta;
+#    2. su equipo YA NO esta en LOS ahora. Se mide, no se supone porque la
+#       situacion se cerro.
+#  La clave lleva la hora en que cayo: una vuelta por falla, aunque se pida
+#  dos veces.
+
+EVENTO_RESTABLECIDO = "caida_restablecida"
+
+
+def clave_restablecida(servicio: str, cayo: str) -> str:
+    return f"restablecida:{servicio}:{cayo}"
+
+
+def restablecidos(config, tenant: str, olt, board, port, pedidos: list[str], *,
+                  avisadas, leer=None) -> dict:
+    """
+    {'listos': {servicio: hora en que cayo}, 'siguen_caidos': [servicios],
+    'sin_aviso_previo': n} o {'cargando': True}. avisadas(servicios) ->
+    {servicio: hora} de los que recibieron el aviso de caida. 'listos' no sale
+    del motor: es para armar las claves.
+    """
+    if leer is None:
+        herr = _herramienta_optica(config)
+        if herr is None:
+            raise CaidaNoAvisable("NO_CONFIGURADO", 503)
+
+        def leer():
+            return _en_los(config, tenant, herr, olt, board, port)
+    indice = buscar_cliente.padron_por_serial(config, tenant)
+    if indice is None:
+        return {"cargando": True}
+    try:
+        filas = leer()
+    except Exception as e:                                       # noqa: BLE001
+        registrar("aviso_de_caida", "no se pudo leer el puerto en SmartOLT", error=e)
+        raise CaidaNoAvisable("OPTICO_NO_CONTESTA", 502)
+    caidos_ahora: set[str] = set()
+    for f in filas or []:
+        if not isinstance(f, dict) or str(f.get("status") or "").strip().lower() != "los":
+            continue
+        fila = _buscar(indice, str(f.get("sn") or "").strip().upper())
+        if fila and not fila.get("_duplicado"):
+            caidos_ahora.add(str(fila.get("servicio")))
+    avisados = avisadas([str(s) for s in pedidos])
+    listos = {s: cayo for s, cayo in avisados.items() if s not in caidos_ahora}
+    return {"listos": listos,
+            "siguen_caidos": sorted(s for s in avisados if s in caidos_ahora),
+            "sin_aviso_previo": len(set(pedidos) - set(avisados))}
