@@ -189,10 +189,10 @@ def log_del_dia(ordenes, *, fecha, zona, tiempos, novedades=(), material=None,
         nuevo = (ev.datos or {}).get("nuevo_estado")
         t = tiempos.get(ev.orden_id) or {}
         if ev.tipo in ASIGNACIONES:
-            quien = ("El Supervisor" if ev.tipo == "asignada_por_el_supervisor"
-                     else (getattr(getattr(ev.profile, "user", None), "name", "")
-                           or "Una persona"))
-            asignadas[(ev.created_at.replace(second=0, microsecond=0), quien)].append(n)
+            #  30/10/2026, el usuario: «en los tickets nuevos no debe salir
+            #  historial todavía». Asignar no es seguimiento: el log arranca
+            #  cuando el tecnico hace algo, o el Supervisor le avisa.
+            continue
         elif nuevo == EN_CAMINO:
             entradas.append((ev.created_at, f"Salió hacia OT #{n}", "tecnico"))
         elif nuevo == EN_SITIO:

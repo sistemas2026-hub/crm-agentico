@@ -92,6 +92,13 @@ describe('el cuadro de cada cuadrilla', () => {
     expect(sin({ salio: '07:42', hechas: 1, total: 7, en_curso: null })).toContain('Sigue OT #18');
   });
 
+  it('el cuadro lleva la línea de progreso de esa orden (30/10/2026)', () => {
+    const h = html([c({ ordenes: [{ numero: 12, estado: 'en_sitio', asunto: 'x', direccion: 'CL 1', barrio: '', siguiente: false }] })]);
+    expect(h).toContain('Progreso de la orden');
+    expect(h).toMatch(/aria-current="step" class="[^"]*pg-actual"><span class="pg-barra[^"]*"><\/span> <span class="pg-nombre[^"]*">En sitio/);
+    expect(html([c()])).not.toContain('Progreso de la orden');
+  });
+
   it('en curso, el asunto y la dirección de ESA orden, no de la que sigue', () => {
     const h = html([
       c({

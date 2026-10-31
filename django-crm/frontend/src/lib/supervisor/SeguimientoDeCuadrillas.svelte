@@ -14,6 +14,7 @@
   (`campo/tiempos_del_dia.py`); acá no se resta nada.
 -->
 <script>
+  import ProgresoDeLaOrden from './ProgresoDeLaOrden.svelte';
   import { textoDeNovedad } from './dia-publicado.js';
 
   /** @type {{ cuadrillas: any[] }} */
@@ -56,6 +57,8 @@
         <p class="sc-ahora">{enQueEsta(r, r.en_curso ? null : f)}</p>
         {#if asunto}<p class="sc-asunto">{asunto}</p>{/if}
         {#if donde}<p class="sc-donde">{donde}</p>{/if}
+        <!-- El progreso de esa orden, como en la app (30/10/2026). -->
+        {#if f}<ProgresoDeLaOrden estado={f.estado} />{/if}
         {#if r.en_curso?.minutos != null}
           <p class="sc-reloj" aria-label={`Lleva ${r.en_curso.minutos} minutos`}>⏱ {r.en_curso.minutos} min</p>
         {:else if r.en_curso?.desde}

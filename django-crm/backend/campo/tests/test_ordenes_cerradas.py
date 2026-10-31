@@ -204,6 +204,7 @@ def test_c6_el_log_de_la_cuadrilla_deja_afuera_lo_terminado(org_a, terminada, us
     abierta = OrdenTrabajo.objects.create(org=org_a, numero=12, tipo_trabajo_version=terminada.tipo_trabajo_version,
                                           estado_operativo=OrdenTrabajo.EN_CAMINO, zona="X")
     AsignacionTrabajo.objects.create(orden=abierta, profile=user_profile, rol="tecnico", es_principal=True)
+    EventoTrabajo.objects.create(org=org_a, orden=abierta, tipo="asignada_por_el_supervisor", datos={})
     _paso(abierta, "en_camino", timezone.now())
 
     c0 = D.del_dia(org_a, _hoy())["cuadrillas"][0]
@@ -211,6 +212,7 @@ def test_c6_el_log_de_la_cuadrilla_deja_afuera_lo_terminado(org_a, terminada, us
 
     assert "Salió hacia OT #12" in textos
     assert not any("#3" in t for t in textos), textos
+    assert not any("asignó" in t for t in textos), "asignar no es seguimiento (30/10/2026)"
     assert c0["resumen_del_dia"]["hechas"] == 1, "lo terminado sigue contando en el avance"
 
 

@@ -575,7 +575,9 @@ def del_dia(org, fecha) -> dict:
                      (*TD.TERMINADAS, OrdenTrabajo.CANCELADA)],
                     fecha=fecha, zona=zona, tiempos=tiempos,
                     novedades=novedades_de.get(j.id, []),
-                    material=("", cargado.get(actas.get(j.id))) if actas else None,
+                    #  El material del dia no es seguimiento de una orden
+                    #  (30/10/2026): se ve en la tarjeta de la cuadrilla.
+                    material=None,
                     sin_reporte=sin_reporte, ahora=ahora),
             }
         except Exception:                                        # noqa: BLE001
