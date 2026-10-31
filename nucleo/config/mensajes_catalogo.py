@@ -220,7 +220,22 @@ LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "vi
 #: de cliente dejaria mandar una "confirmacion de pago" con un monto
 #: inventado a cualquier numero (auditor de frontera). Se suma uno cuando su
 #: disparador existe y se audito.
-PROACTIVOS: frozenset[str] = frozenset({"visita_programada", "ticket_creado_cliente"})
+#:
+#: CONTRATO POR EVENTO (30/10/2026, auditorias de frontera y PII del ticket
+#: creado). Quien pide no decide nada que no deba:
+#:   contexto  los datos que se le aceptan; el resto se descarta. Nunca
+#:             'empresa' ni 'fecha' (los pone el motor), y nunca un dato de
+#:             otro momento.
+#:   destino   'telefono': el CRM sabe el movil (la orden lo trae) y el caso;
+#:             'ticket':   solo el NUMERO de ticket -- el motor lo lee en el ISP
+#:             y de ahi salen servicio, asunto y clave (avisos.hecho_del_ticket).
+PROACTIVOS: dict[str, dict] = {
+    "visita_programada": {
+        "contexto": frozenset({"cliente_nombre", "cliente_apellidos", "cliente_nombre_completo",
+                               "ticket_numero", "ticket_asunto", "fecha_visita", "franja"}),
+        "destino": "telefono"},
+    "ticket_creado_cliente": {"contexto": frozenset(), "destino": "ticket"},
+}
 
 RESPALDOS_POR_DEFECTO: dict[str, str] = {
     "cliente_nombre": "cliente",

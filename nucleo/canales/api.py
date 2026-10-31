@@ -7450,22 +7450,44 @@ def aviso_proactivo():
     from nucleo.seguimiento import mensajes_automaticos
 
     cuerpo = request.get_json(force=True, silent=True) or {}
-    tenant, evento, clave = cuerpo.get("tenant"), cuerpo.get("evento"), cuerpo.get("clave")
-    if not tenant or not evento or not clave:
-        return jsonify({"error": "Faltan 'tenant', 'evento' o 'clave'."}), 400
-    if evento not in PROACTIVOS:
+    tenant, evento = cuerpo.get("tenant"), cuerpo.get("evento")
+    if not tenant or not evento:
+        return jsonify({"error": "Faltan 'tenant' o 'evento'."}), 400
+    contrato = PROACTIVOS.get(evento)
+    if contrato is None:
         return jsonify({"error": f"'{evento}' no se pide por esta ruta."}), 400
-    servicio = cuerpo.get("servicio")
-    if servicio is not None and not re.fullmatch(r"\d{1,20}", str(servicio)):
-        return jsonify({"error": "'servicio' va solo con digitos."}), 400
+    #  Solo los datos que este evento acepta de quien lo pide (ver el contrato
+    #  en mensajes_catalogo.PROACTIVOS).
+    crudo = cuerpo.get("contexto") if isinstance(cuerpo.get("contexto"), dict) else {}
+    contexto = {k: v for k, v in crudo.items() if k in contrato["contexto"]}
+    caso_id, telefono, servicio, clave = cuerpo.get("caso_id"), cuerpo.get("telefono"), None, None
+    if contrato["destino"] == "ticket":
+        numero = cuerpo.get("ticket")
+        if not re.fullmatch(r"\d{1,20}", str(numero or "")):
+            return jsonify({"error": "'ticket' va solo con digitos."}), 400
+        #  Ni el chat de un caso ni un telefono suelto: el destino sale del
+        #  servicio del ticket, que el motor confirma en el ISP.
+        caso_id, telefono = None, None
+    else:
+        clave = cuerpo.get("clave")
+        if not clave:
+            return jsonify({"error": "Falta 'clave'."}), 400
     try:
         config = _config_de(tenant)
+        if contrato["destino"] == "ticket":
+            hecho = avisos_proactivos.hecho_del_ticket(
+                config, str(numero),
+                leer=lambda n: importacion_io.ticket_para_aviso(config, tenant, n),
+                asuntos=lambda: {a["asunto"] for a in ticket_desde_dexter.asuntos(config, tenant)})
+            if "clave" not in hecho:
+                return jsonify(hecho), 200
+            clave, servicio, contexto = hecho["clave"], hecho["servicio"], hecho["contexto"]
         resultado = avisos_proactivos.avisar(
             config, tenant, evento, str(clave),
-            servicio=str(servicio) if servicio is not None else None,
+            servicio=servicio,
             ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
-            caso_id=cuerpo.get("caso_id"), telefono_crudo=cuerpo.get("telefono"),
-            contexto=cuerpo.get("contexto") or {}, ahora=datetime.now(timezone.utc),
+            caso_id=caso_id, telefono_crudo=telefono,
+            contexto=contexto, ahora=datetime.now(timezone.utc),
             conversacion_de=lambda caso: encuestas_db.destino_del_caso(tenant, caso),
             ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
             de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),

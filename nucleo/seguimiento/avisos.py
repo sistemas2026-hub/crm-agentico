@@ -57,6 +57,52 @@ def partes_del_nombre(nombre: str | None) -> dict:
             "cliente_nombre_completo": limpio}
 
 
+def servicios_sin_titular(config) -> set[str]:
+    """Los servicios que no son de una persona: el cliente ficticio del que
+    cuelgan las instalaciones nuevas (220 de 220 tickets de instalacion en
+    Rapilink, medido el 08/10/2026). Su ficha tiene un telefono que no es el
+    del prospecto. Misma variable que ya leen la importacion y el ticket."""
+    ficticio = str((config.variables_tenant or {}).get("WISPHUB_ID_SERVICIO_INSTALACIONES") or "").strip()
+    return {ficticio} if ficticio else set()
+
+
+def hecho_del_ticket(config, numero: str, *, leer, asuntos) -> dict:
+    """
+    El aviso de un ticket, confirmado contra el ISP (30/10/2026, auditorias de
+    frontera y PII). Quien lo pide solo dice QUE ticket: el servicio y el
+    asunto salen del ticket mismo, y la clave la arma el motor. Asi nadie puede
+    elegir a quien se le escribe ni que texto le llega.
+
+    leer(numero) -> {servicio, asunto} | None (puede lanzar);
+    asuntos() -> el catalogo de asuntos del ISP (puede lanzar).
+    Devuelve {clave, servicio, contexto} o {enviado: False, motivo[, ...]}.
+
+    EL ASUNTO SOLO VIAJA SI ES DEL CATALOGO: en WispHub es texto libre, y 126
+    de 3.418 tickets traen ahi el nombre y el barrio de un prospecto (medido
+    el 08/10/2026). Fuera del catalogo, o sin catalogo a mano, no viaja.
+    """
+    try:
+        ticket = leer(numero)
+    except LookupError:
+        return {"enviado": False, "motivo": "no_configurado"}
+    except Exception:                                           # noqa: BLE001
+        return {"enviado": False, "motivo": "isp_no_contesta", "reintentar_en": REINTENTO_ISP_S}
+    if not ticket or not ticket.get("servicio"):
+        return {"enviado": False, "motivo": "ticket_no_existe"}
+    servicio = str(ticket["servicio"])
+    if servicio in servicios_sin_titular(config):
+        return {"enviado": False, "motivo": "servicio_sin_titular"}
+    contexto = {"ticket_numero": str(numero)}
+    try:
+        permitidos = asuntos()
+    except Exception:                                           # noqa: BLE001
+        permitidos = set()
+    if ticket.get("asunto") and ticket["asunto"] in permitidos:
+        contexto["ticket_asunto"] = ticket["asunto"]
+    proveedor = config.importacion_tickets.proveedor or "isp"
+    return {"clave": f"ticket:{proveedor}:{numero}", "servicio": servicio, "contexto": contexto}
+
+
 def _segundos_hasta_el_horario(config, ahora: datetime) -> int:
     """0 si 'ahora' esta dentro del horario; si no, cuanto falta para abrirlo."""
     h = config.horario_avisos
@@ -92,7 +138,10 @@ def avisar(config, tenant: str, evento: str, clave: str, *, caso_id: str | None,
         #  le escribe tampoco al movil del ISP: es la misma persona.
         if del_chat and de_baja(del_chat):
             return {"enviado": False, "motivo": "de_baja"}
-    falta_destino = not del_chat and not telefono_crudo
+    #  Un BSUID no es un destino (destino.elegir lo descarta): con uno en el
+    #  chat, el movil de la ficha sigue haciendo falta (auditor de frontera).
+    chat_es_numero = str(del_chat or "").lstrip("+").isdigit()
+    falta_destino = not chat_es_numero and not telefono_crudo
     falta_nombre = not contexto.get("cliente_nombre")
     if servicio and ficha_de and (falta_destino or falta_nombre):
         try:

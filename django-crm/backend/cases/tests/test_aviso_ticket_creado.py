@@ -10,11 +10,11 @@ ticket desde Dexter), el CRM le pide al motor el aviso `ticket_creado_cliente`.
   A  atar un caso NUEVO pide UN aviso, despues del commit; repetir el vinculo
      o un vinculo rechazado no pide nada. Los tickets IMPORTADOS no pasan por
      aca: los abrio una persona en el sistema del ISP (ficha de avisos).
-  B  el pedido lleva la clave del ticket, el servicio (el motor lee el movil
-     de la ficha del ISP: el CRM no lo tiene), el numero y el asunto -- y NO
-     la descripcion, que es texto libre de quien atiende.
+  B  el pedido lleva SOLO el numero de ticket: el motor lo lee en el ISP y de
+     ahi salen servicio, asunto y clave. Ni la descripcion ni el asunto del
+     caso, que son texto libre y se pueden editar antes de que el aviso salga.
   C  la tarea reagenda cuando el motor dice cuando volver, no pide nada por un
-     caso que ya se cerro (al cerrar sale la encuesta) y sale a nombre de la
+     caso terminado (cerrado, rechazado, duplicado) (al cerrar sale la encuesta) y sale a nombre de la
      empresa de la org, no la del entorno.
 
     pytest cases/tests/test_aviso_ticket_creado.py
@@ -97,20 +97,16 @@ def _atado(org, autor, **extra):
                  external_service_id="5832", **extra)
 
 
-def test_b_el_pedido_lleva_clave_servicio_numero_y_asunto_y_no_la_descripcion(
-        org_a, admin_user, motor):
+def test_b_el_pedido_lleva_solo_el_numero_de_ticket(org_a, admin_user, motor):
+    """El motor confirma el hecho en el ISP (auditorias, 30/10/2026): de ahi
+    salen servicio, asunto y clave. El CRM no manda nada que el motor deba
+    creerle -- ni el asunto, que se puede editar con texto libre."""
     caso = _atado(org_a, admin_user)
     with mock.patch("requests.post", return_value=_R({"enviado": True, "motivo": None})) as post:
         tasks.avisar_ticket_creado(str(caso.id), str(org_a.id))
     assert post.call_args.args[0] == "http://motor:5000/avisos/evento"
     cuerpo = post.call_args.kwargs["json"]
-    assert cuerpo["tenant"] == "rapilink", "la empresa de la org, no la del entorno"
-    assert cuerpo["evento"] == "ticket_creado_cliente"
-    assert cuerpo["clave"] == "ticket:wisphub:95001"
-    assert cuerpo["caso_id"] == str(caso.id)
-    assert cuerpo["servicio"] == "5832"
-    assert cuerpo["contexto"] == {"ticket_numero": "95001", "ticket_asunto": "Sin internet"}
-    assert "telefono" not in cuerpo
+    assert cuerpo == {"tenant": "rapilink", "evento": "ticket_creado_cliente", "ticket": "95001"}
     assert "robó" not in str(cuerpo), "la descripcion no viaja"
     motor.assert_called_with(str(org_a.id))
 
@@ -135,11 +131,11 @@ def test_c2_con_las_vueltas_agotadas_no_reagenda_mas(org_a, admin_user, motor):
     assert reagendar.call_count == 0
 
 
-@pytest.mark.parametrize("cambio", ["cerrado", "sin_vinculo", "sin_empresa"])
-def test_c3_no_se_pide_por_un_caso_cerrado_sin_ticket_o_sin_empresa(org_a, admin_user, motor, cambio):
+@pytest.mark.parametrize("cambio", ["Closed", "Rejected", "Duplicate", "sin_vinculo", "sin_empresa"])
+def test_c3_no_se_pide_por_un_caso_terminado_sin_ticket_o_sin_empresa(org_a, admin_user, motor, cambio):
     caso = _atado(org_a, admin_user) if cambio != "sin_vinculo" else _caso(org_a, admin_user)
-    if cambio == "cerrado":
-        Case.objects.filter(id=caso.id).update(status="Closed")
+    if cambio in ("Closed", "Rejected", "Duplicate"):
+        Case.objects.filter(id=caso.id).update(status=cambio)
     if cambio == "sin_empresa":
         motor.return_value = ""
     with mock.patch("requests.post") as post:

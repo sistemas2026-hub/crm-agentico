@@ -475,12 +475,10 @@ def enviar_encuesta_whatsapp(case_id, org_id, cerrado_en=None, vuelta=0):
 #  PRD §8.17, Ola 2. Cuando una persona abre un ticket desde "Nuevo ticket", el
 #  cliente no esta en el chat y no sabe que su pedido quedo registrado. Lo pide
 #  la vista que ata el caso a su ticket del ISP (la unica via por la que nace un
-#  ticket desde Dexter: los importados no pasan por ahi). Decide el motor; el
-#  CRM no tiene el telefono y le pasa el servicio, el motor lee la ficha.
+#  ticket desde Dexter: los importados no pasan por ahi). Decide el motor.
 #
-#  NO viaja la descripcion: es texto libre de quien atiende. El asunto si: con
-#  el ticket en el ISP, es uno de la lista que valido el motor al crearlo.
-#  Un caso que ya se cerro no se avisa: al cerrar sale la encuesta.
+#  Solo viaja el numero de ticket: el motor confirma el hecho en el ISP.
+#  Un caso que ya termino no se avisa: al cerrar sale la encuesta.
 
 @shared_task
 def avisar_ticket_creado(case_id, org_id, vuelta=0):
@@ -505,17 +503,14 @@ def avisar_ticket_creado(case_id, org_id, vuelta=0):
         case = Case.objects.filter(id=case_id, org_id=org_id).first()
         if case is None or not case.provider or not case.external_ticket_id:
             return None
-        if case.status == "Closed":
-            logger.info("avisar_ticket_creado: case=%s ya se cerro, no se pide", case_id)
+        if case.status in TERMINAL_STATUSES:
+            logger.info("avisar_ticket_creado: case=%s ya termino, no se pide", case_id)
             return {"enviado": False, "motivo": "ya_cerrado"}
-        cuerpo = {
-            "tenant": tenant,
-            "evento": "ticket_creado_cliente",
-            "clave": f"ticket:{case.provider}:{case.external_ticket_id}",
-            "caso_id": str(case.id),
-            "servicio": case.external_service_id or None,
-            "contexto": {"ticket_numero": case.external_ticket_id, "ticket_asunto": case.name},
-        }
+        #  SOLO el numero: el motor lo lee en el ISP y de ahi salen servicio,
+        #  asunto y clave (auditorias de frontera y PII, 30/10/2026). El asunto
+        #  del caso no viaja: se puede editar con texto libre antes de enviar.
+        cuerpo = {"tenant": tenant, "evento": "ticket_creado_cliente",
+                  "ticket": case.external_ticket_id}
     finally:
         clear_rls_context()
     datos = avisos_al_cliente.pedir(url, cuerpo, f"ticket case={case_id}")

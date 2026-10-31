@@ -180,6 +180,12 @@ def listar_abiertos(config, tenant, ahora=None) -> list[dict]:
     return filas
 
 
+class SinHerramienta(LookupError, RuntimeError):
+    """La empresa no declara la herramienta. Es RuntimeError para quien ya lo
+    capturaba asi, y LookupError para quien distingue "no configurado" de "el
+    ISP no contesto" (avisos.hecho_del_ticket)."""
+
+
 def leer_ticket(config, tenant, id_ticket) -> dict:
     """
     Un ticket suelto, para reconciliar uno que salio de la ventana.
@@ -191,7 +197,7 @@ def leer_ticket(config, tenant, id_ticket) -> dict:
     """
     herr = _herramienta(config, "consultar_ticket_por_id")
     if herr is None:
-        raise RuntimeError(
+        raise SinHerramienta(
             "falta 'consultar_ticket_por_id' en el catalogo: sin ella no se "
             "puede leer un ticket por su numero")
     return ejecutor_http.ejecutar(
@@ -266,18 +272,39 @@ def contacto_del_servicio(config, tenant: str, servicio: str) -> dict | None:
     nucleo/seguimiento/avisos.py en memoria y lo descarta. El campo es el que
     la empresa declara como su identidad (autenticacion.campo_identidad).
     """
+    #  De LECTURA: el catalogo tambien declara el filtro en una que escribe
+    #  ('actualizar_sn_onu', PUT). La frontera la frenaria igual; aca ni se elige.
     herr = next((h for h in config.herramientas
-                 if h.tipo == "http" and "id_servicio" in (h.filtros_verificados or {})),
+                 if h.tipo == "http" and getattr(h, "metodo", "GET") == "GET"
+                 and getattr(h, "solo_lectura", False)
+                 and "id_servicio" in (h.filtros_verificados or {})),
                 None)
     if herr is None:
         return None
     datos = ejecutor_http.ejecutar(herr, {"id_servicio": str(servicio)}, tenant,
                                    variables_tenant=config.variables_tenant)
     fila = (datos.get("results") or [None])[0] if isinstance(datos, dict) else None
-    if not isinstance(fila, dict):
+    #  Que la fila sea LA pedida: un filtro que el ISP ignora devuelve el primer
+    #  cliente de la empresa con aspecto de respuesta correcta, y el aviso le
+    #  llegaria a otra persona sin nadie en el medio (auditorias, 30/10/2026).
+    if not isinstance(fila, dict) or str(fila.get("id_servicio") or "") != str(servicio):
         return None
     return {"nombre": fila.get("nombre") or "",
             "telefono": fila.get(config.autenticacion.campo_identidad) or ""}
+
+
+def ticket_para_aviso(config, tenant: str, numero: str) -> dict | None:
+    """
+    {servicio, asunto} de un ticket del ISP, para confirmar el hecho de un
+    aviso (avisos.hecho_del_ticket). None si el ISP devolvio otro ticket o
+    ninguno. LookupError si la empresa no declara como leer un ticket.
+    La descripcion -- texto libre -- no sale de aca.
+    """
+    t = leer_ticket(config, tenant, numero)
+    if not isinstance(t, dict) or str(t.get("id_ticket") or "") != str(numero):
+        return None
+    servicio = t.get("servicio") if isinstance(t.get("servicio"), dict) else {}
+    return {"servicio": str(servicio.get("id_servicio") or ""), "asunto": t.get("asunto") or ""}
 
 
 def casos_de_este_proveedor(config, tenant: str) -> list[dict]:
