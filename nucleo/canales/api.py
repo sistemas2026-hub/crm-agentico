@@ -467,6 +467,11 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
         intentos, int(pendiente["max_intentos"]))
     persistencia.resolver_verificacion(
         tenant, pendiente["id"], resultado, por_que, medicion_posterior, intentos)
+    if resultado == verificacion_accion.NO_CONFIRMADA:
+        #  CONDICION 4 (PRD §2, Fase D): el efecto no aparecio. La herramienta
+        #  pierde la autonomia ganada en esta empresa, si la tenia.
+        _degradar_autonomia(tenant, pendiente["herramienta"], "una verificacion no confirmo el efecto",
+                            {"verificacion": str(pendiente["id"])})
     # El 'por que' queda en la fila (resolver_verificacion), no en el log: lo
     # arma la medicion de un equipo externo y puede traer sus datos.
     registrar("verificacion", "accion comprobada",
@@ -2080,6 +2085,12 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.vincular_accion_a_conversacion(
                         tenant, pendiente["accion_id"], conversation_id,
                         aprob.vigencia_minutos if aprob else None)
+                    #  AUTONOMIA GANADA (31/10/2026, PRD §2, Fase C). Recien
+                    #  ligada a su conversacion la accion se puede aprobar; si
+                    #  esta empresa le dio autonomia a la herramienta, la firma
+                    #  la promocion y recorre la misma cadena que una persona.
+                    #  Sin promocion vigente no pasa nada: queda en la cola.
+                    _ejecutar_si_es_autonoma(config, tenant, pendiente["accion_id"], herr)
                 except Exception as e:
                     # La accion existe y sigue sin conversacion: no se puede
                     # aprobar, que es el lado seguro. Se registra para que no
@@ -8588,6 +8599,8 @@ def conversaciones_reiniciar_equipo(id_conversacion):
     # ADMIN, conversacion abierta -- siguen siendo las de esta ruta; la cadena
     # se suma, no las reemplaza.
     quien = autor_nombre or autor_id
+    if _aprobador_reservado(quien):
+        return jsonify({"error": "Ese nombre de aprobador esta reservado."}), 400
     argumentos = {"sn_onu": serial}
     sesion_min = Sesion(identificador_canal=quien)
     sesion_min.sn_onu = serial
@@ -9514,15 +9527,31 @@ def acciones_propuesta_aprobar(id_accion):
         # comprueba que llegue.
         return jsonify({"error": "Falta 'revisado_por': una ejecucion aprobada "
                                  "sin responsable no se puede auditar."}), 400
+    if _aprobador_reservado(quien):
+        return jsonify({"error": "Ese nombre de aprobador esta reservado."}), 400
 
     return _aprobar_y_ejecutar(config, tenant, id_accion, quien)
 
 
 def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
+    """La respuesta Flask de _aprobar_y_ejecutar_datos: las dos entradas
+    humanas (la cola y el boton de la Bandeja) la usan tal cual."""
+    datos, codigo = _aprobar_y_ejecutar_datos(config, tenant, id_accion, quien)
+    return jsonify(datos), codigo
+
+
+def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *,
+                              al_bloquear: str = "vencer") -> tuple[dict, int]:
     """
     Los cuatro pasos de §9.3 sobre una accion ya propuesta: reservar (que es
     aprobar, y para una irreversible escribe el sello), revalidar, ejecutar,
-    resolver. Devuelve la respuesta Flask.
+    resolver. Devuelve (datos, codigo http).
+
+    TAMBIEN la usa la autonomia ganada (31/10/2026, PRD §2, Fase C): la misma
+    cadena, con 'autonomia_ganada:<promocion>' como quien. Para ella, una
+    guarda que frena la accion la devuelve a la cola de una persona
+    (al_bloquear='liberar') en vez de vencerla: al cliente se le dijo que
+    quedo pedido, y alguien tiene que verla.
 
     M06-F: vive aparte del endpoint porque hay DOS entradas humanas a la misma
     cadena -- aprobar una propuesta de la cola, y el boton de reinicio de la
@@ -9534,10 +9563,10 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         reserva = persistencia.reservar_accion(tenant, id_accion, quien)
     except Exception as e:
         registrar("acciones", "fallo al reservar la accion", error=e)
-        return jsonify({"error": "No se pudo tomar la accion."}), 500
+        return ({"error": "No se pudo tomar la accion."}), 500
 
     if not reserva["ok"]:
-        return jsonify(_NEGATIVAS.get(reserva["motivo"], {
+        return (_NEGATIVAS.get(reserva["motivo"], {
             "error": "No se pudo aprobar esta accion.",
             "codigo": reserva["motivo"]})), _CODIGO_HTTP.get(reserva["motivo"], 409)
 
@@ -9550,7 +9579,7 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         # se ejecuta, y vuelve a pendiente: puede que alguien este editando el
         # catalogo justo ahora.
         persistencia.liberar_accion(tenant, id_accion, "herramienta_fuera_de_catalogo")
-        return jsonify({"error": "La herramienta de esta accion ya no esta "
+        return ({"error": "La herramienta de esta accion ya no esta "
                                  "disponible para aprobacion.",
                         "codigo": "herramienta_fuera_de_catalogo"}), 409
 
@@ -9562,7 +9591,7 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         # vuelve a estar disponible: el operador reintenta cuando la API
         # responda.
         persistencia.liberar_accion(tenant, id_accion, veredicto.codigo)
-        return jsonify({"error": "No se pudo comprobar que esta accion siga "
+        return ({"error": "No se pudo comprobar que esta accion siga "
                                  "aplicando. No se ejecuto nada: se puede "
                                  "reintentar.",
                         "codigo": "revalidacion_indeterminada",
@@ -9570,7 +9599,7 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
 
     if veredicto.desenlace == revalidacion.NO_CUMPLE:
         persistencia.vencer_accion(tenant, id_accion, veredicto.codigo, conv)
-        return jsonify({"error": veredicto.detalle or "Esta accion ya no aplica.",
+        return ({"error": veredicto.detalle or "Esta accion ya no aplica.",
                         "codigo": "revalidacion_fallida",
                         "detalle": veredicto.codigo, "estado": "vencida"}), 409
 
@@ -9594,7 +9623,7 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         if not fila or fila.get("estado") != "ejecutando":
             # No se ejecuto nada: vuelve a estar disponible.
             persistencia.liberar_accion(tenant, id_accion, "relectura_fallida")
-            return jsonify({"error": "No se pudo releer la accion aprobada. No "
+            return ({"error": "No se pudo releer la accion aprobada. No "
                                      "se ejecuto nada: se puede reintentar.",
                             "codigo": "relectura_fallida", "estado": "pendiente"}), 503
         resultado, codigo_error, verificacion_pendiente =             motor.ejecutar_accion_irreversible(config, fila, tenant)
@@ -9607,8 +9636,13 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
     # queda como 'ejecutada_fallo'. Queda 'vencida' con el codigo del bloqueo:
     # la aprobacion era para ESE momento y no se reutiliza sola.
     if codigo_error in motor.CODIGOS_DE_BLOQUEO:
+        if al_bloquear == "liberar":
+            persistencia.liberar_accion(tenant, id_accion, codigo_error)
+            return ({"ok": False, "estado": "pendiente", "codigo": codigo_error,
+                     "error": "Una guarda del sistema freno la ejecucion autonoma: "
+                              "queda para que una persona la apruebe."}), 409
         persistencia.vencer_accion(tenant, id_accion, codigo_error, conv)
-        return jsonify({"ok": False, "estado": "vencida", "codigo": codigo_error,
+        return ({"ok": False, "estado": "vencida", "codigo": codigo_error,
                         "error": (resultado or {}).get("error")
                                  or "Una guarda del sistema freno esta accion.",
                         "resultado": resultado}), 409
@@ -9637,6 +9671,14 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         registrar("acciones", "la accion se ejecuto y no se pudo guardar el desenlace",
                   error=e)
 
+    if codigo_error:
+        #  CONDICION 4 (PRD §2, Fase D): una ejecucion que fallo o quedo
+        #  incierta degrada la autonomia de esa herramienta en esta empresa,
+        #  la haya ejecutado una persona o la autonomia. No-op si no la tenia.
+        _degradar_autonomia(tenant, herramienta.nombre,
+                            "una ejecucion fallo o quedo incierta",
+                            {"accion": str(id_accion), "codigo": str(codigo_error)})
+
     if verificacion_pendiente and conv and not codigo_error:
         # El efecto salio EN ESTA pasada (reiniciar_ont): se comprueba despues,
         # contra la conversacion de la que salio la propuesta.
@@ -9648,15 +9690,73 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
                       error=e)
 
     if incierto:
-        return jsonify({"ok": False, "estado": "desconocida",
+        return ({"ok": False, "estado": "desconocida",
                         "error_ejecucion": codigo_error,
                         "mensaje": "No se sabe si la accion llegó a hacerse. NO se "
                                    "reintenta: hay que comprobarlo a mano."}), 502
     if codigo_error:
-        return jsonify({"ok": False, "estado": "ejecutada_fallo",
+        return ({"ok": False, "estado": "ejecutada_fallo",
                         "error_ejecucion": codigo_error, "resultado": resultado}), 502
 
-    return jsonify(_salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion))
+    return _salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion), 200
+
+
+def _degradar_autonomia(tenant: str, herramienta: str, motivo: str, evidencia: dict) -> None:
+    """Condicion 4 (PRD §2): baja la autonomia ganada de la herramienta. Nunca
+    rompe a quien llama: si no se puede escribir, queda en el log (y la
+    proxima ejecucion autonoma igual exige que la promocion siga vigente)."""
+    try:
+        from nucleo.persistencia import autonomia_ganada as registro
+
+        fila = registro.degradar(tenant, herramienta, motivo, evidencia)
+        if fila:
+            registrar("autonomia_ganada", "autonomia degradada por el codigo",
+                      tenant=tenant, herramienta=herramienta)
+    except (Exception, SystemExit) as e:                        # noqa: BLE001
+        registrar("autonomia_ganada", "no se pudo degradar la autonomia",
+                  tenant=tenant, herramienta=herramienta, error=e)
+
+
+def _aprobador_reservado(quien: str) -> bool:
+    """Ninguna persona firma como la autonomia (aprobacion.PREFIJO_AUTONOMIA)."""
+    from nucleo.seguridad import aprobacion
+
+    return (quien or "").strip().lower().startswith(aprobacion.PREFIJO_AUTONOMIA)
+
+
+def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -> dict | None:
+    """
+    Si la herramienta tiene autonomia ganada vigente en esta empresa, ejecuta
+    la propuesta recien ligada a su conversacion por la MISMA cadena que una
+    aprobacion humana, firmada por la promocion (PRD §2, Fase C). None si no
+    es autonoma. Nunca rompe el turno.
+
+    Solo irreversibles con aprobacion humana: son las unicas que pasan por
+    frontera.critica(), que es donde se vuelve a exigir -- en el instante de
+    ejecutar -- que la promocion siga vigente, ademas del interruptor y el
+    techo.
+    """
+    if herramienta is None or not getattr(herramienta, "aprobacion_humana", False) \
+            or not getattr(herramienta, "irreversible", False):
+        return None
+    from nucleo.seguridad import aprobacion, autonomia_ganada
+    from nucleo.persistencia import autonomia_ganada as registro
+
+    vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente)
+    if not vigente.get("autonoma"):
+        return None
+    try:
+        datos, codigo = _aprobar_y_ejecutar_datos(
+            config, tenant, accion_id, f"{aprobacion.PREFIJO_AUTONOMIA}{vigente['promocion_id']}",
+            al_bloquear="liberar")
+    except Exception as e:                                       # noqa: BLE001
+        registrar("autonomia_ganada", "la ejecucion autonoma fallo", tenant=tenant,
+                  herramienta=herramienta.nombre, error=e)
+        return {"ok": False, "estado": "desconocido"}
+    registrar("autonomia_ganada", "accion ejecutada por autonomia ganada", tenant=tenant,
+              herramienta=herramienta.nombre, http=codigo, ok=bool(datos.get("ok")),
+              estado=datos.get("estado"))
+    return datos
 
 
 def _confirmar_efecto(config, tenant, herramienta, reservada, codigo_error):

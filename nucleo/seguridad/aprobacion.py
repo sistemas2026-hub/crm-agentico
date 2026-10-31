@@ -66,6 +66,30 @@ SIN_ORIGEN = "APROBACION_SIN_ORIGEN"
 SIN_HUELLA = "APROBACION_SIN_HUELLA"
 SIN_SELLO = "APROBACION_SIN_SELLO"
 ALTERADA = "APROBACION_ALTERADA"
+AUTONOMIA_NO_VIGENTE = "AUTONOMIA_NO_VIGENTE"
+
+#  LA AUTONOMIA GANADA COMO APROBADOR  --  31/10/2026 (PRD §2, Ola 3, Fase C)
+#  -------------------------------------------------------------------------
+#  Una accion que una empresa promovio (nucleo/seguridad/autonomia_ganada.py)
+#  recorre la MISMA cadena que una aprobada por una persona: reserva con sello,
+#  revalidacion, frontera.critica, idempotencia. Lo unico que cambia es quien
+#  firma: 'autonomia_ganada:<id de la promocion>'. Ese aprobador vale SOLO si,
+#  en el instante de ejecutar, la promocion vigente de (empresa, herramienta)
+#  es EXACTAMENTE esa -- leida sin cache, fallando cerrado. Una degradada, una
+#  retirada, otra promocion, o la base caida: no vale.
+#
+#  El prefijo es reservado: ninguna entrada humana lo acepta como nombre
+#  (api.py::_aprobador_reservado), asi que nadie puede firmar como la
+#  autonomia. Y el interruptor y el techo de critica() siguen por encima.
+PREFIJO_AUTONOMIA = "autonomia_ganada:"
+
+
+def _autonomia_vigente(tenant: str, herramienta: str) -> dict:
+    """La promocion vigente, sin cache. Se sustituye en las pruebas."""
+    from nucleo.persistencia import autonomia_ganada as registro
+    from nucleo.seguridad import autonomia_ganada
+
+    return autonomia_ganada.vigente(tenant, herramienta, leer=registro.vigente)
 
 #  M06-F (22/09/2026): el estado en que una aprobacion VALE es el del ciclo B5
 #  de origin, no uno propio. En B5 aprobar es RESERVAR: una persona pasa la fila
@@ -223,5 +247,14 @@ def veredicto(aprobacion: Aprobacion | None, *, tenant: str, herramienta: str,
                          "la aprobacion no corresponde a esta accion: cambio el "
                          "tenant, el origen, la herramienta, los argumentos o "
                          "quien aprobo desde que se aprobo")
+    if aprobacion.aprobador.startswith(PREFIJO_AUTONOMIA):
+        promocion = aprobacion.aprobador[len(PREFIJO_AUTONOMIA):]
+        vigente = _autonomia_vigente(tenant.strip(), herramienta)
+        if not vigente.get("autonoma") or vigente.get("promocion_id") != promocion:
+            return Veredicto(False, AUTONOMIA_NO_VIGENTE,
+                             f"la autonomia de '{herramienta}' ya no esta vigente "
+                             f"en esta empresa ({vigente.get('estado')})")
+        return Veredicto(True, "autonomia_vigente",
+                         f"autonomia ganada vigente ({promocion})")
     return Veredicto(True, "aprobacion_vigente",
                      f"aprobada por {aprobacion.aprobador}")

@@ -1777,11 +1777,36 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
                     f"esperando aprobacion ({resumen}). No lo propongas otra "
                     f"vez ni digas que se hizo: decile a quien pregunta que ya "
                     f"quedo pedido y que todavia falta que alguien lo apruebe."}
+    if _tiene_autonomia_ganada(tenant, herramienta):
+        #  PRD §2, Fase C: esta empresa le dio autonomia a la herramienta. Se
+        #  ejecuta apenas termina el turno, por la misma cadena que una
+        #  aprobacion, y si una guarda la frena vuelve a la cola de una
+        #  persona. Por eso se dice "quedo pedido", nunca "ya se hizo".
+        return {"accion_id": accion_id, "estado": "en_curso", "resumen": resumen,
+                "instruccion_interna": f"Esta accion se ejecuta automaticamente "
+                    f"apenas termines de responder, si las comprobaciones de "
+                    f"seguridad lo permiten ({resumen}). Decile que ya quedo "
+                    f"pedido y que en unos minutos se comprueba el resultado. NO "
+                    f"digas que ya se hizo ni que funciono: eso lo confirma la "
+                    f"verificacion."}
     return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
            "instruccion_interna": f"Decile a quien te pidio esto que la accion "
                f"quedo pendiente de aprobacion ({resumen}) -- todavia NO se "
                f"ejecuto, no confirmes que ya se hizo. Alguien tiene que "
                f"aprobarla desde la pantalla correspondiente."}
+
+
+def _tiene_autonomia_ganada(tenant: str, herramienta) -> bool:
+    """Si la herramienta es autonoma en esta empresa AHORA (falla cerrado).
+    Solo para decir la verdad en la respuesta: quien decide si se ejecuta es
+    api._ejecutar_si_es_autonoma, y quien lo autoriza, frontera.critica."""
+    if not (getattr(herramienta, "irreversible", False) and getattr(herramienta, "aprobacion_humana", False)):
+        return False
+    from nucleo.persistencia import autonomia_ganada as registro
+    from nucleo.seguridad import autonomia_ganada
+
+    return bool(autonomia_ganada.vigente(tenant, herramienta.nombre,
+                                         leer=registro.vigente).get("autonoma"))
 
 
 def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
