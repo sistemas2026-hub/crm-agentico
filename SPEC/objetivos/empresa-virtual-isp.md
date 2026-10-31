@@ -6,6 +6,9 @@
 > El **qué** y el **por qué** del multi-ISP viven en [PRD.md §8.13](../../PRD.md)
 > y en [plataforma-multi-isp.md](plataforma-multi-isp.md); acá no se repiten.
 > Si difieren, manda el PRD.
+> **La fase de reconstruccion visual vive en su propia ficha:**
+> [sede-virtual-reconstruccion.md](sede-virtual-reconstruccion.md)
+> (31/10/2026). Alla se decide con que se dibuja; aca sigue el que y el por que.
 
 El Centro de Mando pasa de ser una pantalla que dibuja agentes a ser una
 **empresa virtual isométrica configurable por empresa**: departamentos, puestos,
