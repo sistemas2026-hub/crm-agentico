@@ -16,6 +16,8 @@ publicado un dia, para la pantalla de Programacion. Cada punto, con su prueba:
   D  el DIA: lo programado para otro dia no entra; lo terminado ese dia si,
      lo terminado otro dia no.
   P  solo quien gestiona, con fecha, y solo su empresa.
+  M  DONDE ESTA CADA CUADRILLA (31/10/2026): la posicion mas fresca de su
+     gente, o nada --que no es lo mismo que «no se movio»--.
   I  LOS INDICADORES (31/10/2026): cuadrillas, en camino, completadas,
      pendientes, el cumplimiento y las que tienen novedad, calculados aca.
   R  POR REVISAR (31/10/2026): lo terminado en campo y sin cerrar de un dia
@@ -591,6 +593,63 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     assert _filas(d)[asignada.numero]["direccion"] == "Calle 38 # 78-33"
     assert texto.count("Calle 38") == 1, "la direccion, solo en la orden asignada"
     assert "3113683499" not in texto, "el telefono, nunca"
+
+
+# ---------------------------------------------------------------------------
+# M · donde esta cada cuadrilla
+# ---------------------------------------------------------------------------
+
+def _con_horario(org):
+    from business_hours.models import BusinessCalendar
+    from campo.cuadrillas import ConfiguracionDeReparto
+
+    cols = ("monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday")
+    cal = BusinessCalendar.objects.create(
+        org=org, name="Cuadrillas", timezone="America/Bogota",
+        **{f"{c}_open": dt.time(0, 1) for c in cols},
+        **{f"{c}_close": dt.time(23, 58) for c in cols})
+    fila, _ = ConfiguracionDeReparto.objects.get_or_create(org=org)
+    fila.calendario_de_cuadrillas = cal
+    fila.save(update_fields=["calendario_de_cuadrillas"])
+
+
+def test_m_la_cuadrilla_dice_donde_esta_con_la_posicion_mas_fresca(
+        org_a, version, norte, admin_profile, user_profile):
+    """Una cuadrilla es varias personas y UN punto. Se toma la mas reciente y
+    se dice de quien es: promediar coordenadas inventaria un lugar donde no
+    hay nadie, y la mas vieja diria que esta donde ya no esta."""
+    from campo import ubicacion_de_cuadrilla as UB
+
+    _con_horario(org_a)
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile, user_profile)
+    _orden(org_a, version, de=admin_profile)
+    ahora = timezone.make_aware(dt.datetime.combine(LUNES, dt.time(10, 0)))
+    UB.registrar(org_a, admin_profile, latitud=10.9, longitud=-74.7,
+                 medida_en=ahora - dt.timedelta(minutes=20), ahora=ahora)
+    UB.registrar(org_a, user_profile, latitud=10.95, longitud=-74.75,
+                 medida_en=ahora - dt.timedelta(minutes=3), ahora=ahora,
+                 bateria=64)
+
+    with mock.patch("django.utils.timezone.now", return_value=ahora):
+        c = D.del_dia(org_a, LUNES)["cuadrillas"][0]
+
+    assert c["posicion"]["latitud"] == 10.95, "la mas reciente, no la primera"
+    assert c["posicion"]["minutos"] == 3 and c["posicion"]["fresca"] is True
+    assert c["posicion"]["bateria"] == 64
+    assert c["posicion"]["de"], "dice de quien es el punto"
+
+
+def test_m2_sin_nadie_que_reporte_la_posicion_es_nada_no_un_punto(
+        org_a, version, norte, admin_profile):
+    """«Sin señal» NO es «no se movio»: no se dibuja un pin inventado."""
+    _con_horario(org_a)
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    _orden(org_a, version, de=admin_profile)
+
+    c = D.del_dia(org_a, LUNES)["cuadrillas"][0]
+
+    assert c["posicion"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@
   import SeguimientoDeCuadrillas from '$lib/supervisor/SeguimientoDeCuadrillas.svelte';
   import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
   import PorRevisar from '$lib/supervisor/PorRevisar.svelte';
+  import MapaDeCuadrillas from '$lib/supervisor/MapaDeCuadrillas.svelte';
   import FranjaDeIndicadores from '$lib/supervisor/FranjaDeIndicadores.svelte';
   import AlertasDelDia from '$lib/supervisor/AlertasDelDia.svelte';
   import ResumenDelDia from '$lib/supervisor/ResumenDelDia.svelte';
@@ -106,6 +107,13 @@
   const kitsIncompletos = $derived(
     data.errorMaterial || !material ? null : (material?.cuentas?.con_faltantes ?? 0)
   );
+
+  /** Hoy en la hora de la empresa: el mapa solo tiene sentido para hoy. */
+  function hoyEnBogota() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  }
 
   /** @param {Event} e */
   function cambiarDia(e) {
@@ -216,6 +224,14 @@
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
             <span class="snoc-label">Seguimiento de las cuadrillas</span>
             <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
+
+            <!-- EL MAPA (31/10/2026): sale de lo mismo que ya se carga, así
+                 que el sondeo de cada 15 s lo mueve solo. Solo se dibuja el
+                 día de hoy: una fecha pasada no tiene posiciones, y mostrar
+                 las de ahora bajo otra fecha seria mentir. -->
+            {#if data.dia === hoyEnBogota()}
+              <MapaDeCuadrillas cuadrillas={publicado.cuadrillas} />
+            {/if}
             {#if data.seguimiento}
               <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Que cierre solo
                    NO se enciende acá: se le delega desde su chat, con el nivel

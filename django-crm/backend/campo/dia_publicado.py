@@ -309,7 +309,7 @@ def del_dia(org, fecha) -> dict:
     """Lo publicado para `fecha`. Ver el encabezado.
 
         {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, zonas, tope,
-                                  ordenes: [fila]}],
+                                  ordenes: [fila], posicion}],
          "con_alguien_que_no_sale": [fila], "esperan": [orden],
          "por_revisar": [fila],
          "cuentas": {publicadas, por_el_supervisor, por_personas,
@@ -601,6 +601,34 @@ def del_dia(org, fecha) -> dict:
         return ({"numero": o.numero, "minutos": salud[o.id]["minutos_desde_la_referencia"]}
                 if o is not None else None)
 
+    #  DONDE ESTA CADA CUADRILLA (31/10/2026). Va en lo que Programacion ya
+    #  carga --y ya refresca cada 15 s-- en vez de en una ruta aparte: el mapa
+    #  se actualiza solo con el sondeo que existe, y no se abre una segunda
+    #  superficie de permisos sobre el dato mas sensible. Esta ruta ya exige
+    #  rol de gestion (`dia_publicado_views._exigir_gestion`).
+    try:
+        from campo import ubicacion_de_cuadrilla as UB
+        posiciones = UB.de_las_cuadrillas(org, fecha, ahora=ahora)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudieron leer las posiciones")
+        posiciones = {}
+
+    def posicion_de(j):
+        """La posicion de la cuadrilla: la MAS RECIENTE de su gente.
+
+        Una cuadrilla es varias personas y un punto en el mapa. Se toma la mas
+        fresca y se dice de quien es: promediar coordenadas inventaria un lugar
+        donde no hay nadie, y mostrar la mas vieja seria decir que la cuadrilla
+        esta donde ya no esta."""
+        mejor = None
+        for r in reciben[j.id]:
+            p = posiciones.get(str(r["profile"].id))
+            if p is None:
+                continue
+            if mejor is None or p["minutos"] < mejor["minutos"]:
+                mejor = {**p, "de": _nombre(r["profile"])}
+        return mejor
+
     def seguimiento_de(j):
         lista = por_jornada[j.id]
         try:
@@ -642,6 +670,9 @@ def del_dia(org, fecha) -> dict:
             "tope": j.cuadrilla.tope_diario or tope,
             "ordenes": filas_de(por_jornada[j.id]),
             "personas": personas[j.id],
+            #  None cuando nadie de la cuadrilla reporto: la pantalla dice
+            #  «sin señal», que NO es lo mismo que «no se movio».
+            "posicion": posicion_de(j),
             **seguimiento_de(j),
         } for j in jornadas],
         "con_alguien_que_no_sale": [fila(o) for o in en_orden(sin_jornada)],
