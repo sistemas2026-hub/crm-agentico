@@ -127,7 +127,7 @@ def test_c2_con_las_vueltas_agotadas_no_reagenda_mas(org_a, admin_user, motor):
     with mock.patch("requests.post", return_value=_R({"enviado": False, "motivo": "todavia_no",
                                                      "reintentar_en": 900})), \
             mock.patch.object(tasks.avisar_ticket_creado, "apply_async") as reagendar:
-        tasks.avisar_ticket_creado(str(caso.id), str(org_a.id), 3)
+        tasks.avisar_ticket_creado(str(caso.id), str(org_a.id), 40)
     assert reagendar.call_count == 0
 
 

@@ -17,9 +17,14 @@ import os
 
 logger = logging.getLogger(__name__)
 
-#: Cuantas veces se reagenda un aviso que el motor dejo para mas tarde. Una
-#: noche alcanza con una vuelta; el tope evita una tarea viva para siempre.
-MAX_VUELTAS = 3
+#: Cuantas veces se reagenda un aviso que el motor dejo para mas tarde. Las
+#: esperas se parten en tramos de ESPERA_MAXIMA_S (una noche son ~14), y el
+#: tope evita una tarea viva para siempre.
+MAX_VUELTAS = 40
+#: Por debajo del visibility_timeout de Redis (3600 s por defecto): una tarea
+#: con una espera mas larga se reentrega cada hora, y a las 7:00 despertaban
+#: una docena de copias del mismo aviso (auditor independiente, 31/10/2026).
+ESPERA_MAXIMA_S = 45 * 60
 
 
 def pedir(url, cuerpo, que):
@@ -49,6 +54,6 @@ def reagendar_en(datos, vuelta):
     if vuelta >= MAX_VUELTAS:
         return None
     try:
-        return min(max(int(datos.get("reintentar_en")), 5), 24 * 3600)
+        return min(max(int(datos.get("reintentar_en")), 5), ESPERA_MAXIMA_S)
     except (TypeError, ValueError):
         return 60

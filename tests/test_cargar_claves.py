@@ -73,6 +73,20 @@ comprobar(nuevo["herramientas"] == BASE["herramientas"], "el catalogo no se toca
 comprobar([c["clave"] for c in cambios] == ["capacidad"], "el cambio se informa con su clave")
 comprobar(BASE == intacta, "el documento de la base no se modifica en el lugar")
 
+print("\nun campo de un bloque, sin tocar el resto del bloque (31/10/2026)")
+base_aut = {"autenticacion": {"campo_identidad": "telefono", "retos_nivel_2": ["solo-la-base"]}}
+semilla_aut = {"autenticacion": {"campo_identidad": "otro", "indicativo_pais": "57"}}
+nuevo, cambios = copiar_claves(base_aut, semilla_aut, ["autenticacion.indicativo_pais"])
+comprobar(nuevo["autenticacion"] == {"campo_identidad": "telefono", "retos_nivel_2": ["solo-la-base"],
+                                     "indicativo_pais": "57"},
+          "entra el campo pedido; lo que solo la base tiene y el resto del bloque quedan")
+comprobar([c["clave"] for c in cambios] == ["autenticacion.indicativo_pais"], "y se informa con su clave")
+nuevo, _ = copiar_claves({}, semilla_aut, ["autenticacion.indicativo_pais"])
+comprobar(nuevo == {"autenticacion": {"indicativo_pais": "57"}},
+          "si la base no tenia el bloque, se crea con ese campo solo")
+comprobar(lanza(lambda: copiar_claves(base_aut, semilla_aut, ["autenticacion.no_existe"])),
+          "un campo que no esta en el YAML es un error")
+
 print("\nun campo de un elemento de una lista, por su nombre")
 nuevo, cambios = copiar_claves(BASE, SEMILLA, ["herramientas[reiniciar_ont].exige_previas"])
 reinicio = next(h for h in nuevo["herramientas"] if h["nombre"] == "reiniciar_ont")

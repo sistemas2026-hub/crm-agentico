@@ -38,7 +38,8 @@ export const NO_LISTO = /** @type {Record<string, string>} */ ({
   canal_apagado: 'WhatsApp no está conectado para esta empresa.',
   meta_no_contesta: 'Meta no respondió al revisar la plantilla.',
   plantilla_no_aprobada: 'La plantilla del aviso todavía no está aprobada por Meta.',
-  plantilla_no_coincide: 'La plantilla aprobada no coincide con los datos elegidos.'
+  plantilla_no_coincide: 'La plantilla aprobada no coincide con los datos elegidos.',
+  sin_indicativo: 'Falta el indicativo del país de la empresa: sin él no se le puede escribir a ningún celular del ISP.'
 });
 
 /** Por qué un aviso a un cliente no salió. */

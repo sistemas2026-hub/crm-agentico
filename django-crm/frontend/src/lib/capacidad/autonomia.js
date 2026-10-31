@@ -28,6 +28,18 @@ export function textoDeFalta(f) {
         : `Aprobadas sin cambios: ${pct(f.tiene)}; hace falta ${pct(f.necesita)}.`;
     case 'cero_no_confirmadas':
       return `${f.tiene} ${f.tiene === 1 ? 'vez' : 'veces'} el efecto no se confirmó después de ejecutarla: tiene que ser cero.`;
+    case 'minimo_confirmadas':
+      return `Reinicios con el efecto confirmado: ${f.tiene} de ${f.necesita}.`;
+    case 'tasa_minima_confirmacion':
+      return f.tiene === null
+        ? `Ningún efecto se pudo medir todavía: hace falta al menos ${pct(f.necesita)} confirmados.`
+        : `Efectos confirmados: ${pct(f.tiene)} de los que se pudieron medir; hace falta ${pct(f.necesita)}.`;
+    case 'proporcion_medida':
+      return f.tiene === null
+        ? 'Ningún efecto se pudo medir todavía.'
+        : `Solo se pudo medir el ${pct(f.tiene)} de los efectos (el cliente no volvió a escribir); hace falta ${pct(f.necesita)}.`;
+    case 'cero_degradaciones':
+      return `Perdió la autonomía sola en esta ventana: vuelve a poder dársela cuando la ventana lo deje atrás.`;
     case 'cero_fallidas':
       return `${f.tiene} ${f.tiene === 1 ? 'ejecución falló' : 'ejecuciones fallaron'} o quedaron inciertas: tiene que ser cero.`;
     default:

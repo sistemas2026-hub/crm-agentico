@@ -21,6 +21,14 @@ describe('textoDeFalta', () => {
     expect(textoDeFalta({ condicion: 'cero_fallidas', tiene: 2, necesita: 0 })).toMatch(/^2 ejecuciones fallaron/);
   });
 
+  it('las condiciones de verificación se dicen en palabras', () => {
+    expect(textoDeFalta({ condicion: 'minimo_confirmadas', tiene: 4, necesita: 20 })).toBe(
+      'Reinicios con el efecto confirmado: 4 de 20.');
+    expect(textoDeFalta({ condicion: 'proporcion_medida', tiene: 0.5, necesita: 0.8 })).toMatch(/50%/);
+    expect(textoDeFalta({ condicion: 'cero_degradaciones', tiene: 1, necesita: 0 })).toMatch(/Perdió la autonomía/);
+    expect(textoDeFalta({ condicion: 'tasa_minima_confirmacion', tiene: 0.8, necesita: 0.95 })).toMatch(/80%.*95%/);
+  });
+
   it('una condición nueva se muestra con su código', () => {
     expect(textoDeFalta({ condicion: 'otra', tiene: 1, necesita: 2 })).toBe('otra: 1 (hace falta 2).');
   });

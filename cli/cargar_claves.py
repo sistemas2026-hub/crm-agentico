@@ -12,7 +12,8 @@ hoy la salida era no cargar nada, y lo nuevo del repo quedaba sin llegar.
 Esto copia del YAML a la base SOLO las claves que se nombran, por el mismo
 camino que el editor de la interfaz (nucleo/config/editor.py::_editar): lee la
 config vigente de la base, reemplaza esas claves, VALIDA el resultado entero
-contra TenantConfig y guarda en una transaccion. Lo demas queda byte a byte.
+contra TenantConfig y guarda en una transaccion. Lo demas no se toma del YAML
+(ojo: el editor reescribe los valores por defecto del esquema, CLAUDE.md D7).
 
     py -3.13 cli/cargar_claves.py tenants/rapilink.config.yaml \\
         --clave capacidad \\
@@ -21,6 +22,8 @@ contra TenantConfig y guarda en una transaccion. Lo demas queda byte a byte.
 Sin --aplicar solo muestra que cambiaria. Formas de clave:
 
     capacidad                                   una clave de primer nivel
+    autenticacion.indicativo_pais               un campo de un bloque, sin tocar
+                                                los demas campos del bloque
     herramientas[reiniciar_ont].exige_previas   un campo de un elemento de una
                                                 lista, ubicado por su 'nombre'
 
@@ -45,16 +48,27 @@ sys.path.insert(0, str(RAIZ))
 
 _EN_LISTA = re.compile(r"^(?P<lista>[a-z_]+)\[(?P<nombre>[^\]]+)\]\.(?P<campo>[a-z_]+)$")
 _SIMPLE = re.compile(r"^[a-z_]+$")
+_EN_BLOQUE = re.compile(r"^(?P<bloque>[a-z_]+)\.(?P<campo>[a-z_]+)$")
 
 
 class ClaveInvalida(ValueError):
     pass
 
 
-def _ubicar(doc: dict, clave: str):
-    """(contenedor, campo) donde vive 'clave' en 'doc', o ClaveInvalida."""
+def _ubicar(doc: dict, clave: str, crear: bool = False):
+    """(contenedor, campo) donde vive 'clave' en 'doc', o ClaveInvalida. Con
+    'crear', un bloque que no existe se crea vacio (en la base: el campo nuevo
+    de un bloque que todavia no tenia ninguno)."""
     if _SIMPLE.match(clave):
         return doc, clave
+    b = _EN_BLOQUE.match(clave)
+    if b:
+        bloque = doc.get(b["bloque"])
+        if bloque is None and crear:
+            bloque = doc[b["bloque"]] = {}
+        if not isinstance(bloque, dict):
+            raise ClaveInvalida(f"'{b['bloque']}' no es un bloque en este documento")
+        return bloque, b["campo"]
     m = _EN_LISTA.match(clave)
     if not m:
         raise ClaveInvalida(f"'{clave}' no tiene una forma conocida (ver --help)")
@@ -80,7 +94,7 @@ def copiar_claves(base: dict, semilla: dict, claves: list[str]) -> tuple[dict, l
         origen, campo = _ubicar(semilla, clave)
         if campo not in origen:
             raise ClaveInvalida(f"'{clave}' no esta en el YAML: no se borra de la base por omision")
-        destino, campo_d = _ubicar(nuevo, clave)
+        destino, campo_d = _ubicar(nuevo, clave, crear=True)
         antes = copy.deepcopy(destino.get(campo_d))
         despues = copy.deepcopy(origen[campo])
         if antes != despues:

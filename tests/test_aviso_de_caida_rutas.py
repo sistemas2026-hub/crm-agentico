@@ -39,7 +39,8 @@ def comprobar(condicion: bool, que: str, detalle: str = "") -> None:
         fallos.append(que)
 
 
-CONFIG = SimpleNamespace(aviso_de_caida=SimpleNamespace(lote=3))
+CONFIG = SimpleNamespace(aviso_de_caida=SimpleNamespace(lote=3),
+                         autenticacion=SimpleNamespace(indicativo_pais="57"))
 api._config_de = lambda tenant: CONFIG
 api._TOKEN_SERVICIO = None
 lecturas: list[tuple] = []
@@ -87,6 +88,12 @@ r = http.post("/avisos/caida/afectados", json={"tenant": "rapilink", **PUERTO})
 comprobar(r.get_json().get("no_listo") == "apagado",
           "si el aviso esta apagado, lo dice ANTES de que alguien apruebe", str(r.get_json()))
 estado_aviso["listo"] = None
+CONFIG.autenticacion.indicativo_pais = None
+r = http.post("/avisos/caida/afectados", json={"tenant": "rapilink", **PUERTO})
+comprobar(r.get_json().get("no_listo") == "sin_indicativo",
+          "sin indicativo del pais tambien lo dice antes: la caida le escribe a moviles del ISP",
+          str(r.get_json()))
+CONFIG.autenticacion.indicativo_pais = "57"
 for campo, malo in (("olt", "3; drop"), ("board", ""), ("port", "a1")):
     r = http.post("/avisos/caida/afectados", json={"tenant": "rapilink", **{**PUERTO, campo: malo}})
     comprobar(r.status_code == 400, f"'{campo}' que no es un numero: 400")

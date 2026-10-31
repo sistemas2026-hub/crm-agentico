@@ -52,6 +52,8 @@ def falso_avisar(config, tenant, evento, clave, **kw):
 
 api._config_de = lambda tenant: SimpleNamespace()
 avisos.avisar = falso_avisar
+horario = {"espera": 0}
+avisos._segundos_hasta_el_horario = lambda config, ahora: horario["espera"]
 api._TOKEN_SERVICIO = None
 http = api.app.test_client()
 
@@ -115,6 +117,12 @@ comprobar(callable(ficha_de) and ficha_de("5832") == {"nombre": "X", "telefono":
           and lecturas_ficha == [("rapilink", "5832")],
           "y la ficha la lee el motor para ESE tenant, solo cuando la decision la pide",
           str(lecturas_ficha))
+horario["espera"] = 3600
+hechos.clear()
+r = http.post("/avisos/evento", json={"tenant": "rapilink", "evento": "ticket_creado_cliente", "ticket": "95001"})
+comprobar(r.get_json() == {"enviado": False, "motivo": "todavia_no", "reintentar_en": 3600} and hechos == [],
+          "fuera del horario no se le pregunta nada al ISP", f"{r.get_json()} {hechos}")
+horario["espera"] = 0
 avisos.hecho_del_ticket = lambda config, numero, leer, asuntos: {"enviado": False,
                                                                  "motivo": "ticket_no_existe"}
 n = len(llamadas)

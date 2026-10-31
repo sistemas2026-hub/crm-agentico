@@ -44,6 +44,13 @@ S = SituacionOperativa
 
 TIPOS_QUE_SE_AVISAN = frozenset({"los", "partial_los"})
 VIVOS = frozenset({S.DETECTADA, S.INVESTIGANDO, S.CONFIRMADA, S.EN_ATENCION})
+#: Lo que de verdad termino. 'en_verificacion' NO: la señal no se ve y se
+#: esta comprobando, puede volver (correlacion.py la manda ahi ante un hueco
+#: de lectura). Ahi el aviso de caida espera; el "ya volvio" arranca recien
+#: cuando la situacion se resolvio, se cerro o se descarto.
+TERMINADAS = frozenset({S.RESUELTA, S.CERRADA, S.DESCARTADA})
+#: Cuanto espera la caida mientras la situacion esta 'en_verificacion'.
+ESPERA_EN_VERIFICACION_S = 10 * 60
 #: Pausa entre lotes. La calidad del numero de la empresa en Meta baja si salen
 #: cientos de plantillas de golpe.
 ESPERA_ENTRE_LOTES_S = 60
@@ -261,9 +268,12 @@ def retomar(ahora=None) -> int:
         n += 1
     #  Los que terminaron la primera fase con la falla todavia viva: cuando la
     #  situacion se resuelve, pasan a "ya volvio".
+    #  Tambien los DETENIDOS despues de mandar (tope de vueltas, aviso apagado
+    #  a mitad): esos clientes recibieron "se cayo" y merecen "ya volvio".
     for aviso in (AvisoDeCaida.objects.select_related("situacion")
-                  .filter(estado=AvisoDeCaida.TERMINADO, fase=AvisoDeCaida.CAIDA, enviados__gt=0)
-                  .exclude(situacion__estado__in=VIVOS)):
+                  .filter(estado__in=[AvisoDeCaida.TERMINADO, AvisoDeCaida.DETENIDO],
+                          fase=AvisoDeCaida.CAIDA, enviados__gt=0,
+                          situacion__estado__in=TERMINADAS)):
         pasar_a_restablecido(aviso)
         turno = programar(aviso, 0)
         pedir_vuelta(str(aviso.id), str(aviso.org_id), turno, 0)
@@ -284,12 +294,16 @@ def avanzar(aviso: AvisoDeCaida) -> int | None:
     situacion = aviso.situacion
     if aviso.fase == AvisoDeCaida.RESTABLECIDO:
         return _avanzar_restablecido(aviso, situacion)
-    if situacion.estado not in VIVOS:
+    if situacion.estado in TERMINADAS:
         #  La falla termino: los que se enteraron de la caida se enteran de la
         #  vuelta. Si a nadie le salio el aviso, no hay nada que cerrar.
         if aviso.enviados > 0:
             return pasar_a_restablecido(aviso)
         return _cerrar(aviso, AvisoDeCaida.DETENIDO, "SITUACION_RESUELTA")
+    if situacion.estado not in VIVOS:
+        #  'en_verificacion': puede volver. Se espera sin tocar los pendientes
+        #  (antes se descartaban y una vuelta a 'confirmada' los perdia).
+        return ESPERA_EN_VERIFICACION_S
     if not aviso.pendientes:
         return _cerrar(aviso, AvisoDeCaida.TERMINADO)
     if aviso.vueltas >= MAX_VUELTAS:

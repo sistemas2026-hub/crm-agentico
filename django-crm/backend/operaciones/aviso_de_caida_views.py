@@ -44,10 +44,22 @@ class FallasDeRedView(APIView):
     permission_classes = [EsJefeDeOperaciones]
 
     def get(self, request):
-        vivas = (S.objects.filter(org=request.org, tipo=S.AFECTACION_PON, estado__in=A.VIVOS)
-                 .prefetch_related("afectados").select_related("aviso_de_caida__aprobado_por__user")
-                 .order_by("-detectada_en"))
-        return Response({"fallas": [_fila(s) for s in vivas]})
+        from datetime import timedelta
+
+        from django.db.models import Q
+        from django.utils import timezone
+
+        #  Las vivas, y las que tienen un aviso en curso o que termino hace
+        #  menos de un dia: el "ya volvio" sale cuando la situacion YA no esta
+        #  viva, y sin esto nadie veria su avance ni por que se detuvo.
+        reciente = timezone.now() - timedelta(hours=24)
+        fallas = (S.objects.filter(org=request.org, tipo=S.AFECTACION_PON)
+                  .filter(Q(estado__in=A.VIVOS)
+                          | Q(aviso_de_caida__estado=AvisoDeCaida.EN_CURSO)
+                          | Q(aviso_de_caida__terminado_en__gte=reciente))
+                  .prefetch_related("afectados").select_related("aviso_de_caida__aprobado_por__user")
+                  .distinct().order_by("-detectada_en"))
+        return Response({"fallas": [_fila(s) for s in fallas]})
 
 
 class AvisoDeCaidaView(APIView):

@@ -170,6 +170,9 @@ try:
     propuesta(org, "ejecutada_ok", decidida=hace(2), revisado_por="autonomia_ganada:p1", huella="h-equipo-1")
     propuesta(org, "ejecutada_ok", decidida=hace(0.5 / 24), revisado_por="autonomia_ganada:p1",
               huella="h-equipo-2")
+    # Lo que firmo la autonomia no suma a favor, pero SI en contra: su falla cuenta.
+    propuesta(org, "ejecutada_fallo", decidida=hace(2), revisado_por="autonomia_ganada:p1",
+              huella="h-equipo-3")
 
     for estado in ("ACCION_CONFIRMADA", "ACCION_CONFIRMADA", "ACCION_NO_CONFIRMADA",
                    "NO_VERIFICABLE", "VERIFICACION_PENDIENTE"):
@@ -187,7 +190,9 @@ try:
               "que firmo la autonomia)", str(m))
     comprobar(m["rechazadas"] == 1, "rechazadas: 1 (la de afuera, la de otra herramienta y la de otra "
               "empresa no)", str(m))
-    comprobar(m["fallidas"] == 2, "fallidas: ejecutada_fallo + desconocida", str(m))
+    comprobar(m["fallidas"] == 3, "fallidas: ejecutada_fallo + desconocida + la que fallo SOLA "
+              "(lo autonomo no suma a favor, pero si en contra)", str(m))
+    comprobar(m["degradaciones"] == 0, "sin degradaciones todavia", str(m))
     comprobar((m["confirmadas"], m["no_confirmadas"], m["no_verificables"], m["pendientes"]) == (2, 1, 1, 1),
               "verificaciones: 2 confirmadas, 1 no confirmada, 1 no verificable, 1 pendiente", str(m))
     vacia = medicion.medir("otra_empresa", "reiniciar_ont", hace(30), AHORA, canales=canales.REALES)
@@ -206,7 +211,7 @@ try:
               "sin fila, no es autonoma")
     medicion.promover("rapilink", "reiniciar_ont", "Ana · u-1", "promovida", {"evidencia": {"revisadas": 40}})
     v = ag.vigente("rapilink", "reiniciar_ont", leer=leer)
-    comprobar(v["autonoma"] and v["promocion_id"], "promovida por el operador: autonoma", str(v))
+    comprobar(v["autonoma"] and v["promocion_id"], "promovida con el rol del runtime (app_backend, lo unico que asume motor_user): autonoma", str(v))
     comprobar(ag.vigente("otra_empresa", "reiniciar_ont", leer=leer)["autonoma"] is False,
               "la promocion de una empresa no le da autonomia a otra")
     comprobar(ag.vigente("rapilink", "cambiar_tipo_onu", leer=leer)["autonoma"] is False,
@@ -220,7 +225,7 @@ try:
         comprobar(False, "app_backend no puede insertar una promocion")
     except Exception as e:                                              # noqa: BLE001
         comprobar("permission denied" in str(e).lower() or "privilegio" in str(e).lower(),
-                  "app_backend no puede insertar una promocion (solo el operador)", type(e).__name__)
+                  "app_backend no puede insertar directo (solo por las funciones)", type(e).__name__)
     try:
         with db.sesion("rapilink") as (cur, org):
             cur.execute("update asistente.autonomia_ganada set estado = 'activa'")
@@ -238,6 +243,8 @@ try:
               "degradada: deja de ser autonoma desde la proxima consulta")
     comprobar(medicion.degradar("rapilink", "reiniciar_ont", "otra vez", {}) is None,
               "degradar lo que ya no esta activa no agrega ruido")
+    comprobar(medicion.medir("rapilink", "reiniciar_ont", hace(30), hace(-1), canales=canales.REALES)
+              ["degradaciones"] == 1, "la degradacion queda en la evidencia de la ventana")
     try:
         with db.sesion("rapilink") as (cur, org):
             cur.execute("select asistente.autonomia_ganada_degradar(%s, 'reiniciar_ont', 'x', '{}'::jsonb)",
@@ -246,6 +253,12 @@ try:
     except Exception:                                                   # noqa: BLE001
         comprobar(True, "no se degrada la autonomia de otra empresa")
     medicion.promover("rapilink", "reiniciar_ont", "Ana · u-1", "otra vez", {})
+    try:
+        medicion.promover("rapilink", "reiniciar_ont", "Ana · u-1", "doble clic", {})
+        comprobar(False, "la base rechaza una segunda promocion activa")
+    except Exception as e:                                              # noqa: BLE001
+        comprobar("ya es autonoma" in str(e), "la base rechaza una segunda promocion activa",
+                  type(e).__name__)
     medicion.retirar("rapilink", "reiniciar_ont", "Luis · u-2", "la quito para revisar")
     v = medicion.vigente("rapilink", "reiniciar_ont")
     comprobar(v["estado"] == "retirada" and v["actor"] == "Luis · u-2",
@@ -257,12 +270,14 @@ try:
     print()
     verificacion(org, "VERIFICACION_PENDIENTE", cuando=hace(0.2))         # ~5 h: sin resolver
     verificacion(org, "VERIFICACION_PENDIENTE", cuando=hace(0.01))        # 15 min: todavia no
-    comprobar(medicion.verificaciones_sin_resolver("rapilink", "reiniciar_ont", 1) == 2,
+    comprobar(medicion.verificaciones_sin_resolver("rapilink", "reiniciar_ont", 1, hace(30)) == 2,
               "sin resolver: las pendientes con mas de 1 h (la de hace 3 dias y la de hace 5 h)")
+    comprobar(medicion.verificaciones_sin_resolver("rapilink", "reiniciar_ont", 1, hace(0.3)) == 1,
+              "desde la promocion: las de antes no cuentan (solo la de hace 5 h)")
     comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=1) == 1,
               "ejecuciones autonomas en la ultima hora: 1")
-    comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=96) == 2,
-              "en 4 dias: 2")
+    comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=96) == 3,
+              "en 4 dias: 3 (dos que salieron bien y una que fallo)")
     comprobar(medicion.ejecuciones_autonomas("rapilink", "reiniciar_ont", horas=96,
                                              hash_argumentos="h-equipo-1") == 1,
               "del mismo equipo (misma huella): 1")

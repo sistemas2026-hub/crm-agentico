@@ -51,6 +51,10 @@ PISO = {"minimo_revisadas": 20, "ventana_dias": 14, "tasa_minima_aprobacion": 0.
 #: Lo que se pide si la empresa no dijo nada: mas que el piso.
 POR_DEFECTO = {"minimo_revisadas": 30, "ventana_dias": 30, "tasa_minima_aprobacion": 0.95,
                "minimo_confirmadas": 20, "tasa_minima_confirmacion": 0.95}
+#: De los efectos ejecutados en la ventana, que parte se pudo MEDIR (confirmada,
+#: no confirmada o no verificable) frente a los que siguen pendientes. Con
+#: menos, la tasa de confirmacion se calcula sobre una minoria y no dice nada.
+PROPORCION_MINIMA_MEDIDA = 0.80
 #: Cuantas verificaciones sin resolver (con mas de HORAS_SIN_RESOLVER) frenan
 #: la autonomia y la degradan: una verificacion se resuelve cuando el cliente
 #: vuelve a escribir, y un reinicio que nadie mide no es evidencia de nada.
@@ -115,6 +119,15 @@ def veredicto(medicion: dict, u: dict) -> dict:
         faltan.append({"condicion": "tasa_minima_confirmacion",
                        "tiene": None if confirmacion is None else round(confirmacion, 4),
                        "necesita": u["tasa_minima_confirmacion"]})
+    con_pendientes = medidas + medicion.get("pendientes", 0)
+    medida = medidas / con_pendientes if con_pendientes else None
+    if medida is None or medida < PROPORCION_MINIMA_MEDIDA:
+        faltan.append({"condicion": "proporcion_medida",
+                       "tiene": None if medida is None else round(medida, 4),
+                       "necesita": PROPORCION_MINIMA_MEDIDA})
+    if medicion.get("degradaciones", 0) > 0:
+        faltan.append({"condicion": "cero_degradaciones", "tiene": medicion["degradaciones"],
+                       "necesita": 0})
     return {"elegible": not faltan, "tasa_aprobacion": None if tasa is None else round(tasa, 4),
             "tasa_confirmacion": None if confirmacion is None else round(confirmacion, 4),
             "faltan": faltan}
@@ -181,7 +194,8 @@ def vigente(tenant: str, herramienta: str, *, leer) -> dict:
         return {"autonoma": False, "estado": "sin_registro", "promocion_id": None}
     if fila.get("estado") != "activa":
         return {"autonoma": False, "estado": str(fila.get("estado")), "promocion_id": None}
-    return {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id"))}
+    return {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id")),
+            "desde": fila.get("creado_en")}
 
 
 def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escribir,

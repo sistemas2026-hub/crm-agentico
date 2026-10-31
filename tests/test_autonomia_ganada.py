@@ -120,6 +120,14 @@ v = ag.veredicto(m(confirmadas=30, no_verificables=3), U)
 comprobar(not v["elegible"] and any(f["condicion"] == "tasa_minima_confirmacion" for f in v["faltan"])
           and v["tasa_confirmacion"] == round(30 / 33, 4),
           "una que no se pudo verificar cuenta en contra (30 de 33 < 95%)", str(v))
+v = ag.veredicto({**m(confirmadas=30), "pendientes": 10}, U)
+comprobar(not v["elegible"] and any(f["condicion"] == "proporcion_medida" for f in v["faltan"]),
+          "si mas de un 20% de los efectos sigue sin medirse, la tasa no dice nada: no es elegible", str(v))
+comprobar(ag.veredicto({**m(confirmadas=30), "pendientes": 5}, U)["elegible"],
+          "con 30 medidas y 5 pendientes (86%), si")
+v = ag.veredicto({**m(), "degradaciones": 1}, U)
+comprobar(not v["elegible"] and {"condicion": "cero_degradaciones", "tiene": 1, "necesita": 0} in v["faltan"],
+          "una degradacion en la ventana: no vuelve a ser elegible hasta que la ventana la deje atras", str(v))
 v = ag.veredicto(m(confirmadas=0), U)
 comprobar(not v["elegible"] and v["tasa_confirmacion"] is None,
           "sin ninguna verificacion, no hay tasa y no es elegible", str(v))
@@ -158,8 +166,9 @@ def leer_lanza(t, h):
     raise ConnectionError("la base no contesta")
 
 
-comprobar(ag.vigente("t", "reiniciar_ont", leer=lambda t, h: {"id": "p1", "estado": "activa"})
-          == {"autonoma": True, "estado": "activa", "promocion_id": "p1"}, "la ultima fila activa: autonoma")
+comprobar(ag.vigente("t", "reiniciar_ont", leer=lambda t, h: {"id": "p1", "estado": "activa", "creado_en": "t0"})
+          == {"autonoma": True, "estado": "activa", "promocion_id": "p1", "desde": "t0"},
+          "la ultima fila activa: autonoma, y desde cuando")
 for fila, estado in ((None, "sin_registro"), ({"id": "p2", "estado": "degradada"}, "degradada"),
                      ({"id": "p3", "estado": "retirada"}, "retirada")):
     comprobar(ag.vigente("t", "x", leer=lambda t, h, f=fila: f)
@@ -278,7 +287,8 @@ medicion.vigente = lambda t, h: {"id": "p9", "estado": "activa"}
 medicion.medir = lambda tenant, h, desde, hasta, canales=None: m()
 d = http.get("/reportes/autonomia-ganada?tenant=rapilink").get_json()
 reinicio = next(f for f in d["acciones"] if f["accion"] == "reiniciar_ont")
-comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "promocion_id": "p9"},
+comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "promocion_id": "p9",
+                                       "desde": None},
           "el reporte dice si ya es autonoma", str(reinicio.get("autonomia")))
 
 if fallos:

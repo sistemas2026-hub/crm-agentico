@@ -132,15 +132,20 @@ api._aprobar_y_ejecutar_datos = lambda config, tenant, i, quien, al_bloquear="ve
     llamadas.append((tenant, i, quien, al_bloquear)) or ({"ok": True}, 200))
 REINICIO = SimpleNamespace(nombre="reiniciar_ont", aprobacion_humana=True, irreversible=True)
 volumen = {"sin_resolver": 0, "por_hora": 0, "misma": 0}
-registro.verificaciones_sin_resolver = lambda tenant, h, horas: volumen["sin_resolver"]
+desde_pedido: list = []
+registro.verificaciones_sin_resolver = lambda tenant, h, horas, desde: (
+    desde_pedido.append(desde) or volumen["sin_resolver"])
 registro.ejecuciones_autonomas = lambda tenant, h, horas, hash_argumentos=None: (
     volumen["misma"] if hash_argumentos else volumen["por_hora"])
 api.persistencia.accion_propuesta_de = lambda tenant, i: {"id": i, "hash_argumentos": "h1"}
 degradadas_c: list[tuple] = []
 api._degradar_autonomia = lambda tenant, h, motivo, ev: degradadas_c.append((h, motivo))
 TICKET = SimpleNamespace(nombre="crear_ticket", aprobacion_humana=True, irreversible=False)
-registro.vigente = lambda tenant, h: {"id": "p1", "estado": "activa"} if h == "reiniciar_ont" else None
+registro.vigente = lambda tenant, h: ({"id": "p1", "estado": "activa", "creado_en": "promovida-en"}
+                                     if h == "reiniciar_ont" else None)
 r = api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO)
+comprobar(desde_pedido[-1:] == ["promovida-en"],
+          "las verificaciones sin resolver se cuentan DESDE la promocion vigente", str(desde_pedido))
 comprobar(r == {"ok": True} and llamadas == [("rapilink", "acc-9", "autonomia_ganada:p1", "liberar")],
           "con autonomia vigente: la misma cadena, firmada por la promocion, liberando si una guarda frena",
           str(llamadas))

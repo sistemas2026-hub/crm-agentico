@@ -45,16 +45,21 @@ def medir(tenant: str, herramienta: str, desde, hasta, *, canales) -> dict:
          "decididas": list(DECIDIDAS), "canales": list(canales), "autonoma": f"{PREFIJO}%"}
     with sesion(tenant) as (cur, org):
         p["org"] = org
+        #  Lo que firmo la autonomia NO suma a favor (revisadas, rechazadas):
+        #  una accion no se gana la autonomia con lo que hizo sola. Pero SI
+        #  suma en contra: una ejecucion autonoma que fallo es evidencia de
+        #  que no tenia que estar sola (auditor independiente, 31/10/2026).
         cur.execute(
-            """select count(*) filter (where a.estado = any(%(decididas)s::text[])) as revisadas,
-                      count(*) filter (where a.estado = 'rechazada') as rechazadas,
+            """select count(*) filter (where a.estado = any(%(decididas)s::text[])
+                                         and coalesce(a.revisado_por, '') not like %(autonoma)s) as revisadas,
+                      count(*) filter (where a.estado = 'rechazada'
+                                         and coalesce(a.revisado_por, '') not like %(autonoma)s) as rechazadas,
                       count(*) filter (where a.estado in ('ejecutada_fallo', 'desconocida')) as fallidas
                  from asistente.acciones_propuestas a
                  join asistente.conversations c
                    on c.organization_id = a.organization_id and c.id = a.conversation_id
                 where a.organization_id = %(org)s and a.herramienta = %(h)s
                   and coalesce(a.rol_solicitante, '') <> 'bandeja'
-                  and coalesce(a.revisado_por, '') not like %(autonoma)s
                   and c.canal = any(%(canales)s::text[])
                   and coalesce(a.revisado_en, a.creado_en) >= %(desde)s
                   and coalesce(a.revisado_en, a.creado_en) < %(hasta)s""", p)
@@ -71,9 +76,19 @@ def medir(tenant: str, herramienta: str, desde, hasta, *, canales) -> dict:
                   and c.canal = any(%(canales)s::text[])
                   and v.ejecutada_en >= %(desde)s and v.ejecutada_en < %(hasta)s""", p)
         v = cur.fetchone()
+        #  Las degradaciones en la ventana: una autonomia que se cayo por su
+        #  cuenta no vuelve a ser elegible hasta que la ventana la deje atras,
+        #  sea cual sea el motivo (algunos -- huerfana, sin resolver -- no
+        #  dejan otra huella en la evidencia).
+        cur.execute(
+            """select count(*) as degradaciones from asistente.autonomia_ganada
+                where organization_id = %(org)s and herramienta = %(h)s and estado = 'degradada'
+                  and creado_en >= %(desde)s and creado_en < %(hasta)s""", p)
+        d = cur.fetchone()
     return {k: int(fila[k]) for fila, claves in ((a, ("revisadas", "rechazadas", "fallidas")),
                                                  (v, ("confirmadas", "no_confirmadas",
-                                                      "no_verificables", "pendientes")))
+                                                      "no_verificables", "pendientes")),
+                                                 (d, ("degradaciones",)))
             for k in claves}
 
 
@@ -99,44 +114,41 @@ def vigente(tenant: str, herramienta: str) -> dict | None:
 
 
 def promover(tenant: str, herramienta: str, actor: str, motivo: str, evidencia: dict) -> dict:
-    """Una persona le da autonomia a la herramienta. Baja a 'autonomia_operador':
-    es administracion, no runtime. No atrapa: si falla, quien promovio tiene
-    que enterarse de que NO quedo."""
-    return _agregar(tenant, herramienta, "activa", actor, motivo, evidencia)
-
-
-def retirar(tenant: str, herramienta: str, actor: str, motivo: str) -> dict:
-    """Una persona se la quita. Mismo rol que promover."""
-    return _agregar(tenant, herramienta, "retirada", actor, motivo, {})
-
-
-def _agregar(tenant, herramienta, estado, actor, motivo, evidencia) -> dict:
+    """Una persona le da autonomia a la herramienta, por la funcion de la base
+    (estado fijo, una sola activa, solo esta empresa). Con el rol del runtime:
+    en produccion el motor no puede asumir 'autonomia_operador' (ver la
+    migracion). No atrapa: si falla, quien promovio tiene que enterarse."""
     import json
 
-    from nucleo.persistencia.db import ROL_OPERADOR_AUTONOMIA
-
-    with sesion(tenant, rol=ROL_OPERADOR_AUTONOMIA) as (cur, org):
-        cur.execute(
-            """insert into asistente.autonomia_ganada
-                 (organization_id, herramienta, estado, actor, motivo, evidencia)
-               values (%s, %s, %s, %s, %s, %s::jsonb)
-               returning id, estado, actor, motivo, evidencia, creado_en""",
-            (org, herramienta, estado, actor, motivo, json.dumps(evidencia or {})))
+    with sesion(tenant) as (cur, org):
+        cur.execute("select * from asistente.autonomia_ganada_promover(%s, %s, %s, %s, %s::jsonb)",
+                    (org, herramienta, actor, motivo, json.dumps(evidencia or {})))
         return dict(cur.fetchone())
 
 
-def verificaciones_sin_resolver(tenant: str, herramienta: str, horas: int) -> int:
-    """Cuantas verificaciones de la herramienta siguen pendientes con mas de
-    'horas' de antiguedad. Una verificacion se resuelve recien cuando el
-    cliente vuelve a escribir: si no vuelve, queda pendiente para siempre, y
-    una autonomia que se mide asi no se degradaria nunca."""
+def retirar(tenant: str, herramienta: str, actor: str, motivo: str) -> dict:
+    """Una persona se la quita, por la funcion de la base."""
+    with sesion(tenant) as (cur, org):
+        cur.execute("select * from asistente.autonomia_ganada_retirar(%s, %s, %s, %s)",
+                    (org, herramienta, actor, motivo))
+        return dict(cur.fetchone())
+
+
+def verificaciones_sin_resolver(tenant: str, herramienta: str, horas: int, desde) -> int:
+    """Cuantas verificaciones de la herramienta, desde 'desde' (la promocion
+    vigente), siguen pendientes con mas de 'horas' de antiguedad. Una
+    verificacion se resuelve recien cuando el cliente vuelve a escribir: si no
+    vuelve, queda pendiente para siempre. Desde la promocion y no todo el
+    historial: las pendientes de cuando aprobaba una persona ya pesaron en la
+    evidencia, y contarlas aca degradaba la autonomia en su primer intento."""
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select count(*) as n from asistente.verificaciones_accion
                 where organization_id = %s and herramienta = %s
                   and estado = 'VERIFICACION_PENDIENTE'
+                  and ejecutada_en >= %s
                   and ejecutada_en < now() - make_interval(hours => %s::int)""",
-            (org, herramienta, int(horas)))
+            (org, herramienta, desde, int(horas)))
         return int(cur.fetchone()["n"])
 
 

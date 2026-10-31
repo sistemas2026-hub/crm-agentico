@@ -175,7 +175,7 @@ def test_c_todavia_no_reagenda_con_los_segundos_del_motor(org_a, user_profile, v
     url = post.call_args.args[0]
     assert url == "http://motor:5000/avisos/evento"
     assert post.call_args.kwargs["json"]["clave"] == f"visita:{o.id}:{fecha.isoformat()}"
-    assert reagendar.call_args.kwargs["countdown"] == 3600
+    assert reagendar.call_args.kwargs["countdown"] == 2700,         "una hora se parte en tramos de 45 min: Redis reentrega lo que espera mas que su visibility_timeout"
 
 
 def test_c1_la_empresa_sale_de_la_organizacion_de_la_orden_no_del_entorno(org_a, user_profile,

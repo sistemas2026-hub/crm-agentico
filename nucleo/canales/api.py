@@ -7579,6 +7579,11 @@ def aviso_proactivo():
     try:
         config = _config_de(tenant)
         if contrato["destino"] == "ticket":
+            #  El horario ANTES de leer el ISP: fuera de hora no se le pregunta
+            #  nada a WispHub para contestar "todavia no" (auditor independiente).
+            espera = avisos_proactivos._segundos_hasta_el_horario(config, datetime.now(timezone.utc))
+            if espera:
+                return jsonify({"enviado": False, "motivo": "todavia_no", "reintentar_en": espera}), 200
             hecho = avisos_proactivos.hecho_del_ticket(
                 config, str(numero),
                 leer=lambda n: importacion_io.ticket_para_aviso(config, tenant, n),
@@ -7604,6 +7609,22 @@ def aviso_proactivo():
         return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
                      componente="avisos", e=e)
     return jsonify(resultado), 200
+
+
+def _caida_no_lista(config, tenant, evento) -> str | None:
+    """Por que un aviso de caida no podria salir, ANTES de aprobar o de una
+    tanda: lo de mensajes_automaticos.listo, y ademas el indicativo del pais.
+    La caida le escribe a moviles del ISP (nunca a un chat): sin indicativo,
+    cada cliente volveria con 'sin_indicativo' y la aprobacion quedaria
+    gastada (auditor independiente, 31/10/2026)."""
+    from nucleo.seguimiento import mensajes_automaticos
+
+    motivo = mensajes_automaticos.listo(config, tenant, evento)
+    if motivo:
+        return motivo
+    if not getattr(getattr(config, "autenticacion", None), "indicativo_pais", None):
+        return "sin_indicativo"
+    return None
 
 
 def _puerto_de(cuerpo):
@@ -7638,7 +7659,7 @@ def aviso_caida_afectados():
             #  apagado o sin plantilla aprobada se dice antes de aprobar, no
             #  consumiendo la aprobacion cliente por cliente.
             resultado = {**resultado, "lote": config.aviso_de_caida.lote,
-                         "no_listo": mensajes_automaticos.listo(config, tenant, aviso_de_caida.EVENTO),
+                         "no_listo": _caida_no_lista(config, tenant, aviso_de_caida.EVENTO),
                          "modo_prueba": mensajes_automaticos.en_prueba(config, aviso_de_caida.EVENTO)}
     except aviso_de_caida.CaidaNoAvisable as e:
         return jsonify({"error": e.codigo}), e.http
@@ -7681,7 +7702,7 @@ def aviso_caida_lote():
             #  La empresa bajo el lote despues de aprobar: se dice cuanto es,
             #  y quien manda achica la tanda en vez de detenerse.
             return jsonify({"error": "LOTE_GRANDE", "lote": config.aviso_de_caida.lote}), 400
-        no_listo = mensajes_automaticos.listo(config, tenant, aviso_de_caida.EVENTO)
+        no_listo = _caida_no_lista(config, tenant, aviso_de_caida.EVENTO)
         if no_listo:
             #  Se apago (o se desaprobo la plantilla) a mitad del envio: no se
             #  lee SmartOLT ni una ficha para contestar 'apagado' 25 veces.
@@ -7750,7 +7771,7 @@ def aviso_caida_restablecida():
         config = _config_de(tenant)
         if len(servicios) > config.aviso_de_caida.lote:
             return jsonify({"error": "LOTE_GRANDE", "lote": config.aviso_de_caida.lote}), 400
-        no_listo = mensajes_automaticos.listo(config, tenant, aviso_de_caida.EVENTO_RESTABLECIDO)
+        no_listo = _caida_no_lista(config, tenant, aviso_de_caida.EVENTO_RESTABLECIDO)
         if no_listo:
             return jsonify({"error": f"AVISO_{no_listo.upper()}"}), 409
         r = aviso_de_caida.restablecidos(
@@ -9882,7 +9903,7 @@ def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -
         return None
     try:
         sin_resolver = registro.verificaciones_sin_resolver(
-            tenant, herramienta.nombre, autonomia_ganada.HORAS_SIN_RESOLVER)
+            tenant, herramienta.nombre, autonomia_ganada.HORAS_SIN_RESOLVER, vigente.get("desde"))
         por_hora = registro.ejecuciones_autonomas(tenant, herramienta.nombre, horas=1)
         fila = persistencia.accion_propuesta_de(tenant, accion_id) or {}
         misma = registro.ejecuciones_autonomas(tenant, herramienta.nombre, horas=24,

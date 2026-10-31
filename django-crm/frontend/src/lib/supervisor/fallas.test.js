@@ -15,6 +15,7 @@ describe('textoDelError', () => {
   it('un aviso que no está listo dice qué falta y que se encienda antes', () => {
     expect(textoDelError('AVISO_APAGADO')).toMatch(/apagado en Mensajes automáticos.*Encendelo/);
     expect(textoDelError('AVISO_PLANTILLA_NO_APROBADA')).toMatch(/no está aprobada por Meta/);
+    expect(textoDelError('AVISO_SIN_INDICATIVO')).toMatch(/indicativo del país/);
   });
 
   it('un código que no conoce se muestra tal cual', () => {

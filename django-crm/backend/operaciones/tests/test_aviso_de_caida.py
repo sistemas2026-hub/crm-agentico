@@ -158,6 +158,12 @@ def test_c3_un_aviso_apagado_se_dice_antes_y_no_se_aprueba(org_a, admin_profile,
 # D · el avance por lotes
 # ---------------------------------------------------------------------------
 
+def _resolver(situacion_id):
+    """Resuelta como la deja una persona: con lo que se comprobo (lo exige la base)."""
+    S.objects.filter(id=situacion_id).update(estado=S.RESUELTA, verificacion="volvio el servicio",
+                                             verificada_en=timezone.now())
+
+
 def _aviso(org, profile, situacion, pendientes=("101", "102", "103")):
     return AvisoDeCaida.objects.create(
         org=org, situacion=situacion, aprobado_por=profile, aprobado_en=timezone.now(),
@@ -193,7 +199,7 @@ def test_d2_termina_cuando_no_queda_nada(org_a, admin_profile, motor):
 def test_d3_una_situacion_resuelta_detiene_el_envio_sin_mandar_nada(org_a, admin_profile, motor):
     s = _situacion(org_a)
     aviso = _aviso(org_a, admin_profile, s)
-    S.objects.filter(id=s.id).update(estado=S.EN_VERIFICACION)
+    _resolver(s.id)
     aviso.refresh_from_db()
     with mock.patch("requests.post") as post:
         assert A.avanzar(aviso) is None
@@ -350,7 +356,7 @@ def test_g_si_la_falla_termina_y_a_alguien_le_salio_el_aviso_pasa_a_restablecido
     s = _situacion(org_a)
     aviso = _aviso(org_a, admin_profile, s)                   # aprobados 101, 102, 103
     AvisoDeCaida.objects.filter(id=aviso.id).update(enviados=2, pendientes=["103"])
-    S.objects.filter(id=s.id).update(estado=S.EN_VERIFICACION)
+    _resolver(s.id)
     aviso.refresh_from_db()
     with mock.patch("requests.post") as post:
         espera = A.avanzar(aviso)
@@ -391,12 +397,15 @@ def test_g3_si_vuelve_a_caer_no_se_le_dice_a_nadie_que_volvio(org_a, admin_profi
 
 def test_g4_sin_avisos_que_salieron_no_hay_restablecido_y_las_vueltas_tienen_tope(
         org_a, admin_profile, motor):
-    s = _situacion(org_a, estado=S.EN_VERIFICACION)
+    s = _situacion(org_a)
+    _resolver(s.id)
     aviso = _aviso(org_a, admin_profile, s)          # enviados = 0
+    aviso.refresh_from_db()                          # la tarea real la relee de la base
     assert A.avanzar(aviso) is None
     aviso.refresh_from_db()
     assert aviso.fase == AvisoDeCaida.CAIDA and aviso.estado == AvisoDeCaida.DETENIDO
-    otra = _situacion(org_a, codigo="S-002", pon="3/2/12", estado=S.EN_VERIFICACION)
+    otra = _situacion(org_a, codigo="S-002", pon="3/2/12")
+    _resolver(otra.id)
     a2 = _aviso(org_a, admin_profile, otra)
     AvisoDeCaida.objects.filter(id=a2.id).update(fase=AvisoDeCaida.RESTABLECIDO, enviados=1,
                                                  vueltas=A.MAX_VUELTAS_RESTABLECIDO)
@@ -416,10 +425,53 @@ def test_g5_retomar_lleva_a_restablecido_lo_que_termino_con_la_falla_viva(org_a,
     AvisoDeCaida.objects.filter(id=sin_envios.id).update(estado=AvisoDeCaida.TERMINADO, enviados=0)
     with mock.patch.object(tasks.avanzar_aviso_de_caida, "apply_async") as vuelta:
         assert A.retomar() == 0, "con la falla viva no pasa nada"
-        S.objects.filter(org=org_a).update(estado=S.EN_VERIFICACION)
+        for situ in S.objects.filter(org=org_a):
+            _resolver(situ.id)
         assert A.retomar() == 1
     aviso.refresh_from_db()
     sin_envios.refresh_from_db()
     assert aviso.fase == AvisoDeCaida.RESTABLECIDO and aviso.estado == AvisoDeCaida.EN_CURSO
     assert sin_envios.fase == AvisoDeCaida.CAIDA, "a quien no se le aviso nada no se le avisa la vuelta"
     assert vuelta.call_args.kwargs["args"][0] == str(aviso.id)
+
+
+# ---------------------------------------------------------------------------
+# H · lo que encontro el auditor independiente (31/10/2026)
+# ---------------------------------------------------------------------------
+
+def test_h_en_verificacion_la_caida_espera_sin_perder_pendientes(org_a, admin_profile, motor):
+    s = _situacion(org_a, estado=S.EN_VERIFICACION)
+    aviso = _aviso(org_a, admin_profile, s)
+    AvisoDeCaida.objects.filter(id=aviso.id).update(enviados=1)
+    aviso.refresh_from_db()
+    with mock.patch("requests.post") as post:
+        assert A.avanzar(aviso) == A.ESPERA_EN_VERIFICACION_S
+    aviso.refresh_from_db()
+    assert post.call_count == 0 and aviso.fase == AvisoDeCaida.CAIDA
+    assert aviso.pendientes == ["101", "102", "103"], "si vuelve a 'confirmada', sigue donde estaba"
+
+
+def test_h2_resuelta_si_pasa_a_restablecido_y_un_detenido_tambien(org_a, admin_profile, motor):
+    from operaciones import tasks
+    s = _situacion(org_a, estado=S.EN_VERIFICACION)
+    aviso = _aviso(org_a, admin_profile, s, pendientes=())
+    AvisoDeCaida.objects.filter(id=aviso.id).update(estado=AvisoDeCaida.DETENIDO, enviados=4,
+                                                    motivo_detencion="TOPE_DE_VUELTAS")
+    with mock.patch.object(tasks.avanzar_aviso_de_caida, "apply_async"):
+        assert A.retomar() == 0, "en verificacion todavia no: puede volver"
+        S.objects.filter(id=s.id).update(estado=S.RESUELTA, verificacion="volvio", verificada_en=timezone.now())
+        assert A.retomar() == 1
+    aviso.refresh_from_db()
+    assert aviso.fase == AvisoDeCaida.RESTABLECIDO, "detenido despues de mandar: igual se avisa la vuelta"
+
+
+def test_h3_la_pantalla_sigue_mostrando_la_caida_mientras_su_aviso_corre(admin_client, org_a, admin_profile):
+    s = _situacion(org_a, estado=S.EN_VERIFICACION)
+    aviso = _aviso(org_a, admin_profile, s)
+    AvisoDeCaida.objects.filter(id=aviso.id).update(fase=AvisoDeCaida.RESTABLECIDO, restablecidos=7)
+    vieja = _situacion(org_a, codigo="S-002", pon="3/2/12", estado=S.EN_VERIFICACION)
+    r = admin_client.get(LISTA)
+    ids = [f["id"] for f in r.json()["fallas"]]
+    assert str(s.id) in ids and str(vieja.id) not in ids
+    fila = next(f for f in r.json()["fallas"] if f["id"] == str(s.id))
+    assert fila["aviso"]["fase"] == "restablecido" and fila["aviso"]["restablecidos"] == 7
