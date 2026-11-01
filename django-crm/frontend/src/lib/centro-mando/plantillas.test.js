@@ -194,3 +194,135 @@ describe('la mitad agregada se amuebla', () => {
     }
   });
 });
+
+describe('cada área se reconoce por lo que tiene dentro', () => {
+  /** Los tipos de mueble de una plantilla, sin contar los que lleva cualquiera. */
+  const COMUNES = new Set(['zona', 'luminaria', 'planta', 'dispensador', 'mampara', 'ducto']);
+  const senas = (p) =>
+    [...new Set(p.mobiliario.map((m) => m.tipo))].filter((t) => !COMUNES.has(t)).sort();
+
+  const BASES = ['operaciones', 'atencion', 'tecnica', 'expedientes', 'comercial', 'reuniones'];
+
+  it('ninguna sala se queda sin mobiliario propio de su oficio', () => {
+    //  Todas tenían estantería y planta, así que una de ventas se veía igual
+    //  que una de auditoría. El veredicto del 01/11/2026 fue «solo veo cuartos
+    //  separados», y esto es la mitad del motivo: no era que faltaran muebles,
+    //  era que eran los MISMOS muebles.
+    for (const nombre of BASES) {
+      expect(senas(PLANTILLAS[nombre]), `${nombre} sin nada propio`).not.toEqual([]);
+    }
+  });
+
+  it('y dos áreas distintas no se amueblan igual', () => {
+    //  La prueba que importa: si dos plantillas tienen las mismas señas, en la
+    //  sede se ven como la misma sala con otro nombre.
+    const vistas = new Map();
+    for (const nombre of BASES) {
+      const clave = senas(PLANTILLAS[nombre]).join('+');
+      expect(vistas.has(clave),
+        `${nombre} se amuebla igual que ${vistas.get(clave)}: ${clave}`).toBe(false);
+      vistas.set(clave, nombre);
+    }
+  });
+
+  it('la sala de redes es la que más equipo técnico tiene', () => {
+    //  Tenía UNA estantería y nada más —menos equipo que la sala de
+    //  expedientes— y el panel de fibra se lo llevaba Operaciones de Campo.
+    const tecnico = (p) =>
+      p.mobiliario.filter((m) => ['panel_fibra', 'tablero', 'ducto'].includes(m.tipo)).length;
+    expect(tecnico(PLANTILLAS.tecnica)).toBeGreaterThan(1);
+  });
+
+  it('el área comercial tiene tableros: es lo que se mira en ventas', () => {
+    expect(PLANTILLAS.comercial.mobiliario.filter((m) => m.tipo === 'tablero').length)
+      .toBeGreaterThan(1);
+  });
+
+  it('ningún mueble de pared se apila con otro en el mismo tramo', () => {
+    //  Los muebles de pared se colocan por `gy` y ocupan `largo`. Tres en el
+    //  mismo punto dibujan uno, y la sala muestra menos de lo que tiene: pasó
+    //  en `generica` al amueblarla, con un tablero, dos estanterías y un
+    //  armario casi en el mismo sitio.
+    //  Cuánto ocupa cada uno a lo largo del muro, LEÍDO DEL DIBUJO y no
+    //  supuesto: el tablero arranca medio paso antes de su `gy` y mide 2,74;
+    //  el panel de fibra, 2,1; el armario, 1,5; la estantería, su `largo`.
+    //  Con un número inventado esta prueba acusaría solapes que no existen y
+    //  dejaría pasar los que sí.
+    const DE_PARED = {
+      tablero: { antes: 0.12, largo: 2.74 },
+      panel_fibra: { antes: 0, largo: 2.1 },
+      armario: { antes: 0, largo: 1.5 },
+      estanteria: { antes: 0, largo: null }
+    };
+    for (const [nombre, p] of Object.entries(PLANTILLAS)) {
+      const enLaPared = p.mobiliario
+        .filter((m) => DE_PARED[m.tipo])
+        .map((m) => {
+          const d = DE_PARED[m.tipo];
+          const desde = (m.gy ?? 0) - d.antes;
+          return { tipo: m.tipo, desde, hasta: desde + (d.largo ?? m.largo ?? 2) };
+        })
+        .sort((a, b) => a.desde - b.desde);
+      for (let i = 1; i < enLaPared.length; i++) {
+        expect(enLaPared[i].desde,
+          `${nombre}: ${enLaPared[i].tipo} se monta sobre ${enLaPared[i - 1].tipo}`
+        ).toBeGreaterThanOrEqual(enLaPared[i - 1].hasta - 0.01);
+      }
+    }
+  });
+});
+
+describe('dos muebles de suelo no ocupan el mismo sitio', () => {
+  /**
+   * Lo que ocupa cada mueble de suelo alrededor de su punto, medido del
+   * dibujo. No es exacto —un banco no es un círculo— y es a propósito: una
+   * cota generosa caza el solape antes de que se vea, y afinarla pediría
+   * replicar la geometría de `oficina.ts` acá, que sería probar la copia.
+   */
+  //  La luminaria NO entra: va en el techo. Una lámpara sobre un escritorio no
+  //  es un choque, es lo que se quiere —y contarla acusaba cuarenta y ocho
+  //  solapes que no existen, que es la forma más rápida de que una guarda se
+  //  aprenda a ignorar—.
+  const RADIO = {
+    mostrador: 1.6, mesa: 1.2, banco: 0.7, dispensador: 0.6, planta: 0.5
+  };
+
+  it('ninguno cae encima de otro, en ninguna plantilla', () => {
+    const choques = [];
+    for (const [nombre, p] of Object.entries(PLANTILLAS)) {
+      const suelo = p.mobiliario.filter(
+        (m) => RADIO[m.tipo] !== undefined && typeof m.gx === 'number');
+      for (let i = 0; i < suelo.length; i++) {
+        for (let j = i + 1; j < suelo.length; j++) {
+          const a = suelo[i];
+          const b = suelo[j];
+          const minimo = RADIO[a.tipo] + RADIO[b.tipo];
+          if (minimo === 0) continue;
+          const d = Math.hypot((a.gx ?? 0) - (b.gx ?? 0), (a.gy ?? 0) - (b.gy ?? 0));
+          if (d < minimo) {
+            choques.push(`${nombre}: ${a.tipo}@${a.gx},${a.gy} y ${b.tipo}@${b.gx},${b.gy} a ${d.toFixed(1)}`);
+          }
+        }
+      }
+    }
+    expect(choques).toEqual([]);
+  });
+
+  it('y ninguno se sienta encima de un puesto', () => {
+    //  Un mueble sobre un escritorio tapa a quien trabaja ahí, que es el único
+    //  elemento de la sala que no es decoración.
+    const choques = [];
+    for (const [nombre, p] of Object.entries(PLANTILLAS)) {
+      for (const m of p.mobiliario) {
+        if (RADIO[m.tipo] === undefined || typeof m.gx !== 'number') continue;
+        for (const q of p.puestos) {
+          const d = Math.hypot(m.gx - q.gx, (m.gy ?? 0) - q.gy);
+          if (d < RADIO[m.tipo] + 1.1) {
+            choques.push(`${nombre}: ${m.tipo}@${m.gx},${m.gy} sobre ${q.id} a ${d.toFixed(1)}`);
+          }
+        }
+      }
+    }
+    expect(choques).toEqual([]);
+  });
+});

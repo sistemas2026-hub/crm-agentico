@@ -61,17 +61,19 @@ const OPERACIONES = {
     { tipo: 'mampara', gx: 11, desde: 0.2, hasta: 9.8, vano: [4.6, 6.4] },
     { tipo: 'zona', gx: 4.2, gy: 6.2, ancho: 4.4, fondo: 3.4 },
     { tipo: 'ducto', gy: 5.3, desde: 1.0, hasta: 10.6 },
-    { tipo: 'tablero', gy: 7.0 },
+    { tipo: 'tablero', gy: 0.3 },
     //  Los armarios y el panel de empalmes son de ESTA plantilla. Un centro de
     //  operaciones los tiene; una sala de atención, no.
-    { tipo: 'armario', gy: 2.4 },
-    { tipo: 'armario', gy: 4.2 },
-    { tipo: 'panel_fibra', gy: 6.3 },
+    { tipo: 'armario', gy: 3.2 },
+    { tipo: 'armario', gy: 4.9 },
+    { tipo: 'panel_fibra', gy: 6.7 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 9, gy: 6 },
     { tipo: 'planta', gx: 12.4, gy: 1.1 },
     { tipo: 'planta', gx: 0.9, gy: 8.9 },
     { tipo: 'planta', gx: 12.3, gy: 6.6 },
+    //  La mesa de preparacion: los equipos se alistan antes de salir.
+    { tipo: 'mesa', gx: 10.0, gy: 6.0 },
     { tipo: 'banco', gx: 11.3, gy: 8.2 },
     { tipo: 'dispensador', gx: 13.0, gy: 4.6 }
   ],
@@ -107,7 +109,13 @@ const ATENCION = {
     { tipo: 'mampara', gx: 10, desde: 0.2, hasta: 8.8, vano: [3.8, 5.6] },
     { tipo: 'zona', gx: 2.0, gy: 5.6, ancho: 5.0, fondo: 3.0 },
     { tipo: 'ducto', gy: 4.6, desde: 1.0, hasta: 9.6 },
+    //  La sala que atiende al publico tenia el muro casi vacio y ningun
+    //  mostrador. Dos tableros -la cola y los avisos- y el mostrador por
+    //  donde se atiende.
+    { tipo: 'tablero', gy: 0.2 },
+    { tipo: 'estanteria', gy: 3.2, largo: 2.0 },
     { tipo: 'tablero', gy: 5.5 },
+    { tipo: 'mostrador', gx: 8.2, gy: 8.2, largo: 2.4 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 6 },
     { tipo: 'banco', gx: 10.4, gy: 1.2 },
@@ -146,9 +154,20 @@ const TECNICA = {
   mobiliario: [
     { tipo: 'zona', gx: 2.4, gy: 4.6, ancho: 4.6, fondo: 2.8 },
     { tipo: 'ducto', gy: 3.8, desde: 1.0, hasta: 9.8 },
-    { tipo: 'estanteria', gy: 4.4, largo: 3.0 },
+    //  LO QUE HACE QUE UN NOC SE VEA COMO UN NOC.
+    //
+    //  Tenía una estantería y nada más -menos equipo que la sala de
+    //  expedientes- y el panel de fibra, que es la pieza más técnica del
+    //  catálogo, se lo llevaba Operaciones de Campo. Mirando la sede entera no
+    //  había forma de distinguir la sala de redes de una oficina cualquiera.
+    { tipo: 'panel_fibra', gy: 0.4 },
+    { tipo: 'tablero', gy: 2.7 },
+    { tipo: 'estanteria', gy: 5.5, largo: 2.2 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 5 },
+    //  La mesa de trabajo: en un NOC es donde se arma y se prueba un equipo
+    //  antes de montarlo.
+    { tipo: 'mesa', gx: 7.6, gy: 7.0 },
     { tipo: 'planta', gx: 9.6, gy: 1.0 },
     { tipo: 'planta', gx: 0.8, gy: 7.0 },
     { tipo: 'dispensador', gx: 9.9, gy: 6.4 }
@@ -178,12 +197,17 @@ const EXPEDIENTES = {
   mobiliario: [
     { tipo: 'mampara', gx: 2, desde: 0.2, hasta: 9.8, vano: [4.0, 5.8] },
     { tipo: 'zona', gx: 4.0, gy: 6.0, ancho: 5.0, fondo: 3.4 },
-    { tipo: 'estanteria', gy: 1.0, largo: 3.6 },
-    { tipo: 'estanteria', gy: 5.2, largo: 3.6 },
+    //  Estanterías Y archivadores: finanzas y auditoría viven de expedientes
+    //  guardados, y un armario cerrado dice eso mejor que otro estante.
+    { tipo: 'estanteria', gy: 0.8, largo: 3.0 },
+    { tipo: 'armario', gy: 4.2 },
+    { tipo: 'estanteria', gy: 6.0, largo: 3.0 },
     { tipo: 'luminaria', gx: 6, gy: 3 },
     { tipo: 'luminaria', gx: 9, gy: 7 },
     { tipo: 'planta', gx: 0.6, gy: 3.0 },
     { tipo: 'planta', gx: 10.8, gy: 1.0 },
+    //  La mesa de consulta, que es donde se abre un expediente.
+    { tipo: 'mesa', gx: 8.6, gy: 8.4 },
     { tipo: 'banco', gx: 0.4, gy: 7.6 },
     { tipo: 'dispensador', gx: 11.0, gy: 8.4 }
   ],
@@ -211,8 +235,16 @@ const COMERCIAL = {
   mural: { paneles: [{ gx: 2.2, ancho: 2.6 }, { gx: 5.2, ancho: 2.6 }] },
   mobiliario: [
     { tipo: 'mostrador', gx: 6.6, gy: 7.4, largo: 2.6 },
+    //  UN ÁREA DE VENTAS TIENE TABLEROS. No tenía ninguno: el muro estaba
+    //  entero vacío y la sala se leía como un pasillo con sillas. Dos, porque
+    //  lo que se mira en comercial son números en la pared.
+    { tipo: 'tablero', gy: 0.3 },
+    { tipo: 'tablero', gy: 3.2 },
+    { tipo: 'estanteria', gy: 6.1, largo: 2.6 },
     { tipo: 'mampara', gx: 9, desde: 0.2, hasta: 9.8, vano: [6.6, 8.4] },
     { tipo: 'zona', gx: 1.6, gy: 5.8, ancho: 4.6, fondo: 3.4 },
+    //  La mesa donde se sienta el cliente que viene a contratar.
+    { tipo: 'mesa', gx: 6.6, gy: 0.9 },
     { tipo: 'banco', gx: 9.4, gy: 2.0 },
     { tipo: 'banco', gx: 9.4, gy: 5.0 },
     { tipo: 'banco', gx: 11.6, gy: 3.4 },
@@ -252,7 +284,7 @@ const REUNIONES = {
     { tipo: 'tablero', gy: 6.4 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 4 },
-    { tipo: 'planta', gx: 10.6, gy: 0.9 },
+    { tipo: 'planta', gx: 11.2, gy: 0.6 },
     { tipo: 'planta', gx: 0.8, gy: 8.0 },
     { tipo: 'planta', gx: 10.4, gy: 7.6 },
     { tipo: 'banco', gx: 9.6, gy: 1.4 },
@@ -300,16 +332,20 @@ const GENERICA = {
     { tipo: 'zona', gx: 2.0, gy: 4.6, ancho: 4.0, fondo: 2.8 },
     //  Contra el muro del fondo, que es la pared que se ve entera desde la
     //  camara y la unica que puede llevar algo alto sin tapar la sala.
-    { tipo: 'estanteria', gx: 0.6, gy: 0.5 },
-    { tipo: 'estanteria', gx: 3.4, gy: 0.5 },
-    { tipo: 'armario', gx: 6.2, gy: 0.5 },
-    { tipo: 'tablero', gy: 0.4 },
+    //  Los muebles de pared se colocan por `gy` a lo largo del muro: el `gx`
+    //  que llevaban antes no lo mira nadie, y los tres quedaban apilados en el
+    //  mismo punto del muro dibujando uno solo.
+    { tipo: 'tablero', gy: 0.3 },
+    { tipo: 'estanteria', gy: 3.1, largo: 1.6 },
+    { tipo: 'estanteria', gy: 4.9, largo: 1.2 },
+    { tipo: 'armario', gy: 6.3 },
     { tipo: 'mesa', gx: 7.4, gy: 3.2 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 7, gy: 5 },
     { tipo: 'luminaria', gx: 5, gy: 1.6 },
     { tipo: 'planta', gx: 8.6, gy: 1.6 },
     { tipo: 'planta', gx: 0.8, gy: 7.0 },
+    { tipo: 'banco', gx: 8.8, gy: 5.0 },
     { tipo: 'planta', gx: 9.0, gy: 6.4 }
   ],
   puestos: [
@@ -469,6 +505,15 @@ function ampliar(base, extra) {
       const choca = ocupados.some(
         (o) => o.tipo === m.tipo && Math.abs(o.gx - gx) < 1 && o.gy === m.gy);
       if (choca) continue;
+      //  Y NO ENCIMA DE UN PUESTO NUEVO. La copia se calculaba contra los
+      //  muebles y no contra las sillas que acababa de abrir la ampliacion:
+      //  en `expedientes_7` una planta quedaba a una unidad del escritorio
+      //  `p4`, tapando a quien trabaja ahi, que es el unico elemento de la
+      //  sala que no es decoracion. Lo cazo la guarda de solapes del suelo; a
+      //  ojo no se habria visto, porque solo pasa en los tamanos generados.
+      const sobrePuesto = nuevos.some(
+        (q) => Math.hypot(q.gx - gx, q.gy - (m.gy ?? 0)) < 1.7);
+      if (sobrePuesto) continue;
       ocupados.push({ tipo: m.tipo, gx, gy: m.gy });
       copias.push({ ...m, gx });
     }
