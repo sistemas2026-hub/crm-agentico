@@ -4,25 +4,35 @@ import { readFileSync } from 'node:fs';
 /**
  * LA RÉPLICA, FIJADA CONTRA LA REFERENCIA.
  *
- * La pantalla se ajustó a un diseño concreto: «Centro del Supervisor NOC IA -
- * Pendientes por Revisión», del proyecto de Stitch 12743695992710804066,
- * pantalla 01f56da1b9f74b93b97b4ae841f2d830. Lo que esta guarda afirma se
- * midió sobre el HTML de ESA pantalla, no sobre un recuerdo de ella.
+ * Hasta el 01/11/2026 la referencia era la pantalla de Stitch «Centro del
+ * Supervisor NOC IA - Pendientes por Revisión» (proyecto 12743695992710804066,
+ * pantalla 01f56da1b9f74b93b97b4ae841f2d830): una tabla de diez columnas.
+ *
+ * Desde el 01/11/2026 la referencia es el diseño que el usuario aprobó (la
+ * segunda propuesta de la IA de diseño, portada en «El Supervisor NOC queda
+ * como el diseño aprobado»): la bandeja deja de ser tabla y pasa a filas
+ * compactas, agrupadas por plazo, sin fila de encabezados. Lo que esta guarda
+ * afirma es la estructura de ESE diseño.
+ *
+ * Un cambio a propósito respecto de la referencia anterior: el tipo de
+ * hallazgo vuelve a la fila, como una etiqueta corta. Stitch lo dejaba en el
+ * detalle porque como columna de texto llenaba 121 filas con lo mismo; el
+ * diseño aprobado lo muestra como etiqueta y la consulta de contenedor lo
+ * oculta primero cuando falta ancho.
  *
  * POR QUÉ HACE FALTA
  * ------------------
- * La referencia vive fuera del repo, detrás de una API con clave. Nadie que
- * toque esta tabla dentro de seis meses va a poder abrirla para comprobar si
- * sigue pareciéndose, y una columna de más o un rótulo cambiado no rompe
- * nada: la pantalla sigue funcionando, solo deja de ser la réplica que
- * alguien pidió. Esto lo convierte en un fallo visible.
+ * La referencia vive fuera del repo. Nadie que toque esta bandeja dentro de
+ * seis meses va a poder abrirla para comprobar si sigue pareciéndose, y una
+ * celda de más o un rótulo cambiado no rompe nada: la pantalla sigue
+ * funcionando, solo deja de ser el diseño que alguien aprobó. Esto lo
+ * convierte en un fallo visible.
  *
  * LO QUE NO HACE
  * --------------
  * No compara píxeles ni estilos: eso necesita un navegador. Afirma la
- * ESTRUCTURA que la referencia fija -- qué columnas, en qué orden, y qué
- * pastillas tiene la barra de filtros -- que es lo que de verdad se pidió
- * replicar y lo que más fácil se desvía.
+ * ESTRUCTURA que la referencia fija -- qué celdas tiene cada fila, en qué
+ * orden, y qué controles tiene la barra de filtros.
  *
  * Si el diseño cambia a propósito, esta prueba se actualiza con él. Que haya
  * que tocarla es el punto: obliga a decir que la réplica ya no es la de
@@ -34,51 +44,40 @@ const PAGINA = new URL(
   import.meta.url
 ).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
-/** Las diez columnas de la referencia, en su orden. */
-const COLUMNAS = [
-  'N.º',
-  'Prioridad',
-  'Cliente',
-  'Caso / OT',
-  'Asunto del ticket',
-  'Técnico actual',
-  'SLA',
-  'Antigüedad',
-  'Propuesta',
-  'Acción'
-];
+/** Las celdas de cada fila del diseño aprobado, en su orden. */
+const CELDAS = ['check', 'plazo', 'quien', 'prio', 'tipo', 'propone', 'tecnico', 'ids', 'accion'];
 
 const fuente = () => readFileSync(PAGINA, 'utf8');
 
-/** Los `<th>` de la tabla de la bandeja, en orden. */
-function columnasDeLaTabla(html) {
-  const tabla = html.indexOf('snoc-tabla-bandeja');
-  if (tabla < 0) return [];
-  const cuerpo = html.indexOf('</thead>', tabla);
-  return [...html.slice(tabla, cuerpo).matchAll(/<th[^>]*>([^<]*)</g)]
-    .map((m) => m[1].trim())
-    .filter(Boolean);
+/** Las celdas `snv-c-*` del snippet `fila`, en orden. */
+function celdasDeLaFila(html) {
+  const inicio = html.indexOf('{#snippet fila(');
+  if (inicio < 0) return [];
+  const fin = html.indexOf('{/snippet}', inicio);
+  return [...html.slice(inicio, fin).matchAll(/class="snv-c-([a-z]+)/g)].map((m) => m[1]);
 }
 
-describe('la bandeja replica la referencia de Stitch', () => {
-  it('tiene las diez columnas, en el orden de la referencia', () => {
-    expect(columnasDeLaTabla(fuente())).toEqual(COLUMNAS);
+describe('la bandeja replica el diseño aprobado', () => {
+  it('cada fila tiene las nueve celdas, en el orden del diseño', () => {
+    expect(celdasDeLaFila(fuente())).toEqual(CELDAS);
   });
 
-  it('NO trae «Tipo de hallazgo» como columna', () => {
-    // La referencia lo deja fuera de la tabla a propósito: vive en el
-    // detalle. Como columna volvía a llenar 121 filas con el mismo texto.
-    expect(columnasDeLaTabla(fuente())).not.toContain('Tipo de hallazgo');
+  it('la bandeja se agrupa por plazo, no es una tabla', () => {
+    const html = fuente();
+    expect(html).toContain('agruparPorPlazo(');
+    expect(html).not.toContain('snoc-tabla-bandeja');
   });
 
-  it('la barra de filtros lleva las pastillas de la referencia', () => {
+  it('la barra de filtros lleva los controles del diseño', () => {
     const html = fuente();
     for (const etiqueta of [
       'Pendientes',
       'Ya decididas',
       'Todas',
-      'Con propuesta',
-      'Sin propuesta',
+      'Con acción recomendada',
+      'Sin acción recomendada',
+      'Ordenar: Plazo',
+      'Ordenar: Prioridad',
       'Limpiar filtros'
     ]) {
       expect(html).toContain(etiqueta);
@@ -104,13 +103,13 @@ describe('la bandeja replica la referencia de Stitch', () => {
     expect(fuente()).toContain('Mostrando');
   });
 
-  it('el reconocedor de columnas funciona', () => {
+  it('el reconocedor de celdas funciona', () => {
     // La comprobación se comprueba: un extractor que devolviera [] siempre
-    // dejaría las tres primeras pruebas en verde sin mirar nada.
-    expect(columnasDeLaTabla('<table class="snoc-tabla-bandeja"><thead><tr><th>Uno</th><th>Dos</th></tr></thead>')).toEqual([
-      'Uno',
-      'Dos'
-    ]);
-    expect(columnasDeLaTabla('<table><thead><tr><th>Otra</th></tr></thead>')).toEqual([]);
+    // dejaría la primera prueba en rojo por la razón equivocada, y uno que
+    // leyera fuera del snippet contaría celdas de otra parte de la pantalla.
+    expect(
+      celdasDeLaFila('{#snippet fila(p)}<div class="snv-c-uno"></div><div class="snv-c-dos"></div>{/snippet}<div class="snv-c-fuera">')
+    ).toEqual(['uno', 'dos']);
+    expect(celdasDeLaFila('<div class="snv-c-suelta"></div>')).toEqual([]);
   });
 });
