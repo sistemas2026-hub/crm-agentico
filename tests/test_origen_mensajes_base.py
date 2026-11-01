@@ -70,6 +70,8 @@ def dsn(base: str) -> str:
             f"sslmode=disable connect_timeout=15")
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 def q(sentencia, params=None):
     with psycopg.connect(dsn(BASE), autocommit=True) as con:
         cur = con.execute(sentencia, params)

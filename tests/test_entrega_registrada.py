@@ -173,6 +173,8 @@ else:
     TENANT = f"prueba-entrega-{uuid.uuid4().hex[:8]}"
     OTRO_TENANT = f"prueba-entrega-{uuid.uuid4().hex[:8]}"
     SIN_CONFIG = f"prueba-sin-config-{uuid.uuid4().hex[:8]}"
+    from base_local import exigir_base_local                       # noqa: E402
+    exigir_base_local(__file__)
     admin = psycopg.connect(
         host=os.environ["DBHOST"], port=os.environ["DBPORT"], dbname=os.environ["DBNAME"],
         user=os.environ["DBUSER"], password=os.environ["DBPASSWORD"], autocommit=True)

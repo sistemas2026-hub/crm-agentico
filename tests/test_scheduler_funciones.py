@@ -159,6 +159,8 @@ def matar_lease(con, org):
     con.commit()
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 con = psycopg.connect(dsn())
 try:
     # =========================================================================

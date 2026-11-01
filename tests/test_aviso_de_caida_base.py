@@ -52,6 +52,8 @@ def comprobar(condicion: bool, que: str, detalle: str = "") -> None:
         fallos.append(que)
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 def q(sentencia, params=None, base=None):
     with psycopg.connect(f"host={HOST} port={PUERTO} dbname={base or BASE} user={USUARIO} "
                          f"password={CLAVE} sslmode=disable connect_timeout=15", autocommit=True) as con:

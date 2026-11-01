@@ -70,6 +70,8 @@ _spec.loader.exec_module(g8)
 DATOS = dict(host=os.environ["DBHOST"], port=os.environ["DBPORT"],
              dbname=os.environ["DBNAME"], user=os.environ["DBUSER"],
              password=os.environ["DBPASSWORD"])
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 admin = psycopg.connect(**DATOS, autocommit=True, row_factory=dict_row)
 ORG = uuid.uuid4()
 TEN = f"prueba-g8-{uuid.uuid4().hex[:8]}"

@@ -72,6 +72,8 @@ DSN = (f"host={os.environ['DBHOST']} port={os.environ['DBPORT']} "
        f"dbname={os.environ['DBNAME']} user={os.environ['DBUSER']} "
        f"password={os.environ['DBPASSWORD']} sslmode=disable")
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 con = psycopg.connect(DSN, autocommit=True, row_factory=dict_row)
 
 

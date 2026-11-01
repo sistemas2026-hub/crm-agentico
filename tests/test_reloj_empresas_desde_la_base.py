@@ -22,7 +22,8 @@ Lo que se prueba:
      que nadie puede editar, para trabajos autonomos.
   3. El reconciliador usa el mismo listado.
   4. Contra PostgreSQL REAL (si se le da RELOJ_PG_ADMIN): solo las activas, en
-     orden, y una dada de baja no aparece.
+     orden; una dada de baja no aparece, ni una fila con la config vacia por
+     defecto (una empresa que nunca se cargo, o el resto de una prueba).
 
 La parte 4 se niega a correr contra otro host que el Postgres descartable
 'pg-reloj', y sin la variable se reporta OMITIDA, no en verde:
@@ -143,6 +144,8 @@ else:
 
     base = f"reloj_{uuid.uuid4().hex[:8]}"
     url = urlparse(ADMIN)
+    from base_local import exigir_base_local                       # noqa: E402
+    exigir_base_local(__file__, dsn=ADMIN)
     with psycopg.connect(ADMIN, autocommit=True) as c:
         c.execute(f"create database {base}")
     try:
@@ -159,11 +162,18 @@ else:
                   config_version integer not null default 1,
                   activo boolean not null default true);
             """)
-            for slug, activo in (("zeta", True), ("alfa", True), ("dada-de-baja", False)):
+            #  'sembrada-sin-config' es lo que dejaba una prueba cortada antes de
+            #  limpiar: la fila con el '{}' por defecto. Paso en produccion con
+            #  cuatro (01/11/2026, tests/test_base_local.py).
+            for slug, activo, config in (("zeta", True, '{"nombre": "z"}'),
+                                         ("alfa", True, '{"nombre": "a"}'),
+                                         ("dada-de-baja", False, '{"nombre": "b"}'),
+                                         ("sembrada-sin-config", True, None)):
                 org = str(uuid.uuid4())
                 c.execute("insert into public.organization values (%s)", (org,))
-                c.execute("insert into asistente.tenant_config (organization_id, slug, activo) "
-                          "values (%s, %s, %s)", (org, slug, activo))
+                c.execute("insert into asistente.tenant_config (organization_id, slug, activo, "
+                          "config) values (%s, %s, %s, coalesce(%s::jsonb, '{}'::jsonb))",
+                          (org, slug, activo, config))
         previo = {k: os.environ.get(k) for k in
                   ("DBHOST", "DBPORT", "DBNAME", "DBUSER", "DBPASSWORD", "DATABASE_URL")}
         os.environ.update({"DBHOST": url.hostname, "DBPORT": str(url.port or 5432),
@@ -179,7 +189,8 @@ else:
                 else:
                     os.environ[k] = v
         revisar(del_motor == ["alfa", "zeta"],
-                "la base devuelve las activas, ordenadas, y no la dada de baja",
+                "la base devuelve las activas con config, ordenadas: ni la dada de "
+                "baja ni la que nunca se cargo",
                 f"devolvio: {del_motor}")
         revisar(del_reloj == del_motor, "el reloj lista exactamente eso",
                 f"reloj: {del_reloj}")

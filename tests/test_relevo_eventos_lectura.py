@@ -70,6 +70,8 @@ from nucleo.relevo import transiciones                            # noqa: E402
 ORG_A, ORG_B = uuid.uuid4(), uuid.uuid4()
 T_A = f"prueba-relevo-{uuid.uuid4().hex[:8]}"
 T_B = f"prueba-relevo-{uuid.uuid4().hex[:8]}"
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 admin = psycopg.connect(
     host=os.environ["DBHOST"], port=os.environ["DBPORT"], dbname=os.environ["DBNAME"],
     user=os.environ["DBUSER"], password=os.environ["DBPASSWORD"], autocommit=True)

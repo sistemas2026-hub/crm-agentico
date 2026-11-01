@@ -356,6 +356,8 @@ else:
     T_B = f"prueba-t6-{uuid.uuid4().hex[:8]}"
     OPERADOR = {"operador_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
                 "operador_nombre": "Ana Perez"}
+    from base_local import exigir_base_local                       # noqa: E402
+    exigir_base_local(__file__)
     admin = psycopg.connect(
         host=os.environ["DBHOST"], port=os.environ["DBPORT"], dbname=os.environ["DBNAME"],
         user=os.environ["DBUSER"], password=os.environ["DBPASSWORD"], autocommit=True)

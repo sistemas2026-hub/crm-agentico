@@ -385,6 +385,8 @@ else:
     DATOS_DB = dict(host=os.environ["DBHOST"], port=os.environ["DBPORT"],
                     dbname=os.environ["DBNAME"], user=os.environ["DBUSER"],
                     password=os.environ["DBPASSWORD"])
+    from base_local import exigir_base_local                       # noqa: E402
+    exigir_base_local(__file__)
     admin = psycopg.connect(**DATOS_DB, autocommit=True, row_factory=dict_row)
     ORG = uuid.uuid4()
     TEN = f"prueba-d28-{uuid.uuid4().hex[:8]}"

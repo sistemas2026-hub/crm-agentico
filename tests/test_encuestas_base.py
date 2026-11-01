@@ -57,6 +57,8 @@ def revisar(condicion, que, porque=""):
     return False
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 def sql(texto, args=()):
     with psycopg.connect(dsn()) as con:
         filas = con.execute(texto, args)

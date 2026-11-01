@@ -90,6 +90,8 @@ def seccion(t: str) -> None:
     print(f"\n--- {t} ---")
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 def admin(base: str = "postgres"):
     return psycopg.connect(host=_u.hostname, port=_u.port or 5432, dbname=base,
                            user=_u.username, password=_u.password, autocommit=True)

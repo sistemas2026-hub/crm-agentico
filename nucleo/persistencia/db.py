@@ -185,7 +185,13 @@ def tenant_de_organizacion(organization_id: str) -> str | None:
 def tenants_activos() -> list[str]:
     """
     Los slugs de las empresas que este despliegue atiende: las filas de
-    asistente.tenant_config con 'activo'.
+    asistente.tenant_config con 'activo' y una config cargada.
+
+    "Cargada" es lo mismo que exige 'fuente.desde_base': la columna nace con
+    '{}' y una fila asi es una empresa que nadie cargo todavia. Medido el
+    01/11/2026: cuatro filas que dejaron pruebas cortadas contra produccion
+    (prueba-b4-*, prueba-entrega-*) aparecian en cada vuelta del reloj, que
+    intentaba leer su YAML, no lo encontraba y lo dejaba como error en el log.
 
     La usa el reloj para saber a quien darle trabajos (ver
     nucleo/reloj.py::tenants_conocidos). Antes salia de 'tenants/*.config.yaml'
@@ -203,7 +209,8 @@ def tenants_activos() -> list[str]:
     try:
         with con.cursor() as cur:
             cur.execute("""select slug from asistente.tenant_config
-                            where activo order by slug""")
+                            where activo and config <> '{}'::jsonb
+                            order by slug""")
             return [str(f["slug"]) for f in cur.fetchall()]
     finally:
         con.close()
