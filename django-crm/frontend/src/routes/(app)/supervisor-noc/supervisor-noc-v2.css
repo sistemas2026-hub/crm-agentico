@@ -1,0 +1,409 @@
+/*
+ * Supervisor NOC -- el diseño del 01/11/2026 ("sala de control sobria").
+ *
+ * POR QUE UNA HOJA APARTE Y BAJO '.snv'
+ * -------------------------------------
+ * 'supervisor-noc.css' la importan nueve pantallas (programacion, cuadrillas,
+ * despacho, plantillas, fallas, planes, ajustes, inventario y el chat). Este
+ * diseño es solo de la pantalla principal, asi que todo vive bajo '.snv', que
+ * se pone unicamente en su raiz, y todas las clases nuevas llevan 'snv-'.
+ *
+ * LOS TOKENS SE REDEFINEN, NO SE REESCRIBEN LAS CLASES
+ * ----------------------------------------------------
+ * La pantalla conserva su logica y buena parte de su marcado: el detalle de
+ * la propuesta, los modales, la tabla de actividad. Esas piezas usan clases
+ * 'snoc-' que leen variables '--snoc-*'. Redefinir las variables en '.snoc.snv'
+ * les cambia la paleta a todas de una vez, solo aca.
+ *
+ * EL COLOR SIGNIFICA ALGO O NO APARECE
+ * ------------------------------------
+ * Un solo azul tinta para las acciones. Rojo = vencido o critico. Ambar = en
+ * riesgo. Verde SOLO para "en vivo" y "actua". Todo lo demas, neutros
+ * teñidos hacia azul pizarra.
+ *
+ * Contexto de diseño completo: .impeccable.md en la raiz del repositorio.
+ */
+
+.snoc.snv {
+  /* --- neutros, teñidos hacia azul pizarra --- */
+  --snv-fondo: oklch(0.972 0.005 250);
+  --snv-superficie: oklch(0.993 0.002 250);
+  --snv-superficie-2: oklch(0.952 0.007 250);
+  --snv-linea: oklch(0.905 0.008 250);
+  --snv-linea-2: oklch(0.835 0.011 250);
+  --snv-tinta: oklch(0.235 0.022 258);
+  --snv-tinta-2: oklch(0.415 0.02 258);
+  --snv-tinta-3: oklch(0.53 0.016 258);
+
+  /* --- la accion --- */
+  --snv-accion: oklch(0.445 0.135 258);
+  --snv-accion-alta: oklch(0.385 0.135 258);
+  --snv-accion-suave: oklch(0.945 0.025 258);
+
+  /* --- el color que significa algo --- */
+  --snv-critico: oklch(0.54 0.19 27);
+  --snv-critico-tinta: oklch(0.47 0.17 27);
+  --snv-critico-suave: oklch(0.958 0.026 27);
+  --snv-alerta: oklch(0.735 0.145 72);
+  --snv-alerta-tinta: oklch(0.5 0.11 62);
+  --snv-alerta-suave: oklch(0.966 0.04 85);
+  --snv-vivo: oklch(0.6 0.13 155);
+  --snv-vivo-tinta: oklch(0.42 0.1 155);
+  --snv-vivo-suave: oklch(0.96 0.03 155);
+
+  --snv-f-titulo: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
+  --snv-f-texto: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', system-ui, sans-serif;
+  --snv-ancho-detalle: clamp(420px, 36vw, 580px);
+
+  /* --- los tokens M3 de la hoja compartida, remapeados a esta paleta --- */
+  --snoc-surface: var(--snv-fondo);
+  --snoc-surface-container-lowest: var(--snv-superficie);
+  --snoc-surface-container-low: oklch(0.962 0.006 250);
+  --snoc-surface-container: var(--snv-superficie-2);
+  --snoc-surface-container-high: oklch(0.935 0.008 250);
+  --snoc-surface-container-highest: oklch(0.915 0.009 250);
+  --snoc-surface-variant: oklch(0.93 0.008 250);
+  --snoc-on-surface: var(--snv-tinta);
+  --snoc-on-surface-variant: var(--snv-tinta-2);
+  --snoc-secondary: var(--snv-tinta-2);
+  --snoc-on-secondary-container: var(--snv-tinta-2);
+  --snoc-on-secondary-fixed-variant: var(--snv-tinta-2);
+  --snoc-secondary-container: var(--snv-accion-suave);
+  --snoc-secondary-fixed-dim: oklch(0.86 0.02 258);
+  --snoc-outline: var(--snv-tinta-3);
+  --snoc-outline-variant: var(--snv-linea);
+  --snoc-primary: var(--snv-accion);
+  --snoc-primary-container: var(--snv-accion);
+  --snoc-on-primary: oklch(0.985 0.005 258);
+  --snoc-on-primary-container: oklch(0.985 0.005 258);
+  --snoc-tertiary: var(--snv-accion-alta);
+  --snoc-primary-fixed: var(--snv-accion-suave);
+  --snoc-primary-fixed-dim: oklch(0.86 0.05 258);
+  --snoc-inverse-surface: var(--snv-tinta);
+  --snoc-inverse-on-surface: var(--snv-superficie);
+  --snoc-error: var(--snv-critico);
+  --snoc-error-container: var(--snv-critico-suave);
+  --snoc-on-error-container: var(--snv-critico-tinta);
+  --snoc-on-error: oklch(0.985 0.005 258);
+  --snoc-r: 4px;
+  --snoc-r-lg: 6px;
+  --snoc-r-xl: 8px;
+  --snoc-r-full: 10px;
+  --snoc-sombra: none;
+
+  font-family: var(--snv-f-texto);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--snv-fondo);
+}
+
+/* Las familias que la hoja compartida fija a mano. */
+.snv .snoc-h1, .snv .snoc-h2, .snv .snoc-h3, .snv .snoc-h4,
+.snv .snoc-cifra, .snv .snoc-mismatch-vs, .snv .snoc-grafico-titulo {
+  font-family: var(--snv-f-titulo);
+}
+.snv .snoc-body { font-size: 14px; line-height: 20px; }
+.snv .snoc-body-sm { font-size: 13px; line-height: 18px; }
+.snv .snoc-btn { font-family: var(--snv-f-texto); font-weight: 700; }
+.snv .snoc-select { font-family: var(--snv-f-texto); font-size: 13px; height: 34px; }
+
+.snv .snoc-lienzo { gap: 0; }
+.snv-con-detalle .snoc-lienzo { padding-right: calc(var(--snv-ancho-detalle) + 16px); }
+
+/* ---------------------------------------------------------------------------
+   CABECERA
+   --------------------------------------------------------------------------- */
+.snv-cabecera { display: flex; flex-direction: column; gap: 8px; padding-bottom: 4px; }
+.snv-cabecera-fila { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.snv-titulo-pantalla {
+  margin: 0; font-family: var(--snv-f-titulo); font-weight: 700; font-size: 22px; letter-spacing: -0.01em;
+}
+.snv-cabecera-der { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.snv-ultimo { font-size: 12px; color: var(--snv-tinta-3); }
+
+/* ---------------------------------------------------------------------------
+   AHORA MISMO
+   --------------------------------------------------------------------------- */
+.snv-ahora { display: flex; flex-direction: column; gap: 20px; padding: 24px 0 8px; }
+.snv-fecha {
+  margin: 0 0 6px; font-size: 12px; color: var(--snv-tinta-3); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.snv-titular {
+  margin: 0; font-family: var(--snv-f-titulo); font-weight: 600; font-size: 36px; line-height: 1.1;
+  letter-spacing: -0.02em; max-width: 28ch; text-wrap: balance; color: var(--snv-tinta);
+}
+.snv-critico { color: var(--snv-critico-tinta); }
+.snv-bajada { margin: 8px 0 0; color: var(--snv-tinta-2); max-width: 70ch; font-size: 15px; }
+
+.snv-signos {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  border-top: 1px solid var(--snv-linea-2); border-bottom: 1px solid var(--snv-linea);
+}
+.snv-signo {
+  all: unset; box-sizing: border-box;
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 12px;
+  padding: 14px 16px; border-left: 1px solid var(--snv-linea);
+}
+.snv-signo:first-child { border-left: 0; padding-left: 0; }
+.snv-signo-enlace { cursor: pointer; }
+.snv-signo-enlace:hover .snv-signo-rot { text-decoration: underline; text-underline-offset: 3px; }
+.snv-signo-enlace:focus-visible { outline: 2px solid var(--snv-accion); outline-offset: -2px; }
+.snv-signo[aria-pressed='true'] { background: var(--snv-accion-suave); }
+.snv-signo-n {
+  grid-row: 1 / 3; align-self: center; min-width: 1.6ch;
+  font-family: var(--snv-f-titulo); font-weight: 600; font-size: 34px; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--snv-tinta);
+}
+.snv-signo-n.snv-sin-dato { font-size: 15px; color: var(--snv-tinta-3); }
+.snv-signo-rot { align-self: end; font-weight: 700; font-size: 13px; color: var(--snv-tinta); }
+.snv-signo-sub { align-self: start; font-size: 12px; line-height: 1.35; color: var(--snv-tinta-3); }
+.snv-tono-critico .snv-signo-n { color: var(--snv-critico-tinta); }
+.snv-tono-alerta .snv-signo-n { color: var(--snv-alerta-tinta); }
+.snv-tono-calma .snv-signo-n { color: var(--snv-tinta-3); }
+
+.snv .snoc-resultado { margin-top: 12px; }
+
+/* ---------------------------------------------------------------------------
+   QUÉ HACE EL SUPERVISOR SOLO
+   --------------------------------------------------------------------------- */
+.snv-solo {
+  margin-top: 24px; padding: 16px 20px;
+  background: var(--snv-superficie); border: 1px solid var(--snv-linea); border-radius: 8px;
+}
+.snv-seccion-cab { display: flex; align-items: baseline; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.snv-seccion-acciones { display: inline-flex; gap: 16px; flex-wrap: wrap; margin-left: auto; }
+.snv-h2 { margin: 0; font-family: var(--snv-f-titulo); font-weight: 600; font-size: 26px; line-height: 1.1; letter-spacing: -0.015em; }
+.snv-h3 { margin: 0 0 12px; font-family: var(--snv-f-titulo); font-weight: 600; font-size: 19px; line-height: 1.2; }
+.snv-seccion-cab .snv-h3 { margin: 0; }
+.snv-nota { margin: 0; font-size: 13px; color: var(--snv-tinta-3); }
+.snv-enlace {
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700;
+  color: var(--snv-accion); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.snv-freno {
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 6px;
+  background: var(--snv-critico-suave); color: var(--snv-critico-tinta); font-size: 14px;
+}
+.snv-tareas {
+  list-style: none; margin: 0 0 12px; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 32px;
+}
+.snv-tarea { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--snv-linea); }
+.snv-estado { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; height: fit-content; padding-top: 1px; }
+.snv-punto { width: 8px; height: 8px; border-radius: 50%; flex: none; background: currentColor; }
+.snv-estado-actua { color: var(--snv-vivo-tinta); }
+.snv-estado-actua .snv-punto { background: var(--snv-vivo); }
+.snv-estado-no { color: var(--snv-critico-tinta); }
+.snv-tarea-txt { display: flex; flex-direction: column; gap: 2px; font-size: 14px; min-width: 0; }
+.snv-tarea-que { font-size: 13px; color: var(--snv-tinta-3); }
+.snv-tarea-porque { font-size: 13px; color: var(--snv-critico-tinta); }
+
+/* ---------------------------------------------------------------------------
+   CUERPO: PARA DECIDIR + MIENTRAS TANTO
+   --------------------------------------------------------------------------- */
+.snv-cuerpo {
+  display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 40px; align-items: start; padding-top: 32px;
+}
+.snv-con-detalle .snv-cuerpo { grid-template-columns: minmax(0, 1fr); }
+.snv-decidir { min-width: 0; }
+
+.snv-filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.snv-segmentado { display: inline-flex; border: 1px solid var(--snv-linea-2); border-radius: 6px; overflow: hidden; background: var(--snv-superficie); }
+.snv-segmentado button {
+  border: 0; background: none; padding: 0 12px; height: 34px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--snv-tinta-2);
+}
+.snv-segmentado button + button { border-left: 1px solid var(--snv-linea); }
+.snv-segmentado button[aria-pressed='true'] { background: var(--snv-tinta); color: var(--snv-superficie); font-weight: 700; }
+.snv-cuenta { font-family: var(--snv-f-titulo); font-variant-numeric: tabular-nums; margin-left: 6px; opacity: 0.75; }
+.snv-buscador {
+  flex: 1 1 220px; min-width: 180px; display: flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 10px; border: 1px solid var(--snv-linea-2); border-radius: 6px; background: var(--snv-superficie);
+  color: var(--snv-tinta-3);
+}
+.snv-buscador input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 13px; color: var(--snv-tinta); }
+.snv-buscador:focus-within { outline: 2px solid var(--snv-accion); outline-offset: 1px; }
+.snv-aviso-filtro { margin: 0 0 12px; font-size: 13px; color: var(--snv-tinta-2); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+
+.snv-vacio {
+  padding: 40px 24px; text-align: center; color: var(--snv-tinta-2); font-size: 14px;
+  background: var(--snv-superficie); border: 1px solid var(--snv-linea); border-radius: 8px;
+}
+.snv-vacio strong { display: block; font-family: var(--snv-f-titulo); font-size: 20px; color: var(--snv-tinta); margin-bottom: 4px; }
+
+/* La bandeja */
+.snv-bandeja { background: var(--snv-superficie); border: 1px solid var(--snv-linea); border-radius: 8px; overflow: hidden; }
+.snv-tildar-todas {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px; font-size: 13px; color: var(--snv-tinta-2);
+  border-bottom: 1px solid var(--snv-linea); cursor: pointer;
+}
+.snv-grupo-cab {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  background: var(--snv-superficie-2); border-top: 1px solid var(--snv-linea);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--snv-tinta-2);
+}
+.snv-grupo:first-of-type .snv-grupo-cab { border-top: 0; }
+.snv-grupo-cab.snv-tono-critico { background: var(--snv-critico-suave); color: var(--snv-critico-tinta); }
+.snv-grupo-cab.snv-tono-alerta { background: var(--snv-alerta-suave); color: var(--snv-alerta-tinta); }
+.snv-grupo-n { font-family: var(--snv-f-titulo); font-size: 14px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+
+.snv-fila {
+  display: grid;
+  grid-template-columns: 24px 150px minmax(0, 1.2fr) minmax(0, 1.3fr) 160px auto;
+  gap: 16px; align-items: start; padding: 14px 16px; border-top: 1px solid var(--snv-linea);
+  transition: background 120ms;
+}
+.snv-fila:hover { background: oklch(0.982 0.004 250); }
+.snv-fila-abierta, .snv-fila-abierta:hover { background: var(--snv-accion-suave); }
+.snv-fila-decidida { color: var(--snv-tinta-2); }
+.snv-celda-check input { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--snv-accion); }
+
+.snv-plazo { display: flex; flex-direction: column; gap: 2px; }
+.snv-plazo-t { font-family: var(--snv-f-titulo); font-weight: 600; font-size: 16px; line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--snv-tinta-2); }
+.snv-plazo-t.snv-tono-critico { color: var(--snv-critico-tinta); }
+.snv-plazo-t.snv-tono-alerta { color: var(--snv-alerta-tinta); }
+.snv-plazo-s { font-size: 12px; color: var(--snv-tinta-3); }
+
+.snv-quien { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.snv-cliente { font-weight: 700; font-size: 15px; line-height: 1.3; }
+.snv-asunto {
+  font-size: 13px; line-height: 1.4; color: var(--snv-tinta-2);
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.snv-etiquetas { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
+.snv-tag { font-size: 12px; font-weight: 500; color: var(--snv-tinta-2); background: var(--snv-superficie-2); border-radius: 4px; padding: 1px 6px; }
+.snv-tag-alta { color: var(--snv-critico-tinta); background: var(--snv-critico-suave); font-weight: 700; }
+.snv-tag-decidida { color: var(--snv-tinta); background: oklch(0.92 0.01 250); font-weight: 700; }
+
+.snv-propone { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; line-height: 1.45; }
+.snv-propone-rot { font-size: 12px; color: var(--snv-tinta-3); }
+.snv-propone-txt { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.snv-propone-vacia { color: var(--snv-tinta-3); font-style: italic; font-size: 13px; }
+
+.snv-asignado { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
+.snv-sin-tecnico { color: var(--snv-alerta-tinta); font-weight: 500; }
+.snv-ids { font-size: 12px; color: var(--snv-tinta-3); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.snv-ids a { color: inherit; }
+.snv-accion { justify-self: end; }
+
+.snv .snoc-paginacion { padding-top: 12px; }
+.snv .snoc-lote { margin-bottom: 12px; }
+
+/* Mientras tanto: la columna derecha. Las piezas son las de siempre
+   ('snoc-grafico'), sin caja: aca se separan por una linea, no por tarjetas. */
+.snv-contexto { display: flex; flex-direction: column; gap: 32px; position: sticky; top: 16px; min-width: 0; }
+.snv-contexto .snoc-grafico { background: none; box-shadow: none; border: 0; padding: 0; border-radius: 0; }
+.snv-contexto .snoc-grafico-titulo {
+  font-size: 19px; font-weight: 600; flex-wrap: wrap; gap: 6px 8px;
+}
+.snv-contexto .snoc-grafico-titulo .snoc-icono { display: none; }
+.snv-contexto .snoc-grafico > .snoc-fila-sep,
+.snv-contexto .snoc-grafico > .snoc-grafico-titulo {
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--snv-linea-2);
+}
+.snv-contexto .snoc-desplazable { max-height: 360px; }
+/* Medido el 01/11 en 1680 px: los filtros de la actividad pedian 341 px y su
+   tabla 346 px en una columna de 340, y empujaban el lienzo 9 px de mas. */
+.snv-contexto .snoc-filtro-actividad { flex-wrap: wrap; max-width: 100%; }
+.snv-contexto .snoc-tabla { table-layout: fixed; width: 100%; }
+.snv-contexto .snoc-tabla th:first-child, .snv-contexto .snoc-tabla td:first-child { width: 52px; }
+.snv-contexto .snoc-recorte { max-width: none; }
+
+/* ---------------------------------------------------------------------------
+   ANÁLISIS
+   --------------------------------------------------------------------------- */
+.snv-analisis { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--snv-linea-2); }
+.snv-analisis summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.snv-analisis summary::-webkit-details-marker { display: none; }
+.snv-flecha { display: inline-block; color: var(--snv-tinta-3); transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.snv-analisis[open] .snv-flecha { transform: rotate(90deg); }
+.snv-analisis-rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 40px; margin: 24px 0; }
+.snv-barra-h { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; margin-bottom: 12px; font-size: 13px; }
+.snv-barra-n { font-family: var(--snv-f-titulo); font-weight: 600; font-variant-numeric: tabular-nums; }
+.snv-riel { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--snv-superficie-2); overflow: hidden; }
+.snv-riel i { display: block; height: 100%; border-radius: 3px; background: var(--snv-accion); }
+.snv-reparto { display: flex; height: 24px; border-radius: 4px; overflow: hidden; margin-bottom: 12px; background: var(--snv-superficie-2); }
+.snv-reparto i { display: block; height: 100%; }
+.snv-reparto-fila { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+.snv-reparto-fila b { margin-left: auto; font-family: var(--snv-f-titulo); font-weight: 600; font-variant-numeric: tabular-nums; }
+.snv-cuadro { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.snv-asistentes { margin-top: 24px; }
+
+/* ---------------------------------------------------------------------------
+   EL DETALLE: PANEL LATERAL
+   Era un modal centrado de 85vw (el comentario de la hoja compartida explica
+   por que: dos columnas de datos). El diseño del 01/11 lo vuelve panel lateral
+   para no perder la bandeja de vista mientras se decide: con el panel abierto,
+   'Mientras tanto' se oculta y la bandeja conserva su ancho. Adentro todo va
+   a una columna.
+   --------------------------------------------------------------------------- */
+.snv-velo-detalle {
+  position: fixed; top: 0; right: 0; bottom: 0; width: var(--snv-ancho-detalle); z-index: 60;
+}
+.snv .snoc-modal-hallazgo.snv-detalle {
+  width: 100%; height: 100%; max-width: none; min-width: 0; border-radius: 0;
+  border-left: 1px solid var(--snv-linea-2); box-shadow: -12px 0 40px oklch(0.24 0.02 258 / 0.1);
+  background: var(--snv-superficie);
+}
+.snv-detalle .snoc-modal-cabecera { flex-wrap: wrap; row-gap: 8px; }
+.snv-detalle .snoc-dos-columnas { grid-template-columns: 1fr; }
+.snv-detalle .snoc-columna { box-shadow: none; border: 1px solid var(--snv-linea); }
+.snv-detalle .snoc-pie-acciones .snoc-campo { width: 100%; }
+.snv-detalle .snoc-modal-pie { flex-direction: column; align-items: stretch; }
+
+/* ---------------------------------------------------------------------------
+   ADAPTABLE
+   --------------------------------------------------------------------------- */
+@media (max-width: 1180px) {
+  .snv-cuerpo { grid-template-columns: minmax(0, 1fr); }
+  .snv-contexto { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .snv-fila { grid-template-columns: 24px 130px minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .snv-fila .snv-asignado { grid-column: 3 / 5; grid-row: 2; }
+}
+@media (max-width: 1100px) {
+  /* Sin lugar para dos columnas: el detalle cubre la pantalla, con velo. */
+  .snv-con-detalle .snoc-lienzo { padding-right: 0; }
+  .snv-velo-detalle { left: 0; width: auto; background: oklch(0.24 0.02 258 / 0.25); display: flex; justify-content: flex-end; }
+  .snv .snoc-modal-hallazgo.snv-detalle { width: min(100%, 580px); }
+}
+@media (max-width: 720px) {
+  .snv-titular { font-size: 27px; }
+  .snv-signo, .snv-signo:first-child { padding: 12px; border-left: 0; border-top: 1px solid var(--snv-linea); }
+  .snv-fila { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px 12px; }
+  .snv-fila .snv-plazo { grid-column: 2; grid-row: 1; flex-direction: row; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .snv-fila .snv-quien { grid-column: 2 / 4; grid-row: 2; }
+  .snv-fila .snv-propone { grid-column: 2 / 4; grid-row: 3; }
+  .snv-fila .snv-asignado { grid-column: 2 / 4; grid-row: 4; }
+  .snv-fila .snv-accion { grid-column: 3; grid-row: 1; }
+  .snv-seccion-acciones { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snv-flecha, .snv-fila { transition: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   PIEZAS HEREDADAS, AJUSTADAS A ESTA PALETA
+   --------------------------------------------------------------------------- */
+/* Carga de tecnicos: la cabecera se parte en dos lineas antes que cortar el
+   estado ("Sobrecarg…"), y el verde de "normal" pasa a gris -- el verde aca
+   se reserva para "en vivo" y "actua". */
+.snv .snoc-tecnico-cabeza { flex-wrap: wrap; row-gap: 2px; }
+.snv .snoc-tecnico-cabeza .snoc-mono-sm { white-space: normal; }
+.snv .snoc-riel-ok, .snv .snoc-riel-neutro { background: var(--snv-tinta-3); }
+.snv .snoc-riel-alerta { background: var(--snv-alerta); }
+.snv .snoc-riel-critico { background: var(--snv-critico); }
+.snv .snoc-sla-ok { background: var(--snv-superficie-2); color: var(--snv-tinta-2); }
+.snv .snoc-sla-alerta { background: var(--snv-alerta-suave); color: var(--snv-alerta-tinta); }
+.snv .snoc-nivel-media { color: var(--snv-tinta-2); }
+.snv .snoc-nivel-baja { color: var(--snv-tinta-3); }
+
+/* Las cajas del detalle con una franja de color a la izquierda pasan a un
+   borde completo y un fondo suave: la franja lateral no dice nada que el
+   titulo de la caja no diga ya. */
+.snv .snoc-que-pasa, .snv .snoc-propuesta, .snv .snoc-accion, .snv .snoc-contraste {
+  border-left: 1px solid var(--snv-linea);
+  border: 1px solid var(--snv-linea);
+  border-radius: 8px;
+}
+.snv .snoc-propuesta { background: var(--snv-accion-suave); border-color: oklch(0.86 0.04 258); }
+.snv .snoc-contraste { background: var(--snv-critico-suave); border-color: oklch(0.86 0.06 27); }
