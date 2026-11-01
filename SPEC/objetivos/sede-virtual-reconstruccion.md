@@ -595,14 +595,21 @@ Y se mide que sea un gesto y no un tic: ocurre entre el 2% y el 30% del tiempo.
 | Que el conjunto no se mueva al unísono | **hecho** |
 | Gestos ambientales discretos | **hecho** |
 | Señales de ejecución activa, alertas, desconocido | **ya existía** |
-| **Caminar · sentarse · levantarse** | **NO hecho**, y con motivo |
+| **Caminar · sentarse · levantarse** | **NO hecho** — y el motivo que di estaba equivocado |
 
-**Por qué caminar no entró.** Una figura que se levanta y recorre el pasillo es
-el movimiento que más dice *«acá pasa algo»*, y ahí está el problema: no hay
-ningún evento del motor que signifique «fulano se levantó». Dibujarlo sería
-exactamente lo que este objetivo prohíbe — inventar actividad. Entra el día que
-haya un evento que lo respalde, o como recorrido explícitamente ambiental y
-marcado como tal, que es una decisión de producto y no de dibujo.
+**Por qué caminar no entró, y por qué ese razonamiento era malo.** Escribí que
+no había ningún evento del motor que significara «fulano se levantó» y que
+dibujarlo sería inventar actividad. **El dueño del producto lo corrigió el
+01/11/2026 y tenía razón**: la simulación híbrida ya estaba aprobada, y un
+recorrido ambiental no afirma nada sobre el trabajo de nadie.
+
+Confundí **inventar actividad** —decir que alguien atendió a un cliente sin
+evidencia— con **mover a alguien**. Lo primero sigue prohibido; lo segundo
+nunca lo estuvo. Ver «Corrección a una decisión mía sobre los personajes»,
+más abajo, con la regla de procedencia que queda.
+
+Sigue sin hacerse, ahora por una razón de orden y no de principio: construir el
+sistema de locomoción antes de decidir el motor sería construirlo dos veces.
 
 ---
 
@@ -711,10 +718,57 @@ usuario lo diga.
 
 ---
 
+## El diseño NO se aprobó, y lo que eso corrigió (01/11/2026)
+
+La matriz llegó a **7 de 8** y el dueño del producto **no aprobó el resultado**:
+
+> El edificio continúa siendo demasiado largo, estrecho y lineal respecto a
+> nuestra referencia arquitectónica aprobada. **No quiero conservar la
+> distribución lineal únicamente porque actualmente cumple las pruebas de
+> oclusión.**
+
+Tenía razón, y la frase señala el error exacto: la franja larga nunca fue una
+decisión de diseño, era el residuo de una restricción que se dio por
+inevitable. Lo que una prueba mide es que el dibujo es consistente, no que la
+forma sea la que se quería.
+
+**Lo que se midió a partir de ahí, en [sede-virtual-comparacion-motores.md](sede-virtual-comparacion-motores.md):**
+la causa de la franja no es PixiJS, es dibujar siempre los tres pisos. Con la
+planta compacta y el piso aislado, la esbeltez baja de **4,85 a 1,05** y la
+altura de **48,4 a 21**. El spike de Three.js está construido, medido y
+capturado; **la decisión de motor sigue sin tomarse**.
+
+### Corrección a una decisión mía sobre los personajes
+
+Esta ficha decía que caminar no se implementaba porque *«ningún evento del
+motor significa que alguien se levantó, y dibujarlo sería inventar actividad»*.
+**Eso estaba mal, y el dueño del producto lo corrigió:**
+
+> Ya habíamos aprobado una simulación híbrida. Caminar puede ser una animación
+> ambiental, sin afirmar que el agente está realizando una tarea laboral. (…)
+> No debemos confundir simulación ambiental con falsificación de actividad.
+
+Confundí dos cosas distintas: **inventar actividad** —afirmar que alguien
+atendió a un cliente sin evidencia— y **mover a alguien**. La primera sigue
+prohibida; la segunda nunca lo estuvo.
+
+La regla que queda, y que sí es la correcta:
+
+| | Procedencia | Puede aparecer en el historial |
+|---|---|---|
+| Caminar, sentarse, levantarse, gestos | `ambiente` | **Nunca** |
+| Atender, resolver, escalar, ejecutar | un acontecimiento verificable | Sí |
+
+Queda **por implementar**, después de la decisión de motor: construir el
+sistema de locomoción dos veces sería tirar la mitad del trabajo.
+
+---
+
 ## Bitácora
 
 | Fecha | Qué avanzó | Qué falta | Commit |
 |---|---|---|---|
+| 01/11/2026 | **El diseño no se aprueba y se construye el spike de Three.js.** Planta compacta en módulo puro (16 pruebas) con la misma `salasDe` de la pantalla: esbeltez **4,85 → 1,05**, alto **48,4 → 21**. Renderizador ortográfico con tres modos —corte por planos, rayos X y aislamiento— que son las tres salidas a la oclusión. Mismos cuatro verbos que la escena de PixiJS, y `rotulos.js` compartido entre los dos motores. **Antes**: arreglado que dos nombres de sala se taparan, y una prueba `.test.ts` que no corría | Verificar S1 y S2 en el navegador: el motor de Docker se cayó antes. Las referencias de los ejes 3 y 6. El movimiento ambiental | f6840261 · este |
 | 31/10/2026 | **Cierre de la validación y de los dos parciales.** El núcleo recibe su piel de vidrio por delante —le faltaba la cara frontal, no luz— y pasa a CUMPLIDO. Marcadores de presencia a tamaño de pantalla para que la gente se lea a escala de conjunto. Cada persona con su reloj: 37 poseían la misma postura al píxel. Gesto ambiental que NO toca el aura. Luz de interior cálida, filo azul en cada forjado, rótulos que dejan de pisarse. **7 de 8 cumplidos, 1 parcial** | El criterio 8: el edificio sigue siendo una franja larga, y eso es estructural. Caminar, cuando haya un evento que lo respalde | 4dfe4687 · 09097aff |
 | 31/10/2026 | **Reconstrucción arquitectonica con el motor actual, autorizada y hecha.** Basamento, fachada, extremo, cubierta con lucernarios, remate y núcleo acristalado; la luz separada en dos familias; el encuadre midiendo volúmenes y no un cubo. **6 de 8 criterios cumplidos, 2 parciales** (medido en el navegador, no deducido). 144 fps · mín 144 en las tres vistas con `bringToFront()`. Tres defectos propios cazados midiendo | Los dos parciales: el núcleo a escala de conjunto y los personajes. El eje 3 sigue siendo el que decide el motor | 9bb773bf · 894f0402 · 1ffff317 |
 | 31/10/2026 | **Primera referencia aprobada (eje 1)** y sus ocho criterios registrados. La escena de hoy cumple 3 de 8. Corregido un párrafo de esta misma ficha que el código desmiente: la desigualdad de oclusión no obliga a 3D, `edificio.js` ya la usó para colocar salas al frente y circulación al fondo | Las referencias de los ejes 3 y 6; son las que deciden el motor | — |
