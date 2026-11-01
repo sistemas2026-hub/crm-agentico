@@ -79,6 +79,20 @@ describe('la escena no conoce el negocio', () => {
   });
 });
 
+describe('ninguna prueba de la escena queda fuera del corredor', () => {
+  it('no hay archivos .test.ts: vitest sólo recoge *.test.js y no avisa', () => {
+    //  `vitest.config.js` tiene `include: ['src/**/*.test.js']`. Una prueba
+    //  escrita como `.test.ts` NO CORRE, y no da error ni advertencia: sale
+    //  verde porque no existe. Pasó el 01/11/2026 con `rotulos.test.ts`, que
+    //  se dio por pasada sin haberse ejecutado nunca.
+    //
+    //  Es exactamente lo que CLAUDE.md §6 llama «código construido no es
+    //  código que corre», aplicado a una prueba.
+    const sueltas = readdirSync(RAIZ).filter((f) => f.endsWith('.test.ts'));
+    expect(sueltas, 'renombralas a .test.js o ampliá el include').toEqual([]);
+  });
+});
+
 describe('la escena no importa el motor gráfico donde no debe', () => {
   const fuentes = fuentesDeLaEscena();
 
@@ -87,7 +101,8 @@ describe('la escena no importa el motor gráfico donde no debe', () => {
     // PixiJS, dejarían de poder probarse en Node — y son justo los cuatro que
     // concentran las decisiones. El día que uno lo importe, lo que se pierde no
     // es la pureza: son las pruebas.
-    const puros = ['camara.ts', 'pose.ts', 'isometria.ts', 'adaptador.ts', 'paleta.ts'];
+    const puros = ['camara.ts', 'pose.ts', 'isometria.ts', 'adaptador.ts', 'paleta.ts',
+                   'rotulos.ts'];
     for (const nombre of puros) {
       const f = fuentes.find((x) => x.archivo === nombre);
       expect(f, `falta ${nombre}`).toBeTruthy();

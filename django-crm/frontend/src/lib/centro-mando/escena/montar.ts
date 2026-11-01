@@ -34,6 +34,7 @@ import { construirOficina, type Planta, type Puesto } from './oficina';
 import { construirPersonaje, type Personaje } from './personaje';
 import { generarTexturas } from './texturas';
 import { ANIMACION_POR_TIPO, type Acontecimiento, type EstadoDeAgente } from './adaptador';
+import { separarRotulos, type CajaDeRotulo } from './rotulos';
 
 export interface Metricas {
   /** Cuadros por segundo del último segundo. */
@@ -261,13 +262,31 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
                     texto.width + 20, alto, 6)
       .fill({ color: 0x0b0a1c, alpha: 0.72 })
       .stroke({ width: 1, color: 0x2c2a52, alpha: 0.9 });
+    //  La guía que une la placa con su ancla cuando hubo que bajarla para que
+    //  no se pisara con otra. Va PRIMERO para quedar detrás de la placa, y
+    //  existe por una razón de verdad y no de adorno: un nombre corrido tres
+    //  líneas hacia abajo señalaría la sala equivocada, y un rótulo que miente
+    //  sobre a quién nombra es peor que dos rótulos encimados.
+    const guia = new Graphics();
+    nodo.addChildAt(guia, 0);
     nodo.addChild(placa);
     nodo.addChild(texto);
     app.stage.addChild(nodo);
     //  El punto del mundo al que queda atado, ya proyectado: no cambia nunca,
     //  así que se calcula una vez.
     const ancla = aPantalla(l.gx, l.gy, l.gz);
-    return { nodo, ancla };
+    return {
+      nodo,
+      ancla,
+      guia,
+      //  Lo que mide la placa, para la separación. El borde izquierdo depende
+      //  de hacia dónde crece, igual que al dibujarla.
+      izquierda: aLaDerecha ? -6 : -texto.width - 14,
+      ancho: texto.width + 20,
+      alto,
+      //  Lo último que se dibujó en la guía, para no rehacerla cada fotograma.
+      corrida: 0
+    };
   });
 
   /* ── la viñeta ────────────────────────────────────────────────────────── */
@@ -558,8 +577,43 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
 
     //  Los letreros siguen a su punto del mundo SIN escalar: se aplica la
     //  misma transformación al ancla y se deja el texto a tamaño de pantalla.
-    for (const l of letreros) {
-      l.nodo.position.set(l.ancla.x * tr.escala + tr.x, l.ancla.y * tr.escala + tr.y);
+    //
+    //  Y ahí está el problema que resuelve `separarRotulos`: las anclas sí
+    //  encogen con la cámara, el texto no. En la vista de conjunto once anclas
+    //  separadas por cuatro celdas caen a doce píxeles y los nombres se montan.
+    //  La separación se recalcula cada fotograma porque depende de la cámara:
+    //  no hay una colocación fija que sirva a todas las escalas.
+    const cajas: CajaDeRotulo[] = letreros.map((l) => ({
+      x: l.ancla.x * tr.escala + tr.x + l.izquierda,
+      y: l.ancla.y * tr.escala + tr.y,
+      ancho: l.ancho,
+      alto: l.alto
+    }));
+    const ys = separarRotulos(cajas);
+    for (let i = 0; i < letreros.length; i++) {
+      const l = letreros[i];
+      l.nodo.position.set(l.ancla.x * tr.escala + tr.x, ys[i]);
+      const corrida = ys[i] - cajas[i].y;
+      //  Redibujar la guía sólo cuando cambió de verdad: a 144 cuadros por
+      //  segundo, once `clear()` por fotograma se notan y no hacen falta.
+      if (Math.abs(corrida - l.corrida) > 0.5) {
+        l.corrida = corrida;
+        l.guia.clear();
+        //  Nace en el BORDE de la placa y no en su centro: dibujada desde el
+        //  centro queda tapada por la placa misma y no se ve nunca —así nació,
+        //  y así era código que no dibujaba nada—. Y sólo cuando el tirón
+        //  saca el ancla fuera de la placa: por debajo de eso el rótulo sigue
+        //  tocando su sala y una línea sobraría.
+        const borde = l.alto / 2 + 1;
+        if (corrida > borde + 2) {
+          l.guia
+            .moveTo(0, -corrida)
+            .lineTo(0, -borde)
+            .stroke({ width: 1, color: 0x6f6ba6, alpha: 0.75 })
+            .circle(0, -corrida, 1.8)
+            .fill({ color: 0x8f8bc6, alpha: 0.9 });
+        }
+      }
     }
 
     //  Los marcadores de presencia, con la misma transformación y el mismo
