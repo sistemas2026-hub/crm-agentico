@@ -427,3 +427,22 @@ export function alertasDelDia(publicado, material) {
     .sort((x, y) => rango[x.a.tono] - rango[y.a.tono] || x.i - y.i)
     .map(({ a }) => a);
 }
+
+/**
+ * SI SE DIBUJA EL MAPA (01/11/2026): solo cuando lo que se mira es HOY.
+ *
+ * Una fecha pasada no tiene posiciones --no se guarda el recorrido-- y
+ * mostrar las de ahora bajo otra fecha sería mentir sobre dónde estuvo
+ * alguien. Sin saber cuál es el día de la empresa tampoco se dibuja: adivinar
+ * con el reloj del navegador fue justo el defecto que dejó el mapa invisible.
+ *
+ * Es una función y no una condición escrita en la plantilla porque una
+ * condición dentro de un `{#if}` no la mira ninguna prueba: la mutación que
+ * la borraba sobrevivía.
+ *
+ * @param {string | null | undefined} dia el día que se está mirando
+ * @param {string | null | undefined} hoy el día de la empresa, del servidor
+ */
+export function seDibujaElMapa(dia, hoy) {
+  return Boolean(hoy) && dia === hoy;
+}

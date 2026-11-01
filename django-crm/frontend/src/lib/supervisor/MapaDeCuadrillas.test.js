@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 
 import MapaDeCuadrillas from './MapaDeCuadrillas.svelte';
+import { seDibujaElMapa } from './dia-publicado.js';
 
 /**
  * EL MAPA DE CUADRILLAS (31/10/2026).
@@ -61,6 +62,35 @@ describe('el mapa de cuadrillas', () => {
       const h = html(vacio);
       expect(h).toContain('0 de 0 reportando');
       expect(h).toContain('class="mp-caja');
+    }
+  });
+});
+
+describe('cuándo se dibuja el mapa', () => {
+  it('solo si lo que se mira es hoy', () => {
+    expect(seDibujaElMapa('2026-11-01', '2026-11-01')).toBe(true);
+  });
+
+  it('un día pasado NO lo dibuja: no hay posiciones de ese día', () => {
+    expect(seDibujaElMapa('2026-10-25', '2026-11-01')).toBe(false);
+  });
+
+  it('un día futuro tampoco', () => {
+    expect(seDibujaElMapa('2026-11-05', '2026-11-01')).toBe(false);
+  });
+
+  it('si la carga falló y los dos quedan vacíos, tampoco: no es que sea hoy', () => {
+    //  Cuando el load no pudo leer, `dia` y `hoy` vienen los dos en ''. Sin
+    //  la guarda, '' === '' daba true y el mapa se dibujaba sobre nada.
+    expect(seDibujaElMapa('', '')).toBe(false);
+    expect(seDibujaElMapa(null, null)).toBe(false);
+  });
+
+  it('sin saber cuál es hoy no se dibuja, en vez de adivinar', () => {
+    //  EL DEFECTO DEL 01/11/2026: la pantalla comparaba contra una zona
+    //  horaria escrita a mano y el mapa no aparecía nunca.
+    for (const sinHoy of ['', null, undefined]) {
+      expect(seDibujaElMapa('2026-11-01', sinHoy)).toBe(false);
     }
   });
 });

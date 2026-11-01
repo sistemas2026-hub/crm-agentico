@@ -24,6 +24,7 @@
   import {
     lineaDePersona,
     quienLaAsigno,
+    seDibujaElMapa,
     textoDeLaSiguiente,
     textoDelDiaDeLaCuadrilla,
     textoSinBajar
@@ -107,13 +108,6 @@
   const kitsIncompletos = $derived(
     data.errorMaterial || !material ? null : (material?.cuentas?.con_faltantes ?? 0)
   );
-
-  /** Hoy en la hora de la empresa: el mapa solo tiene sentido para hoy. */
-  function hoyEnBogota() {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit'
-    }).format(new Date());
-  }
 
   /** @param {Event} e */
   function cambiarDia(e) {
@@ -229,7 +223,7 @@
                  que el sondeo de cada 15 s lo mueve solo. Solo se dibuja el
                  día de hoy: una fecha pasada no tiene posiciones, y mostrar
                  las de ahora bajo otra fecha seria mentir. -->
-            {#if data.dia === hoyEnBogota()}
+            {#if seDibujaElMapa(data.dia, data.hoy)}
               <MapaDeCuadrillas cuadrillas={publicado.cuadrillas} />
             {/if}
             {#if data.seguimiento}

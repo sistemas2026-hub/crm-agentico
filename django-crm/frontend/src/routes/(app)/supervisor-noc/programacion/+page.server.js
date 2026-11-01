@@ -47,7 +47,7 @@ export async function load({ url, cookies, locals }) {
   const rol = /** @type {any} */ (locals).profile?.role ?? null;
   if (!ROLES_GESTION.has(rol)) {
     return {
-      puedeVer: false, dia: '', publicado: null, error: false,
+      puedeVer: false, dia: '', hoy: '', publicado: null, error: false,
       material: null, errorMaterial: false, configuracion: null, seguimiento: null,
       vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
     };
@@ -55,7 +55,15 @@ export async function load({ url, cookies, locals }) {
 
   //  Hoy en el reloj de la EMPRESA, no en el del servidor (UTC).
   const pedido = (url.searchParams.get('dia') ?? '').trim();
-  const dia = /^\d{4}-\d{2}-\d{2}$/.test(pedido) ? pedido : await hoyDeLaEmpresa(locals, cookies);
+  //  EL HOY DE LA EMPRESA SE CALCULA UNA VEZ Y VIAJA (01/11/2026). La pantalla
+  //  necesita saber si lo que mira es HOY --el mapa solo tiene sentido para
+  //  hoy-- y no puede deducirlo: el navegador del supervisor puede estar en
+  //  otra zona, y fijar una en el codigo rompe la regla de que lo que varia
+  //  por empresa es configuracion (CLAUDE.md §3.3). Antes el mapa comparaba
+  //  contra «America/Bogota» escrito a mano y no aparecia nunca si los dos
+  //  relojes no coincidian.
+  const hoy = await hoyDeLaEmpresa(locals, cookies);
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(pedido) ? pedido : hoy;
 
   //  LA PESTAÑA CERRADAS (30/10/2026): lo que ya se cerró, en el rango que
   //  se elija, contado desde el día que se mira.
@@ -80,6 +88,7 @@ export async function load({ url, cookies, locals }) {
   return {
     puedeVer: true,
     dia,
+    hoy,
     publicado: dp.publicado,
     error: dp.error,
     material: mat.material,

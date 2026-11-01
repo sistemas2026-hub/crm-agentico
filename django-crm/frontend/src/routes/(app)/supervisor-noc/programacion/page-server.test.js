@@ -244,6 +244,28 @@ describe('Programación: la carga', () => {
     expect(d.publicado).toEqual(PUBLICADO);
   });
 
+  it('el HOY DE LA EMPRESA viaja, y es el mismo con o sin día en la URL', async () => {
+    //  EL DEFECTO (01/11/2026): el mapa se dibujaba solo si el día que se
+    //  mira es hoy, y la pantalla lo comparaba contra «America/Bogota»
+    //  escrito a mano en el navegador. Con el reloj del navegador en otra
+    //  zona --o con otra empresa-- los dos días no coincidían y el mapa NO
+    //  APARECÍA NUNCA, sin ningún error. El servidor ya sabe cuál es el día
+    //  de la empresa: lo manda, y la pantalla compara contra eso.
+    const sinDia = /** @type {any} */ (
+      await load(ctx('http://x/supervisor-noc/programacion', 'ADMIN'))
+    );
+    const conOtroDia = /** @type {any} */ (
+      await load(ctx('http://x/supervisor-noc/programacion?dia=2026-10-30', 'ADMIN'))
+    );
+
+    expect(sinDia.hoy).toBe('2026-10-28');
+    expect(sinDia.dia).toBe(sinDia.hoy);
+    //  Mirando otro día, `hoy` NO cambia: es lo que distingue «hoy» de «lo
+    //  que estoy mirando», que es justo lo que decide si se dibuja el mapa.
+    expect(conOtroDia.hoy).toBe('2026-10-28');
+    expect(conOtroDia.dia).toBe('2026-10-30');
+  });
+
   it('con día en la URL pide ese', async () => {
     await load(ctx('http://x/supervisor-noc/programacion?dia=2026-10-30', 'SUPERVISOR'));
 
