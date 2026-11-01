@@ -29,25 +29,43 @@
   /** @type {{ data: any }} */
   let { data } = $props();
 
-  let org = $derived(data.org);
-
   /*
-   * Lo que sale del motor llega APARTE (ver settings.js::getSettingsHub): la
-   * pagina se dibuja con lo del CRM sin esperarlo, y las tarjetas del
-   * asistente se completan cuando llega. Mientras tanto se ven sin valor, que
-   * es lo mismo que mostraban con el motor caido. La promesa nunca rechaza.
+   * Cada lectura llega APARTE (ver settings.js::getSettingsHub, 01/11/2026):
+   * la carga no espera ninguna, la pagina se dibuja enseguida y cada fila
+   * muestra su valor cuando llega el suyo. Mientras tanto se ve sin valor, lo
+   * mismo que muestra cuando esa lectura fallo o un miembro no puede verla.
+   * Las promesas nunca rechazan.
+   *
+   * `d` junta lo que ya llego con lo que vino resuelto desde el principio
+   * (asi tambien se dibuja con datos planos, que es como lo prueba
+   * hub-se-dibuja-sin-esperar.test.js).
    */
-  /** @type {any} */
-  let motor = $state({});
+  /** @param {any} v */
+  const esPromesa = (v) => !!v && typeof v.then === 'function';
+  /** @type {Record<string, any>} */
+  let llegado = $state({});
   $effect(() => {
     let vigente = true;
-    Promise.resolve(data.motor).then((m) => {
-      if (vigente) motor = m ?? {};
-    });
+    llegado = {};
+    for (const [clave, valor] of Object.entries(data)) {
+      if (!esPromesa(valor)) continue;
+      valor.then((/** @type {any} */ v) => {
+        if (vigente) llegado[clave] = v;
+      });
+    }
     return () => {
       vigente = false;
     };
   });
+  /** @type {any} */
+  let d = $derived({
+    ...Object.fromEntries(Object.entries(data).filter(([, v]) => !esPromesa(v))),
+    ...llegado
+  });
+
+  let org = $derived(d.organizacion);
+  /** @type {any} */
+  let motor = $derived(d.motor ?? {});
 
   /**
    * Weekday hours as one line. When the days do not all match it says so
@@ -56,10 +74,13 @@
    * and this is the number an SLA is measured against.
    */
   let hoursSummary = $derived.by(() => {
-    const open = data.calendar.days.filter((d) => d.open);
+    if (!d.calendar) return null;
+    const open = (d.calendar.days ?? []).filter((/** @type {any} */ dia) => dia.open);
     if (!open.length) return 'Sin horario configurado';
     const first = open[0];
-    const uniform = open.every((d) => d.open === first.open && d.close === first.close);
+    const uniform = open.every(
+      (/** @type {any} */ dia) => dia.open === first.open && dia.close === first.close
+    );
     return uniform
       ? `${open.length} días, ${first.open}-${first.close}`
       : `${open.length} días, horario variable`;
@@ -88,8 +109,8 @@
 
   /** An approval rule set to MANAGER with no named approvers matches nobody. */
   let stuckApprovalRules = $derived(
-    data.approvalRules.filter(
-      (r) => r.is_active && r.approver_role === 'MANAGER' && !r.approvers.length
+    (d.approvalRules ?? []).filter(
+      (/** @type {any} */ r) => r.is_active && r.approver_role === 'MANAGER' && !r.approvers.length
     ).length
   );
 
@@ -104,18 +125,18 @@
           // People counts are admin-only oversight; a member's fan-out gets no
           // totals (the endpoint 403s), so the row lists the destination with
           // no value rather than a misleading zero.
-          value: data.peopleTotals
-            ? `${data.peopleTotals.count} personas · ${data.peopleTotals.admins} administradores`
+          value: d.peopleTotals
+            ? `${d.peopleTotals.count} personas · ${d.peopleTotals.admins} administradores`
             : null,
-          warn: data.peopleTotals ? data.peopleTotals.tokens_on_deactivated > 0 : false
+          warn: d.peopleTotals ? d.peopleTotals.tokens_on_deactivated > 0 : false
         },
         {
           href: '/settings/api-tokens',
           title: 'Tokens de API',
           body: 'Tokens de acceso personal para scripts, integraciones y agentes de IA.',
-          value: data.tokenTotals ? `${data.tokenTotals.live} activos` : null,
-          warn: data.tokenTotals
-            ? data.tokenTotals.orphaned > 0 || data.tokenTotals.unused_90d > 0
+          value: d.tokenTotals ? `${d.tokenTotals.live} activos` : null,
+          warn: d.tokenTotals
+            ? d.tokenTotals.orphaned > 0 || d.tokenTotals.unused_90d > 0
             : false
         },
         {
@@ -137,7 +158,7 @@
           href: '/settings/organization',
           title: 'Organización',
           body: 'Los datos de la empresa que se imprimen en cada factura y cotización.',
-          value: org.company_name,
+          value: org?.company_name || null,
           warn: false
         }
       ]
@@ -149,28 +170,30 @@
           href: '/settings/routing',
           title: 'Enrutamiento de tickets',
           body: 'A quién le llega un ticket nuevo, en el orden en que se prueban las reglas.',
-          value: `${data.routingTotals.active} reglas`,
-          warn: data.routingTotals.unrouted_last_30d > 0
+          value: d.routingTotals ? `${d.routingTotals.active} reglas` : null,
+          warn: d.routingTotals ? d.routingTotals.unrouted_last_30d > 0 : false
         },
         {
           href: '/settings/escalation',
           title: 'Escalamiento',
           body: 'Qué pasa cuando un ticket no cumple su objetivo de respuesta.',
-          value: `${data.escalationTotals.active} de ${data.escalationTotals.count} prioridades`,
-          warn: data.escalationTotals.breaches_unhandled_30d > 0
+          value: d.escalationTotals
+            ? `${d.escalationTotals.active} de ${d.escalationTotals.count} prioridades`
+            : null,
+          warn: d.escalationTotals ? d.escalationTotals.breaches_unhandled_30d > 0 : false
         },
         {
           href: '/settings/business-hours',
           title: 'Horario laboral',
           body: 'El reloj contra el que se mide cada objetivo de respuesta.',
-          value: `${data.calendar.name} · ${hoursSummary}`,
+          value: d.calendar ? `${d.calendar.name} · ${hoursSummary}` : null,
           warn: false
         },
         {
           href: '/settings/ticket-approvals',
           title: 'Reglas de aprobación',
           body: 'Qué bloquea el cierre de un ticket, y quién puede destrabarlo.',
-          value: `${data.approvalTotals.active} activas`,
+          value: d.approvalTotals ? `${d.approvalTotals.active} activas` : null,
           warn: stuckApprovalRules > 0
         },
         {
@@ -180,26 +203,28 @@
           // Admin-only, like people and tokens above: a member's fan-out gets
           // null (the endpoint 403s), so the row lists the destination without
           // a value rather than guessing at the policy.
-          value: !data.reopen
+          value: !d.reopen
             ? null
-            : data.reopen.is_enabled
-              ? `Dentro de ${data.reopen.reopen_window_days} días`
+            : d.reopen.is_enabled
+              ? `Dentro de ${d.reopen.reopen_window_days} días`
               : 'Apagada. Lo cerrado sigue cerrado',
           // Replies arriving outside the window are normal for any window, so
           // that number belongs on the page, not on a warning here. Off is the
           // state worth flagging: it makes every reply to a closed ticket
           // vanish, not just the late ones.
-          warn: data.reopen ? !data.reopen.is_enabled : false
+          warn: d.reopen ? !d.reopen.is_enabled : false
         },
         {
           href: '/settings/inbound-email',
           title: 'Correo entrante',
           body: 'Las direcciones que convierten un correo en un ticket.',
-          value: `${data.mailboxTotals.active} de ${data.mailboxTotals.count} activas`,
+          value: d.mailboxTotals
+            ? `${d.mailboxTotals.active} de ${d.mailboxTotals.count} activas`
+            : null,
           // Off AND still receiving, not merely off. An address switched off
           // and left alone is a decision; one still getting mail and creating
           // nothing is a customer being ignored.
-          warn: data.mailboxTotals.silently_dropping > 0
+          warn: d.mailboxTotals ? d.mailboxTotals.silently_dropping > 0 : false
         }
       ]
     },
@@ -288,10 +313,11 @@
           // Sin canales nadie recibe nada, y eso NO es un error: es el estado
           // por defecto. Pero vale decirlo, porque hoy esos avisos los escribe
           // alguien a mano.
-          value: data.avisosCampo?.cuantos
-            ? `${data.avisosCampo.cuantos} canal${data.avisosCampo.cuantos === 1 ? '' : 'es'}`
+          value: d.avisosCampo?.cuantos
+            ? `${d.avisosCampo.cuantos} canal${d.avisosCampo.cuantos === 1 ? '' : 'es'}`
             : null,
-          warn: !data.avisosCampo?.cuantos
+          // Solo cuando la lectura llego y dijo cero: sin dato no se acusa.
+          warn: !!d.avisosCampo && !d.avisosCampo.cuantos
         },
         // Solo aparece si el catalogo del tenant declara las herramientas de
         // SmartOLT -- un tenant sin esa integracion no tiene por que ver un
@@ -352,14 +378,14 @@
           href: '/settings/macros',
           title: 'Macros',
           body: 'Respuestas predefinidas, y los placeholders que reemplazan.',
-          value: `${data.macroTotals.org} compartidas`,
-          warn: data.macroTotals.with_unknown_placeholders > 0
+          value: d.macroTotals ? `${d.macroTotals.org} compartidas` : null,
+          warn: d.macroTotals ? d.macroTotals.with_unknown_placeholders > 0 : false
         },
         {
           href: '/settings/tags',
           title: 'Etiquetas',
           body: 'Etiquetas compartidas entre cuentas, prospectos, negociaciones y tickets.',
-          value: `${data.tagTotals.active} en uso`,
+          value: d.tagTotals ? `${d.tagTotals.active} en uso` : null,
           // Unused tags are housekeeping, not a fault, the tags page lists
           // them without needing the hub to raise an alarm about tidiness.
           warn: false
@@ -368,8 +394,10 @@
           href: '/settings/custom-fields',
           title: 'Campos personalizados',
           body: 'Campos que esta organización agregó a los registros.',
-          value: `${data.fieldTotals.active} en ${data.fieldTotals.models_extended} tipos de registro`,
-          warn: data.fieldTotals.required_with_gaps > 0
+          value: d.fieldTotals
+            ? `${d.fieldTotals.active} en ${d.fieldTotals.models_extended} tipos de registro`
+            : null,
+          warn: d.fieldTotals ? d.fieldTotals.required_with_gaps > 0 : false
         },
         {
           href: '/invoices/templates',
@@ -387,8 +415,11 @@
 
 <PageHeader title="Configuración">
   {#snippet sub()}
-    {org.name} · <span class="v2-num">{count(org.member_count)}</span> miembros · desde
-    {shortDate(org.created_at)}
+    {org?.name || data.orgNombre}
+    {#if org}
+      · <span class="v2-num">{count(org.member_count)}</span> miembros · desde
+      {shortDate(org.created_at)}
+    {/if}
     {#if warnings}
       · <span class="v2-num">{count(warnings)}</span> necesitan revisión
     {/if}

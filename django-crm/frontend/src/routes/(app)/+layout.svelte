@@ -4,6 +4,7 @@
   import { page } from '$app/state';
   import { afterNavigate } from '$app/navigation';
   import Sidebar from '$lib/v2/components/Sidebar.svelte';
+  import BarraNavegacion from '$lib/v2/components/BarraNavegacion.svelte';
   import CommandPalette from '$lib/v2/components/CommandPalette.svelte';
   import { Search, Sun, MessageCircle, LifeBuoy, ClipboardCheck, Plus, Menu } from '@lucide/svelte';
   import { barra, recordarPreferencia, resumenRecogido } from '$lib/conversaciones/barra-lateral.svelte.js';
@@ -92,6 +93,7 @@
      marca (que vuelve al inicio) y los módulos operativos. Ver
      `conversaciones/+layout.svelte`. -->
 <div class="v2-root v2-shell" class:sin-barra={barraRecogida}>
+  <BarraNavegacion />
   {#if !barraRecogida}
     <Sidebar
       counts={data.counts}
