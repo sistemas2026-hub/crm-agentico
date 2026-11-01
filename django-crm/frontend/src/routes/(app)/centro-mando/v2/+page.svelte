@@ -242,7 +242,11 @@
               gy: p.origen.gy + p.mundo.fondo + 0.6,
               gz: p.origen.gz,
               hacia: /** @type {const} */ ('derecha'),
-              cuerpo: 10
+              cuerpo: 10,
+              //  El acento del area. De lejos el nombre no se lee y el color
+              //  si: con once departamentos, la planta se veia como una mancha
+              //  gris donde no se distinguia un area de otra.
+              color: p.acento
             }))
         ]
   );

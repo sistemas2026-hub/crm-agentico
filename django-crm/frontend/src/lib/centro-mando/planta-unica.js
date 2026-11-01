@@ -58,7 +58,7 @@
 export const CELDA_MAXIMA = { ancho: 38, fondo: 18 };
 
 /** A qué múltiplo se redondea la celda hacia arriba. */
-export const PASO = { ancho: 6, fondo: 4 };
+export const PASO = { ancho: 4, fondo: 3 };
 
 /**
  * La celda que le hace falta a ESTA empresa.
@@ -90,8 +90,13 @@ export function celdaPara(salas) {
     }),
     { ancho: 0, fondo: 0 }
   );
+  //  UN pasillo y no dos. La primera version sumaba `AIRE * 2` -como si cada
+  //  sala tuviera su propio pasillo a cada lado- y con salas de 14 x 10 daba
+  //  celdas de 24 x 16: diez unidades de suelo pelado por sala, y la planta
+  //  volvia a leerse como islas sueltas. El pasillo entre dos salas es UNO
+  //  solo, y lo comparten.
   const arriba = (v, paso, minimo) =>
-    Math.max(minimo, Math.ceil((v + AIRE * 2) / paso) * paso);
+    Math.max(minimo, Math.ceil((v + AIRE) / paso) * paso);
   return {
     ancho: arriba(mayor.ancho, PASO.ancho, PASO.ancho * 2),
     fondo: arriba(mayor.fondo, PASO.fondo, PASO.fondo * 2)
@@ -100,6 +105,28 @@ export function celdaPara(salas) {
 
 /** Lo que separa dos salas vecinas dentro de sus celdas. */
 export const AIRE = 3;
+
+/**
+ * Las celdas que el patio se queda, y que ninguna sala puede ocupar.
+ *
+ * FIJAS, Y AHÍ ESTÁ TODA LA GRACIA. Un patio centrado de verdad tendría que
+ * moverse cuando la rejilla crece, y mover el patio mueve todas las salas —que
+ * es justo lo que este archivo existe para evitar—. Reservadas siempre, el
+ * hueco está donde está desde el primer día y la sede crece a su alrededor.
+ *
+ * Son dos celdas y no una porque un patio cuadrado de una celda queda más
+ * hondo que ancho: la celda es ancha y chata.
+ *
+ * Con pocos departamentos la rejilla ni siquiera llega hasta acá y no hay
+ * patio, solo la plaza del frente. Es correcto: una empresa de tres
+ * departamentos no tiene un patio interior.
+ */
+export const PATIO = [
+  { columna: 1, fila: 1 },
+  { columna: 2, fila: 1 }
+];
+
+const esPatio = (c) => PATIO.some((p) => p.columna === c.columna && p.fila === c.fila);
 
 /**
  * La plaza: el vacío del frente, por donde se entra.
@@ -171,14 +198,20 @@ function secuencia(cuantas, celda) {
       const fondo = plazaPara(ancho) + f * celda.fondo;
       return Math.abs(ancho / fondo - 1);
     };
+    //  Las celdas del patio se saltean, no se ocupan. Saltearlas no rompe la
+    //  estabilidad: la reserva es la misma siempre, así que la sala número 7
+    //  sigue cayendo en la misma celda tenga la empresa ocho departamentos o
+    //  cuarenta.
     if (desvio(columnas + 1, filas) <= desvio(columnas, filas + 1)) {
       for (let f = 0; f < filas && celdas.length < cuantas; f++) {
-        celdas.push({ columna: columnas, fila: f });
+        const c = { columna: columnas, fila: f };
+        if (!esPatio(c)) celdas.push(c);
       }
       columnas++;
     } else {
       for (let c = 0; c < columnas && celdas.length < cuantas; c++) {
-        celdas.push({ columna: c, fila: filas });
+        const d = { columna: c, fila: filas };
+        if (!esPatio(d)) celdas.push(d);
       }
       filas++;
     }
@@ -224,6 +257,7 @@ export function repartirPlantaUnica(salas) {
     return {
       puestas: [],
       celda,
+      patio: null,
       huella: { ancho: celda.ancho, fondo: plazaPara(celda.ancho) },
       plaza: { x: 0, y: 0, ancho: celda.ancho, fondo: plazaPara(celda.ancho) }
     };
@@ -261,9 +295,23 @@ export function repartirPlantaUnica(salas) {
     fondo: filas * celda.fondo + fondoDeLaPlaza
   };
 
+  //  El patio, en coordenadas del mundo, SOLO si la rejilla llegó hasta sus
+  //  celdas. Con pocos departamentos no existe, y devolver un rectángulo
+  //  fuera del edificio dibujaría un suelo flotando al lado de la sede.
+  const dentro = PATIO.filter((p) => p.columna < columnas && p.fila < filas);
+  const patio = dentro.length === 0 ? null : {
+    x: Math.min(...dentro.map((p) => p.columna)) * celda.ancho,
+    y: Math.min(...dentro.map((p) => p.fila)) * celda.fondo,
+    ancho: (Math.max(...dentro.map((p) => p.columna)) + 1
+            - Math.min(...dentro.map((p) => p.columna))) * celda.ancho,
+    fondo: (Math.max(...dentro.map((p) => p.fila)) + 1
+            - Math.min(...dentro.map((p) => p.fila))) * celda.fondo
+  };
+
   return {
     puestas,
     celda,
+    patio,
     huella,
     //  LA PLAZA VA AL FRENTE, y el frente en esta proyección es el `gy` MAYOR.
     //

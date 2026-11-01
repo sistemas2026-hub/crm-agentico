@@ -26,7 +26,7 @@
  */
 
 import { plantaDe } from './departamentos.js';
-import { PLAZA, repartirPlantaUnica } from './planta-unica.js';
+import { ENTRADA, PASILLO, repartirAnillo } from './anillo.js';
 
 /** Lo que sube un muro de sala. */
 export const ALTURA_DE_MURO = 4;
@@ -44,7 +44,7 @@ export function sedeDe(salas, agentes, opciones = {}) {
     return { plantas: [], niveles: [], mundo: { ancho: 0, fondo: 0, alto: 0 } };
   }
 
-  const { puestas, huella, plaza } = repartirPlantaUnica(lista);
+  const { puestas, huella, patio, entrada } = repartirAnillo(lista);
   const soloSala = opciones.soloSala ?? null;
   const plantas = [];
 
@@ -74,11 +74,11 @@ export function sedeDe(salas, agentes, opciones = {}) {
   //     se entra y es lo que hace que la planta se lea como una sede y no como
   //     un almacén de cubículos.
   plantas.push({
-    mundo: { ancho: plaza.ancho, fondo: plaza.fondo, alto: 0 },
-    origen: { gx: plaza.x, gy: plaza.y, gz: 0 },
+    mundo: { ancho: entrada.ancho, fondo: entrada.fondo, alto: 0 },
+    origen: { gx: entrada.x, gy: entrada.y, gz: 0 },
     nivel: null,
     papel: 'circulacion',
-    pasillo: { desde: 0, hasta: plaza.ancho },
+    pasillo: { desde: 0, hasta: entrada.ancho },
     cartel: null,
     mural: null,
     muros: false,
@@ -92,6 +92,19 @@ export function sedeDe(salas, agentes, opciones = {}) {
   const ids = [];
   for (const puesta of puestas) {
     if (soloSala !== null && puesta.sala.id !== soloSala) continue;
+    //  LA SALA EN SU TAMANO REAL, pegada a la esquina de su celda.
+    //
+    //  Se probó estirarla hasta llenar la celda —así compartía muros con la
+    //  vecina— y en el navegador se vio por qué está mal: todas las salas
+    //  quedaban del mismo tamaño, perdiendo que el NOC es ancho y Dirección
+    //  chica, y cada una arrastraba un halo de suelo pelado porque el
+    //  mobiliario de una plantilla de 13 × 9 quedaba centrado en una sala de
+    //  21 × 13. «Se ve muy estirada», y era verdad.
+    //
+    //  Pegadas a la esquina y no centradas: así las de una misma columna
+    //  alinean su muro izquierdo y las de una misma fila su muro de fondo. Lo
+    //  que sobra no queda repartido alrededor de cada sala sino junto, al
+    //  frente y a la derecha, y eso se lee como pasillo.
     const planta = plantaDe(puesta.sala, agentes);
     plantas.push({
       ...planta,
@@ -106,10 +119,57 @@ export function sedeDe(salas, agentes, opciones = {}) {
       nivel: puesta.sala.piso ?? null,
       papel: 'sala',
       sala: puesta.sala.id,
-      celda: { fila: puesta.fila, columna: puesta.columna }
+      banda: puesta.banda
     });
     ids.push(puesta.sala.id);
   }
+
+  //  4. EL PATIO, si la rejilla llegó hasta sus celdas. Suelo por el que se
+  //     pasa, sin muros: es el hueco alrededor del cual se ordena la sede.
+  if (patio) {
+    plantas.push({
+      mundo: { ancho: patio.ancho, fondo: patio.fondo, alto: 0 },
+      origen: { gx: patio.x, gy: patio.y, gz: 0 },
+      nivel: null,
+      papel: 'circulacion',
+      pasillo: { desde: 0, hasta: patio.ancho },
+      cartel: null,
+      mural: null,
+      muros: false,
+      losa: true,
+      baranda: false,
+      mobiliario: [],
+      puestos: []
+    });
+  }
+
+  //  5. EL PERÍMETRO: el muro de fondo y los dos costados.
+  //
+  //     El frente queda ABIERTO, y no por falta de ganas: en esta isometría el
+  //     muro del frente estaría entre la cámara y la oficina entera. Es la
+  //     misma razón por la que las salas no llevan techo.
+  const periferia = (pieza, origen) => plantas.unshift({
+    mundo: { ancho: pieza.ancho ?? 0.6, fondo: pieza.fondo ?? 0.6, alto: ALTURA_DE_MURO },
+    origen,
+    nivel: null,
+    papel: 'arquitectura',
+    pasillo: null,
+    mobiliario: [],
+    puestos: [],
+    arquitectura: pieza
+  });
+  periferia(
+    { tipo: 'fachada', ancho: huella.ancho, altura: ALTURA_DE_MURO },
+    { gx: 0, gy: -0.6, gz: 0 }
+  );
+  periferia(
+    { tipo: 'extremo', fondo: huella.fondo, altura: ALTURA_DE_MURO },
+    { gx: -0.6, gy: 0, gz: 0 }
+  );
+  periferia(
+    { tipo: 'extremo', fondo: huella.fondo, altura: ALTURA_DE_MURO },
+    { gx: huella.ancho, gy: 0, gz: 0 }
+  );
 
   return {
     plantas,
@@ -129,4 +189,4 @@ export function sitioDe(salas, id) {
   return { gx: p.x + p.ancho / 2, gy: p.y + p.fondo / 2, ancho: p.ancho, fondo: p.fondo };
 }
 
-export { PLAZA };
+export { ENTRADA, PASILLO };

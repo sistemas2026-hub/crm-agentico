@@ -136,6 +136,14 @@ export interface OpcionesDeEscena {
     hacia?: 'izquierda' | 'derecha';
     /** Cuerpo de letra. Los de sala son menores que los de piso: hay once. */
     cuerpo?: number;
+    /**
+     * El acento del área, para que el rótulo diga de cuál es sin leerlo.
+     *
+     * De lejos el nombre no se lee pero el color sí, y eso es la mitad de la
+     * legibilidad de una planta con once departamentos: mirada de conjunto,
+     * la sede era una mancha gris uniforme.
+     */
+    color?: number;
   }[];
 }
 
@@ -258,10 +266,17 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     //  una pantalla encendida o una losa clara se pierde. Cuesta un polígono.
     const placa = new Graphics();
     const alto = Math.round((l.cuerpo ?? 13) * 1.7);
-    placa.roundRect(aLaDerecha ? -6 : -texto.width - 14, -alto / 2,
-                    texto.width + 20, alto, 6)
+    const izq = aLaDerecha ? -6 : -texto.width - 14;
+    placa.roundRect(izq, -alto / 2, texto.width + 20, alto, 6)
       .fill({ color: 0x0b0a1c, alpha: 0.72 })
-      .stroke({ width: 1, color: 0x2c2a52, alpha: 0.9 });
+      .stroke({ width: 1, color: l.color ?? 0x2c2a52, alpha: l.color ? 0.95 : 0.9 });
+    //  Y una pastilla del color del área pegada al borde. El contorno solo no
+    //  alcanza: a tamaño de pantalla es una línea de un píxel y se pierde
+    //  contra el fondo. La pastilla es lo que se ve desde lejos.
+    if (l.color !== undefined) {
+      placa.roundRect(izq + 3, -alto / 2 + 3, 3, alto - 6, 1.5)
+        .fill({ color: l.color, alpha: 0.95 });
+    }
     //  La guía que une la placa con su ancla cuando hubo que bajarla para que
     //  no se pisara con otra. Va PRIMERO para quedar detrás de la placa, y
     //  existe por una razón de verdad y no de adorno: un nombre corrido tres

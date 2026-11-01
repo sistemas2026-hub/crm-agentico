@@ -283,12 +283,34 @@ const GENERICA = {
   pasillo: null,
   cartel: { gx: 4.6 },
   mural: null,
+  //  AMUEBLADA, Y NO ES DECORACION.
+  //
+  //  Tenia cinco muebles -una zona, dos luces y dos plantas- y era la
+  //  plantilla de CUATRO de los once departamentos del piloto: Administracion,
+  //  Recursos Humanos, Direccion y Recepcion. Mirando la sede entera el
+  //  01/11/2026 el veredicto fue «solo veo cuartos separados», y la causa
+  //  estaba aca: una sala con dos escritorios y nada mas no se lee como una
+  //  oficina, se lee como un cuarto.
+  //
+  //  Lo que se agrega NO es un puesto. Estanterias, armario, una pantalla de
+  //  pared y plantas llenan la sala sin afirmar que trabaja ahi nadie mas: los
+  //  escritorios siguen saliendo de lo que la empresa declara, que es la
+  //  regla que no se toca.
   mobiliario: [
     { tipo: 'zona', gx: 2.0, gy: 4.6, ancho: 4.0, fondo: 2.8 },
+    //  Contra el muro del fondo, que es la pared que se ve entera desde la
+    //  camara y la unica que puede llevar algo alto sin tapar la sala.
+    { tipo: 'estanteria', gx: 0.6, gy: 0.5 },
+    { tipo: 'estanteria', gx: 3.4, gy: 0.5 },
+    { tipo: 'armario', gx: 6.2, gy: 0.5 },
+    { tipo: 'tablero', gy: 0.4 },
+    { tipo: 'mesa', gx: 7.4, gy: 3.2 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 7, gy: 5 },
-    { tipo: 'planta', gx: 8.6, gy: 1.0 },
-    { tipo: 'planta', gx: 0.8, gy: 7.0 }
+    { tipo: 'luminaria', gx: 5, gy: 1.6 },
+    { tipo: 'planta', gx: 8.6, gy: 1.6 },
+    { tipo: 'planta', gx: 0.8, gy: 7.0 },
+    { tipo: 'planta', gx: 9.0, gy: 6.4 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Puesto principal', principal: true, gx: 2.6, gy: 5.2 },
