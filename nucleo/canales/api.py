@@ -5192,6 +5192,97 @@ def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
     return jsonify(resultado.como_dict()), codigo_http
 
 
+@app.post("/interno/vision/analizar-evidencia")
+def interno_analizar_evidencia():
+    """
+    Mira la foto que un tecnico subio como evidencia de una orden de campo.
+
+    POR QUE EL MOTOR Y NO EL CRM  --  31/10/2026
+    --------------------------------------------
+    Mismo reparto que '/interno/supervisor/chat': la credencial del proveedor
+    esta SOLO aca, igual que la de WispHub y la de SmartOLT, y copiarla al CRM
+    seria tener dos servicios con la misma clave. El CRM manda los bytes y
+    recibe texto; no sabe a quien se le pregunto.
+
+    LAS CUATRO GARANTIAS QUE REUSA, y por eso esto no es un atajo:
+      - el interruptor por empresa ('vision_evidencias_campo'), que es PROPIO
+        y no el de WhatsApp: no es el mismo consentimiento
+      - el tope de gasto del tenant, consultado ANTES de pagarle a nadie
+      - los topes de 'vision' (8 MB, JPEG/PNG, 30 s, 1200 caracteres) y la
+        redaccion del texto que vuelve
+      - el evento de consumo VISION, para que estas fotos aparezcan en
+        /consumo junto a las del chat y no en una factura que nadie mira
+
+    EL CUERPO: multipart con el archivo en 'imagen', y 'pie' opcional -- lo
+    que esa foto TENIA que mostrar, que sale de las instrucciones del
+    requisito en la plantilla del tenant. No se acepta ni el modelo ni la
+    instruccion: los fija este lado.
+
+    NUNCA 500 POR UNA FOTO: si el proveedor falla, vuelve 200 con
+    estado='error' y el motivo por tipo. Quien llama tiene que poder
+    distinguir "no se pudo mirar" de "la peticion estaba mal".
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    archivo = request.files.get("imagen")
+    if archivo is None:
+        return jsonify({"error": "Falta el archivo 'imagen' (multipart)."}), 400
+    contenido = archivo.read() or b""
+    pie = str(request.form.get("pie") or "")
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+
+    #  EL INTERRUPTOR, y falla CERRADO: sin el campo no se mira nada.
+    if not getattr(config, "vision_evidencias_campo", False):
+        return jsonify({"estado": "apagado", "texto": "", "error": "",
+                        "motivo": "esta empresa no tiene habilitado que se "
+                                  "miren las fotos de evidencia"}), 200
+
+    #  EL TOPE DE GASTO, antes de pagar. El gate del turno (mas abajo, en el
+    #  webhook) no cubre esta ruta: si no se consultara aca, el tope del
+    #  tenant no incluiria las fotos de campo y la factura se dispararia por
+    #  un camino que nadie esta mirando (auditoria del arquitecto, 31/10/2026).
+    try:
+        frenar = consumo.estado_del_gasto(config, tenant)["accion"] == "frenar"
+    except Exception:                                         # noqa: BLE001
+        #  Si no se puede saber, se sigue: mismo criterio que el turno. No
+        #  dejar sin servicio por una consulta de estadisticas.
+        frenar = False
+    if frenar:
+        registrar("vision", "tope alcanzado: no se analiza la evidencia",
+                  tenant=tenant)
+        return jsonify({"estado": "apagado", "texto": "", "error": "",
+                        "motivo": "la empresa alcanzo su tope de gasto"}), 200
+
+    modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
+    r = vision.analizar(contenido, modelo, pie,
+                        instruccion=vision.INSTRUCCION_EVIDENCIA)
+
+    #  TEXTO FIJO y conteos. Del contenido no va NADA al log -- ni que se vio
+    #  ni lo que decia-- y la orden no se nombra: esta ruta no la conoce.
+    registrar("vision", "evidencia de campo procesada", tenant=tenant,
+              estado=r.estado, segundos=round(r.segundos, 1), tokens=r.tokens,
+              caracteres=len(r.texto), error=r.error or None)
+
+    if r.tokens:
+        proveedor_v, modelo_v = consumo.partir_referencia(modelo)
+        costo_v, tarifa_v = consumo.costo_de(config, modelo, r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.VISION, proveedor_v, modelo_v,
+            entrada=r.tokens, costo_usd=costo_v, hay_tarifa=tarifa_v,
+            metadatos={"segundos": round(r.segundos, 1), "estado": r.estado,
+                       "origen": "evidencia_campo"})
+
+    return jsonify({"estado": r.estado, "texto": r.texto, "error": r.error,
+                    "modelo": r.modelo, "segundos": round(r.segundos, 1),
+                    "tokens": r.tokens, "motivo": ""}), 200
+
+
 @app.get("/autonomia")
 def autonomia_estado():
     """

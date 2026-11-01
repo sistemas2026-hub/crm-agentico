@@ -108,7 +108,8 @@ def revisar(orden, *, pendientes=None) -> dict | None:
         return None
     cierre = _cierre_de_esta_vuelta(orden)
     puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
-                          _medicion(orden, pendientes), _material(orden, cierre))
+                          _medicion(orden, pendientes), _material(orden, cierre),
+                          _fotos(orden))
               if p is not None]
     if any(p["ok"] is False for p in puntos):
         veredicto = NO_CERRAR
@@ -153,6 +154,37 @@ def guardar_foto(orden, revision, profile=None) -> None:
 
 def _punto(clave, ok, texto, **extra) -> dict:
     return {"clave": clave, "ok": ok, "texto": texto, **extra}
+
+
+def _fotos(orden):
+    """Lo que la IA vio en las fotos de evidencia  --  31/10/2026.
+
+    EL SEXTO PUNTO, Y EL UNICO QUE NO PUEDE DECIR QUE NO. Vale `True` o
+    `None`, nunca `False`, y eso no es una omision: la linea de mas abajo
+    convierte cualquier `False` en NO_CERRAR, y ese veredicto ademas alimenta
+    el cierre autonomo del Supervisor. Una opinion no verificada de un modelo
+    no puede frenar el trabajo de un tecnico.
+
+    `None` ya significa REVISAR --"miralo vos"--, que es todo el alcance que
+    corresponde: la IA pide atencion, nunca niega un cierre (CLAUDE.md §4).
+    Si esta empresa no lo tiene encendido, el punto NO APARECE y la revision
+    queda exactamente como antes. Ver `campo/inspeccion_visual.py`.
+
+    NO TUMBA LA REVISION: un fallo aca devuelve None, no una excepcion. La
+    revision del cierre ya corre en produccion y decide si una orden se
+    cierra; algo que se agrega no puede romper lo que ya funcionaba.
+    """
+    try:
+        from campo.inspeccion_visual import punto_de_la_revision
+
+        p = punto_de_la_revision(orden)
+    except Exception:                                            # noqa: BLE001
+        return None
+    #  LA GUARDA, en el consumidor y no solo en quien lo produce: si alguna
+    #  vez alguien devolviera False desde alla, acá no pasa igual.
+    if p is None or p.get("ok") is False:
+        return None
+    return p
 
 
 def _cierre_de_esta_vuelta(orden):

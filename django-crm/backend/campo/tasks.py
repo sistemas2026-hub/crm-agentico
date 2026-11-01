@@ -327,6 +327,93 @@ def pedir_revision_del_cierre(orden) -> None:
     transaction.on_commit(_encolar)
 
 
+@shared_task(name="campo.tasks.analizar_evidencia")
+def analizar_evidencia(org_id: str, evidencia_id: str) -> dict:
+    """Mira la foto que el tecnico acaba de confirmar (31/10/2026).
+
+    MISMO CONTRATO QUE 'revisar_el_cierre_ya', y por los mismos motivos:
+    fuera de la peticion porque le habla a un tercero por HTTP --el tecnico
+    esta parado en la calle, y una transaccion de base abierta esperando una
+    operacion externa es lo que CLAUDE.md §12 prohibe--, con el contexto RLS
+    antes de leer, el 'finally' que lo limpia, y sin levantar nunca.
+
+    APPEND-ONLY: cada intento es una fila. Si se reintenta quedan las dos, y
+    es a proposito -- ver 'campo/analisis_de_evidencia.py'.
+    """
+    from campo import inspeccion_visual as IV
+    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        set_rls_context(org_id)
+        try:
+            evidencia = (EvidenciaTrabajo.objects
+                         .select_related("orden_trabajo__tipo_trabajo_version")
+                         .get(pk=evidencia_id, org_id=org_id))
+        except EvidenciaTrabajo.DoesNotExist:
+            return {"estado": "", "motivo": "la evidencia ya no esta"}
+
+        r = IV.analizar(evidencia)
+        #  'pide_atencion' LO ESCRIBE EL CODIGO, no el modelo: es la unica
+        #  senal que llega a la revision del cierre.
+        AnalisisDeEvidencia.objects.create(
+            org_id=org_id, evidencia=evidencia, vuelta=evidencia.vuelta,
+            origen=AnalisisDeEvidencia.IA,
+            texto=r["texto"], motivo=r["motivo"],
+            pide_atencion=_pide_atencion(r["texto"]),
+            modelo=r["modelo"], segundos=r["segundos"] or 0,
+            tokens=r["tokens"] or 0)
+        return {"estado": r["estado"], "motivo": r["motivo"]}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("inspeccion visual: fallo (%s)", type(e).__name__)
+        return {"estado": "", "motivo": type(e).__name__}
+    finally:
+        #  De SESION, y la conexion vuelve al pool.
+        clear_rls_context()
+
+
+#: Lo que hace que una foto se marque para mirar. Son palabras que el propio
+#: analizador usa cuando algo no cuadra o no se puede determinar. Es un
+#: criterio GRUESO y esta bien que lo sea: su unica consecuencia es que la
+#: tarjeta diga "revisá las fotos", NUNCA que una orden no se cierre.
+PALABRAS_QUE_PIDEN_MIRAR = (
+    "suelto", "sueltos", "desconectad", "no se ve", "no se puede",
+    "borros", "oscur", "tapad", "fuera de cuadro", "no se alcanza",
+    "parece no", "sin fijar", "deteriorad", "dañad", "danad",
+)
+
+
+def _pide_atencion(texto: str) -> bool:
+    """Si este analisis amerita que una persona lo lea. Falla hacia MIRAR.
+
+    Sin texto no se marca --eso ya lo cuenta 'motivo' por separado-- y con
+    texto, cualquier palabra de la lista alcanza. Preferir el falso positivo
+    es lo correcto aca: el costo de marcar de mas es que alguien lea un
+    parrafo; el de marcar de menos es que una foto mala pase sin que nadie la
+    mire. Y marcar de mas no puede frenar nada.
+    """
+    bajo = (texto or "").lower()
+    return any(p in bajo for p in PALABRAS_QUE_PIDEN_MIRAR)
+
+
+def pedir_analisis_de_la_foto(evidencia) -> None:
+    """Despierta el analisis de ESTA evidencia, DESPUES del commit.
+
+    Mismo razonamiento que 'pedir_revision_del_cierre': la tarea vuelve a leer
+    de la base en otro proceso, y encolada antes del commit puede ganarle a la
+    escritura. Si el broker no esta, el tecnico igual subio su foto -- que es
+    lo que vino a hacer.
+    """
+    def _encolar():
+        try:
+            analizar_evidencia.delay(str(evidencia.org_id), str(evidencia.id))
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("inspeccion visual: no se pudo encolar (%s)",
+                           type(e).__name__)
+
+    transaction.on_commit(_encolar)
+
+
 @shared_task(name="campo.tasks.ciclo_de_la_madrugada")
 def ciclo_de_la_madrugada() -> dict:
     """Recorre las empresas y corre el ciclo de las que les toca.

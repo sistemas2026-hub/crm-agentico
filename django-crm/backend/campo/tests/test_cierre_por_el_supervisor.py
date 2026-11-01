@@ -533,3 +533,128 @@ def test_i8_el_reclamo_caduca_y_no_congela_la_orden(abierto, orden):
     assert CS._reclamar(orden, ahora + dt.timedelta(minutes=10)) is False
     assert CS._reclamar(
         orden, ahora + dt.timedelta(minutes=CS.MINUTOS_ENTRE_INTENTOS + 1)) is True
+
+
+# ---------------------------------------------------------------------------
+# V · LO QUE LA IA VIO EN LAS FOTOS  --  31/10/2026
+# ---------------------------------------------------------------------------
+#  El sexto punto de la revisión. LA GARANTÍA ENTERA es que nunca puede valer
+#  `False`: cualquier `False` se convierte en NO_CERRAR, y ese veredicto
+#  además alimenta el cierre autónomo. Una opinión no verificada de un modelo
+#  no puede frenar el trabajo de un técnico (CLAUDE.md §4).
+
+def _analisis(orden, org, **kw):
+    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+
+    ev = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    datos = {"texto": "Se ve una ONT con la luz PON fija.", "motivo": "",
+             "pide_atencion": False}
+    datos.update(kw)
+    return AnalisisDeEvidencia.objects.create(
+        org=org, evidencia=ev, vuelta=orden.vuelta,
+        origen=AnalisisDeEvidencia.IA, **datos)
+
+
+def test_v1_sin_analisis_la_revision_queda_igual(abierto, orden):
+    """Si esta empresa no lo tiene encendido, el punto NO aparece."""
+    r = RC.revisar(orden, pendientes=set())
+    assert r["veredicto"] == RC.CERRAR, r
+    assert not [p for p in r["puntos"] if p["clave"] == "fotos"]
+
+
+def test_v2_fotos_miradas_y_limpias_suman_un_punto_en_si(abierto, orden):
+    _analisis(orden, abierto)
+    r = RC.revisar(orden, pendientes=set())
+    punto = next(p for p in r["puntos"] if p["clave"] == "fotos")
+    assert punto["ok"] is True, punto
+    assert r["veredicto"] == RC.CERRAR, r
+
+
+def test_v3_una_foto_que_pide_atencion_lleva_a_REVISAR_no_a_NO_CERRAR(
+        abierto, orden):
+    """EL CASO QUE DEFINE EL ALCANCE. La IA pide una mirada; no niega nada."""
+    _analisis(orden, abierto, pide_atencion=True,
+              texto="Se ve un cable suelto junto a la ONT.")
+    r = RC.revisar(orden, pendientes=set())
+    punto = next(p for p in r["puntos"] if p["clave"] == "fotos")
+    assert punto["ok"] is None, punto
+    assert r["veredicto"] == RC.REVISAR, r
+    assert r["veredicto"] != RC.NO_CERRAR
+
+
+def test_v4_una_foto_que_no_se_pudo_mirar_tampoco_niega(abierto, orden):
+    _analisis(orden, abierto, texto="", motivo="el analizador solo mira JPEG y PNG, y esto es HEIC")
+    r = RC.revisar(orden, pendientes=set())
+    punto = next(p for p in r["puntos"] if p["clave"] == "fotos")
+    assert punto["ok"] is None, punto
+    assert "HEIC" in punto["texto"]
+    assert r["veredicto"] == RC.REVISAR
+
+
+def test_v5_el_punto_NUNCA_puede_valer_False(abierto, orden):
+    """La guarda, sobre TODAS las combinaciones. Si alguna diera `False`, una
+    orden dejaría de poder cerrarse por lo que dijo un modelo."""
+    from campo.models import AnalisisDeEvidencia
+
+    combinaciones = [
+        {"texto": "ok", "motivo": "", "pide_atencion": False},
+        {"texto": "ok", "motivo": "", "pide_atencion": True},
+        {"texto": "", "motivo": "no se pudo leer", "pide_atencion": False},
+        {"texto": "", "motivo": "no se pudo leer", "pide_atencion": True},
+        {"texto": "cable suelto", "motivo": "x", "pide_atencion": True},
+    ]
+    for combo in combinaciones:
+        AnalisisDeEvidencia.objects.filter(org=abierto).delete()
+        _analisis(orden, abierto, **combo)
+        r = RC.revisar(orden, pendientes=set())
+        punto = next((p for p in r["puntos"] if p["clave"] == "fotos"), None)
+        assert punto is None or punto["ok"] is not False, (combo, punto)
+        assert r["veredicto"] != RC.NO_CERRAR, (combo, r["veredicto"])
+
+
+def test_v6_el_analisis_de_otra_vuelta_no_cuenta(abierto, orden):
+    """Una orden devuelta y rehecha tiene otras fotos: el análisis de la
+    vuelta anterior no dice nada de ésta."""
+    _analisis(orden, abierto, pide_atencion=True)
+    from campo.models import AnalisisDeEvidencia
+
+    AnalisisDeEvidencia.objects.filter(org=abierto).update(vuelta=99)
+    r = RC.revisar(orden, pendientes=set())
+    assert not [p for p in r["puntos"] if p["clave"] == "fotos"]
+
+
+def test_v7_confirmar_la_foto_encola_el_analisis(
+        user_client, orden, org_a, django_capture_on_commit_callbacks):
+    """El enganche: sin esto el módulo entero estaría construido y sin
+    llamador -- «construido no es que corre» (CLAUDE.md §6)."""
+    from campo.models import EvidenciaTrabajo
+
+    ev = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    ev.estado_archivo = EvidenciaTrabajo.SUBIENDO
+    ev.save(update_fields=["estado_archivo"])
+
+    with mock.patch("campo.services.storage.CampoStorage.verify_upload",
+                    return_value=True):
+        with mock.patch("campo.tasks.analizar_evidencia.delay") as delay:
+            with django_capture_on_commit_callbacks(execute=True):
+                r = user_client.post(
+                    f"/api/campo/evidencias/{ev.id}/confirmar/", {}, format="json")
+
+    assert r.status_code == 200, r.content
+    delay.assert_called_once_with(str(org_a.id), str(ev.id))
+
+
+def test_v8_un_formato_que_el_analizador_no_mira_se_dice_antes_de_pagar(orden):
+    """HEIC y WebP se suben bien y el analizador los rechaza. Se detecta de
+    este lado para no pagar un viaje HTTP, y el motivo nombra el formato."""
+    from campo import inspeccion_visual as IV
+
+    heic = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 32
+    webp = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 32
+    assert IV.formato_legible(heic) == "HEIC"
+    assert IV.formato_legible(webp) == "WebP"
+    assert "HEIC" in IV.se_puede_mirar(heic)
+    assert "WebP" in IV.se_puede_mirar(webp)
+    assert IV.se_puede_mirar(bytes([0xFF, 0xD8, 0xFF]) + b"\x00" * 32) == ""
+    grande = bytes([0xFF, 0xD8, 0xFF]) + b"\x00" * (IV.MAX_BYTES + 1)
+    assert "acepta hasta" in IV.se_puede_mirar(grande)

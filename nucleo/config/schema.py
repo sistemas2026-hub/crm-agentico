@@ -3485,6 +3485,22 @@ class TenantConfig(Base):
     # foto se guarda, se muestra en la bandeja, y al modelo le llega el aviso
     # de siempre. No se descarga nada de mas ni se llama a ningun proveedor.
     vision_habilitada: bool = False
+    # SI LAS FOTOS QUE EL TECNICO SUBE COMO EVIDENCIA SE MIRAN  --  31/10/2026
+    #
+    # PERILLA PROPIA, Y NO LA DE ARRIBA. Las dos mandan una imagen al mismo
+    # proveedor, pero no las respalda el mismo consentimiento: una es la foto
+    # que un cliente DECIDE mandar por WhatsApp, y esta es la que un tecnico
+    # toma DENTRO de la casa de ese cliente. Una empresa puede autorizar la
+    # primera y no la segunda, o al reves, y con un solo campo no podria
+    # decirlo. Decidido asi el 31/10/2026, con la recomendacion escrita.
+    #
+    # Apagado por defecto, por el mismo motivo que el de arriba. Apagado, la
+    # evidencia se sube, se guarda y se ve igual que siempre: no se llama a
+    # ningun proveedor y la revision del cierre no gana ningun punto.
+    #
+    # NO gobierna si la tarea de analisis esta corriendo: eso es una decision
+    # de operacion, como RELOJ_HABILITADO (CLAUDE.md §8).
+    vision_evidencias_campo: bool = False
     # El cierre de lo que atendio solo el asistente. Seccion propia y no un
     # campo mas de 'limites' porque tiene cuatro perillas que se mueven
     # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada

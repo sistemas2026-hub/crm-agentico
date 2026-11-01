@@ -1070,6 +1070,12 @@ class ConfirmarEvidenciaView(APIView):
             datos={"evidencia_id": str(evidencia.id), "requisito_id": evidencia.requisito_id},
         )
 
+        #  LA FOTO CONFIRMADA DESPIERTA SU ANALISIS (31/10/2026). Acá y no
+        #  antes: el archivo ya pasó `verify_upload`, así que hay algo que
+        #  mirar. Va por `on_commit` y nunca tumba esta petición -- si el
+        #  análisis no corre, el técnico igual subió su foto.
+        tareas_de_campo.pedir_analisis_de_la_foto(evidencia)
+
         return Response({"estado": "recibida", "evidencia_id": str(evidencia.id)})
 
 

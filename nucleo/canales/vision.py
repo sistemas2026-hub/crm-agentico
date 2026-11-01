@@ -178,7 +178,51 @@ def _mime_de(contenido: bytes) -> str:
     return "image/png" if contenido[:8] == FIRMA_PNG else "image/jpeg"
 
 
-def mensaje_multimodal(contenido: bytes, pie: str = "") -> list[dict]:
+#: La instruccion para una foto de EVIDENCIA de una orden de campo
+#: (31/10/2026). Es otra cosa que la de arriba, y la diferencia es el punto:
+#: las reglas 3 y 4 de INSTRUCCION prohiben decir que algo esta mal instalado
+#: --correcto cuando quien mira es el cliente por WhatsApp-- y aca eso es
+#: justo lo que se pregunta. Quien lee esto es la oficina.
+#:
+#: LO QUE NO CAMBIA, y por eso se repite entero: sigue sin poder afirmar que
+#: el servicio funciona ni inventar una medicion. Una foto muestra un cable y
+#: una luz; la potencia optica no se ve.
+#:
+#: NO VA EN LA CONFIG DEL TENANT. Lo que varia por empresa es QUE tiene que
+#: mostrar cada foto, y eso ya vive en el esquema de la plantilla
+#: ('evidencias[].instrucciones', campo/plantillas.py:507) -- se pasa como
+#: 'pie'. Esto es como se mira una foto de instalacion, igual para cualquiera.
+INSTRUCCION_EVIDENCIA = (
+    "Sos un inspector de instalaciones de un proveedor de internet. Un "
+    "tecnico subio esta foto como evidencia de un trabajo. La lee la oficina, "
+    "no el cliente.\n\n"
+    "Reglas:\n"
+    "1. Deci que elementos de telecomunicaciones se ven: ONT, router, modem, "
+    "access point, fuente, caja de distribucion, roseta, conectores, patch "
+    "cord, cable UTP, fibra. Solo los que se ven.\n"
+    "2. Marca y modelo SOLO si se leen en la imagen. Si no, no los nombres.\n"
+    "3. Si hay luces indicadoras, deci cuales, de que color y si estan fijas "
+    "o parpadeando. No digas que significan: eso cambia con cada fabricante.\n"
+    "4. Deci lo que se ve del trabajo: como quedo el cableado, si los equipos "
+    "estan fijados, si hay cables sueltos o conectores que parecen no estar "
+    "puestos. Decilo como lo que es --lo que se OBSERVA-- y no como un "
+    "diagnostico. 'Se ve un cable suelto' esta bien; 'la instalacion esta "
+    "mal' no.\n"
+    "5. NO digas si el servicio funciona, si hay senal, ni inventes "
+    "mediciones de potencia optica, velocidad o continuidad. Nada de eso se "
+    "ve en una foto.\n"
+    "6. Si algo esta borroso, oscuro, tapado o fuera de cuadro, decilo, y "
+    "deci que no se puede determinar por eso.\n"
+    "7. Si te dicen que tenia que mostrar esta foto, contesta ademas si eso "
+    "se ve o no se ve, en una linea.\n"
+    "8. NO transcribas numeros de documento, cedulas, telefonos ni datos "
+    "personales que aparezcan en la imagen, aunque se lean.\n"
+    "9. Se breve: un parrafo corto. Sin saludos."
+)
+
+
+def mensaje_multimodal(contenido: bytes, pie: str = "",
+                       instruccion: str = "") -> list[dict]:
     """
     Los dos mensajes que se le mandan al modelo.
 
@@ -203,18 +247,30 @@ def mensaje_multimodal(contenido: bytes, pie: str = "") -> list[dict]:
     partes.append({
         "type": "image_url",
         "image_url": {"url": f"data:{_mime_de(contenido)};base64,{datos}"}})
-    return [{"role": "system", "content": INSTRUCCION},
+    #  La instruccion es un PARAMETRO con el default de siempre (31/10/2026).
+    #  Antes era la constante del modulo, y para mirar una foto de evidencia
+    #  de campo --donde se pregunta justo lo que las reglas 3 y 4 de
+    #  INSTRUCCION prohiben-- la salida facil habria sido un segundo modulo
+    #  que vuelva a hablarle al proveedor. Eso es la historia del reloj
+    #  escrito dos veces (CLAUDE.md §6): hay UN solo sitio que manda imagenes,
+    #  con sus seis garantias --timeout, tope, formato, redaccion, evento de
+    #  costo e idempotencia-- y lo que cambia es que se le pide.
+    return [{"role": "system", "content": instruccion or INSTRUCCION},
             {"role": "user", "content": partes}]
 
 
 def analizar(contenido: bytes, modelo: str, pie: str = "",
-             temperatura: float = 0.1) -> Resultado:
+             temperatura: float = 0.1, instruccion: str = "") -> Resultado:
     """
     Los bytes de una imagen -> que se ve, o el motivo de por que no se pudo.
 
     'modelo' es la referencia completa del tenant ('deepseek:deepseek-v4-flash'):
     sale de la config, no de una constante de este archivo, porque es un dato
     que varia por empresa (CLAUDE.md 3.3).
+
+    'instruccion' vacia = la de WhatsApp. Para una foto de evidencia de campo
+    se pasa INSTRUCCION_EVIDENCIA. Todo lo demas --los topes, el formato, el
+    recorte y la redaccion-- corre igual para las dos.
 
     NUNCA LEVANTA, por la misma razon que transcripcion.transcribir(): quien
     llama esta atendiendo a un cliente que espera respuesta, y una foto que no
@@ -249,7 +305,7 @@ def analizar(contenido: bytes, modelo: str, pie: str = "",
 
         r = cliente.chat(
             modelo,
-            mensaje_multimodal(contenido, pie),
+            mensaje_multimodal(contenido, pie, instruccion),
             temperatura=temperatura,
             timeout=TIMEOUT_SEGUNDOS)
 
