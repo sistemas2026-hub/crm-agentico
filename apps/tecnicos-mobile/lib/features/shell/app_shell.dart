@@ -18,6 +18,10 @@ import '../../core/storage/ubicacion_de_captura.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/sync/envio_automatico.dart';
+import 'package:geolocator/geolocator.dart';
+
+import '../../core/ubicacion/compartir_ubicacion.dart';
+import '../../core/ubicacion/mandar_ubicacion.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -77,6 +81,7 @@ class ShellDependencias {
     this.datosDeSoporte,
     this.salir = const SalirDeLaApp(),
     this.conectividad,
+    this.ubicacion,
     this.cerrarSesion,
     this.cicloDeVida,
     this.sesionVencida,
@@ -111,6 +116,11 @@ class ShellDependencias {
   final SyncSummary? resumenInicial;
   final Future<void> Function() sincronizarAhora;
   final Future<IdentidadTecnico> Function() cargarIdentidad;
+
+  /// COMPARTIR LA UBICACIÓN (31/10/2026). Opcional: sin esto, Inicio no
+  /// dibuja el interruptor y la aplicación anda igual. Nace apagado y lo
+  /// prende el técnico; ver `core/ubicacion/compartir_ubicacion.dart`.
+  final CompartirUbicacion? ubicacion;
 
   /// Las órdenes de la jornada, compartidas por Inicio y Trabajo. El
   /// contenedor las crea y las cierra; no las interpreta.
@@ -171,6 +181,14 @@ class ShellDependencias {
       resumenInicial: sincronizacion.lastSummary,
       sincronizarAhora: sincronizacion.procesarCola,
       conectividad: _conectividadDelTelefono(),
+      //  COMPARTIR LA UBICACION (31/10/2026). Nace apagado: `alArrancar` solo
+      //  lo retoma si el tecnico lo habia dejado encendido.
+      ubicacion: CompartirUbicacion(
+        enviar: (Position p, int? bateria) =>
+            mandarUbicacion(ApiClient(), p, bateria),
+        leerEncendido: almacenamiento.getCompartirUbicacion,
+        guardarEncendido: almacenamiento.setCompartirUbicacion,
+      ),
       sesionVencida: ApiClient.sesionVencida,
       recepcion: RecepcionDelKit.real(),
       // Se pregunta al servidor; sin señal, vale lo último que se supo.
@@ -391,6 +409,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _resumen = widget.dependencias.resumenInicial;
     WidgetsBinding.instance.addObserver(this);
     _envio.arrancar();
+    //  Si el técnico lo había dejado encendido, se retoma; si no, no hace
+    //  nada y NO pide permiso al abrir.
+    widget.dependencias.ubicacion?.alArrancar();
 
     _suscripcionResumen = widget.dependencias.resumenes.listen(
       (SyncSummary resumen) {
@@ -561,6 +582,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _envio.parar();
+    //  `soltar` corta el reloj SIN olvidar que el técnico lo tenía encendido:
+    //  mañana al abrir la aplicación se retoma solo.
+    widget.dependencias.ubicacion?.soltar();
     _suscripcionResumen?.cancel();
     _suscripcionConexion?.cancel();
     _suscripcionSesion?.cancel();
@@ -716,6 +740,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             novedades: _novedades,
             onAvisarNovedad: widget.dependencias.avisarNovedad,
             onYaSegui: widget.dependencias.yaSegui,
+            ubicacion: widget.dependencias.ubicacion,
             resumenSincronizacion: _resumen,
             abrirOrdenDeUnAviso: widget.dependencias.abrirOrdenPorId == null
                 ? null

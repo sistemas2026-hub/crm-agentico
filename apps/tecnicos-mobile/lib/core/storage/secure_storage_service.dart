@@ -33,6 +33,10 @@ class SecureStorageService implements SecureStorageLectura {
   /// La labor del día, para verla sin señal (29/10/2026). Se borra al cerrar
   /// sesión: es de quien la tenía.
   static const _keyLaborDeHoy = 'dexter_labor_de_hoy';
+  /// Si el tecnico dejo encendido el compartir su ubicacion (31/10/2026).
+  /// Se guarda para que al abrir la aplicacion se retome sin volver a
+  /// preguntarle; nace apagado, y apagarlo lo borra.
+  static const _keyUbicacion = 'dexter_comparte_ubicacion';
   static const _keyUserEmail = 'dexter_user_email';
   static const _keyUserName = 'dexter_user_name';
   static const _keyBaseUrl = 'dexter_api_base_url';
@@ -46,6 +50,29 @@ class SecureStorageService implements SecureStorageLectura {
   /// sea contra el propio teléfono, y el error que se ve es "conexión
   /// rechazada" sin ninguna pista de por qué.
   static String get defaultBaseUrl => ApiEndpoints.defaultEnvironmentUrl;
+
+  /// Si quedo encendido. Falso ante cualquier duda: nadie comparte por un
+  /// valor que no se pudo leer.
+  Future<bool> getCompartirUbicacion() async {
+    try {
+      return await _storage.read(key: _keyUbicacion) == '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> setCompartirUbicacion(bool encendido) async {
+    try {
+      if (encendido) {
+        await _storage.write(key: _keyUbicacion, value: '1');
+      } else {
+        await _storage.delete(key: _keyUbicacion);
+      }
+    } catch (_) {
+      //  Que no se pueda recordar la preferencia no puede tumbar nada: lo
+      //  peor que pasa es que manana tenga que prenderlo otra vez.
+    }
+  }
 
   Future<void> saveTokens({
     required String accessToken,

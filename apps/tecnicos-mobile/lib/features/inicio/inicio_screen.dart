@@ -17,6 +17,8 @@ import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'labor_de_hoy.dart';
 import 'novedad_de_cuadrilla.dart';
+import '../../core/ubicacion/compartir_ubicacion.dart';
+import 'compartir_mi_ubicacion.dart';
 import 'resumen_de_inicio.dart';
 
 /// Inicio — la pantalla de decisión de la jornada.
@@ -54,6 +56,7 @@ class InicioScreen extends StatefulWidget {
     this.onAvisarNovedad,
     this.onYaSegui,
     this.resumenSincronizacion,
+    this.ubicacion,
     this.onVerTodos,
     this.onVerMateriales,
     this.jornada,
@@ -70,6 +73,9 @@ class InicioScreen extends StatefulWidget {
   /// Con qué cuadrilla y qué labor sale hoy. Null si no se sabe; si es de otro
   /// día, no se muestra.
   final LaborDeHoy? laborDeHoy;
+
+  /// COMPARTIR LA UBICACIÓN (31/10/2026). Null = no se ofrece el interruptor.
+  final CompartirUbicacion? ubicacion;
 
   /// Las novedades que avisó este técnico (30/10/2026): «se pinchó la llanta».
   final List<NovedadLocal> novedades;
@@ -211,6 +217,16 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ] else ...<Widget>[
               _saludo(sync),
+              // COMPARTIR LA UBICACIÓN (31/10/2026): arriba, con el saludo,
+              // porque es una decisión del técnico sobre su día y no un
+              // ajuste escondido. Nace apagado.
+              if (widget.ubicacion != null)
+                CompartirMiUbicacion(
+                  servicio: widget.ubicacion!,
+                  alCambiar: () {
+                    if (mounted) setState(() {});
+                  },
+                ),
               // LA NOVEDAD DE LA CUADRILLA (30/10/2026): «se pinchó la llanta»
               // sin escribir en ningún ticket. Arriba, junto al saludo: es lo
               // que cambia el día.

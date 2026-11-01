@@ -23,6 +23,11 @@ class ApiEndpoints {
   /// Con qué cuadrilla y qué labor sale hoy el técnico (29/10/2026).
   static String get miDia => '$baseUrl/api/campo/mi-dia/';
 
+  /// Donde esta el telefono del tecnico (31/10/2026). El servidor rechaza
+  /// la de quien no sale hoy o esta fuera del horario de las cuadrillas:
+  /// responde 200 con `guardada: false`, no un error.
+  static String get ubicacion => '$baseUrl/api/campo/ubicacion/';
+
   /// Las novedades de la cuadrilla (30/10/2026): «se pinchó la llanta».
   static String get novedades => '$baseUrl/api/campo/novedades/';
   static String resolverNovedad(String id) =>
