@@ -55,7 +55,12 @@
     textoDePlazo,
     titularDelTablero
   } from '$lib/v2/supervisor-noc-plazo.js';
-  import { loQueHaceSolo } from '$lib/v2/supervisor-noc-autonomia.js';
+  import {
+    tarjetasDeSolo,
+    resumenAutonomiaGanada,
+    nombreDeAccion
+  } from '$lib/v2/supervisor-noc-autonomia.js';
+  import { efectosDeAceptar, celdaDistinta } from '$lib/v2/supervisor-noc-ficha.js';
   import './supervisor-noc.css';
   //  El diseño del 01/11/2026 vive en su propia hoja y bajo '.snv': esta hoja
   //  de arriba la comparten nueve pantallas, y lo de esta no debe tocarlas.
@@ -91,8 +96,8 @@
 
   /**
    * Lee el alcance. La usa el modal al abrirse y, desde el 01/11/2026, la
-   * pantalla al cargar: el bloque «Qué hace el Supervisor solo» muestra las
-   * tareas delegadas sin tener que abrir nada. Una sola lectura para los dos.
+   * pantalla al cargar: «Qué hace el Supervisor solo» muestra las tareas
+   * delegadas sin tener que abrir nada. Una sola lectura para los dos.
    */
   async function leerAlcance() {
     alcanceError = '';
@@ -121,13 +126,13 @@
   }
 
   //  Se vuelve a leer cada vez que corre la carga del servidor --al decidir,
-  //  al correr un ciclo--: lo que el Supervisor tiene delegado puede haber
-  //  cambiado desde Ajustes o desde el chat.
+  //  al correr un ciclo--: lo delegado puede haber cambiado desde Ajustes o
+  //  desde el chat.
   $effect(() => {
     if (data.puedeVer) leerAlcance();
   });
 
-  const solo = $derived(loQueHaceSolo(alcance));
+  const tarjetas = $derived(tarjetasDeSolo(alcance));
 
   async function guardarNivel() {
     alcanceGuardando = true;
@@ -215,6 +220,13 @@
 
   /** Cuantas filas por pagina. */
   const POR_PAGINA = 10;
+
+  //  EL ORDEN DE LA BANDEJA  --  01/11/2026. Por plazo (agrupada) es lo que
+  //  abre; por prioridad es el orden de siempre, sin grupos.
+  let ordenar = $state(/** @type {'plazo' | 'prioridad'} */ ('plazo'));
+  //  Lo que la persona plegó o desplegó a mano. Lo que no tocó sigue la regla
+  //  de 'estaPlegado'.
+  let plegadoManual = $state(/** @type {Record<string, boolean>} */ ({}));
 
   const NIVELES_VISIBLES = ['Alta', 'Media', 'Baja'];
 
@@ -311,6 +323,10 @@
   let indicadoresVivos = $state(/** @type {any} */ (null));
   let autonomiaViva = $state(/** @type {any} */ (null));
   let capacidadViva = $state(/** @type {any} */ (null));
+  //  01/11/2026: la tarjeta «Autonomía ganada». Viaja como promesa, igual que
+  //  las otras tres lentas, y 'null' es "todavía no llegó".
+  let ganadaViva = $state(/** @type {any} */ (null));
+  const ganada = $derived(resumenAutonomiaGanada(ganadaViva));
 
   $effect(() => {
     //  Se vuelven a enganchar cuando la carga del servidor corre de nuevo.
@@ -320,6 +336,8 @@
     indicadoresVivos = null;
     autonomiaViva = null;
     capacidadViva = null;
+    ganadaViva = null;
+    Promise.resolve(data.autonomiaGanada).then((v) => { if (vigente) ganadaViva = v ?? { autonomia: null, error: 'Sin respuesta.' }; });
     Promise.resolve(data.indicadores).then((v) => { if (vigente) indicadoresVivos = v; });
     Promise.resolve(data.autonomia).then((v) => { if (vigente) autonomiaViva = v; });
     Promise.resolve(data.capacidad).then((v) => { if (vigente) capacidadViva = v; });
@@ -497,12 +515,25 @@
   //  ORDENADA POR PLAZO ANTES DE CORTAR LA PAGINA  --  01/11/2026. Agrupar
   //  solo dentro de la pagina dejaria un vencido en la 2 mientras la 1 muestra
   //  casos en plazo. Dentro de cada grupo se respeta el orden de la bandeja.
-  const bandejaPorPlazo = $derived(agruparPorPlazo(bandeja).flatMap((g) => g.filas));
-  const pagina = $derived(bandejaPorPlazo.slice(pag.desde - 1, pag.hasta));
+  const bandejaOrdenada = $derived(
+    ordenar === 'plazo' ? agruparPorPlazo(bandeja).flatMap((g) => g.filas) : bandeja
+  );
+  const pagina = $derived(bandejaOrdenada.slice(pag.desde - 1, pag.hasta));
   const gruposDeLaPagina = $derived(agruparPorPlazo(pagina));
   //  El numero del grupo es el de TODA la bandeja filtrada, no el de la
   //  pagina: «Plazo vencido 9» con 4 filas a la vista dice que hay mas.
   const cuentaDeLaBandeja = $derived(cuentaPorPlazo(bandeja));
+
+  /**
+   * Los grupos tranquilos («En plazo», «Sin plazo») abren plegados SOLO si en
+   * la pagina hay algo vencido o por vencer: plegarlos siempre dejaria una
+   * bandeja sin urgentes toda cerrada, que se lee como vacia.
+   */
+  function estaPlegado(/** @type {string} */ clave) {
+    if (clave in plegadoManual) return plegadoManual[clave];
+    const hayUrgentes = gruposDeLaPagina.some((g) => g.clave === 'vencido' || g.clave === 'pronto');
+    return hayUrgentes && (clave === 'plazo' || clave === 'sin');
+  }
 
   //  LO QUE DICE LA FRASE DE ARRIBA. Sobre la bandeja de PENDIENTES, sin
   //  filtros y sin desincronizados: la misma lista que cuenta el KPI de
@@ -524,13 +555,18 @@
     pronto: plazoPendientes?.pronto ?? 0
   });
   const sobrePendientes = $derived(enPendientes ? ticketsDe(enPendientes) : null);
-  //  Los otros signos vitales: los indicadores del backend, como antes.
-  //  'propuestas' sale de la franja porque ya lo dice la frase; 'sla' porque
-  //  lo reemplaza «En riesgo», contado sobre la bandeja.
-  const signos = $derived(kpis.filter((k) => k.clave !== 'propuestas' && k.clave !== 'sla'));
-  const fechaDeHoy = new Date().toLocaleDateString('es-CO', {
-    weekday: 'long', day: 'numeric', month: 'long'
-  });
+  //  «Sin técnico» sobre la misma lista: las pendientes sin técnico actual.
+  const sinTecnico = $derived(
+    enPendientes ? enPendientes.filter((/** @type {any} */ p) => !p.tecnico).length : null
+  );
+  //  Los signos que vienen del backend, con el rótulo corto del diseño.
+  const signosDelBackend = $derived(
+    [
+      { clave: 'bloqueados', rotulo: 'Bloqueados' },
+      { clave: 'sin_programar', rotulo: 'Sin programar' }
+    ].map((s) => ({ ...s, n: kpis.find((k) => k.clave === s.clave)?.n ?? null }))
+  );
+  const desincronizados = $derived(kpis.find((k) => k.clave === 'desinc')?.n ?? null);
 
   // Cambiar un filtro o buscar vuelve a la primera pagina. Sin esto, filtrar
   // de 121 a 4 resultados estando en la pagina 7 deja la tabla vacia.
@@ -1197,125 +1233,106 @@
         <!-- ============ CABECERA ============ -->
         <header class="snv-cabecera">
           <div class="snv-cabecera-fila">
-            <h1 class="snv-titulo-pantalla">Supervisor NOC</h1>
+            <div class="snv-cabecera-izq">
+              <h1 class="snv-titulo-pantalla"><span class="snv-rombo" aria-hidden="true"></span>Supervisor NOC</h1>
+              <!--
+                La respuesta a «¿cómo está la operación?», antes que cualquier
+                número. La frase y los grupos de la bandeja cuentan con la MISMA
+                función (cuentaPorPlazo), sobre la MISMA lista que «Pendientes».
+              -->
+              <p class="snv-titular" id="snv-titular">
+                {titular.principal}{#if titular.alerta}{' '}<span class="snv-critico">{titular.alerta}</span>{/if}
+              </p>
+              {#if titular.bajada || (sobrePendientes && sobrePendientes.tickets < sobrePendientes.propuestas)}
+                <p class="snv-bajada">
+                  {titular.bajada ?? ''}
+                  {#if sobrePendientes && sobrePendientes.tickets < sobrePendientes.propuestas}
+                    Son {sobrePendientes.propuestas} propuestas sobre {sobrePendientes.tickets}
+                    {sobrePendientes.palabra}.
+                  {/if}
+                </p>
+              {/if}
+            </div>
             <div class="snv-cabecera-der">
               <span
                 class="snv-ultimo"
                 title="Derivado de la propuesta más reciente: el backend no registra cuándo corrió el ciclo."
               >
-                Última propuesta: {ultimaPropuesta ? fecha(ultimaPropuesta) : 'ninguna todavía'}
+                Última propuesta: {ultimaPropuesta ? haceCuanto(ultimaPropuesta) : 'ninguna todavía'}
               </span>
-              <button
-                class="snoc-btn snoc-btn-primario"
-                type="button"
-                onclick={() => (modalCiclo = true)}
-                disabled={corriendo}
-              >
-                <span class="snoc-icono" style="font-size:14px;" aria-hidden="true">refresh</span>
-                <span>{corriendo ? 'Analizando…' : 'Analizar ahora'}</span>
+              <button class="snv-btn snv-btn-pri" type="button" onclick={() => (modalCiclo = true)} disabled={corriendo}>
+                <span aria-hidden="true">▶</span>
+                {corriendo ? 'Analizando…' : 'Analizar ahora'}
               </button>
             </div>
           </div>
-          <div class="snoc-envuelve snoc-pestanas">
+          <div class="snv-pestanas">
             <PestanasNoc activa="pendientes" />
           </div>
         </header>
 
+        {#if indicadoresVivos?.error}
+          <div class="snoc-aviso">
+            <span class="snoc-icono snoc-error-txt" style="font-size:20px;" aria-hidden="true">error</span>
+            <p class="snoc-body" style="margin:0;">{indicadoresVivos.error.mensaje}</p>
+          </div>
+        {/if}
+
         <!--
           ============ AHORA MISMO ============
-          La respuesta a «¿cómo está la operación?» en una frase, antes que
-          cualquier número. La frase y los grupos de la bandeja cuentan con la
-          MISMA función (cuentaPorPlazo), sobre la MISMA lista que la tabla
-          muestra en «Pendientes»: si arriba dice 3 vencidas, el grupo dice 3.
+          Cinco signos. El color aparece solo si el número pide atención; un
+          cero o un hueco van en gris. «SLA en riesgo» y «Sin técnico» salen de
+          la bandeja de pendientes (mismo conteo que los grupos); bloqueados,
+          sin programar y desincronizados son los indicadores del backend.
         -->
-        <section class="snv-ahora" aria-labelledby="snv-titular">
-          <div class="snv-ahora-texto">
-            <p class="snv-fecha">{fechaDeHoy}</p>
-            <h2 class="snv-titular" id="snv-titular">
-              {titular.principal}{#if titular.alerta}{' '}<span class="snv-critico">{titular.alerta}</span>{/if}
-            </h2>
-            {#if titular.bajada || (sobrePendientes && sobrePendientes.tickets < sobrePendientes.propuestas)}
-              <p class="snv-bajada">
-                {titular.bajada ?? ''}
-                {#if sobrePendientes && sobrePendientes.tickets < sobrePendientes.propuestas}
-                  Son {sobrePendientes.propuestas} propuestas sobre {sobrePendientes.tickets}
-                  {sobrePendientes.palabra}.
-                {/if}
-              </p>
-            {/if}
-          </div>
-
-          {#if indicadoresVivos?.error}
-            <div class="snoc-aviso">
-              <span class="snoc-icono snoc-error-txt" style="font-size:20px;" aria-hidden="true">error</span>
-              <p class="snoc-body" style="margin:0;">{indicadoresVivos.error.mensaje}</p>
-            </div>
-          {/if}
-
-          <!--
-            LOS SIGNOS VITALES: una franja, no seis tarjetas. El color aparece
-            solo si el número pide atención; un cero o un hueco van en gris.
-            «En riesgo» sale de la bandeja (mismo conteo que los grupos); los
-            otros cuatro son los indicadores del backend, como antes.
-          -->
+        <section class="snv-caja snv-ahora" aria-labelledby="snv-ahora-titulo">
+          <h2 class="snv-h3" id="snv-ahora-titulo">Ahora mismo</h2>
           <div class="snv-signos" role="group" aria-label="Signos vitales de la operación">
             <a class="snv-signo snv-signo-enlace {enRiesgo.vencido ? 'snv-tono-critico' : enRiesgo.total ? 'snv-tono-alerta' : 'snv-tono-calma'}"
                href="#pendientes" onclick={irAPendientes}>
-              {#if enRiesgo.total == null}
-                <span class="snv-signo-n snv-sin-dato">Sin dato</span>
-              {:else}
-                <span class="snv-signo-n">{enRiesgo.total}</span>
-              {/if}
+              <span class="snv-signo-n">{enRiesgo.total ?? 'Sin dato'}</span>
               <span class="snv-signo-rot">SLA en riesgo</span>
               <span class="snv-signo-sub">
                 {enRiesgo.total == null ? 'la bandeja no se pudo leer' : `${enRiesgo.vencido} vencidas · ${enRiesgo.pronto} por vencer`}
               </span>
             </a>
-            {#each signos as k (k.clave)}
-              {#if k.clave === 'desinc'}
-                <!--
-                  13/10/2026: los desincronizados salieron de la bandeja --los
-                  cierra el Supervisor solo-- y este signo es SU LUGAR. Es un
-                  <button>: antes era un número y ahora es una acción.
-                -->
-                <button
-                  class="snv-signo snv-signo-enlace snv-tono-calma"
-                  type="button"
-                  aria-pressed={verDesincronizados === 'solo'}
-                  title="Ver los casos desincronizados en la bandeja"
-                  onclick={() => {
-                    //  EL ORDEN IMPORTA: 'irAPendientes' deja la vista en
-                    //  'ocultar', asi que el modo se fija DESPUES.
-                    const prender = verDesincronizados !== 'solo';
-                    irAPendientes();
-                    verDesincronizados = prender ? 'solo' : 'ocultar';
-                    nPagina = 1;
-                    document.getElementById('pendientes')?.scrollIntoView({ block: 'start' });
-                  }}
-                >
-                  {#if k.n == null}
-                    <span class="snv-signo-n snv-sin-dato">Sin dato</span>
-                  {:else}
-                    <span class="snv-signo-n">{k.n}</span>
-                  {/if}
-                  <span class="snv-signo-rot">{k.titulo}</span>
-                  <span class="snv-signo-sub">
-                    {verDesincronizados === 'solo' ? 'Viéndolos · tocá para volver' : 'los cierra el Supervisor'}
-                  </span>
-                </button>
-              {:else}
-                <div class="snv-signo {k.n ? (k.clave === 'bloqueados' ? 'snv-tono-alerta' : '') : 'snv-tono-calma'}">
-                  {#if k.n == null}
-                    <!-- Un hueco, no un cero: el backend no entregó el indicador. -->
-                    <span class="snv-signo-n snv-sin-dato">{esperandoIndicadores ? '…' : 'Sin dato'}</span>
-                  {:else}
-                    <span class="snv-signo-n">{k.n}</span>
-                  {/if}
-                  <span class="snv-signo-rot">{k.titulo}</span>
-                  <span class="snv-signo-sub">{k.sub}</span>
-                </div>
-              {/if}
+            {#each signosDelBackend as k (k.clave)}
+              <div class="snv-signo {k.n ? (k.clave === 'bloqueados' ? 'snv-tono-alerta' : '') : 'snv-tono-calma'}">
+                <!-- Un hueco, no un cero: el backend no entregó el indicador. -->
+                <span class="snv-signo-n">{k.n ?? (esperandoIndicadores ? '…' : 'Sin dato')}</span>
+                <span class="snv-signo-rot">{k.rotulo}</span>
+              </div>
             {/each}
+            <div class="snv-signo {sinTecnico ? '' : 'snv-tono-calma'}">
+              <span class="snv-signo-n">{sinTecnico ?? 'Sin dato'}</span>
+              <span class="snv-signo-rot">Sin técnico</span>
+            </div>
+            <!--
+              13/10/2026: los desincronizados salieron de la bandeja --los
+              cierra el Supervisor solo-- y este signo es SU LUGAR. Es un
+              <button>: muestra solo esos casos.
+            -->
+            <button
+              class="snv-signo snv-signo-enlace snv-tono-calma"
+              type="button"
+              aria-pressed={verDesincronizados === 'solo'}
+              title="Ver los casos desincronizados en la bandeja"
+              onclick={() => {
+                //  EL ORDEN IMPORTA: 'irAPendientes' deja la vista en
+                //  'ocultar', asi que el modo se fija DESPUES.
+                const prender = verDesincronizados !== 'solo';
+                irAPendientes();
+                verDesincronizados = prender ? 'solo' : 'ocultar';
+                nPagina = 1;
+                document.getElementById('pendientes')?.scrollIntoView({ block: 'start' });
+              }}
+            >
+              <span class="snv-signo-n">{desincronizados ?? (esperandoIndicadores ? '…' : 'Sin dato')}</span>
+              <span class="snv-signo-rot">Desincronizados</span>
+              <span class="snv-signo-sub">
+                {verDesincronizados === 'solo' ? 'viéndolos · tocá para volver' : 'los cierra el Supervisor'}
+              </span>
+            </button>
           </div>
         </section>
 
@@ -1354,166 +1371,175 @@
 
         <!--
           ============ QUÉ HACE EL SUPERVISOR SOLO ============
-          01/11/2026. Desde que aprueba y cierra órdenes solo, esto es lo
-          primero que necesita saber quien mira: qué tareas tiene delegadas y
-          si de verdad están corriendo. Antes vivía dentro del modal de
-          Alcance. Lee la misma respuesta y aplica la misma regla de tres
-          estados ($lib/v2/supervisor-noc-autonomia.js).
+          01/11/2026. Desde que aprueba y cierra órdenes solo, es lo primero que
+          necesita saber quien mira. Las dos tareas que más pesan van en
+          tarjeta propia, con el MISMO estado de tres valores que el modal de
+          Alcance; la tercera tarjeta es la autonomía ganada, la misma lectura
+          que la pantalla de Capacidad. Las demás tareas delegadas se nombran
+          abajo: esconderlas sería decir que no corren.
         -->
         <section class="snv-solo" aria-labelledby="snv-solo-titulo">
           <div class="snv-seccion-cab">
             <h2 class="snv-h3" id="snv-solo-titulo">Qué hace el Supervisor solo</h2>
-            <span class="snv-seccion-acciones">
-              <button class="snv-enlace" type="button" onclick={abrirAlcance}>Alcance y freno de mano</button>
-              <a class="snv-enlace" href="/supervisor-noc/ajustes">Delegar o quitar tareas</a>
-              <a class="snv-enlace" href="/capacidad">Autonomía ganada</a>
-            </span>
+            <button class="snv-enlace" type="button" onclick={abrirAlcance}>Ver reglas de autonomía ↗</button>
           </div>
-
-          {#if !solo.leido}
-            <p class="snv-nota">{alcanceError || 'Leyendo qué tiene delegado…'}</p>
-          {:else if solo.sinCatalogo}
-            <p class="snv-nota">El backend no devolvió el catálogo de tareas.</p>
-          {:else}
-            {#if solo.frenado}
-              <p class="snv-freno">
-                <strong>Freno de mano puesto.</strong> Ninguna acción automática corre hasta que alguien lo levante.
-              </p>
-            {/if}
-            {#if solo.activas.length === 0}
-              <p class="snv-nota">No tiene tareas delegadas: observa y propone, y todo lo decide una persona.</p>
-            {:else}
-              <ul class="snv-tareas">
-                {#each solo.activas as t (t.clave)}
-                  <li class="snv-tarea">
-                    <span class="snv-estado {t.actua ? 'snv-estado-actua' : 'snv-estado-no'}">
-                      <span class="snv-punto" aria-hidden="true"></span>{t.actua ? 'Actúa' : 'No actúa'}
-                    </span>
-                    <span class="snv-tarea-txt">
-                      <strong>{t.nombre}</strong>
-                      <span class={t.actua ? 'snv-tarea-que' : 'snv-tarea-porque'}>{t.porQue ?? t.queHace}</span>
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            <p class="snv-nota">
-              {solo.actuan} de {solo.activas.length} tareas delegadas están actuando{solo.sinDelegar
-                ? ` · ${solo.sinDelegar} más sin delegar`
-                : ''}. Lo que hace solo queda en la Actividad con la marca «IA».
-              {#if fueraDeAlcance > 0}
-                <strong class="snoc-error-txt">{fueraDeAlcance} propuestas quedaron por encima de su alcance.</strong>
-              {/if}
+          {#if tarjetas.frenado}
+            <p class="snv-freno">
+              <strong>Freno de mano puesto.</strong> Ninguna acción automática corre hasta que alguien lo levante.
+              <button class="snv-enlace" type="button" onclick={abrirAlcance}>Ver por qué</button>
             </p>
+          {/if}
+          <div class="snv-tarjetas">
+            {#each [{ t: tarjetas.desincronizados, titulo: 'Cierra casos desincronizados', pie: 'No toca WispHub.' }, { t: tarjetas.ordenes, titulo: 'Aprueba y cierra órdenes de trabajo (OT)', pie: 'Cierra el ticket en WispHub y después la orden en Dexter.' }] as c (c.titulo)}
+              <article class="snv-tarjeta">
+                <h3 class="snv-tarjeta-titulo">{c.titulo}</h3>
+                {#if !alcance}
+                  <p class="snv-nota">{alcanceError || 'Leyendo…'}</p>
+                {:else if !c.t}
+                  <p class="snv-nota">El catálogo de tareas no la trae.</p>
+                {:else}
+                  <span class="snv-estado snv-estado-{c.t.estado}">
+                    <span class="snv-punto" aria-hidden="true"></span>
+                    {c.t.estado === 'encendida' ? 'Encendido' : c.t.estado === 'apagada' ? 'Apagado' : 'No actúa'}
+                  </span>
+                  {#if c.t.estado === 'no_actua'}
+                    <p class="snv-tarjeta-txt snv-critico">
+                      {c.t.porQue}
+                      <button class="snv-enlace" type="button" onclick={abrirAlcance}>Ver por qué</button>
+                    </p>
+                  {:else if c.t.estado === 'apagada'}
+                    <p class="snv-tarjeta-txt">No está delegada. <a class="snv-enlace" href="/supervisor-noc/ajustes">Delegar</a></p>
+                  {:else}
+                    <p class="snv-tarjeta-txt">{c.pie}</p>
+                  {/if}
+                {/if}
+              </article>
+            {/each}
+            <article class="snv-tarjeta">
+              <h3 class="snv-tarjeta-titulo">Autonomía ganada</h3>
+              {#if !ganada.leido}
+                <p class="snv-nota">Leyendo…</p>
+              {:else if ganada.error}
+                <p class="snv-nota">No se pudo leer: {ganada.error}</p>
+              {:else}
+                {#if ganada.autonomas.length}
+                  <p class="snv-tarjeta-linea"><span class="snv-punto snv-punto-vivo" aria-hidden="true"></span>
+                    {ganada.autonomas.length} {ganada.autonomas.length === 1 ? 'acción se hace sola' : 'acciones se hacen solas'}:
+                    {ganada.autonomas.map(nombreDeAccion).join(', ')}</p>
+                {:else}
+                  <p class="snv-tarjeta-linea">Ninguna acción se hace sola todavía.</p>
+                {/if}
+                {#if ganada.elegibles.length}
+                  <p class="snv-tarjeta-linea"><span class="snv-punto snv-punto-alerta" aria-hidden="true"></span>
+                    {ganada.elegibles.length} con la evidencia para ganarla: {ganada.elegibles.map(nombreDeAccion).join(', ')}</p>
+                {/if}
+                {#if ganada.degradadas.length}
+                  <p class="snv-tarjeta-linea snv-critico"><span class="snv-punto snv-punto-critico" aria-hidden="true"></span>
+                    {ganada.degradadas.length} la perdió por un fallo: {ganada.degradadas.map(nombreDeAccion).join(', ')}</p>
+                {/if}
+                <a class="snv-enlace" href="/capacidad">Ver en Capacidad</a>
+              {/if}
+            </article>
+          </div>
+          {#if tarjetas.otras.length}
+            <p class="snv-nota snv-otras">
+              También tiene delegadas:
+              {#each tarjetas.otras as o, i (o.clave)}{i ? ' · ' : ' '}<span class={o.actua ? '' : 'snv-critico'} title={o.porQue ?? o.queHace}>{o.nombre}{o.actua ? '' : ' (no actúa)'}</span>{/each}.
+              <a class="snv-enlace" href="/supervisor-noc/ajustes">Delegar o quitar</a>
+            </p>
+          {/if}
+          {#if fueraDeAlcance > 0}
+            <p class="snv-nota snv-critico">{fueraDeAlcance} propuestas quedaron por encima de su alcance.</p>
           {/if}
         </section>
 
         <div class="snv-cuerpo">
-          <!--
-            ============ PARA DECIDIR ============
-            Lo único de la pantalla que pide una decisión de una persona.
-            Agrupada por PLAZO --vencido, vence pronto, en plazo, sin plazo-- y
-            no por una prioridad 0-99 que hay que interpretar. Dentro de cada
-            grupo se respeta el orden de la bandeja. Los botones de decisión
-            siguen en «Revisar», junto a la evidencia: decidir sobre una fila
-            es decidir sin mirar por qué.
-          -->
-          <section class="snv-decidir" id="pendientes" aria-labelledby="snv-decidir-titulo">
-            <div class="snv-seccion-cab">
-              <h2 class="snv-h2" id="snv-decidir-titulo">Para decidir</h2>
-              {#if data.hallazgos.error}
-                <span class="snv-nota snoc-error-txt">No se pudieron leer</span>
-              {:else}
-                <span class="snv-nota">
-                  {bandeja.length} {filtroEstado === 'pendientes' ? 'esperan tu revisión' : 'en la lista'}
-                  {#if sobreLaBandeja.tickets < bandeja.length}
-                    · {sobreLaBandeja.tickets} {sobreLaBandeja.palabra}
-                  {/if}
-                </span>
-                <!-- EL TOPE SE DICE (19/10/2026): el backend manda 200 y lo que
-                     espera decision va primero; lo demas puede quedar afuera. -->
-                {#if data.hallazgos.truncado}
-                  <span class="snv-nota">
-                    · se cargaron {propuestas.length} de {data.hallazgos.count}: las que esperan
-                    decisión van primero, y «Ya decididas» puede quedar corta
-                  </span>
+          <div class="snv-columna-principal">
+            <!--
+              ============ PARA DECIDIR ============
+              Lo único que pide una decisión de una persona. Agrupada por
+              PLAZO, con los grupos tranquilos plegados cuando hay urgentes.
+              Dentro de cada grupo se respeta el orden de la bandeja. Decidir
+              sigue en «Revisar», junto a la evidencia.
+            -->
+            <section class="snv-decidir" id="pendientes" aria-labelledby="snv-decidir-titulo">
+              <div class="snv-decidir-cab">
+                <h2 class="snv-h2" id="snv-decidir-titulo">Para decidir</h2>
+                {#if !data.hallazgos.error}
+                  <span class="snv-pildora-n" title="Pendientes de decisión">{conteoPorEstado.pendientes ?? 0}</span>
                 {/if}
-              {/if}
-            </div>
-
-            {#if !data.hallazgos.error && propuestas.length > 0}
-              <!-- Los filtros se aplican en el navegador: el GET ya trajo el
-                   conjunto entero. -->
-              <div class="snv-filtros">
-                <div class="snv-segmentado" role="group" aria-label="Estado de la revisión">
-                  {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
-                    <button type="button" aria-pressed={filtroEstado === o.v} onclick={() => (filtroEstado = o.v)}>
-                      {o.t}<span class="snv-cuenta">{conteoPorEstado[o.v] ?? 0}</span>
-                    </button>
-                  {/each}
-                </div>
-
-                <label class="snv-buscador">
-                  <span class="snoc-icono" style="font-size:18px;" aria-hidden="true">search</span>
-                  <input
-                    type="search"
-                    placeholder="Cliente, caso, asunto o técnico"
-                    bind:value={busqueda}
-                    aria-label="Buscar en las propuestas"
-                  />
-                </label>
-
-                <select
-                  class="snoc-select"
-                  aria-label="Filtrar por prioridad"
-                  value={filtroNivel ?? ''}
-                  onchange={(e) => (filtroNivel = e.currentTarget.value || null)}
-                >
-                  <option value="">Toda prioridad</option>
-                  {#each NIVELES_VISIBLES as nv (nv)}
-                    <option value={nv} disabled={(conteoPorNivel[nv] ?? 0) === 0}>
-                      Prioridad {nv.toLowerCase()} ({conteoPorNivel[nv] ?? 0})
-                    </option>
-                  {/each}
-                </select>
-
-                <select
-                  class="snoc-select"
-                  aria-label="Filtrar por si trae acción recomendada"
-                  value={filtroPropuesta}
-                  onchange={(e) => (filtroPropuesta = e.currentTarget.value)}
-                >
-                  <option value="">Con y sin acción</option>
-                  <option value="si">Con acción recomendada</option>
-                  <option value="no">Sin acción recomendada</option>
-                </select>
-
-                <!-- El tipo: un filtro que ya funcionaba, como desplegable. -->
-                <select
-                  class="snoc-select"
-                  aria-label="Filtrar por tipo de hallazgo"
-                  value={filtro ?? ''}
-                  onchange={(e) => (filtro = e.currentTarget.value || null)}
-                >
-                  <option value="">Todo tipo ({enLaBandeja.length})</option>
-                  {#each porSenal as [clave, info] (clave)}
-                    <option value={clave}>{rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})</option>
-                  {/each}
-                </select>
-
-                {#if hayFiltros}
-                  <button class="snv-enlace" type="button" onclick={limpiarFiltros}>Limpiar filtros</button>
+                {#if !data.hallazgos.error && propuestas.length > 0}
+                  <div class="snv-segmentado" role="group" aria-label="Estado de la revisión">
+                    {#each [{ v: 'pendientes', t: 'Pendientes' }, { v: 'decididas', t: 'Ya decididas' }, { v: '', t: 'Todas' }] as o (o.v)}
+                      <button type="button" aria-pressed={filtroEstado === o.v} onclick={() => (filtroEstado = o.v)}>
+                        {o.t}<span class="snv-cuenta">{conteoPorEstado[o.v] ?? 0}</span>
+                      </button>
+                    {/each}
+                  </div>
                 {/if}
               </div>
-              {#if verDesincronizados === 'solo'}
-                <p class="snv-aviso-filtro">
-                  Mostrando solo los casos desincronizados, que el Supervisor cierra solo.
-                  <button class="snv-enlace" type="button" onclick={() => (verDesincronizados = 'ocultar')}>
-                    Volver a la bandeja
-                  </button>
+              {#if data.hallazgos.error}
+                <p class="snv-nota snv-critico">No se pudieron leer las propuestas.</p>
+              {:else if sobreLaBandeja.tickets < bandeja.length || data.hallazgos.truncado}
+                <p class="snv-nota">
+                  {#if sobreLaBandeja.tickets < bandeja.length}
+                    {bandeja.length} propuestas sobre {sobreLaBandeja.tickets} {sobreLaBandeja.palabra}.
+                  {/if}
+                  <!-- EL TOPE SE DICE (19/10/2026): el backend manda 200 y lo que
+                       espera decision va primero. -->
+                  {#if data.hallazgos.truncado}
+                    Se cargaron {propuestas.length} de {data.hallazgos.count}: las que esperan decisión van
+                    primero, y «Ya decididas» puede quedar corta.
+                  {/if}
                 </p>
               {/if}
-            {/if}
+
+              {#if !data.hallazgos.error && propuestas.length > 0}
+                <!-- Los filtros se aplican en el navegador: el GET ya trajo el
+                     conjunto entero. -->
+                <div class="snv-filtros">
+                  <label class="snv-buscador">
+                    <span aria-hidden="true">⌕</span>
+                    <input type="search" placeholder="Buscar por cliente, caso, OT o ticket…" bind:value={busqueda}
+                           aria-label="Buscar en las propuestas" />
+                  </label>
+                  <select class="snv-select" aria-label="Filtrar por prioridad" value={filtroNivel ?? ''}
+                          onchange={(e) => (filtroNivel = e.currentTarget.value || null)}>
+                    <option value="">Prioridad</option>
+                    {#each NIVELES_VISIBLES as nv (nv)}
+                      <option value={nv} disabled={(conteoPorNivel[nv] ?? 0) === 0}>{nv} ({conteoPorNivel[nv] ?? 0})</option>
+                    {/each}
+                  </select>
+                  <select class="snv-select" aria-label="Filtrar por tipo de hallazgo" value={filtro ?? ''}
+                          onchange={(e) => (filtro = e.currentTarget.value || null)}>
+                    <option value="">Tipo</option>
+                    {#each porSenal as [clave, info] (clave)}
+                      <option value={clave}>{rotuloDeHallazgo(clave, info.etiqueta)} ({info.n})</option>
+                    {/each}
+                  </select>
+                  <select class="snv-select" aria-label="Filtrar por si trae acción recomendada" value={filtroPropuesta}
+                          onchange={(e) => (filtroPropuesta = e.currentTarget.value)}>
+                    <option value="">Con y sin acción</option>
+                    <option value="si">Con acción recomendada</option>
+                    <option value="no">Sin acción recomendada</option>
+                  </select>
+                  <select class="snv-select" aria-label="Ordenar la bandeja" bind:value={ordenar}>
+                    <option value="plazo">Ordenar: Plazo</option>
+                    <option value="prioridad">Ordenar: Prioridad</option>
+                  </select>
+                  {#if hayFiltros}
+                    <button class="snv-enlace" type="button" onclick={limpiarFiltros}>Limpiar filtros</button>
+                  {/if}
+                </div>
+                {#if verDesincronizados === 'solo'}
+                  <p class="snv-aviso-filtro">
+                    Mostrando solo los casos desincronizados, que el Supervisor cierra solo.
+                    <button class="snv-enlace" type="button" onclick={() => (verDesincronizados = 'ocultar')}>
+                      Volver a la bandeja
+                    </button>
+                  </p>
+                {/if}
+              {/if}
 
           {#if form?.error}
             <div class="snoc-aviso">
@@ -1554,33 +1580,45 @@
             </div>
           {/if}
 
-            {#if data.hallazgos.error}
-              <div class="snoc-aviso">
-                <span class="snoc-icono snoc-error-txt" style="font-size:18px;" aria-hidden="true">error</span>
-                <span class="snoc-body">{data.hallazgos.error.mensaje}</span>
-              </div>
-            {:else if propuestas.length === 0}
-              <div class="snv-vacio">
-                <strong>Todavía no hay propuestas</strong>
-                Usá «Analizar ahora» para que el Supervisor revise la operación.
-              </div>
-            {:else if bandeja.length === 0}
-              <div class="snv-vacio">
-                {#if busqueda.trim() || filtro || filtroNivel || filtroPropuesta}
-                  <strong>Nada coincide</strong>
-                  {busqueda.trim()
-                    ? `Ninguna propuesta coincide con «${busqueda.trim()}».`
-                    : 'Ninguna propuesta con esos filtros.'}
-                  <button class="snv-enlace" type="button" onclick={limpiarFiltros}>Limpiar filtros</button>
-                {:else if filtroEstado === 'pendientes'}
-                  <strong>Todo al día</strong>
-                  No hay propuestas esperando tu decisión.
-                {:else}
-                  <strong>Nada en esta lista</strong>
-                  <button class="snv-enlace" type="button" onclick={limpiarFiltros}>Volver a pendientes</button>
-                {/if}
-              </div>
-            {:else}
+              {#if data.hallazgos.error}
+                <div class="snoc-aviso">
+                  <span class="snoc-icono snoc-error-txt" style="font-size:18px;" aria-hidden="true">error</span>
+                  <span class="snoc-body">{data.hallazgos.error.mensaje}</span>
+                </div>
+              {:else if propuestas.length === 0}
+                <div class="snv-vacio">
+                  <strong>Todavía no hay propuestas</strong>
+                  Usá «Analizar ahora» para que el Supervisor revise la operación.
+                </div>
+              {:else if bandeja.length === 0}
+                <div class="snv-vacio">
+                  {#if busqueda.trim() || filtro || filtroNivel || filtroPropuesta}
+                    <strong>Nada coincide</strong>
+                    {busqueda.trim()
+                      ? `Ninguna propuesta coincide con «${busqueda.trim()}».`
+                      : 'Ninguna propuesta con esos filtros.'}
+                    <button class="snv-enlace" type="button" onclick={limpiarFiltros}>Limpiar filtros</button>
+                  {:else if filtroEstado === 'pendientes'}
+                    <strong>Todo al día</strong>
+                    No hay propuestas esperando tu decisión.
+                  {:else}
+                    <strong>Nada en esta lista</strong>
+                    <button class="snv-enlace" type="button" onclick={limpiarFiltros}>Volver a pendientes</button>
+                  {/if}
+                </div>
+              {:else}
+                <div class="snv-bandeja">
+                  <!--
+                    LA BARRA DE SELECCION. Tilda SOLO las pendientes de esta
+                    pagina: "seleccionar todo" sobre algo que no se ve es la forma
+                    mas facil de aceptar algo que nadie miro. Con algo tildado,
+                    muestra el lote --que dice que hace segun lo tildado--.
+                  -->
+                  <div class="snv-barra-sel">
+                    {#if seleccionables.length > 0}
+                      <input type="checkbox" aria-label="Seleccionar las pendientes de esta página"
+                             checked={todasTildadas} disabled={enLote} onchange={tildarTodas} />
+                    {/if}
             {#if seleccionadas.length > 0 || enLote || loteResultado}
               <div class="snoc-lote">
                 {#if enLote}
@@ -1643,245 +1681,119 @@
                 </ul>
               {/if}
             {/if}
-              <div class="snv-bandeja">
-                {#if seleccionables.length > 0}
-                  <!--
-                    TILDA SOLO LAS PENDIENTES de esta pagina: "seleccionar todo"
-                    sobre algo que no se ve es la forma mas facil de aceptar algo
-                    que nadie miro.
-                  -->
-                  <label class="snv-tildar-todas">
-                    <input
-                      type="checkbox"
-                      checked={todasTildadas}
-                      disabled={enLote}
-                      onchange={tildarTodas}
-                    />
-                    Seleccionar las {seleccionables.length} pendientes de esta página
-                  </label>
-                {/if}
-                {#each gruposDeLaPagina as g (g.clave)}
-                  <div class="snv-grupo">
-                    <div class="snv-grupo-cab snv-tono-{g.tono}">
-                      <span>{g.titulo}</span>
-                      <span class="snv-grupo-n">{cuentaDeLaBandeja?.[g.clave] ?? g.filas.length}</span>
-                    </div>
-                    {#each g.filas as p (p.id)}
-                      {@const pl = textoDePlazo(p.sla_estado, p.sla_minutos)}
-                      <div class="snv-fila {abierta === p.id ? 'snv-fila-abierta' : ''} {p.revision.pendiente ? '' : 'snv-fila-decidida'}">
-                        <div class="snv-celda-check">
-                          {#if p.revision.pendiente}
-                            <input
-                              type="checkbox"
-                              aria-label="Seleccionar la propuesta de {p.cliente ?? 'este caso'}"
-                              checked={!!seleccion[p.id]}
-                              disabled={enLote}
-                              onchange={() => (seleccion[p.id] = !seleccion[p.id])}
-                            />
-                          {/if}
-                        </div>
-
-                        <div class="snv-plazo">
-                          <span class="snv-plazo-t snv-tono-{pl.tono}">{pl.texto}</span>
-                          <span class="snv-plazo-s">
-                            {pl.detalle || (p.edad.texto ? `abierto hace ${p.edad.texto}` : '')}
-                          </span>
-                        </div>
-
-                        <div class="snv-quien">
-                          <!--
-                            EL CLIENTE, SIEMPRE EN LA MISMA COLUMNA. Si la fuente no
-                            lo trae, se dice; no se rellena con el evento.
-                          -->
-                          {#if p.cliente}
-                            <span class="snv-cliente">{p.cliente}</span>
-                          {:else}
-                            <span class="snv-cliente snoc-celda-ausente">Cliente no disponible en la fuente</span>
-                          {/if}
-                          <span class="snv-asunto" title={p.asunto}>
-                            {p.asunto || 'Sin asunto en la fuente'}
-                          </span>
-                          <span class="snv-etiquetas">
-                            <span
-                              class="snv-tag {p.nivel.texto === 'Alta' ? 'snv-tag-alta' : ''}"
-                              title="Prioridad {p.prioridad} en la escala del Supervisor (0-99, menor es más urgente)"
-                            >
-                              Prioridad {p.nivel.texto.toLowerCase()}
-                            </span>
-                            <span class="snv-tag">{rotuloDeHallazgo(p.tipo_senal, p.tipo_senal_display)}</span>
-                            {#if !p.revision.pendiente}
-                              <span class="snv-tag snv-tag-decidida" title="Ya pasó por una persona">{p.revision.texto}</span>
-                            {/if}
-                            {#if (sobreLaBandeja.porOrigen.get(origenDe(p)) ?? 0) > 1}
-                              <span class="snv-tag" title="Para que se vea CUAL ticket cuenta dos veces">
-                                {sobreLaBandeja.porOrigen.get(origenDe(p))} propuestas de este ticket
-                              </span>
-                            {/if}
-                          </span>
-                        </div>
-
-                        <div class="snv-propone">
-                          {#if p.tienePropuesta}
-                            <span class="snv-propone-rot">El Supervisor propone</span>
-                            <span class="snv-propone-txt" title={p.accion_propuesta}>{p.accion_propuesta}</span>
-                          {:else}
-                            <span class="snv-propone-vacia">Detectado, sin acción para recomendar</span>
-                          {/if}
-                        </div>
-
-                        <div class="snv-asignado">
-                          <!-- EL TÉCNICO ACTUAL, no el que la IA sugiere. -->
-                          {#if p.tecnico}
-                            <span>{p.tecnico}</span>
-                          {:else}
-                            <span class="snv-sin-tecnico">Sin técnico asignado</span>
-                          {/if}
-                          <!--
-                            Los dos identificadores: el caso de este lado y el
-                            número del proveedor para buscarlo allá.
-                          -->
-                          <span class="snv-ids">
-                            {#if p.orden_numero != null}
-                              OT-{p.orden_numero}
-                            {:else if p.caso_id}
-                              <a href="/tickets/{p.caso_id}" title="Abrir el caso en Dexter">Caso {String(p.caso_id).slice(0, 8)}</a>
-                            {:else if !p.ticket_externo}
-                              <span title={p.origen_id}>{String(p.origen_id).slice(0, 8)}</span>
-                            {/if}
-                            {#if p.ticket_externo}
-                              {' · '}{p.ticket_externo}{#if p.proveedor_externo}{' · '}{p.proveedor_externo}{/if}
-                            {/if}
-                          </span>
-                        </div>
-
-                        <div class="snv-accion">
-                          <button
-                            class="snoc-btn {abierta === p.id ? 'snoc-btn-primario' : ''}"
-                            type="button"
-                            onclick={() => abrirDetalle(p.id)}
-                            aria-label="Revisar la propuesta de {p.cliente ?? 'este caso'}"
-                          >
-                            Revisar
-                          </button>
-                        </div>
-                      </div>
-                    {/each}
-                  </div>
-                {/each}
-              </div>
-
-              <!-- PAGINACIÓN -->
-              <div class="snoc-paginacion">
-                <span class="snv-nota">
-                  Mostrando {pag.desde} a {pag.hasta} de {pag.total} · se decide desde «Revisar», junto a la evidencia
-                </span>
-                {#if pag.paginas > 1}
-                  <div class="snoc-paginacion-botones">
-                    <button class="snoc-pildora" type="button" onclick={() => (nPagina = pag.actual - 1)} disabled={pag.actual === 1}>
-                      Anterior
-                    </button>
-                    {#each pag.ventana as n, i (i)}
-                      {#if n === null}
-                        <span class="snoc-paginacion-hueco" aria-hidden="true">…</span>
-                      {:else}
-                        <button
-                          class="snoc-pildora {n === pag.actual ? 'snoc-pildora-activa' : ''}"
-                          type="button"
-                          onclick={() => (nPagina = n)}
-                          aria-current={n === pag.actual ? 'page' : undefined}
-                          aria-label="Página {n}"
-                        >
-                          {n}
-                        </button>
-                      {/if}
-                    {/each}
-                    <button class="snoc-pildora" type="button" onclick={() => (nPagina = pag.actual + 1)} disabled={pag.actual === pag.paginas}>
-                      Siguiente
-                    </button>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </section>
-
-          <!--
-            ============ MIENTRAS TANTO ============
-            Lo que pasa alrededor, al lado de lo que hay que decidir. Con el
-            panel de detalle abierto se oculta: el detalle ocupa su lugar y la
-            bandeja conserva su ancho.
-          -->
-          {#if !abierta}
-            <aside class="snv-contexto" aria-label="Lo que pasa alrededor">
-          <div class="snoc-grafico" id="tecnicos">
-            <div class="snoc-fila-sep">
-              <h2 class="snoc-grafico-titulo">
-                <span class="snoc-icono snoc-primario" style="font-size:15px;">engineering</span>
-                Técnicos · carga operativa
-              </h2>
-              <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver todos</a>
-            </div>
-            {#if capacidadViva?.error}
-              <div class="snoc-hueco">
-                <span class="snoc-hueco-rotulo">Sin dato</span>
-                <p class="snoc-hueco-motivo">{capacidadViva.error.mensaje}</p>
-              </div>
-            {:else if !tecnicos.disponible}
-              <div class="snoc-hueco">
-                <span class="snoc-hueco-rotulo">Nadie con jornada</span>
-                <p class="snoc-hueco-motivo">
-                  Ninguna persona tiene jornada registrada para el {fechaCorta(data.dia)}.
-                </p>
-              </div>
-            {:else}
-              <div class="snoc-desplazable">
-                {#each tecnicos.filas as t (t.id)}
-                  <div class="snoc-tecnico">
-                    <div class="snoc-tecnico-cabeza">
-                      <span class="snoc-tecnico-nombre">{t.nombre}</span>
-                      <span class="snoc-mono-sm {t.tono === 'critico' ? 'snoc-error-txt' : 'snoc-tenue'}">
-                        {t.pct == null ? t.estado : `${t.pct}% · ${t.estado}`}
-                      </span>
-                    </div>
-                    <div class="snoc-riel">
-                      <div class="snoc-riel-relleno snoc-riel-{t.tono}" style="width:{t.ancho}%;"></div>
-                    </div>
-                    {#if t.faltantes > 0}
-                      <span class="snoc-mono-sm snoc-tenue">
-                        {t.faltantes} orden{t.faltantes === 1 ? '' : 'es'} sin duración: la carga real puede ser mayor
+                    {#if !(seleccionadas.length > 0 || enLote || loteResultado)}
+                      <span class="snv-nota">
+                        {seleccionables.length > 0
+                          ? `Seleccionar las ${seleccionables.length} pendientes de esta página`
+                          : 'Nada para seleccionar en esta página'}
                       </span>
                     {/if}
                   </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
 
-          <!-- Órdenes de trabajo -->
-          <div class="snoc-grafico" id="programacion">
-            <div class="snoc-fila-sep">
-              <h2 class="snoc-grafico-titulo">
-                <span class="snoc-icono snoc-primario" style="font-size:15px;">assignment</span>
-                Órdenes de trabajo
-              </h2>
-              <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver programación</a>
-            </div>
-            {#if ordenes.disponible}
-              <div class="snoc-desplazable">
-                {#each ordenes.filas as f (f.clave)}
-                  <div class="snoc-fila-orden">
-                    <span>{f.texto}</span>
-                    <span class="snoc-fila-orden-n {f.tono === 'alerta' ? 'snoc-error-txt' : ''}">{f.n}</span>
-                  </div>
-                {/each}
-              </div>
-            {:else}
-              <div class="snoc-hueco">
-                <span class="snoc-hueco-rotulo">Sin dato</span>
-                <p class="snoc-hueco-motivo">Los indicadores de programación no llegaron en esta consulta.</p>
-              </div>
-            {/if}
-          </div>
+                  {#snippet fila(/** @type {any} */ p)}
+                    {@const pl = textoDePlazo(p.sla_estado, p.sla_minutos)}
+                    <div class="snv-fila {abierta === p.id ? 'snv-fila-abierta' : ''} {p.revision.pendiente ? '' : 'snv-fila-decidida'}">
+                      <div class="snv-c-check">
+                        {#if p.revision.pendiente}
+                          <input type="checkbox" aria-label="Seleccionar la propuesta de {p.cliente ?? 'este caso'}"
+                                 checked={!!seleccion[p.id]} disabled={enLote}
+                                 onchange={() => (seleccion[p.id] = !seleccion[p.id])} />
+                        {/if}
+                      </div>
+                      <div class="snv-c-plazo snv-tono-{pl.tono}" title={pl.detalle || undefined}>{pl.texto}</div>
+                      <div class="snv-c-quien">
+                        <!-- EL CLIENTE, SIEMPRE EN LA MISMA COLUMNA. Si la fuente
+                             no lo trae se dice; no se rellena con el evento. -->
+                        {#if p.cliente}
+                          <span class="snv-cliente">{p.cliente}</span>
+                        {:else}
+                          <span class="snv-cliente snoc-celda-ausente">Cliente no disponible</span>
+                        {/if}
+                        <span class="snv-asunto" title={p.asunto}>{p.asunto || 'Sin asunto en la fuente'}</span>
+                        {#if !p.revision.pendiente}
+                          <span class="snv-tag snv-tag-decidida" title="Ya pasó por una persona">{p.revision.texto}</span>
+                        {/if}
+                        {#if (sobreLaBandeja.porOrigen.get(origenDe(p)) ?? 0) > 1}
+                          <span class="snv-tag" title="Para que se vea CUAL ticket cuenta dos veces">
+                            {sobreLaBandeja.porOrigen.get(origenDe(p))} propuestas de este ticket
+                          </span>
+                        {/if}
+                      </div>
+                      <div class="snv-c-prio">
+                        <span class="snv-tag {p.nivel.texto === 'Alta' ? 'snv-tag-alta' : ''}"
+                              title="Prioridad {p.prioridad} en la escala del Supervisor (0-99, menor es más urgente)">{p.nivel.texto}</span>
+                      </div>
+                      <div class="snv-c-tipo"><span class="snv-tag">{rotuloDeHallazgo(p.tipo_senal, p.tipo_senal_display)}</span></div>
+                      <div class="snv-c-propone" title={p.accion_propuesta || undefined}>
+                        {#if p.tienePropuesta}{p.accion_propuesta}{:else}<span class="snv-propone-vacia">Sin acción para recomendar</span>{/if}
+                      </div>
+                      <div class="snv-c-tecnico">
+                        <!-- EL TÉCNICO ACTUAL, no el que la IA sugiere. -->
+                        {#if p.tecnico}{p.tecnico}{:else}<span class="snv-sin-tecnico">Sin técnico</span>{/if}
+                      </div>
+                      <div class="snv-c-ids">
+                        <!-- Los dos identificadores: el caso de este lado y el
+                             número del proveedor para buscarlo allá. -->
+                        {#if p.orden_numero != null}
+                          <span>OT-{p.orden_numero}</span>
+                        {:else if p.caso_id}
+                          <a href="/tickets/{p.caso_id}" title="Abrir el caso en Dexter">Caso {String(p.caso_id).slice(0, 8)}</a>
+                        {:else if !p.ticket_externo}
+                          <span title={p.origen_id}>{String(p.origen_id).slice(0, 8)}</span>
+                        {/if}
+                        {#if p.ticket_externo}<span title={p.proveedor_externo ?? undefined}>{p.ticket_externo}</span>{/if}
+                      </div>
+                      <div class="snv-c-accion">
+                        <button class="snv-btn snv-btn-sec {abierta === p.id ? 'snv-btn-activo' : ''}" type="button"
+                                onclick={() => abrirDetalle(p.id)}
+                                aria-label="Revisar la propuesta de {p.cliente ?? 'este caso'}">Revisar</button>
+                      </div>
+                    </div>
+                  {/snippet}
 
+                  {#if ordenar === 'plazo'}
+                    {#each gruposDeLaPagina as g (g.clave)}
+                      {@const plegado = estaPlegado(g.clave)}
+                      <div class="snv-grupo">
+                        <button class="snv-grupo-cab snv-tono-{g.tono}" type="button" aria-expanded={!plegado}
+                                onclick={() => (plegadoManual = { ...plegadoManual, [g.clave]: !plegado })}>
+                          <span class="snv-chevron" aria-hidden="true">{plegado ? '▸' : '▾'}</span>
+                          {g.titulo} ({cuentaDeLaBandeja?.[g.clave] ?? g.filas.length})
+                        </button>
+                        {#if !plegado}
+                          {#each g.filas as p (p.id)}{@render fila(p)}{/each}
+                        {/if}
+                      </div>
+                    {/each}
+                  {:else}
+                    {#each pagina as p (p.id)}{@render fila(p)}{/each}
+                  {/if}
+                </div>
+
+                <!-- PAGINACIÓN -->
+                <div class="snoc-paginacion">
+                  <span class="snv-nota">Mostrando {pag.desde} a {pag.hasta} de {pag.total}</span>
+                  {#if pag.paginas > 1}
+                    <div class="snoc-paginacion-botones">
+                      <button class="snoc-pildora" type="button" onclick={() => (nPagina = pag.actual - 1)} disabled={pag.actual === 1}>Anterior</button>
+                      {#each pag.ventana as n, i (i)}
+                        {#if n === null}
+                          <span class="snoc-paginacion-hueco" aria-hidden="true">…</span>
+                        {:else}
+                          <button class="snoc-pildora {n === pag.actual ? 'snoc-pildora-activa' : ''}" type="button"
+                                  onclick={() => (nPagina = n)} aria-current={n === pag.actual ? 'page' : undefined}
+                                  aria-label="Página {n}">{n}</button>
+                        {/if}
+                      {/each}
+                      <button class="snoc-pildora" type="button" onclick={() => (nPagina = pag.actual + 1)} disabled={pag.actual === pag.paginas}>Siguiente</button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </section>
+
+            <!-- ============ ACTIVIDAD ============ debajo de la bandeja, a todo el ancho -->
+            <section class="snv-caja snv-actividad">
           <!--
             Actividad reciente del Supervisor
             De `common.Activity`, acotada a las entidades de este módulo. Un
@@ -1999,26 +1911,106 @@
               </div>
             {/if}
           </div>
+            </section>
+          </div>
+
+          <!--
+            ============ MIENTRAS TANTO ============
+            Con el panel de detalle abierto se oculta: el detalle ocupa su
+            lugar y la bandeja conserva su ancho.
+          -->
+          {#if !abierta}
+            <aside class="snv-contexto" aria-label="Lo que pasa alrededor">
+              <h2 class="snv-h3">Mientras tanto</h2>
+          <div class="snoc-grafico" id="tecnicos">
+            <div class="snoc-fila-sep">
+              <h2 class="snoc-grafico-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">engineering</span>
+                Técnicos · carga operativa
+              </h2>
+              <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver todos</a>
+            </div>
+            {#if capacidadViva?.error}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">{capacidadViva.error.mensaje}</p>
+              </div>
+            {:else if !tecnicos.disponible}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Nadie con jornada</span>
+                <p class="snoc-hueco-motivo">
+                  Ninguna persona tiene jornada registrada para el {fechaCorta(data.dia)}.
+                </p>
+              </div>
+            {:else}
+              <div class="snoc-desplazable">
+                {#each tecnicos.filas as t (t.id)}
+                  <div class="snoc-tecnico">
+                    <div class="snoc-tecnico-cabeza">
+                      <span class="snoc-tecnico-nombre">{t.nombre}</span>
+                      <span class="snoc-mono-sm {t.tono === 'critico' ? 'snoc-error-txt' : 'snoc-tenue'}">
+                        {t.pct == null ? t.estado : `${t.pct}% · ${t.estado}`}
+                      </span>
+                    </div>
+                    <div class="snoc-riel">
+                      <div class="snoc-riel-relleno snoc-riel-{t.tono}" style="width:{t.ancho}%;"></div>
+                    </div>
+                    {#if t.faltantes > 0}
+                      <span class="snoc-mono-sm snoc-tenue">
+                        {t.faltantes} orden{t.faltantes === 1 ? '' : 'es'} sin duración: la carga real puede ser mayor
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Órdenes de trabajo -->
+          <div class="snoc-grafico" id="programacion">
+            <div class="snoc-fila-sep">
+              <h2 class="snoc-grafico-titulo">
+                <span class="snoc-icono snoc-primario" style="font-size:15px;">assignment</span>
+                Órdenes de trabajo
+              </h2>
+              <a class="snoc-pildora" href="/supervisor-noc/programacion">Ver programación</a>
+            </div>
+            {#if ordenes.disponible}
+              <div class="snoc-desplazable">
+                {#each ordenes.filas as f (f.clave)}
+                  <div class="snoc-fila-orden">
+                    <span>{f.texto}</span>
+                    <span class="snoc-fila-orden-n {f.tono === 'alerta' ? 'snoc-error-txt' : ''}">{f.n}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="snoc-hueco">
+                <span class="snoc-hueco-rotulo">Sin dato</span>
+                <p class="snoc-hueco-motivo">Los indicadores de programación no llegaron en esta consulta.</p>
+              </div>
+            {/if}
+          </div>
+
             </aside>
           {/if}
         </div>
 
         <!--
           ============ ANÁLISIS ============
-          A un clic, no en la primera vista: de qué se trata lo pendiente y de
-          dónde viene. Barras y no donas: una longitud se compara de un vistazo,
-          un ángulo no.
+          A un clic, no en la primera vista. Barras y no donas: una longitud se
+          compara de un vistazo, un ángulo no.
         -->
         <details class="snv-analisis" open={form?.ok && form.tipo === 'asistente'}>
           <summary>
-            <span class="snv-flecha" aria-hidden="true">▸</span>
+            <span class="snv-chevron" aria-hidden="true">▸</span>
             <span class="snv-h2">Análisis</span>
             <span class="snv-nota">De qué se trata lo pendiente y de dónde viene</span>
           </summary>
 
           <div class="snv-analisis-rejilla">
             <section>
-              <h3 class="snv-h3">
+              <h3 class="snv-h4">
                 {filtroEstado === 'pendientes' ? 'Pendientes' : filtroEstado === 'decididas' ? 'Ya decididas' : 'Todas'} por tipo
               </h3>
               {#if donut.disponible}
@@ -2041,7 +2033,7 @@
             </section>
 
             <section>
-              <h3 class="snv-h3">Casos técnicos por estado</h3>
+              <h3 class="snv-h4">Casos técnicos por estado</h3>
               {#if barras.disponible}
                 {@const max = Math.max(...barras.barras.map((/** @type {any} */ b) => b.n), 1)}
                 {#each barras.barras as b (b.estado)}
@@ -2058,7 +2050,7 @@
             <section>
               <!-- De `casos.por_origen`: 'wisphub' o 'dexter', las dos categorías
                    que el campo distingue; no se derivan otras. -->
-              <h3 class="snv-h3">Casos por origen</h3>
+              <h3 class="snv-h4">Casos por origen</h3>
               {#if origen.disponible}
                 <div class="snv-reparto" role="img" aria-label="Reparto de los {origen.total} casos por sistema de origen">
                   {#each origen.tramos as t (t.clave)}
@@ -2078,8 +2070,7 @@
             </section>
           </div>
 
-          <!-- El mapa no se dibuja vacío: una tarjeta que dice «falta en el
-               backend» ocupa lugar y no informa. Queda dicho en una línea. -->
+          <!-- El mapa no se dibuja vacío: queda dicho en una línea. -->
           <p class="snv-nota">{SIN_DATO.mapa.titulo}: {SIN_DATO.mapa.motivo}</p>
 
         <!-- ============ ASISTENTES OPERATIVOS ============ -->
@@ -2140,7 +2131,14 @@
     </div>
   </div>
 
-  <!-- ============ MODAL DE DETALLE DEL HALLAZGO ============ -->
+  <!--
+    ============ PANEL DE DETALLE ============
+    01/11/2026: era un modal centrado de 85vw; el diseño aprobado lo vuelve
+    panel lateral para decidir sin perder la bandeja de vista. Lo de adentro
+    son las MISMAS derivaciones de siempre ($lib/v2/supervisor-noc-detalle.js),
+    ordenadas como se lee una decisión: de quién se trata, qué pasa, con qué
+    evidencia, qué propone, y qué pasa --y qué NO pasa-- si se acepta.
+  -->
   {#if abierta}
     <div
       class="snv-velo-detalle"
@@ -2149,193 +2147,126 @@
         if (e.target === e.currentTarget) cerrarDetalle();
       }}
     >
-      <div class="snoc-modal-hallazgo snv-detalle" role="dialog" aria-modal="false" aria-labelledby="snoc-hallazgo-titulo">
-        <!-- CABECERA: navegación entre hallazgos -->
-        <div class="snoc-modal-cabecera">
-          <div class="snoc-fila" style="gap:var(--snoc-xs);">
-            {#if posicion.total > 1}
-              <button
-                class="snoc-btn"
-                type="button"
-                onclick={() => irA(-1)}
-                disabled={posicion.indice <= 0 || cargandoDetalle}
-              >
-                <span class="snoc-icono" style="font-size:16px;">chevron_left</span> Anterior
-              </button>
-              <span class="snoc-mono-sm snoc-contador">{posicion.indice + 1} de {posicion.total}</span>
-              <button
-                class="snoc-btn"
-                type="button"
-                onclick={() => irA(1)}
-                disabled={posicion.indice >= posicion.total - 1 || cargandoDetalle}
-              >
-                Siguiente <span class="snoc-icono" style="font-size:16px;">chevron_right</span>
-              </button>
-            {/if}
-          </div>
-          <div class="snoc-fila" style="gap:var(--snoc-sm);">
-            <!--
-              La insignia dice lo que aceptar HACE, no en que modo esta el
-              producto: para una desincronizacion aceptar autoriza un cierre.
-            -->
-            <span class="snoc-insignia snoc-insignia-neutra">
-              <span class="snoc-punto snoc-punto-primario"></span>
-              {aceptar.ejecuta
-                ? 'Cierre controlado · requiere tu autorización'
-                : aceptar.pasaADespacho
-                  ? 'Pasa a Despacho · requiere tu autorización'
-                  : 'Observación · sin ejecución'}
-            </span>
-            <button class="snoc-btn" type="button" onclick={cerrarDetalle} aria-label="Cerrar">
-              <span class="snoc-icono" style="font-size:18px;">close</span>
-            </button>
-          </div>
+      <div class="snv-detalle" role="dialog" aria-modal="false" aria-labelledby="snv-detalle-titulo">
+        <div class="snv-det-cab">
+          <h2 class="snv-h3" id="snv-detalle-titulo">Detalle de la propuesta</h2>
+          <button class="snv-cerrar" type="button" onclick={cerrarDetalle} aria-label="Cerrar el detalle">×</button>
         </div>
+        {#if posicion.total > 1}
+          <div class="snv-det-nav">
+            <button class="snv-enlace-nav" type="button" onclick={() => irA(-1)}
+                    disabled={posicion.indice <= 0 || cargandoDetalle}>‹ Anterior</button>
+            <span>{posicion.indice + 1} de {posicion.total}</span>
+            <button class="snv-enlace-nav" type="button" onclick={() => irA(1)}
+                    disabled={posicion.indice >= posicion.total - 1 || cargandoDetalle}>Siguiente ›</button>
+          </div>
+        {/if}
 
-        <div class="snoc-modal-cuerpo">
+        <div class="snv-det-cuerpo">
           {#if cargandoDetalle}
-            <div class="snoc-cargando">
-              <span class="snoc-icono snoc-girando" style="font-size:22px;">progress_activity</span>
-              <span class="snoc-body snoc-secundario">Consultando la propuesta…</span>
-            </div>
+            <p class="snv-nota">Consultando la propuesta…</p>
           {:else if errorDetalle}
             <div class="snoc-aviso">
-              <span class="snoc-icono snoc-error-txt" style="font-size:18px;">error</span>
+              <span class="snoc-icono snoc-error-txt" style="font-size:18px;" aria-hidden="true">error</span>
               <span class="snoc-body">{errorDetalle}</span>
             </div>
           {:else if detalle}
-            <div class="snoc-fila-sep" style="flex-wrap:wrap;">
-              <h3 class="snoc-h2" id="snoc-hallazgo-titulo">{titulo}</h3>
-              <span class="snoc-mono-sm snoc-tenue">Leído {haceCuanto(comun?.leido ?? detalle.created_at)}</span>
-            </div>
-
-            <!-- LA DISCREPANCIA -->
-            <div class="snoc-hallazgo">
-              <div class="snoc-fila-sep" style="flex-wrap:wrap;">
-                <div class="snoc-fila" style="gap:var(--snoc-xs);">
-                  <span class="snoc-icono" style="font-size:18px;">warning</span>
-                  <span class="snoc-hallazgo-titulo">{detalle.tipo_senal_display}</span>
-                </div>
-                <span class="snoc-mono-sm">{detalle.origen_tipo} · {String(detalle.origen_id).slice(0, 8)}</span>
+            {@const plazoFila = textoDePlazo(contextoFila?.sla_estado, contextoFila?.sla_minutos)}
+            {@const efectos = efectosDeAceptar(aceptar)}
+            <!-- DE QUIÉN SE TRATA -->
+            <div class="snv-det-ficha">
+              <span class="snv-det-icono snv-tono-{plazoFila.tono}" aria-hidden="true">!</span>
+              <div class="snv-det-quien">
+                <strong>Cliente: {contextoFila?.cliente ?? 'no disponible en la fuente'}</strong>
+                <span class="snv-det-titulo">{titulo}</span>
+                <span class="snv-ids">
+                  {#if contextoFila?.orden_numero != null}OT-{contextoFila.orden_numero}{:else if contextoFila?.caso_id}<a href="/tickets/{contextoFila.caso_id}">Caso {String(contextoFila.caso_id).slice(0, 8)}</a>{:else}{String(detalle.origen_id).slice(0, 8)}{/if}{#if contextoFila?.ticket_externo}{' · '}{contextoFila.ticket_externo}{/if}
+                </span>
               </div>
+              <span class="snv-det-plazo snv-tono-{plazoFila.tono}">{plazoFila.texto}</span>
+            </div>
+            <p class="snv-det-meta">
+              {detalle.tipo_senal_display} · Prioridad {detalle.prioridad}{#if basePrioridad}{' '}({basePrioridad}){/if}
+              · Detectado {haceCuanto(detalle.created_at)} · Expira {expiraEn(detalle.expira_en)}
+              · {estadoDe(detalle.estado).texto}
+            </p>
 
+            <section class="snv-det-sec">
+              <h3>Qué está pasando</h3>
+              <p>{resumen}</p>
               {#if contraste}
-                <div class="snoc-mismatch">
-                  <div class="snoc-mismatch-lado">
-                    <span class="snoc-label-sm" style="text-transform:uppercase;">En el CRM</span>
-                    <span class="snoc-h4">{contraste.crm}</span>
-                  </div>
-                  <span class="snoc-mismatch-vs">≠</span>
-                  <div class="snoc-mismatch-lado">
-                    <span class="snoc-label-sm" style="text-transform:uppercase;">En el proveedor</span>
-                    <span class="snoc-h4">{contraste.proveedor}</span>
-                  </div>
-                </div>
+                <p class="snv-det-contraste">
+                  En Dexter: <strong>{contraste.crm}</strong> · En WispHub: <strong>{contraste.proveedor}</strong>
+                </p>
               {/if}
-              <!--
-                NO VA EL MOTIVO ACA. Lo pinta «¿Qué está pasando?», que está
-                tres centímetros más abajo. Hasta el 13/10/2026 el mismo
-                párrafo salía cuatro veces en esta pantalla: aquí, ahí, al pie
-                de «¿Qué detectó?» y otra vez como «Interpretación».
-              -->
-            </div>
-
-            <!-- TIRA DE CINCO -->
-            <div class="snoc-tira">
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Estado</span>
-                <span class="snoc-insignia {estadoDe(detalle.estado).clase}">{estadoDe(detalle.estado).texto}</span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Prioridad</span>
-                <span class="snoc-mono">
-                  {detalle.prioridad}{#if basePrioridad}<span class="snoc-tenue"> · {basePrioridad}</span>{/if}
-                </span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Autonomía</span>
-                <span class="snoc-mono">
-                  {detalle.nivel_autonomia_requerido} · {NIVELES[detalle.nivel_autonomia_requerido] ?? '—'}
-                </span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Detección</span>
-                <span class="snoc-mono">{haceCuanto(detalle.created_at)}</span>
-              </span>
-              <span class="snoc-tira-item">
-                <span class="snoc-label-sm snoc-tenue">Expira</span>
-                <span class="snoc-mono">{expiraEn(detalle.expira_en)}</span>
-              </span>
-            </div>
-
-            <!-- ============ 1 · IDENTIFICACIÓN ============ -->
-            <!--
-              Lo primero que la pantalla tiene que contestar es DE QUÉ habla.
-              Las cuatro casillas salen del contexto que el backend ya resolvió
-              para la fila; las que la fuente no entrega lo dicen con todas las
-              letras en vez de quedarse vacías.
-            -->
-            <dl class="snoc-identidad">
-              {#each identidad as casilla (casilla.rotulo)}
-                <div>
-                  <dt>{casilla.rotulo}</dt>
-                  <dd class:snoc-sin-fuente={casilla.valor === AUSENTE}>
-                    {#if casilla.href && casilla.valor !== AUSENTE}
-                      <a class="snoc-enlace-externo" href={casilla.href}>{casilla.valor}</a>
-                    {:else}
-                      {casilla.valor}
-                    {/if}
-                  </dd>
-                </div>
-              {/each}
-            </dl>
-
-            <!-- ============ 2 · ¿QUÉ ESTÁ PASANDO? ============ -->
-            <section class="snoc-que-pasa">
-              <h4 class="snoc-h4">¿Qué está pasando?</h4>
-              <p class="snoc-que-pasa-frase">{resumen}</p>
             </section>
 
-            <!-- ============ 3 · DEXTER vs WISPHUB ============ -->
-            <!--
-              SOLO SI HAY DOS FUENTES QUE COMPARAR. Para un ticket leído, tres
-              de las cuatro filas decían «No disponible en la fuente» y la
-              cuarta repetía el identificador de arriba.
-            -->
-            {#if comparacionAporta(comparacion)}
-            <section class="snoc-columna">
-              <div class="snoc-columna-titulo">
-                <span class="snoc-icono snoc-primario" style="font-size:15px;">compare_arrows</span>
-                <span class="snoc-label-sm" style="text-transform:uppercase;">Dexter vs WispHub</span>
-              </div>
-              <table class="snoc-comparacion">
-                <thead>
-                  <tr><th>Información</th><th>Dexter</th><th>WispHub</th></tr>
-                </thead>
-                <tbody>
-                  {#each comparables as fila (fila.campo)}
-                    <tr>
-                      <th scope="row">{fila.campo}</th>
-                      <td class:snoc-sin-fuente={fila.dexter === AUSENTE}>{fila.dexter}</td>
-                      <td class:snoc-sin-fuente={fila.wisphub === AUSENTE}>{fila.wisphub}</td>
-                    </tr>
+            <section class="snv-det-sec">
+              <h3>Evidencia</h3>
+              <!-- SOLO SI HAY DOS FUENTES QUE COMPARAR: una tabla con un lado
+                   vacío se lee como si algo hubiera fallado. -->
+              {#if comparacionAporta(comparacion)}
+                <table class="snv-evidencia">
+                  <thead><tr><th>Campo</th><th>Dexter</th><th>WispHub</th></tr></thead>
+                  <tbody>
+                    {#each comparables as f (f.campo)}
+                      {@const distinta = celdaDistinta(f)}
+                      <tr>
+                        <th scope="row">{f.campo}</th>
+                        <td class:snv-distinta={distinta} class:snoc-sin-fuente={f.dexter === AUSENTE}>{f.dexter}</td>
+                        <td class:snoc-sin-fuente={f.wisphub === AUSENTE}>{f.wisphub}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {/if}
+              <!-- Los hechos con su fuente: lo que el Supervisor vio, separado
+                   de lo que interpreta. -->
+              {#if analisis.hechos.length}
+                <ul class="snv-hechos">
+                  {#each analisis.hechos as h, i (i)}
+                    <li>{h.dato}<span class="snv-nota"> · {h.fuente}</span></li>
                   {/each}
-                </tbody>
-              </table>
+                </ul>
+              {:else if !comparacionAporta(comparacion)}
+                <p class="snv-nota">{AUSENTE}</p>
+              {/if}
+              {#if analisis.impacto !== AUSENTE}
+                <p><strong>Impacto:</strong> {analisis.impacto}</p>
+              {/if}
+              {#if analisis.faltantes.length}
+                <p class="snv-nota">Falta para estar seguro: {analisis.faltantes.join(' · ')}</p>
+              {/if}
             </section>
-            {/if}
 
-            <!-- ============ 4 · ¿QUÉ DETECTÓ EL SUPERVISOR? — RETIRADA ============
-                 Sus cinco casillas estaban todas en otro lado: «Hallazgo» era
-                 el título de la pantalla, «Detectado» es la tira de arriba,
-                 «Antigüedad» está en el bloque técnico, «Fuente» venía vacía
-                 siempre, y al pie repetía el motivo por tercera vez. Lo único
-                 que no estaba en ningún otro sitio --la clave técnica-- bajó
-                 al desplegable de abajo, que es donde se busca algo así. -->
+            <section class="snv-det-sec">
+              <h3>Propuesta del Supervisor</h3>
+              <p>{detalle.accion_propuesta || 'Lo detectó, pero no trae una acción para recomendar.'}</p>
+            </section>
 
-            <!-- ============ 10 · INFORMACIÓN TÉCNICA (se conserva entera) ============
-                 Baja de sitio, no se pierde: primero lo que hace falta para
-                 decidir, y el detalle técnico a un clic. -->
+            <section class="snv-det-acepto">
+              <h3>Si aceptás</h3>
+              <p class="snv-det-sub">Qué va a pasar</p>
+              <ul class="snv-lista-si">
+                {#each efectos.si as e, i (i)}<li>{e}</li>{/each}
+              </ul>
+              <p class="snv-det-sub">Qué NO va a pasar</p>
+              <ul class="snv-lista-no">
+                {#each efectos.no as e, i (i)}<li>{e}</li>{/each}
+              </ul>
+              {#if aceptar.avisoLectura}
+                <!-- 19/10/2026: aceptar pasa a Despacho aunque la lectura diga
+                     que no hace falta ir. Se dice acá, junto a la decisión. -->
+                <p class="snoc-aviso">
+                  <span class="snoc-icono" style="font-size:16px;" aria-hidden="true">warning</span>
+                  {aceptar.avisoLectura}
+                </p>
+              {/if}
+            </section>
+
+            <!-- INFORMACIÓN TÉCNICA: todo lo que estaba, a un clic. -->
+            <details class="snv-det-tecnica">
+              <summary>Información técnica</summary>
             <details class="snoc-detalle-tecnico">
               <summary class="snoc-label-sm">Información técnica de la señal</summary>
             <!-- DOS COLUMNAS: identificación y contexto -->
@@ -2414,101 +2345,6 @@
               </section>
             </div>
             </details>
-
-            <!-- ============ 6 · ANÁLISIS DEL SUPERVISOR ============ -->
-            <!--
-              Las tres cosas van SEPARADAS y rotuladas. Un lector apurado lee
-              la interpretación como si fuera un hecho, y sobre eso decide.
-            -->
-            <section class="snoc-columna">
-              <div class="snoc-columna-titulo">
-                <span class="snoc-icono snoc-primario" style="font-size:15px;">psychology</span>
-                <span class="snoc-label-sm" style="text-transform:uppercase;">Análisis del Supervisor NOC IA</span>
-              </div>
-
-              <p class="snoc-etiqueta-analisis">Hechos observados</p>
-              {#if analisis.hechos.length === 0}
-                <p class="snoc-sin-fuente snoc-body-sm">{AUSENTE}</p>
-              {:else}
-                <ul class="snoc-lista-hechos">
-                  {#each analisis.hechos as h, i (i)}
-                    <li>
-                      <span class="snoc-body-sm">{h.dato}</span>
-                      <span class="snoc-mono-sm snoc-tenue">{h.fuente}</span>
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-
-              <!--
-                NO VA «INTERPRETACIÓN DEL SUPERVISOR». Era 'detalle.motivo',
-                palabra por palabra lo que «¿Qué está pasando?» ya dice arriba.
-                Lo que esta sección aporta y nadie más tiene son los HECHOS con
-                su fuente, el impacto, y lo que falta para estar seguro.
-              -->
-              <p class="snoc-etiqueta-analisis">Impacto operativo</p>
-              <p class="snoc-body-sm" class:snoc-sin-fuente={analisis.impacto === AUSENTE}>
-                {analisis.impacto}
-              </p>
-
-              {#if analisis.faltantes.length > 0}
-                <p class="snoc-etiqueta-analisis">Información que falta</p>
-                <ul class="snoc-lista-hechos">
-                  {#each analisis.faltantes as f, i (i)}
-                    <li><span class="snoc-body-sm">{f}</span></li>
-                  {/each}
-                </ul>
-              {/if}
-            </section>
-
-            <!-- ============ 7 · LA PROPUESTA ============ -->
-            <section class="snoc-propuesta">
-              <h4 class="snoc-h4">¿Qué propone el Supervisor NOC IA?</h4>
-              <p class="snoc-propuesta-accion">{detalle.accion_propuesta || AUSENTE}</p>
-              <dl class="snoc-dl">
-                <div><dt>Confirmación humana</dt><dd>Obligatoria</dd></div>
-                <div><dt>Evidencia que la respalda</dt><dd>{analisis.hechos.length} observaciones</dd></div>
-              </dl>
-            </section>
-
-            <!-- ============ 8 · ¿QUÉ PASA SI ACEPTO? ============ -->
-            <!--
-              La sección que evita el malentendido más caro de esta pantalla.
-              NO dice «resultado: caso cerrado»: aceptar registra un acuerdo y
-              no ejecuta nada mientras siga el Shadow Mode. El estado
-              «ejecutada» no existe en el modelo.
-            -->
-            <section class="snoc-si-acepto">
-              <h4 class="snoc-h4">Si aceptas esta propuesta</h4>
-              <!--
-                SOLO LAS FILAS CON DATO. «Acción propuesta» repetía en chico la
-                frase que está justo arriba en grande, y las otras dos decían
-                «No disponible en la fuente» para todo lo que no es una
-                desincronización -- tres renglones vacíos que se leen como si
-                algo hubiera fallado.
-              -->
-              {#if filasAceptar.length}
-                <dl class="snoc-dl">
-                  {#each filasAceptar as f (f.rotulo)}
-                    <div><dt>{f.rotulo}</dt><dd>{f.valor}</dd></div>
-                  {/each}
-                </dl>
-              {/if}
-              <p class="snoc-aviso-shadow">
-                <span class="snoc-icono" style="font-size:16px;">info</span>
-                {aceptar.efecto}
-              </p>
-              {#if aceptar.avisoLectura}
-                <!-- 19/10/2026: aceptar pasa a Despacho aunque la lectura diga
-                     que no hace falta ir. Se dice acá y en el pie, junto al
-                     botón, que es donde se decide. -->
-                <p class="snoc-aviso">
-                  <span class="snoc-icono" style="font-size:16px;" aria-hidden="true">warning</span>
-                  {aceptar.avisoLectura}
-                </p>
-              {/if}
-            </section>
-
             <!-- ============ EL REGISTRO DE AUDITORIA ============
                  Para que esta: si manana hay que revisar por que se mando una
                  cuadrilla a una casa, esta tabla dice que sabia el sistema, de
@@ -2624,82 +2460,53 @@
                 </div>
               </details>
             {/if}
+            </details>
           {/if}
         </div>
 
-        <!-- PIE FIJO: la decisión -->
+        <!-- EL PIE NO SE DESPLAZA: la decisión tiene que estar siempre a mano. -->
         {#if detalle && !cargandoDetalle && !errorDetalle}
-          <div class="snoc-modal-pie">
-            <div class="snoc-fila" style="gap:var(--snoc-xs); min-width:0;">
-              <span class="snoc-icono snoc-primario" style="font-size:16px;">{aceptar.avisoLectura ? 'warning' : 'verified_user'}</span>
-              <span class="snoc-body-sm snoc-secundario">
-                {#if aceptar.ejecuta}
-                  La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar autoriza un intento de
-                  cierre en Dexter, que el sistema revalida antes de ejecutar.
-                {:else if aceptar.avisoLectura}
-                  <!-- Junto al boton, que es donde se decide: la seccion de
-                       arriba puede quedar fuera de la vista. -->
-                  <strong>{aceptar.avisoLectura}</strong>
-                {:else if aceptar.pasaADespacho}
-                  La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar pasa el caso a
-                  Despacho a campo; la orden la crea una persona ahí.
-                {:else}
-                  La IA observa y propone. <strong>La decisión es tuya</strong>: aceptar no ejecuta nada.
-                {/if}
-              </span>
-            </div>
+          <div class="snv-det-pie">
             {#if detalle.estado === 'propuesta'}
-              <div class="snoc-pie-acciones">
-                <input class="snoc-campo" bind:value={comentario} placeholder="Motivo (para rechazar o cancelar)" />
-                <!--
-                  Los tres botones se deshabilitan mientras una decision esta
-                  en curso, no solo el que se apreto: las tres actuan sobre la
-                  MISMA propuesta, y mandar "rechazar" mientras "aceptar"
-                  viaja es pedir dos cosas contrarias sobre lo mismo.
-                -->
+              <label class="snv-det-coment">
+                <span>Comentario <span class="snv-nota">(opcional; para rechazar o cancelar conviene decir por qué)</span></span>
+                <textarea bind:value={comentario} placeholder="Agregá un comentario…" rows="2"></textarea>
+              </label>
+              <!--
+                Los tres botones se deshabilitan mientras una decision esta en
+                curso: las tres actuan sobre la MISMA propuesta. El rotulo de
+                espera lo pone 'alDecidir' al ENVIAR, leyendo 'data-espera'; un
+                'onclick' deshabilitaria el boton antes de que el formulario salga.
+              -->
+              <div class="snv-det-botones">
                 <form method="POST" action="?/cancelar" use:enhance={alDecidir} style="display:contents;">
                   <input type="hidden" name="id" value={detalle.id} />
                   <input type="hidden" name="motivo" value={comentario} />
-                  <!-- El rotulo de espera lo pone 'alDecidir' al ENVIAR, leyendo
-                       'data-espera'. NO un 'onclick': deshabilitaria el boton
-                       antes de que el formulario salga, y no saldria. -->
-                  <button class="snoc-btn" type="submit" disabled={!!decidiendo}
-                          data-espera="Cancelando…">
-                    {decidiendo === 'Cancelando…' ? 'Cancelando…' : 'Cancelar'}
+                  <button class="snv-enlace snv-det-cancelar" type="submit" disabled={!!decidiendo} data-espera="Cancelando…">
+                    {decidiendo === 'Cancelando…' ? 'Cancelando…' : 'Cancelar la propuesta'}
                   </button>
                 </form>
                 <form method="POST" action="?/revisar" use:enhance={alDecidir} style="display:contents;">
                   <input type="hidden" name="id" value={detalle.id} />
                   <input type="hidden" name="comentario" value={comentario} />
-                  <button class="snoc-btn snoc-btn-error" name="decision" value="rechazada"
-                          type="submit" disabled={!!decidiendo}
-                          data-espera="Rechazando…">
+                  <button class="snv-btn snv-btn-sec" name="decision" value="rechazada" type="submit"
+                          disabled={!!decidiendo} data-espera="Rechazando…">
                     {decidiendo === 'Rechazando…' ? 'Rechazando…' : 'Rechazar'}
                   </button>
-                  <!--
-                    DICE "Cerrando el caso…" y no "Guardando…": en una
-                    desincronizacion, aceptar no guarda una decision, ejecuta
-                    un cierre contra el proveedor. El texto de espera tiene
-                    que decir lo que de verdad esta pasando, que ademas
-                    explica por que tarda.
-
-                    Y DICE A DONDE VA (19/10/2026): «Aceptar y pasar a
-                    Despacho» cuando aceptar pone el caso en la cola de campo.
-                    El rotulo sale de 'siAcepto', con lo que dice el backend.
-                  -->
-                  <button class="snoc-btn snoc-btn-primario" name="decision" value="aceptada"
-                          type="submit" disabled={!!decidiendo}
-                          data-espera={aceptar.espera}>
+                  <!-- El rótulo dice A DÓNDE VA («Aceptar y pasar a Despacho») y,
+                       mientras viaja, lo que de verdad pasa («Cerrando el caso…»).
+                       Sale de 'siAcepto', con lo que dice el backend. -->
+                  <button class="snv-btn snv-btn-pri" name="decision" value="aceptada" type="submit"
+                          disabled={!!decidiendo} data-espera={aceptar.espera}>
+                    <span aria-hidden="true">✓</span>
                     {decidiendo && decidiendo === aceptar.espera ? decidiendo : aceptar.rotuloBoton}
                   </button>
                 </form>
               </div>
             {:else}
-              <div class="snoc-fila" style="gap:var(--snoc-sm);">
-                <span class="snoc-body-sm snoc-secundario">
-                  Ya revisada: <strong>{estadoDe(detalle.estado).texto}</strong>
-                </span>
-                <button class="snoc-btn" type="button" onclick={cerrarDetalle}>Cerrar</button>
+              <div class="snv-det-botones">
+                <span class="snv-nota">Ya revisada: <strong>{estadoDe(detalle.estado).texto}</strong></span>
+                <button class="snv-btn snv-btn-sec" type="button" onclick={cerrarDetalle}>Cerrar</button>
               </div>
             {/if}
           </div>
@@ -2707,7 +2514,6 @@
       </div>
     </div>
   {/if}
-
 
   <!-- ============ MODAL DEL CICLO ============ -->
   <!-- ============ LO QUE EL CICLO CERRO SOLO ============
