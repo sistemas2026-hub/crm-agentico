@@ -393,35 +393,83 @@ puesto**. Es el mismo trabajo en los dos motores.
 
 ---
 
-## Lo que falta verificar, y por qué no se verificó
+## Lo verificado en navegador, y lo que encontró
 
-El motor Linux de Docker Desktop se cayó durante la sesión
-—`com.docker.backend` ausente, el *named pipe*
-`//./pipe/dockerDesktopLinuxEngine` inexistente— y **no se reinició**, por
-restricción explícita: *«diagnostica la causa sin reiniciar Docker Desktop ni
-afectar contenedores ajenos»*. Sin él no hay laboratorio ni navegador.
+El motor de Docker siguió caído toda la sesión —`com.docker.backend` ausente, el
+*named pipe* inexistente, el reenvío de puertos del laboratorio muerto con él— y
+**no se reinició**, por restricción explícita. El laboratorio no volvió.
 
-**Lo que SÍ se pudo medir sin Docker:** las suites puras corren con Node 24
-directamente —despoja tipos de TypeScript por su cuenta— con un arnés mínimo de
-`describe`/`it`/`expect` y un gancho de resolución que mapea los `./x.js` que
-en disco son `.ts`. **386 pruebas en 13 archivos, cero rojas**, incluidas las 48
-de `edificio.test.js` que garantizan que la opción A quedó intacta.
-**Esto no es vitest**: el arnés es propio y no reproduce su aislamiento ni sus
-`vi.mock`. Vale como medición de lógica pura y no sustituye la corrida real.
+Se verificó igual, por otro camino: **un banco de capturas que sirve los módulos
+de la sede directamente del árbol de trabajo**, con Node despojando los tipos de
+TypeScript (`stripTypeScriptTypes`) y un mapa de importación para `three` y
+`pixi.js`. Los datos salen del fixture del repositorio, no de la base.
 
-**Lo que queda pendiente, todo del navegador:**
+**Qué NO es esto.** No es el laboratorio: no hay backend, ni sesión, ni empresa
+real, ni la pantalla de `/centro-mando/v2` con su cabecera, su ficha y su flujo
+en vivo. Mide **el dibujo**, que es justo lo que esta comparación necesita. Y el
+contador de fotogramas de un navegador sin ventana está limitado a 60: los
+números de rendimiento del eje 7 **no se midieron acá** y siguen siendo los del
+laboratorio.
+
+### Lo que la verificación encontró, que es el motivo de hacerla
+
+**El arreglo de los rótulos estaba puesto y no servía: se veía UN nombre de
+once.** Y el trazador de rayos tenía razón —el ancla estaba en el centro de la
+sala, que está bajo la cubierta— así que la prueba era correcta y la pregunta
+estaba mal: no es *«¿se ve el centro?»* sino *«¿se ve algo de esta sala, y
+dónde?»*. Ahora cada rótulo prueba seis anclajes, de la esquina que mira a la
+cámara hacia adentro, y se ancla al primero visible: **8 de 11**, y los tres
+que faltan están de verdad detrás del edificio.
+
+**Y apareció un tercer caso de la misma familia, que ninguna prueba sin pantalla
+iba a encontrar: el trazador de rayos tampoco sabe que un objeto está APAGADO.**
+En «Rayos X» la cubierta se apaga —el botón funciona, el techo desaparece— y aun
+así era ella la que bloqueaba **27 de 40 rayos**, así que el modo que existe
+para ver los pisos de arriba era justo el que se quedaba sin sus nombres. Las
+tres cosas que el rayo ignora están ahora en una sola regla, `noTapa`: la
+esquina recortada, lo apagado y lo traslúcido.
+
+Es exactamente lo que CLAUDE.md §6 llama *el mecanismo puesto y el efecto
+ausente*, dos veces más, y las dos sólo se veían mirando.
+
+### El estado de cada pendiente
 
 | # | Qué | Estado |
 |---|---|---|
-| 1 | Los rótulos de salas tapadas, en el spike | **corregido en código, SIN verificar** |
-| 2 | El modo «Rayos X» apaga la cubierta | **corregido en código, SIN verificar** |
-| 3 | Captura de A, B y C en condiciones equivalentes | **no hecha** |
-| 4 | Ausencia de errores de consola en el spike y en `?planta=compacta` | **no comprobada** |
-| 5 | Selección, oclusión y navegación medidas en B | **no medidas** |
-| 6 | Rendimiento de B (eje 7) | **no medido** |
+| 1 | Los rótulos de salas tapadas | **verificado, y estaba mal**: 1 de 11 → 8 de 11 |
+| 2 | «Rayos X» apaga la cubierta | **verificado**: se ve el piso 3 desde arriba |
+| 3 | Captura de A, B y C en condiciones equivalentes | **hecha**, ocho capturas |
+| 4 | Errores de consola | **cero**, en las tres opciones y en los tres modos |
+| 5 | Oclusión y navegación en B | **medidas**: ver la captura con cubierta |
+| 6 | Rendimiento de B (eje 7) | **sin medir**: el banco limita a 60 fps |
+| 7 | Las suites | **413 verdes, 0 rojas** en 14 archivos, con el arnés de Node |
 
-Hasta que 1 y 2 se vean en un navegador **no están aprobados**, y así está
-escrito también en el commit y en el `LEEME.md` de las capturas.
+Lo que sigue **sin** verificarse, y conviene decirlo: la pantalla completa de
+`/centro-mando/v2` con `?planta=compacta` —cabecera, ficha de puesto, flujo en
+vivo, bitácora— no se abrió nunca. El banco monta la escena, no la pantalla.
+
+### Lo que las capturas muestran
+
+En [documentos/sede/capturas/comparacion/](../../documentos/sede/capturas/comparacion/).
+
+- **A · lineal.** 95,2 × 18,2, esbeltez 5,23. Las once salas se ven, con todo el
+  mobiliario y los personajes. Se entiende de un vistazo por qué no se aprobó.
+- **B · compacto, con cubierta.** 39 × 39, esbeltez 1,00 — y **la cubierta borra
+  el piso de arriba entero**: «NOC y Redes» queda rotulado sobre un techo
+  vacío. Es el defecto que la aritmética había contado como «9 puestos
+  tapados», visto.
+- **B · compacto, sin cubierta.** Las once salas a la vista, dos filas por piso,
+  y el edificio se lee como **tres bandejas flotando** con el núcleo asomando:
+  justo lo que `edificio.js` escribió que había que evitar.
+- **B · piso 1 aislado.** La mejor imagen de B, y la que defiende su caso: cinco
+  salas en dos filas, mobiliario completo, personajes con su placa de nombre.
+- **C · corte, rayos X y piso 1.** El volumen compacto con remate, los tres
+  pisos abiertos desde arriba, y la planta de dos filas con sus cinco nombres.
+- **C · el defecto encontrado**, guardado a propósito: un solo rótulo de once.
+
+**La comparación honesta está entre `B-pixi-compacto-piso1.png` y
+`C-three-piso1.png`**: la misma planta, la misma empresa, el mismo encuadre. B
+tiene mobiliario y gente; C tiene volumen, luz y remate.
 
 ---
 

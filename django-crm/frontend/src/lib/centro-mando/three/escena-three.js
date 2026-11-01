@@ -29,6 +29,7 @@
 import * as THREE from 'three';
 import { edificioCompacto, NUCLEO, ALTURA_DE_PISO, ALTURA_DE_MURO } from './distribucion.js';
 import { separarRotulos } from '../escena/rotulos.js';
+import { anclasDeSala, aplicarModoDeVista, noTapa, salaVisible } from './vista.js';
 
 /** Una celda del mundo, en unidades de Three. Las mismas que en la planta. */
 const CELDA = 1;
@@ -405,16 +406,20 @@ export function montarThree(contenedor, opciones) {
           'background:#0b0a1ccc;color:#e8e7f5;border:1px solid #2c2a52;' +
           'border-radius:5px;padding:1px 5px;font-size:10px;';
         capaRotulos.appendChild(nodo);
+        //  VARIOS ANCLAJES, NO UNO.
+        //
+        //  A la altura del tabique —sobre el suelo lo tapan los escritorios y
+        //  sobre el techo señalaría al piso de arriba— pero probando primero la
+        //  esquina que mira a la cámara y dejando el centro de último. Con el
+        //  centro solo, diez de once rótulos desaparecían: el centro de una
+        //  sala está bajo la cubierta. Medido en el banco el 01/11/2026.
+        const anclas = anclasDeSala(
+          { x: puesta.x, y: y + 2.4, z: puesta.y, ancho: puesta.ancho, fondo: puesta.fondo }
+        ).map((p) => new THREE.Vector3(p.x, p.y, p.z));
         rotulos.push({
           nodo,
-          //  Anclado al CENTRO de la sala y a la altura del tabique: sobre el
-          //  suelo lo tapan los escritorios, y sobre el techo señalaría al
-          //  piso de arriba.
-          mundo: new THREE.Vector3(
-            puesta.x + puesta.ancho / 2,
-            y + 2.4,
-            puesta.y + puesta.fondo / 2
-          ),
+          anclas,
+          mundo: anclas[anclas.length - 1],
           ancho: 0,
           visible: true
         });
@@ -493,56 +498,19 @@ export function montarThree(contenedor, opciones) {
     new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)
   ];
 
-  function colocarCorte() {
-    const { huella } = edificio;
-    //  El corte se lleva algo más de un tercio del frente: lo suficiente para
-    //  ver dentro de los tres pisos y poco como para que el edificio siga
-    //  leyéndose como un volumen cerrado y no como media maqueta.
-    planosDeCorte[0].constant = huella.ancho * 0.62;
-    planosDeCorte[1].constant = huella.fondo * 0.62;
-  }
 
-  /** Cómo se ve lo que hay encima del piso que se mira. */
+  /**
+   * Cómo se ve lo que hay encima del piso que se mira.
+   *
+   * El cuerpo vive en `vista.js`: necesita un grafo de Three.js y nada más, y
+   * ahí se puede medir en Node con la matemática de verdad. Acá queda sólo el
+   * acople a lo que esta escena tiene.
+   */
   function aplicarModo() {
-    //  En rayos X la cubierta se APAGA. Volverla traslúcida sobre tres losas
-    //  también traslúcidas apila cuatro capas de transparencia y el resultado
-    //  es una niebla lechosa donde no se distingue ningún piso.
-    for (const hijo of raiz.children) {
-      if (hijo.userData.esCubierta) hijo.visible = modo !== 'rayosX';
-    }
-
-    //  El recorte se aplica a TODOS los materiales: un muro recortado junto a
-    //  un escritorio entero deja un escritorio flotando en el aire.
-    colocarCorte();
-    const recorta = modo === 'corte' && soloNivel === null;
-    escena.traverse((o) => {
-      if (!o.isMesh) return;
-      const materiales = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of materiales) {
-        if (!m) continue;
-        m.clippingPlanes = recorta ? planosDeCorte : null;
-        m.clipIntersection = true;
-        m.needsUpdate = true;
-      }
+    aplicarModoDeVista({
+      raiz, escena, porNivel, planos: planosDeCorte,
+      huella: edificio.huella, modo, soloNivel
     });
-
-    for (const [nivel, g] of porNivel) {
-      const losa = g.userData.losa;
-      if (!losa) continue;
-      const esElDeAbajo = nivel === Math.min(...porNivel.keys());
-      if (modo === 'rayosX' && !esElDeAbajo) {
-        losa.material.transparent = true;
-        losa.material.opacity = 0.18;
-        losa.material.depthWrite = false;
-        losa.castShadow = false;
-      } else {
-        losa.material.transparent = false;
-        losa.material.opacity = 1;
-        losa.material.depthWrite = true;
-        losa.castShadow = true;
-      }
-      losa.material.needsUpdate = true;
-    }
   }
 
   construir();
@@ -668,43 +636,17 @@ export function montarThree(contenedor, opciones) {
    * desinforma, y es el mismo criterio por el que los rótulos se separan.
    */
   const rayoDeRotulo = new THREE.Raycaster();
-  const origenAuxiliar = new THREE.Vector3();
-  const direccionAuxiliar = new THREE.Vector3();
 
-  /** ¿Este punto cae en la esquina que el corte se llevó? */
-  function enLaEsquinaCortada(p) {
-    return (
-      modo === 'corte' &&
-      soloNivel === null &&
-      p.x > planosDeCorte[0].constant &&
-      p.z > planosDeCorte[1].constant
-    );
-  }
+  /**
+   * Lo mismo que antes, ahora en `vista.js` para poder probarlo sin pantalla.
+   * Las dos lecciones que costaron el defecto —rayo paralelo y recorte que el
+   * trazador no conoce— están escritas allá, junto a la prueba que las mide.
+   */
+  const seIgnora = (tocado) =>
+    noTapa(tocado, { modo, soloNivel, planos: planosDeCorte });
 
-  function salaVisible(mundo) {
-    //  DOS COSAS QUE SE APRENDIERON MIDIENDO, las dos con el mismo síntoma:
-    //  todos los rótulos desaparecían a la vez.
-    //
-    //  1. En cámara ORTOGRÁFICA los rayos son PARALELOS. Lanzarlo desde
-    //     `camara.position` hacia el ancla es un rayo de perspectiva, que no
-    //     es el que dibuja la pantalla. El rayo correcto sale de detrás del
-    //     ancla, en la dirección de la cámara.
-    //  2. El trazador de rayos NO CONOCE los planos de recorte. La esquina
-    //     que el corte se llevó sigue ahí para él, así que todos los rayos
-    //     chocaban con geometría invisible y no se veía nada.
-    origenAuxiliar.copy(mundo).addScaledVector(DIRECCION, 500);
-    direccionAuxiliar.copy(DIRECCION).negate();
-    rayoDeRotulo.set(origenAuxiliar, direccionAuxiliar);
-    const tocados = rayoDeRotulo.intersectObject(raiz, true);
-    const distanciaAlAncla = 500;
-    for (const t of tocados) {
-      if (enLaEsquinaCortada(t.point)) continue;
-      //  Medio metro de margen: el suelo de la propia sala está justo debajo
-      //  del ancla y se tocaría a sí misma.
-      return t.distance > distanciaAlAncla - 2.6;
-    }
-    return true;
-  }
+  const sePuedeVer = (mundo) =>
+    salaVisible(rayoDeRotulo, raiz, mundo, DIRECCION, seIgnora);
 
   //  El rayo no se lanza en cada fotograma: once rayos contra toda la escena,
   //  144 veces por segundo, es trabajo que nadie ve. Cada seis basta.
@@ -714,6 +656,15 @@ export function montarThree(contenedor, opciones) {
   function situarRotulos() {
     if (rotulos.length === 0) return;
     const probar = cuadrosDesdeLaPrueba++ % 6 === 0;
+    //  Primero DÓNDE anclar, después dónde cae en pantalla: proyectar antes
+    //  mediría el ancla vieja y el rótulo saltaría un fotograma después.
+    if (probar) {
+      for (const r of rotulos) {
+        const visto = r.anclas.find((a) => sePuedeVer(a));
+        r.visible = visto !== undefined;
+        r.mundo = visto ?? r.anclas[r.anclas.length - 1];
+      }
+    }
     const w = contenedor.clientWidth || 1;
     const h = contenedor.clientHeight || 1;
     const v = new THREE.Vector3();
@@ -727,7 +678,6 @@ export function montarThree(contenedor, opciones) {
         alto: 18
       };
     });
-    if (probar) for (const r of rotulos) r.visible = salaVisible(r.mundo);
     const ys = separarRotulos(cajas);
     rotulos.forEach((r, i) => {
       r.nodo.style.display = r.visible === false ? 'none' : '';
