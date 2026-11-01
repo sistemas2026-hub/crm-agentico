@@ -354,6 +354,18 @@ def analizar_evidencia(org_id: str, evidencia_id: str) -> dict:
             return {"estado": "", "motivo": "la evidencia ya no esta"}
 
         r = IV.analizar(evidencia)
+        #  APAGADO NO DEJA RASTRO (revisor de PII, 31/10/2026, H1). Si la
+        #  empresa no lo tiene habilitado, no se escribe fila: con la fila
+        #  escrita, `punto_de_la_revision` veia "ninguna se pudo mirar",
+        #  devolvia el punto en "no se sabe" y el veredicto pasaba a REVISAR
+        #  -- o sea que la funcion APAGADA, que es el default, habria frenado
+        #  el cierre autonomo del Supervisor en toda orden con evidencia.
+        #
+        #  Un FALLO si se guarda, y la diferencia importa: un fallo hay que
+        #  poder verlo; "esta empresa no lo pidio" no es nada que haya pasado.
+        if r["motivo"] == IV.MOTIVO_APAGADO:
+            return {"estado": "", "motivo": r["motivo"]}
+
         #  'pide_atencion' LO ESCRIBE EL CODIGO, no el modelo: es la unica
         #  senal que llega a la revision del cierre.
         AnalisisDeEvidencia.objects.create(

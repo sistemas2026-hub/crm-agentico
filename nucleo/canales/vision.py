@@ -216,13 +216,30 @@ INSTRUCCION_EVIDENCIA = (
     "7. Si te dicen que tenia que mostrar esta foto, contesta ademas si eso "
     "se ve o no se ve, en una linea.\n"
     "8. NO transcribas numeros de documento, cedulas, telefonos ni datos "
-    "personales que aparezcan en la imagen, aunque se lean.\n"
-    "9. Se breve: un parrafo corto. Sin saludos."
+    "personales que aparezcan en la imagen, aunque se lean. Tampoco "
+    "describas a las personas que aparezcan, ni leas direcciones, placas ni "
+    "papeles que esten en el encuadre.\n"
+    "9. Si la foto no muestra equipos ni una instalacion, deci en una linea "
+    "que no se ve lo que se pedia y nada mas. No describas el resto.\n"
+    "10. Se breve: un parrafo corto. Sin saludos."
 )
 
 
+#: Como se le presenta al modelo el texto que acompana a la imagen. El de
+#: WhatsApp es lo que escribio el cliente; el de campo es lo que la plantilla
+#: de la empresa declara que esa foto tenia que mostrar. Decirle al proveedor
+#: que lo segundo "lo escribio el cliente" es una afirmacion falsa sobre el
+#: origen del dato, y ademas mueve el analisis: el modelo no trata igual una
+#: frase del cliente que una instruccion de la oficina (revisor de PII,
+#: 31/10/2026, H5). Por eso el rotulo lo elige quien llama, igual que la
+#: instruccion.
+PIE_DEL_CLIENTE = "El cliente escribio junto a la foto"
+PIE_DE_LA_PLANTILLA = "Lo que esta foto tenia que mostrar, segun la empresa"
+
+
 def mensaje_multimodal(contenido: bytes, pie: str = "",
-                       instruccion: str = "") -> list[dict]:
+                       instruccion: str = "",
+                       rotulo_del_pie: str = "") -> list[dict]:
     """
     Los dos mensajes que se le mandan al modelo.
 
@@ -243,7 +260,7 @@ def mensaje_multimodal(contenido: bytes, pie: str = "",
     if (pie or "").strip():
         partes.append({
             "type": "text",
-            "text": f"El cliente escribio junto a la foto: {pie.strip()}"})
+            "text": f"{rotulo_del_pie or PIE_DEL_CLIENTE}: {pie.strip()}"})
     partes.append({
         "type": "image_url",
         "image_url": {"url": f"data:{_mime_de(contenido)};base64,{datos}"}})
@@ -260,7 +277,8 @@ def mensaje_multimodal(contenido: bytes, pie: str = "",
 
 
 def analizar(contenido: bytes, modelo: str, pie: str = "",
-             temperatura: float = 0.1, instruccion: str = "") -> Resultado:
+             temperatura: float = 0.1, instruccion: str = "",
+             rotulo_del_pie: str = "") -> Resultado:
     """
     Los bytes de una imagen -> que se ve, o el motivo de por que no se pudo.
 
@@ -305,7 +323,7 @@ def analizar(contenido: bytes, modelo: str, pie: str = "",
 
         r = cliente.chat(
             modelo,
-            mensaje_multimodal(contenido, pie, instruccion),
+            mensaje_multimodal(contenido, pie, instruccion, rotulo_del_pie),
             temperatura=temperatura,
             timeout=TIMEOUT_SEGUNDOS)
 

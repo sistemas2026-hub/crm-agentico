@@ -562,6 +562,80 @@ def test_v1_sin_analisis_la_revision_queda_igual(abierto, orden):
     assert not [p for p in r["puntos"] if p["clave"] == "fotos"]
 
 
+def test_v1b_apagado_NO_DEJA_RASTRO_y_el_cierre_autonomo_sigue(abierto, orden):
+    """EL CASO QUE LA v1 NO MODELABA (revisor de PII, 31/10/2026, H1).
+
+    `v1` modela «apagado» como «no hay filas». El apagado real produce otra
+    cosa: la tarea corría igual y escribía una fila con `motivo` y sin
+    `texto`. Con eso, `punto_de_la_revision` veía «ninguna se pudo mirar»,
+    devolvía el punto en «no se sabe» y el veredicto pasaba a REVISAR — o
+    sea que la función APAGADA, que es el default y lo que va a producción,
+    frenaba el cierre autónomo del Supervisor en TODA orden con evidencia.
+
+    Se afirma sobre el efecto en los dos extremos: que no quede fila, y que
+    el veredicto siga siendo el que era.
+    """
+    from campo import inspeccion_visual as IV
+    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+    from campo import tasks as T
+
+    ev = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    #  El motor contesta que esta empresa no lo tiene habilitado.
+    with mock.patch.object(IV, "_esta_habilitado", return_value=False):
+        with mock.patch("requests.post") as post:
+            T.analizar_evidencia(str(abierto.id), str(ev.id))
+            post.assert_not_called(), "la foto no tiene que salir del CRM"
+
+    assert not AnalisisDeEvidencia.objects.filter(org=abierto).exists(),         "apagado no deja fila"
+    r = RC.revisar(orden, pendientes=set())
+    assert not [p for p in r["puntos"] if p["clave"] == "fotos"]
+    assert r["veredicto"] == RC.CERRAR, r
+
+
+def test_v1c_el_interruptor_falla_CERRADO(abierto, orden):
+    """Si no se puede comprobar el consentimiento, la foto no sale.
+
+    Es lo contrario de como falla casi todo lo demás del proyecto, y es a
+    propósito: no poder comprobar un consentimiento no es permiso.
+    """
+    from campo import inspeccion_visual as IV
+
+    class _Rota:
+        status_code = 500
+
+        def json(self):
+            return {}
+
+    with mock.patch("requests.get", return_value=_Rota()):
+        assert IV._esta_habilitado("rapilink") is False
+    with mock.patch("requests.get", side_effect=RuntimeError("sin red")):
+        assert IV._esta_habilitado("rapilink") is False
+    with mock.patch("requests.get",
+                    return_value=type("R", (), {"status_code": 200,
+                                                "json": lambda s: {}})()):
+        assert IV._esta_habilitado("rapilink") is False
+
+
+def test_v1d_la_empresa_sale_de_la_orden_no_del_entorno(abierto, orden, monkeypatch):
+    """H2: `MOTOR_TENANT` es UNA por instalación. Con dos empresas, la foto
+    de la segunda se habría mandado con el consentimiento de la primera."""
+    from campo import inspeccion_visual as IV
+    from campo.models import EvidenciaTrabajo
+
+    monkeypatch.setenv("MOTOR_TENANT", "la-empresa-equivocada")
+    ev = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    vistos = []
+
+    def _ver(tenant):
+        vistos.append(tenant)
+        return False
+
+    with mock.patch.object(IV, "_esta_habilitado", side_effect=_ver):
+        IV.analizar(ev)
+
+    assert vistos and "la-empresa-equivocada" not in vistos, vistos
+
+
 def test_v2_fotos_miradas_y_limpias_suman_un_punto_en_si(abierto, orden):
     _analisis(orden, abierto)
     r = RC.revisar(orden, pendientes=set())

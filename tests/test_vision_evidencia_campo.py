@@ -173,6 +173,40 @@ try:
 finally:
     _cliente.chat = _original
 
+# =============================================================================
+print("\n-- G: el rotulo del pie dice de quien es  (revisor de PII, H5) --")
+# =============================================================================
+#  El rotulo era constante: al proveedor le llegaba "El cliente escribio junto
+#  a la foto: Esta foto tenia que mostrar la ONT", que es falso --lo escribio
+#  un empleado en la plantilla-- y mueve el analisis, porque el modelo no
+#  trata igual una frase del cliente que una instruccion de la oficina.
+m = vision.mensaje_multimodal(JPEG, pie="la ONT instalada",
+                              instruccion=vision.INSTRUCCION_EVIDENCIA,
+                              rotulo_del_pie=vision.PIE_DE_LA_PLANTILLA)
+texto_del_pie = m[1]["content"][0]["text"]
+comprobar("G1. NO se le atribuye al cliente",
+          "El cliente escribio" not in texto_del_pie, texto_del_pie[:60])
+comprobar("G2. dice que es lo que la empresa pedia",
+          texto_del_pie.startswith(vision.PIE_DE_LA_PLANTILLA), texto_del_pie[:60])
+
+m = vision.mensaje_multimodal(JPEG, pie="mira la luz roja")
+comprobar("G3. y sin rotulo sigue siendo el del cliente",
+          m[1]["content"][0]["text"].startswith(vision.PIE_DEL_CLIENTE))
+
+# =============================================================================
+print("\n-- H: lo que la instruccion de evidencia NO puede perder --")
+# =============================================================================
+#  La de WhatsApp acota la foto fuera de tema ("deci en una linea que se ve y
+#  nada mas"). Al escribir la de evidencia esa regla se habia perdido, y sus
+#  reglas 1 y 4 piden describir: una foto donde entra una persona o un recibo
+#  se describia entera, y eso queda guardado para siempre (revisor de PII,
+#  H4). Estas dos afirmaciones existen para que no se pierda otra vez.
+comprobar("H1. acota la foto que no muestra una instalacion",
+          "no muestra equipos ni una instalacion" in vision.INSTRUCCION_EVIDENCIA)
+comprobar("H2. y prohibe describir personas, direcciones y papeles",
+          "describas a las personas" in vision.INSTRUCCION_EVIDENCIA
+          and "placas" in vision.INSTRUCCION_EVIDENCIA)
+
 print("\n" + "=" * 72)
 if fallos:
     print(f" {len(fallos)} FALLAS:")

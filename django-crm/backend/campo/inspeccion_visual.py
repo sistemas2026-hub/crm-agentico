@@ -67,6 +67,19 @@ logger = logging.getLogger(__name__)
 ESTADO_OK = "procesado"
 ESTADO_APAGADO = "apagado"
 
+#: EL MOTIVO QUE NO SE GUARDA. Cuando la empresa no tiene esto habilitado no
+#: pasa nada y no queda nada: ni fila, ni punto en la revision, ni foto que
+#: haya salido del CRM. Es una cadena y no un booleano porque quien decide no
+#: escribir es la tarea, y tiene que poder distinguir ESTE motivo de un fallo
+#: de verdad -- un fallo si se guarda, para que se vea.
+#:
+#: Lo encontro el revisor de PII (31/10/2026): la primera version escribia
+#: fila igual, y con eso `punto_de_la_revision` veia "ninguna se pudo mirar",
+#: devolvia el punto en "no se sabe" y el veredicto pasaba a REVISAR. Con la
+#: funcion APAGADA --que es el default y lo que va a produccion-- eso habria
+#: frenado el cierre autonomo del Supervisor en toda orden con evidencia.
+MOTIVO_APAGADO = "esta empresa no tiene habilitado que se miren las fotos"
+
 #: Los formatos que el analizador del motor mira hoy. Se comprueba de ESTE
 #: lado para no pagar un viaje HTTP por una foto que va a rechazar igual, y
 #: para que el motivo que se guarda diga "HEIC" y no "no es JPEG ni PNG".
@@ -137,6 +150,42 @@ def que_tenia_que_mostrar(evidencia) -> str:
     return ""
 
 
+def _motor() -> tuple[str, dict]:
+    """La base del motor y las cabeceras. Un solo sitio que lo arma."""
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    return base, cabeceras
+
+
+def _esta_habilitado(tenant: str) -> bool:
+    """Si ESTA empresa tiene habilitado que se miren sus fotos de evidencia.
+
+    FALLA CERRADO en todos los frentes: si el motor no contesta, contesta
+    cualquier otra cosa, o la respuesta no se entiende, la foto no sale. Eso
+    es lo contrario de como falla la mayoria de las consultas de este
+    proyecto, y es a proposito: esto no es un dato de servicio, es el
+    consentimiento de una empresa para mandarle fotos de la casa de sus
+    clientes a un tercero. No poder comprobarlo no es permiso.
+    """
+    import requests
+
+    base, cabeceras = _motor()
+    try:
+        r = requests.get(f"{base}/interno/vision/evidencias-habilitada",
+                         params={"tenant": tenant}, headers=cabeceras,
+                         timeout=10)
+        if r.status_code != 200:
+            return False
+        return bool((r.json() or {}).get("habilitada") is True)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("inspeccion visual: no se pudo comprobar el "
+                       "interruptor (%s)", type(e).__name__)
+        return False
+
+
 def _bytes_de(evidencia) -> bytes | None:
     """El binario de la evidencia, o None si no se pudo leer.
 
@@ -167,10 +216,29 @@ def analizar(evidencia) -> dict:
     analisis es otro. Que el segundo falle no puede convertir la subida en un
     500 -- mismo criterio que `cierre_en_isp.cerrar_ticket_al_validar`.
     """
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    #  LA EMPRESA SALE DE LA ORDEN, NUNCA DEL ENTORNO (revisor de PII,
+    #  31/10/2026). La primera version leia `MOTOR_TENANT`, que es UNA por
+    #  instalacion: con dos empresas en la misma, la foto tomada dentro de la
+    #  casa de un cliente de la B se habria mandado al proveedor porque la A
+    #  tiene el interruptor encendido, y la factura habria caido en la A. El
+    #  interruptor que este modulo justifica con "no es el mismo
+    #  consentimiento" se habria evaluado contra el consentimiento de otra
+    #  empresa. Hay una guarda que lo caza:
+    #  `common/tests/test_motor_tenant_falla_cerrado.py`.
+    from operaciones.areas_del_tenant import tenant_de
+
+    tenant = tenant_de(evidencia.org)
     if not tenant:
-        return _no("falta MOTOR_TENANT: sin saber de que empresa es la foto "
-                   "no se le manda a nadie")
+        return _no("no se sabe a que empresa del motor pertenece esta orden: "
+                   "no se le manda la foto a nadie")
+
+    #  EL CONSENTIMIENTO SE PREGUNTA ANTES DE MOVER LOS BYTES (H1). La ruta
+    #  de analisis tambien lo comprueba --ahi vive el control-- pero para
+    #  entonces la foto ya salio del servicio que es su dueño. Preguntar
+    #  primero cuesta un GET sin cuerpo.
+    if not _esta_habilitado(tenant):
+        return _no(MOTIVO_APAGADO)
+
     contenido = _bytes_de(evidencia)
     if contenido is None:
         return _no("no se pudo leer el archivo de la evidencia")
@@ -181,11 +249,7 @@ def analizar(evidencia) -> dict:
 
     import requests
 
-    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    cabeceras = {}
-    token = os.environ.get("MOTOR_SERVICE_TOKEN")
-    if token:
-        cabeceras["X-Servicio-Token"] = token
+    base, cabeceras = _motor()
     try:
         r = requests.post(
             f"{base}/interno/vision/analizar-evidencia",

@@ -5192,6 +5192,33 @@ def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
     return jsonify(resultado.como_dict()), codigo_http
 
 
+@app.get("/interno/vision/evidencias-habilitada")
+def interno_vision_evidencias_habilitada():
+    """Si esta empresa tiene habilitado que se miren sus fotos de evidencia.
+
+    EXISTE PARA QUE EL CONSENTIMIENTO SE PREGUNTE ANTES DE MOVER LOS BYTES
+    (revisor de PII, 31/10/2026). La ruta de abajo tambien lo comprueba --ahi
+    vive el control y sigue estando-- pero para cuando contesta, la foto ya
+    salio del servicio que es su dueño. El interruptor ES la capa de
+    consentimiento: tiene que poder consultarse sin mandar nada.
+
+    Si la config no se puede leer contesta 'false'. No poder comprobarlo no
+    es permiso, y quien llama falla cerrado del otro lado tambien.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        registrar("vision", "no se pudo leer la config para el interruptor",
+                  tenant=tenant, error=e)
+        return jsonify({"habilitada": False}), 200
+    return jsonify({
+        "habilitada": bool(getattr(config, "vision_evidencias_campo", False)),
+    }), 200
+
+
 @app.post("/interno/vision/analizar-evidencia")
 def interno_analizar_evidencia():
     """
@@ -5259,9 +5286,32 @@ def interno_analizar_evidencia():
         return jsonify({"estado": "apagado", "texto": "", "error": "",
                         "motivo": "la empresa alcanzo su tope de gasto"}), 200
 
+    #  SE RECODIFICA ANTES DE MANDARLA, y no es solo para que pese menos
+    #  (revisor de PII, 31/10/2026, H3). El archivo de campo llega CRUDO del
+    #  disco: a diferencia de la foto de WhatsApp, que ya paso por
+    #  `media.preparar`, este nunca se recodifico, asi que puede llevar EXIF
+    #  --GPS de la vivienda, modelo del telefono, hora exacta-- adentro de los
+    #  bytes. `redactar()` mira el texto que vuelve, no la imagen que va.
+    #  `comprimir_imagen` abre con Pillow y vuelve a guardar sin `exif=`, que
+    #  es lo que lo tira.
+    #
+    #  NO ESTA MEDIDO que las fotos de hoy traigan GPS: la app recodifica en
+    #  el telefono y probablemente ya lo pierda. Se hace igual porque es una
+    #  linea, cuesta menos y la unica ruta de subida escribe lo que le manden.
+    try:
+        listo, _mime = media.preparar(contenido, "image", "image/jpeg")
+    except Exception:                                         # noqa: BLE001
+        #  Si no se pudo recodificar NO se manda el original: el EXIF es
+        #  justamente lo que esto viene a sacar.
+        registrar("vision", "no se pudo preparar la evidencia", tenant=tenant)
+        return jsonify({"estado": vision.ERROR, "texto": "",
+                        "error": "no se pudo preparar la imagen", "modelo": "",
+                        "segundos": 0, "tokens": 0, "motivo": ""}), 200
+
     modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
-    r = vision.analizar(contenido, modelo, pie,
-                        instruccion=vision.INSTRUCCION_EVIDENCIA)
+    r = vision.analizar(listo, modelo, pie,
+                        instruccion=vision.INSTRUCCION_EVIDENCIA,
+                        rotulo_del_pie=vision.PIE_DE_LA_PLANTILLA)
 
     #  TEXTO FIJO y conteos. Del contenido no va NADA al log -- ni que se vio
     #  ni lo que decia-- y la orden no se nombra: esta ruta no la conoce.
