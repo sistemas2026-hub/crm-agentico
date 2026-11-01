@@ -39,9 +39,17 @@ cuánto tapa lo gobierna una desigualdad medida y escrita en ese archivo:
 H > z_placa + (P − d) / 0,8125
 ```
 
-Para **una** fila de salas sale `H > 12,75`, de donde los 15 que usa hoy. Para
-**dos** filas haría falta `H > 28,7`: un edificio de 86 unidades de alto para
-40 de planta. Una torre, no una sede.
+Para **una** fila de salas sale `H > 12,75`, de donde los 15 que usa hoy.
+
+> **CORRECCIÓN DEL 01/11/2026, POR LA TARDE.** Acá este documento decía que dos
+> filas exigirían `H > 28,7` —un edificio de 86 unidades para 40 de planta— y
+> que por eso la planta compacta no cabía en PixiJS. **Era una estimación
+> presentada como una medición, y es falsa.** La desigualdad se aplicó a una
+> huella entera cuando este motor dibuja **una losa por sala**, no una losa
+> corrida: entre dos filas hay un pasillo, y por ese hueco se ve. Medido con la
+> inversa de la proyección —la misma de `edificio.test.js`— la planta compacta
+> **no tapa ni un puesto a la altura de piso actual**. El detalle, y lo que sí
+> resultó ser el límite, está en *La opción B, medida* más abajo.
 
 **La restricción no viene del motor: viene de dibujar siempre todos los pisos.**
 Un piso aislado no tiene nada encima, así que su planta puede ser todo lo
@@ -109,21 +117,121 @@ mínimo que la desigualdad permitía. Aislando el piso bastan 7.
 
 ---
 
+## La opción B, medida: PixiJS con la planta compacta
+
+Esta sección la pidió el dueño del producto después de leer el spike, y la
+pregunta era la correcta:
+
+> ¿Podríamos conseguir una distribución compacta en PixiJS si aislamos los pisos
+> y cambiamos la composición, sin abandonar su sistema de personajes e
+> interacciones?
+
+**Sí se puede, y bastante más fácil de lo que este documento decía.** Lo que no
+entra es una sola pieza, y resultó no ser ninguna oficina.
+
+### El experimento
+
+No se construyó una segunda aplicación: se escribió un constructor de geometría
+—[edificio-compacto.js](../../django-crm/frontend/src/lib/centro-mando/edificio-compacto.js),
+205 líneas— que devuelve **el mismo contrato** que `edificioDe` y reparte las
+salas con la misma `repartirPiso` que usa el spike. La pantalla `/centro-mando/v2`
+lo dibuja con `?planta=compacta`; sin el parámetro es la de siempre. Así la
+misma escena, los mismos personajes y la misma ficha de puesto dibujan las dos
+distribuciones, y la comparación no mide dos programas distintos.
+
+De `edificio.js` **no se cambió una línea de conducta**: sólo se exportaron dos
+funciones que ya existían (`nucleo` y `circulacion`). Sus 48 pruebas siguen en
+verde.
+
+### Lo medido
+
+Con la inversa de la proyección, la misma de `edificio.test.js`, sobre la
+empresa del piloto (11 salas, 3 pisos, 33 puestos) y sobre el fixture por
+defecto:
+
+| Qué se dibuja | Puestos tapados | Edificio |
+|---|---|---|
+| A · lineal, como está hoy | **0** de 33 | 88,2 × 18,2 × 48,4 · esbeltez 4,85 |
+| B · compacta, **sin** cubierta | **0** de 33 | 40 × 38 × 42 · esbeltez 1,05 |
+| B · compacta, **con** cubierta | **9** de 33 | ídem |
+| B · compacta, un piso aislado | **0** de 33 | 40 × 38 |
+| C · Three.js, con cubierta y con corte | 0 (por construcción) | 40 × 38 × **21** |
+
+**La única pieza que tapa algo es la cubierta.** Ni las salas entre sí, ni el
+núcleo apilado, ni el basamento: cero. La prueba lo afirma nombrando al
+culpable, no contando víctimas.
+
+Por qué: una cubierta sobre una huella de 39 celdas de fondo tiene que ser
+cruzada por la proyección entera. En la distribución lineal el mismo remate no
+tapa nada porque esa huella tiene 18 de fondo. **Lo que cambió no es el remate:
+es la profundidad que la proyección tiene que atravesar.**
+
+Y para que la cubierta quepa, la altura de piso tendría que subir de 15 a **38**
+—barrido completo de 15 a 130, primera altura limpia: 38—, o sea un edificio de
+**114 unidades sobre una planta de 39 × 39**. Ese es el número que este
+documento le atribuía al caso general; sólo vale para esta pieza.
+
+### Lo que B gana, y lo que cuesta
+
+**Gana todo lo de interacción, que es mucho:** selección por puesto, navegación
+edificio → piso → sala, ficha de agente, flujo en vivo, 37 personajes animados.
+Nada de eso hay que reconstruirlo, porque el contrato es el mismo.
+
+**Cuesta tres cosas, las tres medidas:**
+
+1. **La cubierta, o el doble de altura.** O el edificio no lleva remate —y un
+   edificio sin cubierta no se lee como un edificio—, o mide 114 de alto. En
+   tres dimensiones la cubierta se recorta o se apaga y lo de abajo sigue
+   siendo correcto sin recalcular nada: es exactamente lo que hace el modo
+   «Rayos X» del spike.
+2. **La visibilidad de las oficinas es una coincidencia de la rejilla, no una
+   propiedad del diseño.** A 15 se ve entera; **entre 16 y 29 se tapan de dos a
+   cuatro puestos**; a partir de 30 vuelve a verse. Funciona porque los
+   pasillos del piso de arriba caen justo donde están los escritorios del de
+   abajo. Cambiar el pasillo, el fondo de una plantilla o agregar una sala
+   mueve esa coincidencia, y el síntoma es un puesto que nadie ve, sin error y
+   sin aviso. Hay una prueba que falla si alguien sube la altura de piso.
+3. **La envolvente no está escrita para una huella en rejilla.** Fachada,
+   extremo acristalado y el canto de losa con el nombre al frente se colocan en
+   `edificio.js` con una aritmética que supone **una fila** (`frente`,
+   `sostiene`, `anchoDeNivel`). El constructor compacto no los dibuja, a
+   propósito: rehacerlos es el trabajo que esta comparación tiene que medir, no
+   el que tiene que hacer antes de que se decida el motor. **Es el hueco visual
+   más grande de B y hay que contarlo al mirar su captura.**
+
+### Qué prueba esto, y qué no
+
+Prueba que **la compacidad no era motivo suficiente para migrar**: se consigue
+en PixiJS sin tocar los personajes ni las interacciones. Elimina el argumento
+más fuerte que tenía el spike.
+
+No prueba que B y C se vean igual. B paga la oclusión **separando pisos** —42
+unidades de alto, o 114 con cubierta— y C la paga **con profundidad real**, 21
+de alto, con remate y con corte. Esa diferencia se ve en una captura y todavía
+no está capturada: ver *Lo que falta verificar*.
+
+---
+
 ## Los ocho criterios de comparación
 
 Los que pidió el dueño del producto, en su orden. **Cumplido / parcial /
 incumplido**, con la evidencia al lado.
 
-| # | Criterio | PixiJS 2.5D | Three.js ortográfico | Quién gana |
-|---|---|---|---|---|
-| 1 | **Parecido con la referencia** | **Parcial.** Franja de esbeltez 4,85. La referencia es un bloque compacto | **Cumplido.** Esbeltez 1,05, sección abierta, fachada de vidrio, núcleo visible | **Three.js**, y es la razón por la que se abrió el spike |
-| 2 | **Compacidad** | **Incumplido.** 88,2 × 18,2 × 48,4 | **Cumplido.** 40 × 38 × 21 | **Three.js**, medido |
-| 3 | **Visibilidad de departamentos** | **Cumplido** en la vista general: con una fila por piso, todas las salas se ven a la vez | **Cumplido por aislamiento**, parcial en la vista general: el corte muestra el frente de los tres pisos, no las tres filas | **Empate, con matiz**: PixiJS muestra más de una vez; Three.js muestra todo cuando se pide |
-| 4 | **Profundidad arquitectónica** | **Parcial.** Profundidad simulada con tres caras y un orden de pintado | **Cumplido.** Volúmenes reales, sombras proyectadas, buffer de profundidad | **Three.js** |
-| 5 | **Iluminación y materiales** | **Parcial.** Luz pintada: tonos fijos por cara, charcos aditivos | **Cumplido.** Luz calculada: focos cálidos por planta, sombras, vidrio con transmisión | **Three.js**, pero ver «lo que esto cuesta» |
-| 6 | **Interacción** | **Cumplido.** Selección por puesto, navegación edificio→piso→sala, ficha de agente, flujo en vivo | **Parcial.** Selección por sala con trazador de rayos, aislamiento de piso, ficha mínima | **PixiJS**, por madurez y no por capacidad |
-| 7 | **Rendimiento** | 90–99 fps sostenidos, mín 87 · 2.426 objetos | 131–144 fps, mín 84 · 413 objetos · 554 llamadas · 10.240 triángulos | **No concluyente** — ver abajo |
-| 8 | **Escalabilidad y mantenimiento** | 6 archivos acoplados al motor, ~4.000 líneas, 552 pruebas | 2 archivos, ~700 líneas, 16 pruebas. Dependencia nueva de 1,2 MB | **No concluyente** — el de PixiJS está terminado y el otro es un spike |
+| # | Criterio | A · PixiJS lineal | B · PixiJS compacto | C · Three.js compacto | Quién gana |
+|---|---|---|---|---|---|
+| 1 | **Parecido con la referencia** | **Parcial.** Franja de esbeltez 4,85 | **Cumplido en planta**, parcial en volumen: esbeltez 1,05 pero 42 de alto y sin envolvente | **Cumplido.** Esbeltez 1,05, 21 de alto, sección abierta, vidrio, núcleo visible | **C**, y **B queda cerca** |
+| 2 | **Compacidad** | **Incumplido.** 88,2 × 18,2 × 48,4 | **Cumplido en huella**, parcial en volumen: 40 × 38 × 42 | **Cumplido.** 40 × 38 × 21 | **C**, medido; **B** resuelve la huella |
+| 3 | **Visibilidad de departamentos** | **Cumplido.** Una fila por piso, todas las salas a la vez | **Cumplido sin cubierta**, 0 de 33 tapados. **Con cubierta: 9 tapados** | **Cumplido.** Corte, rayos X y aislamiento; la cubierta se apaga | **C**: en B la visibilidad y el remate no pueden coexistir |
+| 4 | **Profundidad arquitectónica** | **Parcial.** Tres caras y un orden de pintado | **Parcial.** La misma, con más filas | **Cumplido.** Volúmenes reales, sombras, buffer de profundidad | **C** |
+| 5 | **Iluminación y materiales** | **Parcial.** Luz pintada: tonos fijos por cara | **Parcial.** Idéntica a A | **Cumplido.** Luz calculada, sombras, vidrio | **C**, pero ver «lo que esto cuesta» |
+| 6 | **Interacción** | **Cumplido.** Puesto, navegación, ficha, flujo en vivo | **Cumplido.** Lo hereda entero: mismo contrato, misma escena | **Parcial.** Selección por sala, aislamiento, ficha mínima | **A y B**, por madurez y no por capacidad |
+| 7 | **Rendimiento** | 90–99 fps, mín 87 · 2.426 objetos | sin medir (falta el navegador) | 131–144 fps, mín 84 · 413 objetos · 554 llamadas · 10.240 tri | **No concluyente** — ver abajo |
+| 8 | **Escalabilidad y mantenimiento** | 6 archivos al motor, ~4.000 líneas, 552 pruebas | **+205 líneas y 20 pruebas** sobre lo que ya existe; 2 funciones exportadas | 2 archivos, ~700 líneas, 16 pruebas. Dependencia nueva de 1,2 MB | **B es el más barato con diferencia** |
+
+**Dónde quedó la comparación después de medir B:** C gana los ejes visuales
+(1, 2, 4, 5) y la visibilidad con remate (3). B gana interacción (6) y coste
+(8) por un margen grande. El eje 7 no decide. **El empate se rompe en el eje
+que todavía no está medido: los personajes.**
 
 ### El rendimiento NO decide, y conviene explicar por qué
 
@@ -211,30 +319,151 @@ lo que la pantalla muestra.
 
 ---
 
+## Los personajes: qué haría falta en cada alternativa
+
+Pedido explícito: *«No reconstruir todavía el sistema de personajes. Documentar
+qué necesitaríamos para implementar locomoción ambiental, animaciones naturales
+y selección de personajes en cada alternativa.»* Esto es ese documento. **No se
+construyó nada de esto.**
+
+### Qué hay hoy, y cuánto de eso sobrevive a una migración
+
+| Pieza | Qué es | ¿Depende del motor? |
+|---|---|---|
+| [pose.ts](../../django-crm/frontend/src/lib/centro-mando/escena/pose.ts) · 304 líneas | La animación entera **como números**: desplazamientos, giros, intensidades, y la transición por interpolación | **No.** Ni un gráfico, 22 pruebas en Node. **Sobrevive intacto a cualquier migración** |
+| [personaje.ts](../../django-crm/frontend/src/lib/centro-mando/escena/personaje.ts) · 349 líneas | La figura: primitivas `Graphics` articuladas por piezas con nombre | **Sí, del todo.** Se reescribe |
+| Los cinco estados | `reposo`, `teclear`, `alerta`, `despachar`, `incognito` — todos **sentados** | No |
+
+Ese corte es la mejor noticia de toda la comparación: **la lógica de animación
+no está acoplada al motor.** Lo que una migración cuesta en personajes son las
+349 líneas de la figura, no las 304 de cómo se mueve. Y `pose.ts` está escrito
+para que agregar estados sea barato por construcción —cada estado declara su
+pose y la transición se interpola—, así que las tres poses nuevas que pide
+caminar (`levantarse`, `caminar`, `sentarse`) son el trabajo más chico de los
+tres que siguen.
+
+### Lo que falta, en cualquiera de las tres opciones
+
+1. **Una figura de pie.** Las cinco poses actuales son de alguien sentado:
+   `piernas` existe pero dobladas bajo el escritorio. Caminar necesita un
+   dibujo distinto, no una pose distinta.
+2. **Un recorrido.** El dato ya está: cada planta declara su `pasillo` como un
+   rango, y el núcleo es el nexo entre pisos. No hace falta inventar un mapa.
+3. **Procedencia `ambiente`.** Decidido el 01/11/2026 y congelado: un
+   movimiento ambiental **nunca** entra al historial ni se cuenta como
+   actividad. Es una regla de datos y no cambia con el motor. Ver
+   [sede-virtual-reconstruccion.md](sede-virtual-reconstruccion.md).
+
+### Y lo que cambia según el motor
+
+**En 2.5D (A y B) el costo verdadero no es la animación: es el orden de
+pintado.** Hoy cada personaje cuelga del contenedor de su sala y el orden se
+calcula **una vez**, al montar, con `gz·1000 + gx + gy`. Un personaje que
+camina cambia su `gx + gy` en cada fotograma, así que **cambia de lugar en el
+orden en cada fotograma**: tiene que pasar por delante de la mesa que acaba de
+dejar y por detrás de la que va a cruzar. Eso significa reordenar por
+fotograma, y cada excepción a mano en ese orden es exactamente la clase de
+agujero que este documento viene midiendo. **Es trabajo nuevo y no tiene
+atajo.**
+
+**En 3D (C) ese problema no existe.** El buffer de profundidad lo resuelve por
+geometría: un personaje que camina es una posición que cambia. Lo que C no
+tiene es **la figura**: el spike dibuja cajas. Hay dos caminos y conviene no
+confundirlos de coste:
+
+- **Mallas simples articuladas a mano**, como el personaje de PixiJS pero en
+  tres dimensiones. Mismo trabajo que las 349 líneas actuales, con `pose.ts`
+  manejándolas igual.
+- **Modelos con esqueleto** (glTF + `AnimationMixer`), que es el camino por el
+  que un personaje se ve *natural* y no articulado. Esto **no es código**: es
+  una canalización de activos —modelar, riguear, animar, versionar— y es la
+  inversión más grande de todo lo que este documento discute. Si lo que se
+  busca es «buenos personajes y movimientos naturales», **este es el renglón
+  que decide, y no la geometría del edificio.**
+
+### Selección de un personaje
+
+| | A y B | C |
+|---|---|---|
+| Hoy | **Funciona.** Selección por puesto, ficha con agente, área y motivo | **No existe.** Selección por sala con trazador de rayos |
+| Lo que falta para un personaje que camina | Que la zona sensible siga al personaje en vez de al puesto | Lo mismo, más construir la selección por personaje |
+
+En las dos, una vez que alguien camina, **la ficha deja de poder anclarse al
+puesto**. Es el mismo trabajo en los dos motores.
+
+---
+
+## Lo que falta verificar, y por qué no se verificó
+
+El motor Linux de Docker Desktop se cayó durante la sesión
+—`com.docker.backend` ausente, el *named pipe*
+`//./pipe/dockerDesktopLinuxEngine` inexistente— y **no se reinició**, por
+restricción explícita: *«diagnostica la causa sin reiniciar Docker Desktop ni
+afectar contenedores ajenos»*. Sin él no hay laboratorio ni navegador.
+
+**Lo que SÍ se pudo medir sin Docker:** las suites puras corren con Node 24
+directamente —despoja tipos de TypeScript por su cuenta— con un arnés mínimo de
+`describe`/`it`/`expect` y un gancho de resolución que mapea los `./x.js` que
+en disco son `.ts`. **386 pruebas en 13 archivos, cero rojas**, incluidas las 48
+de `edificio.test.js` que garantizan que la opción A quedó intacta.
+**Esto no es vitest**: el arnés es propio y no reproduce su aislamiento ni sus
+`vi.mock`. Vale como medición de lógica pura y no sustituye la corrida real.
+
+**Lo que queda pendiente, todo del navegador:**
+
+| # | Qué | Estado |
+|---|---|---|
+| 1 | Los rótulos de salas tapadas, en el spike | **corregido en código, SIN verificar** |
+| 2 | El modo «Rayos X» apaga la cubierta | **corregido en código, SIN verificar** |
+| 3 | Captura de A, B y C en condiciones equivalentes | **no hecha** |
+| 4 | Ausencia de errores de consola en el spike y en `?planta=compacta` | **no comprobada** |
+| 5 | Selección, oclusión y navegación medidas en B | **no medidas** |
+| 6 | Rendimiento de B (eje 7) | **no medido** |
+
+Hasta que 1 y 2 se vean en un navegador **no están aprobados**, y así está
+escrito también en el commit y en el `LEEME.md` de las capturas.
+
+---
+
 ## Recomendación
 
-**Three.js ortográfico para el edificio, y la decisión no está tomada todavía**
-porque falta lo que el spike no puede dar.
+**La decisión NO está tomada, y después de medir la opción B lo está menos que
+antes** — que es el resultado correcto de una comparación honesta: el argumento
+más fuerte que tenía Three.js se cayó.
 
-Lo que sí está medido y no depende de opinión:
+Lo que está medido y no depende de opinión:
 
-- La compacidad que se pidió **es alcanzable** y la cifra es 4,85 → 1,05.
+- La compacidad **es alcanzable en los dos motores**: 4,85 → 1,05 en C y
+  4,85 → 1,05 en B, con la misma empresa y el mismo reparto.
 - La causa de la franja **no era el motor** sino dibujar siempre todos los
-  pisos; con eso resuelto, la planta compacta es posible en los dos.
-- Lo que Three.js aporta es que **cortar, atravesar y apagar capas sea correcto
-  por construcción** en vez de una excepción al orden de pintado.
-- El rendimiento **no decide**: los dos sobran.
+  pisos, y **mi estimación de lo que eso costaba en PixiJS estaba mal**: no hace
+  falta una torre de 86, hace falta renunciar a la cubierta o subir la altura de
+  piso a 38.
+- Lo que separa a B de C ya no es la planta: es que en C **cortar, atravesar y
+  apagar capas es correcto por construcción**, y en B cada una de esas tres
+  cosas es una excepción al orden de pintado. Se ve en la cubierta y se ve en el
+  personaje que camina.
+- **B es muchísimo más barato**: 205 líneas y 20 pruebas sobre lo que ya existe,
+  contra reconstruir selección, ficha, flujo en vivo, bitácora y 552 pruebas.
+- El rendimiento **no decide**: los dos sobran, y el de B todavía no se midió.
 
-Lo que falta antes de decidir:
+Lo que falta antes de decidir, en orden de peso:
 
-1. **Las referencias de los ejes 3 y 6** —personajes/animación y cámara—, que
-   el dueño del producto dijo que desarrollaría aparte. El eje 3 es el que
-   verdaderamente decide: un sistema de personajes de calidad es la mitad del
-   trabajo, y los dos motores lo resuelven de forma muy distinta.
-2. **Verificar S1 y S2 en el navegador** cuando vuelva el laboratorio.
-3. **Un presupuesto honesto de migración**, porque lo que habría que reconstruir
-   no es el edificio: es la selección por puesto, la ficha, el flujo en vivo, la
-   bitácora y 552 pruebas.
+1. **Los personajes.** Es el eje que rompe el empate, no la geometría. Si lo
+   que se busca es movimiento natural con modelos con esqueleto, eso es una
+   canalización de activos que sólo tiene camino hecho en 3D, y entonces decide
+   C. Si alcanza con figuras articuladas como las de hoy, `pose.ts` sirve igual
+   en los dos y entonces el coste decide B. **La referencia del eje 3 que el
+   dueño del producto va a desarrollar es, literalmente, el dato que falta.**
+2. **Ver las tres capturas juntas.** B paga la oclusión con altura —42, o 114
+   con cubierta— y C con profundidad real —21, con remate y con corte—. Esa
+   diferencia no se decide leyendo números.
+3. **Verificar los dos arreglos del spike** en el navegador.
+4. **La referencia del eje 6** (cámara).
+
+**Lo que NO recomiendo:** decidir ahora. Ni por rendimiento —era la
+instrucción—, ni por líneas de código, ni por la compacidad, que acaba de dejar
+de distinguir a los dos candidatos.
 
 ---
 
@@ -251,6 +480,11 @@ Por restricción explícita, y comprobado:
 - Sin alterar permisos ni el aislamiento multiempresa: la empresa sale de
   `tenantDeLaSesion` en el servidor, igual que en `/centro-mando/v2`, porque es
   literalmente el mismo `load`.
-- El prototipo de PixiJS queda **íntegro y recuperable**: ni un archivo suyo se
-  modificó para este spike, y la etiqueta `sede-pixi-2026-10-31` sigue apuntando
-  al estado anterior.
+- El prototipo de PixiJS queda **íntegro y recuperable**, y acá hay que ser
+  preciso porque la segunda mitad de la sesión sí tocó dos de sus archivos:
+  - `edificio.js`: se exportaron `nucleo()` y `circulacion()`, que ya existían.
+    **Cero cambios de conducta**, y sus 48 pruebas lo miden.
+  - `v2/+page.svelte`: la opción B se dibuja sólo con `?planta=compacta`. Sin el
+    parámetro la pantalla hace exactamente lo que hacía.
+  - El spike de Three.js no tocó ninguno de los dos.
+  - La etiqueta `sede-pixi-2026-10-31` sigue apuntando al estado anterior.

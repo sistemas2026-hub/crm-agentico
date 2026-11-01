@@ -37,6 +37,8 @@
   import { ocupacionesSinSilla, pisosDe, plantaDe, salaPorId, salasDe }
     from '$lib/centro-mando/departamentos.js';
   import { edificioDe } from '$lib/centro-mando/edificio.js';
+  import { edificioCompactoPixi } from '$lib/centro-mando/edificio-compacto.js';
+  import { page } from '$app/state';
   import FichaDePuesto from '$lib/components/centro-mando/FichaDePuesto.svelte';
 
   let { data } = $props();
@@ -138,11 +140,26 @@
    * recinto. Tener dos funciones —una para el edificio y otra para un piso—
    * sería tener dos geometrías que se van separando sin que nadie lo note.
    */
+  /**
+   * LA OPCION B DE LA COMPARACION DE MOTORES, detras de `?planta=compacta`.
+   *
+   * Sin el parametro esta pantalla es la de siempre, byte por byte: es la
+   * forma de comparar las dos distribuciones con la MISMA escena, los mismos
+   * personajes y la misma ficha de puesto, sin duplicar 877 lineas que se
+   * irian separando. Con el parametro se dibuja la planta en rejilla, y lo
+   * que mide es `edificio-compacto.test.js`.
+   *
+   * Es temporal y se va con la decision de motor: lo dice el propio nombre
+   * del parametro, que no es una preferencia del usuario ni se persiste.
+   */
+  const plantaCompacta = $derived(page.url.searchParams.get('planta') === 'compacta');
+
   let edificio = $derived(
     SALAS.length === 0 || vista.tipo === 'sala'
       ? null
-      : edificioDe(SALAS, inventario, PISOS,
-                   { soloNivel: vista.tipo === 'piso' ? vista.nivel : null })
+      : (plantaCompacta ? edificioCompactoPixi : edificioDe)(
+          SALAS, inventario, PISOS,
+          { soloNivel: vista.tipo === 'piso' ? vista.nivel : null })
   );
 
   let planta = $derived(

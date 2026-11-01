@@ -114,7 +114,7 @@ function vanoDePuerta(ancho) {
  *
  * @param {number} ancho celdas de ancho, el frente completo del nivel
  */
-function circulacion(ancho, acento, hastaDondeSostiene, alturaColumna) {
+export function circulacion(ancho, acento, hastaDondeSostiene, alturaColumna) {
   const w = Math.max(4, Math.round(ancho));
   //  LAS COLUMNAS SON LO QUE CIERRA EL EDIFICIO.
   //
@@ -162,7 +162,7 @@ function circulacion(ancho, acento, hastaDondeSostiene, alturaColumna) {
  * alineada y se lee como un núcleo continuo. Es lo que une los pisos: sin él,
  * tres bandejas apiladas son tres bandejas apiladas.
  */
-function nucleo(acento, altura) {
+export function nucleo(acento, altura) {
   return {
     //  El muro del núcleo sube la ALTURA DE PISO entera, no cuatro unidades:
     //  así el remate de un nivel llega justo a la losa del siguiente y los
