@@ -1,0 +1,153 @@
+<!--
+  DÓNDE ESTÁ CADA CUADRILLA (31/10/2026). Pedido del usuario: «un mapa donde
+  uno pueda ver la posición actual de cada técnico, para hacerle seguimiento».
+
+  CON OPENSTREETMAP, Y ES UNA DECISIÓN. Google y Mapbox recibirían la
+  ubicación de los técnicos, y la autorización de tratamiento que firma el
+  cliente nombra a los proveedores: meterlos obliga a un trámite antes de
+  encender nada. OSM no agrega un tercero.
+
+  LO QUE NO HACE, A PROPÓSITO:
+  - no dibuja un pin de quien no reportó: «sin señal» NO es «no se movió»;
+  - no muestra una posición vieja como actual: lo que pasa los 30 minutos sale
+    atenuado y con su hora;
+  - no dibuja recorridos: no se guardan.
+
+  Y LO QUE UN PIN SIGNIFICA: que el teléfono de esa persona reportó esa
+  coordenada. No prueba que la persona esté ahí, y el mapa lo dice, porque un
+  punto en una pantalla se lee como un hecho sobre alguien.
+
+  Leaflet se carga solo en el navegador (`onMount`): en el render del servidor
+  no hay `window` y el módulo revienta al importarse arriba.
+-->
+<script>
+  import { onMount } from 'svelte';
+
+  /** @type {{ cuadrillas: any[] }} */
+  let { cuadrillas } = $props();
+
+  /** Las que tienen algo que dibujar. */
+  let conPosicion = $derived((cuadrillas ?? []).filter((c) => c.posicion));
+  let sinSenal = $derived((cuadrillas ?? []).filter((c) => !c.posicion));
+
+  /** @type {HTMLDivElement | undefined} */
+  let caja = $state();
+  /** @type {any} */
+  let mapa = null;
+  /** @type {any} */
+  let capa = null;
+  /** @type {any} */
+  let L = null;
+
+  onMount(async () => {
+    L = (await import('leaflet')).default;
+    await import('leaflet/dist/leaflet.css');
+    if (!caja) return;
+    mapa = L.map(caja, { attributionControl: true, zoomControl: true });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(mapa);
+    capa = L.layerGroup().addTo(mapa);
+    //  Sin nada que mostrar, el mapa igual tiene que verse: Soledad.
+    mapa.setView([10.9185, -74.7668], 13);
+    dibujar();
+    return () => mapa?.remove();
+  });
+
+  //  Los pines se rehacen cuando cambian los datos; el sondeo de la pantalla
+  //  los trae cada 15 s, así que el mapa se mueve solo.
+  $effect(() => {
+    void conPosicion;
+    dibujar();
+  });
+
+  function dibujar() {
+    if (!mapa || !capa || !L) return;
+    capa.clearLayers();
+    const puntos = [];
+    for (const c of conPosicion) {
+      const p = c.posicion;
+      const color = p.fresca ? '#1f7a3d' : '#6b7280';
+      const marca = L.circleMarker([p.latitud, p.longitud], {
+        radius: p.fresca ? 9 : 7,
+        color: '#fff',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: p.fresca ? 0.95 : 0.55
+      });
+      marca.bindPopup(textoDelPopup(c));
+      marca.addTo(capa);
+      puntos.push([p.latitud, p.longitud]);
+      //  La precisión, cuando es pobre, como un círculo: así el supervisor ve
+      //  que es el barrio y no la casa, en vez de creerle al punto.
+      if (p.precision_pobre && p.precision_m) {
+        L.circle([p.latitud, p.longitud], {
+          radius: p.precision_m, color, weight: 1, opacity: 0.4, fillOpacity: 0.07
+        }).addTo(capa);
+      }
+    }
+    if (puntos.length === 1) mapa.setView(puntos[0], 15);
+    else if (puntos.length > 1) mapa.fitBounds(puntos, { padding: [40, 40] });
+  }
+
+  /** @param {any} c */
+  function textoDelPopup(c) {
+    const p = c.posicion;
+    const foco = (c.ordenes ?? []).find((/** @type {any} */ o) => o.siguiente) ?? (c.ordenes ?? [])[0];
+    const filas = [
+      `<strong>${esc(c.cuadrilla)}</strong>`,
+      `Reportó: ${esc(p.de ?? '—')}`,
+      `Hace ${p.minutos} min${p.fresca ? '' : ' · no es donde está ahora'}`
+    ];
+    if (foco) filas.push(`OT #${esc(String(foco.numero))} · ${esc(foco.asunto || foco.tipo || '')}`);
+    if (p.precision_m) filas.push(`Precisión ± ${p.precision_m} m`);
+    if (p.bateria !== null && p.bateria !== undefined) filas.push(`Batería ${p.bateria}%`);
+    return filas.join('<br>');
+  }
+
+  /** @param {string} s */
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (ch) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);
+  }
+</script>
+
+<section class="mp" aria-label="Dónde está cada cuadrilla">
+  <div class="mp-cab">
+    <span class="snoc-label">Dónde está cada cuadrilla</span>
+    <span class="mp-cuenta snoc-secundario">
+      {conPosicion.length} de {(cuadrillas ?? []).length} reportando
+    </span>
+  </div>
+
+  <div class="mp-caja" bind:this={caja}></div>
+
+  <p class="mp-nota snoc-secundario">
+    Un punto dice que el teléfono de esa persona reportó esa coordenada, no que la persona esté ahí.
+    Lo atenuado pasó los 30 minutos: es dónde estuvo, no dónde está.
+  </p>
+
+  {#if sinSenal.length}
+    <p class="mp-sin snoc-secundario">
+      Sin señal: {sinSenal.map((c) => c.cuadrilla).join(' · ')}
+    </p>
+  {/if}
+</section>
+
+<style>
+  .mp { display: grid; gap: var(--snoc-xs); min-width: 0; }
+  .mp-cab { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .mp-cuenta { font-size: 12px; }
+  .mp-caja {
+    height: 360px;
+    border-radius: var(--snoc-r-xl);
+    border: 1px solid var(--snoc-outline-variant);
+    background: var(--snoc-surface-container);
+    overflow: hidden;
+  }
+  .mp-nota, .mp-sin { margin: 0; font-size: 12px; }
+  .mp-sin { font-weight: 600; }
+  /* Leaflet dibuja dentro de la caja; su CSS llega con el módulo. */
+  :global(.leaflet-container) { font: inherit; background: var(--snoc-surface-container); }
+</style>

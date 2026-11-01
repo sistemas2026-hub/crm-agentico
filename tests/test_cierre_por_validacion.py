@@ -251,7 +251,8 @@ def cierra_el_supervisor(**compuertas):
     with escenario(registro, proveedor), Compuertas(**compuertas):
         r = cierre.cerrar_ticket_por_el_supervisor(
             Config([HerramientaQueEscribe()]), TENANT, orden_id=ORDEN, ticket=TICKET,
-            texto="Trabajo de campo OT #7001 validado en Dexter.")
+            texto="Trabajo de campo OT #7001 validado en Dexter.",
+            revision="orden:7001|vuelta:1|se_puede_cerrar")
     return r, registro, proveedor
 
 
@@ -373,15 +374,42 @@ class _ConfigDe:
         self.variables_tenant = CATALOGO_REAL.variables_tenant
 
 
-seccion("9. catalogo REAL: la herramienta exige aprobacion humana y el Supervisor no la quema")
+seccion("9. catalogo REAL: la marca sigue puesta, y la exencion del tenant deja cerrar")
+#  CAMBIO DEL 31/10/2026. Hasta hoy esta seccion afirmaba lo contrario --que el
+#  Supervisor NO cerraba-- y era correcta: la decision del 13/10 ("se cierra
+#  aunque el ISP le avise al cliente, el aviso no dice quien lo cerro") se
+#  habia aplicado solo a la puerta humana. El usuario la extendio a esta.
+#
+#  LO QUE NO CAMBIO, y por eso se sigue afirmando: la marca de la herramienta
+#  SIGUE PUESTA. Lo que abre la puerta es la exencion nombrada por el tenant,
+#  no haberla apagado -- apagarla habria habilitado tambien la conversacion.
 afirmar(HERR_REAL.aprobacion_humana is True,
-        "el catalogo real declara aprobacion_humana en la herramienta de cierre (M06-E)")
+        "el catalogo real SIGUE declarando aprobacion_humana (M06-E)")
+afirmar(frontera.CIERRE_DE_ORDEN_REVISADA in (HERR_REAL.aprobacion_humana_salvo or []),
+        "y el tenant la eximio para el cierre de una orden revisada")
 registro, red = RegistroComoLaBase(), _Red()
 with red_falsa(registro, red):
     r1 = cierre.cerrar_ticket_por_el_supervisor(
-        _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T")
+        _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision=f"orden:{ORDEN}|vuelta:1|se_puede_cerrar")
+afirmar(r1.cerrado,
+        f"el Supervisor cierra el ticket (codigo={r1.codigo}, {r1.motivo[:60]})")
+afirmar(len(red.pedidos) == 1,
+        f"y al ISP le llega UNA publicacion ({len(red.pedidos)})")
+
+seccion("9b. con la marca y SIN la exencion sigue frenada, y no se quema el intento")
+#  La garantia de H1 (30/10/2026) no se toca: el rechazo ocurre ANTES de
+#  reclamar la clave, asi que la orden se puede reintentar. Si se perdiera, la
+#  empresa que no declare la exencion tendria sus ordenes quemadas para siempre.
+sin_exencion = HERR_REAL.model_copy(update={"aprobacion_humana_salvo": []})
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    r1 = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(sin_exencion), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision="orden:x|vuelta:1|se_puede_cerrar")
     r2 = cierre.cerrar_ticket_por_el_supervisor(
-        _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T")
+        _ConfigDe(sin_exencion), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision="orden:x|vuelta:1|se_puede_cerrar")
 afirmar(r1.codigo == cierre.NO_AUTORIZADA and "APROBACION_HUMANA_REQUERIDA" in r1.motivo,
         f"no sale, y dice POR QUE (codigo={r1.codigo}, motivo={r1.motivo[:50]})")
 afirmar(red.pedidos == [], "no le llega nada al ISP")
@@ -396,7 +424,8 @@ for primero in ("supervisor", "persona"):
     with red_falsa(registro, red):
         sup = lambda: cierre.cerrar_ticket_por_el_supervisor(          # noqa: E731
             _ConfigDe(sin_marca), TENANT, orden_id=ORDEN, ticket=TICKET,
-            texto="Trabajo de campo OT #7001 validado en Dexter.")
+            texto="Trabajo de campo OT #7001 validado en Dexter.",
+            revision="orden:7001|vuelta:1|se_puede_cerrar")
         per = lambda: cierre.cerrar_ticket_de_orden(                   # noqa: E731
             _ConfigDe(sin_marca), TENANT, orden_id=ORDEN, ticket=TICKET,
             texto="Trabajo de campo OT #7001 validado en Dexter.", actor="Laura Gomez")
@@ -438,9 +467,39 @@ class _RedQueSeCorta(_Red):
 registro, red = RegistroComoLaBase(), _RedQueSeCorta()
 with red_falsa(registro, red):
     r = cierre.cerrar_ticket_por_el_supervisor(
-        _ConfigDe(sin_marca), TENANT, orden_id="orden-timeout", ticket=TICKET, texto="T")
+        _ConfigDe(sin_marca), TENANT, orden_id="orden-timeout", ticket=TICKET, texto="T",
+        revision="orden:7001|vuelta:1|se_puede_cerrar")
 afirmar(len(red.pedidos) == 1 and r.codigo == cierre.INCIERTO,
         f"salio el pedido y se corto: no se sabe (codigo={r.codigo})")
+
+
+seccion("9c. sin la revision que lo autoriza, el Supervisor no cierra  (H1, 31/10/2026)")
+#  La premisa de la exencion es "el Supervisor lo reviso punto por punto", y esa
+#  revision corre en el CRM: desde aca NO se puede comprobar, y hasta el
+#  31/10 tampoco se pedia nada que la nombrara -- se cerraba el ticket que le
+#  dijeran. Exigirla no la prueba; hace que la auditoria pueda contestar QUE
+#  revision autorizo cada cierre, y que un servicio sin una no entre por
+#  descuido.
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    for revision in ("", "   ", None):
+        r = cierre.cerrar_ticket_por_el_supervisor(
+            _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+            revision=revision)
+        afirmar(r.codigo == cierre.NO_EJECUTADA,
+                f"revision {revision!r}: no cierra (codigo={r.codigo})")
+afirmar(red.pedidos == [], "y no le llega nada al ISP")
+afirmar(registro.filas == {}, "ni se reclama la clave")
+
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    r = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision="orden:7001|vuelta:1|se_puede_cerrar")
+afirmar(r.cerrado, f"con la revision si cierra (codigo={r.codigo})")
+afirmar("se_puede_cerrar" in r.referencia,
+        f"y la referencia que queda auditada la nombra ({r.referencia})")
+
 
 print()
 if _fallos:

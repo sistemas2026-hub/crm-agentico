@@ -1530,3 +1530,4 @@ from campo.niveles import (  # noqa: E402,F401
     NivelDeRespuesta,
 )
 from campo.novedades import NovedadDeCuadrilla  # noqa: E402,F401
+from campo.ubicacion_de_cuadrilla import PosicionDeTecnico  # noqa: E402,F401

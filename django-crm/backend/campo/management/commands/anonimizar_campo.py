@@ -36,6 +36,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from campo.models import EvidenciaTrabajo, OrdenTrabajo
+from campo.ubicacion_de_cuadrilla import PosicionDeTecnico
 from common.models import Profile, User
 
 #: Hosts que se consideran locales. Cualquier otro aborta el comando.
@@ -72,10 +73,12 @@ class Command(BaseCommand):
             ordenes = self._anonimizar_ordenes()
             evidencias = self._limpiar_metadatos_evidencias()
             personas = self._anonimizar_personas()
+            posiciones = self._borrar_posiciones()
 
         self.stdout.write(self.style.SUCCESS(
-            f"[OK] {ordenes} órdenes, {evidencias} evidencias y {personas} "
-            f"personas anonimizadas."
+            f"[OK] {ordenes} órdenes, {evidencias} evidencias, {personas} "
+            f"personas anonimizadas y {posiciones} posiciones de técnico "
+            f"borradas."
         ))
         self.stdout.write(
             "Se conservaron: cantidad, tipo, estado, fechas, vuelta y "
@@ -202,3 +205,20 @@ class Command(BaseCommand):
 
         Profile.objects.update()  # nada que anonimizar hoy; queda el gancho
         return tocadas
+
+    def _borrar_posiciones(self) -> int:
+        """DONDE ESTABA CADA TECNICO: se BORRA, no se desplaza.
+
+        Lo encontro el revisor de PII el 31/10/2026: este comando decia por
+        escrito que reemplazaba «coordenadas» --lo hace con las de la orden--
+        y `campo_posicion_tecnico` quedaba intacta. En una copia local de
+        produccion eso dejaba la ultima coordenada REAL de cada empleado, y
+        como las cuadrillas se conservan a proposito, saber de quien es cada
+        punto es trivial.
+
+        Se borra en vez de desplazarse, al reves que el GPS del domicilio del
+        cliente: aquella coordenada sostiene la forma de los datos (hay que
+        poder probar un mapa de ordenes); esta no le sirve a nadie en una
+        copia de trabajo, y la posicion de un empleado no es un dato que se
+        lleve a un portatil ni corrido unos metros."""
+        return PosicionDeTecnico.objects.all().delete()[0]
