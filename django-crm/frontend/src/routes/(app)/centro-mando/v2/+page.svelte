@@ -506,6 +506,13 @@
     const laPlanta = planta;
     const elZoom = escalaMinima;
     const losLetreros = letreros;
+    //  Por donde puede cruzar gente de ambiente: las piezas de circulacion de
+    //  la sede -el patio y la entrada-. En la vista de una sala no hay
+    //  ninguna, y entonces no camina nadie, que es lo correcto.
+    const porDondeCruzar = (edificio?.plantas ?? [])
+      .filter((p) => p.papel === 'circulacion')
+      .map((p) => ({ x: p.origen.gx, y: p.origen.gy,
+                     ancho: p.mundo.ancho, fondo: p.mundo.fondo }));
     //  Sin estructura no se monta nada, y NO se cae a una inventada: dibujar
     //  un edificio que nadie declaró sería afirmar cómo es una empresa que no
     //  se pudo consultar. El aviso lo da el pie.
@@ -529,7 +536,8 @@
         if (!vivo) return;
         visualizar = adaptador.visualizar;
         escena = await montarEscena({ contenedor: lienzo, planta: laPlanta,
-                                      escalaMinima: elZoom, letreros: losLetreros });
+                                      escalaMinima: elZoom, letreros: losLetreros,
+                                      ambiente: porDondeCruzar });
         if (!vivo) {
           escena.destruir();
           escena = null;

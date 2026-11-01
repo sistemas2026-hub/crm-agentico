@@ -125,7 +125,8 @@ describe('la escena no importa el motor gráfico donde no debe', () => {
       .map((f) => f.archivo)
       .sort();
     expect(conPixi).toEqual([
-      'arquitectura.ts', 'montar.ts', 'oficina.ts', 'personaje.ts',
+      'arquitectura.ts',
+      'caminante.ts', 'montar.ts', 'oficina.ts', 'personaje.ts',
       'texturas.ts', 'volumen.ts'
     ]);
   });

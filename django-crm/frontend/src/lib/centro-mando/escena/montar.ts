@@ -28,6 +28,8 @@
 import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { Camara, LIMITES, gesto, type Toque } from './camara';
 import { aPantalla, extensionDeVolumenes, extensionDelMundo, profundidad } from './isometria';
+import { construirCaminante, type Caminante } from './caminante';
+import { avanzar, poblar } from '../ambiente.js';
 import { PALETA, coloresConAcento } from './paleta';
 import { Transicion } from './pose';
 import { construirOficina, type Planta, type Puesto } from './oficina';
@@ -145,6 +147,18 @@ export interface OpcionesDeEscena {
      */
     color?: number;
   }[];
+  /**
+   * Las zonas de circulación por las que puede caminar gente de ambiente.
+   *
+   * Sin esto no hay nadie caminando, y esa es la omisión correcta: una sala
+   * mirada sola no tiene por dónde cruzar, y una figura dando vueltas dentro
+   * de un departamento estaría pisando puestos declarados.
+   *
+   * Lo que se dibuja acá NO es nadie de la empresa: no tiene nombre, no se
+   * puede pulsar, no entra en ningún contador y no produce un acontecimiento.
+   * Ver `ambiente.js`.
+   */
+  ambiente?: { x: number; y: number; ancho: number; fondo: number }[];
 }
 
 interface Habitante {
@@ -578,12 +592,38 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
   let acumulado = 0;
   let cuadros = 0;
 
+  /* ── la gente que cruza ───────────────────────────────────────────────── */
+  /* Van al MUNDO y no a una sala: su `zIndex` se recalcula cada fotograma con
+     la misma `profundidad` que ordena todo lo demás, así que Pixi las intercala
+     sola entre las manzanas. Es lo que hace barato que caminen —no hay que
+     reordenar nada a mano— y también por qué sólo pueden ir por la circulación:
+     a nivel de mundo una figura se pinta entera delante o detrás de una sala,
+     nunca entre sus muebles. */
+  let gente = poblar(opciones.ambiente ?? []);
+  const caminantes: Caminante[] = gente.map((f: any) => {
+    const c = construirCaminante(f.oficio);
+    c.nodo.eventMode = 'none';
+    mundo.addChild(c.nodo);
+    return c;
+  });
+
   app.ticker.add((tick) => {
     // `deltaMS` es el tiempo real del fotograma. Se acota a 100 ms porque al
     // volver de una pestaña oculta el navegador entrega un salto enorme, y sin
     // tope la respiración del personaje da un brinco y la cámara se dispara.
     const dt = Math.min(0.1, tick.deltaMS / 1000);
     t += dt;
+
+    if (caminantes.length > 0) {
+      gente = gente.map((f: any) => avanzar(f, dt, opciones.ambiente ?? []));
+      for (let i = 0; i < caminantes.length; i++) {
+        const f: any = gente[i];
+        const p = aPantalla(f.x, f.y, 0);
+        caminantes[i].nodo.position.set(p.x, p.y);
+        caminantes[i].nodo.zIndex = profundidad(f.x, f.y);
+        caminantes[i].paso(t, f.andando === true);
+      }
+    }
 
     camara.avanzar(dt);
     const tr = camara.transformacion();
@@ -787,6 +827,11 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     },
 
     destruir() {
+      //  Las figuras de ambiente primero: son hijas del mundo y `app.destroy`
+      //  se las lleva, pero liberarlas a mano deja claro que son nuestras y no
+      //  de la escena.
+      for (const c of caminantes) c.destruir();
+      caminantes.length = 0;
       //  Idempotente: destruir dos veces no puede explotar. Al cambiar de sala
       //  hay un desmontaje y un montaje en el mismo gesto, y basta con que el
       //  efecto de limpieza corra dos veces.
