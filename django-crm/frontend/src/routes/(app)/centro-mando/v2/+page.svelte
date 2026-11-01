@@ -38,6 +38,7 @@
     from '$lib/centro-mando/departamentos.js';
   import { edificioDe } from '$lib/centro-mando/edificio.js';
   import { edificioCompactoPixi } from '$lib/centro-mando/edificio-compacto.js';
+  import { sedeDe } from '$lib/centro-mando/sede.js';
   import { page } from '$app/state';
   import FichaDePuesto from '$lib/components/centro-mando/FichaDePuesto.svelte';
 
@@ -152,14 +153,24 @@
    * Es temporal y se va con la decision de motor: lo dice el propio nombre
    * del parametro, que no es una preferencia del usuario ni se persiste.
    */
-  const plantaCompacta = $derived(page.url.searchParams.get('planta') === 'compacta');
+  const composicion = $derived(page.url.searchParams.get('planta') ?? 'lineal');
 
+  /**
+   * LA SEDE EN UNA PLANTA, con `?planta=sede`.
+   *
+   * Es la composicion que se decidio el 01/11/2026: todos los departamentos en
+   * un plano, navegando por traslado. No hay pisos que aislar, asi que
+   * `soloNivel` no aplica y la vista de piso no cambia nada — la de sala
+   * sigue funcionando igual, porque una sala mirada sola es una sala.
+   */
   let edificio = $derived(
     SALAS.length === 0 || vista.tipo === 'sala'
       ? null
-      : (plantaCompacta ? edificioCompactoPixi : edificioDe)(
-          SALAS, inventario, PISOS,
-          { soloNivel: vista.tipo === 'piso' ? vista.nivel : null })
+      : composicion === 'sede'
+        ? sedeDe(SALAS, inventario)
+        : (composicion === 'compacta' ? edificioCompactoPixi : edificioDe)(
+            SALAS, inventario, PISOS,
+            { soloNivel: vista.tipo === 'piso' ? vista.nivel : null })
   );
 
   let planta = $derived(

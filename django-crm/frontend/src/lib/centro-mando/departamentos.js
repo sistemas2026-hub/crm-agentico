@@ -36,7 +36,7 @@
  * verdaderas, y las tres se ven distintas entre sí — que es el punto.
  */
 
-import { plantillaDe } from './plantillas.js';
+import { plantillaPara } from './plantillas.js';
 
 /**
  * @typedef {{ id: string, rotulo: string, direccion: string, piso: number,
@@ -71,12 +71,27 @@ function colorDe(texto) {
  * @returns {Sala}
  */
 function componer(decl, tipo) {
-  const { plantilla, faltante } = plantillaDe(decl?.plantilla);
   const ocupaciones = new Map(
     (Array.isArray(decl?.ocupaciones) ? decl.ocupaciones : [])
       .filter((o) => o && o.puesto)
       .map((o) => [String(o.puesto), o])
   );
+
+  //  EL TAMANO DE LA SALA SALE DE CUANTOS AGENTES TIENE, no solo del nombre
+  //  que declara la configuracion.
+  //
+  //  Antes era `plantillaDe(decl?.plantilla)` a secas, y eso dejaba a la
+  //  oficina sin crecer: medido el 01/11/2026, diez agentes en un
+  //  departamento con plantilla `atencion` daban cuatro sillas y SIETE
+  //  ocupaciones sin puesto. El aviso estaba -`ocupacionesSinSilla()` los
+  //  nombra- pero el unico arreglo era que alguien editara el YAML a mano cada
+  //  vez que la empresa suma un agente. Eso es lo que §3.3 llama resolver con
+  //  una sesion de desarrollo algo que ya se resolvio una vez.
+  //
+  //  Se cuentan las OCUPACIONES DECLARADAS y no los agentes del inventario: lo
+  //  que decide cuanta sala hace falta es lo que la empresa escribio para este
+  //  departamento, no quien resulte estar conectado hoy.
+  const { plantilla, faltante } = plantillaPara(decl?.plantilla, ocupaciones.size);
 
   const id = String(decl?.id ?? '');
   const puestos = plantilla.puestos.map((p) => {

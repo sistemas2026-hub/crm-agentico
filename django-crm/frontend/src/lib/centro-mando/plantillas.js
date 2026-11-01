@@ -346,7 +346,33 @@ function ampliar(base, extra) {
   //  La separacion sale de la sala misma, no de una constante: cada plantilla
   //  tiene su escala y un numero fijo apretaria unas y desparramaria otras.
   const sep = fila.length > 1 ? Number((fila[1].gx - fila[0].gx).toFixed(2)) : 3.2;
-  const delta = Number((extra * sep).toFixed(2));
+
+  //  CUANTO BAJA UNA FILA NUEVA. Sale de la sala, igual que `sep`: si ya tiene
+  //  dos filas, la distancia entre ellas; si no, lo que ocupa un escritorio con
+  //  su silla y el paso de atras.
+  const gys = [...filas.keys()].sort((x, y) => x - y);
+  const paso = gys.length > 1
+    ? Number(Math.abs(gys[1] - gys[0]).toFixed(2))
+    : 3.2;
+
+  //  UNA SALA NO SE ESTIRA SIN LIMITE, SE LLENA EN FILAS.
+  //
+  //  La primera version metia TODOS los puestos nuevos en la misma fila. Con
+  //  los tamanos chicos no se notaba, pero el dia que una empresa declare
+  //  veinte agentes en un departamento, `tecnica_21` mediria 78 celdas de
+  //  ancho: eso no es una oficina, es un pasillo con escritorios. Y en una
+  //  planta unica -donde todos los departamentos comparten el plano- una sala
+  //  asi se come el edificio entero.
+  //
+  //  Seis es el maximo que se estira la fila existente; a partir de ahi se
+  //  abren filas nuevas hacia el frente y la sala crece en fondo.
+  const MAX_EXTRA_POR_FILA = 6;
+  const enLaFilaLarga = Math.min(extra, MAX_EXTRA_POR_FILA);
+  const porFila = fila.length + enLaFilaLarga;
+  const alFondo = Math.max(0, extra - enLaFilaLarga);
+  const filasNuevas = Math.ceil(alFondo / porFila);
+
+  const delta = Number((enLaFilaLarga * sep).toFixed(2));
   const mitad = base.mundo.ancho / 2;
   const ancho = Number((base.mundo.ancho + delta).toFixed(2));
   const correr = (gx) => (gx > mitad ? Number((gx + delta).toFixed(2)) : gx);
@@ -368,11 +394,22 @@ function ampliar(base, extra) {
   const nuevos = [];
   const lamparas = [];
   for (let k = 1; k <= extra; k++) {
-    const gx = Number((ultimo.gx + k * sep).toFixed(2));
-    nuevos.push({ id: `p${desde + k}`, nombre: `${raiz} ${desde + k}`, gx, gy: ultimo.gy });
+    let gx, gy;
+    if (k <= enLaFilaLarga) {
+      //  Los primeros estiran la fila que ya estaba.
+      gx = Number((ultimo.gx + k * sep).toFixed(2));
+      gy = ultimo.gy;
+    } else {
+      //  Y el resto abre filas nuevas por delante, alineadas con la primera
+      //  columna: asi los escritorios quedan en rejilla y no escalonados.
+      const i = k - enLaFilaLarga - 1;
+      gx = Number((fila[0].gx + (i % porFila) * sep).toFixed(2));
+      gy = Number((ultimo.gy + (Math.floor(i / porFila) + 1) * paso).toFixed(2));
+    }
+    nuevos.push({ id: `p${desde + k}`, nombre: `${raiz} ${desde + k}`, gx, gy });
     //  Una luminaria cada dos puestos nuevos: sin esto la mitad agregada queda
     //  a oscuras y parece un deposito, no una oficina.
-    if (k % 2 === 1) lamparas.push({ tipo: 'luminaria', gx: Math.round(gx), gy: Math.round(ultimo.gy + 0.6) });
+    if (k % 2 === 1) lamparas.push({ tipo: 'luminaria', gx: Math.round(gx), gy: Math.round(gy + 0.6) });
   }
 
   const mueble = (m) => {
@@ -418,7 +455,13 @@ function ampliar(base, extra) {
   return {
     ...base,
     rotulo: `${base.rotulo} · ${base.puestos.length + extra} puestos`,
-    mundo: { ...base.mundo, ancho },
+    //  El fondo crece con las filas nuevas; el ancho, solo con lo que se
+    //  estiro la fila larga.
+    mundo: {
+      ...base.mundo,
+      ancho,
+      fondo: Number((base.mundo.fondo + filasNuevas * paso).toFixed(2))
+    },
     pasillo: base.pasillo
       ? { desde: correr(base.pasillo.desde), hasta: correr(base.pasillo.hasta) }
       : null,
@@ -439,6 +482,13 @@ function ampliar(base, extra) {
 //  Cuantos puestos de mas tiene cada tamano. Dos y no cinco: el catalogo se
 //  elige de una lista desplegable, y veinte opciones no son mas libertad que
 //  seis -- son veinte lineas para leer antes de elegir.
+//
+//  Y SE QUEDA EN DOS, aunque el 01/11/2026 se decidiera que una empresa crea
+//  mas agentes a medida que crece. Ampliar la lista rompia dos cosas a la vez:
+//  este catalogo lo comparte el motor Python -que no se toca- y las variantes
+//  de aca NO crecen hacia el fondo a proposito. Lo que se agrego en su lugar
+//  es `plantillaPara()`, que DERIVA el tamano de cuantos agentes declara el
+//  departamento sin inventar nombres nuevos de configuracion.
 const TAMANOS = [3, 6];
 
 /**
@@ -477,6 +527,75 @@ export const PLANTILLAS = conTamanos({
 
 /** El nombre que se usa cuando la configuración pide una que no está. */
 export const PLANTILLA_DE_RESERVA = 'generica';
+
+/**
+ * La plantilla que le hace falta a un departamento con `cuantos` agentes.
+ *
+ * POR QUE NO ALCANZA CON LA QUE DECLARA LA CONFIGURACION
+ * -----------------------------------------------------
+ * El 01/11/2026 se fijo una regla de producto: **una empresa crea mas agentes
+ * a medida que crece.** Medido contra lo que habia ese dia, diez agentes en un
+ * departamento con plantilla `atencion` dejaban SIETE sin silla, y veinte no
+ * entraban ni en `atencion_10`, la variante mayor del catalogo. Los agentes no
+ * desaparecian en silencio -`ocupacionesSinSilla()` los nombra- pero la
+ * oficina no crecia sola: habia que editar el YAML a mano cada vez. Eso es
+ * exactamente lo que CLAUDE.md §3.3 prohibe.
+ *
+ * Asi que el tamano deja de elegirse y pasa a DERIVARSE. La configuracion
+ * sigue declarando QUE clase de sala es -`atencion`, `tecnica`- y cuantos
+ * agentes tiene; de ahi sale cuanta sala hace falta.
+ *
+ * TRES COSAS QUE ESTA FUNCION NO HACE, y cada una tiene su motivo:
+ *
+ * 1. **No achica.** Si la configuracion pide `atencion_10` y hoy hay dos
+ *    agentes, la sala sigue siendo de diez: la empresa pidio ese tamano y una
+ *    oficina que se encoge cuando alguien se va es una oficina que se mueve
+ *    sola.
+ * 2. **No inventa nombres de configuracion.** El catalogo con sus `_7` y `_10`
+ *    lo comparte el motor Python, que no se toca. Las salas mas grandes se
+ *    construyen al vuelo y no se registran: no son una opcion que elegir, son
+ *    el resultado de un dato.
+ * 3. **No cambia la clase de sala.** Un departamento tecnico con veinte
+ *    agentes sigue siendo tecnico, con su acento y su mobiliario.
+ *
+ * Y UNA ADVERTENCIA QUE IMPORTA: las salas que esta funcion construye por
+ * encima del catalogo **crecen hacia el fondo**, y eso solo es correcto en una
+ * planta unica. En el edificio apilado de `edificio.js`, mas fondo es un
+ * escritorio detras de la losa de arriba -la desigualdad esta escrita en ese
+ * archivo-. La decision del 01/11/2026 de poner todos los departamentos en una
+ * sola planta es la que lo habilita.
+ *
+ * @param {string} nombre el que declara la configuracion
+ * @param {number} cuantos cuantos agentes tiene declarados el departamento
+ */
+export function plantillaPara(nombre, cuantos) {
+  const { plantilla, faltante } = plantillaDe(nombre);
+  const hacenFalta = Number.isFinite(cuantos) ? Math.max(0, Math.trunc(cuantos)) : 0;
+  const tiene = plantilla.puestos.length;
+  if (hacenFalta <= tiene) return { plantilla, faltante, derivada: false };
+
+  //  LA DE RESERVA NO SE AMPLIA CUANDO ES RESERVA, y SI cuando la eligieron.
+  //
+  //  Las dos cosas son la misma sala y hay que distinguirlas, porque `faltante`
+  //  dice cual de las dos paso. Si la configuracion pidio una plantilla que no
+  //  existe, agrandar la sala en la que se cayo seria agrandar el error -y el
+  //  aviso de `faltante` ya viaja-. Pero `generica` tambien se declara a
+  //  proposito: en la empresa del piloto la usan Administracion, Recursos
+  //  Humanos, Direccion y Recepcion. Esos departamentos tienen el mismo derecho
+  //  a crecer que cualquier otro, y no darselo dejaria sin crecer justo a los
+  //  que mas probable es que empiecen chicos.
+  if (faltante !== null) return { plantilla, faltante, derivada: false };
+
+  //  Se amplia desde la BASE y no desde la variante declarada: ampliar dos
+  //  veces estiraria la fila ya estirada y dejaria los puestos nuevos sobre
+  //  los viejos. `ampliar` cuenta desde la base y eso es lo que espera.
+  const base = PLANTILLAS[String(nombre ?? '').replace(/_\d+$/, '')] ?? plantilla;
+  return {
+    plantilla: ampliar(base, hacenFalta - base.puestos.length),
+    faltante,
+    derivada: true
+  };
+}
 
 /**
  * La plantilla que pide un nombre, y si hubo que caer en la de reserva.
