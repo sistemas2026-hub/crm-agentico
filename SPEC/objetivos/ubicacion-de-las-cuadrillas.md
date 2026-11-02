@@ -22,6 +22,18 @@ Google y Mapbox recibirían la ubicación de los técnicos. La autorización de 
 
 `registrar()` rechaza, fallando CERRADO, tres casos: quien no tiene jornada hoy, quien llega fuera del **horario de las cuadrillas** (con 60 min de margen), y la empresa que no cargó horario. Si esa regla viviera solo en el teléfono, una versión vieja de la app seguiría mandando a las 22:00 — y a esa hora la coordenada es **la casa del técnico**.
 
+**2b · Se comparte SOLA; el técnico no prende nada (02/11/2026)**
+
+Revisa la decisión 2 en un punto. El usuario, al ver el interruptor: *«es mejor que el técnico no tenga que estar presionando un botón; solo estará enterado de que la aplicación comparte la ubicación, y al momento de instalar la app que pida el permiso y ya»*.
+
+Tiene razón en lo que importa: un técnico que tiene que acordarse de prender algo cada mañana no lo prende, y entonces el mapa **miente por omisión** — el supervisor ve «sin señal» y no sabe si es que no hay cobertura o que nadie prendió nada.
+
+- **El consentimiento no desaparece, cambia de lugar.** Android obliga a mostrar el diálogo de permiso, y sin un «permitir» no se lee ni una coordenada. Lo que se fue es repetirlo cada día.
+- **El interruptor queda, encendido por omisión.** Una app de trabajo que comparte dónde está alguien y no le deja pararlo es otra cosa.
+- **Se distingue quién apaga:** lo que apaga el técnico se recuerda; lo que apaga el servidor (fuera de jornada u horario) **no**, porque mañana a las siete sí corresponde. Antes las trataba igual y quedaba apagada para siempre.
+
+Lo que esto **no** cambia: la garantía sigue en el servidor (decisión 2), que rechaza fuera de jornada y de horario. Que la app comparta sola no amplía ni un minuto lo que se guarda.
+
 **3 · Solo la última posición. La tabla no guarda el recorrido**
 
 Una fila por persona, que se pisa. Un rastro permanente de por dónde anduvo un empleado es otro dato y otra decisión; la operación necesita saber dónde está, no por dónde pasó. (Los respaldos de la base son otra cosa: eso se resuelve en la política de respaldo.)
