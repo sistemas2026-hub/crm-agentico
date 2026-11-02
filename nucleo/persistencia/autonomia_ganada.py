@@ -38,10 +38,15 @@ DECIDIDAS = ("aprobada", "ejecutada_ok", "ejecutada_fallo", "desconocida", "rech
 PREFIJO = "autonomia_ganada:"
 
 
-def medir(tenant: str, herramienta: str, desde, hasta, *, canales) -> dict:
+def medir(tenant: str, herramienta: str, desde, hasta, *, canales, rol: str | None = None) -> dict:
     """Los conteos de una herramienta en [desde, hasta). 'canales' son los
-    reales (nucleo/canales/canal.REALES)."""
-    p = {"org": None, "h": herramienta, "desde": desde, "hasta": hasta,
+    reales (nucleo/canales/canal.REALES).
+
+    Con 'rol' (02/11/2026, auditoria M4), las PROPUESTAS cuentan solo las de
+    ese agente: un agente de cara al cliente no se gana la autonomia con
+    aprobaciones que se dieron a otro. Las verificaciones siguen siendo de
+    toda la herramienta (no guardan agente): dicen si la ACCION anda."""
+    p = {"org": None, "h": herramienta, "desde": desde, "hasta": hasta, "rol": rol,
          "decididas": list(DECIDIDAS), "canales": list(canales), "autonoma": f"{PREFIJO}%"}
     with sesion(tenant) as (cur, org):
         p["org"] = org
@@ -60,6 +65,7 @@ def medir(tenant: str, herramienta: str, desde, hasta, *, canales) -> dict:
                    on c.organization_id = a.organization_id and c.id = a.conversation_id
                 where a.organization_id = %(org)s and a.herramienta = %(h)s
                   and coalesce(a.rol_solicitante, '') <> 'bandeja'
+                  and (%(rol)s::text is null or a.rol_solicitante = %(rol)s::text)
                   and c.canal = any(%(canales)s::text[])
                   and coalesce(a.revisado_en, a.creado_en) >= %(desde)s
                   and coalesce(a.revisado_en, a.creado_en) < %(hasta)s""", p)
@@ -138,10 +144,15 @@ def promover(tenant: str, herramienta: str, actor: str, motivo: str, evidencia: 
 def retirar(tenant: str, herramienta: str, actor: str, motivo: str,
             rol: str | None = None) -> dict:
     """Una persona se la quita, por la funcion de la base. Con 'rol', solo a
-    ese agente (y esa fila propia manda sobre la general)."""
+    ese agente (y esa fila propia manda sobre la general). Sin 'rol', a TODOS:
+    cada alcance activo, general y por agente (auditoria M2)."""
     with sesion(tenant) as (cur, org):
-        cur.execute("select * from asistente.autonomia_ganada_retirar_agente(%s, %s, %s, %s, %s)",
-                    (org, herramienta, rol, actor, motivo))
+        if rol:
+            cur.execute("select * from asistente.autonomia_ganada_retirar_agente(%s, %s, %s, %s, %s)",
+                        (org, herramienta, rol, actor, motivo))
+        else:
+            cur.execute("select * from asistente.autonomia_ganada_retirar_todo(%s, %s, %s, %s)",
+                        (org, herramienta, actor, motivo))
         return dict(cur.fetchone())
 
 

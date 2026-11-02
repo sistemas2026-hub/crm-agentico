@@ -3938,7 +3938,8 @@ def autonomia_ganada_promover():
         fila = autonomia_ganada.promover(
             _config_de(tenant), tenant, str(accion), f"{autor} · {usuario}",
             datetime.now(timezone.utc),
-            medir=lambda t, h, d, hh: medicion.medir(t, h, d, hh, canales=canales.REALES),
+            medir=lambda t, h, d, hh, rol=None: medicion.medir(t, h, d, hh, canales=canales.REALES,
+                                                               rol=rol),
             escribir=medicion.promover, leer_vigente=medicion.vigente, rol=rol)
     except autonomia_ganada.NoPromovible as e:
         return jsonify({"error": e.codigo, "faltan": e.faltan}), 409
@@ -3961,13 +3962,13 @@ def autonomia_ganada_retirar():
     motivo = str(cuerpo.get("motivo") or "").strip()
     if not tenant or not accion or not motivo:
         return jsonify({"error": "Faltan 'tenant', 'accion' o 'motivo'."}), 400
+    #  BAJAR SIEMPRE SE PUEDE (auditoria M1): no se rechaza un agente que ya no
+    #  tiene la herramienta -- su fila propia activa quedaria dormida y
+    #  reviviria sola el dia que se la vuelvan a dar -- ni se consulta la config,
+    #  que puede venir de una copia vieja. Solo se valida que sea un nombre.
     rol = str(cuerpo.get("rol") or "").strip() or None
-    if rol:
-        #  Solo un agente que puede usar la herramienta: una fila para otro no
-        #  decide nada y ensucia la historia.
-        from nucleo.seguridad import autonomia_ganada as ag_reglas
-        if rol not in ag_reglas.agentes_que_la_usan(_config_de(tenant), str(accion)):
-            return jsonify({"error": "AGENTE_SIN_ESA_HERRAMIENTA"}), 409
+    if rol and not re.fullmatch(r"[a-z0-9_]{1,64}", rol):
+        return jsonify({"error": "AGENTE_INVALIDO"}), 400
     try:
         autor, usuario, _ = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido:
@@ -10094,12 +10095,15 @@ def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -
     #  pidio. Si no se puede leer la propuesta, no se adivina: queda para una
     #  persona.
     try:
-        rol_solicitante = (persistencia.accion_propuesta_de(tenant, accion_id) or {}).get(
-            "rol_solicitante") or None
+        propuesta = persistencia.accion_propuesta_de(tenant, accion_id)
     except (Exception, SystemExit) as e:                         # noqa: BLE001
         registrar("autonomia_ganada", "no se pudo leer la propuesta: queda para una persona",
                   tenant=tenant, herramienta=herramienta.nombre, error=e)
         return None
+    if not propuesta:
+        #  Sin propuesta no hay agente que mirar: no se adivina lo general.
+        return None
+    rol_solicitante = propuesta.get("rol_solicitante") or None
     vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente,
                                        config_herramienta=herramienta, rol=rol_solicitante)
     if vigente.get("estado") == autonomia_ganada.YA_ES_CRITICA:

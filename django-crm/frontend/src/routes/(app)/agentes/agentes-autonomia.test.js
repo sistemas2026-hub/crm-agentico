@@ -157,6 +157,14 @@ describe('que un agente haga sola una accion, o que vuelva a pedir aprobacion', 
     expect(r.data.autonomia.faltan).toEqual([{ condicion: 'cero_fallidas', tiene: 1, necesita: 0 }]);
   });
 
+  it('un rechazo a proposito del motor se dice en palabras, con 409', async () => {
+    contesta = { ok: false, status: 409, json: async () => ({ error: 'AGENTE_SIN_ESA_HERRAMIENTA' }) };
+    const r = /** @type {any} */ (await actions.promover(accion({ accion: 'reiniciar_ont', rol: 'ventas',
+                                                                 confirmo: 'si' })));
+    expect(r.status).toBe(409);
+    expect(r.data.autonomia.error).toBe('Este agente no usa esa herramienta.');
+  });
+
   it('retirar exige un motivo y manda el agente', async () => {
     const sin = /** @type {any} */ (await actions.retirar(accion({ accion: 'reiniciar_ont', rol: 'soporte' })));
     expect(sin.status).toBe(400);

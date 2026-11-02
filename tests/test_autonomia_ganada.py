@@ -327,7 +327,7 @@ def escribir_rol(tenant, accion, actor, motivo, evidencia, rol=None):
 
 try:
     ag.promover(RAPILINK, "rapilink", "reiniciar_ont", "Ana · u-1", AHORA,
-                medir=lambda *a: sin_evidencia, escribir=escribir_rol,
+                medir=lambda *a, **k: sin_evidencia, escribir=escribir_rol,
                 leer_vigente=lambda t, h, r=None: None, rol="facturacion_cliente")
     #  facturacion_cliente no tiene reiniciar_ont en 'puede_consultar' 
     error = None
@@ -336,12 +336,16 @@ except ag.NoPromovible as e:
 comprobar(error is not None and error.codigo == "AGENTE_SIN_ESA_HERRAMIENTA" and escritas_rol == [],
           "a un agente que no usa la herramienta no se le promueve", str(error and error.codigo))
 leidos: list = []
+medidos_rol: list = []
 ag.promover(RAPILINK, "rapilink", "reiniciar_ont", "Ana · u-1", AHORA,
-            medir=lambda *a: sin_evidencia, escribir=escribir_rol,
+            medir=lambda *a, **k: medidos_rol.append(k.get("rol")) or sin_evidencia,
+            escribir=escribir_rol,
             leer_vigente=lambda t, h, r=None: leidos.append(r) or None, rol="soporte_tecnico_cliente")
 comprobar(escritas_rol == [("reiniciar_ont", "soporte_tecnico_cliente")]
           and leidos == ["soporte_tecnico_cliente"],
           "con un agente que si la usa: se mira y se escribe SU alcance", f"{escritas_rol} {leidos}")
+comprobar(medidos_rol == ["soporte_tecnico_cliente"],
+          "M4: la evidencia de una promocion por agente se mide con SUS propuestas", str(medidos_rol))
 por_rol = {"soporte": {"id": "r1", "estado": "retirada", "rol": "soporte"},
            "soporte_tecnico_cliente": {"id": "p5", "estado": "activa",
                                        "rol": "soporte_tecnico_cliente", "creado_en": "t0"}}
@@ -386,7 +390,7 @@ from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
 
 api._config_de = lambda tenant: RAPILINK_CRITICO   # el camino de lo critico
 api._TOKEN_SERVICIO = None
-medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=10, rechazadas=0)
+medicion.medir = lambda tenant, h, desde, hasta, canales=None, rol=None: m(revisadas=10, rechazadas=0)
 medicion.vigente = lambda t, h: None
 http = api.app.test_client()
 r = http.get("/reportes/autonomia-ganada?tenant=rapilink")
@@ -404,7 +408,7 @@ medicion.promover = lambda t, a, actor, motivo, ev: escritas_ruta.append(("promo
 medicion.retirar = lambda t, a, actor, motivo, rol=None: escritas_ruta.append(("retirar", a, actor, motivo)) or {
     "id": "p10", "estado": "retirada"}
 medicion.vigente = lambda t, h: None
-medicion.medir = lambda tenant, h, desde, hasta, canales=None: m()
+medicion.medir = lambda tenant, h, desde, hasta, canales=None, rol=None: m()
 AUTOR = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
          "autor_rol": "ADMIN"}
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
@@ -419,13 +423,13 @@ r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion"
 comprobar(r.status_code == 403 and len(escritas_ruta) == n,
           "quien no es ADMIN no promueve: el motor lo vuelve a exigir", str(r.status_code))
 canales_pedidos: list = []
-medicion.medir = lambda tenant, h, desde, hasta, canales=None: canales_pedidos.append(canales) or m()
+medicion.medir = lambda tenant, h, desde, hasta, canales=None, rol=None: canales_pedidos.append(canales) or m()
 http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
 from nucleo.canales import canal as modulo_canal                 # noqa: E402
 comprobar(canales_pedidos and set(canales_pedidos[-1]) == set(modulo_canal.REALES),
           "la evidencia se mide solo en canales reales", str(canales_pedidos))
 n = len(escritas_ruta)
-medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=5, rechazadas=0)
+medicion.medir = lambda tenant, h, desde, hasta, canales=None, rol=None: m(revisadas=5, rechazadas=0)
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
 comprobar(r.status_code == 409 and r.get_json()["error"] == "SIN_EVIDENCIA" and len(escritas_ruta) == n,
           "sin evidencia: 409 con lo que falta, y nada escrito", r.get_data(as_text=True)[:200])
@@ -443,7 +447,7 @@ comprobar(http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "ac
                                                         **AUTOR}).status_code == 400,
           "retirar sin motivo: 400")
 medicion.vigente = lambda t, h: {"id": "p9", "estado": "activa"}
-medicion.medir = lambda tenant, h, desde, hasta, canales=None: m()
+medicion.medir = lambda tenant, h, desde, hasta, canales=None, rol=None: m()
 d = http.get("/reportes/autonomia-ganada?tenant=rapilink").get_json()
 reinicio = next(f for f in d["acciones"] if f["accion"] == "reiniciar_ont")
 comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "promocion_id": "p9",
@@ -474,23 +478,33 @@ salida = api._ejecutar_si_es_autonoma(RAPILINK, "rapilink", "accion-2",
 comprobar(salida is None and roles_leidos == ["soporte"],
           "pide la promocion del agente que pidio la accion (y la de soporte esta retirada)",
           str(roles_leidos))
+roles_leidos.clear()
+api.persistencia.accion_propuesta_de = lambda t, a: None
+salida = api._ejecutar_si_es_autonoma(RAPILINK, "rapilink", "accion-3", por_nombre["reiniciar_ont"])
+comprobar(salida is None and roles_leidos == [],
+          "B4: sin propuesta no hay agente que mirar: ni se consulta lo general", str(roles_leidos))
 promovidas_rol: list = []
 medicion.promover = lambda t, a, actor, motivo, ev, rol=None: promovidas_rol.append(rol) or {
     "id": "p11", "estado": "activa"}
 medicion.vigente = lambda t, h, r=None: None
-medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=0, rechazadas=0, confirmadas=0)
+medicion.medir = lambda tenant, h, desde, hasta, canales=None, rol=None: m(revisadas=0, rechazadas=0, confirmadas=0)
 api._config_de = lambda tenant: RAPILINK
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont",
                                                   "rol": "soporte_tecnico_cliente", **AUTOR})
 comprobar(r.status_code == 201 and promovidas_rol == ["soporte_tecnico_cliente"],
           "POST promover con 'rol': se escribe para ese agente", f"{r.status_code} {promovidas_rol}")
-r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
-                                                 "rol": "ventas", "motivo": "x", **AUTOR})
-comprobar(r.status_code == 409, "retirar para un agente que no usa la herramienta: 409",
-          str(r.status_code))
 retiradas_rol: list = []
 medicion.retirar = lambda t, a, actor, motivo, rol=None: retiradas_rol.append(rol) or {
     "id": "p12", "estado": "retirada"}
+r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                 "rol": "ventas", "motivo": "ya no la usa", **AUTOR})
+comprobar(r.status_code == 201 and retiradas_rol == ["ventas"],
+          "M1: retirar para un agente que ya no tiene la herramienta SE ACEPTA (bajar siempre se puede)",
+          f"{r.status_code} {retiradas_rol}")
+r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                 "rol": "Soporte; drop", "motivo": "x", **AUTOR})
+comprobar(r.status_code == 400, "un agente que no es un nombre: 400", str(r.status_code))
+retiradas_rol.clear()
 r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
                                                  "rol": "soporte", "motivo": "no en soporte", **AUTOR})
 comprobar(r.status_code == 201 and retiradas_rol == ["soporte"],

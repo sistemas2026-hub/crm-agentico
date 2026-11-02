@@ -34,6 +34,21 @@
 --  filas generales (rol nulo): el codigo de antes del despliegue sigue
 --  funcionando igual mientras la migracion y el push no coinciden. Las nuevas
 --  (*_agente) reciben el rol, y la degradacion pasa a bajar todos los alcances.
+--
+--  ORDEN: ESTA MIGRACION ANTES DEL PUSH. El codigo nuevo pide la columna 'rol';
+--  sin ella falla cerrado (nada sale solo, promover y retirar dan 503).
+--
+--  VOLVER A CODIGO ANTERIOR A cf0a64fe -- LEER ANTES  (auditoria, 02/11/2026)
+--  --------------------------------------------------------------------------
+--  El codigo viejo lee "la ultima fila de la herramienta" sin mirar 'rol'. Con
+--  filas por agente escritas, tomaria la ultima -- de cualquier agente -- como
+--  si valiera para todos: una promocion dada solo a 'soporte_tecnico_cliente'
+--  pasaria a valer para cualquier agente con la herramienta. Ningun diseno de
+--  tabla lo evita del todo (con otra tabla, al volver se pierden las
+--  restricciones por agente y la general vale para todos). Por eso, ANTES de
+--  desplegar codigo anterior:
+--      py -3.13 cli/autonomia.py <tenant> --detener --actor ... --motivo "vuelta atras"
+--  y despues de volver, retirar lo que corresponda antes de reactivar.
 
 alter table asistente.autonomia_ganada
   add column if not exists rol text check (rol is null or btrim(rol) <> '');
@@ -44,6 +59,34 @@ comment on column asistente.autonomia_ganada.rol is
 
 create index if not exists autonomia_ganada_por_agente_idx
   on asistente.autonomia_ganada (organization_id, herramienta, rol, creado_en desc, id desc);
+
+
+-- -----------------------------------------------------------------------------
+--  LOS CANDADOS POR ALCANCE  (los toman degradar y retirar-todo; promover el suyo)
+-- -----------------------------------------------------------------------------
+create or replace function asistente._autonomia_ganada_bloquear_alcances(
+        p_org uuid, p_herramienta text)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_rol text;
+begin
+  --  General primero y despues cada agente por nombre: el mismo orden para
+  --  todos, asi dos degradaciones a la vez no se cruzan.
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text || ':' || p_herramienta || ':*', 0));
+  for v_rol in
+    select distinct a.rol from asistente.autonomia_ganada a
+     where a.organization_id = p_org and a.herramienta = p_herramienta and a.rol is not null
+     order by a.rol
+  loop
+    perform pg_advisory_xact_lock(hashtextextended(p_org::text || ':' || p_herramienta || ':' || v_rol, 0));
+  end loop;
+end $$;
+
+revoke all on function asistente._autonomia_ganada_bloquear_alcances(uuid, text) from public;
 
 
 -- -----------------------------------------------------------------------------
@@ -66,6 +109,10 @@ begin
   if p_org is distinct from asistente.org_actual() then
     raise exception 'solo se degrada la autonomia de la empresa de esta sesion';
   end if;
+  --  Los MISMOS candados que promover, uno por alcance y en orden fijo: sin
+  --  esto, una promocion que hace commit en el medio quedaba activa despues
+  --  de la falla que motivo degradar (auditoria, B1).
+  perform asistente._autonomia_ganada_bloquear_alcances(p_org, p_herramienta);
   --  Cada alcance (general y cada agente) cuya ULTIMA fila esta activa.
   for v_alcance in
     select distinct on (a.rol) a.rol, a.estado
@@ -158,6 +205,58 @@ begin
   return v_fila;
 end $$;
 
+--  RETIRAR PARA TODOS: baja cada alcance activo, general y por agente. Es lo
+--  que significa "quitarsela a todos"; retirar solo lo general dejaba activas
+--  las promociones por agente (auditoria, M2). Bajar siempre es seguro.
+create or replace function asistente.autonomia_ganada_retirar_todo(
+        p_org uuid, p_herramienta text, p_actor text, p_motivo text)
+returns asistente.autonomia_ganada
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_alcance record;
+  v_fila asistente.autonomia_ganada;
+begin
+  if coalesce(btrim(p_actor), '') = '' then
+    raise exception 'hay que decir QUIEN retira';
+  end if;
+  if coalesce(btrim(p_motivo), '') = '' then
+    raise exception 'hay que decir POR QUE se retira';
+  end if;
+  if p_org is distinct from asistente.org_actual() then
+    raise exception 'solo se retira en la empresa de esta sesion';
+  end if;
+  perform asistente._autonomia_ganada_bloquear_alcances(p_org, p_herramienta);
+  for v_alcance in
+    select distinct on (a.rol) a.rol, a.estado
+      from asistente.autonomia_ganada a
+     where a.organization_id = p_org and a.herramienta = p_herramienta
+     order by a.rol, a.creado_en desc, a.id desc
+  loop
+    if v_alcance.estado = 'activa' then
+      insert into asistente.autonomia_ganada
+             (organization_id, herramienta, rol, estado, actor, motivo)
+      values (p_org, p_herramienta, v_alcance.rol, 'retirada', btrim(p_actor), btrim(p_motivo))
+      returning * into v_fila;
+    end if;
+  end loop;
+  --  Sin nada activo igual deja constancia en lo general: quien retiro tiene
+  --  que ver su decision escrita.
+  if v_fila.id is null then
+    insert into asistente.autonomia_ganada
+           (organization_id, herramienta, estado, actor, motivo)
+    values (p_org, p_herramienta, 'retirada', btrim(p_actor), btrim(p_motivo))
+    returning * into v_fila;
+  end if;
+  return v_fila;
+end $$;
+
+revoke all on function asistente.autonomia_ganada_retirar_todo(uuid, text, text, text) from public;
+grant execute on function asistente.autonomia_ganada_retirar_todo(uuid, text, text, text)
+  to app_backend, autonomia_operador;
+
 revoke all on function asistente.autonomia_ganada_promover_agente(uuid, text, text, text, text, jsonb) from public;
 revoke all on function asistente.autonomia_ganada_retirar_agente(uuid, text, text, text, text) from public;
 grant execute on function asistente.autonomia_ganada_promover_agente(uuid, text, text, text, text, jsonb)
@@ -195,6 +294,32 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
+--  EL AGENTE QUE PIDIO LA ACCION NO SE EDITA  (auditoria, M3)
+-- -----------------------------------------------------------------------------
+--  'rol_solicitante' decide ahora que promocion gobierna el ultimo metro.
+--  Cambiarlo en una propuesta pendiente o reservada la pasaria de un agente
+--  'retirada' a otro 'activa'. Ningun codigo lo actualiza; el trigger lo
+--  vuelve imposible. Aparte del trigger de identidad (202609221030), para no
+--  reescribir aquel.
+create or replace function asistente.acciones_propuestas_rol_inmutable()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.rol_solicitante is distinct from old.rol_solicitante then
+    raise exception 'acciones_propuestas: el agente que pidio la accion no se edita (id %)', old.id
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists acciones_propuestas_rol_inmutable on asistente.acciones_propuestas;
+create trigger acciones_propuestas_rol_inmutable
+  before update of rol_solicitante on asistente.acciones_propuestas
+  for each row execute function asistente.acciones_propuestas_rol_inmutable();
+
+
+-- -----------------------------------------------------------------------------
 --  AUTOVERIFICACION
 -- -----------------------------------------------------------------------------
 do $$
@@ -204,7 +329,9 @@ begin
   foreach v_funcion in array array['autonomia_ganada_promover', 'autonomia_ganada_retirar',
                                    'autonomia_ganada_degradar',
                                    'autonomia_ganada_promover_agente',
-                                   'autonomia_ganada_retirar_agente'] loop
+                                   'autonomia_ganada_retirar_agente',
+                                   'autonomia_ganada_retirar_todo',
+                                   '_autonomia_ganada_bloquear_alcances'] loop
     if not exists (select 1 from pg_proc p
                      join pg_namespace n on n.oid = p.pronamespace
                      join pg_roles r on r.oid = p.proowner

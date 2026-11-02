@@ -83,6 +83,16 @@ export async function load({ locals, fetch, cookies }) {
 
 const NOMBRE = /^[a-z0-9_]{1,64}$/;
 
+/** Lo que el motor rechaza a proposito, dicho para quien decide (409, no 502). */
+const RECHAZOS = /** @type {Record<string, string>} */ ({
+  SIN_EVIDENCIA: 'Todavía no alcanza: mirá lo que le falta.',
+  AGENTE_SIN_ESA_HERRAMIENTA: 'Este agente no usa esa herramienta.',
+  YA_ES_AUTONOMA: 'Este agente ya la hace solo.',
+  CONFIG_SIN_CONFIRMAR: 'No se pudo confirmar la configuración de la empresa desde la base. Probá de nuevo en un minuto.',
+  NO_CANDIDATA: 'Esa acción no tiene en código las comprobaciones que hacen falta para hacerse sola.',
+  NO_ES_UNA_ACCION_CON_APROBACION: 'Esa acción no pide aprobación: no hay nada que cambiar.'
+});
+
 /**
  * Que un agente haga sola una accion, o que vuelva a pedir aprobacion
  * (02/11/2026, PRD §2 y §8.18). Lo decide una persona ADMIN; el autor y su
@@ -108,8 +118,9 @@ export const actions = {
     try {
       await cambiarAutonomia(locals, fetch, 'promover', { accion, ...(rol ? { rol } : {}) });
     } catch (/** @type {any} */ e) {
-      return fail(e?.codigo === 'SIN_EVIDENCIA' ? 409 : 502,
-        { autonomia: { accion, rol, error: e?.message || 'No se pudo cambiar.', faltan: e?.faltan ?? [] } });
+      const conocido = RECHAZOS[e?.codigo];
+      return fail(conocido ? 409 : 502,
+        { autonomia: { accion, rol, error: conocido || e?.message || 'No se pudo cambiar.', faltan: e?.faltan ?? [] } });
     }
     return { autonomia: { accion, rol, ok: 'promovida' } };
   },

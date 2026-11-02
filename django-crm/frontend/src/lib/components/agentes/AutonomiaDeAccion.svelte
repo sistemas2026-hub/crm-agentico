@@ -46,6 +46,13 @@
     {#if accion?.no_critica}<span class="nota">No crítica: no espera evidencia</span>{/if}
   </div>
 
+  {#if enEste?.autonoma && !enEste?.rol}
+    <!-- Viene de la promocion GENERAL (sin agente): vale para todo agente que
+         use la accion, tambien uno que se cree despues. Quitarsela aca la frena
+         solo en este agente (auditoria, M2). -->
+    <p class="nota">Por una autorización para todos los agentes que usan esta acción.</p>
+  {/if}
+
   {#if enEste?.estado === 'degradada'}
     <p class="nota falta">Un efecto no se confirmó o una ejecución falló, y volvió sola a pedir aprobación.</p>
   {/if}

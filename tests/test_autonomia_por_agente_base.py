@@ -86,7 +86,9 @@ try:
             create table public.organization (id uuid primary key);
             insert into public.organization values ('00000000-0000-0000-0000-000000000001');
             create function asistente.org_actual() returns uuid language sql stable as $f$
-              select nullif(current_setting('app.current_tenant', true), '')::uuid $f$;""")
+              select nullif(current_setting('app.current_tenant', true), '')::uuid $f$;
+            create table asistente.acciones_propuestas (
+              id uuid primary key default gen_random_uuid(), rol_solicitante text, estado text);""")
         c.execute((RAIZ / "supabase" / "202610310200_autonomia_ganada.sql").read_text(encoding="utf-8"))
         c.execute(f"set app.current_tenant = '{ORG}'")
         c.execute("select estado from asistente.autonomia_ganada_promover(%s, 'reiniciar_ont', 'ana', 'antes', '{}')",
@@ -145,6 +147,30 @@ try:
                 "la propia manda aunque la general sea mas nueva", str(vigente("soporte")))
         revisar(vigente("ventas") == ("*", "activa"), "y quien no tiene propia toma la general nueva",
                 str(vigente("ventas")))
+        #  RETIRAR PARA TODOS (M2): baja cada alcance activo, y si no habia
+        #  nada activo igual deja constancia.
+        uno("select 1 from asistente.autonomia_ganada_promover_agente(%s, 'reiniciar_ont', 'soporte_tecnico_cliente', 'ana', 'si', '{}')", ORG)
+        uno("select 1 from asistente.autonomia_ganada_retirar_todo(%s, 'reiniciar_ont', 'ana', 'todos')", ORG)
+        activos = c.execute("""select count(*) from (select distinct on (rol) rol, estado
+                                 from asistente.autonomia_ganada where herramienta = 'reiniciar_ont'
+                                order by rol, creado_en desc, id desc) x where estado = 'activa'""").fetchone()[0]
+        revisar(activos == 0, "retirar para todos no deja ningun alcance activo", str(activos))
+        antes = c.execute("select count(*) from asistente.autonomia_ganada").fetchone()[0]
+        uno("select 1 from asistente.autonomia_ganada_retirar_todo(%s, 'reiniciar_ont', 'ana', 'otra vez')", ORG)
+        despues = c.execute("select count(*) from asistente.autonomia_ganada").fetchone()[0]
+        revisar(despues == antes + 1, "sin nada activo, retirar para todos igual deja su constancia")
+
+        #  EL AGENTE QUE PIDIO LA ACCION NO SE EDITA (M3).
+        pid = uno("insert into asistente.acciones_propuestas (rol_solicitante, estado) "
+                  "values ('soporte', 'pendiente') returning id")[0]
+        c.execute("update asistente.acciones_propuestas set estado = 'ejecutando' where id = %s", (pid,))
+        try:
+            c.execute("update asistente.acciones_propuestas set rol_solicitante = 'soporte_tecnico_cliente' "
+                      "where id = %s", (pid,))
+            revisar(False, "cambiar el agente de una propuesta se rechaza")
+        except psycopg.errors.CheckViolation:
+            revisar(True, "cambiar el agente de una propuesta se rechaza (el estado si cambia)")
+
         try:
             c.execute("select asistente.autonomia_ganada_promover_agente('00000000-0000-0000-0000-000000000009', "
                       "'reiniciar_ont', 'soporte', 'ana', 'x', '{}')")

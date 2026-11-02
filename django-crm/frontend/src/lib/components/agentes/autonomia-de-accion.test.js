@@ -12,7 +12,8 @@ import AutonomiaDeAccion from './AutonomiaDeAccion.svelte';
 const REINICIO = {
   accion: 'reiniciar_ont', candidata: true, elegible: true, no_critica: true, faltan: [],
   por_agente: {
-    soporte_tecnico_cliente: { autonoma: true, estado: 'activa', promocion_id: 'p5' },
+    soporte_tecnico_cliente: { autonoma: true, estado: 'activa', promocion_id: 'p5',
+                               rol: 'soporte_tecnico_cliente' },
     soporte: { autonoma: false, estado: 'retirada', promocion_id: null },
     otro: { autonoma: false, estado: 'degradada', promocion_id: null }
   }
@@ -64,6 +65,14 @@ describe('la autonomia de una accion, en cada agente', () => {
                            agente: 'soporte', esAdmin: true });
     expect(html).not.toContain('action="?/promover"');
     expect(html).toMatch(/fall/i);
+  });
+
+  it('cuando lo hace solo por la autorizacion general, lo dice', () => {
+    const general = { ...REINICIO, por_agente: { nuevo: { autonoma: true, estado: 'activa', promocion_id: 'g1' } } };
+    expect(dibujar({ accion: general, agente: 'nuevo', esAdmin: true }))
+      .toContain('para todos los agentes');
+    expect(dibujar({ accion: REINICIO, agente: 'soporte_tecnico_cliente', esAdmin: true }))
+      .not.toContain('para todos los agentes');
   });
 
   it('el resultado de un cambio se muestra solo en el agente donde se hizo', () => {

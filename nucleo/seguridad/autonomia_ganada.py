@@ -289,7 +289,8 @@ def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escr
         raise NoPromovible("YA_ES_AUTONOMA")
     u = umbrales(config, accion)
     desde = ahora - timedelta(days=u["ventana_dias"])
-    m = medir(tenant, accion, desde, ahora)
+    #  Para un agente, la evidencia de SUS propuestas (auditoria M4).
+    m = medir(tenant, accion, desde, ahora, rol=rol) if rol else medir(tenant, accion, desde, ahora)
     if not getattr(h, "critica", True):
         #  LO NO CRITICO NO ESPERA EVIDENCIA  --  PRD §2 y §8.18, 02/11/2026.
         #  Las garantias en codigo ya se exigieron arriba (candidata); lo que
