@@ -37,6 +37,9 @@
 
 <svelte:head><title>Avisos de campo · Dexter</title></svelte:head>
 
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 <div class="flex flex-col gap-space-lg max-w-3xl">
   <header class="flex flex-col gap-space-xs">
     <h1 class="font-headline-lg text-headline-lg text-on-surface">Avisos de campo</h1>
@@ -263,4 +266,5 @@
       Solo gestión puede cambiar esto. Lo de arriba es para consulta.
     </p>
   {/if}
+</div>
 </div>

@@ -40,6 +40,11 @@
   {/snippet}
 </PageHeader>
 
+<!-- El contenedor de la app corta lo que se sale (.v2-main, overflow hidden):
+     cada pantalla hace su propio scroll en .v2-scroll, como Configuracion. Sin
+     esto /capacidad no bajaba y la autonomia ganada quedaba fuera de alcance
+     (02/11/2026). -->
+<div class="v2-scroll">
 <div class="v2-pad" style="padding-top:14px;padding-bottom:32px;display:flex;flex-direction:column;gap:14px">
   <nav class="periodos" aria-label="Período">
     {#each data.periodos as d (d)}
@@ -213,6 +218,7 @@
       {/if}
     {/if}
   </section>
+</div>
 </div>
 
 <style>

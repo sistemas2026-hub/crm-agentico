@@ -65,6 +65,9 @@
 
 <svelte:head><title>Acciones sin conversación</title></svelte:head>
 
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 <div class="legado">
   <h1>Acciones sin conversación</h1>
 
@@ -141,6 +144,7 @@
       </li>
     {/each}
   </ul>
+</div>
 </div>
 
 <style>

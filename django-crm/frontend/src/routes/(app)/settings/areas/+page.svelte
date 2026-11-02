@@ -25,6 +25,9 @@
   let creando = $state(false);
 </script>
 
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 <div class="v2-page">
   <PageHeader title="Áreas de trabajo">
     {#snippet sub()}
@@ -151,6 +154,7 @@
       desde <a href="/agentes">Agentes</a>.
     </p>
   {/if}
+</div>
 </div>
 
 <style>

@@ -28,6 +28,9 @@
 
 <svelte:head><title>Instalaciones · Ajustes</title></svelte:head>
 
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 <div class="hoja">
   <header>
     <h1>Instalaciones</h1>
@@ -111,6 +114,7 @@
       <p class="nota">Solo un administrador puede cambiar esto.</p>
     {/if}
   </form>
+</div>
 </div>
 
 <style>

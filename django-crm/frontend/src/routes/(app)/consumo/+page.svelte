@@ -168,6 +168,9 @@
     Uso del asistente y gasto por tokens, de los últimos 30 días.
   {/snippet}
 </PageHeader>
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 
 {#if data.error || !c}
   <p class="aviso-error">⚠️ {data.error ?? 'No hay datos de consumo.'}</p>
@@ -545,6 +548,7 @@
     </div>
   </div>
 {/if}
+</div>
 
 <style>
   .aviso-error {

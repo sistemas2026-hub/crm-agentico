@@ -69,6 +69,9 @@
 
 <svelte:head><title>Instalaciones</title></svelte:head>
 
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 <div class="hoja" data-privado>
   <header>
     <h1>Solicitudes de instalación</h1>
@@ -289,6 +292,7 @@
       {/if}
     </article>
   {/each}
+</div>
 </div>
 
 <style>
