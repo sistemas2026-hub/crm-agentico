@@ -104,6 +104,22 @@ export interface Mundo {
    * sobre el piloto: 5 de 11 salas sin forma de entrar.
    */
   puertaLateral?: [number, number];
+
+  /**
+   * Qué lados que miran a la cámara llevan peto de cerramiento.
+   *
+   * `frente` es el borde `gy = fondo` y `derecha` el borde `gx = ancho`: los
+   * dos lados que una sala deja abiertos porque un muro entero ahí taparía
+   * media sala. El peto los cierra sin tapar a nadie. Ver
+   * `construirAntepecho`.
+   */
+  antepecho?: { frente?: boolean; derecha?: boolean };
+
+  /** El vano de la puerta en el peto del frente, en celdas `gx`. */
+  puertaFrente?: [number, number];
+
+  /** El vano de la puerta en el peto de la derecha, en celdas `gy`. */
+  puertaDerecha?: [number, number];
 }
 
 /** Una caja ocupada de verdad: dónde empieza y cuánto mide. */

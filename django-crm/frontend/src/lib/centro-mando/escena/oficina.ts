@@ -35,7 +35,7 @@ import { ALTURA_UNIDAD, BALDOSA, aPantalla, profundidad, rombo, type Mundo } fro
 import { PALETA, tono } from './paleta';
 import type { Texturas } from './texturas';
 import { construirNucleoAcristalado, construirPieza, type PiezaDeArquitectura } from './arquitectura';
-import { aplanar, caja, panelMuroFondo, panelMuroLateral } from './volumen';
+import { aplanar, caja, panelEnX, panelEnY, panelMuroFondo, panelMuroLateral } from './volumen';
 
 /**
  * UNA PLANTA ES UN DATO, NO CÓDIGO.
@@ -381,6 +381,103 @@ function construirLosa(mundo: Mundo): Graphics {
  * diferencia entre «esta planta sigue y no la dibujamos» y «esta planta termina
  * aqui» es justo lo que una seccion arquitectonica tiene que dejar claro.
  */
+/**
+ * EL CERRAMIENTO DE LOS DOS LADOS QUE MIRAN A LA CÁMARA.
+ *
+ * Una sala dibuja dos muros altos —el de fondo y el lateral— y deja los otros
+ * dos abiertos. Mirada de lejos eso no se lee como un departamento sino como
+ * dos tabiques sueltos, que es justo lo que se señaló al ver la planta
+ * compacta: «algunas oficinas parecen espacios separados por paredes
+ * parciales, no departamentos completos».
+ *
+ * POR QUÉ NO SE CIERRAN CON UN MURO ENTERO, con el número delante. En esta
+ * isometría la `y` de pantalla crece hacia abajo y la altura se resta, así que
+ * un muro en el borde de adelante tapa todo lo que tenga detrás y más bajo.
+ * Medido, en celdas desde el borde:
+ *
+ *     altura   tapa escritorios   tapa personas
+ *       1,2         0,7               0,0
+ *       2,2         2,4               0,7
+ *       4,0         5,3               3,7     <- un muro normal
+ *
+ * Una sala mide nueve o diez de fondo: un muro de 4 esconde media sala y a la
+ * gente que trabaja en ella. Un antepecho de 1,2 cierra el recinto y **no tapa
+ * a nadie**. Eso es lo que se dibuja: un peto a la altura de un escritorio,
+ * con su remate, y el hueco de la puerta abierto donde corresponde.
+ *
+ * El vano es el MISMO dato que usa la rejilla de navegación. Una puerta que se
+ * ve y por la que no se puede pasar, o al revés, es la clase de desacuerdo que
+ * aparece cuando la geometría y las rutas se escriben dos veces.
+ */
+/**
+ * Lo que sube el peto de cerramiento.
+ *
+ * 1,2 y no mas: a esa altura no tapa a NADIE -ver la tabla de arriba- y aun
+ * asi dibuja el recinto entero. A 2,2 ya empieza a comerse escritorios.
+ */
+export const ALTURA_DE_ANTEPECHO = 1.2;
+
+function construirAntepecho(mundo: Mundo): Graphics {
+  const g = new Graphics();
+  const h = ALTURA_DE_ANTEPECHO;
+  const remate = 0.1;
+
+  /** Un tramo del peto, con su remate más claro arriba. */
+  const tramo = (
+    pintar: (gg: Graphics, desde: number, largo: number, z0: number, z1: number, color: number, alpha?: number) => void,
+    desde: number, hasta: number
+  ) => {
+    const largo = hasta - desde;
+    if (largo <= 0.01) return;
+    pintar(g, desde, largo, 0, h - remate, PALETA.muroLateral);
+    pintar(g, desde, largo, h - remate, h, PALETA.muroRemate);
+    //  La sombra de contacto al pie: sin ella el peto flota sobre el suelo.
+    pintar(g, desde, largo, 0, 0.22, PALETA.pisoProfundo, 0.6);
+  };
+
+  /** El hueco de la puerta: jambas a los lados y umbral en el suelo. */
+  const marcarVano = (
+    pintar: (gg: Graphics, desde: number, largo: number, z0: number, z1: number, color: number, alpha?: number) => void,
+    vano: [number, number],
+    aSuelo: (u: number) => { x: number; y: number }
+  ) => {
+    pintar(g, vano[0] - 0.14, 0.14, 0, h, PALETA.muroRemate);
+    pintar(g, vano[1], 0.14, 0, h, PALETA.muroRemate);
+    const a = aSuelo(vano[0]);
+    const b = aSuelo(vano[1]);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
+     .stroke({ color: PALETA.muroBanda, width: 2.5, alpha: 0.9 });
+  };
+
+  if (mundo.antepecho?.frente) {
+    const pintar = (gg: Graphics, desde: number, largo: number, z0: number, z1: number, c: number, a = 1) =>
+      panelEnY(gg, mundo.fondo, desde, largo, z0, z1, c, a);
+    const v = mundo.puertaFrente;
+    if (v) {
+      tramo(pintar, 0, Math.max(0, v[0]));
+      tramo(pintar, Math.min(mundo.ancho, v[1]), mundo.ancho);
+      marcarVano(pintar, v, (u) => aPantalla(u, mundo.fondo, 0.02));
+    } else {
+      tramo(pintar, 0, mundo.ancho);
+    }
+  }
+
+  if (mundo.antepecho?.derecha) {
+    const pintar = (gg: Graphics, desde: number, largo: number, z0: number, z1: number, c: number, a = 1) =>
+      panelEnX(gg, mundo.ancho, desde, largo, z0, z1, c, a);
+    const v = mundo.puertaDerecha;
+    if (v) {
+      tramo(pintar, 0, Math.max(0, v[0]));
+      tramo(pintar, Math.min(mundo.fondo, v[1]), mundo.fondo);
+      marcarVano(pintar, v, (u) => aPantalla(mundo.ancho, u, 0.02));
+    } else {
+      tramo(pintar, 0, mundo.fondo);
+    }
+  }
+
+  return g;
+}
+
 function construirBaranda(mundo: Mundo): Graphics {
   const g = new Graphics();
   const h = 0.8;
@@ -2392,6 +2489,16 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
     rot.zIndex = -2400;
     rot.eventMode = 'none';
     raiz.addChild(rot);
+  }
+
+  //  EL CERRAMIENTO de los dos lados que miran a la camara. Ver
+  //  `construirAntepecho`: si lleva puerta, el hueco se abre y se marca.
+  if (mundo.antepecho?.frente || mundo.antepecho?.derecha) {
+    const cierre = construirAntepecho(mundo);
+    //  Al mismo nivel que la baranda: por encima del suelo y por debajo del
+    //  mobiliario, que si no un antepecho tacharia el escritorio de delante.
+    cierre.zIndex = -1500;
+    raiz.addChild(cierre);
   }
 
   if (planta.baranda) {

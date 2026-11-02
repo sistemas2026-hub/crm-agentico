@@ -53,6 +53,10 @@ export function sedeDe(salas, agentes, opciones = {}) {
   //  cruzan las figuras de ambiente.
   const circulacion = [...pasillos, patio, entrada].filter(Boolean);
 
+  //  LOS VANOS QUE DAN AL PATIO, para que no se le pongan muebles delante.
+  //  Se llena al colocar las salas y se usa al amueblar el patio, mas abajo.
+  const vanosAlPatio = [];
+
   /**
    * El vano de la puerta lateral de una sala, si hay circulación a su
    * izquierda.
@@ -67,13 +71,131 @@ export function sedeDe(salas, agentes, opciones = {}) {
    * `edificio.js`: centrada queda detrás del puesto principal en casi todas
    * las plantillas, y una puerta tapada por una silla no se lee como puerta.
    */
-  const puertaLateralDe = (p) => {
-    const pegada = circulacion.some((c) =>
-      Math.abs(c.x + c.ancho - p.x) < 0.01
-      && c.y < p.y + p.fondo && p.y < c.y + c.fondo);
-    if (!pegada) return undefined;
-    const desde = Math.max(0.6, Math.round(p.fondo * 0.25 * 10) / 10);
-    return [desde, desde + 1.8];
+  /** ¿Hay circulación pegada a este lado de la sala? */
+  const daACirculacion = (p, lado) => circulacion.some((c) => {
+    if (lado === 'izquierda') {
+      return Math.abs(c.x + c.ancho - p.x) < 0.01
+        && c.y < p.y + p.fondo && p.y < c.y + c.fondo;
+    }
+    if (lado === 'derecha') {
+      return Math.abs(c.x - (p.x + p.ancho)) < 0.01
+        && c.y < p.y + p.fondo && p.y < c.y + c.fondo;
+    }
+    if (lado === 'frente') {
+      return Math.abs(c.y - (p.y + p.fondo)) < 0.01
+        && c.x < p.x + p.ancho && p.x < c.x + c.ancho;
+    }
+    return Math.abs(c.y + c.fondo - p.y) < 0.01
+      && c.x < p.x + p.ancho && p.x < c.x + c.ancho;
+  });
+
+  /** ¿Hay otra sala pegada a este lado? */
+  const salaPegada = (p, lado) => puestas.some((q) => {
+    if (q === p) return false;
+    if (lado === 'derecha') {
+      return Math.abs(q.x - (p.x + p.ancho)) < 0.01
+        && q.y < p.y + p.fondo && p.y < q.y + q.fondo;
+    }
+    return Math.abs(q.y - (p.y + p.fondo)) < 0.01
+      && q.x < p.x + p.ancho && p.x < q.x + q.ancho;
+  });
+
+  /** Lo que mide un vano de puerta. Una persona pasa; dos no. */
+  const ANCHO_DE_VANO = 1.8;
+
+  /**
+   * El vano de una puerta en un lado de la sala, corrido al hueco que haya.
+   *
+   * ARRANCÓ EN «UN CUARTO DEL LADO», copiado de `edificio.js`, y la guarda de
+   * `sede.test.js` lo tumbó: en la plantilla de atención el puesto «Atención
+   * 1» queda a 1,2 del muro justo donde caía el vano. Una puerta tapada por
+   * una silla no se lee como puerta, y encima deja a ese puesto sin salida.
+   *
+   * Así que el vano se busca, igual que el ancla de los rótulos: se recorre el
+   * lado y se elige el tramo más lejano de cualquier puesto pegado a ese muro.
+   * No se mueve el escritorio —los puestos salen de lo que declara la
+   * empresa— sino la puerta, que es lo que este archivo sí decide.
+   *
+   * @param largo cuánto mide ese lado, en celdas
+   * @param estorbos posición a lo largo del lado de lo que no se puede tapar
+   */
+  const vanoDe = (largo, estorbos = []) => {
+    const margen = 0.6;
+    const util = largo - margen * 2 - ANCHO_DE_VANO;
+    if (util <= 0) return [margen, largo - margen];
+    let mejor = margen;
+    let mejorHolgura = -Infinity;
+    //  Once posiciones alcanzan: un vano mide 1,8 y los lados miden 9 o 14.
+    for (let i = 0; i <= 10; i++) {
+      const desde = margen + (i / 10) * util;
+      const centro = desde + ANCHO_DE_VANO / 2;
+      const holgura = estorbos.length === 0
+        ? 0
+        : Math.min(...estorbos.map((e) => Math.abs(e - centro)));
+      if (holgura > mejorHolgura) {
+        mejorHolgura = holgura;
+        mejor = desde;
+      }
+    }
+    return [Number(mejor.toFixed(2)), Number((mejor + ANCHO_DE_VANO).toFixed(2))];
+  };
+
+  /**
+   * Los puestos que están lo bastante cerca de un muro como para estorbar su
+   * puerta, proyectados sobre ese muro.
+   *
+   * @param planta la sala ya compuesta
+   * @param lado cuál de los cuatro
+   */
+  const estorbosDe = (planta, lado) => {
+    const CERCA = 2.2;
+    const m = planta.mundo;
+    return (planta.puestos ?? [])
+      .filter((q) => {
+        if (lado === 'izquierda') return (q.gx ?? 0) < CERCA;
+        if (lado === 'derecha') return m.ancho - (q.gx ?? 0) < CERCA;
+        return m.fondo - (q.gy ?? 0) < CERCA;
+      })
+      .map((q) => (lado === 'frente' ? (q.gx ?? 0) : (q.gy ?? 0)));
+  };
+
+  /**
+   * EL CERRAMIENTO DE UNA SALA, DEDUCIDO DEL PLANO.
+   *
+   * Se decide por geometría y no por el nombre del departamento: preguntarle
+   * al plano —¿qué tengo pegado a cada lado?— sigue siendo cierto el día que
+   * el reparto cambie, y además es la única forma de que valga para una
+   * empresa que declare otros departamentos.
+   *
+   * Las reglas, y cada una tiene su motivo:
+   *
+   * - Los muros ALTOS de fondo e izquierda ya los dibuja la sala. Llevan vano
+   *   sólo si ese lado da a una circulación; contra otra sala sería una puerta
+   *   a un escritorio ajeno.
+   * - Los dos lados que miran a la cámara llevan PETO, que cierra el recinto
+   *   sin tapar a nadie. Ver `ALTURA_DE_ANTEPECHO`.
+   * - **Ningún peto donde ya hay otra sala pegada**: ahí está su muro alto, y
+   *   dos cerramientos en el mismo borde son la «pared duplicada» que hay que
+   *   evitar. Es también lo que hace que una columna de salas se lea como una
+   *   manzana maciza y no como una fila de cajas.
+   * - Y ningún vano contra el borde del edificio: un hueco que no da a ningún
+   *   sitio es un agujero, no una puerta.
+   */
+  const cerramientoDe = (p, planta) => {
+    const ladoIzq = daACirculacion(p, 'izquierda');
+    const ladoDer = daACirculacion(p, 'derecha');
+    const alFrente = daACirculacion(p, 'frente');
+    const petoDerecha = !salaPegada(p, 'derecha');
+    const petoFrente = !salaPegada(p, 'frente');
+    const con = (lado) => estorbosDe(planta, lado);
+    return {
+      puertaLateral: ladoIzq ? vanoDe(p.fondo, con('izquierda')) : undefined,
+      antepecho: (petoDerecha || petoFrente)
+        ? { frente: petoFrente, derecha: petoDerecha }
+        : undefined,
+      puertaDerecha: petoDerecha && ladoDer ? vanoDe(p.fondo, con('derecha')) : undefined,
+      puertaFrente: petoFrente && alFrente ? vanoDe(p.ancho, con('frente')) : undefined
+    };
   };
 
   //  1. EL SUELO DE LA SEDE, bajo todo.
@@ -136,7 +258,24 @@ export function sedeDe(salas, agentes, opciones = {}) {
     //  que sobra no queda repartido alrededor de cada sala sino junto, al
     //  frente y a la derecha, y eso se lee como pasillo.
     const planta = plantaDe(puesta.sala, agentes);
-    const vano = puertaLateralDe(puesta);
+    const cierre = cerramientoDe(puesta, { ...planta, mundo: { ...planta.mundo, ancho: puesta.ancho, fondo: puesta.fondo } });
+    //  Si este vano da al patio, se anota en coordenadas LOCALES del patio.
+    if (patio) {
+      if (cierre.puertaDerecha && Math.abs(patio.x - (puesta.x + puesta.ancho)) < 0.01) {
+        vanosAlPatio.push({
+          lado: 'izquierda',
+          desde: puesta.y + cierre.puertaDerecha[0] - patio.y,
+          hasta: puesta.y + cierre.puertaDerecha[1] - patio.y
+        });
+      }
+      if (cierre.puertaLateral && Math.abs(patio.x + patio.ancho - puesta.x) < 0.01) {
+        vanosAlPatio.push({
+          lado: 'derecha',
+          desde: puesta.y + cierre.puertaLateral[0] - patio.y,
+          hasta: puesta.y + cierre.puertaLateral[1] - patio.y
+        });
+      }
+    }
     //  EL ANCHO SALE DEL REPARTO, NO DE LA PLANTILLA. `anillo.js` ensancha
     //  cada sala hasta llenar su columna para que no quede suelo muerto al
     //  costado; si acá se dibujara con el ancho de la plantilla, ese suelo
@@ -150,7 +289,10 @@ export function sedeDe(salas, agentes, opciones = {}) {
         ...planta.mundo,
         ancho: puesta.ancho,
         fondo: puesta.fondo,
-        ...(vano ? { puertaLateral: vano } : {})
+        ...(cierre.puertaLateral ? { puertaLateral: cierre.puertaLateral } : {}),
+        ...(cierre.antepecho ? { antepecho: cierre.antepecho } : {}),
+        ...(cierre.puertaDerecha ? { puertaDerecha: cierre.puertaDerecha } : {}),
+        ...(cierre.puertaFrente ? { puertaFrente: cierre.puertaFrente } : {})
       },
       origen: { gx: puesta.x, gy: puesta.y, gz: 0 },
       //  SIN LOSA PROPIA: el suelo ya está, y dos suelos a la misma altura se
@@ -184,7 +326,7 @@ export function sedeDe(salas, agentes, opciones = {}) {
       muros: false,
       losa: true,
       baranda: false,
-      mobiliario: mobiliarioDePatio(patio),
+      mobiliario: mobiliarioDePatio(patio, vanosAlPatio),
       puestos: []
     });
   }

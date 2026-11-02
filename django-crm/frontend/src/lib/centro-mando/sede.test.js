@@ -138,6 +138,136 @@ describe('a toda sala se puede entrar DE VERDAD', () => {
   });
 });
 
+describe('cada sala es un recinto cerrado con su puerta', () => {
+  //  «Algunas oficinas parecen espacios separados por paredes parciales, no
+  //  departamentos completos», decía la revisión del 02/11/2026 mirando la
+  //  planta compacta. Era cierto: una sala dibujaba dos muros y dejaba los
+  //  otros dos lados al aire.
+
+  it('ninguna sala queda sin cerrar por un lado que da al vacío', () => {
+    //  LA REGLA: todo lado que no tenga otra sala pegada lleva cerramiento.
+    //  Los de fondo e izquierda son muros altos que la sala ya dibuja; los dos
+    //  que miran a la cámara llevan peto.
+    for (const n of [2, 5, 8, 11]) {
+      const sede = sedeDe(salasDe(n), []);
+      const cuartos = sede.plantas.filter((p) => p.papel === 'sala');
+      for (const p of cuartos) {
+        const o = p.origen;
+        const pegada = (lado) => cuartos.some((q) => {
+          if (q === p) return false;
+          const oq = q.origen;
+          if (lado === 'derecha') {
+            return Math.abs(oq.gx - (o.gx + p.mundo.ancho)) < 0.01
+              && oq.gy < o.gy + p.mundo.fondo && o.gy < oq.gy + q.mundo.fondo;
+          }
+          return Math.abs(oq.gy - (o.gy + p.mundo.fondo)) < 0.01
+            && oq.gx < o.gx + p.mundo.ancho && o.gx < oq.gx + q.mundo.ancho;
+        });
+        if (!pegada('derecha')) {
+          expect(p.mundo.antepecho?.derecha, `${p.sala} abierta por la derecha`).toBe(true);
+        }
+        if (!pegada('frente')) {
+          expect(p.mundo.antepecho?.frente, `${p.sala} abierta por el frente`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('y ninguna queda sin puerta a una circulación', () => {
+    for (const n of [1, 2, 5, 8, 11]) {
+      const sede = sedeDe(salasDe(n), []);
+      for (const p of sede.plantas.filter((x) => x.papel === 'sala')) {
+        const m = p.mundo;
+        const vias = [m.puerta, m.puertaLateral, m.puertaDerecha, m.puertaFrente]
+          .filter(Boolean).length;
+        expect(vias, `${p.sala} (empresa de ${n}) no tiene ninguna puerta`)
+          .toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('no se dibujan dos cerramientos en el mismo borde', () => {
+    //  «Evitando paredes duplicadas». Si dos salas están pegadas, el borde
+    //  entre ellas lo cierra el muro alto de una sola: un peto encima sería
+    //  una pared de más, y de lejos se ve como una junta doble.
+    const sede = sedeDe(salasDe(11), []);
+    const cuartos = sede.plantas.filter((p) => p.papel === 'sala');
+    for (const p of cuartos) {
+      const o = p.origen;
+      const hayVecinaDerecha = cuartos.some((q) => q !== p
+        && Math.abs(q.origen.gx - (o.gx + p.mundo.ancho)) < 0.01
+        && q.origen.gy < o.gy + p.mundo.fondo && o.gy < q.origen.gy + q.mundo.fondo);
+      if (hayVecinaDerecha) {
+        expect(p.mundo.antepecho?.derecha, `${p.sala} dobla el cerramiento con su vecina`)
+          .not.toBe(true);
+      }
+    }
+  });
+
+  it('ningún vano da contra el borde del edificio', () => {
+    //  Un hueco que no da a ningún sitio es un agujero, no una puerta.
+    const sede = sedeDe(salasDe(11), []);
+    const circ = circulaciones(sede);
+    for (const p of sede.plantas.filter((x) => x.papel === 'sala')) {
+      const o = p.origen;
+      const m = p.mundo;
+      if (m.puertaDerecha) {
+        const da = circ.some((c) => Math.abs(c.x - (o.gx + m.ancho)) < 0.01
+          && c.y < o.gy + m.fondo && o.gy < c.y + c.fondo);
+        expect(da, `${p.sala}: puerta derecha contra el vacío`).toBe(true);
+      }
+      if (m.puertaFrente) {
+        const da = circ.some((c) => Math.abs(c.y - (o.gy + m.fondo)) < 0.01
+          && c.x < o.gx + m.ancho && o.gx < c.x + c.ancho);
+        expect(da, `${p.sala}: puerta de frente contra el vacío`).toBe(true);
+      }
+    }
+  });
+
+  it('el vano cabe en su lado y deja jamba a los dos costados', () => {
+    const sede = sedeDe(salasDe(11), []);
+    for (const p of sede.plantas.filter((x) => x.papel === 'sala')) {
+      const m = p.mundo;
+      for (const [nombre, v, largo] of [
+        ['lateral', m.puertaLateral, m.fondo],
+        ['derecha', m.puertaDerecha, m.fondo],
+        ['frente', m.puertaFrente, m.ancho]
+      ]) {
+        if (!v) continue;
+        expect(v[0], `${p.sala}/${nombre} empieza en el canto`).toBeGreaterThan(0.3);
+        expect(v[1], `${p.sala}/${nombre} termina en el canto`).toBeLessThan(largo - 0.3);
+        expect(v[1] - v[0], `${p.sala}/${nombre} mide ${(v[1] - v[0]).toFixed(1)}`)
+          .toBeGreaterThan(1.2);
+      }
+    }
+  });
+
+  it('ninguna puerta cae encima de un escritorio', () => {
+    //  «Las puertas no podrán atravesar escritorios ni mobiliario». Un vano
+    //  tapado por una silla no se lee como puerta y además deja el puesto sin
+    //  sitio por donde salir.
+    const sede = sedeDe(salasDe(11), []);
+    for (const p of sede.plantas.filter((x) => x.papel === 'sala')) {
+      const m = p.mundo;
+      for (const q of p.puestos ?? []) {
+        const gx = q.gx ?? 0;
+        const gy = q.gy ?? 0;
+        if (m.puertaLateral && gy > m.puertaLateral[0] - 1 && gy < m.puertaLateral[1] + 1) {
+          expect(gx, `${p.sala}: ${q.nombre} tapa la puerta lateral`).toBeGreaterThan(1.4);
+        }
+        if (m.puertaDerecha && gy > m.puertaDerecha[0] - 1 && gy < m.puertaDerecha[1] + 1) {
+          expect(m.ancho - gx, `${p.sala}: ${q.nombre} tapa la puerta derecha`)
+            .toBeGreaterThan(1.4);
+        }
+        if (m.puertaFrente && gx > m.puertaFrente[0] - 1 && gx < m.puertaFrente[1] + 1) {
+          expect(m.fondo - gy, `${p.sala}: ${q.nombre} tapa la puerta del frente`)
+            .toBeGreaterThan(1.4);
+        }
+      }
+    }
+  });
+});
+
 describe('la sede devuelve el mismo contrato que el edificio apilado', () => {
   it('trae plantas, niveles y mundo', () => {
     const sede = sedeDe(salasDe(11), []);

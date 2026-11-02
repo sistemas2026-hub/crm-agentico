@@ -52,12 +52,28 @@ export const MARGEN_DE_PASO = 1.2;
 export const MINIMO = { ancho: 8, fondo: 8 };
 
 /**
+ * Lo que se deja libre a cada lado del vano de una puerta.
+ *
+ * UN BANCO DELANTE DE UNA PUERTA ES UNA PUERTA CERRADA, y eso no se ve
+ * mirando: la puerta sigue dibujada. Lo encontró la rejilla de navegación el
+ * 02/11/2026, en cuanto hubo una: **siete puestos de Comercial y Auditoría no
+ * se alcanzaban desde el pasillo** aunque sus dos salas tenían su vano
+ * abierto. La celda de JUSTO AFUERA estaba ocupada por el macetero del borde
+ * del patio.
+ */
+export const DESPEJE_DE_PUERTA = 1.6;
+
+/**
  * El mobiliario de un patio, en coordenadas locales de su losa.
  *
  * @param {{ancho: number, fondo: number}} patio
+ * @param {{lado: 'izquierda'|'derecha', desde: number, hasta: number}[]} [puertas]
+ *        los vanos que dan a este patio, en `gy` local. NO son un dato de la
+ *        empresa: son geometría del plano, y lo único que hacen es QUITAR
+ *        piezas. Nunca agregan ninguna.
  * @returns {{tipo: string, gx: number, gy: number, largo?: number}[]}
  */
-export function mobiliarioDePatio(patio) {
+export function mobiliarioDePatio(patio, puertas = []) {
   const ancho = Number(patio?.ancho) || 0;
   const fondo = Number(patio?.fondo) || 0;
   if (ancho < MINIMO.ancho || fondo < MINIMO.fondo) return [];
@@ -93,11 +109,22 @@ export function mobiliarioDePatio(patio) {
     turno += 1;
   }
 
+  //  Y NADA DELANTE DE UNA PUERTA. Una pieza del borde izquierdo estorba a un
+  //  vano del lado izquierdo, y lo mismo del otro. Se mira el lado además del
+  //  `gy`: un banco del borde derecho no tapa una puerta de la izquierda, y
+  //  descartarlo igual dejaria el patio pelado sin motivo.
+  const tapaUnaPuerta = (pieza) => (puertas ?? []).some((v) => {
+    const suLado = pieza.gx < ancho / 2 ? 'izquierda' : 'derecha';
+    if (v.lado !== suLado) return false;
+    return pieza.gy > v.desde - DESPEJE_DE_PUERTA
+      && pieza.gy < v.hasta + DESPEJE_DE_PUERTA;
+  });
+
   const piezas = [
     ...fijas,
     ...bordes.filter((b) => !fijas.some(
       (f) => Math.hypot(f.gx - b.gx, f.gy - b.gy) < PASO / 2))
-  ];
+  ].filter((pieza) => pieza.tipo === 'luminaria' || !tapaUnaPuerta(pieza));
 
   //  Las luminarias van en el TECHO: son las únicas que pueden ir por el eje
   //  sin que nadie las atraviese caminando.
