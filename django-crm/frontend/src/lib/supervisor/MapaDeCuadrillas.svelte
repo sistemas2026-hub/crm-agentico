@@ -39,20 +39,34 @@
   /** @type {any} */
   let L = null;
 
-  onMount(async () => {
-    L = (await import('leaflet')).default;
-    await import('leaflet/dist/leaflet.css');
-    if (!caja) return;
-    mapa = L.map(caja, { attributionControl: true, zoomControl: true });
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap'
-    }).addTo(mapa);
-    capa = L.layerGroup().addTo(mapa);
-    //  Sin nada que mostrar, el mapa igual tiene que verse: Soledad.
-    mapa.setView([10.9185, -74.7668], 13);
-    dibujar();
-    return () => mapa?.remove();
+  //  LA LIMPIEZA VA EN UN `onMount` SÍNCRONO (01/11/2026). Un `onMount`
+  //  asíncrono devuelve una promesa, y Svelte ignora lo que resuelva: la
+  //  función de limpieza nunca corría y el mapa quedaba vivo al salir de la
+  //  pantalla, con su reloj y sus oyentes. Lo marcó `svelte-check`; sin eso
+  //  no se nota hasta que la memoria crece.
+  onMount(() => {
+    let vivo = true;
+    (async () => {
+      L = (await import('leaflet')).default;
+      await import('leaflet/dist/leaflet.css');
+      //  Entre el import y acá el supervisor pudo haberse ido de la pantalla.
+      if (!vivo || !caja) return;
+      mapa = L.map(caja, { attributionControl: true, zoomControl: true });
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(mapa);
+      capa = L.layerGroup().addTo(mapa);
+      //  Sin nada que mostrar, el mapa igual tiene que verse: Soledad.
+      mapa.setView([10.9185, -74.7668], 13);
+      dibujar();
+    })();
+    return () => {
+      vivo = false;
+      mapa?.remove();
+      mapa = null;
+      capa = null;
+    };
   });
 
   //  Los pines se rehacen cuando cambian los datos; el sondeo de la pantalla
@@ -123,6 +137,14 @@
 
   <div class="mp-caja" bind:this={caja}></div>
 
+  <!-- SIN CUADRILLAS ARMADAS (01/11/2026): se dice, en vez de dejar un mapa
+       vacío que no se distingue de uno roto. -->
+  {#if !(cuadrillas ?? []).length}
+    <p class="mp-vacio snoc-secundario">
+      No hay cuadrillas armadas para este día: no hay a quién ubicar.
+    </p>
+  {/if}
+
   <p class="mp-nota snoc-secundario">
     Un punto dice que el teléfono de esa persona reportó esa coordenada, no que la persona esté ahí.
     Lo atenuado pasó los 30 minutos: es dónde estuvo, no dónde está.
@@ -146,7 +168,8 @@
     background: var(--snoc-surface-container);
     overflow: hidden;
   }
-  .mp-nota, .mp-sin { margin: 0; font-size: 12px; }
+  .mp-nota, .mp-sin, .mp-vacio { margin: 0; font-size: 12px; }
+  .mp-vacio { font-weight: 600; }
   .mp-sin { font-weight: 600; }
   /* Leaflet dibuja dentro de la caja; su CSS llega con el módulo. */
   :global(.leaflet-container) { font: inherit; background: var(--snoc-surface-container); }

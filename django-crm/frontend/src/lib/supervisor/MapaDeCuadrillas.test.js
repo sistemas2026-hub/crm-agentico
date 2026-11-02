@@ -57,12 +57,21 @@ describe('el mapa de cuadrillas', () => {
     expect(h).toContain('es dónde estuvo, no dónde está');
   });
 
-  it('sin ninguna cuadrilla no revienta y sigue dibujando la caja', () => {
+  it('sin ninguna cuadrilla DICE que no hay a quién ubicar, y dibuja la caja', () => {
+    //  01/11/2026: el mapa vivía dentro del bloque de cuadrillas, así que un
+    //  día sin cuadrillas armadas no lo dibujaba — y desde afuera eso no se
+    //  distingue de un mapa roto. Ahora se ve siempre y dice por qué está
+    //  vacío.
     for (const vacio of [[], undefined]) {
       const h = html(vacio);
       expect(h).toContain('0 de 0 reportando');
       expect(h).toContain('class="mp-caja');
+      expect(h).toContain('No hay cuadrillas armadas para este día');
     }
+  });
+
+  it('con cuadrillas NO dice que no haya ninguna', () => {
+    expect(html([cuadrilla()])).not.toContain('No hay cuadrillas armadas');
   });
 });
 

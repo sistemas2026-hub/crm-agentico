@@ -5,8 +5,9 @@ import 'package:campo/core/ubicacion/compartir_ubicacion.dart';
 /// COMPARTIR LA UBICACIÓN (31/10/2026).
 ///
 /// Lo que se mide es la CONDUCTA del servicio, no que la clase exista: que
-/// nace apagado, que lo que no se pudo enviar no se encola, y que un rechazo
-/// del servidor lo apaga en vez de insistir contra una puerta cerrada.
+/// comparte SOLA sin que nadie toque nada, que lo que el tecnico apaga se
+/// recuerda, que lo que apaga el SERVIDOR no --manana corresponde-- y que lo
+/// que no se pudo enviar no se encola.
 ///
 /// El permiso y la lectura del GPS son del sistema operativo y no entran acá:
 /// esta prueba corre sin teléfono. Por eso el servicio recibe el envío por
@@ -26,26 +27,49 @@ Position _posicion() => Position(
 
 void main() {
   group('compartir la ubicación', () {
-    test('nace apagado: nadie comparte sin haberlo prendido', () async {
-      var guardado = false;
+    test('comparte SOLA al abrir la app, sin que nadie toque nada', () async {
+      //  DECISIÓN DEL USUARIO (02/11/2026): «es mejor que el técnico no tenga
+      //  que estar presionando un botón». Un técnico que tiene que acordarse
+      //  de prender algo cada mañana no lo prende, y el mapa miente por
+      //  omisión.
+      var envios = 0;
       final s = CompartirUbicacion(
-        enviar: (_, __) async => true,
-        leerEncendido: () async => false,
-        guardarEncendido: (v) async => guardado = v,
+        enviar: (_, __) async {
+          envios++;
+          return true;
+        },
+        leerApagada: () async => false,
+        guardarApagada: (_) async {},
       );
-      //  CON EL PERMISO CONCEDIDO, a propósito: sin esto la prueba pasaba por
-      //  accidente --el permiso fallaba en el entorno de pruebas y tapaba el
-      //  encendido-- y sobrevivía a la mutación «nace encendido» (31/10/2026).
       s.permisoDePrueba = true;
       s.posicionDePrueba = _posicion;
 
-      expect(s.encendido, isFalse);
-      expect(s.estado.value, EstadoDeUbicacion.apagado);
+      await s.alArrancar();
+
+      expect(s.encendido, isTrue, reason: 'nadie la prendió: arrancó sola');
+      expect(envios, 1, reason: 'y ya mandó la primera');
+      expect(s.estado.value, EstadoDeUbicacion.compartiendo);
+      s.soltar();
+    });
+
+    test('lo que el técnico apagó NO vuelve a encenderse solo', () async {
+      var envios = 0;
+      final s = CompartirUbicacion(
+        enviar: (_, __) async {
+          envios++;
+          return true;
+        },
+        leerApagada: () async => true,
+        guardarApagada: (_) async {},
+      );
+      s.permisoDePrueba = true;
+      s.posicionDePrueba = _posicion;
 
       await s.alArrancar();
 
-      expect(s.encendido, isFalse, reason: 'al abrir la app no se prende solo');
-      expect(guardado, isFalse);
+      expect(s.encendido, isFalse);
+      expect(envios, 0, reason: 'ni una posición de quien la apagó');
+      expect(s.estado.value, EstadoDeUbicacion.apagado);
       s.soltar();
     });
 
@@ -56,8 +80,8 @@ void main() {
           envios++;
           return true;
         },
-        leerEncendido: () async => false,
-        guardarEncendido: (_) async {},
+        leerApagada: () async => false,
+        guardarApagada: (_) async {},
         cada: const Duration(milliseconds: 20),
       );
       s.permisoDePrueba = false;
@@ -73,9 +97,9 @@ void main() {
       s.soltar();
     });
 
-    test('un rechazo del servidor lo APAGA, no lo pone a reintentar', () async {
+    test('un rechazo del servidor la APAGA por hoy, y NO lo recuerda', () async {
       var envios = 0;
-      var guardado = true;
+      bool? guardado;
       final s = CompartirUbicacion(
         //  `false` = el servidor dijo que no corresponde (fuera de jornada o
         //  de horario).
@@ -83,8 +107,8 @@ void main() {
           envios++;
           return false;
         },
-        leerEncendido: () async => true,
-        guardarEncendido: (v) async => guardado = v,
+        leerApagada: () async => false,
+        guardarApagada: (v) async => guardado = v,
         cada: const Duration(milliseconds: 20),
       );
       s.permisoDePrueba = true;
@@ -96,7 +120,11 @@ void main() {
       expect(s.encendido, isFalse, reason: 'se para solo');
       expect(s.estado.value, EstadoDeUbicacion.fueraDeJornada);
       expect(envios, 1, reason: 'no insiste contra una puerta cerrada');
-      expect(guardado, isFalse, reason: 'y no vuelve a arrancar mañana solo');
+      //  LO QUE APAGA EL SERVIDOR NO SE RECUERDA: mañana dentro del horario
+      //  sí corresponde, y el técnico no tiene por qué volver a prenderla.
+      //  `false` es lo que escribió `encender`; nunca `true`.
+      expect(guardado, isNot(true),
+          reason: 'mañana a las siete tiene que arrancar sola otra vez');
       s.soltar();
     });
 
@@ -108,8 +136,8 @@ void main() {
           enviadas.add(p);
           return true;
         },
-        leerEncendido: () async => false,
-        guardarEncendido: (_) async {},
+        leerApagada: () async => false,
+        guardarApagada: (_) async {},
         //  El reloj no llega a sonar: cada envío de esta prueba lo dispara
         //  ella, para contar exactamente y no medir la frecuencia del timer.
         cada: const Duration(hours: 1),
@@ -135,16 +163,16 @@ void main() {
       s.soltar();
     });
 
-    test('apagarlo corta el envío y queda recordado', () async {
+    test('apagarla corta el envío y queda recordado', () async {
       var envios = 0;
-      var guardado = true;
+      var guardado = false;
       final s = CompartirUbicacion(
         enviar: (_, __) async {
           envios++;
           return true;
         },
-        leerEncendido: () async => true,
-        guardarEncendido: (v) async => guardado = v,
+        leerApagada: () async => false,
+        guardarApagada: (v) async => guardado = v,
         cada: const Duration(milliseconds: 20),
       );
       s.permisoDePrueba = true;
@@ -156,7 +184,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 80));
 
       expect(envios, cuantos, reason: 'después de apagar no sale ni una más');
-      expect(guardado, isFalse);
+      expect(guardado, isTrue, reason: 'lo que apaga el técnico se recuerda');
       expect(s.estado.value, EstadoDeUbicacion.apagado);
       s.soltar();
     });

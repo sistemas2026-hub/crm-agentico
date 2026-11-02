@@ -33,10 +33,12 @@ class SecureStorageService implements SecureStorageLectura {
   /// La labor del día, para verla sin señal (29/10/2026). Se borra al cerrar
   /// sesión: es de quien la tenía.
   static const _keyLaborDeHoy = 'dexter_labor_de_hoy';
-  /// Si el tecnico dejo encendido el compartir su ubicacion (31/10/2026).
-  /// Se guarda para que al abrir la aplicacion se retome sin volver a
-  /// preguntarle; nace apagado, y apagarlo lo borra.
-  static const _keyUbicacion = 'dexter_comparte_ubicacion';
+  /// Si el tecnico APAGO a mano el compartir su ubicacion (02/11/2026).
+  /// Se guarda el apagado y no el encendido: lo normal es compartir --se
+  /// decidio que no tenga que prenderlo cada dia-- asi que lo que hay que
+  /// recordar es la excepcion. Un telefono recien instalado no tiene nada
+  /// guardado y comparte.
+  static const _keyUbicacion = 'dexter_ubicacion_apagada';
   static const _keyUserEmail = 'dexter_user_email';
   static const _keyUserName = 'dexter_user_name';
   static const _keyBaseUrl = 'dexter_api_base_url';
@@ -51,9 +53,10 @@ class SecureStorageService implements SecureStorageLectura {
   /// rechazada" sin ninguna pista de por qué.
   static String get defaultBaseUrl => ApiEndpoints.defaultEnvironmentUrl;
 
-  /// Si quedo encendido. Falso ante cualquier duda: nadie comparte por un
-  /// valor que no se pudo leer.
-  Future<bool> getCompartirUbicacion() async {
+  /// Si el tecnico la apago. Falso ante cualquier duda: lo normal es
+  /// compartir, y una lectura que falla no puede apagar el seguimiento de
+  /// toda una cuadrilla en silencio.
+  Future<bool> getUbicacionApagada() async {
     try {
       return await _storage.read(key: _keyUbicacion) == '1';
     } catch (_) {
@@ -61,9 +64,9 @@ class SecureStorageService implements SecureStorageLectura {
     }
   }
 
-  Future<void> setCompartirUbicacion(bool encendido) async {
+  Future<void> setUbicacionApagada(bool apagada) async {
     try {
-      if (encendido) {
+      if (apagada) {
         await _storage.write(key: _keyUbicacion, value: '1');
       } else {
         await _storage.delete(key: _keyUbicacion);

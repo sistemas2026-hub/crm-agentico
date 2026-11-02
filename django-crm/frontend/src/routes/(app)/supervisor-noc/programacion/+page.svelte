@@ -198,6 +198,22 @@
         {#if publicado}
           <FranjaDeIndicadores {cuentas} {kitsIncompletos} />
 
+          <!-- EL MAPA (31/10/2026, movido el 01/11/2026). Vivía dentro del
+               bloque de cuadrillas, así que un día sin cuadrillas armadas no
+               lo dibujaba -- y desde afuera eso no se distingue de un mapa
+               roto: le pasó al usuario. Decisión suya: se ve con programación
+               y sin ella; cuando no hay nadie, lo dice.
+
+               Sale de lo mismo que la pantalla ya carga, así que el sondeo de
+               cada 15 s lo mueve solo. Solo el día de hoy: una fecha pasada
+               no tiene posiciones, y mostrar las de ahora bajo otra fecha
+               sería mentir. -->
+          {#if seDibujaElMapa(data.dia, data.hoy)}
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
+              <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} />
+            </section>
+          {/if}
+
           <!-- LO QUE NECESITA QUE ALGUIEN HAGA ALGO, junto; y cuánto se lleva
                del día. Los dos salen de lo que la página ya cargó. -->
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap:var(--snoc-sm);">
@@ -218,14 +234,6 @@
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
             <span class="snoc-label">Seguimiento de las cuadrillas</span>
             <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
-
-            <!-- EL MAPA (31/10/2026): sale de lo mismo que ya se carga, así
-                 que el sondeo de cada 15 s lo mueve solo. Solo se dibuja el
-                 día de hoy: una fecha pasada no tiene posiciones, y mostrar
-                 las de ahora bajo otra fecha seria mentir. -->
-            {#if seDibujaElMapa(data.dia, data.hoy)}
-              <MapaDeCuadrillas cuadrillas={publicado.cuadrillas} />
-            {/if}
             {#if data.seguimiento}
               <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Que cierre solo
                    NO se enciende acá: se le delega desde su chat, con el nivel
