@@ -14,17 +14,22 @@ import '../../core/ubicacion/compartir_ubicacion.dart';
 ///
 /// NO MUESTRA LA COORDENADA. Al técnico no le sirve ver sus grados; le sirve
 /// saber si la oficina lo está viendo ahora mismo.
+///
+/// SIN INTERRUPTOR (02/11/2026). El usuario: «quita el botón de la app de
+/// compartir mi ubicación». La tarjeta informa y no se toca: el técnico tiene
+/// que estar enterado —para eso sigue acá— pero no decide cada día.
+///
+/// Lo que NO queda sin salida: apagarlo sigue siendo posible desde los
+/// ajustes del teléfono, revocando el permiso de ubicación. Ese control lo
+/// garantiza Android y ninguna aplicación lo puede quitar, así que esto no
+/// deja a nadie compartiendo sin forma de pararlo.
 class CompartirMiUbicacion extends StatelessWidget {
   const CompartirMiUbicacion({
     super.key,
     required this.servicio,
-    this.alCambiar,
   });
 
   final CompartirUbicacion servicio;
-
-  /// Para que la pantalla se entere: el estado vive en el servicio.
-  final VoidCallback? alCambiar;
 
   @override
   Widget build(BuildContext context) {
@@ -59,17 +64,6 @@ class CompartirMiUbicacion extends StatelessWidget {
                       'Compartir mi ubicación',
                       style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                     ),
-                  ),
-                  Switch(
-                    value: prendido,
-                    onChanged: (bool v) async {
-                      if (v) {
-                        await servicio.encender();
-                      } else {
-                        await servicio.apagar();
-                      }
-                      alCambiar?.call();
-                    },
                   ),
                 ],
               ),

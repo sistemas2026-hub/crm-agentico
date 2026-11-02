@@ -221,12 +221,7 @@ class _InicioScreenState extends State<InicioScreen> {
               // porque es una decisión del técnico sobre su día y no un
               // ajuste escondido. Nace apagado.
               if (widget.ubicacion != null)
-                CompartirMiUbicacion(
-                  servicio: widget.ubicacion!,
-                  alCambiar: () {
-                    if (mounted) setState(() {});
-                  },
-                ),
+                CompartirMiUbicacion(servicio: widget.ubicacion!),
               // LA NOVEDAD DE LA CUADRILLA (30/10/2026): «se pinchó la llanta»
               // sin escribir en ningún ticket. Arriba, junto al saludo: es lo
               // que cambia el día.
