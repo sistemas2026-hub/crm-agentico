@@ -6,7 +6,9 @@
    * que SE DESCARTO esa alternativa, y nucleo/modelo/motor.py::
    * _ejecutar_derivacion, que es lo que reemplaza.
    *
-   * Pagina puramente informativa (sin +page.server.js): no depende de que
+   * (02/11/2026: ya NO es solo informativa -- tiene +page.server.js y se
+   * edita quien atiende que; el formulario de agentes tambien conecta al
+   * router.) Antes decia: pagina puramente informativa: no depende de que
    * este tenant tenga los roles nuevos configurados, es documentacion del
    * MECANISMO, igual que /agentes/asignaciones documenta el de fusion de
    * roles. Los mismos tonos que ya usan las etiquetas de conversaciones

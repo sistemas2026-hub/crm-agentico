@@ -2,8 +2,9 @@
   /**
    * Los agentes configurados y, para cada uno, que puede hacer y que puede
    * ver. Un ADMIN puede crear/editar/borrar desde aca (via AgenteFormDialog,
-   * que habla con /api/agentes); crear una herramienta nueva sigue siendo
-   * trabajo de codigo.
+   * que habla con /api/agentes, en cuatro pasos desde el 02/11/2026). Una
+   * herramienta nueva que llama a una API se crea en /configuracion-guiada,
+   * sin codigo; las de logica propia (agregados, internas) si son codigo.
    *
    * La tarjeta esta armada para responder una pregunta concreta: "¿que le
    * estoy dejando hacer a este agente?". Por eso las herramientas van
@@ -155,6 +156,7 @@
     modo={modoDialogo}
     agente={agenteEnEdicion}
     catalogo={data.catalogo || []}
+    autonomia={data.autonomia}
   />
 {/if}
 
