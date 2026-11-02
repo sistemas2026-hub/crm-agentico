@@ -1301,6 +1301,7 @@
                 <!-- Un hueco, no un cero: el backend no entregó el indicador. -->
                 <span class="snv-signo-n">{k.n ?? (esperandoIndicadores ? '…' : 'Sin dato')}</span>
                 <span class="snv-signo-rot">{k.rotulo}</span>
+                {#if esperandoIndicadores}<span class="snv-signo-sub">cargando</span>{/if}
               </div>
             {/each}
             <div class="snv-signo {sinTecnico ? '' : 'snv-tono-calma'}">
