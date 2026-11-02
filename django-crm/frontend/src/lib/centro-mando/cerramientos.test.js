@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { sedeDe } from './sede.js';
 import { salasDe } from './departamentos.js';
 import PORDEFECTO from './__fixtures__/organizacion-por-defecto.json';
+import { PLANTILLAS } from './plantillas.js';
 import { celdaDe, conectividad, rejillaDe, transitable } from './navegacion.js';
 
 /**
@@ -32,6 +33,9 @@ import { celdaDe, conectividad, rejillaDe, transitable } from './navegacion.js';
 const SEDE = sedeDe(salasDe(PORDEFECTO), []);
 const REJILLA = rejillaDe(SEDE);
 const SALAS = SEDE.plantas.filter((p) => p.papel === 'sala');
+//  Que plantilla pidio cada sala. La planta compuesta no lo lleva: lo declara
+//  la empresa, y es lo unico que dice contra que comparar su mobiliario.
+const PLANTILLA_DE = new Map(salasDe(PORDEFECTO).map((s) => [s.id, s.plantilla]));
 const CIRCULACION = SEDE.plantas
   .filter((p) => p.papel === 'circulacion')
   .map((p) => ({ x: p.origen.gx, y: p.origen.gy, ancho: p.mundo.ancho, fondo: p.mundo.fondo }));
@@ -48,7 +52,7 @@ const vanoDeclarado = (m, lado) => (
 /**
  * ¿Llega la escena a pintar ese vano?
  *
- * Se replican acá las condiciones de `construirMuros` y `construirAntepecho`:
+ * Se replican acá las condiciones de `construirMuros` y `construirCerramiento`:
  * los muros altos de fondo e izquierda pintan su vano siempre que exista; los
  * dos del peto SÓLO si ese lado lleva peto. Esa condición de más es justamente
  * la que puede dejar un vano declarado sin dibujar.
@@ -156,5 +160,130 @@ describe('la matriz de las once salas', () => {
   it('y todos sus puestos se alcanzan desde la circulación', () => {
     const { aislados } = conectividad(REJILLA, CIRCULACION);
     expect(aislados, `sin ruta: ${aislados.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('los tres niveles de cerramiento', () => {
+  //  «Restringido, estándar y semipúblico», y la decisión de dónde vive ese
+  //  dato importa: sale de la PLANTILLA, no del departamento. Que una sala de
+  //  expedientes sea privada es una propiedad del tipo de sala, igual que
+  //  tener estanterías — así cualquier empresa que elija esa plantilla recibe
+  //  el cerramiento que le corresponde sin configurar nada, que es lo que
+  //  CLAUDE.md §3.3 pide de todo lo que varía por empresa.
+
+  const NIVELES = ['restringido', 'estandar', 'semipublico'];
+
+  it('cada sala declara uno de los tres, y ninguno queda sin usar', () => {
+    const vistos = new Set();
+    for (const p of SALAS) {
+      expect(NIVELES, `${p.sala} declara «${p.mundo.privacidad}»`)
+        .toContain(p.mundo.privacidad);
+      vistos.add(p.mundo.privacidad);
+    }
+    //  Si los tres no aparecen, dos de las variantes son código que no corre.
+    expect([...vistos].sort()).toEqual([...NIVELES].sort());
+  });
+
+  it('las salas que reciben gente de la calle NO son restringidas', () => {
+    //  Y al revés: una sala de atención con lector de acceso le estaría
+    //  diciendo al cliente que no puede entrar donde lo van a atender.
+    for (const p of SALAS) {
+      const tieneMostrador = (p.mobiliario ?? []).some((m) => m.tipo === 'mostrador');
+      const tieneBancosDeEspera = (p.mobiliario ?? []).filter((m) => m.tipo === 'banco').length >= 3;
+      if (tieneMostrador && tieneBancosDeEspera) {
+        expect(p.mundo.privacidad, `${p.sala} atiende público y está restringida`)
+          .not.toBe('restringido');
+      }
+    }
+  });
+
+  it('la sala con racks es restringida', () => {
+    //  El cuarto de equipos no es un sitio por el que se pasa.
+    for (const p of SALAS) {
+      if (!(p.mobiliario ?? []).some((m) => m.tipo === 'rack')) continue;
+      expect(p.mundo.privacidad, `${p.sala} tiene racks y no está restringida`)
+        .toBe('restringido');
+    }
+  });
+
+  it('el reparto no deja a una sola sala en su nivel', () => {
+    //  Un nivel con una sola sala no es un nivel: es una excepción, y una
+    //  excepción con nombre de categoría se termina usando para otra cosa.
+    const cuenta = {};
+    for (const p of SALAS) cuenta[p.mundo.privacidad] = (cuenta[p.mundo.privacidad] ?? 0) + 1;
+    for (const [nivel, n] of Object.entries(cuenta)) {
+      expect(n, `«${nivel}» lo usa una sola sala`).toBeGreaterThan(1);
+    }
+  });
+});
+
+describe('ningun mueble se pone delante de la puerta', () => {
+  //  Cuanto ocupa a lo largo de SU muro cada mueble de pared, leido del
+  //  dibujo. Esta repetido a proposito: si `sede.js` cambia estos numeros y
+  //  aqui no, la guarda deja de medir lo que el dibujo hace — y eso se ve,
+  //  porque entonces afirma de mas o de menos.
+  const LARGO = {
+    tablero: [-0.12, 2.74],
+    panel_fibra: [0, 2.1],
+    armario: [0, 1.5],
+    estanteria: [0, null],
+    pizarra: [-0.1, null],
+    videoconferencia: [-0.1, null],
+    biblioteca: [0, null]
+  };
+
+  const tapadoDe = (p) => {
+    const v = p.mundo.puertaLateral;
+    if (!v) return [];
+    const choques = [];
+    for (const mu of p.mobiliario ?? []) {
+      const def = LARGO[mu.tipo];
+      if (!def) continue;
+      const desde = (mu.gy ?? 0) + def[0];
+      const largo = def[1] ?? ((mu.largo ?? 2) + (def[0] < 0 ? 0.2 : 0));
+      const solape = Math.min(desde + largo, v[1]) - Math.max(desde, v[0]);
+      if (solape > 0.05) choques.push({ tipo: mu.tipo, solape });
+    }
+    return choques;
+  };
+
+  it('ninguna puerta queda tapada por la mitad o mas', () => {
+    //  LA AFIRMACION QUE IMPORTA, y la que la revision pidio con estas
+    //  palabras: «las entradas del lado derecho no se distinguen». Eran
+    //  SEIS de once, todas las que abren por el muro lateral, que es el
+    //  unico que lleva mobiliario colgado. El dato estaba bien —la puerta
+    //  existia, se dibujaba y se pasaba por ella— y encima tenia un tablero.
+    //
+    //  Medio vano es el limite: por debajo la hoja y el marco se siguen
+    //  leyendo; por encima, lo que se ve es el mueble.
+    const MEDIO = 0.9;
+    const mal = [];
+    for (const p of SALAS) {
+      for (const c of tapadoDe(p)) {
+        if (c.solape >= MEDIO) {
+          mal.push(`${p.sala}: ${c.tipo} tapa ${c.solape.toFixed(2)} de 1,8`);
+        }
+      }
+    }
+    expect(mal, mal.join(' | ')).toEqual([]);
+  });
+
+  it('y el compositor aparta lo que puede, no lo borra', () => {
+    //  `apartarDelVano` corre el mueble por el muro. Lo que NO puede hacer es
+    //  hacerlo desaparecer: una sala que pierde su armario al cambiar de
+    //  columna es una sala cuyo contenido depende de donde cayo. Ya paso una
+    //  vez —el despeje de puertas del patio borro el mostrador de recepcion—
+    //  y por eso esto se mide.
+    for (const p of SALAS) {
+      const dePlantilla = PLANTILLAS[PLANTILLA_DE.get(p.sala) ?? 'generica'];
+      if (!dePlantilla) continue;
+      const cuenta = (lista) => {
+        const c = {};
+        for (const mu of lista ?? []) c[mu.tipo] = (c[mu.tipo] ?? 0) + 1;
+        return c;
+      };
+      expect(cuenta(p.mobiliario), `${p.sala} perdio o gano muebles al colocarse`)
+        .toEqual(cuenta(dePlantilla.mobiliario));
+    }
   });
 });

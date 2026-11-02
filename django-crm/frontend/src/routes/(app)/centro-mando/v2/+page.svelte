@@ -175,11 +175,49 @@
             { soloNivel: vista.tipo === 'piso' ? vista.nivel : null })
   );
 
+  /**
+   * UNA SALA MIRADA SOLA, PERO CON SUS MUROS Y SU PUERTA.
+   *
+   * Antes esto era `plantaDe(sala)` a secas: la plantilla cruda, sin peto, sin
+   * vano y sin nivel de cerramiento. Esos tres los calcula `sede.js` a partir
+   * del plano —qué tiene pegado a cada lado— y por eso no existen en la
+   * plantilla.
+   *
+   * El efecto se vio al pedir una captura ampliada del NOC: la sala aparecía
+   * abierta por dos lados y sin puerta, mientras en la vista de conjunto sí
+   * las tenía. Dos dibujos distintos de la misma sala, y el de cerca —el que
+   * sirve para revisar— era el que mentía.
+   *
+   * Así que se le pide a la sede esa sala y se la trae a su propio origen. El
+   * `mundo` viaja entero: antepecho, vanos y privacidad incluidos.
+   *
+   * Sólo para la composición `sede`: las otras dos no calculan cerramientos, y
+   * caer a la plantilla cruda ahí es correcto.
+   */
+  let salaConCerramiento = $derived(
+    composicion !== 'sede' || SALAS.length === 0 || vista.tipo !== 'sala'
+      ? null
+      : (() => {
+          const quien = sala ?? SALAS[0];
+          const dentro = sedeDe(SALAS, inventario, { soloSala: quien.id })
+            .plantas.find((p) => p.papel === 'sala');
+          if (!dentro) return null;
+          return {
+            ...dentro,
+            //  A su propio origen: la cámara de una sala encuadra desde (0,0).
+            origen: { gx: 0, gy: 0, gz: 0 },
+            //  Y con su losa: en la sede el suelo es una pieza común, pero una
+            //  sala sola necesita la suya o queda flotando.
+            losa: true
+          };
+        })()
+  );
+
   let planta = $derived(
     SALAS.length === 0
       ? null
       : vista.tipo === 'sala'
-        ? plantaDe(sala ?? SALAS[0], inventario)
+        ? (salaConCerramiento ?? plantaDe(sala ?? SALAS[0], inventario))
         : (edificio?.plantas?.length ? edificio.plantas : null)
   );
 

@@ -76,7 +76,7 @@ export const BULTO = {
 const NO_ESTORBAN = new Set([
   'luminaria', 'tablero', 'videowall', 'panel_fibra', 'pizarra',
   'videoconferencia', 'biblioteca', 'estanteria', 'armario', 'ducto',
-  'zona', 'mampara'
+  'zona'
 ]);
 
 /**
@@ -97,11 +97,28 @@ export function rejillaDe(sede) {
   const celdas = new Uint8Array(ancho * fondo).fill(MURO);
   const en = (cx, cy) => cy * ancho + cx;
 
-  const pintar = (x, y, w, f, valor) => {
-    const x0 = Math.max(0, Math.floor(x / CELDA));
-    const y0 = Math.max(0, Math.floor(y / CELDA));
-    const x1 = Math.min(ancho, Math.ceil((x + w) / CELDA));
-    const y1 = Math.min(fondo, Math.ceil((y + f) / CELDA));
+  const pintar = (x, y, w, f, valor, dentroDe = null) => {
+    //  RECORTADO A SU RECINTO. Un mueble pertenece a una planta y no puede
+    //  ocupar la de al lado: el bulto es un radio generoso y, sin recortar,
+    //  atraviesa el muro y tapia celdas del otro lado.
+    //
+    //  Medido el 02/11/2026: la mesa del patio, en gx 14,9 con bulto 1,5,
+    //  llegaba hasta gx 13,4 — medio metro DENTRO de la sala vecina, cuyo
+    //  muro está en gx 14 — y tapaba el único paso entre sus racks y la
+    //  pared. La sala entera quedaba aislada por un mueble que no está en
+    //  ella. Un muro que no detiene a un mueble tampoco detiene a nadie.
+    let ix = x; let iy = y; let fx = x + w; let fy = y + f;
+    if (dentroDe) {
+      ix = Math.max(ix, dentroDe.gx);
+      iy = Math.max(iy, dentroDe.gy);
+      fx = Math.min(fx, dentroDe.gx + dentroDe.ancho);
+      fy = Math.min(fy, dentroDe.gy + dentroDe.fondo);
+      if (fx <= ix || fy <= iy) return;
+    }
+    const x0 = Math.max(0, Math.floor(ix / CELDA));
+    const y0 = Math.max(0, Math.floor(iy / CELDA));
+    const x1 = Math.min(ancho, Math.ceil(fx / CELDA));
+    const y1 = Math.min(fondo, Math.ceil(fy / CELDA));
     for (let cy = y0; cy < y1; cy++) {
       for (let cx = x0; cx < x1; cx++) celdas[en(cx, cy)] = valor;
     }
@@ -156,16 +173,41 @@ export function rejillaDe(sede) {
   const destinos = new Map();
   for (const p of [...salas, ...plantas.filter((x) => x.papel === 'circulacion')]) {
     const o = p.origen;
+    //  El recinto al que pertenece cada pieza. Nada de lo que hay aqui dentro
+    //  puede tapiar una celda de la planta de al lado.
+    const recinto = { gx: o.gx, gy: o.gy, ancho: p.mundo.ancho, fondo: p.mundo.fondo };
     for (const mu of p.mobiliario ?? []) {
+      //  LA MAMPARA ES UN TABIQUE, y hasta hoy la rejilla la cruzaba como si
+      //  fuera aire. Se dibuja de pared a pared con su propio vano, asi que
+      //  alguien podia aparecer atravesandola — la mentira simetrica de la
+      //  que este archivo se cuida en su cabecera, que es una puerta que se
+      //  ve y no se pasa. Se pinta como muro y se le abre el vano.
+      if (mu.tipo === 'mampara') {
+        const g = CELDA;
+        const desde = mu.desde ?? 0;
+        const hasta = mu.hasta ?? (mu.gx != null ? p.mundo.fondo : p.mundo.ancho);
+        if (mu.gx != null) {
+          pintar(o.gx + mu.gx, o.gy + desde, g, hasta - desde, MURO, recinto);
+          if (mu.vano) {
+            pintar(o.gx + mu.gx, o.gy + mu.vano[0], g, mu.vano[1] - mu.vano[0], LIBRE, recinto);
+          }
+        } else if (mu.gy != null) {
+          pintar(o.gx + desde, o.gy + mu.gy, hasta - desde, g, MURO, recinto);
+          if (mu.vano) {
+            pintar(o.gx + mu.vano[0], o.gy + mu.gy, mu.vano[1] - mu.vano[0], g, LIBRE, recinto);
+          }
+        }
+        continue;
+      }
       if (NO_ESTORBAN.has(mu.tipo)) continue;
       const r = BULTO[mu.tipo] ?? 0.7;
-      pintar(o.gx + (mu.gx ?? 0) - r, o.gy + (mu.gy ?? 0) - r, r * 2, r * 2, MUEBLE);
+      pintar(o.gx + (mu.gx ?? 0) - r, o.gy + (mu.gy ?? 0) - r, r * 2, r * 2, MUEBLE, recinto);
     }
     for (const q of p.puestos ?? []) {
       const gx = o.gx + (q.gx ?? 0);
       const gy = o.gy + (q.gy ?? 0);
       //  El escritorio con su silla: no se pasa por encima.
-      pintar(gx - 0.9, gy - 0.9, 1.8, 1.8, PUESTO);
+      pintar(gx - 0.9, gy - 0.9, 1.8, 1.8, PUESTO, recinto);
       //  EL PUNTO DE LLEGADA. No es el puesto: a un escritorio se llega por su
       //  lado, y la celda del escritorio la ocupa el escritorio.
       //
@@ -181,7 +223,18 @@ export function rejillaDe(sede) {
     }
   }
 
-  return { ancho, fondo, celdas, puertas, destinos };
+  //  A DONDE SE LLEGA DESDE LA CIRCULACION, calculado una vez y guardado.
+  //
+  //  Va aqui y no en quien pregunta porque es una propiedad del plano, no de
+  //  la pregunta: la misma rejilla no puede decirle a uno que a un puesto se
+  //  llega y a otro que no. Cuesta unos milisegundos sobre siete mil celdas.
+  const rejilla = { ancho, fondo, celdas, puertas, destinos };
+  rejilla.alcanzable = alcanzablesDesde(rejilla, plantas
+    .filter((x) => x.papel === 'circulacion')
+    .map((x) => ({
+      x: x.origen.gx, y: x.origen.gy, ancho: x.mundo.ancho, fondo: x.mundo.fondo
+    })));
+  return rejilla;
 }
 
 /**
@@ -193,11 +246,73 @@ export function rejillaDe(sede) {
 export function llegadaA(rejilla, idPuesto) {
   const punto = rejilla.destinos.get(idPuesto);
   if (!punto) return null;
+  const alcanzable = rejilla.alcanzable ?? null;
+
+  //  LIBRE NO ES LO MISMO QUE ALCANZABLE, y durante un tiempo esto devolvio
+  //  lo primero creyendo que era lo segundo.
+  //
+  //  Medido el 02/11/2026 con once departamentos: en la sala comercial, el
+  //  cuarto escritorio queda en una bolsa cerrada por los otros tres, un
+  //  tabique y un mueble. Su celda de delante esta LIBRE —nadie la ocupa— y
+  //  no se llega a ella desde ningun pasillo. Esta funcion la devolvia, la
+  //  busqueda de ruta no encontraba camino, y nadie iba nunca a ese puesto.
+  //
+  //  Asi que primero se buscan los candidatos a los que de verdad se llega.
+  //  Si ninguno lo es, se devuelve el primero libre igual: quien pregunta
+  //  sabra que no hay ruta, y es mejor que devolver nada.
+  let primeroLibre = null;
   for (const c of punto.candidatos ?? [punto]) {
     const celda = celdaDe(c.gx, c.gy);
-    if (transitable(rejilla, celda.cx, celda.cy)) return celda;
+    if (!transitable(rejilla, celda.cx, celda.cy)) continue;
+    if (primeroLibre === null) primeroLibre = celda;
+    if (!alcanzable || alcanzable[celda.cy * rejilla.ancho + celda.cx]) return celda;
   }
-  return null;
+  return primeroLibre;
+}
+
+/**
+ * Las celdas a las que se llega andando desde unos rectangulos de partida.
+ *
+ * Una sola implementacion, porque antes habia dos criterios distintos de «se
+ * llega» y no coincidian: uno aceptaba cualquier celda de la VECINDAD de un
+ * destino y el otro exigia la celda misma. Con dos definiciones, una decia
+ * que a un puesto se llegaba y la otra no encontraba la ruta, y las dos
+ * estaban en verde.
+ *
+ * @returns {Uint8Array} una marca por celda
+ */
+export function alcanzablesDesde(rejilla, partidas) {
+  const visto = new Uint8Array(rejilla.ancho * rejilla.fondo);
+  const cola = [];
+  for (const c of partidas ?? []) {
+    const { cx: x0, cy: y0 } = celdaDe(c.x, c.y);
+    const { cx: x1, cy: y1 } = celdaDe(c.x + c.ancho, c.y + c.fondo);
+    for (let cy = y0; cy < y1; cy++) {
+      for (let cx = x0; cx < x1; cx++) {
+        if (!transitable(rejilla, cx, cy)) continue;
+        const i = cy * rejilla.ancho + cx;
+        if (visto[i]) continue;
+        visto[i] = 1;
+        cola.push(i);
+      }
+    }
+  }
+  for (let k = 0; k < cola.length; k++) {
+    const i = cola[k];
+    const cx = i % rejilla.ancho;
+    const cy = (i - cx) / rejilla.ancho;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!transitable(rejilla, nx, ny)) continue;
+      const j = ny * rejilla.ancho + nx;
+      if (visto[j]) continue;
+      visto[j] = 1;
+      cola.push(j);
+    }
+  }
+  visto.cuantas = cola.length;
+  return visto;
 }
 
 /** ¿Se puede pisar esta celda? */
@@ -302,58 +417,24 @@ export function camino(rejilla, desde, hasta) {
  * @param {{x: number, y: number, ancho: number, fondo: number}[]} circulacion
  */
 export function conectividad(rejilla, circulacion) {
-  const n = rejilla.ancho * rejilla.fondo;
-  const visto = new Uint8Array(n);
-  const cola = [];
-
-  for (const c of circulacion ?? []) {
-    const { cx: x0, cy: y0 } = celdaDe(c.x, c.y);
-    const { cx: x1, cy: y1 } = celdaDe(c.x + c.ancho, c.y + c.fondo);
-    for (let cy = y0; cy < y1; cy++) {
-      for (let cx = x0; cx < x1; cx++) {
-        if (!transitable(rejilla, cx, cy)) continue;
-        const i = cy * rejilla.ancho + cx;
-        if (visto[i]) continue;
-        visto[i] = 1;
-        cola.push(i);
-      }
-    }
-  }
-
-  for (let k = 0; k < cola.length; k++) {
-    const i = cola[k];
-    const cx = i % rejilla.ancho;
-    const cy = (i - cx) / rejilla.ancho;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = cx + dx;
-      const ny = cy + dy;
-      if (!transitable(rejilla, nx, ny)) continue;
-      const j = ny * rejilla.ancho + nx;
-      if (visto[j]) continue;
-      visto[j] = 1;
-      cola.push(j);
-    }
-  }
-
+  const visto = alcanzablesDesde(rejilla, circulacion);
   const alcanzables = [];
   const aislados = [];
   for (const [id, punto] of rejilla.destinos) {
-    //  Vale cualquiera de los cuatro lados del escritorio, y la vecindad
-    //  inmediata de cada uno: una celda de medio metro es mas fina que el
-    //  error con que se pintan los bultos.
+    //  LA CELDA MISMA de alguno de los cuatro lados del escritorio.
+    //
+    //  Antes valia cualquier celda de su VECINDAD, para absorber el error con
+    //  que se pintan los bultos. Esa holgura dejaba pasar un puesto cuya
+    //  unica celda libre estaba dentro de una bolsa cerrada: la vecina de al
+    //  lado, del otro lado del mueble, si se alcanzaba. Ya no hace falta
+    //  —ahora ningun bulto cruza un muro— y afirmar de menos es peor que
+    //  rodear de mas.
     const llega = (punto.candidatos ?? [punto]).some((c) => {
       const { cx, cy } = celdaDe(c.gx, c.gy);
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-          if (nx < 0 || ny < 0 || nx >= rejilla.ancho || ny >= rejilla.fondo) continue;
-          if (visto[ny * rejilla.ancho + nx]) return true;
-        }
-      }
-      return false;
+      if (cx < 0 || cy < 0 || cx >= rejilla.ancho || cy >= rejilla.fondo) return false;
+      return Boolean(visto[cy * rejilla.ancho + cx]);
     });
     (llega ? alcanzables : aislados).push(id);
   }
-  return { alcanzables, aislados, celdasAlcanzadas: cola.length };
+  return { alcanzables, aislados, celdasAlcanzadas: visto.cuantas };
 }

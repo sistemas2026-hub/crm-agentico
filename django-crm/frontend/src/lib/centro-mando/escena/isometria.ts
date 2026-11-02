@@ -111,7 +111,7 @@ export interface Mundo {
    * `frente` es el borde `gy = fondo` y `derecha` el borde `gx = ancho`: los
    * dos lados que una sala deja abiertos porque un muro entero ahí taparía
    * media sala. El peto los cierra sin tapar a nadie. Ver
-   * `construirAntepecho`.
+   * `construirCerramiento`.
    */
   antepecho?: { frente?: boolean; derecha?: boolean };
 
@@ -120,6 +120,20 @@ export interface Mundo {
 
   /** El vano de la puerta en el peto de la derecha, en celdas `gy`. */
   puertaDerecha?: [number, number];
+
+  /**
+   * Cuanto se cierra esta sala: `restringido`, `estandar` o `semipublico`.
+   *
+   * Sale de la PLANTILLA y no del departamento: que una sala de expedientes
+   * sea privada es una propiedad del tipo de sala, igual que tener
+   * estanterias. Asi cualquier empresa que elija esa plantilla recibe el
+   * cerramiento que le corresponde sin configurar nada.
+   *
+   * Decide si la puerta lleva hoja y si lleva lector de acceso. El lector es
+   * un DIBUJO: quien puede entrar lo decide el backend, y esta pantalla no
+   * lo sabe ni puede saberlo.
+   */
+  privacidad?: 'restringido' | 'estandar' | 'semipublico';
 }
 
 /** Una caja ocupada de verdad: dónde empieza y cuánto mide. */

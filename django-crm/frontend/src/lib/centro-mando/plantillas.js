@@ -46,6 +46,7 @@
  */
 const OPERACIONES = {
   rotulo: 'Centro de operaciones',
+  privacidad: 'restringido',
   acento: 0x4f46e5,
   mundo: { ancho: 14, fondo: 10, alto: 4 },
   pasillo: { desde: 11, hasta: 14 },
@@ -111,6 +112,7 @@ const OPERACIONES = {
  */
 const ATENCION = {
   rotulo: 'Sala de atención',
+  privacidad: 'semipublico',
   acento: 0x0ea5a4,
   mundo: { ancho: 13, fondo: 9, alto: 4 },
   pasillo: { desde: 10, hasta: 13 },
@@ -144,8 +146,12 @@ const ATENCION = {
     //  espera; dos bancos separados, como asientos de descanso.
     { tipo: 'banco', gx: 10.6, gy: 0.9 },
     { tipo: 'banco', gx: 10.6, gy: 2.4 },
-    { tipo: 'banco', gx: 10.6, gy: 3.9 },
-    { tipo: 'banco', gx: 10.6, gy: 5.4 },
+    //  LOS DOS DE ATRAS, PASADO EL HUECO DEL TABIQUE. Estaban en 3,9 y 5,4,
+    //  justo sobre el vano -3,8 a 5,6-, y lo taponaban entero: la mampara se
+    //  dibujaba con su paso y no se podia pasar. Medido el 02/11/2026, el dia
+    //  que la rejilla empezo a tratar una mampara como el tabique que es.
+    { tipo: 'banco', gx: 10.6, gy: 6.6 },
+    { tipo: 'banco', gx: 10.6, gy: 8.1 },
     //  EL TURNERO, a la entrada de la espera: la pieza que dice «acá se hace
     //  fila» y que no tiene nadie más en la sede.
     { tipo: 'turnero', gx: 12.1, gy: 7.9 },
@@ -174,6 +180,7 @@ const ATENCION = {
  */
 const TECNICA = {
   rotulo: 'Sala técnica',
+  privacidad: 'estandar',
   acento: 0x4d9e2a,
   mundo: { ancho: 11, fondo: 8, alto: 4 },
   pasillo: null,
@@ -228,6 +235,7 @@ const TECNICA = {
  */
 const EXPEDIENTES = {
   rotulo: 'Sala de expedientes',
+  privacidad: 'estandar',
   acento: 0xa855f7,
   mundo: { ancho: 12, fondo: 10, alto: 4 },
   pasillo: { desde: 0, hasta: 2 },
@@ -289,6 +297,7 @@ const EXPEDIENTES = {
  */
 const COMERCIAL = {
   rotulo: 'Sala comercial',
+  privacidad: 'estandar',
   acento: 0xb8860b,
   mundo: { ancho: 13, fondo: 10, alto: 4 },
   pasillo: { desde: 9, hasta: 13 },
@@ -333,6 +342,7 @@ const COMERCIAL = {
  */
 const REUNIONES = {
   rotulo: 'Sala de reuniones',
+  privacidad: 'estandar',
   acento: 0x2563eb,
   mundo: { ancho: 12, fondo: 9, alto: 4 },
   pasillo: null,
@@ -401,6 +411,7 @@ const REUNIONES = {
  */
 const FINANZAS = {
   rotulo: 'Sala de finanzas',
+  privacidad: 'restringido',
   acento: 0x10b981,
   //  DIEZ DE FONDO Y NO NUEVE. Con nueve, la composicion compacta
   //  -`edificio-compacto.js`, que apila pisos- dejaba el puesto `cartera/p1`
@@ -457,6 +468,7 @@ const FINANZAS = {
  */
 const PERSONAL = {
   rotulo: 'Sala de personal',
+  privacidad: 'restringido',
   acento: 0x60a5fa,
   mundo: { ancho: 11, fondo: 9, alto: 4 },
   pasillo: null,
@@ -468,18 +480,24 @@ const PERSONAL = {
     //  alli se reune el equipo a la vista, aca se recibe a una persona y
     //  tiene que sentirse privado. Deja los tres puestos de un lado y la
     //  mesa del otro.
-    { tipo: 'mampara', gx: 6, desde: 3.0, hasta: 8.8, vano: [5.4, 7.2] },
+    //  El paso va arriba y no en medio: la mesa de entrevistas ocupa el fondo
+    //  de este lado y antes caia justo sobre el hueco.
+    { tipo: 'mampara', gx: 6, desde: 3.0, hasta: 8.8, vano: [3.2, 5.0] },
     //  LA MESA DE ENTREVISTAS, con sus dos sillas enfrentadas, en el extremo
     //  opuesto al puesto de gestión.
-    { tipo: 'mesa_revision', gx: 7.4, gy: 5.4, largo: 2.6 },
+    { tipo: 'mesa_revision', gx: 7.4, gy: 6.8, largo: 2.6 },
     //  EL MURO, en tres tramos y en este orden: primero el calendario de
     //  personal -lo que se consulta de paso-, despues el panel de formacion
     //  frente a la mesa de entrevistas, y el armario al fondo. Los tres
     //  juntos no entraban en los nueve de fondo con el reparto anterior: el
     //  tablero ocupa 2,74 y el hueco medía 2,1. Lo cazo la guarda de solapes.
+    //  EL MURO DEJA UN HUECO DE 1,9 PARA LA PUERTA, entre la pizarra y el
+    //  armario. Antes los tres muebles lo llenaban de punta a punta -0,18 a
+    //  7,9 sin un claro de 1,8- y el vano caia debajo del armario: la puerta
+    //  existia, se dibujaba y se pasaba por ella, y no se veia.
     { tipo: 'tablero', gy: 0.3 },
-    { tipo: 'pizarra', gy: 3.2, largo: 2.8 },
-    { tipo: 'armario', gy: 6.4 },
+    { tipo: 'pizarra', gy: 3.2, largo: 2.2 },
+    { tipo: 'armario', gy: 7.2 },
     { tipo: 'banco', gx: 9.6, gy: 2.0 },
     //  El dispensador, junto a la espera de quien viene a una entrevista.
     { tipo: 'dispensador', gx: 9.9, gy: 0.7 },
@@ -507,6 +525,7 @@ const PERSONAL = {
  */
 const INSPECCION = {
   rotulo: 'Sala de inspección',
+  privacidad: 'restringido',
   acento: 0x9f1239,
   mundo: { ancho: 11, fondo: 9, alto: 4 },
   pasillo: null,
@@ -553,6 +572,7 @@ const INSPECCION = {
  */
 const GESTION = {
   rotulo: 'Sala de gestión',
+  privacidad: 'estandar',
   acento: 0xa78bfa,
   mundo: { ancho: 13, fondo: 9, alto: 4 },
   pasillo: { desde: 10, hasta: 13 },
@@ -595,6 +615,7 @@ const GESTION = {
  */
 const DESPACHO = {
   rotulo: 'Despacho de dirección',
+  privacidad: 'restringido',
   acento: 0x1d4ed8,
   mundo: { ancho: 11, fondo: 9, alto: 4 },
   pasillo: null,
@@ -603,17 +624,23 @@ const DESPACHO = {
   mobiliario: [
     //  La biblioteca: libros de lomo ancho y alguno tumbado, no las carpetas
     //  de archivo de la estantería. Es el mueble de un despacho.
-    { tipo: 'biblioteca', gy: 0.8, largo: 2.4 },
+    //  Las tres piezas de pared, compactadas hacia el fondo para que quede un
+    //  hueco de casi dos al frente: es por donde se entra. Ver `personal`.
+    { tipo: 'biblioteca', gy: 0.5, largo: 1.8 },
     //  Las dos sillas de visita, enfrente del escritorio ejecutivo.
-    { tipo: 'mesa_revision', gx: 2.0, gy: 5.8, largo: 2.2 },
+    //  SEPARADA DEL MURO. A gx 2,0 su bulto llegaba a 0,4 de la pared y la
+    //  puerta no podia ir en todo ese tramo: con la biblioteca, la pantalla
+    //  de videoconferencia y el tablero colgados ahi, el vano no tenia donde
+    //  caer y terminaba debajo de dos muebles a la vez.
+    { tipo: 'mesa_revision', gx: 3.2, gy: 5.8, largo: 2.2 },
     //  La mesa estratégica, en su propio rincón.
     { tipo: 'mesa', gx: 8.0, gy: 5.8 },
     { tipo: 'zona', gx: 6.6, gy: 4.6, ancho: 3.6, fondo: 3.4 },
-    { tipo: 'videoconferencia', gy: 3.4, largo: 2.2 },
+    { tipo: 'videoconferencia', gy: 2.5, largo: 1.8 },
     //  El panel de indicadores generales: lo que mira quien dirige. La sala
     //  de reuniones no lo tiene -alli se mira a quien esta del otro lado de
     //  la camara-, y es lo que separa un despacho de una sala de juntas.
-    { tipo: 'tablero', gy: 5.9 },
+    { tipo: 'tablero', gy: 4.4 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 6 },
     { tipo: 'planta', gx: 9.9, gy: 1.2 }
@@ -638,6 +665,7 @@ const DESPACHO = {
  */
 const GENERICA = {
   rotulo: 'Sala sin plantilla',
+  privacidad: 'estandar',
   acento: 0x64748b,
   mundo: { ancho: 10, fondo: 8, alto: 4 },
   pasillo: null,

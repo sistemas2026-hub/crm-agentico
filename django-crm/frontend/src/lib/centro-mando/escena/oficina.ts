@@ -410,6 +410,109 @@ function construirLosa(mundo: Mundo): Graphics {
  * aparece cuando la geometría y las rutas se escriben dos veces.
  */
 /**
+ * UNA PUERTA QUE SE RECONOCE COMO PUERTA.
+ *
+ * Hasta acá un vano era un HUECO: el muro se partía en dos tramos, con sus
+ * jambas y una línea de umbral. La auditoría de las once salas demostró que
+ * esos huecos existían, estaban dibujados y se podía pasar por ellos —las tres
+ * columnas coincidían— y aun así, mirando la planta, «las entradas del lado
+ * derecho no se distinguen». Las dos cosas eran ciertas a la vez: **el dato
+ * estaba bien y el dibujo no se leía**.
+ *
+ * Lo que convierte un hueco en una puerta es poca cosa y hay que ponerla:
+ *
+ *   - un MARCO que sobresale del plano del muro, con dintel;
+ *   - una HOJA entreabierta, que es lo que dice «esto se abre» —y abierta, no
+ *     cerrada, para no tapar el paso en la vista de conjunto—;
+ *   - dos BISAGRAS en el canto donde gira;
+ *   - un UMBRAL en el suelo, más marcado que una línea;
+ *   - y en las salas restringidas, un LECTOR junto a la jamba.
+ *
+ * EL LECTOR ES UN DIBUJO Y NO UN PERMISO. Dice que esa puerta es de acceso
+ * controlado; quién puede entrar lo decide el backend y esto no lo sabe ni
+ * puede saberlo. Pintarlo de forma que parezca una validación sería afirmar
+ * una seguridad que esta pantalla no da.
+ *
+ * Se dibuja igual en los cuatro muros. Las dos funciones que reciben —`panel`
+ * para pintar un trozo de pared y `aSuelo` para un punto del piso— son lo que
+ * hace que el mismo código sirva para el muro de fondo, el lateral y los dos
+ * petos, que en isometría son cuatro planos distintos.
+ */
+function dibujarPuerta(
+  g: Graphics,
+  vano: [number, number],
+  alto: number,
+  privacidad: string | undefined,
+  panel: (gg: Graphics, desde: number, largo: number, z0: number, z1: number, color: number, alpha?: number) => void,
+  aSuelo: (u: number) => { x: number; y: number },
+  //  EN CRISTAL cuando la puerta está en el cerramiento acristalado. No es un
+  //  adorno: una hoja de madera opaca en mitad de una mampara de vidrio sería
+  //  justo el tapón que el vidrio existe para no poner.
+  acristalada = false
+) {
+  const [a, b] = vano;
+  const hHoja = Math.min(alto, acristalada ? 2.5 : 2.2);
+  //  SEMIPÚBLICA: sin hoja. Una sala a la que entra gente de la calle tiene un
+  //  acceso abierto, y ponerle una hoja diría lo contrario.
+  const conHoja = privacidad !== 'semipublico';
+
+  //  1 · EL MARCO. Sobresale del muro —por eso va un poco más ancho que el
+  //  vano y con su propio tono— y es lo primero que hace que el hueco se lea
+  //  como una abertura hecha a propósito.
+  panel(g, a - 0.18, 0.18, 0, hHoja + 0.12, PALETA.muroRemate);
+  panel(g, b, 0.18, 0, hHoja + 0.12, PALETA.muroRemate);
+  //  El dintel, cruzando por encima.
+  panel(g, a - 0.18, (b - a) + 0.36, hHoja, hHoja + 0.12, PALETA.muroRemate);
+
+  //  2 · EL FONDO DEL VANO, oscuro: es lo que da profundidad y evita que la
+  //  puerta se lea como un cuadro pintado en la pared.
+  //  En la de cristal se ve la sala a través del hueco, así que el fondo es
+  //  apenas una sombra; en la de obra es un hueco oscuro de verdad.
+  panel(g, a, b - a, 0, hHoja, PALETA.pisoProfundo, acristalada ? 0.2 : 0.55);
+
+  if (conHoja) {
+    //  3 · LA HOJA, ENTREABIERTA. Ocupa un tercio del vano desde la jamba
+    //  izquierda: se ve que hay una puerta y queda sitio por donde pasar.
+    const anchoHoja = (b - a) * 0.34;
+    if (acristalada) {
+      //  Hoja de vidrio con bastidor: el paño translúcido, y los cantos de
+      //  perfil metálico, que es lo que de verdad se ve de una puerta así.
+      panel(g, a + 0.04, anchoHoja, 0.04, hHoja - 0.06, PALETA.vidrioBrillo, 0.22);
+      panel(g, a + 0.04, anchoHoja, 0.04, 0.16, PALETA.metal);
+      panel(g, a + 0.04, anchoHoja, hHoja - 0.18, hHoja - 0.06, PALETA.metal);
+      panel(g, a + 0.04, 0.06, 0.04, hHoja - 0.06, PALETA.metal);
+      panel(g, a + anchoHoja - 0.02, 0.06, 0.04, hHoja - 0.06, PALETA.metal);
+      //  El tirador es una barra vertical, no un pomo.
+      panel(g, a + anchoHoja - 0.14, 0.06, hHoja * 0.34, hHoja * 0.62, PALETA.muroRemate);
+    } else {
+      panel(g, a + 0.04, anchoHoja, 0.04, hHoja - 0.06, PALETA.madera);
+      panel(g, a + 0.04, anchoHoja, hHoja - 0.2, hHoja - 0.06, tono(PALETA.madera, 0.14));
+      //  4 · LAS BISAGRAS, en el canto donde gira.
+      for (const z of [hHoja * 0.28, hHoja * 0.72]) {
+        panel(g, a + 0.02, 0.07, z, z + 0.14, PALETA.metal);
+      }
+      //  La manija, del lado opuesto.
+      panel(g, a + anchoHoja - 0.08, 0.07, hHoja * 0.45, hHoja * 0.52, PALETA.metal);
+    }
+  }
+
+  //  5 · EL UMBRAL. Una banda en el suelo y no una línea: a la escala de la
+  //  vista de conjunto, una línea de un píxel desaparece.
+  const p0 = aSuelo(a);
+  const p1 = aSuelo(b);
+  g.moveTo(p0.x, p0.y).lineTo(p1.x, p1.y)
+   .stroke({ color: PALETA.muroBanda, width: 3, alpha: 0.95 });
+
+  //  6 · EL LECTOR DE ACCESO, sólo en las salas restringidas. Un cuerpo chico
+  //  junto a la jamba derecha, con su testigo.
+  if (privacidad === 'restringido') {
+    const zl = hHoja * 0.55;
+    panel(g, b + 0.2, 0.16, zl, zl + 0.26, PALETA.rackCuerpo);
+    panel(g, b + 0.23, 0.1, zl + 0.05, zl + 0.16, PALETA.mossClaro, 0.95);
+  }
+}
+
+/**
  * Lo que sube el peto de cerramiento.
  *
  * 1,2 y no mas: a esa altura no tapa a NADIE -ver la tabla de arriba- y aun
@@ -417,16 +520,60 @@ function construirLosa(mundo: Mundo): Graphics {
  */
 export const ALTURA_DE_ANTEPECHO = 1.2;
 
-function construirAntepecho(mundo: Mundo): Graphics {
+/**
+ * Lo que sube el CRISTAL por encima del antepecho.
+ *
+ * 2,9 es la altura de un cerramiento de oficina de verdad, y el dato que lo
+ * permite es que el vidrio no tapa: la tabla de oclusion de arriba mide
+ * cuanto esconde un muro OPACO, y aca solo es opaco hasta 1,2. De 1,2 para
+ * arriba hay pano translucido, dos travesanos y un montante cada dos metros y
+ * medio — menos de un palmo de obstaculo en todo el borde.
+ */
+export const ALTURA_DE_CRISTAL = 2.9;
+
+/** Cada cuanto va un montante vertical del pano. */
+const PASO_DE_MONTANTE = 2.5;
+
+/**
+ * EL CERRAMIENTO DE LOS DOS LADOS QUE MIRAN A LA CAMARA.
+ *
+ * Antes era solo un peto de 1,2, y la revision lo dijo con una pregunta en
+ * vez de con una queja: «y si haces la pared que hace falta de cristal, con
+ * puerta?». Es la respuesta correcta y resuelve a la vez las dos cosas que el
+ * peto dejaba abiertas:
+ *
+ *   - UNA SALA SE LEE COMO RECINTO. Un peto a la altura de un escritorio
+ *     parece una divisoria de plano abierto; un pano que llega casi al techo
+ *     es una pared, y entonces la puerta que tiene es una puerta de verdad y
+ *     no una interrupcion del mobiliario.
+ *   - Y NO CUESTA VISIBILIDAD. Era el motivo por el que el peto se quedaba en
+ *     1,2: a 2,2 ya se come escritorios y a 4,0 esconde a la gente. El vidrio
+ *     rompe ese compromiso — sube la pared sin esconder nada.
+ *
+ * Por eso devuelve DOS dibujos y no uno. No es comodidad: van a
+ * profundidades distintas y por motivos opuestos.
+ *
+ *   - El ANTEPECHO es opaco, asi que va DETRAS del mobiliario. Es mentira
+ *     —esta en el borde de delante— y es la mentira barata que evita que un
+ *     peto tache el escritorio que tiene justo detras.
+ *   - El CRISTAL va DELANTE de todo, que es donde de verdad esta. Se puede
+ *     justamente porque es transparente: dibujar la verdad deja de costar
+ *     nada en cuanto el material no esconde.
+ */
+function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics } {
   const g = new Graphics();
+  const c = new Graphics();
   const h = ALTURA_DE_ANTEPECHO;
+  const hc = ALTURA_DE_CRISTAL;
   const remate = 0.1;
 
-  /** Un tramo del peto, con su remate más claro arriba. */
-  const tramo = (
-    pintar: (gg: Graphics, desde: number, largo: number, z0: number, z1: number, color: number, alpha?: number) => void,
-    desde: number, hasta: number
-  ) => {
+  type Pintar = (
+    gg: Graphics, desde: number, largo: number,
+    z0: number, z1: number, color: number, alpha?: number
+  ) => void;
+
+  /** Un tramo del peto, con su remate mas claro arriba. */
+  const tramo = (pintar: Pintar, desde: number, hasta: number) => {
     const largo = hasta - desde;
     if (largo <= 0.01) return;
     pintar(g, desde, largo, 0, h - remate, PALETA.muroLateral);
@@ -435,47 +582,77 @@ function construirAntepecho(mundo: Mundo): Graphics {
     pintar(g, desde, largo, 0, 0.22, PALETA.pisoProfundo, 0.6);
   };
 
-  /** El hueco de la puerta: jambas a los lados y umbral en el suelo. */
-  const marcarVano = (
-    pintar: (gg: Graphics, desde: number, largo: number, z0: number, z1: number, color: number, alpha?: number) => void,
-    vano: [number, number],
+  /**
+   * El pano de vidrio sobre ese tramo de peto.
+   *
+   * Tres capas y ninguna sobra: el pano, que apenas tine; una banda de
+   * reflejo alta, que es lo unico que dice «esto es vidrio y no aire»; y la
+   * carpinteria —dos travesanos y los montantes—, que es lo que de verdad se
+   * ve a esta escala y lo que lo convierte en una pared.
+   */
+  const pano = (pintar: Pintar, desde: number, hasta: number) => {
+    const largo = hasta - desde;
+    if (largo <= 0.01) return;
+    pintar(c, desde, largo, h, hc - 0.15, PALETA.vidrio, 0.1);
+    pintar(c, desde, largo, hc - 0.9, hc - 0.45, PALETA.vidrioBrillo, 0.18);
+    pintar(c, desde, largo, h, h + 0.12, PALETA.muroRemate);
+    pintar(c, desde, largo, hc - 0.15, hc, PALETA.muroRemate);
+    //  Los montantes se reparten para que el ultimo caiga en el borde del
+    //  tramo: un pano que termina sin montante se deshilacha.
+    //  LA CARPINTERIA ES LO QUE SE LEE, no el pano.
+    //
+    //  Medido el 02/11/2026 sobre la captura del conjunto: a la escala de la
+    //  vista general el pano translucido practicamente no se distingue del
+    //  fondo —tine un 10% y detras tiene suelo claro—, y lo que dibuja la
+    //  pared son los dos travesanos y los montantes. Por eso son gruesos: a
+    //  0,09 el montante medía menos de un pixel y desaparecía.
+    const ancho = 0.14;
+    //  Un tramo mas corto que su propio montante no lleva ninguno: quedaria
+    //  desbordando el pano por los dos lados.
+    if (largo < ancho * 1.5) return;
+    const cuantos = Math.max(1, Math.round(largo / PASO_DE_MONTANTE));
+    for (let i = 0; i <= cuantos; i++) {
+      const u = desde + (i / cuantos) * largo;
+      const x = Math.min(Math.max(u - ancho / 2, desde), hasta - ancho);
+      pintar(c, x, ancho, h, hc, PALETA.muroRemate, 0.92);
+    }
+  };
+
+  const lado = (
+    pintar: Pintar,
+    largoTotal: number,
+    vano: [number, number] | undefined,
     aSuelo: (u: number) => { x: number; y: number }
   ) => {
-    pintar(g, vano[0] - 0.14, 0.14, 0, h, PALETA.muroRemate);
-    pintar(g, vano[1], 0.14, 0, h, PALETA.muroRemate);
-    const a = aSuelo(vano[0]);
-    const b = aSuelo(vano[1]);
-    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
-     .stroke({ color: PALETA.muroBanda, width: 2.5, alpha: 0.9 });
+    if (vano) {
+      tramo(pintar, 0, Math.max(0, vano[0]));
+      tramo(pintar, Math.min(largoTotal, vano[1]), largoTotal);
+      pano(pintar, 0, Math.max(0, vano[0]));
+      pano(pintar, Math.min(largoTotal, vano[1]), largoTotal);
+      //  LA PUERTA VA EN EL CRISTAL, no en el peto: sube hasta el travesano
+      //  alto y es lo que se busca con la vista al entrar.
+      dibujarPuerta(c, vano, hc, mundo.privacidad, pintar, aSuelo, true);
+    } else {
+      tramo(pintar, 0, largoTotal);
+      pano(pintar, 0, largoTotal);
+    }
   };
 
   if (mundo.antepecho?.frente) {
-    const pintar = (gg: Graphics, desde: number, largo: number, z0: number, z1: number, c: number, a = 1) =>
-      panelEnY(gg, mundo.fondo, desde, largo, z0, z1, c, a);
-    const v = mundo.puertaFrente;
-    if (v) {
-      tramo(pintar, 0, Math.max(0, v[0]));
-      tramo(pintar, Math.min(mundo.ancho, v[1]), mundo.ancho);
-      marcarVano(pintar, v, (u) => aPantalla(u, mundo.fondo, 0.02));
-    } else {
-      tramo(pintar, 0, mundo.ancho);
-    }
+    lado(
+      (gg, desde, largo, z0, z1, col, a = 1) => panelEnY(gg, mundo.fondo, desde, largo, z0, z1, col, a),
+      mundo.ancho, mundo.puertaFrente, (u) => aPantalla(u, mundo.fondo, 0.02)
+    );
   }
 
   if (mundo.antepecho?.derecha) {
-    const pintar = (gg: Graphics, desde: number, largo: number, z0: number, z1: number, c: number, a = 1) =>
-      panelEnX(gg, mundo.ancho, desde, largo, z0, z1, c, a);
-    const v = mundo.puertaDerecha;
-    if (v) {
-      tramo(pintar, 0, Math.max(0, v[0]));
-      tramo(pintar, Math.min(mundo.fondo, v[1]), mundo.fondo);
-      marcarVano(pintar, v, (u) => aPantalla(mundo.ancho, u, 0.02));
-    } else {
-      tramo(pintar, 0, mundo.fondo);
-    }
+    lado(
+      (gg, desde, largo, z0, z1, col, a = 1) => panelEnX(gg, mundo.ancho, desde, largo, z0, z1, col, a),
+      mundo.fondo, mundo.puertaDerecha, (u) => aPantalla(mundo.ancho, u, 0.02)
+    );
   }
 
-  return g;
+  return { peto: g, cristal: c };
 }
 
 function construirBaranda(mundo: Mundo): Graphics {
@@ -656,15 +833,12 @@ function construirMuros(mundo: Mundo): Graphics {
     panelMuroFondo(g, Math.min(mundo.ancho, vano[1]), mundo.ancho, 0, h, PALETA.muroFondo);
     //  Dintel: el muro sigue por encima de la puerta.
     panelMuroFondo(g, vano[0], vano[1], 2.2, h, PALETA.muroFondo);
-    //  Las jambas, un tono más claro: es lo que le da espesor al muro y hace
-    //  que el hueco se lea como una puerta y no como pared que falta.
-    panelMuroFondo(g, vano[0] - 0.12, vano[0], 0, 2.2, PALETA.muroRemate);
-    panelMuroFondo(g, vano[1], vano[1] + 0.12, 0, 2.2, PALETA.muroRemate);
-    //  El umbral en el suelo, que es lo que dice por dónde se entra.
-    const a = aPantalla(vano[0], 0, 0.02);
-    const b = aPantalla(vano[1], 0, 0.02);
-    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
-     .stroke({ color: PALETA.muroBanda, width: 2, alpha: 0.8 });
+    //  Y la puerta. `panelMuroFondo` toma (desde, HASTA) y no (desde, largo),
+    //  así que se adapta acá en vez de cambiar la primitiva, que usan otros.
+    dibujarPuerta(
+      g, vano, 2.2, mundo.privacidad,
+      (gg, desde, largo, z0, z1, c, al) => panelMuroFondo(gg, desde, desde + largo, z0, z1, c, al),
+      (u) => aPantalla(u, 0, 0.02));
   } else {
     panelMuroFondo(g, 0, mundo.ancho, 0, h, PALETA.muroFondo);
   }
@@ -679,15 +853,12 @@ function construirMuros(mundo: Mundo): Graphics {
       Math.max(0, mundo.fondo - vanoLateral[1]), 0, h, PALETA.muroLateral);
     //  Dintel.
     panelMuroLateral(g, vanoLateral[0], vanoLateral[1] - vanoLateral[0], 2.2, h, PALETA.muroLateral);
-    //  Jambas: es lo que le da espesor al muro y hace que el hueco se lea como
-    //  una puerta y no como pared que falta.
-    panelMuroLateral(g, vanoLateral[0] - 0.12, 0.12, 0, 2.2, PALETA.muroRemate);
-    panelMuroLateral(g, vanoLateral[1], 0.12, 0, 2.2, PALETA.muroRemate);
-    //  El umbral en el suelo, que es lo que dice por dónde se entra.
-    const a = aPantalla(0, vanoLateral[0], 0.02);
-    const b = aPantalla(0, vanoLateral[1], 0.02);
-    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
-     .stroke({ color: PALETA.muroBanda, width: 2, alpha: 0.8 });
+    //  Y LA PUERTA: marco, hoja, bisagras, umbral y lector. Un hueco con
+    //  jambas no se lee como puerta — ver `dibujarPuerta`.
+    dibujarPuerta(
+      g, vanoLateral, 2.2, mundo.privacidad,
+      (gg, desde, largo, z0, z1, c, al) => panelMuroLateral(gg, desde, largo, z0, z1, c, al),
+      (u) => aPantalla(0, u, 0.02));
   } else {
     panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
   }
@@ -2492,13 +2663,24 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   }
 
   //  EL CERRAMIENTO de los dos lados que miran a la camara. Ver
-  //  `construirAntepecho`: si lleva puerta, el hueco se abre y se marca.
+  //  `construirCerramiento`: antepecho opaco abajo, cristal arriba, y la
+  //  puerta en el cristal.
   if (mundo.antepecho?.frente || mundo.antepecho?.derecha) {
-    const cierre = construirAntepecho(mundo);
-    //  Al mismo nivel que la baranda: por encima del suelo y por debajo del
-    //  mobiliario, que si no un antepecho tacharia el escritorio de delante.
-    cierre.zIndex = -1500;
-    raiz.addChild(cierre);
+    const { peto, cristal } = construirCerramiento(mundo);
+    //  El peto, al mismo nivel que la baranda: por encima del suelo y por
+    //  debajo del mobiliario, que si no tacharia el escritorio de delante.
+    peto.zIndex = -1500;
+    peto.eventMode = 'none';
+    raiz.addChild(peto);
+    //  El cristal, DELANTE DE TODO lo de esta sala, que es donde esta. Puede
+    //  ir aca y no detras precisamente porque no esconde: el compromiso que
+    //  obligaba a mentir con el peto no existe para un material transparente.
+    //  Por debajo de la capa de rotulos, que va en 5000.
+    cristal.zIndex = 950;
+    //  Y NO RECIBE EL PUNTERO: una sala se sigue eligiendo haciendo clic
+    //  sobre ella, no sobre el vidrio que tiene delante.
+    cristal.eventMode = 'none';
+    raiz.addChild(cristal);
   }
 
   if (planta.baranda) {

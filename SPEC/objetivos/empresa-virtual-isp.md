@@ -2818,3 +2818,152 @@ mandar.
 Y **no afirma sobre píxeles**. De la escena sólo se afirma lo que la propia
 cabecera publica, objetos y fotogramas: una escena con cero objetos no se montó
 y a 0 fps no está corriendo, y las dos cosas se ven igual en un lienzo negro.
+
+## P7 · La pared que faltaba, de cristal — 02/11/2026
+
+La revisión no pidió un arreglo: hizo una pregunta. *«¿Y si haces la pared que
+hace falta de cristal? Con puerta.»* Es la respuesta correcta, y rompe un
+compromiso que llevaba tres entregas en pie.
+
+### Por qué el peto se quedaba en 1,2
+
+Está medido en `oficina.ts` y la tabla sigue siendo cierta: un muro **opaco**
+en el borde de delante esconde lo que hay detrás.
+
+| Altura | Esconde de escritorio | Esconde de persona |
+|---|---|---|
+| 1,2 | 0,7 celdas | **0,0** |
+| 2,2 | 2,4 | 0,7 |
+| 4,0 | 5,3 | 3,7 |
+
+De ahí salía un peto a la altura de un escritorio: cerraba el recinto sin tapar
+a nadie. El precio era que **una sala no se leía como sala** — un peto de 1,2
+es una divisoria de plano abierto, y entonces el vano que tiene no parece una
+puerta sino una interrupción del mobiliario.
+
+El vidrio no es un término medio entre las dos cosas: **las desacopla**. La
+pared sube a 2,9 y no esconde nada, porque sólo es opaca hasta 1,2.
+
+### Lo que cambió, y lo que no
+
+- `construirCerramiento` devuelve **dos dibujos**, y eso no es comodidad. El
+  antepecho opaco sigue yendo **detrás** del mobiliario: es mentira —está en el
+  borde de delante— y es la mentira barata que evita que tache el escritorio
+  que tiene justo detrás. El cristal va **delante de todo**, que es donde de
+  verdad está. Se puede justamente porque es transparente: **dibujar la verdad
+  deja de costar nada en cuanto el material no esconde.**
+- La puerta del cristal es de cristal: hoja translúcida con bastidor metálico y
+  tirador vertical. Una hoja de madera opaca en mitad de un paño de vidrio
+  sería el tapón que el vidrio existe para no poner.
+- Las **seis puertas de muro de obra** (las del lateral izquierdo) siguen de
+  madera, con marco, hoja, bisagras y umbral. Son dos materiales porque son dos
+  muros, y que se distingan es información, no inconsistencia.
+
+Medido sobre la organización del piloto: **11 de 11** salas llevan cerramiento
+acristalado, **5** puertas van en el cristal y **6** en muro de obra.
+
+### La carpintería es lo que se lee
+
+Primera versión con montantes de 0,09: en la captura del conjunto el paño
+prácticamente no se distingue —tiñe un 10% y detrás tiene suelo claro— y el
+montante medía **menos de un píxel**. Lo que dibuja la pared a esa escala son
+los dos travesaños y los montantes, así que son gruesos a propósito (0,14).
+
+### Y tres defectos de la rejilla que salieron del mismo síntoma
+
+Nada de esto se buscaba. Con **tres** departamentos, una sala entera quedaba
+aislada **con su puerta dibujada y abierta**. Los tres tenían la misma forma —
+la rejilla afirmaba algo que el dibujo no decía— y ninguno se veía mirando la
+planta.
+
+1. **El bulto de un mueble atravesaba los muros.** La mesa del patio, con bulto
+   1,5 y centro a 0,9 del muro, tapiaba medio metro **dentro** de la sala
+   vecina y le cerraba su único paso. Un muro que no detiene a un mueble
+   tampoco detiene a nadie: ahora cada pieza se recorta a su propio recinto.
+2. **Una mampara era aire.** Estaba en la lista de los que no estorban, así que
+   se dibujaba de pared a pared y se cruzaba por cualquier punto. Es la mentira
+   simétrica de una puerta que se ve y no se pasa, y la más difícil de ver:
+   nadie mira una figura y comprueba que *no* atraviese un tabique. Al
+   convertirla en tabique aparecieron **cuatro de siete vanos de mampara
+   amueblados**, dos taponados del todo — los dos bancos de espera de Atención
+   caían justo sobre el paso, y la mesa de entrevistas de Recursos Humanos
+   también.
+3. **Había dos definiciones de «se llega» y no coincidían.** Una aceptaba
+   cualquier celda de la *vecindad* de un destino; la otra exigía la celda
+   misma. En Comercial el cuarto escritorio queda en una bolsa cerrada por los
+   otros tres: la primera lo daba por alcanzable —su vecina, del otro lado del
+   mueble, sí lo era— y la ruta no existía. **Las dos estaban en verde.** Ahora
+   hay una sola función, `alcanzablesDesde`, y la rejilla guarda a dónde se
+   llega.
+
+El tercero estaba escondido por un defecto del propio fixture: los puestos de
+las once salas compartían identificador (`principal`, `p1`…), así que el mapa
+de destinos se pisaba a sí mismo y la prueba afirmaba sobre una sede de cuatro
+puestos en vez de treinta y siete. **Arreglar la prueba fue lo que destapó los
+tres.**
+
+### Qué lo mide
+
+Tres guardas nuevas en `navegacion.test.js`, y cada una se comprobó rompiendo a
+propósito lo que vigila:
+
+| Mutación | Resultado |
+|---|---|
+| el bulto vuelve a atravesar el muro | **cazada** (1 roja) |
+| la mampara vuelve a ser aire | **cazada** (1 roja) |
+| `llegadaA` vuelve a devolver la primera celda libre | **cazada** (2 rojas) |
+| `conectividad` vuelve a valer con la celda de al lado | **no la vio nadie** |
+
+La última se declara sin adornar: con los otros dos arreglos puestos ya no
+existe en el plano ningún puesto que la holgura dejara pasar, así que aflojar
+`conectividad` hoy no cambia ninguna respuesta. El cambio se hizo por
+coherencia —una sola definición— y **no hay mutación que lo demuestre**.
+
+El cristal, en cambio, **no tiene guarda en CI**: es dibujo, y el arnés no
+monta PixiJS. Se verificó con capturas del navegador, que es lo que hay.
+
+### Diez de doce plantillas no dejaban sitio para su puerta
+
+Persiguiendo por qué Finanzas seguía sin hoja visible apareció el defecto de
+fondo, y no era de la puerta: **era del muro**. Medido sobre las doce
+plantillas base, contando muebles de pared, maceteros pegados al muro y
+escritorios, **diez no dejaban en su muro izquierdo ningún tramo de 1,8
+libre**. No es que la puerta estuviera mal elegida: no había dónde ponerla.
+
+| Plantilla | Lo que invadía el mejor hueco |
+|---|---|
+| `inspeccion` | 2,22 de 1,8 |
+| `comercial` | 1,62 |
+| `expedientes`, `reuniones` | 1,40 |
+| `despacho` | 1,22 |
+| `finanzas` | 0,80 |
+| `atencion` | 0,52 |
+| `gestion`, `generica` | 0,20 |
+| `personal` | 0,10 |
+| `operaciones`, `tecnica` | **cabe** |
+
+La tentación era editar diez plantillas. Se descartó: **una plantilla no puede
+saber dónde va su puerta.** Depende de qué tiene pegado a cada lado, y eso lo
+decide el reparto — la misma plantilla, en dos sitios del plano, abre por muros
+distintos. Pedirle que reserve «el sitio de la puerta» es pedirle que adivine,
+y la siguiente empresa que escriba una plantilla no tiene por qué saberlo.
+
+Así que lo resuelve quien elige el vano: `apartarDelVano` corre por el muro el
+mueble que tapa la puerta recién abierta, hasta la posición libre más cercana.
+**Mueve, no borra.** Un armario que desaparece al cambiar la sala de columna es
+una sala cuyo contenido depende de dónde cayó, y eso ya costó una vez — el
+primer despeje de puertas del patio borraba el mostrador de recepción.
+
+Resultado medido sobre el piloto: de **6 puertas tapadas a 2**, y esas dos
+quedan libres al **94%** y al **77%**. Donde el muro está genuinamente lleno
+—Dirección tiene biblioteca, pantalla de videoconferencia y tablero en nueve
+metros— la pieza se queda donde está y la medición lo dice, en vez de hacerla
+desaparecer.
+
+Dos guardas nuevas en `cerramientos.test.js`, y las dos matan su mutación:
+
+| Mutación | Resultado |
+|---|---|
+| el compositor no aparta nada | **cazada** por «ninguna puerta queda tapada por la mitad o más» |
+| en vez de mover, borra | **cazada** por «aparta lo que puede, no lo borra» |
+

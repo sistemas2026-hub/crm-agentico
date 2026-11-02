@@ -28,7 +28,17 @@ const salasDe = (n) => Array.from({ length: n }, (_, i) => {
   const plantilla = BASES[i % BASES.length];
   return {
     id: `d${i}`, rotulo: `Departamento ${i}`, tipo: 'departamento', piso: 1,
-    plantilla, planta: PLANTILLAS[plantilla]
+    plantilla,
+    //  LOS PUESTOS LLEVAN EL PREFIJO DE SU SALA, igual que los compone
+    //  `departamentos.js`. Sin eso, once salas comparten los identificadores
+    //  'principal', 'p1', 'p2'... y el mapa de destinos se pisa a si mismo:
+    //  quedan cuatro entradas en vez de treinta y siete, y la prueba afirma
+    //  sobre una sede que no existe. Costo una tarde de perseguir un puesto
+    //  'p3' aislado que era el de OTRA sala.
+    planta: {
+      ...PLANTILLAS[plantilla],
+      puestos: PLANTILLAS[plantilla].puestos.map((q) => ({ ...q, id: `d${i}:${q.id}` }))
+    }
   };
 });
 
@@ -94,6 +104,115 @@ describe('desde el pasillo se llega a todos los puestos', () => {
         expect(transitable(rejilla, c.cx, c.cy),
           `${p.sala}: hay algo delante de su puerta, en (${gx.toFixed(1)}, ${gy.toFixed(1)})`)
           .toBe(true);
+      }
+    }
+  });
+});
+
+describe('un muro detiene tambien a los muebles', () => {
+  //  LOS TRES DEFECTOS DE ESTE BLOQUE SALIERON DEL MISMO SINTOMA, el
+  //  02/11/2026: con tres departamentos, una sala entera quedaba aislada y su
+  //  puerta estaba dibujada y abierta. Ninguno se veia mirando la planta y los
+  //  tres tenian la misma forma — la rejilla afirmaba algo que el dibujo no
+  //  decia. Se escriben aca para que no vuelvan en silencio.
+
+  it('un mueble no tapia celdas de la planta de al lado', () => {
+    //  El bulto es un radio generoso a proposito, y sin recortar atraviesa el
+    //  muro: la mesa del patio, con bulto 1,5 y centro a 0,9 del muro, tapiaba
+    //  medio metro DENTRO de la sala vecina y le cerraba su unico paso.
+    const sede = sedeDe(salasDe(3), []);
+    const rejilla = rejillaDe(sede);
+    const circulaciones = sede.plantas.filter((p) => p.papel === 'circulacion');
+    let revisadas = 0;
+    for (const p of sede.plantas.filter((x) => x.papel === 'sala')) {
+      for (const c of circulaciones) {
+        for (const mu of c.mobiliario ?? []) {
+          const gx = c.origen.gx + (mu.gx ?? 0);
+          const gy = c.origen.gy + (mu.gy ?? 0);
+          //  Solo los que estan lo bastante cerca como para poder cruzar.
+          if (gx < p.origen.gx - 2 || gx > p.origen.gx + p.mundo.ancho + 2) continue;
+          if (gy < p.origen.gy - 2 || gy > p.origen.gy + p.mundo.fondo + 2) continue;
+          //  Una celda bien dentro de la sala, a la altura del mueble.
+          const dx = Math.min(Math.max(gx, p.origen.gx + 0.6),
+            p.origen.gx + p.mundo.ancho - 0.6);
+          const dy = Math.min(Math.max(gy, p.origen.gy + 0.6),
+            p.origen.gy + p.mundo.fondo - 0.6);
+          //  Que no sea una celda que la propia sala ocupa con algo suyo.
+          const suyo = (p.mobiliario ?? []).some(
+            (m) => Math.abs(p.origen.gx + (m.gx ?? 0) - dx) < 2
+              && Math.abs(p.origen.gy + (m.gy ?? 0) - dy) < 2)
+            || (p.puestos ?? []).some(
+              (q) => Math.abs(p.origen.gx + (q.gx ?? 0) - dx) < 1.6
+                && Math.abs(p.origen.gy + (q.gy ?? 0) - dy) < 1.6);
+          if (suyo) continue;
+          const ce = celdaDe(dx, dy);
+          revisadas++;
+          expect(rejilla.celdas[ce.cy * rejilla.ancho + ce.cx],
+            `${mu.tipo} de la circulacion tapia una celda de ${p.sala}`).toBe(LIBRE);
+        }
+      }
+    }
+    expect(revisadas, 'no habia ningun mueble de circulacion pegado a una sala')
+      .toBeGreaterThan(0);
+  });
+
+  it('una mampara es un tabique, y su vano es por donde se pasa', () => {
+    //  Estaba en la lista de los que NO estorban, asi que se dibujaba de pared
+    //  a pared y se cruzaba por cualquier punto. Es la mentira simetrica de
+    //  una puerta que se ve y no se pasa, y la mas dificil de ver: nadie mira
+    //  una figura y comprueba que NO atraviese un tabique.
+    const sede = sedeDe(salasDe(11), []);
+    const rejilla = rejillaDe(sede);
+    let conMampara = 0;
+    for (const p of sede.plantas.filter((x) => x.papel === 'sala')) {
+      for (const mu of (p.mobiliario ?? []).filter((m) => m.tipo === 'mampara')) {
+        if (mu.gx == null) continue;
+        conMampara++;
+        const gx = p.origen.gx + mu.gx;
+        const desde = mu.desde ?? 0;
+        const hasta = Math.min(mu.hasta ?? p.mundo.fondo, p.mundo.fondo);
+        const vano = mu.vano ?? null;
+        //  Un punto del tabique fuera del vano: infranqueable.
+        const fuera = vano && vano[0] - desde > 0.8
+          ? (desde + vano[0]) / 2
+          : (Math.min(vano ? vano[1] : hasta, hasta) + hasta) / 2;
+        const cf = celdaDe(gx + 0.1, p.origen.gy + fuera);
+        expect(rejilla.celdas[cf.cy * rejilla.ancho + cf.cx],
+          `${p.sala}: su mampara se cruza por donde no hay vano`).not.toBe(LIBRE);
+        //  Y el vano, franqueable.
+        if (vano) {
+          const cv = celdaDe(gx + 0.1, p.origen.gy + (vano[0] + vano[1]) / 2);
+          expect(transitable(rejilla, cv.cx, cv.cy),
+            `${p.sala}: el vano de su mampara no deja pasar`).toBe(true);
+        }
+      }
+    }
+    expect(conMampara, 'ninguna sala del caso tenia mampara').toBeGreaterThan(0);
+  });
+
+  it('«se llega» quiere decir lo mismo para quien pregunta y para quien lleva', () => {
+    //  LA GUARDA QUE FALTABA. Habia dos definiciones: una aceptaba cualquier
+    //  celda de la VECINDAD de un destino y la otra exigia la celda misma, y
+    //  no coincidian. En la sala comercial el cuarto escritorio quedaba en una
+    //  bolsa cerrada por los otros tres: `conectividad` lo daba por alcanzable
+    //  —su vecina del otro lado del mueble si lo era— y la ruta no existia.
+    //  Las dos estaban en verde.
+    for (const n of [3, 8, 11]) {
+      const sede = sedeDe(salasDe(n), []);
+      const rejilla = rejillaDe(sede);
+      const { alcanzables } = conectividad(rejilla, circulacionesDe(sede));
+      const patio = sede.plantas
+        .filter((p) => p.papel === 'circulacion')
+        .sort((a, b) => b.mundo.ancho * b.mundo.fondo - a.mundo.ancho * a.mundo.fondo)[0];
+      const origen = celdaDe(
+        patio.origen.gx + patio.mundo.ancho / 2,
+        patio.origen.gy + patio.mundo.fondo / 2);
+      for (const id of alcanzables) {
+        const hasta = llegadaA(rejilla, id);
+        expect(hasta, `con ${n}: ${id} se da por alcanzable y no tiene llegada`).toBeTruthy();
+        expect(camino(rejilla, origen, hasta),
+          `con ${n}: ${id} se da por alcanzable y la llegada que devuelve no tiene ruta`)
+          .toBeTruthy();
       }
     }
   });

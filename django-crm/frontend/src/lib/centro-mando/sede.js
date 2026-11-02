@@ -28,6 +28,11 @@
 import { plantaDe } from './departamentos.js';
 import { ENTRADA, PASILLO, repartirAnillo } from './anillo.js';
 import { mobiliarioDeEntrada, mobiliarioDePatio } from './patio.js';
+//  EL MISMO BULTO QUE USA LA REJILLA. Si la puerta se decidiera con unos
+//  numeros y el paso se midiera con otros, habria puertas que la rejilla
+//  considera tapiadas y el dibujo muestra abiertas — la contradiccion que
+//  `navegacion.js` existe para no tener.
+import { BULTO } from './navegacion.js';
 
 /** Lo que sube un muro de sala. */
 export const ALTURA_DE_MURO = 4;
@@ -126,17 +131,62 @@ export function sedeDe(salas, agentes, opciones = {}) {
     const margen = 0.6;
     const util = largo - margen * 2 - ANCHO_DE_VANO;
     if (util <= 0) return [margen, largo - margen];
-    let mejor = margen;
-    let mejorHolgura = -Infinity;
-    //  Once posiciones alcanzan: un vano mide 1,8 y los lados miden 9 o 14.
-    for (let i = 0; i <= 10; i++) {
-      const desde = margen + (i / 10) * util;
+
+    //  CUANTO SE METE EL VANO EN CADA CLASE DE ESTORBO, por separado.
+    //
+    //  No se suman con un peso: son cosas distintas y se ordenan, no se
+    //  promedian. Un vano DETRAS DE UN ESCRITORIO deja ese puesto sin salida
+    //  -lo midio la guarda de navegacion, con un puesto aislado- asi que eso
+    //  es una condicion dura. Un vano debajo de un tablero solo lo hace
+    //  invisible: malo, pero menos. Se elige el que no pise ningun puesto y,
+    //  entre esos, el que menos quede tapado.
+    const invasion = (desde, clase) => {
+      const hasta = desde + ANCHO_DE_VANO;
+      let total = 0;
+      for (const e of estorbos) {
+        if ((e.clase ?? 'puesto') !== clase) continue;
+        total += Math.max(0, Math.min(hasta, e.hasta) - Math.max(desde, e.desde));
+      }
+      return total;
+    };
+    //  Y lo lejos que queda del más cercano, para desempatar entre libres.
+    const holgura = (desde) => {
       const centro = desde + ANCHO_DE_VANO / 2;
-      const holgura = estorbos.length === 0
-        ? 0
-        : Math.min(...estorbos.map((e) => Math.abs(e - centro)));
-      if (holgura > mejorHolgura) {
-        mejorHolgura = holgura;
+      if (estorbos.length === 0) return Infinity;
+      return Math.min(...estorbos.map(
+        (e) => Math.abs(centro - (e.desde + e.hasta) / 2)));
+    };
+
+    /** Comparacion lexicografica: el primer campo que difiera decide. */
+    const antesQue = (a, b) => {
+      for (let k = 0; k < a.length; k++) {
+        if (a[k] < b[k] - 0.001) return true;
+        if (a[k] > b[k] + 0.001) return false;
+      }
+      return false;
+    };
+
+    //  Cuarenta y un posiciones: un vano mide 1,8 y los lados miden entre 8 y
+    //  14, asi que el paso queda en un cuarto de celda.
+    const candidatos = [];
+    for (let i = 0; i <= 40; i++) candidatos.push(margen + (i / 40) * util);
+
+    //  LOS PUESTOS SON UN FILTRO DURO, no un termino a minimizar. Una puerta
+    //  detras de un escritorio deja ese puesto SIN SALIDA -lo midio la guarda
+    //  de navegacion, con un puesto aislado-, y eso no se compensa con que la
+    //  puerta se vea mejor. Solo si ninguna posicion los evita se afloja.
+    const libres = candidatos.filter(
+      (d) => invasion(d, 'puesto') + invasion(d, 'bulto') < 0.001);
+    const donde = libres.length > 0 ? libres : candidatos;
+
+    let mejor = donde[0];
+    let mejorClave = null;
+    for (const desde of donde) {
+      //  Entre los que no pisan un puesto: el que menos quede tapado por un
+      //  mueble de pared y, a igualdad, el mas despejado.
+      const clave = [invasion(desde, 'pared'), -holgura(desde)];
+      if (mejorClave === null || antesQue(clave, mejorClave)) {
+        mejorClave = clave;
         mejor = desde;
       }
     }
@@ -150,16 +200,192 @@ export function sedeDe(salas, agentes, opciones = {}) {
    * @param planta la sala ya compuesta
    * @param lado cuál de los cuatro
    */
+  /**
+   * Cuánto ocupa a lo largo de SU muro cada mueble de pared.
+   *
+   * Leído del dibujo, no supuesto: un tablero ocupa 2,74 y arranca medio paso
+   * antes de su `gy`; el panel de empalmes, 2,1; el armario, 1,5; la
+   * estantería, la biblioteca, la pizarra y la videoconferencia, su `largo`.
+   * Con números inventados, el vano esquivaría estorbos que no existen y se
+   * quedaría encima de los que sí.
+   *
+   * `null` es un mueble que NO va en el muro: no estorba a una puerta.
+   */
+  /**
+   * POR DÓNDE NO PUEDE IR LA PUERTA DE ESE LADO.
+   *
+   * Dos clases de estorbo, y la segunda faltaba:
+   *
+   * - Un PUESTO pegado al muro. Una puerta detrás de una silla no se lee como
+   *   puerta y deja a ese puesto sin salida.
+   * - Un MUEBLE DE PARED encima del vano. Se dibuja después del muro, así que
+   *   lo tapa: la puerta existe, se dibuja, se pasa por ella — y no se ve.
+   *
+   * Lo segundo costó seis de las once puertas. Medido el 02/11/2026 buscando
+   * por qué «las entradas del lado derecho no se distinguen»: en Finanzas, el
+   * tablero de recaudo caía justo encima de su vano, y lo mismo en Campo,
+   * Atención, Recursos Humanos, Dirección y Recepción. Las seis son las que
+   * tienen su puerta en el muro lateral, que es el que lleva mobiliario.
+   *
+   * @returns {{desde: number, hasta: number}[]} tramos ocupados del lado
+   */
   const estorbosDe = (planta, lado) => {
     const CERCA = 2.2;
     const m = planta.mundo;
-    return (planta.puestos ?? [])
-      .filter((q) => {
-        if (lado === 'izquierda') return (q.gx ?? 0) < CERCA;
-        if (lado === 'derecha') return m.ancho - (q.gx ?? 0) < CERCA;
-        return m.fondo - (q.gy ?? 0) < CERCA;
-      })
-      .map((q) => (lado === 'frente' ? (q.gx ?? 0) : (q.gy ?? 0)));
+    const tramos = [];
+
+    //  Los puestos pegados a ese muro, con el bulto de su escritorio.
+    for (const q of planta.puestos ?? []) {
+      const cerca = lado === 'izquierda' ? (q.gx ?? 0) < CERCA
+        : lado === 'derecha' ? m.ancho - (q.gx ?? 0) < CERCA
+          : m.fondo - (q.gy ?? 0) < CERCA;
+      if (!cerca) continue;
+      const centro = lado === 'frente' ? (q.gx ?? 0) : (q.gy ?? 0);
+      //  PESO 1. Un escritorio cerca del muro estorba el paso, pero no TAPA la
+      //  puerta: esta sigue viendose. Si hay que elegir entre pasar por detras
+      //  de una silla y quedar detras de un tablero, se elige lo primero.
+      tramos.push({ desde: centro - 1.1, hasta: centro + 1.1, clase: 'puesto' });
+    }
+
+    //  EL MOBILIARIO DE SUELO QUE LLEGA HASTA EL MURO. No tapa la puerta: la
+    //  TAPIA. El vano se abre en el muro y, un paso despues, el mueble vuelve
+    //  a pintar esa misma celda de obstaculo — la puerta se dibuja, se ve, y
+    //  no se pasa.
+    //
+    //  Medido el 02/11/2026 con ocho departamentos: en la sala de finanzas el
+    //  archivador del rincon ocupaba las celdas del vano y la sala entera
+    //  quedo aislada, con su puerta dibujada. Por eso es un filtro DURO como
+    //  los puestos y no una penalizacion: no hay nada que compensar.
+    const ALCANCE = 1.2;
+    for (const mu of planta.mobiliario ?? []) {
+      //  UNA MAMPARA PERPENDICULAR parte el muro en dos justo donde toca. Una
+      //  puerta en ese punto abriria contra el canto del tabique.
+      if (mu.tipo === 'mampara') {
+        const tocaElFrente = (mu.hasta ?? 0) >= m.fondo - 0.6;
+        if (lado === 'frente' && mu.gx != null && tocaElFrente) {
+          tramos.push({ desde: mu.gx - 0.6, hasta: mu.gx + 0.6, clase: 'bulto' });
+        }
+        continue;
+      }
+      const r = BULTO[mu.tipo];
+      //  Sin bulto declarado es de pared o de techo: no tapia nada.
+      if (!r) continue;
+      const gx = mu.gx ?? 0;
+      const gy = mu.gy ?? 0;
+      const hueco = lado === 'izquierda' ? gx - r
+        : lado === 'derecha' ? m.ancho - (gx + r)
+          : m.fondo - (gy + r);
+      if (hueco > ALCANCE) continue;
+      const centro = lado === 'frente' ? gx : gy;
+      tramos.push({ desde: centro - r, hasta: centro + r, clase: 'bulto' });
+    }
+
+    //  Y el mobiliario de pared, sólo en el muro donde de verdad está: los de
+    //  pared van en el LATERAL (`gx = 0`), colocados por su `gy`.
+    if (lado === 'izquierda') {
+      for (const mu of planta.mobiliario ?? []) {
+        const def = LARGO_EN_EL_MURO[mu.tipo];
+        if (!def) continue;
+        const desde = (mu.gy ?? 0) + def[0];
+        const largoPieza = def[1] ?? ((mu.largo ?? 2) + (def[0] < 0 ? 0.2 : 0));
+        //  PESO 10: un mueble de pared se dibuja DESPUES del muro y tapa el
+        //  vano entero. Es el estorbo que de verdad hace invisible una puerta.
+        tramos.push({ desde, hasta: desde + largoPieza, clase: 'pared' });
+      }
+    }
+    return tramos;
+  };
+
+  const LARGO_EN_EL_MURO = {
+    tablero: [-0.12, 2.74],
+    panel_fibra: [0, 2.1],
+    armario: [0, 1.5],
+    estanteria: [0, null],
+    pizarra: [-0.1, null],
+    videoconferencia: [-0.1, null],
+    biblioteca: [0, null]
+  };
+
+  /** El tramo que ocupa en su muro un mueble de pared, o `null` si no va ahí. */
+  const tramoEnElMuro = (mu) => {
+    const def = LARGO_EN_EL_MURO[mu.tipo];
+    if (!def) return null;
+    const desde = (mu.gy ?? 0) + def[0];
+    const largo = def[1] ?? ((mu.largo ?? 2) + (def[0] < 0 ? 0.2 : 0));
+    return { desde, largo, borde: def[0] };
+  };
+
+  /**
+   * APARTA DEL VANO EL MOBILIARIO DE PARED.
+   *
+   * POR QUÉ ESTO VIVE EN EL COMPOSITOR Y NO EN LA PLANTILLA. Una plantilla no
+   * puede saber dónde va su puerta: depende de qué tiene pegado a cada lado,
+   * y eso lo decide el reparto. La misma plantilla, en dos sitios del plano,
+   * abre por muros distintos. Así que quien elige el vano es quien tiene que
+   * resolver el choque — pedirle a cada plantilla que deje libre «el sitio de
+   * la puerta» sería pedirle que adivine.
+   *
+   * Y HACÍA FALTA DE VERDAD: medido el 02/11/2026 sobre las doce plantillas
+   * base, **diez** no dejaban en su muro izquierdo ningún tramo de 1,8 libre
+   * de muebles de pared, maceteros y escritorios. No era que la puerta
+   * estuviera mal elegida: no había dónde ponerla. El síntoma era que seis de
+   * las once puertas quedaban debajo de un tablero o de un armario — «las
+   * entradas del lado derecho no se distinguen».
+   *
+   * Se MUEVE y no se borra. Un armario que desaparece al mover una sala de
+   * columna es una sala que cambia de contenido según dónde caiga, y eso ya
+   * costó una vez: la primera versión del despeje de puertas del patio
+   * borraba el mostrador de recepción. Si no hay sitio en todo el muro, la
+   * pieza se queda donde está y la medición lo dice.
+   *
+   * @param mobiliario el de la plantilla
+   * @param vano el de la puerta lateral, o `undefined`
+   * @param fondo cuánto mide ese muro en la sala ya colocada
+   */
+  const apartarDelVano = (mobiliario, vano, fondo) => {
+    if (!vano || !mobiliario?.length) return mobiliario ?? [];
+    //  Aire a cada lado de la puerta, y entre dos muebles.
+    const CLARO = 0.2;
+    const SEPARACION = 0.1;
+    const va = vano[0] - CLARO;
+    const vb = vano[1] + CLARO;
+    const pisa = (a, b, c, d) => Math.min(b, d) - Math.max(a, c) > 0.001;
+
+    const piezas = mobiliario
+      .map((mu, i) => ({ mu, i, t: tramoEnElMuro(mu) }))
+      .filter((p) => p.t !== null);
+    const estorban = piezas.filter(
+      (p) => pisa(p.t.desde, p.t.desde + p.t.largo, va, vb));
+    if (estorban.length === 0) return mobiliario;
+
+    //  Los que ya están fuera del vano no se tocan, y son el obstáculo de los
+    //  que hay que mover.
+    const ocupados = piezas
+      .filter((p) => !estorban.includes(p))
+      .map((p) => [p.t.desde, p.t.desde + p.t.largo]);
+
+    const salida = mobiliario.slice();
+    //  De mayor a menor: al grande le cuesta más encontrar sitio, y si va
+    //  último se encuentra el muro repartido en trozos que no le sirven.
+    for (const p of [...estorban].sort((a, b) => b.t.largo - a.t.largo)) {
+      const { desde, largo, borde } = p.t;
+      let mejor = null;
+      //  0,05 y no 0,1 contra el canto: con 0,1 el segundo tablero de la
+      //  sala de atencion se quedaba fuera por CUATRO centimetros y la puerta
+      //  seguia debajo de el.
+      for (let d = 0.05; d + largo <= fondo - 0.05 + 1e-9; d += 0.05) {
+        if (pisa(d, d + largo, va, vb)) continue;
+        if (ocupados.some(([a, b]) => pisa(d, d + largo, a - SEPARACION, b + SEPARACION))) continue;
+        const coste = Math.abs(d - desde);
+        if (mejor === null || coste < mejor.coste) mejor = { d, coste };
+      }
+      //  Sin sitio en todo el muro se queda donde estaba. Pasa en salas muy
+      //  cargadas y es preferible a hacerle desaparecer un mueble.
+      if (mejor === null) continue;
+      ocupados.push([mejor.d, mejor.d + largo]);
+      salida[p.i] = { ...p.mu, gy: Number((mejor.d - borde).toFixed(2)) };
+    }
+    return salida;
   };
 
   /**
@@ -308,10 +534,17 @@ export function sedeDe(salas, agentes, opciones = {}) {
     //  salas.
     plantas.push({
       ...planta,
+      //  CON LA PUERTA DESPEJADA. Ver `apartarDelVano`: el vano se acaba de
+      //  elegir arriba, y lo que lo tape se corre por el muro.
+      mobiliario: apartarDelVano(planta.mobiliario, cierre.puertaLateral, puesta.fondo),
       mundo: {
         ...planta.mundo,
         ancho: puesta.ancho,
         fondo: puesta.fondo,
+        //  CUANTO SE CIERRA ESTA SALA. Sale de la plantilla -es una propiedad
+        //  del tipo de sala, como tener estanterias- y decide si la puerta
+        //  lleva hoja y lector. Ver `dibujarPuerta`.
+        privacidad: planta.privacidad ?? 'estandar',
         ...(cierre.puertaLateral ? { puertaLateral: cierre.puertaLateral } : {}),
         ...(cierre.antepecho ? { antepecho: cierre.antepecho } : {}),
         ...(cierre.puertaDerecha ? { puertaDerecha: cierre.puertaDerecha } : {}),

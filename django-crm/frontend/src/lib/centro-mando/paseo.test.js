@@ -25,7 +25,17 @@ const salasDe = (n) => Array.from({ length: n }, (_, i) => {
   const plantilla = BASES[i % BASES.length];
   return {
     id: `d${i}`, rotulo: `Departamento ${i}`, tipo: 'departamento', piso: 1,
-    plantilla, planta: PLANTILLAS[plantilla]
+    plantilla,
+    //  LOS PUESTOS LLEVAN EL PREFIJO DE SU SALA, igual que los compone
+    //  `departamentos.js`. Sin eso, once salas comparten los identificadores
+    //  'principal', 'p1', 'p2'... y el mapa de destinos se pisa a si mismo:
+    //  quedan cuatro entradas en vez de treinta y siete, y la prueba afirma
+    //  sobre una sede que no existe. Costo una tarde de perseguir un puesto
+    //  'p3' aislado que era el de OTRA sala.
+    planta: {
+      ...PLANTILLAS[plantilla],
+      puestos: PLANTILLAS[plantilla].puestos.map((q) => ({ ...q, id: `d${i}:${q.id}` }))
+    }
   };
 });
 
