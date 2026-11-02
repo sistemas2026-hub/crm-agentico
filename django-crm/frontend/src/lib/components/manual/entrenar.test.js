@@ -158,3 +158,49 @@ describe('el simulador no vuelve a fijar el agente', () => {
     expect(fuente).toMatch(/rolElegido\s*=\s*String\(rol \|\| ''\)\.trim\(\) \|\| 'cliente_final'/);
   });
 });
+
+describe('el asistente no se bloquea por un perfil que el CRM no resuelve', () => {
+  //  GUARDA ESTÁTICA, y se dice que lo es: `+server.js` importa
+  //  `$env/dynamic/private` y este harness no lo resuelve.
+  //
+  //  EL DEFECTO QUE CIERRA, medido en producción el 02/11/2026: `/profile/`
+  //  del CRM devuelve 403 «Organization context is required» con el mismo JWT
+  //  que el resto de las rutas acepta, y el proxy cortaba ahí con un 502. Era
+  //  la razón por la que esta pantalla no se usaba. No es nuevo ni es de acá:
+  //  `lib/server/v2/inventario.js:185` documenta el mismo 403 en otra ruta.
+  //
+  //  Con un agente elegido el `profile_id` ni se manda --es excluyente con
+  //  `rol` del lado del motor-- así que pedirlo era frenar por un dato que no
+  //  se iba a usar.
+  const fuente = readFileSync(
+    resolve(process.cwd(), 'src/routes/api/asistente/+server.js'),
+    'utf-8'
+  );
+
+  it('con agente elegido manda rol, y sin agente manda profile_id', () => {
+    expect(fuente).toContain("...(rolPedido ? { rol: rolPedido } : { profile_id: profileId })");
+  });
+
+  it('el fallo de /profile/ solo corta cuando NO hay agente elegido', () => {
+    //  Si alguien saca el `if (!rolPedido)`, vuelve a cortar siempre.
+    const bloque = fuente.slice(fuente.indexOf('apiRequest'));
+    expect(bloque).toMatch(/catch[\s\S]{0,120}if \(!rolPedido\) \{/);
+  });
+
+  it('sin agente elegido y sin perfil, NO sigue', () => {
+    //  La otra mitad: el profile_id es lo que decide a qué datos llega el
+    //  turno. Dejarlo pasar vacío sería peor que el 502.
+    expect(fuente).toContain('if (!profileId && !rolPedido)');
+  });
+
+  it('el nombre cae a la sesión, nunca al cliente', () => {
+    expect(fuente).toContain("(locals.user.name || locals.user.email || '').trim()");
+    //  Si viniera del navegador, cualquiera firmaría con el nombre de otro.
+    expect(fuente).not.toMatch(/nombreColaborador\s*=\s*(cuerpo|body)\./);
+  });
+
+  it('elegir agente sigue siendo solo de ADMIN', () => {
+    expect(fuente).toContain("locals.profile?.role === 'ADMIN'");
+    expect(fuente).toMatch(/if \(rolPedido && !esAdmin\)/);
+  });
+});

@@ -42,32 +42,6 @@ export async function POST({ request, locals, fetch }) {
       { status: 500 });
   }
 
-  /** @type {string | undefined} */
-  let profileId;
-  /**
-   * El nombre de quien pregunta. Sale de la MISMA consulta que el
-   * profile_id -- no cuesta una llamada extra -- y viaja al motor para que
-   * pueda firmar a su nombre lo que se escriba en un sistema externo (ver
-   * 'firmar_campo' en el esquema del asistente).
-   *
-   * Va desde aca por el mismo motivo que el profile_id: el motor no lee las
-   * tablas del CRM, asi que quien sabe quien inicio sesion es esto. Y como el
-   * profile_id, NO se acepta del cliente: se resuelve del lado del servidor.
-   * Si viniera del navegador, cualquiera podria firmar con el nombre de otro.
-   */
-  let nombreColaborador = '';
-  try {
-    const perfil = await apiRequest('/profile/', {}, locals);
-    profileId = perfil?.user_obj?.id;
-    nombreColaborador = (perfil?.user_obj?.name || perfil?.user_obj?.email || '').trim();
-  } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo identificar tu perfil' }, { status: 502 });
-  }
-  if (!profileId) {
-    return json({ error: 'No se pudo identificar tu perfil en esta organizacion' },
-      { status: 403 });
-  }
-
   /**
    * HABLARLE A UN AGENTE CONCRETO, Y SOLO SI SOS ADMIN  --  02/11/2026
    *
@@ -132,6 +106,49 @@ export async function POST({ request, locals, fetch }) {
   }
   if (!textoDelTurno) {
     return json({ error: avisoFoto || 'Falta el mensaje' }, { status: 400 });
+  }
+
+  /**
+   * EL PERFIL SOLO HACE FALTA SI NO ELEGISTE AGENTE  --  02/11/2026
+   *
+   * `/profile/` del CRM devuelve 403 «Organization context is required» con
+   * el mismo JWT que estas rutas aceptan. No es nuevo: `lib/server/v2/
+   * inventario.js:185` documenta exactamente el mismo 403 en
+   * `/users/get-teams-and-users/`, y es la razon por la que esta pantalla
+   * no se usaba -- fallaba antes de hablarle al motor.
+   *
+   * Con un agente ELEGIDO, el `profile_id` no se manda (es excluyente con
+   * `rol`), asi que pedirlo era bloquear por un dato que no se iba a usar.
+   * Sin agente elegido sigue haciendo falta: es lo que decide a que datos
+   * llega el turno, y ahi un fallo SI tiene que frenar.
+   *
+   * El nombre cae a la sesion, que lo tiene del JWT. Nunca se acepta del
+   * cliente: con eso cualquiera firmaria con el nombre de otro.
+   */
+  /** @type {string | undefined} */
+  let profileId;
+  let nombreColaborador = (locals.user.name || locals.user.email || '').trim();
+  try {
+    const perfil = await apiRequest('/profile/', {}, locals);
+    profileId = perfil?.user_obj?.id;
+    nombreColaborador =
+      (perfil?.user_obj?.name || perfil?.user_obj?.email || '').trim() || nombreColaborador;
+  } catch (/** @type {any} */ err) {
+    if (!rolPedido) {
+      return json(
+        {
+          error:
+            'No se pudo identificar tu perfil en esta organización. ' +
+            'Elegí un agente en «Le habla a» para seguir, o volvé a iniciar sesión. ' +
+            `(${err?.message || 'sin detalle'})`
+        },
+        { status: 502 }
+      );
+    }
+  }
+  if (!profileId && !rolPedido) {
+    return json({ error: 'No se pudo identificar tu perfil en esta organizacion' },
+      { status: 403 });
   }
 
   try {
