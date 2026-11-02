@@ -6056,13 +6056,13 @@ herramientas:
       una queja de lentitud tambien sale bien -- el equipo sano es una
       CONDICION, no el motivo. Reinicia la ONT del cliente.
       Llamarla NO reinicia el equipo en ese momento: deja el reinicio
-      PENDIENTE de aprobacion de un colaborador. Dile al cliente que el
-      reinicio remoto de su equipo quedo solicitado y que un colaborador lo
-      tiene que aprobar -- NUNCA le digas que ya se reinicio. Cuando se
-      apruebe, el equipo va a estar sin conexion **uno o dos minutos**
+      SOLICITADO, y el resultado de la herramienta te dice si sale solo
+      apenas termines de responder o si lo tiene que aprobar un colaborador.
+      Dile al cliente exactamente eso -- NUNCA le digas que ya se reinicio.
+      Cuando salga, el equipo va a estar sin conexion **uno o dos minutos**
       (medido en vivo, 14/08/2026: volvio a responder en ~73 segundos).
 
-      Ademas de la aprobacion, el codigo exige que ya hayas corrido
+      Ademas, el codigo exige que ya hayas corrido
       consultar_senal_ont, ping_cliente y consultar_incidente_red EN ESTA
       conversacion y que los tres hayan dado resultado favorable (senal
       aceptable, ping exitoso, sin caida compartida) -- y los vuelve a medir
@@ -6125,6 +6125,16 @@ herramientas:
     # y se anota la verificacion contra la conversacion de origen.
     aprobacion_humana: true
     irreversible: true
+    # NO CRITICA (PRD §2 y §8.18, 02/11/2026). El dueno del producto: "solo
+    # necesito humano o aprobacion en las tareas criticas que repercuten danos
+    # para la empresa". Un reinicio no mueve dinero ni afecta a otros clientes,
+    # y el equipo vuelve solo en uno o dos minutos. Con esto la empresa puede
+    # darle autonomia sin esperar evidencia de aprobaciones; todo lo de arriba y
+    # lo de abajo se sigue exigiendo en codigo -- sintoma declarado, previas que
+    # se vuelven a medir al ejecutar, uno por conversacion, uno por equipo por
+    # dia, verificacion de 'last_status_change' -- y si no confirma, la
+    # autonomia se degrada sola y vuelve a una persona.
+    critica: false
     plantilla_resumen: "Reiniciar la ONT {sn_onu}"
     roles_permitidos: [cliente_final, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
@@ -6230,8 +6240,9 @@ herramientas:
       LLAMA LA HERRAMIENTA reiniciar_ont AHORA, en este mismo paso. No
       anuncies que la vas a usar sin llamarla: si no la llamas, el reinicio
       ni siquiera queda solicitado. Primero llamala, y recien despues
-      cuentale al cliente que el reinicio remoto quedo SOLICITADO y que un
-      colaborador lo tiene que aprobar -- no le digas que ya se reinicio.
+      cuentale al cliente lo que diga el resultado: que el reinicio remoto
+      quedo SOLICITADO y si sale solo en unos instantes o lo tiene que
+      aprobar un colaborador -- no le digas que ya se reinicio.
 
       Unica excepcion: si el cliente ya te dijo en este intercambio que no
       quiere que la reinicies.

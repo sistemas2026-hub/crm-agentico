@@ -977,6 +977,23 @@ class Herramienta(Base):
     #  autonomo. Y no alcanza con ponerla -- el nombre tiene que existir
     #  tambien en el codigo, o la config no carga (validacion mas abajo).
     aprobacion_humana_salvo: list[str] = Field(default_factory=list)
+    #  SI ESTA ACCION ES CRITICA  --  PRD §2 y §8.18, 02/11/2026
+    #  ---------------------------------------------------------
+    #  Critica = un error suyo puede danar a la empresa: mueve dinero, deja a un
+    #  cliente sin servicio de forma que no vuelve sola o le da uno que no paga,
+    #  afecta a muchos clientes, borra o expone datos, o compromete a la empresa
+    #  con un tercero. Solo lo critico necesita a una persona.
+    #
+    #  Una accion con 'aprobacion_humana' que la empresa declara NO critica se
+    #  promueve a autonoma sin esperar evidencia de aprobaciones -- si cumple
+    #  las garantias en codigo (efecto verificable, previas), que siguen
+    #  exigidas (nucleo/seguridad/autonomia_ganada.py::promover). La cadena de
+    #  ejecucion no cambia: interruptor, techo, etapa, autorizacion,
+    #  idempotencia, verificacion y degradacion sola.
+    #
+    #  True por omision: lo que no se declara se trata como critico (falla
+    #  cerrado). Es de cada empresa porque cada una decide que le duele.
+    critica: bool = True
     # =========================================================================
     #  CAPACIDADES QUE EL RECONCILIADOR BUSCA POR BANDERA
     # =========================================================================

@@ -160,7 +160,7 @@
           <div class="fila-accion">
             <strong>{a.accion}</strong>
             <span class="estado" class:listo={a.elegible}>
-              {a.elegible ? 'Tiene la evidencia' : 'Todavía no'}
+              {a.no_critica ? 'No crítica: no espera evidencia' : a.elegible ? 'Tiene la evidencia' : 'Todavía no'}
             </span>
           </div>
           <p class="pie">
@@ -184,7 +184,7 @@
             </form>
           {:else}
             {#if a.autonomia?.estado === 'degradada'}
-              <p class="pie falta">Tenía autonomía y la perdió sola: una ejecución falló o un efecto no se confirmó. Para volver a dársela, la evidencia tiene que alcanzar de nuevo.</p>
+              <p class="pie falta">Tenía autonomía y la perdió sola: una ejecución falló o un efecto no se confirmó. {a.no_critica ? 'Revisá qué falló antes de volver a dársela.' : 'Para volver a dársela, la evidencia tiene que alcanzar de nuevo.'}</p>
             {/if}
             {#if a.elegible}
               <form method="POST" action="?/promover" use:enhance class="promover">

@@ -49,6 +49,12 @@ print("\nque acciones son candidatas, por su config")
 RAPILINK = TenantConfig.model_validate(
     yaml.safe_load((RAIZ / "tenants" / "rapilink.config.yaml").read_text(encoding="utf-8")))
 por_nombre = {h.nombre: h for h in RAPILINK.herramientas}
+#  La misma config con el reinicio declarado CRITICO: las pruebas de evidencia
+#  de abajo miden el camino de lo critico, que es el que la exige (PRD §2,
+#  02/11/2026). Rapilink lo declara no critico -- ver la seccion de lo no critico.
+RAPILINK_CRITICO = RAPILINK.model_copy(update={"herramientas": [
+    h.model_copy(update={"critica": True}) if h.nombre == "reiniciar_ont" else h
+    for h in RAPILINK.herramientas]})
 comprobar(ag.por_que_no_es_candidata(por_nombre["reiniciar_ont"]) == [],
           "reiniciar_ont es candidata: mide su efecto y exige previas")
 comprobar("efecto_no_verificable" in ag.por_que_no_es_candidata(por_nombre["registrar_pago"]),
@@ -146,7 +152,7 @@ def medir(tenant, herramienta, desde, hasta):
     return m()
 
 
-filas = ag.evaluar(RAPILINK, "rapilink", AHORA, medir=medir)
+filas = ag.evaluar(RAPILINK_CRITICO, "rapilink", AHORA, medir=medir)
 nombres = [f["accion"] for f in filas]
 comprobar("reiniciar_ont" in nombres and "consultar_cliente" not in nombres,
           "solo las que piden aprobacion humana", str(nombres))
@@ -194,10 +200,11 @@ def escribir(tenant, accion, actor, motivo, evidencia):
     return {"id": "nueva", "estado": "activa"}
 
 
-def intentar(accion="reiniciar_ont", actor="Ana · u-1", medicion=None, ya=None):
+def intentar(accion="reiniciar_ont", actor="Ana · u-1", medicion=None, ya=None,
+             config=None):
     escritas.clear()
     try:
-        return ag.promover(RAPILINK, "rapilink", accion, actor, AHORA,
+        return ag.promover(config or RAPILINK_CRITICO, "rapilink", accion, actor, AHORA,
                            medir=lambda *a: medicion or m(), escribir=escribir,
                            leer_vigente=lambda t, h: ya), None
     except ag.NoPromovible as e:
@@ -227,11 +234,45 @@ _, error = intentar(actor="   ")
 comprobar(error is not None and error.codigo == "FALTA_QUIEN_PROMUEVE" and escritas == [],
           "sin una persona que promueva, no")
 
+print("\nlo no critico no espera evidencia (PRD §2, 02/11/2026)")
+#  "Solo necesito humano o aprobacion en las tareas criticas que repercuten
+#  danos para la empresa" (el dueno del producto). Una accion no critica que
+#  cumple las dos garantias en codigo -- efecto verificable, previas
+#  comprobadas -- se promueve sin esperar 20 revisiones de una persona.
+comprobar(por_nombre["reiniciar_ont"].critica is False,
+          "Rapilink declara reiniciar_ont NO critica: el equipo vuelve solo")
+comprobar(all(h.critica for h in RAPILINK.herramientas
+              if h.aprobacion_humana and h.nombre != "reiniciar_ont"),
+          "las demas que piden aprobacion siguen criticas (dinero, servicio, una venta)")
+sin_evidencia = m(revisadas=0, rechazadas=0, confirmadas=0)
+fila, error = intentar(medicion=sin_evidencia, config=RAPILINK)
+comprobar(error is None and fila == {"id": "nueva", "estado": "activa"}
+          and escritas and escritas[0][3].get("no_critica") is True,
+          "no critica: se promueve SIN evidencia previa, y queda escrito por que",
+          str(error and (error.codigo, error.faltan)) + str(escritas))
+_, error = intentar(medicion=sin_evidencia, config=RAPILINK_CRITICO)
+comprobar(error is not None and error.codigo == "SIN_EVIDENCIA",
+          "la MISMA accion declarada critica sigue exigiendo la evidencia",
+          str(error and error.codigo))
+sin_garantias = SimpleNamespace(herramientas=[SimpleNamespace(
+    nombre="reiniciar_ont", aprobacion_humana=True, irreversible=True, critica=False,
+    verificacion=None, exige_previas=[])], autonomia_ganada=None)
+_, error = intentar(medicion=sin_evidencia, config=sin_garantias)
+comprobar(error is not None and error.codigo == "NO_CANDIDATA",
+          "no critica NO alcanza sin las garantias en codigo: la persona sale, la garantia no",
+          str(error and error.codigo))
+filas_nc = ag.evaluar(RAPILINK, "rapilink", AHORA, medir=lambda *a: sin_evidencia)
+reinicio_nc = next(f for f in filas_nc if f["accion"] == "reiniciar_ont")
+comprobar(reinicio_nc["elegible"] and reinicio_nc["faltan"] == [] and reinicio_nc.get("no_critica"),
+          "y la pantalla la muestra elegible, diciendo que es por no critica", str(reinicio_nc))
+pago_nc = next(f for f in filas_nc if f["accion"] == "registrar_pago")
+comprobar(not pago_nc["elegible"], "registrar_pago, critico y sin efecto medible, nunca elegible")
+
 print("\nla ruta GET /reportes/autonomia-ganada")
 from nucleo.canales import api                               # noqa: E402
 from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
 
-api._config_de = lambda tenant: RAPILINK
+api._config_de = lambda tenant: RAPILINK_CRITICO   # el camino de lo critico
 api._TOKEN_SERVICIO = None
 medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=10, rechazadas=0)
 medicion.vigente = lambda t, h: None
@@ -276,6 +317,12 @@ medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=5, re
 r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
 comprobar(r.status_code == 409 and r.get_json()["error"] == "SIN_EVIDENCIA" and len(escritas_ruta) == n,
           "sin evidencia: 409 con lo que falta, y nada escrito", r.get_data(as_text=True)[:200])
+api._config_de = lambda tenant: RAPILINK            # la config real: no critica
+r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont", **AUTOR})
+comprobar(r.status_code == 201 and len(escritas_ruta) == n + 1 and escritas_ruta[-1][:2] == ("promover", "reiniciar_ont"),
+          "no critica, por la ruta: la misma falta de evidencia ya no frena (201)", r.get_data(as_text=True)[:200])
+n = len(escritas_ruta)
+api._config_de = lambda tenant: RAPILINK_CRITICO
 r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
                                                  "motivo": "la reviso", **AUTOR})
 comprobar(r.status_code == 201 and escritas_ruta[-1][0] == "retirar" and escritas_ruta[-1][3] == "la reviso",

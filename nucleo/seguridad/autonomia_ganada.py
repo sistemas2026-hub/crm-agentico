@@ -152,6 +152,11 @@ def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dic
             m = medir(tenant, h.nombre, desde, ahora)
             fila.update({"umbrales": u, "evidencia": m, "desde": desde.isoformat(),
                          **veredicto(m, u)})
+            if not getattr(h, "critica", True):
+                #  PRD §2 (02/11/2026): lo no critico no espera evidencia. La
+                #  evidencia se sigue mostrando -- es lo que dice si anda --,
+                #  pero no es condicion.
+                fila.update({"elegible": True, "faltan": [], "no_critica": True})
             if leer_vigente is not None:
                 fila["autonomia"] = vigente(tenant, h.nombre, leer=leer_vigente)
         else:
@@ -229,6 +234,16 @@ def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escr
     u = umbrales(config, accion)
     desde = ahora - timedelta(days=u["ventana_dias"])
     m = medir(tenant, accion, desde, ahora)
+    if not getattr(h, "critica", True):
+        #  LO NO CRITICO NO ESPERA EVIDENCIA  --  PRD §2 y §8.18, 02/11/2026.
+        #  Las garantias en codigo ya se exigieron arriba (candidata); lo que
+        #  no se pide es que una persona la haya aprobado veinte veces antes.
+        #  Se mide igual y queda escrito: es la linea de base de lo que pase
+        #  despues, y la degradacion sola sigue en pie.
+        return escribir(tenant, accion, actor.strip(),
+                        "promovida sin evidencia previa: la empresa la declara no critica",
+                        {"no_critica": True, "evidencia": m, "umbrales": u,
+                         "desde": desde.isoformat()})
     v = veredicto(m, u)
     if not v["elegible"]:
         raise NoPromovible("SIN_EVIDENCIA", v["faltan"])
