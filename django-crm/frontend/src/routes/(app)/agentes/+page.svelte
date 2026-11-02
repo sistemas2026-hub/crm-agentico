@@ -13,6 +13,7 @@
    * distinguia una consulta de algo que cambia el mundo real.
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import { huecosDe as huecosDeAgente, textoDelHueco } from '$lib/components/manual/entrenar.js';
   import StatCard from '$lib/v2/components/StatCard.svelte';
   import AgenteFormDialog from '$lib/components/agentes/AgenteFormDialog.svelte';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -90,6 +91,10 @@
   function resumen(texto) {
     return (texto || '').trim().split(/\n\s*\n/)[0].replace(/\s*\n\s*/g, ' ');
   }
+
+  /** Los huecos de ESTE agente y su senal en palabras: la logica vive en
+      $lib para poder probarla -- el harness de vitest no compila .svelte. */
+  const huecosDe = (nombre) => huecosDeAgente(data.huecosPorRol, nombre);
 
   /**
    * Las herramientas por lo que HACEN, no por su tipo tecnico.
@@ -312,6 +317,33 @@
           </div>
 
           <p class="descripcion">{resumen(agente.descripcion)}</p>
+
+          <!--
+            QUE LE FALTA A ESTE AGENTE, por rol y de los ultimos 14 dias
+            (02/11/2026). Hasta hoy la unica medicion de esta pantalla era la
+            tasa de escalada de TODA la empresa, arriba: al lado de la tarjeta
+            de un agente decia algo que no era de ese agente. Esto es el mismo
+            SQL determinista que alimenta /habilidades --no un segundo calculo
+            de lo mismo-- y es lo que deja ver si una correccion sirvio: el
+            numero antes y el numero despues.
+
+            Sin huecos NO se muestra nada. "0 huecos" en un agente que nadie
+            uso diria que anda bien, y lo que pasa es que no hay datos.
+          -->
+          {#if huecosDe(agente.nombre).length > 0}
+            <div class="huecos" role="note">
+              <p class="huecos-titulo">Le falta saber hacer ({huecosDe(agente.nombre).length})</p>
+              <ul>
+                {#each huecosDe(agente.nombre).slice(0, 3) as h (h.senal + h.motivo)}
+                  <li>
+                    <span class="huecos-n">{h.n_casos}</span>
+                    {textoDelHueco(h)}
+                  </li>
+                {/each}
+              </ul>
+              <a class="huecos-link" href="/habilidades">Enseñarle en Habilidades →</a>
+            </div>
+          {/if}
 
           <!--
             Reemplaza al diagrama radial que estaba aca. Ese gastaba ~250px de
@@ -570,6 +602,36 @@
     color: var(--v2-ink);
     opacity: 0.78;
     margin: 0;
+  }
+  .huecos {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--v2-line);
+    background: color-mix(in srgb, var(--v2-amber, #8a5300) 6%, transparent);
+    font-size: 12px;
+  }
+  .huecos-titulo {
+    margin: 0 0 4px;
+    font-weight: 600;
+  }
+  .huecos ul {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    display: grid;
+    gap: 2px;
+  }
+  .huecos-n {
+    display: inline-block;
+    min-width: 1.4em;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .huecos-link {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 11px;
   }
   .herramientas {
     display: flex;

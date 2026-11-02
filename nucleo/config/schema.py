@@ -3539,6 +3539,18 @@ class TenantConfig(Base):
     # NO gobierna si la tarea de analisis esta corriendo: eso es una decision
     # de operacion, como RELOJ_HABILITADO (CLAUDE.md §8).
     vision_evidencias_campo: bool = False
+    # SI SE MIRAN LAS FOTOS QUE UN COLABORADOR ADJUNTA EN EL ASISTENTE
+    # INTERNO  --  02/11/2026
+    #
+    # La TERCERA, y por el mismo motivo que la segunda: no es el mismo
+    # consentimiento la foto que un cliente DECIDE mandar por WhatsApp,
+    # la que un tecnico toma DENTRO de la casa de ese cliente, y la que
+    # alguien de la oficina adjunta en el chat interno. Una empresa puede
+    # autorizar unas y no otras, y con un campo solo no podria decirlo.
+    #
+    # Las tres nacen apagadas. Apagada, el asistente sigue funcionando
+    # igual: se puede escribir, no se puede adjuntar foto.
+    vision_asistente_interno: bool = False
     # El cierre de lo que atendio solo el asistente. Seccion propia y no un
     # campo mas de 'limites' porque tiene cuatro perillas que se mueven
     # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada
