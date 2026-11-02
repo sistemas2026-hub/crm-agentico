@@ -27,6 +27,7 @@
 
 import { plantaDe } from './departamentos.js';
 import { ENTRADA, PASILLO, repartirAnillo } from './anillo.js';
+import { mobiliarioDeEntrada, mobiliarioDePatio } from './patio.js';
 
 /** Lo que sube un muro de sala. */
 export const ALTURA_DE_MURO = 4;
@@ -84,7 +85,9 @@ export function sedeDe(salas, agentes, opciones = {}) {
     muros: false,
     losa: true,
     baranda: false,
-    mobiliario: [],
+    //  El mostrador que marca el acceso. No reemplaza a la recepción: esa es
+    //  una sala declarada y sigue donde la ponga el reparto.
+    mobiliario: mobiliarioDeEntrada(entrada),
     puestos: []
   });
 
@@ -124,8 +127,10 @@ export function sedeDe(salas, agentes, opciones = {}) {
     ids.push(puesta.sala.id);
   }
 
-  //  4. EL PATIO, si la rejilla llegó hasta sus celdas. Suelo por el que se
-  //     pasa, sin muros: es el hueco alrededor del cual se ordena la sede.
+  //  4. EL PATIO. Suelo por el que se pasa, sin muros, y AMUEBLADO: un
+  //     rectángulo de suelo liso en el medio de la empresa se lee como un
+  //     descampado por grande o chico que sea. Lo que lo convierte en patio no
+  //     es el tamaño sino que tenga para qué estar. Ver `patio.js`.
   if (patio) {
     plantas.push({
       mundo: { ancho: patio.ancho, fondo: patio.fondo, alto: 0 },
@@ -138,7 +143,7 @@ export function sedeDe(salas, agentes, opciones = {}) {
       muros: false,
       losa: true,
       baranda: false,
-      mobiliario: [],
+      mobiliario: mobiliarioDePatio(patio),
       puestos: []
     });
   }
@@ -181,12 +186,11 @@ export function sedeDe(salas, agentes, opciones = {}) {
   };
 }
 
-/** Dónde está un departamento en la planta, para llevar la cámara. */
-export function sitioDe(salas, id) {
-  const { puestas } = repartirPlantaUnica(Array.isArray(salas) ? salas : []);
-  const p = puestas.find((x) => x.sala.id === id);
-  if (!p) return null;
-  return { gx: p.x + p.ancho / 2, gy: p.y + p.fondo / 2, ancho: p.ancho, fondo: p.fondo };
-}
+//  Acá vivía `sitioDe`, y no la reemplaza nada: no tenía un solo llamador y
+//  llamaba a `repartirPlantaUnica`, que este archivo NO importa. O sea que si
+//  alguien la hubiera usado habría reventado con un ReferenceError. Es el
+//  mismo caso que `colocarCorte()` unas horas antes: una función que quedó sin
+//  llamador al extraer un módulo y que nada señaló. Cuando haga falta llevar la
+//  cámara a un departamento, el dato sale de `repartirAnillo`.
 
 export { ENTRADA, PASILLO };
