@@ -123,10 +123,10 @@
     type="button"
     class="corregir-trigger"
     class:hecho={guardada}
-    disabled={guardando}
+    disabled={guardando || !rol}
     title={rol
       ? `Escribir el procedimiento que le faltó a «${rol}». Queda como propuesta hasta que alguien la apruebe en Habilidades.`
-      : 'No se sabe qué agente atendió esta conversación'}
+      : 'No se sabe qué agente atendió esta conversación, así que no se le puede enseñar desde acá.'}
     onclick={abrir}
   >
     {#if guardada}✓ Corregido{:else}✎ Corregir{/if}

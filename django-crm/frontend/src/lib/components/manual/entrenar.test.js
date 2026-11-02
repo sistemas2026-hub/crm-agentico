@@ -177,3 +177,42 @@ describe('cuando guardar falla, el motivo no se pierde', () => {
     expect(fuente).not.toMatch(/await resp\.json\(\)\.catch/);
   });
 });
+
+describe('«✎ Corregir» aparece en toda respuesta del agente', () => {
+  //  EL DEFECTO QUE CIERRA, encontrado el 02/11/2026 leyendo por qué no se
+  //  veía en Conversaciones: el botón se agregó DENTRO del pie de la burbuja
+  //  sin sumarse a la condición que decide si ese pie existe. Resultado: solo
+  //  aparecía cuando algo MÁS ya había puesto un pie ahí --el estado de
+  //  entrega, o el botón de buen ejemplo con casos cargados--. En una
+  //  conversación sin casos del manual no se veía nunca.
+  //
+  //  Guarda estática: el harness no compila `.svelte`. Lo que se afirma es la
+  //  condición, que es donde vivía el bug.
+  const hilo = readFileSync(
+    resolve(process.cwd(), 'src/lib/conversaciones/messages/MessageThread.svelte'),
+    'utf-8'
+  );
+
+  it('toda respuesta del agente tiene pie, sin depender de nada más', () => {
+    expect(hilo).toContain(
+      "!!(m.sinEntregar || m.estado_entrega === 'fallido' || m.rol === 'assistant')"
+    );
+  });
+
+  it('y ya no exige casos del manual ni estado de entrega', () => {
+    //  Si alguien repone la condición vieja, esto se pone rojo.
+    expect(hilo).not.toMatch(/m\.rol === 'assistant' && \(m\.estado_entrega \|\| casos\.length/);
+  });
+
+  it('el botón está dentro de ese pie y le llega el rol de la conversación', () => {
+    expect(hilo).toMatch(/<CorregirAgente[\s\S]{0,80}rol=\{rolActivo\}/);
+  });
+
+  it('sin rol el botón se ve apagado, no deja escribir y fallar al final', () => {
+    const corregir = readFileSync(
+      resolve(process.cwd(), 'src/lib/components/manual/CorregirAgente.svelte'),
+      'utf-8'
+    );
+    expect(corregir).toContain('disabled={guardando || !rol}');
+  });
+});

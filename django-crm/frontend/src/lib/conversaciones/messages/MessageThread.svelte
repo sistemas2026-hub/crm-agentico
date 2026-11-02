@@ -52,13 +52,20 @@
   } = $props();
 
   /** Si debajo de la burbuja hay algo que decir: el estado de entrega, el
-      aviso de que no llego, o el control de marcar como ejemplo. Se pregunta
-      antes de dibujar el pie para no dejar un renglon vacio con margen --que
-      es lo que separa un hilo prolijo de uno con huecos. */
+      aviso de que no llego, el control de marcar como ejemplo, o el de
+      corregir. Se pregunta antes de dibujar el pie para no dejar un renglon
+      vacio con margen --que es lo que separa un hilo prolijo de uno con
+      huecos.
+
+      TODA RESPUESTA DEL AGENTE TIENE PIE (02/11/2026). Hasta hoy pedia
+      ademas `estado_entrega` o que hubiera casos cargados, y «✎ Corregir» se
+      agrego DENTRO de este bloque sin sumarse a esta lista: el boton solo
+      aparecia cuando algo MAS ya habia puesto un pie ahi. En una
+      conversacion sin casos del manual --o en un canal que no reporta
+      entrega-- no se veia nunca. Corregir aplica a cualquier respuesta del
+      agente, asi que ahora la condicion lo dice. */
   const conPie = (/** @type {any} */ m) =>
-    !!(m.sinEntregar ||
-       m.estado_entrega === 'fallido' ||
-       (m.rol === 'assistant' && (m.estado_entrega || casos.length > 0)));
+    !!(m.sinEntregar || m.estado_entrega === 'fallido' || m.rol === 'assistant');
 
   /** @type {HTMLElement | undefined} */
   let hiloEl = $state();
