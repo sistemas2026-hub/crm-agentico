@@ -2,6 +2,26 @@
 --  CERRAR B-7  -  el secreto de firma de JWT deja de estar guardado en la base
 -- =============================================================================
 --
+--  NO ES UNA MIGRACION DEL LEDGER, Y POR ESO VIVE EN supabase/operador/
+--  -------------------------------------------------------------------
+--  Borrar un ajuste de la base pide ser su dueño o superusuario, y el rol del
+--  ledger probablemente no lo es: fallaria, y migrar_asistente.py se detiene en
+--  la primera que falla, asi que TODAS las migraciones siguientes quedarian
+--  trabadas (auditoria de frontera, 02/11/2026, B3). Es configuracion del
+--  servidor, no esquema: la aplica quien administra el Postgres de Supabase,
+--  con psql, como superusuario, y deja constancia en el estado del proyecto.
+--
+--  BORRAR NO ALCANZA: HAY QUE ROTAR PRIMERO (auditoria, A1)
+--  -------------------------------------------------------
+--  Esto apaga la compuerta B7_REQUERIDO (nucleo/seguridad/autonomia2.py), pero
+--  el secreto que estuvo legible sigue siendo el mismo: quien lo haya leido
+--  puede seguir firmando un token 'service_role'. El orden es:
+--    1. rotar JWT_SECRET de Supabase y regenerar ANON_KEY y SERVICE_ROLE_KEY;
+--    2. aplicar este archivo;
+--    3. reiniciar el pooler (Supavisor) y el CRM, para que ninguna sesion
+--       abierta conserve el valor viejo.
+--  Hasta el paso 3, B-7 no esta cerrado aunque la compuerta diga que si.
+--
 --  Por que existe (02/11/2026, PRD §8.18)
 --  --------------------------------------
 --  Supabase autoalojado deja el secreto con que se firman los JWT en un GUC de
@@ -53,7 +73,10 @@ begin
      where exists (select 1 from unnest(s.setconfig) c
                     where c like 'app.settings.jwt_secret=%')
   loop
-    if v.setrole = 0 then
+    if v.setrole = 0 and v.setdatabase = 0 then
+      --  ALTER ROLE ALL SET: para todos los roles, en todas las bases.
+      execute 'alter role all reset "app.settings.jwt_secret"';
+    elsif v.setrole = 0 then
       execute format('alter database %I reset "app.settings.jwt_secret"', v.datname);
     elsif v.setdatabase = 0 then
       execute format('alter role %I reset "app.settings.jwt_secret"', v.rolname);

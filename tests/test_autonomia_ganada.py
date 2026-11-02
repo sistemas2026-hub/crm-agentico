@@ -268,6 +268,54 @@ comprobar(reinicio_nc["elegible"] and reinicio_nc["faltan"] == [] and reinicio_n
 pago_nc = next(f for f in filas_nc if f["accion"] == "registrar_pago")
 comprobar(not pago_nc["elegible"], "registrar_pago, critico y sin efecto medible, nunca elegible")
 
+print("\nlo que la auditoria de frontera encontro en lo no critico (02/11/2026)")
+#  M2: lo negativo de la ventana frena aun a lo no critico.
+_, error = intentar(medicion=m(revisadas=0, rechazadas=0, confirmadas=0, fallidas=1), config=RAPILINK)
+comprobar(error is not None and error.codigo == "SIN_EVIDENCIA"
+          and [f["condicion"] for f in error.faltan] == ["cero_fallidas"] and escritas == [],
+          "M2: con una ejecucion fallida en la ventana, no se promueve (solo dice esa)",
+          str(error and error.faltan))
+con_degradacion = {**m(revisadas=0, rechazadas=0, confirmadas=0), "degradaciones": 1}
+_, error = intentar(medicion=con_degradacion, config=RAPILINK)
+comprobar(error is not None and any(f["condicion"] == "cero_degradaciones" for f in error.faltan),
+          "M2: despues de una degradacion, un clic no la devuelve", str(error and error.faltan))
+fila_nc = next(f for f in ag.evaluar(RAPILINK, "rapilink", AHORA,
+                                    medir=lambda *a: m(revisadas=0, rechazadas=0, confirmadas=0,
+                                                       no_confirmadas=1))
+               if f["accion"] == "reiniciar_ont")
+comprobar(not fila_nc["elegible"] and fila_nc["faltan"][0]["condicion"] == "cero_no_confirmadas",
+          "M2: y la pantalla no ofrece el boton", str(fila_nc["faltan"]))
+#  M3: 'critica: false' tiene que venir de la base.
+desde_yaml = RAPILINK.model_copy()
+desde_yaml._origen = "yaml"
+_, error = intentar(medicion=sin_evidencia, config=desde_yaml)
+comprobar(error is not None and error.codigo == "CONFIG_SIN_CONFIRMAR" and escritas == [],
+          "M3: con la config del YAML de la imagen (la base no contesto), no se promueve",
+          str(error and error.codigo))
+#  M1: una promocion sin evidencia deja de valer si la accion vuelve a critica.
+promovida_nc = {"id": "p7", "estado": "activa", "evidencia": {"no_critica": True}, "creado_en": "t0"}
+hoy_critica = por_nombre["reiniciar_ont"].model_copy(update={"critica": True})
+v = ag.vigente("t", "reiniciar_ont", leer=lambda t, h: promovida_nc, config_herramienta=hoy_critica)
+comprobar(v["autonoma"] is False and v["estado"] == ag.YA_ES_CRITICA,
+          "M1: promovida por no critica y hoy critica -> NO autonoma", str(v))
+v = ag.vigente("t", "reiniciar_ont", leer=lambda t, h: promovida_nc,
+               config_herramienta=por_nombre["reiniciar_ont"])
+comprobar(v["autonoma"] is True, "M1: mientras siga no critica, vale", str(v))
+con_evidencia = {"id": "p8", "estado": "activa", "evidencia": {"evidencia": {}}, "creado_en": "t0"}
+v = ag.vigente("t", "reiniciar_ont", leer=lambda t, h: con_evidencia, config_herramienta=hoy_critica)
+comprobar(v["autonoma"] is True, "M1: una promovida CON evidencia no se toca al volverse critica", str(v))
+#  B1: el schema solo acepta 'critica: false' donde la cadena la sostiene.
+crudo = yaml.safe_load((RAIZ / "tenants" / "rapilink.config.yaml").read_text(encoding="utf-8"))
+for h in crudo["herramientas"]:
+    if h["nombre"] == "crear_ticket":
+        h["critica"] = False
+try:
+    TenantConfig.model_validate(crudo)
+    rechazada = False
+except ValidationError as e:
+    rechazada = "critica: false" in str(e)
+comprobar(rechazada, "B1: crear_ticket (sin irreversible, sin verificacion) no puede ser no critica")
+
 print("\nla ruta GET /reportes/autonomia-ganada")
 from nucleo.canales import api                               # noqa: E402
 from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
@@ -337,6 +385,17 @@ reinicio = next(f for f in d["acciones"] if f["accion"] == "reiniciar_ont")
 comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "promocion_id": "p9",
                                        "desde": None},
           "el reporte dice si ya es autonoma", str(reinicio.get("autonomia")))
+
+print("\nla ejecucion: la que hoy es critica no sale sola, y se degrada (M1)")
+degradadas: list[tuple] = []
+api._degradar_autonomia = lambda t, h, motivo, ev: degradadas.append((h, motivo))
+medicion.vigente = lambda t, h: {"id": "p7", "estado": "activa",
+                                 "evidencia": {"no_critica": True}, "creado_en": None}
+salida = api._ejecutar_si_es_autonoma(RAPILINK_CRITICO, "rapilink", "accion-1",
+                                     next(h for h in RAPILINK_CRITICO.herramientas
+                                          if h.nombre == "reiniciar_ont"))
+comprobar(salida is None and degradadas and degradadas[0][0] == "reiniciar_ont",
+          "M1: no se ejecuta, y la promocion queda degradada con su motivo", str(degradadas))
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

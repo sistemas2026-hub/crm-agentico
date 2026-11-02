@@ -1580,6 +1580,10 @@ def _ejecutar_propuesta(argumentos_modelo: dict, tenant: str, propuesto_por: str
 
     if not herramienta_dict.get("nombre") or not herramienta_dict.get("tipo"):
         return {"error": "El borrador necesita al menos 'nombre' y 'tipo'."}
+    #  Lo que arma el modelo en un chat NACE CRITICO, diga lo que diga el
+    #  borrador: declarar algo no critico promueve sin evidencia, y eso lo
+    #  decide la empresa en su catalogo, no una frase (auditoria, B1).
+    herramienta_dict["critica"] = True
 
     id_propuesta = persistencia.guardar_herramienta_propuesta(
         tenant, descripcion_pedido, sondeo_dict, herramienta_dict, propuesto_por)
@@ -1806,7 +1810,8 @@ def _tiene_autonomia_ganada(tenant: str, herramienta) -> bool:
     from nucleo.seguridad import autonomia_ganada
 
     return bool(autonomia_ganada.vigente(tenant, herramienta.nombre,
-                                         leer=registro.vigente).get("autonoma"))
+                                         leer=registro.vigente,
+                                         config_herramienta=herramienta).get("autonoma"))
 
 
 def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:

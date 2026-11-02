@@ -554,6 +554,10 @@ services:
       # desde la misma imagen, asi que el nombre es lo unico que los separa en
       # pg_stat_activity. Ver nucleo/persistencia/conexion.py.
       DB_APPLICATION_NAME: dexter-reloj
+      # La misma etapa que el motor (ver alla): las escrituras del reloj sin
+      # actor van por frontera.autonoma, que tambien la exige. Sin esta linea,
+      # encenderla en Dokploy no alcanzaba al reloj (auditoria, 02/11/2026).
+      AUTONOMIA_2_ACTIVA: ${AUTONOMIA_2_ACTIVA:-}
     # El mismo margen de apagado que 'motor', y por el mismo motivo: una pasada
     # del reloj puede estar a mitad de una transaccion cuando llega el SIGTERM.
     stop_grace_period: 45s

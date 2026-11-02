@@ -153,10 +153,11 @@ def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dic
             fila.update({"umbrales": u, "evidencia": m, "desde": desde.isoformat(),
                          **veredicto(m, u)})
             if not getattr(h, "critica", True):
-                #  PRD §2 (02/11/2026): lo no critico no espera evidencia. La
-                #  evidencia se sigue mostrando -- es lo que dice si anda --,
-                #  pero no es condicion.
-                fila.update({"elegible": True, "faltan": [], "no_critica": True})
+                #  PRD §2 (02/11/2026): lo no critico no espera evidencia
+                #  POSITIVA. Lo negativo de la ventana sigue frenando (M2).
+                negativas = _negativas(fila["faltan"])
+                fila.update({"elegible": not negativas, "faltan": negativas,
+                             "no_critica": True})
             if leer_vigente is not None:
                 fila["autonomia"] = vigente(tenant, h.nombre, leer=leer_vigente)
         else:
@@ -169,6 +170,14 @@ def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dic
 #  FASE B  --  promover (una persona), retirar (una persona), y el estado vigente
 # =============================================================================
 
+#: Lo que frena aun a lo no critico: hechos en contra dentro de la ventana.
+_CONDICIONES_NEGATIVAS = ("cero_no_confirmadas", "cero_fallidas", "cero_degradaciones")
+
+
+def _negativas(faltan: list) -> list:
+    return [f for f in faltan if f.get("condicion") in _CONDICIONES_NEGATIVAS]
+
+
 class NoPromovible(Exception):
     """Por que no se puede promover, con un codigo fijo y lo que falta."""
 
@@ -178,7 +187,12 @@ class NoPromovible(Exception):
         self.faltan = faltan or []
 
 
-def vigente(tenant: str, herramienta: str, *, leer) -> dict:
+#: La promocion se hizo sin evidencia porque la accion era no critica, y hoy
+#: la empresa la declara critica: deja de valer (auditoria de frontera, M1).
+YA_ES_CRITICA = "promovida_sin_evidencia_y_hoy_critica"
+
+
+def vigente(tenant: str, herramienta: str, *, leer, config_herramienta=None) -> dict:
     """
     Si la herramienta es autonoma AHORA en esta empresa. FALLA CERRADO, como
     el interruptor: sin fila, con la base caida o con la tabla sin instalar,
@@ -199,6 +213,16 @@ def vigente(tenant: str, herramienta: str, *, leer) -> dict:
         return {"autonoma": False, "estado": "sin_registro", "promocion_id": None}
     if fila.get("estado") != "activa":
         return {"autonoma": False, "estado": str(fila.get("estado")), "promocion_id": None}
+    #  UNA PROMOCION SIN EVIDENCIA VALE MIENTRAS LA ACCION SIGA NO CRITICA.
+    #  Si la empresa despues la declara critica, la promocion no juntó nunca
+    #  la evidencia que lo critico exige: falla cerrado, y quien llama la
+    #  degrada con su motivo.
+    evidencia = fila.get("evidencia") or {}
+    if (isinstance(evidencia, dict) and evidencia.get("no_critica")
+            and config_herramienta is not None
+            and getattr(config_herramienta, "critica", True)):
+        return {"autonoma": False, "estado": YA_ES_CRITICA,
+                "promocion_id": str(fila.get("id"))}
     return {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id")),
             "desde": fila.get("creado_en")}
 
@@ -240,6 +264,23 @@ def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escr
         #  no se pide es que una persona la haya aprobado veinte veces antes.
         #  Se mide igual y queda escrito: es la linea de base de lo que pase
         #  despues, y la degradacion sola sigue en pie.
+        #
+        #  DOS COSAS QUE SI SE EXIGEN (auditoria de frontera, 02/11/2026):
+        #  M3 -- que 'critica: false' venga de la BASE, no del YAML de la
+        #        imagen ni de una copia servida cuando la base no contestaba:
+        #        la imagen puede declararla no critica antes de que la empresa
+        #        la haya cargado, y esa ruta falla ABIERTO (CLAUDE.md §8).
+        #  M2 -- lo negativo de la ventana: cero fallidas, cero no
+        #        confirmadas, cero degradaciones. Sin esto, la degradacion
+        #        sola se deshacia con un clic, una y otra vez.
+        if getattr(config, "_origen", "base") != "base":
+            raise NoPromovible("CONFIG_SIN_CONFIRMAR",
+                               [{"condicion": "config_desde_la_base",
+                                 "tiene": getattr(config, "_origen", None),
+                                 "necesita": "base"}])
+        negativas = _negativas(veredicto(m, u)["faltan"])
+        if negativas:
+            raise NoPromovible("SIN_EVIDENCIA", negativas)
         return escribir(tenant, accion, actor.strip(),
                         "promovida sin evidencia previa: la empresa la declara no critica",
                         {"no_critica": True, "evidencia": m, "umbrales": u,

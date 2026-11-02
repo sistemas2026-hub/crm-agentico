@@ -10078,7 +10078,13 @@ def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -
     from nucleo.seguridad import aprobacion, autonomia_ganada
     from nucleo.persistencia import autonomia_ganada as registro
 
-    vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente)
+    vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente,
+                                       config_herramienta=herramienta)
+    if vigente.get("estado") == autonomia_ganada.YA_ES_CRITICA:
+        _degradar_autonomia(tenant, herramienta.nombre,
+                            "se promovio sin evidencia por no critica y hoy la empresa "
+                            "la declara critica", {"promocion_id": vigente.get("promocion_id")})
+        return None
     if not vigente.get("autonoma"):
         return None
     try:

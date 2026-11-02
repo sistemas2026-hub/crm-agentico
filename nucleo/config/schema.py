@@ -1902,6 +1902,27 @@ class Herramienta(Base):
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
 
+        #  'critica: false' SOLO DONDE LA CADENA LA SOSTIENE  --  02/11/2026
+        #  (auditoria de frontera, B1). Declararla no critica promueve sin
+        #  evidencia; eso solo es seguro en una accion que pasa por la cadena
+        #  de aprobacion (aprobacion_humana + irreversible: frontera.critica,
+        #  firma de la promocion leida en el ultimo metro) y cuyo efecto el
+        #  codigo mide antes y despues. Fuera de eso, la marca no haria nada
+        #  o haria algo que nadie verifica: se rechaza al CARGAR.
+        if not self.critica:
+            faltan = [n for n, ok in (
+                ("aprobacion_humana", self.aprobacion_humana),
+                ("irreversible", self.irreversible),
+                ("verificacion con comprobaciones",
+                 bool(self.verificacion and self.verificacion.comprobaciones)),
+                ("exige_previas", bool(self.exige_previas))) if not ok]
+            if faltan:
+                raise ValueError(
+                    f"'{self.nombre}': 'critica: false' exige {faltan}. Una "
+                    f"accion no critica se hace sola sin evidencia previa, y "
+                    f"eso solo es seguro si el codigo comprueba sus previas, "
+                    f"mide su efecto y la ejecuta por la cadena de aprobacion.")
+
         #  UNA EXENCION QUE EL CODIGO NO CONOCE NO EXIME NADA, Y CALLARLO
         #  SERIA LO PEOR: el YAML diria que el Supervisor puede cerrar, la
         #  frontera lo seguiria frenando, y el sintoma
