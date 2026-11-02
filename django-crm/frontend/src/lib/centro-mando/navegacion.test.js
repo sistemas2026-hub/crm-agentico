@@ -208,3 +208,64 @@ describe('el camino', () => {
     expect(CELDA).toBeLessThanOrEqual(0.5);
   });
 });
+
+describe('la navegación no sabe nada del negocio', () => {
+  //  «El algoritmo de navegación no debe saber nada de facturación, NOC,
+  //  ventas o herramientas de IA. Su responsabilidad debe ser exclusivamente
+  //  mover personajes por una geometría válida». Es lo que permite reutilizarlo
+  //  el día que haya visitantes, personal humano u otros elementos móviles.
+  //
+  //  La guarda de `escena/` ya vigila esa carpeta; estos dos archivos viven
+  //  fuera y nadie los miraba.
+  const PROHIBIDAS = [
+    'wisphub', 'smartolt', 'bottlecrm', 'ticket', 'herramienta', 'isp',
+    'rapilink', 'factura', 'suscriptor', 'agente', 'noc', 'cartera'
+  ];
+
+  it('ni `navegacion.js` ni `paseo.js` nombran el negocio', async () => {
+    const fs = await import('node:fs');
+    const archivos = ['navegacion.js', 'paseo.js'];
+    for (const archivo of archivos) {
+      const texto = fs.readFileSync(`src/lib/centro-mando/${archivo}`, 'utf8');
+      for (const palabra of PROHIBIDAS) {
+        const re = new RegExp(String.raw`\b${palabra}\b`, 'i');
+        expect(re.test(texto), `«${palabra}» aparece en ${archivo}`).toBe(false);
+      }
+    }
+  });
+
+  it('y la guarda se pondría roja si lo hicieran', () => {
+    //  LA MUTACIÓN EXPLÍCITA, y acá se ganó el sueldo.
+    //
+    //  La primera versión de este archivo se escribió con un heredoc que se
+    //  comió una barra, y la expresión quedó con un RETROCESO -el carácter
+    //  U+0008- en vez de un límite de palabra. La guarda de arriba pasaba en
+    //  verde SIN COMPARAR NADA: no encontraba ninguna palabra prohibida
+    //  porque no buscaba ninguna.
+    //
+    //  Por eso las dos usan `String.raw`: dentro de una plantilla o de una
+    //  cadena normal, `\b` es un escape, no un límite de palabra.
+    const re = new RegExp(String.raw`\bagente\b`, 'i');
+    expect(re.test('const nombreDelAgente = 1')).toBe(false);
+    expect(re.test('// el agente que ejecuta')).toBe(true);
+  });
+
+  it('lo que `rejillaDe` recibe es geometría y nada más', () => {
+    //  Una sede de mentira, sin un solo dato de empresa, tiene que producir
+    //  una rejilla válida.
+    const sede = {
+      mundo: { ancho: 10, fondo: 10 },
+      plantas: [
+        { papel: 'circulacion', origen: { gx: 4, gy: 0 }, mundo: { ancho: 2, fondo: 10 } },
+        {
+          papel: 'sala', sala: 'x', origen: { gx: 0, gy: 0 },
+          mundo: { ancho: 4, fondo: 6, puertaDerecha: [1, 2.8], antepecho: { derecha: true } },
+          puestos: [{ id: 'x:1', gx: 1.5, gy: 3 }], mobiliario: []
+        }
+      ]
+    };
+    const r = rejillaDe(sede);
+    expect(r.destinos.size).toBe(1);
+    expect(conectividad(r, [{ x: 4, y: 0, ancho: 2, fondo: 10 }]).aislados).toEqual([]);
+  });
+});

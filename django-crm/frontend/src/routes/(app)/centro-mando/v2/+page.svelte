@@ -38,6 +38,7 @@
     from '$lib/centro-mando/departamentos.js';
   import { edificioDe } from '$lib/centro-mando/edificio.js';
   import { anclaDelNombre } from '$lib/centro-mando/escena/rotulos';
+  import { rejillaDe } from '$lib/centro-mando/navegacion.js';
   import { edificioCompactoPixi } from '$lib/centro-mando/edificio-compacto.js';
   import { sedeDe } from '$lib/centro-mando/sede.js';
   import { page } from '$app/state';
@@ -517,6 +518,15 @@
       .filter((p) => p.papel === 'circulacion')
       .map((p) => ({ x: p.origen.gx, y: p.origen.gy,
                      ancho: p.mundo.ancho, fondo: p.mundo.fondo }));
+    //  EL MAPA POR EL QUE SE CAMINA. Se deriva del mismo edificio que se
+    //  dibuja, no de una lista escrita aparte: una puerta que se ve y por la
+    //  que no se pasa es lo que aparece cuando hay dos geometrias.
+    //
+    //  Solo en la vista de conjunto: dentro de una sala no hay pasillo al que
+    //  salir, y un paseo sin pasillo es alguien dando vueltas entre mesas.
+    const elMapa = (edificio && porDondeCruzar.length > 0)
+      ? { rejilla: rejillaDe(edificio), paseos: porDondeCruzar }
+      : null;
     //  Sin estructura no se monta nada, y NO se cae a una inventada: dibujar
     //  un edificio que nadie declaró sería afirmar cómo es una empresa que no
     //  se pudo consultar. El aviso lo da el pie.
@@ -541,7 +551,8 @@
         visualizar = adaptador.visualizar;
         escena = await montarEscena({ contenedor: lienzo, planta: laPlanta,
                                       escalaMinima: elZoom, letreros: losLetreros,
-                                      ambiente: porDondeCruzar });
+                                      ambiente: porDondeCruzar,
+                                      navegacion: elMapa });
         if (!vivo) {
           escena.destruir();
           escena = null;

@@ -11,9 +11,13 @@
  * ------------------
  * Esto es **geometría**, no conducta. Dice qué celdas son transitables y cómo
  * ir de una a otra. No mueve a nadie, no decide quién camina ni cuándo, y no
- * sabe qué es un agente. Esa separación importa: el día que un personaje se
- * levante de su puesto, lo que decida ese movimiento tiene que ser otra cosa,
+ * sabe de quién es cada puesto. Esa separación importa: el día que un
+ * personaje se levante, lo que decida ese movimiento tiene que ser otra cosa
  * y tiene que poder distinguirse de una actividad laboral de verdad.
+ *
+ * Lo vigila `navegacion.test.js`, que prohibe el vocabulario del negocio en
+ * este archivo y en `paseo.js`, comentarios incluidos: así el mismo código
+ * sirve el día que caminen visitantes o personal humano.
  *
  * SE DERIVA DEL PLANO, NO SE ESCRIBE
  * ----------------------------------

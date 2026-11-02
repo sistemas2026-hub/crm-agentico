@@ -30,6 +30,10 @@ import { Camara, LIMITES, gesto, type Toque } from './camara';
 import { aPantalla, extensionDeVolumenes, extensionDelMundo, profundidad } from './isometria';
 import { construirCaminante, type Caminante } from './caminante';
 import { avanzar, poblar } from '../ambiente.js';
+import { CELDA, camino, celdaDe, llegadaA } from '../navegacion.js';
+import {
+  avanzar as avanzarPaseo, crearPaseo, enPie, mezcla, puedeArrancar
+} from '../paseo.js';
 import { PALETA, coloresConAcento } from './paleta';
 import { Transicion } from './pose';
 import { construirOficina, type Planta, type Puesto } from './oficina';
@@ -127,6 +131,18 @@ export interface OpcionesDeEscena {
    * interactivos: si lo fueran se comerían los clics de los puestos que tienen
    * detrás.
    */
+  /**
+   * El mapa por el que se puede caminar, y a dónde se puede ir.
+   *
+   * Sin esto NADIE se levanta de su silla: un personaje que camine sin mapa
+   * atraviesa las paredes, y eso es peor que un personaje quieto.
+   */
+  navegacion?: {
+    rejilla: any;
+    /** Dónde se puede ir a dar una vuelta, en unidades del plano. */
+    paseos: { x: number; y: number; ancho: number; fondo: number }[];
+  };
+
   letreros?: {
     texto: string; gx: number; gy: number; gz: number;
     /**
@@ -607,6 +623,56 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     return c;
   });
 
+  /* ── el paseo: alguien se levanta, camina y vuelve ─────────────────────
+     El cuerpo que camina NO es el personaje sentado: `personaje.ts` dibuja a
+     alguien en su silla y estirarle las piernas se ve como lo que es. Se usa
+     el mismo `caminante.ts` del ambiente, y durante el medio segundo de
+     levantarse los dos se cruzan en opacidad sobre el mismo punto — que es lo
+     que evita el salto.
+
+     SOLO SE LEVANTAN LOS PUESTOS OCUPADOS. Una silla vacía que se pone de pie
+     y camina sería una persona inventada. */
+  const navegable = opciones.navegacion ?? null;
+  const paseantes = navegable
+    ? habitantes
+        .filter((h) => h.personaje && (h.puesto.def.agente || h.puesto.def.persona))
+        .map((h, i) => ({
+          habitante: h,
+          paseo: crearPaseo(h.puesto.def.id, i * 17 + 5),
+          cuerpo: null as Caminante | null
+        }))
+    : [];
+
+  /** Una vuelta por el pasillo desde el puesto, o `null` si no hay camino. */
+  const planearPaseo = (idPuesto: string) => {
+    if (!navegable) return null;
+    const silla = llegadaA(navegable.rejilla, idPuesto);
+    if (!silla) return null;
+    const zonas = navegable.paseos ?? [];
+    if (zonas.length === 0) return null;
+    //  Un punto del pasillo, elegido de forma estable por el identificador:
+    //  dos cargas seguidas tienen que dar el mismo paseo.
+    let suma = 0;
+    for (let k = 0; k < idPuesto.length; k++) suma += idPuesto.charCodeAt(k);
+    const z = zonas[suma % zonas.length];
+    const destino = celdaDe(
+      z.x + z.ancho * (0.3 + ((suma % 7) / 7) * 0.4),
+      z.y + z.fondo * (0.2 + ((suma % 11) / 11) * 0.6));
+    const ida = camino(navegable.rejilla, silla, destino);
+    if (!ida || ida.length < 3) return null;
+    //  UNA VUELTA CORTA, NO UNA EXCURSIÓN. Medido en el navegador: con la ruta
+    //  entera hasta el punto elegido, el cuerpo estaba fuera de su silla unos
+    //  40 segundos de cada 70 —el contador de objetos lo mostraba subido más
+    //  de la mitad del tiempo—. Eso no se lee como «alguien se levantó un
+    //  momento» sino como que la oficina está medio vacía.
+    //
+    //  Se corta la ida a 24 celdas: doce unidades de ida y doce de vuelta, que
+    //  a 1,5 por segundo son unos dieciséis segundos de paseo.
+    const corta = ida.slice(0, Math.min(ida.length, 24));
+    if (corta.length < 3) return null;
+    return { ida: corta, vuelta: [...corta].reverse() };
+  };
+
   app.ticker.add((tick) => {
     // `deltaMS` es el tiempo real del fotograma. Se acota a 100 ms porque al
     // volver de una pestaña oculta el navegador entrega un salto enorme, y sin
@@ -622,6 +688,39 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
         caminantes[i].nodo.position.set(p.x, p.y);
         caminantes[i].nodo.zIndex = profundidad(f.x, f.y);
         caminantes[i].paso(t, f.andando === true);
+      }
+    }
+
+    //  EL PASEO. Se avanza el estado de cada uno y se mueve su cuerpo.
+    for (const p of paseantes) {
+      const antes = p.paseo;
+      //  `puedeArrancar` mira a los demás: como mucho uno fuera de su silla.
+      const puede = antes.estado !== 'sentado'
+        || puedeArrancar(paseantes.map((q) => q.paseo));
+      p.paseo = puede
+        ? avanzarPaseo(antes, dt, { celda: CELDA, planear: () => planearPaseo(p.paseo.puesto) })
+        : { ...antes, espera: Math.max(antes.espera, 2) };
+
+      const m = mezcla(p.paseo);
+      //  La silla se vacía a la vez que aparece el cuerpo de pie: los dos
+      //  extremos de la misma transición, no un corte.
+      if (p.habitante.personaje) p.habitante.personaje.nodo.alpha = 1 - m;
+
+      if (enPie(p.paseo) && p.paseo.donde) {
+        if (!p.cuerpo) {
+          p.cuerpo = construirCaminante('visita');
+          p.cuerpo.nodo.eventMode = 'none';
+          mundo.addChild(p.cuerpo.nodo);
+        }
+        const q = aPantalla(p.paseo.donde.gx, p.paseo.donde.gy, 0);
+        p.cuerpo.nodo.position.set(q.x, q.y);
+        p.cuerpo.nodo.zIndex = profundidad(p.paseo.donde.gx, p.paseo.donde.gy);
+        p.cuerpo.nodo.alpha = m;
+        p.cuerpo.paso(t, p.paseo.estado === 'yendo' || p.paseo.estado === 'volviendo');
+      } else if (p.cuerpo) {
+        p.cuerpo.destruir();
+        p.cuerpo = null;
+        if (p.habitante.personaje) p.habitante.personaje.nodo.alpha = 1;
       }
     }
 
@@ -832,6 +931,10 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       //  de la escena.
       for (const c of caminantes) c.destruir();
       caminantes.length = 0;
+      //  Los cuerpos de los paseos tambien: si no, salir y entrar de la
+      //  pantalla deja figuras sueltas en memoria de la tarjeta.
+      for (const p of paseantes) { p.cuerpo?.destruir(); p.cuerpo = null; }
+      paseantes.length = 0;
       //  Idempotente: destruir dos veces no puede explotar. Al cambiar de sala
       //  hay un desmontaje y un montaje en el mismo gesto, y basta con que el
       //  efecto de limpieza corra dos veces.
