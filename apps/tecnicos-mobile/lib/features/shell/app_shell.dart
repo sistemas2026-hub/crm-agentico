@@ -181,13 +181,14 @@ class ShellDependencias {
       resumenInicial: sincronizacion.lastSummary,
       sincronizarAhora: sincronizacion.procesarCola,
       conectividad: _conectividadDelTelefono(),
-      //  COMPARTIR LA UBICACION (31/10/2026). Nace apagado: `alArrancar` solo
-      //  lo retoma si el tecnico lo habia dejado encendido.
+      //  COMPARTIR LA UBICACION (02/11/2026). Nace ENCENDIDA: `alArrancar`
+      //  pide el permiso del sistema y empieza, salvo que el tecnico la haya
+      //  apagado a mano.
       ubicacion: CompartirUbicacion(
         enviar: (Position p, int? bateria) =>
             mandarUbicacion(ApiClient(), p, bateria),
-        leerEncendido: almacenamiento.getCompartirUbicacion,
-        guardarEncendido: almacenamiento.setCompartirUbicacion,
+        leerApagada: almacenamiento.getUbicacionApagada,
+        guardarApagada: almacenamiento.setUbicacionApagada,
       ),
       sesionVencida: ApiClient.sesionVencida,
       recepcion: RecepcionDelKit.real(),

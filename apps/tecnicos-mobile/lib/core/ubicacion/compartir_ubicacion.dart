@@ -8,15 +8,25 @@ import 'package:geolocator/geolocator.dart';
 /// El usuario: «un mapa donde uno pueda ver la posición actual de cada
 /// técnico, con el fin de hacerle seguimiento».
 ///
-/// SE ENCIENDE A MANO, Y ESA ES LA DECISIÓN
-/// ----------------------------------------
-/// Nace apagado. El técnico lo prende, ve el permiso del sistema con su
-/// explicación, y puede apagarlo cuando quiera. No hay interruptor del
-/// servidor que lo encienda por él.
+/// COMPARTE SOLA, Y ESA ES LA DECISIÓN (02/11/2026)
+/// ------------------------------------------------
+/// El usuario: «es mejor que el técnico no tenga que estar presionando un
+/// botón; solo estará enterado de que la aplicación comparte la ubicación, y
+/// al momento de instalar la app que pida el permiso y ya».
 ///
-/// Eso resuelve dos cosas de una: el piloto con un solo técnico no necesita
-/// nada especial —los demás simplemente no lo prenden— y el consentimiento es
-/// un acto de la persona, no una casilla en una pantalla de oficina.
+/// Tiene razón en lo que importa: un técnico que tiene que acordarse de
+/// prender algo cada mañana, no lo prende, y entonces el mapa miente por
+/// omisión. Así que **nace encendida**: al abrir la aplicación pide el
+/// permiso del sistema y empieza.
+///
+/// EL CONSENTIMIENTO NO DESAPARECE, CAMBIA DE LUGAR. Android obliga a mostrar
+/// el diálogo de permiso, y sin un «permitir» del técnico no se lee ni una
+/// coordenada. Lo que se fue es tener que repetirlo cada día.
+///
+/// Y SIGUE PUDIENDO APAGARLA. El interruptor queda, encendido por omisión:
+/// una aplicación de trabajo que comparte dónde está alguien y no le deja
+/// pararlo es otra cosa. Apagarla se recuerda --no se vuelve a encender sola
+/// al día siguiente-- hasta que él la prenda.
 ///
 /// LO QUE NO SE HACE, Y POR QUÉ
 /// ----------------------------
@@ -39,8 +49,8 @@ import 'package:geolocator/geolocator.dart';
 class CompartirUbicacion {
   CompartirUbicacion({
     required this.enviar,
-    required this.leerEncendido,
-    required this.guardarEncendido,
+    required this.leerApagada,
+    required this.guardarApagada,
     this.cada = const Duration(minutes: 3),
     this.plazoDeLectura = const Duration(seconds: 20),
   });
@@ -50,9 +60,14 @@ class CompartirUbicacion {
   /// próxima vez que el técnico abra la aplicación.
   final Future<bool> Function(Position posicion, int? bateria) enviar;
 
-  /// Si el técnico lo dejó encendido (sobrevive a cerrar la aplicación).
-  final Future<bool> Function() leerEncendido;
-  final Future<void> Function(bool) guardarEncendido;
+  /// Si el técnico la APAGÓ a mano (sobrevive a cerrar la aplicación).
+  ///
+  /// Se guarda el apagado y no el encendido, a propósito: lo normal es
+  /// compartir, así que lo que hay que recordar es la excepción. Un teléfono
+  /// recién instalado no tiene nada guardado y comparte, que es lo que se
+  /// decidió.
+  final Future<bool> Function() leerApagada;
+  final Future<void> Function(bool) guardarApagada;
 
   final Duration cada;
   final Duration plazoDeLectura;
@@ -68,20 +83,27 @@ class CompartirUbicacion {
 
   bool get encendido => _encendido;
 
-  /// Al abrir la aplicación: si quedó encendido, se retoma.
+  /// Al abrir la aplicación: comparte, salvo que el técnico la haya apagado.
+  ///
+  /// PIDE EL PERMISO ACÁ. Es el «al momento de instalar la app que pida el
+  /// permiso»: la primera vez que se abre. Si el técnico lo niega, Android
+  /// deja de preguntar solo, y la tarjeta se lo dice.
   Future<void> alArrancar() async {
-    if (await leerEncendido()) await encender(pedirPermiso: false);
+    if (await leerApagada()) {
+      estado.value = EstadoDeUbicacion.apagado;
+      return;
+    }
+    await encender();
   }
 
-  /// Lo prende el técnico. Con [pedirPermiso] pide el del sistema si falta;
-  /// al retomar no se pide, para no interrumpir con un diálogo al abrir.
+  /// La prende: la primera vez pide el permiso del sistema si falta.
   Future<bool> encender({bool pedirPermiso = true}) async {
     if (!await _hayPermiso(pedir: pedirPermiso)) {
       estado.value = EstadoDeUbicacion.sinPermiso;
       return false;
     }
     _encendido = true;
-    await guardarEncendido(true);
+    await guardarApagada(false);
     estado.value = EstadoDeUbicacion.compartiendo;
     _reloj?.cancel();
     _reloj = Timer.periodic(cada, (_) => _mandarUna());
@@ -89,12 +111,17 @@ class CompartirUbicacion {
     return true;
   }
 
-  /// Lo apaga el técnico, o el servidor al decir que está fuera de horario.
+  /// La apaga el técnico, o el servidor al decir que no corresponde.
+  ///
+  /// `recordarlo` distingue las dos: lo que el técnico apaga se recuerda y no
+  /// vuelve solo; lo que para el servidor --fuera de jornada u horario-- NO
+  /// se recuerda, porque mañana a las siete sí corresponde y nadie tendría
+  /// que volver a prenderla a mano.
   Future<void> apagar({bool recordarlo = true}) async {
     _encendido = false;
     _reloj?.cancel();
     _reloj = null;
-    if (recordarlo) await guardarEncendido(false);
+    if (recordarlo) await guardarApagada(true);
     estado.value = EstadoDeUbicacion.apagado;
   }
 
@@ -118,9 +145,10 @@ class CompartirUbicacion {
       final bool aceptada = await enviar(p, await _bateria());
       if (!aceptada) {
         //  El servidor dice que no corresponde (fuera de jornada o de
-        //  horario): se para, y se recuerda apagado para no reintentar
-        //  mañana a la madrugada.
-        await apagar();
+        //  horario): se para por hoy, pero NO se recuerda apagada --mañana
+        //  dentro del horario sí corresponde, y el técnico no tiene por qué
+        //  volver a prenderla.
+        await apagar(recordarlo: false);
         estado.value = EstadoDeUbicacion.fueraDeJornada;
         return;
       }

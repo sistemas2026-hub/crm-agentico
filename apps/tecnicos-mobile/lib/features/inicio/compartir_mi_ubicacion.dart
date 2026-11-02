@@ -83,10 +83,10 @@ class CompartirMiUbicacion extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.xs),
               const Text(
-                'La oficina ve dónde está tu cuadrilla para saber a quién '
-                'mandar al próximo caso. Solo mientras dura tu jornada y '
-                'mientras tengas la app abierta. Lo podés apagar cuando '
-                'quieras, y nadie guarda por dónde pasaste.',
+                'Se comparte sola mientras dura tu jornada y tengas la app '
+                'abierta, para que la oficina sepa a quién mandar al próximo '
+                'caso. No guarda por dónde pasaste. Si la apagás, no vuelve a '
+                'encenderse sola.',
                 style: TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
               ),
             ],
