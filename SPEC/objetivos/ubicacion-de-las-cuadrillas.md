@@ -29,7 +29,7 @@ Revisa la decisión 2 en un punto. El usuario, al ver el interruptor: *«es mejo
 Tiene razón en lo que importa: un técnico que tiene que acordarse de prender algo cada mañana no lo prende, y entonces el mapa **miente por omisión** — el supervisor ve «sin señal» y no sabe si es que no hay cobertura o que nadie prendió nada.
 
 - **El consentimiento no desaparece, cambia de lugar.** Android obliga a mostrar el diálogo de permiso, y sin un «permitir» no se lee ni una coordenada. Lo que se fue es repetirlo cada día.
-- **El interruptor queda, encendido por omisión.** Una app de trabajo que comparte dónde está alguien y no le deja pararlo es otra cosa.
+- **El interruptor se quitó** (mismo día, pedido del usuario: *«quita el botón de la app de compartir mi ubicación»*). La tarjeta queda: enterarse es la mitad del punto. Lo que no queda sin salida es pararlo — revocar el permiso de ubicación desde los ajustes del teléfono sigue estando, y ese control lo garantiza Android, ninguna aplicación lo puede quitar.
 - **Se distingue quién apaga:** lo que apaga el técnico se recuerda; lo que apaga el servidor (fuera de jornada u horario) **no**, porque mañana a las siete sí corresponde. Antes las trataba igual y quedaba apagada para siempre.
 
 Lo que esto **no** cambia: la garantía sigue en el servidor (decisión 2), que rechaza fuera de jornada y de horario. Que la app comparta sola no amplía ni un minuto lo que se guarda.
