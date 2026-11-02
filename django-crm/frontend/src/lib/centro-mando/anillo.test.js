@@ -112,6 +112,54 @@ describe('el suelo vacío, que es lo que se veía mal', () => {
     }
   });
 
+  it('las salas ocupan tres cuartas partes del suelo', () => {
+    //  EL RECORRIDO DE ESTA CIFRA, que es la que mide «se ve vacío»:
+    //
+    //    47%   el reparto original, con una columna huérfana pegada al patio
+    //    63%   tras equilibrar las manzanas y angostar el patio
+    //    76%   al dejar de dejar suelo muerto al costado y al frente
+    //
+    //  Las salas ya no se pegan a un lado de su columna dejando el resto como
+    //  franja muerta: ocupan la columna entera, y la manzana más corta reparte
+    //  entre sus salas el fondo que le falta para llegar al frente.
+    const r = repartirAnillo(PILOTO);
+    const ocupacion = areaSalas(r) / area(r);
+    expect(ocupacion, `ocupación ${(ocupacion * 100).toFixed(0)}%`).toBeGreaterThan(0.72);
+  });
+
+  it('ninguna sala queda más angosta que su columna', () => {
+    //  LA CAUSA, no el síntoma. Una sala más angosta que su columna deja una
+    //  franja de una o dos celdas al costado que no es sala, ni patio, ni
+    //  pasillo: 224 unidades sobre el piloto, el 11% del plano.
+    for (const lista of [PILOTO, empresaDe(7), empresaDe(14), empresaDe(23)]) {
+      const r = repartirAnillo(lista);
+      const porColumna = new Map();
+      for (const p of r.puestas) {
+        const k = `${p.banda}:${p.x}`;
+        porColumna.set(k, Math.max(porColumna.get(k) ?? 0, p.ancho));
+      }
+      for (const p of r.puestas) {
+        expect(p.ancho, `${p.sala.id} mide ${p.ancho} en una columna de ${porColumna.get(`${p.banda}:${p.x}`)}`)
+          .toBe(porColumna.get(`${p.banda}:${p.x}`));
+      }
+    }
+  });
+
+  it('y ninguna manzana se queda corta de fondo', () => {
+    //  La otra mitad: con cinco salas de un lado y seis del otro, la manzana
+    //  corta llegaba hasta 47 de los 54 del plano.
+    for (const lista of [PILOTO, empresaDe(9), empresaDe(16), empresaDe(31)]) {
+      const r = repartirAnillo(lista);
+      for (const banda of ['izquierda', 'derecha']) {
+        const ps = r.puestas.filter((p) => p.banda === banda);
+        if (ps.length === 0) continue;
+        const llega = Math.max(...ps.map((p) => p.y + p.fondo));
+        expect(llega, `la manzana ${banda} llega a ${llega} de ${r.huella.fondo}`)
+          .toBe(r.huella.fondo);
+      }
+    }
+  });
+
   it('el suelo muerto se queda abajo del quinto, en cualquier tamaño de empresa', () => {
     //  AFIRMA EL EFECTO, no la paridad de fondos entre manzanas, que era el
     //  proxy que esta prueba usaba antes. Dos manzanas pueden quedar

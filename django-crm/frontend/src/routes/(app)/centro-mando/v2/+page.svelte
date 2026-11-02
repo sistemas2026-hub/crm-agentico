@@ -749,7 +749,17 @@
   .pantalla {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 56px);
+    /*  100% DEL ALTO DISPONIBLE, no `100vh - 56px`.
+     *
+     *  Esos 56 px restaban una barra superior que en este armazón no existe:
+     *  medido el 02/11/2026 en una ventana de 1000 px, `.pantalla` ocupaba 944
+     *  y debajo quedaba una banda vacía. Y no era solo fea — la escena se
+     *  encuadra por el ALTO (su caja mide 1,86:1 contra un lienzo de 1,92:1),
+     *  así que cada píxel de alto que se perdía encogía la sede entera.
+     *
+     *  `100%` y no `100vh`: el contenedor de la aplicación ya acota el alto, y
+     *  con `vh` la pantalla se pasaba por debajo cuando hay algo encima. */
+    height: 100%;
     min-height: 520px;
     background: #0b0a1c;
     color: #e8e7f5;

@@ -137,9 +137,21 @@ export function sedeDe(salas, agentes, opciones = {}) {
     //  frente y a la derecha, y eso se lee como pasillo.
     const planta = plantaDe(puesta.sala, agentes);
     const vano = puertaLateralDe(puesta);
+    //  EL ANCHO SALE DEL REPARTO, NO DE LA PLANTILLA. `anillo.js` ensancha
+    //  cada sala hasta llenar su columna para que no quede suelo muerto al
+    //  costado; si acá se dibujara con el ancho de la plantilla, ese suelo
+    //  volvería a aparecer —y encima la sala ya no tocaría la circulación—.
+    //  Y el fondo igual: una columna mas corta que la otra dejaba una franja
+    //  muerta al frente del edificio, asi que el sobrante se reparte entre sus
+    //  salas.
     plantas.push({
       ...planta,
-      mundo: vano ? { ...planta.mundo, puertaLateral: vano } : planta.mundo,
+      mundo: {
+        ...planta.mundo,
+        ancho: puesta.ancho,
+        fondo: puesta.fondo,
+        ...(vano ? { puertaLateral: vano } : {})
+      },
       origen: { gx: puesta.x, gy: puesta.y, gz: 0 },
       //  SIN LOSA PROPIA: el suelo ya está, y dos suelos a la misma altura se
       //  solapan de forma indefinida —ahí aparece el parpadeo entre

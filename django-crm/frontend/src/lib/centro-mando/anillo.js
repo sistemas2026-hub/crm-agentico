@@ -90,14 +90,20 @@ export const PASILLO = 3;
  * suelo muerto llegaba al **27%**. Con el patio en 10 y sin tope: **19% en el
  * peor caso**, y la mayoría entre 12 y 16%.
  *
- * El patio no necesitaba ser ancho, necesitaba ser angosto. Diez de ancho con
- * oficinas a los dos lados es una calle interior por la que se pasa; catorce
- * vacíos son un descampado. Y el plano que sale de ahí tiene UNA columna por
+ * El patio no necesitaba ser ancho, necesitaba ser angosto. Una calle interior
+ * con oficinas a los dos lados es por donde se pasa; catorce vacíos son un
+ * descampado.
+ *
+ * BAJÓ DE DIEZ A OCHO el 02/11/2026, y el motivo es de escala. En isometría
+ * todo se ve en proporción a `1/(ancho+fondo)`, así que cada celda que el
+ * patio deja de ocupar a lo ancho agranda la sede entera. Ocho sigue dejando
+ * **5,6 celdas de paso libre** entre el mobiliario de los dos bordes, que es
+ * lo que `patio.js` necesita para amueblarlo sin cerrar el camino. Y el plano que sale de ahí tiene UNA columna por
  * manzana hasta las diecisiete salas, así que **no hay oficinas atrás**: todas
  * dan al patio. Los pasillos siguen apareciendo cuando la empresa crece lo
  * suficiente para necesitar dos columnas.
  */
-export const PATIO_MINIMO = { ancho: 10, fondo: 10 };
+export const PATIO_MINIMO = { ancho: 8, fondo: 10 };
 
 const medida = (s) => s?.planta?.mundo ?? { ancho: 10, fondo: 8 };
 
@@ -326,9 +332,30 @@ export function repartirAnillo(salas) {
     let x = x0;
     forma.columnas.forEach((columna, i) => {
       const anchoCol = forma.anchos[i];
+      //  Y LO MISMO CON EL FONDO: una columna que no llega al frente del
+      //  edificio deja una franja muerta de punta a punta.
+      //
+      //  Medido el 02/11/2026: con cinco salas de un lado y seis del otro, la
+      //  manzana corta llegaba hasta 47 de los 54 del plano y dejaba **98
+      //  unidades** —el 5%— de suelo que no era sala, ni patio, ni pasillo.
+      //
+      //  El sobrante se reparte entre las salas de la columna, así que a cada
+      //  una le tocan una o dos celdas más de fondo. El mobiliario de pared va
+      //  por `gy` a lo largo del muro y no se mueve: lo que crece es el frente
+      //  de la sala, que es el lado abierto hacia la cámara.
+      const fondoCol = columna.reduce((t, s) => t + medida(s).fondo, 0);
+      const sobra = Math.max(0, fondo - fondoCol);
+      //  EN CELDAS ENTERAS Y SIN PERDER NINGUNA. Repartir `sobra / n` y
+      //  redondear deja resto: con 7 entre 5 salas tocaban 1,4 y se repartían
+      //  cinco, dejando dos celdas de franja muerta —la guarda de este archivo
+      //  lo cazó con «la manzana izquierda llega a 53 de 55»—. Las primeras
+      //  salas de la columna se llevan la celda de más.
+      const base = columna.length > 0 ? Math.floor(sobra / columna.length) : 0;
+      const resto = columna.length > 0 ? sobra % columna.length : 0;
       let y = 0;
-      for (const sala of columna) {
+      columna.forEach((sala, j) => {
         const m = medida(sala);
+        const reparto = base + (j < resto ? 1 : 0);
         //  PEGADA AL LADO POR DONDE SE ENTRA, y esto no es un detalle.
         //
         //  Una columna es tan ancha como su sala mayor, así que una sala más
@@ -339,10 +366,32 @@ export function repartirAnillo(salas) {
         //
         //  La manzana izquierda tiene su circulación a la derecha y la derecha
         //  la tiene a la izquierda, así que cada una se pega hacia su lado.
-        const x0Sala = banda === 'izquierda' ? x + (anchoCol - m.ancho) : x;
-        puestas.push({ sala, x: x0Sala, y, ancho: m.ancho, fondo: m.fondo, banda });
-        y += m.fondo;
-      }
+        //
+        //  Y ADEMÁS SE ENSANCHA HASTA LLENAR SU COLUMNA. Pegarla a un lado
+        //  resolvía el acceso y dejaba el resto como suelo muerto al otro:
+        //  medido el 02/11/2026, **224 unidades, el 11% del plano**, repartidas
+        //  en franjas de una o dos celdas al costado de ocho de las once salas.
+        //
+        //  Ese suelo no desaparece: pasa a ser suelo DE LA SALA, con sus muros.
+        //  No es «estirar la sala hasta llenar una celda» —lo que se probó en
+        //  el navegador y se veía mal, con el mobiliario a la deriva en una
+        //  celda del doble de grande—: acá el ensanche es de una o dos celdas
+        //  sobre doce, y los muebles están anclados al muro de fondo y al
+        //  lateral, así que ninguno se mueve.
+        //
+        //  Importa más de lo que parece: en isometría la escala va como
+        //  1/(ancho+fondo), así que el suelo que se ahorra agranda la sede
+        //  entera en pantalla.
+        const anchoSala = anchoCol;
+        const fondoSala = m.fondo + reparto;
+        puestas.push({
+          sala, x, y, ancho: anchoSala, fondo: fondoSala, banda,
+          //  Cuánto creció, para que quien dibuje pueda saberlo.
+          ensanche: anchoSala - m.ancho,
+          alargue: fondoSala - m.fondo
+        });
+        y += fondoSala;
+      });
       x += anchoCol;
       //  El pasillo va DESPUÉS de cada columna menos la última: es lo que le
       //  da frente a la columna de atrás, que si no queda sin entrada.
