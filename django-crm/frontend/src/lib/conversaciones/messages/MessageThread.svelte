@@ -14,6 +14,7 @@
    */
   import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock, Bot, UserRound, User } from '@lucide/svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
+  import CorregirAgente from '$lib/components/manual/CorregirAgente.svelte';
   import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
   import { partirMensaje, resumir } from './analisis-imagen.js';
 
@@ -42,7 +43,12 @@
         que el motor ya no le acepta envíos (X26). Sin esto, "Reintentar" en
         una cerrada pasaba por T21 y abría una conversación fantasma
         (auditor de frontera, 21/10/2026). */
-    puedeReintentar = true
+    puedeReintentar = true,
+    /** Qué agente atiende esta conversación (`rol_efectivo`). Lo necesita
+        «✎ Corregir»: una habilidad sin rol no la ve nadie, así que sin esto
+        el botón se muestra apagado en vez de guardar una corrección muerta.
+        Vacío = no se sabe, y entonces no se puede corregir desde acá. */
+    rolActivo = ''
   } = $props();
 
   /** Si debajo de la burbuja hay algo que decir: el estado de entrega, el
@@ -424,12 +430,22 @@
                      los estados son palomitas y viven DENTRO de la burbuja. -->
                 <span class="entrega">{ENTREGA_TEXTO.descartado}</span>
               {/if}
-              {#if item.m.rol === 'assistant' && casos.length > 0}
-                <MarcarEjemplo
+              {#if item.m.rol === 'assistant'}
+                {#if casos.length > 0}
+                  <MarcarEjemplo
+                    conversacionId={item.m.conversation_id || conversacionId}
+                    mensajeId={item.m.id}
+                    casoInicial={item.m.caso_marcado}
+                    {casos}
+                  />
+                {/if}
+                <!-- El otro lado: esta respuesta estuvo mal y así se hace.
+                     NO depende de `casos` --eso es la taxonomía del manual--
+                     sino del rol, que es a quien se le enseña. -->
+                <CorregirAgente
+                  rol={rolActivo}
+                  textoDeLaRespuesta={item.m.contenido || item.m.texto || ''}
                   conversacionId={item.m.conversation_id || conversacionId}
-                  mensajeId={item.m.id}
-                  casoInicial={item.m.caso_marcado}
-                  {casos}
                 />
               {/if}
             </div>

@@ -1882,6 +1882,7 @@
     onVerAnteriores={verAnteriores}
     {cargandoAnteriores}
     puedeReintentar={conversacion.estado === 'abierta'}
+    rolActivo={conversacion.rol_efectivo ?? ''}
   />
 
   {#if chatCerrado}
