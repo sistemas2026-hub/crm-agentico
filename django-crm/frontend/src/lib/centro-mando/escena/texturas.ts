@@ -136,14 +136,46 @@ export function texturaTrama(ancho = 128, alto = 128): Texture {
  * nada. Un degradado que empieza en el centro apaga la escena entera y se nota
  * como «esto se ve sucio».
  */
+/**
+ * CUÁNTO OSCURECE LA VIÑETA A UNA DISTANCIA DEL CENTRO.
+ *
+ * Sale de la textura a una función propia porque es un número que se puede
+ * medir y porque el que tenía estaba mal, medido sobre una captura del
+ * 02/11/2026:
+ *
+ *     dentro del edificio, 48% de los pixeles por debajo de 128
+ *     por tercios del ancho:  izquierda 110 · centro 134 · derecha 110
+ *     por tercios del alto:   arriba   116 · medio  130 · abajo   112
+ *
+ * O sea: los bordes perdían un 22% de luz y SEIS DE CADA DIEZ pixeles de las
+ * orillas caían por debajo de media escala. Con once departamentos repartidos
+ * por toda la planta, eso es mobiliario y rótulos que no se leen — y no es un
+ * problema del suelo, que mide 168 de 255: es la capa de encima.
+ *
+ * ARRANCA MÁS AFUERA Y PEGA MÁS FLOJO: 0,68 en vez de 0,55 y un techo de 0,45
+ * en vez de 0,82. La viñeta sigue haciendo su trabajo —que la mirada caiga en
+ * el centro— sin apagar un tercio del encuadre.
+ *
+ * @param p distancia al centro, de 0 (centro) a 1 (borde)
+ */
+export const VINETA = { desde: 0.68, techo: 0.45 };
+
+export function alfaDeVineta(p: number): number {
+  const d = Math.min(1, Math.max(0, p));
+  if (d <= VINETA.desde) return 0;
+  const k = (d - VINETA.desde) / (1 - VINETA.desde);
+  return k * k * VINETA.techo;
+}
+
 export function texturaVineta(lado = 512): Texture {
   const { c, ctx } = lienzo(lado, lado);
   const r = lado / 2;
   const g = ctx.createRadialGradient(r, r, 0, r, r, r);
-  for (let i = 0; i <= 16; i++) {
-    const p = i / 16;
-    const k = p < 0.55 ? 0 : Math.pow((p - 0.55) / 0.45, 2);
-    g.addColorStop(p, `rgba(0,0,0,${(k * 0.82).toFixed(4)})`);
+  //  Veinticuatro paradas y no dieciséis: con el arranque más afuera, la
+  //  rampa es más corta y a dieciséis se le ve el escalón.
+  for (let i = 0; i <= 24; i++) {
+    const p = i / 24;
+    g.addColorStop(p, `rgba(0,0,0,${alfaDeVineta(p).toFixed(4)})`);
   }
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, lado, lado);
