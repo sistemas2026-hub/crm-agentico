@@ -11,51 +11,10 @@
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
-  import CorregirAgente from '$lib/components/manual/CorregirAgente.svelte';
-  import { siguienteNumero } from '$lib/components/manual/entrenar.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
   let casos = $state(data.casos ?? []);
-
-  /**
-   * A QUE AGENTE SE LE HABLA  --  02/11/2026
-   *
-   * Hasta hoy el proxy fijaba 'cliente_final' y no habia forma de probar
-   * desde ninguna pantalla un agente recien creado en /agentes: la unica via
-   * era asignarselo al propio perfil y usar /asistente. Sin poder verlo
-   * equivocarse no se lo puede corregir, que es el primer paso de entrenarlo.
-   *
-   * Arranca en 'cliente_final' a proposito: este simulador existe para probar
-   * el canal de WhatsApp, y ese sigue siendo su caso normal.
-   */
-  let agentes = $state(data.agentes ?? []);
-  let rolElegido = $state('cliente_final');
-
-  /** Como se lee un agente en la lista: su area y cargo si los declara. */
-  function etiquetaDe(a) {
-    const partes = [a.area, a.cargo].filter(Boolean);
-    return partes.length ? `${a.nombre} — ${partes.join(' · ')}` : a.nombre;
-  }
-
-  /**
-   * CAMBIAR DE AGENTE ABRE UNA CONVERSACION NUEVA, y el numero cambia a la
-   * vista. No es un adorno: la sesion del motor ES el
-   * `identificador_sesion` --o sea el numero-- y una conversacion ya abierta
-   * restaura su `rol_efectivo` y PISA el rol que mande esta pantalla
-   * (api.py:875). Sin esto, elegir otro agente y escribir habria seguido
-   * hablandole al anterior mientras el <select> mostraba el nuevo: el
-   * resultado falso mas caro posible en la herramienta que existe para
-   * probar.
-   *
-   * Se incrementa el numero en vez de limpiarlo para que se VEA que la
-   * conversacion es otra, y para no pedirle a quien prueba que invente uno.
-   */
-  function cambiarDeAgente() {
-    reiniciar();
-    telefono = siguienteNumero(telefono);
-  }
-
 
   let telefono = $state('3001234567');
   let mensajes = $state([]);
@@ -164,7 +123,7 @@
       const resp = await fetch('/api/simulador-whatsapp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telefono: telefono.trim(), mensaje: texto, rol: rolElegido })
+        body: JSON.stringify({ telefono: telefono.trim(), mensaje: texto })
       });
       const datos = await resp.json();
       if (resp.ok) {
@@ -223,20 +182,6 @@
       bind:value={telefono}
       placeholder="3001234567"
     />
-    {#if agentes.length > 0}
-      <label for="agente">Le habla a</label>
-      <select
-        id="agente"
-        class="v2-input sel-agente"
-        bind:value={rolElegido}
-        onchange={cambiarDeAgente}
-        title="A qué agente le entra el mensaje. Cambiarlo abre una conversación nueva (el número sube en uno), porque una ya abierta conserva el área que la atiende."
-      >
-        {#each agentes as a (a.nombre)}
-          <option value={a.nombre}>{etiquetaDe(a)}</option>
-        {/each}
-      </select>
-    {/if}
     <button class="v2-btn" type="button" onclick={reiniciar}>Reiniciar conversación</button>
     {#if mensajes.length > 0}
       {#if rolActivo}
@@ -259,23 +204,12 @@
       {#each mensajes as m}
         <div class="chat-burbuja chat-{m.rol}">
           <div>{m.texto}</div>
-          {#if m.rol === 'asistente'}
-            {#if casos.length > 0}
-              <MarcarEjemplo
-                conversacionId={m.conversacionId}
-                mensajeId={m.mensajeId}
-                casoInicial={m.casoMarcado}
-                {casos}
-              />
-            {/if}
-            <!-- Se le enseña al area que DE VERDAD atendio, no a la de
-                 entrada: una conversacion deriva a mitad de turno, y
-                 corregir al router cuando se equivoco ventas no le llega
-                 a ventas. `rolActivo` es el `rol_efectivo` del motor. -->
-            <CorregirAgente
-              rol={rolActivo || rolElegido}
-              textoDeLaRespuesta={m.texto}
+          {#if m.rol === 'asistente' && casos.length > 0}
+            <MarcarEjemplo
               conversacionId={m.conversacionId}
+              mensajeId={m.mensajeId}
+              casoInicial={m.casoMarcado}
+              {casos}
             />
           {/if}
         </div>
@@ -330,9 +264,6 @@
   }
   .fila-telefono input {
     max-width: 180px;
-  }
-  .sel-agente {
-    max-width: 260px;
   }
   .agente-activo {
     font-size: 0.85rem;

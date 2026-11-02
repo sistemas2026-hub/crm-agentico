@@ -37,25 +37,6 @@ export function codigoDesde(texto, ahora = Date.now) {
 }
 
 /**
- * El mismo número de prueba con el último bloque +1.
- *
- * POR QUÉ EXISTE: la sesión del motor ES el `identificador_sesion`, o sea el
- * número. Una conversación ya abierta restaura su `rol_efectivo` y **pisa**
- * el rol que mande la pantalla, así que cambiar de agente sin cambiar de
- * número habría seguido hablándole al anterior mientras el selector mostraba
- * el nuevo — el resultado falso más caro posible en la herramienta que
- * existe para probar.
- *
- * @param {string} actual
- * @returns {string}
- */
-export function siguienteNumero(actual) {
-  const limpio = String(actual || '').replace(/\D/g, '');
-  if (!limpio) return '3001234567';
-  return String(BigInt(limpio) + 1n);
-}
-
-/**
  * La señal de un hueco, en palabras.
  *
  * Las tres las define `nucleo/habilidades/analista.py::detectar`, y cada una

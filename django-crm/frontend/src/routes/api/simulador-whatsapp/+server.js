@@ -66,20 +66,10 @@ export async function POST({ request, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { telefono, mensaje, rol } = await request.json();
+  const { telefono, mensaje } = await request.json();
   if (!telefono || !mensaje) {
     return json({ error: 'Falta telefono o mensaje' }, { status: 400 });
   }
-
-  // EL ROL LO ELIGE QUIEN PRUEBA, y antes estaba fijo en 'cliente_final'
-  // (02/11/2026). El motor siempre acepto `rol` en POST /chat --lo documenta
-  // su docstring-- y era este proxy el que lo tapaba: no habia forma de
-  // hablarle desde la pantalla a un agente recien creado, y sin eso no se
-  // puede ver que se equivoca, que es el primer paso de corregirlo.
-  //
-  // Vacio sigue siendo 'cliente_final': el simulador existe para probar ESE
-  // canal y esa sigue siendo su conducta por defecto.
-  const rolElegido = String(rol || '').trim() || 'cliente_final';
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = await tenantDeLaSesion(locals, fetch);
@@ -94,7 +84,7 @@ export async function POST({ request, locals, fetch }) {
       headers: headersMotor({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         tenant,
-        rol: rolElegido,
+        rol: 'cliente_final',
         identificador_sesion: telefono,
         mensaje,
         // Canal propio para que el simulador nunca se confunda con trafico
