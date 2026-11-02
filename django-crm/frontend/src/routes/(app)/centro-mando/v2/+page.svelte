@@ -37,6 +37,7 @@
   import { ocupacionesSinSilla, pisosDe, plantaDe, salaPorId, salasDe }
     from '$lib/centro-mando/departamentos.js';
   import { edificioDe } from '$lib/centro-mando/edificio.js';
+  import { anclaDelNombre } from '$lib/centro-mando/escena/rotulos';
   import { edificioCompactoPixi } from '$lib/centro-mando/edificio-compacto.js';
   import { sedeDe } from '$lib/centro-mando/sede.js';
   import { page } from '$app/state';
@@ -238,7 +239,10 @@
             .filter((p) => p.papel === 'sala')
             .map((p) => ({
               texto: p.cartel?.rotulo ?? p.sala,
-              gx: p.origen.gx + 0.4,
+              //  EL ANCLA SE CORRE HASTA EL HUECO. Pegada a la esquina, el
+              //  nombre de la sala caia encima de la placa de un puesto en
+              //  6 de las 11 salas. Ver `anclaDelNombre`.
+              gx: p.origen.gx + anclaDelNombre(p.mundo.ancho, p.mundo.fondo, p.puestos ?? []),
               gy: p.origen.gy + p.mundo.fondo + 0.6,
               gz: p.origen.gz,
               hacia: /** @type {const} */ ('derecha'),

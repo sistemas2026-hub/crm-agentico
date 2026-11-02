@@ -203,6 +203,57 @@ describe('cada área se reconoce por lo que tiene dentro', () => {
 
   const BASES = ['operaciones', 'atencion', 'tecnica', 'expedientes', 'comercial', 'reuniones'];
 
+  it('cada área tiene al menos tres piezas que no tiene ninguna otra', () => {
+    //  LA REGLA QUE PIDIÓ LA ESPECIFICACIÓN DEL 02/11/2026, con esas palabras:
+    //  «cada departamento debe tener por lo menos tres elementos exclusivos
+    //  reconocibles». Y es la afirmación que faltaba: las otras pruebas de
+    //  este bloque comprueban que dos áreas no sean IGUALES, que es mucho más
+    //  flojo — se cumple con que cada una tenga una pieza distinta.
+    //
+    //  «Exclusiva» acá significa que el tipo aparece en esta área y en como
+    //  mucho otra: con siete plantillas y trece tipos útiles, exigir que
+    //  ninguna otra lo tenga obligaría a inventar muebles.
+    const cuentaDeTipo = {};
+    for (const n of BASES) {
+      for (const t of new Set(PLANTILLAS[n].mobiliario.map((m) => m.tipo))) {
+        cuentaDeTipo[t] = (cuentaDeTipo[t] ?? 0) + 1;
+      }
+    }
+    for (const n of BASES) {
+      const propias = [...new Set(PLANTILLAS[n].mobiliario.map((m) => m.tipo))]
+        .filter((t) => cuentaDeTipo[t] <= 2);
+      expect(propias.length, `${n} solo tiene ${propias.length} piezas propias: ${propias.join(', ')}`)
+        .toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('ningún adorno se repite mecánicamente en toda la sede', () => {
+    //  «No duplicar plantas, archivadores y otros adornos de manera
+    //  automática», dice la especificación. La maceta llegó a estar en las 19
+    //  plantillas y a dibujarse **39 veces** en la sede del piloto: era la
+    //  pieza más numerosa de toda la escena, por encima de cualquier equipo.
+    //
+    //  El tope es por PLANTILLA y no por sede: cuántas salas usen una
+    //  plantilla lo decide la empresa, no este archivo.
+    for (const n of [...BASES, 'generica']) {
+      const macetas = PLANTILLAS[n].mobiliario.filter((m) => m.tipo === 'planta').length;
+      expect(macetas, `${n} tiene ${macetas} macetas`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('la mesa de reunión está donde reunirse es la función', () => {
+    //  Mesa redonda + alfombra estaba en 16 de 19 plantillas, o sea en **9 de
+    //  las 11 salas** del piloto: el otro mueble que hacía que todas se
+    //  parecieran. Auditoría recibió una mesa de REVISIÓN —dos sillas
+    //  enfrentadas y un expediente abierto— que es otra cosa y se ve distinta.
+    const conMesa = BASES.filter((n) =>
+      PLANTILLAS[n].mobiliario.some((m) => m.tipo === 'mesa'));
+    expect(conMesa, `mesa redonda en ${conMesa.join(', ')}`)
+      .toContain('reuniones');
+    expect(conMesa.length, `mesa redonda en ${conMesa.length} de ${BASES.length} áreas`)
+      .toBeLessThanOrEqual(Math.ceil(BASES.length / 2));
+  });
+
   it('el mueble de documentos no está en casi todas las áreas', () => {
     //  LA PREGUNTA QUE ESTA GUARDA NO SABÍA HACER. La de más abajo comprueba
     //  que no haya DOS áreas amuebladas igual, y pasaba en verde mientras la

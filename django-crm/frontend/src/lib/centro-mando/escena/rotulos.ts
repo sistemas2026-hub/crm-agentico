@@ -70,3 +70,75 @@ export function separarRotulos(cajas: CajaDeRotulo[], holgura = 2): number[] {
   }
   return ys;
 }
+
+/**
+ * DÓNDE ANCLAR EL NOMBRE DE UNA SALA PARA QUE NO LO TAPE UNA PLACA DE PUESTO.
+ *
+ * `separarRotulos` resuelve que dos NOMBRES DE SALA no se monten, y eso hace
+ * bien. Lo que no mira —ni puede, porque no las recibe— son las placas que
+ * cuelgan sobre cada escritorio, que viven en el mundo y se dibujan aparte.
+ *
+ * Medido sobre la sede del piloto: **6 de los 11 nombres de sala** caían
+ * encima de una placa de puesto. «Agente de Soporte Técnico» sobre
+ * «Operaciones de Campo», «Recepcionista Virtual» sobre «Atención al Cliente».
+ * Y mi propia prueba de solapes decía cero, porque comparaba nombres de sala
+ * contra nombres de sala: medí el par que se me ocurrió y no el que estaba
+ * roto.
+ *
+ * La solución es correr el ancla a lo largo del frente de la sala, que es
+ * suelo libre, hasta el punto más lejano de cualquier puesto. No se mueve el
+ * puesto ni se achica el nombre: se busca el hueco que ya existe.
+ *
+ * Se trabaja en PANTALLA y no en celdas porque en isometría dos puntos
+ * separados en el mundo pueden caer juntos: `(gx+1, gy+1)` queda a cero
+ * píxeles en horizontal de `(gx, gy)`.
+ *
+ * @param ancho el ancho de la sala, en celdas
+ * @param fondo su fondo
+ * @param puestos los escritorios, en celdas locales de la sala
+ * @returns el desplazamiento `gx` desde la esquina, en celdas
+ */
+export function anclaDelNombre(
+  ancho: number,
+  fondo: number,
+  puestos: { gx?: number; gy?: number }[]
+): number {
+  //  El frente de la sala, muestreado. Diez puntos alcanzan: la placa mide
+  //  unos 120 px y el frente entero de una sala de 13 celdas mide 416.
+  const CANDIDATOS = 10;
+  //  El nombre se ancla un poco por delante del borde, sobre el suelo.
+  const gyAncla = fondo + 0.6;
+  //  La placa de un puesto cuelga por encima del escritorio.
+  const GZ_PLACA = 2.6;
+
+  const aPantallaX = (gx: number, gy: number) => (gx - gy) * 32;
+  const aPantallaY = (gx: number, gy: number, gz = 0) => (gx + gy) * 16 - gz * 26;
+
+  const placas = (puestos ?? []).map((p) => ({
+    x: aPantallaX(p.gx ?? 0, p.gy ?? 0),
+    y: aPantallaY(p.gx ?? 0, p.gy ?? 0, GZ_PLACA)
+  }));
+  if (placas.length === 0) return 0.4;
+
+  let mejor = 0.4;
+  let mejorHolgura = -Infinity;
+  for (let i = 0; i < CANDIDATOS; i++) {
+    //  Entre 0,4 y el ancho menos un margen: pegado al borde derecho el
+    //  nombre se sale de su propia sala.
+    const gx = 0.4 + (i / (CANDIDATOS - 1)) * Math.max(0, ancho - 2.8);
+    const x = aPantallaX(gx, gyAncla);
+    const y = aPantallaY(gx, gyAncla);
+    //  La holgura de este candidato es la distancia a la placa MÁS CERCANA.
+    //  Se pondera la vertical porque una placa justo encima o justo debajo
+    //  tapa, y una al lado a la misma altura no.
+    let holgura = Infinity;
+    for (const p of placas) {
+      holgura = Math.min(holgura, Math.hypot((x - p.x) * 0.55, y - p.y));
+    }
+    if (holgura > mejorHolgura) {
+      mejorHolgura = holgura;
+      mejor = gx;
+    }
+  }
+  return Number(mejor.toFixed(2));
+}

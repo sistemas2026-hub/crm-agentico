@@ -58,24 +58,32 @@ const OPERACIONES = {
     ]
   },
   mobiliario: [
+    //  LA MAMPARA PARTE LA SALA EN DOS, y eso es la distribución de un
+    //  despacho: coordinación de un lado, alistamiento del otro, con un vano
+    //  por donde sale el material hacia la calle.
     { tipo: 'mampara', gx: 11, desde: 0.2, hasta: 9.8, vano: [4.6, 6.4] },
-    { tipo: 'zona', gx: 4.2, gy: 6.2, ancho: 4.4, fondo: 3.4 },
     { tipo: 'ducto', gy: 5.3, desde: 1.0, hasta: 10.6 },
+
+    //  EL TABLERO DE CUADRILLAS, al frente de la zona de coordinación: es lo
+    //  que se mira acá, y es lo primero que ve quien entra.
     { tipo: 'tablero', gy: 0.3 },
-    //  Los armarios y el panel de empalmes son de ESTA plantilla. Un centro de
-    //  operaciones los tiene; una sala de atención, no.
     { tipo: 'armario', gy: 3.2 },
-    { tipo: 'armario', gy: 4.9 },
+
+    //  LA ZONA DE ALISTAMIENTO, que es lo que ninguna otra área tiene: banco
+    //  de preparación, cajas de material y bobinas de cable drop. Todo del
+    //  lado de afuera de la mampara, junto a la salida operativa.
+    { tipo: 'banco_trabajo', gx: 11.6, gy: 0.6, largo: 3.2 },
+    { tipo: 'cajas', gx: 11.8, gy: 4.2, cuantas: 3 },
+    { tipo: 'cajas', gx: 12.8, gy: 4.4, cuantas: 2 },
+    { tipo: 'bobina', gx: 11.7, gy: 6.3 },
+    { tipo: 'bobina', gx: 12.9, gy: 6.5 },
     { tipo: 'panel_fibra', gy: 6.7 },
+
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 9, gy: 6 },
-    { tipo: 'planta', gx: 12.4, gy: 1.1 },
-    { tipo: 'planta', gx: 0.9, gy: 8.9 },
-    { tipo: 'planta', gx: 12.3, gy: 6.6 },
-    //  La mesa de preparacion: los equipos se alistan antes de salir.
-    { tipo: 'mesa', gx: 10.0, gy: 6.0 },
-    { tipo: 'banco', gx: 11.3, gy: 8.2 },
-    { tipo: 'dispensador', gx: 13.0, gy: 4.6 }
+    //  UNA maceta. Antes eran tres, y la maceta era la pieza más repetida de
+    //  toda la sede: 39 unidades, más que cualquier equipo.
+    { tipo: 'planta', gx: 0.9, gy: 8.9 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Supervisión', principal: true, gx: 4.8, gy: 7.4 },
@@ -106,30 +114,36 @@ const ATENCION = {
     ]
   },
   mobiliario: [
+    //  LA SALA DE ESPERA ES LO QUE DEFINE ESTA ÁREA. La mampara separa a quien
+    //  espera de quien atiende, y del lado de afuera va la espera entera:
+    //  bancos en fila, dispensador y una planta. Ninguna otra área recibe
+    //  gente sentada.
     { tipo: 'mampara', gx: 10, desde: 0.2, hasta: 8.8, vano: [3.8, 5.6] },
-    { tipo: 'zona', gx: 2.0, gy: 5.6, ancho: 5.0, fondo: 3.0 },
     { tipo: 'ducto', gy: 4.6, desde: 1.0, hasta: 9.6 },
-    //  La sala que atiende al publico tenia el muro casi vacio y ningun
-    //  mostrador. Dos tableros -la cola y los avisos- y el mostrador por
-    //  donde se atiende.
+
+    //  Los dos tableros: la cola y los avisos. Es lo que se mira desde la
+    //  espera, y por eso están en el muro que la espera ve.
     { tipo: 'tablero', gy: 0.2 },
-    //  SIN ESTANTERÍA DE CARPETAS, a propósito: ver `expedientes`. Lo que se
-    //  atiende acá llega por pantalla, no se guarda en una balda.
-    //
-    //  Y sin nada en su lugar: el hueco que deja mide 2,56 y un tablero ocupa
-    //  2,74, así que un tercer tablero se monta sobre el de 5,5 —lo cazó la
-    //  guarda de solapes de este archivo—. Entre dejar el muro con un tramo
-    //  libre y apilar dos tableros que se dibujan como uno, el tramo libre.
     { tipo: 'tablero', gy: 5.5 },
+
+    //  EL MOSTRADOR, junto al vano: es por donde se atiende, y está donde se
+    //  cruzan los dos lados.
     { tipo: 'mostrador', gx: 8.2, gy: 8.2, largo: 2.4 },
+
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 6 },
-    { tipo: 'banco', gx: 10.4, gy: 1.2 },
-    { tipo: 'banco', gx: 10.4, gy: 6.4 },
-    { tipo: 'planta', gx: 11.6, gy: 3.4 },
-    { tipo: 'planta', gx: 0.8, gy: 7.8 },
-    { tipo: 'planta', gx: 11.5, gy: 8.0 },
-    { tipo: 'dispensador', gx: 12.0, gy: 4.6 }
+    //  CUATRO BANCOS EN FILA, no dos sueltos: una fila se lee como una sala de
+    //  espera; dos bancos separados, como asientos de descanso.
+    { tipo: 'banco', gx: 10.6, gy: 0.9 },
+    { tipo: 'banco', gx: 10.6, gy: 2.4 },
+    { tipo: 'banco', gx: 10.6, gy: 3.9 },
+    { tipo: 'banco', gx: 10.6, gy: 5.4 },
+    //  EL TURNERO, a la entrada de la espera: la pieza que dice «acá se hace
+    //  fila» y que no tiene nadie más en la sede.
+    { tipo: 'turnero', gx: 12.1, gy: 7.9 },
+    { tipo: 'dispensador', gx: 12.0, gy: 1.4 },
+    //  UNA maceta, en la espera, que es donde una planta tiene sentido.
+    { tipo: 'planta', gx: 12.0, gy: 5.0 }
   ],
   puestos: [
     //  Corrido a la izquierda respecto de la fila de atrás: con los dos
@@ -158,27 +172,35 @@ const TECNICA = {
   cartel: { gx: 5.0 },
   mural: { paneles: [{ gx: 3.0, ancho: 4.4 }] },
   mobiliario: [
-    { tipo: 'zona', gx: 2.4, gy: 4.6, ancho: 4.6, fondo: 2.8 },
     { tipo: 'ducto', gy: 3.8, desde: 1.0, hasta: 9.8 },
-    //  LO QUE HACE QUE UN NOC SE VEA COMO UN NOC.
+
+    //  LAS TRES PIEZAS QUE NADIE MÁS TIENE: videowall, racks y panel de fibra.
     //
-    //  Tenía una estantería y nada más -menos equipo que la sala de
-    //  expedientes- y el panel de fibra, que es la pieza más técnica del
-    //  catálogo, se lo llevaba Operaciones de Campo. Mirando la sede entera no
-    //  había forma de distinguir la sala de redes de una oficina cualquiera.
+    //  El videowall va en el muro de FONDO y los puestos miran hacia él: es la
+    //  distribución de un NOC y no la de una oficina. Ocupa casi todo el muro
+    //  porque es la pieza protagonista — si se lee algo al mirar esta sala,
+    //  tiene que ser «acá se vigila una red».
+    { tipo: 'videowall', gx: 1.4, ancho: 8.0 },
+
+    //  La fila de racks contra el costado, en zona protegida. Tres cuerpos y
+    //  no uno: un rack suelto parece un armario, una fila es una sala de
+    //  equipos.
+    { tipo: 'rack', gx: 9.9, gy: 0.5, unidades: 6 },
+    { tipo: 'rack', gx: 9.9, gy: 1.8, unidades: 4 },
+    { tipo: 'rack', gx: 9.9, gy: 3.1, unidades: 7 },
+
     { tipo: 'panel_fibra', gy: 0.4 },
-    { tipo: 'tablero', gy: 2.7 },
-    //  Gabinete de equipos, no estantería de carpetas: en una sala de redes lo
-    //  que se guarda son ONT, transceptores y herramienta. Ver `expedientes`.
-    { tipo: 'armario', gy: 5.5 },
+    { tipo: 'armario', gy: 3.2 },
+
+    //  El banco donde se arma y se prueba un equipo antes de montarlo. No es
+    //  la mesa redonda de reunión que tenía media sede.
+    { tipo: 'banco_trabajo', gx: 7.4, gy: 5.6, largo: 2.2 },
+
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 5 },
-    //  La mesa de trabajo: en un NOC es donde se arma y se prueba un equipo
-    //  antes de montarlo.
-    { tipo: 'mesa', gx: 7.6, gy: 7.0 },
-    { tipo: 'planta', gx: 9.6, gy: 1.0 },
-    { tipo: 'planta', gx: 0.8, gy: 7.0 },
-    { tipo: 'dispensador', gx: 9.9, gy: 6.4 }
+    //  UNA sola maceta, y al fondo. Un NOC no es un sitio con plantas; la que
+    //  hay está para que la sala no se lea como un sótano.
+    { tipo: 'planta', gx: 0.8, gy: 7.0 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Coordinación', principal: true, gx: 3.4, gy: 5.4 },
@@ -223,12 +245,16 @@ const EXPEDIENTES = {
     { tipo: 'estanteria', gy: 6.0, largo: 3.0 },
     { tipo: 'luminaria', gx: 6, gy: 3 },
     { tipo: 'luminaria', gx: 9, gy: 7 },
-    { tipo: 'planta', gx: 0.6, gy: 3.0 },
-    { tipo: 'planta', gx: 10.8, gy: 1.0 },
-    //  La mesa de consulta, que es donde se abre un expediente.
-    { tipo: 'mesa', gx: 8.6, gy: 8.4 },
-    { tipo: 'banco', gx: 0.4, gy: 7.6 },
-    { tipo: 'dispensador', gx: 11.0, gy: 8.4 }
+    //  LA MESA DE REVISIÓN, con dos sillas enfrentadas y un expediente abierto.
+    //  Reemplaza a la mesa redonda de reunión, que estaba en 9 de las 11 salas
+    //  de la sede y era el otro mueble que hacía que todas se parecieran. Acá
+    //  alguien se sienta ENFRENTE a que le revisen algo, y eso se ve.
+    { tipo: 'mesa_revision', gx: 7.8, gy: 7.2, largo: 2.4 },
+    //  Las bandejas de documentos: lo que esta EN TRAMITE, frente a la
+    //  estanteria, que guarda lo ya archivado. Es la tercera pieza propia de
+    //  esta area y la nombra la especificacion del 02/11/2026.
+    { tipo: 'bandejas', gx: 2.4, gy: 0.4, cuantas: 4 },
+    { tipo: 'planta', gx: 0.6, gy: 3.0 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Coordinación', principal: true, gx: 4.6, gy: 6.8 },
@@ -259,22 +285,20 @@ const COMERCIAL = {
     //  lo que se mira en comercial son números en la pared.
     { tipo: 'tablero', gy: 0.3 },
     { tipo: 'tablero', gy: 3.2 },
-    //  Un tercer tablero y no una estantería: en comercial lo que se mira son
-    //  números en la pared. Ver `expedientes`.
-    { tipo: 'tablero', gy: 6.1 },
+    //  LA PIZARRA DE IDEAS, que es de esta área y de Reuniones. Se distingue
+    //  del tablero a propósito: el tablero es una pantalla de datos con
+    //  tarjetas ordenadas; la pizarra es blanca y lo que tiene está escrito a
+    //  mano. Comercial piensa en una pizarra; el NOC mira un tablero.
+    { tipo: 'pizarra', gy: 6.1, largo: 2.8 },
     { tipo: 'mampara', gx: 9, desde: 0.2, hasta: 9.8, vano: [6.6, 8.4] },
     { tipo: 'zona', gx: 1.6, gy: 5.8, ancho: 4.6, fondo: 3.4 },
     //  La mesa donde se sienta el cliente que viene a contratar.
     { tipo: 'mesa', gx: 6.6, gy: 0.9 },
     { tipo: 'banco', gx: 9.4, gy: 2.0 },
     { tipo: 'banco', gx: 9.4, gy: 5.0 },
-    { tipo: 'banco', gx: 11.6, gy: 3.4 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 7, gy: 7 },
-    { tipo: 'planta', gx: 11.8, gy: 0.8 },
-    { tipo: 'planta', gx: 0.8, gy: 9.0 },
-    { tipo: 'planta', gx: 10.4, gy: 8.6 },
-    { tipo: 'dispensador', gx: 12.0, gy: 6.2 }
+    { tipo: 'planta', gx: 0.8, gy: 9.0 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Cierre', principal: true, gx: 2.2, gy: 6.6 },
@@ -299,19 +323,23 @@ const REUNIONES = {
   cartel: { gx: 5.6 },
   mural: null,
   mobiliario: [
-    { tipo: 'mesa', gx: 7.6, gy: 4.2 },
-    { tipo: 'zona', gx: 1.6, gy: 5.4, ancho: 4.0, fondo: 2.8 },
-    //  Una sala de reuniones no archiva: tiene mesa y tablero. Ver
-    //  `expedientes` para por qué la estantería no está acá.
-    { tipo: 'tablero', gy: 2.0 },
-    { tipo: 'tablero', gy: 6.4 },
+    //  LA MESA GRANDE EN EL MEDIO es la sala. Acá sí corresponde la mesa
+    //  redonda: es el único sitio de la sede donde reunirse ES la función, y
+    //  por eso se la quitamos a las otras nueve salas que la tenían de adorno.
+    { tipo: 'mesa', gx: 6.4, gy: 4.0 },
+    { tipo: 'zona', gx: 4.6, gy: 2.6, ancho: 4.8, fondo: 3.6 },
+    //  Pantalla de presentaciones y pizarra, enfrentadas a la mesa. Una sala
+    //  de reuniones no archiva: no tiene estantería ni armario.
+    //  La pantalla de videoconferencia es la pieza protagonista de esta sala:
+    //  muestra PERSONAS, no datos ni trazos. Reemplaza al tablero, que es el
+    //  lenguaje del NOC y de comercial.
+    { tipo: 'videoconferencia', gy: 1.4, largo: 3.0 },
+    { tipo: 'pizarra', gy: 5.6, largo: 2.6 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 4 },
-    { tipo: 'planta', gx: 11.2, gy: 0.6 },
-    { tipo: 'planta', gx: 0.8, gy: 8.0 },
-    { tipo: 'planta', gx: 10.4, gy: 7.6 },
-    { tipo: 'banco', gx: 9.6, gy: 1.4 },
-    { tipo: 'dispensador', gx: 11.0, gy: 5.6 }
+    { tipo: 'banco', gx: 10.6, gy: 1.4 },
+    { tipo: 'banco', gx: 10.6, gy: 3.0 },
+    { tipo: 'planta', gx: 0.8, gy: 8.0 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Dirección', principal: true, gx: 2.0, gy: 6.0 },
@@ -364,14 +392,16 @@ const GENERICA = {
     //  verse sobria, no como un archivo. Ver `expedientes`.
     { tipo: 'estanteria', gy: 3.1, largo: 1.6 },
     { tipo: 'armario', gy: 6.3 },
-    { tipo: 'mesa', gx: 7.4, gy: 3.2 },
+    //  La impresora multifunción: ésta es la sala que imprime, sella y
+    //  despacha, y es lo que la separa de un cuarto con dos escritorios.
+    { tipo: 'impresora', gx: 8.2, gy: 3.0 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 7, gy: 5 },
     { tipo: 'luminaria', gx: 5, gy: 1.6 },
-    { tipo: 'planta', gx: 8.6, gy: 1.6 },
-    { tipo: 'planta', gx: 0.8, gy: 7.0 },
-    { tipo: 'banco', gx: 8.8, gy: 5.0 },
-    { tipo: 'planta', gx: 9.0, gy: 6.4 }
+    { tipo: 'cajas', gx: 8.4, gy: 5.2, cuantas: 2 },
+    //  UNA maceta. Eran tres en esta plantilla sola, y como la usan cuatro
+    //  departamentos del piloto, eran doce macetas de las 39 de la sede.
+    { tipo: 'planta', gx: 0.8, gy: 7.0 }
   ],
   puestos: [
     { id: 'principal', nombre: 'Puesto principal', principal: true, gx: 2.6, gy: 5.2 },

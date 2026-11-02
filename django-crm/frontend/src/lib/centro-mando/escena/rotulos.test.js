@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { separarRotulos } from './rotulos';
+import { anclaDelNombre, separarRotulos } from './rotulos';
 
 /**
  * La cascada real: once rótulos de sala bajando en diagonal, con las medidas
@@ -93,5 +93,71 @@ describe('separar los rótulos que se pisan', () => {
     const ys = separarRotulos(cajas, 2);
     expect(ys[0]).toBe(100);
     expect(ys[1]).toBe(122);
+  });
+});
+
+describe('el nombre de la sala no cae encima de una placa de puesto', () => {
+  //  LA GUARDA QUE FALTABA, y la escribo con el error a la vista: mi prueba de
+  //  solapes comparaba nombres de sala contra nombres de sala y decia CERO
+  //  choques, mientras 6 de los 11 nombres estaban tapados por la placa de un
+  //  escritorio. Medi el par que se me ocurrio y no el que estaba roto.
+  const aPantallaX = (gx, gy) => (gx - gy) * 32;
+  const aPantallaY = (gx, gy, gz = 0) => (gx + gy) * 16 - gz * 26;
+
+  /** La holgura del nombre de una sala a la placa mas cercana, en pixeles. */
+  const holgura = (ancho, fondo, puestos, gx) => {
+    const x = aPantallaX(gx, fondo + 0.6);
+    const y = aPantallaY(gx, fondo + 0.6);
+    let d = Infinity;
+    for (const p of puestos) {
+      d = Math.min(d, Math.hypot(
+        (x - aPantallaX(p.gx ?? 0, p.gy ?? 0)) * 0.55,
+        y - aPantallaY(p.gx ?? 0, p.gy ?? 0, 2.6)));
+    }
+    return d;
+  };
+
+  const SALAS = [
+    { nombre: 'operaciones', ancho: 14, fondo: 10,
+      puestos: [{ gx: 4.8, gy: 7.4 }, { gx: 1.5, gy: 3.4 }, { gx: 4.5, gy: 3.4 }, { gx: 7.5, gy: 3.4 }] },
+    { nombre: 'atencion', ancho: 13, fondo: 9,
+      puestos: [{ gx: 2.4, gy: 6.0 }, { gx: 1.4, gy: 2.6 }, { gx: 4.6, gy: 2.6 }, { gx: 7.2, gy: 4.6 }] },
+    { nombre: 'tecnica', ancho: 11, fondo: 8,
+      puestos: [{ gx: 3.4, gy: 5.4 }, { gx: 1.6, gy: 2.4 }, { gx: 5.4, gy: 2.4 }] },
+    { nombre: 'reuniones', ancho: 12, fondo: 9,
+      puestos: [{ gx: 2.0, gy: 6.0 }, { gx: 2.2, gy: 2.4 }] }
+  ];
+
+  it('el ancla elegida deja mas holgura que la esquina', () => {
+    for (const s of SALAS) {
+      const enLaEsquina = holgura(s.ancho, s.fondo, s.puestos, 0.4);
+      const elegida = holgura(s.ancho, s.fondo, s.puestos,
+                              anclaDelNombre(s.ancho, s.fondo, s.puestos));
+      expect(elegida, `${s.nombre}: esquina ${enLaEsquina.toFixed(0)}px, elegida ${elegida.toFixed(0)}px`)
+        .toBeGreaterThanOrEqual(enLaEsquina);
+    }
+  });
+
+  it('y deja al nombre lejos de toda placa', () => {
+    //  Una placa mide unos 26 px de alto. Treinta es un nombre que se lee
+    //  entero.
+    for (const s of SALAS) {
+      const d = holgura(s.ancho, s.fondo, s.puestos,
+                        anclaDelNombre(s.ancho, s.fondo, s.puestos));
+      expect(d, `${s.nombre}: el nombre queda a ${d.toFixed(0)}px de una placa`)
+        .toBeGreaterThan(30);
+    }
+  });
+
+  it('el ancla nunca se sale de la sala', () => {
+    for (const s of SALAS) {
+      const gx = anclaDelNombre(s.ancho, s.fondo, s.puestos);
+      expect(gx).toBeGreaterThanOrEqual(0);
+      expect(gx).toBeLessThanOrEqual(s.ancho - 2);
+    }
+  });
+
+  it('una sala sin puestos ancla en su esquina', () => {
+    expect(anclaDelNombre(12, 9, [])).toBe(0.4);
   });
 });

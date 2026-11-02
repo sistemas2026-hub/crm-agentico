@@ -1693,6 +1693,495 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
+   La biblioteca de las piezas de red
+   ────────────────────────────────────────────────────────────────────────────
+   Hasta acá el catálogo era de oficina genérica: escritorios, estanterías,
+   macetas. Con eso, once departamentos se distinguían por el color del rótulo
+   y nada más — medido: la maceta aparecía en las 19 plantillas y era la pieza
+   más numerosa de la escena, con 39 unidades.
+
+   Estas piezas existen para que un área se reconozca SIN leer el letrero. No
+   son adornos: cada una es lo que de verdad hay en ese sitio. Y son módulos
+   del mismo registro `TIPOS` que el resto, así que una sala las pide con una
+   fila de datos.
+
+   OJO AL ESCRIBIR ACÁ: `guardas.test.js` prohíbe el vocabulario del negocio
+   en esta carpeta, comentarios incluidos, y me frenó con dos palabras en el
+   primer intento. La escena dibuja TIPOS y no sabe de qué empresa son.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * EL VIDEOWALL del NOC: la pieza protagonista de la sala de supervisión.
+ *
+ * Tres por dos paneles con marco común, topología de red en el central y
+ * gráficas en los demás. Es lo primero que se ve de un NOC y lo que ninguna
+ * otra área tiene.
+ *
+ * Va en el muro de FONDO y no en el lateral: un videowall se mira de frente
+ * desde los puestos, y los puestos miran hacia el fondo.
+ *
+ * @param gx dónde empieza, en celdas del muro de fondo
+ * @param ancho cuánto ocupa
+ */
+function construirVideowall(gx: number, ancho: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, 0.2);
+  const g = new Graphics();
+
+  const z0 = 1.15;
+  const z1 = 3.3;
+  //  El bastidor, un poco más grande que los paneles: es lo que los une en una
+  //  sola pieza en vez de seis pantallas sueltas colgadas.
+  panelMuroFondo(g, gx - 0.12, ancho + 0.24, z0 - 0.12, z1 + 0.12, PALETA.pantallaMarco);
+
+  const cols = 3;
+  const filas = 2;
+  const anchoPanel = (ancho - 0.1 * (cols - 1)) / cols;
+  const altoPanel = (z1 - z0 - 0.1 * (filas - 1)) / filas;
+  for (let c = 0; c < cols; c++) {
+    for (let f = 0; f < filas; f++) {
+      const x = gx + c * (anchoPanel + 0.1);
+      const zb = z0 + f * (altoPanel + 0.1);
+      panelMuroFondo(g, x, anchoPanel, zb, zb + altoPanel, PALETA.noche);
+      panelMuroFondo(g, x, anchoPanel, zb, zb + altoPanel, PALETA.azulTecno, 0.22);
+    }
+  }
+  nodo.addChild(g);
+
+  //  LA TOPOLOGÍA, en el panel central de arriba. Nodos unidos por enlaces: es
+  //  el dibujo que dice «esto vigila una red» y no «esto es una pantalla».
+  const red = new Graphics();
+  const cx = gx + anchoPanel + 0.05;
+  const zTop = z0 + altoPanel + 0.1;
+  const nodos: { x: number; y: number }[] = [];
+  for (let i = 0; i < 7; i++) {
+    //  Repartidos con `sin`, no al azar: la escena tiene que verse igual en dos
+    //  cargas seguidas para poder comparar capturas.
+    const u = 0.18 + ((Math.sin(i * 2.3) + 1) / 2) * (anchoPanel - 0.36);
+    const v = 0.22 + ((Math.sin(i * 5.1) + 1) / 2) * (altoPanel - 0.44);
+    nodos.push(aPantalla(cx + u, 0, zTop + v));
+  }
+  for (let i = 1; i < nodos.length; i++) {
+    red.moveTo(nodos[0].x, nodos[0].y).lineTo(nodos[i].x, nodos[i].y);
+  }
+  red.stroke({ width: 1, color: PALETA.azulTecnoTenue, alpha: 0.7 });
+  for (let i = 0; i < nodos.length; i++) {
+    red.circle(nodos[i].x, nodos[i].y, i === 0 ? 3 : 1.9)
+       .fill({ color: i === 0 ? ACENTO_CLARO : PALETA.mossClaro, alpha: 0.95 });
+  }
+  nodo.addChild(red);
+
+  //  Barras y trazas en los demás paneles. Dos lenguajes distintos para que no
+  //  parezcan la misma pantalla repetida seis veces.
+  const datos = new Graphics();
+  for (const [c, f] of [[0, 1], [2, 1], [0, 0], [1, 0], [2, 0]] as const) {
+    const x0 = gx + c * (anchoPanel + 0.1);
+    const zb = z0 + f * (altoPanel + 0.1);
+    if ((c + f) % 2 === 0) {
+      for (let i = 0; i < 9; i++) {
+        const h = (0.2 + ((Math.sin(i * 3.7 + c) + 1) / 2) * 0.55) * altoPanel;
+        panelMuroFondo(datos, x0 + 0.14 + i * (anchoPanel - 0.28) / 9,
+                       (anchoPanel - 0.28) / 11, zb + 0.16, zb + 0.16 + h,
+                       i % 4 === 0 ? PALETA.clayClaro : PALETA.mossClaro, 0.75);
+      }
+    } else {
+      const pts = [];
+      for (let i = 0; i <= 12; i++) {
+        const u = 0.14 + (i / 12) * (anchoPanel - 0.28);
+        const v = 0.2 + ((Math.sin(i * 1.4 + f * 2) + 1) / 2) * (altoPanel - 0.4);
+        pts.push(aPantalla(x0 + u, 0, zb + v));
+      }
+      datos.moveTo(pts[0].x, pts[0].y);
+      for (const p of pts.slice(1)) datos.lineTo(p.x, p.y);
+      datos.stroke({ width: 1.4, color: ACENTO_CLARO, alpha: 0.8 });
+    }
+  }
+  nodo.addChild(datos);
+
+  return { nodo };
+}
+
+/**
+ * UN RACK de red: el armario de equipos con sus testigos.
+ *
+ * Es un volumen en el suelo y no un panel de pared, porque un rack se rodea:
+ * en el NOC van en fila contra un costado y se ve que son cuerpos.
+ *
+ * @param gx @param gy la esquina
+ * @param unidades cuántos equipos lleva montados
+ */
+function construirRack(gx: number, gy: number, unidades: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  const alto = 2.6;
+  caja(g, gx, gy, 0, 0.8, 1.1, alto, PALETA.rackCuerpo);
+  //  El frente, un tono más claro: sin esto el rack es una caja negra y no se
+  //  distingue de un armario.
+  caja(g, gx, gy + 0.02, 0.06, 0.03, 1.06, alto - 0.12, PALETA.rackFrente);
+  nodo.addChild(g);
+
+  //  Los equipos montados, cada uno con su franja de testigos. La altura
+  //  desigual es lo que lo hace un rack en uso y no un mueble vacío.
+  const equipos = new Graphics();
+  const cuantos = Math.max(2, Math.min(9, Math.trunc(unidades) || 5));
+  for (let i = 0; i < cuantos; i++) {
+    const z = 0.22 + i * ((alto - 0.5) / cuantos);
+    const h = ((alto - 0.5) / cuantos) * 0.72;
+    caja(equipos, gx - 0.01, gy + 0.08, z, 0.04, 0.94, h, tono(PALETA.rackFrente, 0.12));
+    //  Los LED. Verde casi siempre y ámbar de vez en cuando: un rack con todas
+    //  las luces de alarma diría que la red está caída, y eso es una afirmación
+    //  sobre la operación que ningún adorno puede hacer.
+    for (let k = 0; k < 6; k++) {
+      const p = aPantalla(gx - 0.02, gy + 0.18 + k * 0.14, z + h * 0.5);
+      equipos.circle(p.x, p.y, 1.1)
+             .fill({ color: (i * 7 + k) % 11 === 0 ? PALETA.clayClaro : PALETA.mossClaro,
+                     alpha: 0.9 });
+    }
+  }
+  nodo.addChild(equipos);
+  return { nodo };
+}
+
+/**
+ * UNA BOBINA de cable drop, de pie sobre su eje.
+ *
+ * La pieza más inequívoca de todo el catálogo: una bobina de dos mil metros de
+ * cable de acometida solo la tiene quien tiende fibra.
+ */
+function construirBobina(gx: number, gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  //  Las dos tapas y el cable enrollado entre ellas. Se dibuja como tres cajas
+  //  y no como cilindros: en isometría a esta escala un cilindro y un prisma
+  //  chato se ven igual, y el prisma cuesta un cuarto.
+  caja(g, gx, gy, 0, 0.12, 1.3, 1.3, PALETA.madera);
+  caja(g, gx + 0.12, gy + 0.12, 0.16, 0.5, 1.06, 1.0, tono(PALETA.noche, 0.22));
+  //  Las vueltas del cable: líneas horizontales sobre el carrete.
+  const vueltas = new Graphics();
+  for (let i = 0; i < 7; i++) {
+    const z = 0.26 + i * 0.12;
+    const a = aPantalla(gx + 0.14, gy + 0.14, z);
+    const b = aPantalla(gx + 0.6, gy + 0.14, z);
+    vueltas.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  }
+  vueltas.stroke({ width: 1, color: PALETA.textoTenue, alpha: 0.45 });
+  caja(g, gx + 0.62, gy, 0, 0.12, 1.3, 1.3, PALETA.maderaClara);
+  nodo.addChild(g);
+  nodo.addChild(vueltas);
+  return { nodo };
+}
+
+/**
+ * CAJAS DE MATERIAL apiladas: el stock que sale a la calle.
+ *
+ * Van en Operaciones de Campo, donde se alista lo que se lleva la cuadrilla.
+ * El apilado desigual es a propósito: tres cajas perfectamente alineadas se
+ * leen como un mueble, y esto es material en movimiento.
+ */
+function construirCajasDeMaterial(gx: number, gy: number, cuantas: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  const n = Math.max(1, Math.min(5, Math.trunc(cuantas) || 3));
+  let z = 0;
+  for (let i = 0; i < n; i++) {
+    const lado = 0.78 - i * 0.05;
+    //  Cada caja corrida un poco respecto de la de abajo.
+    const dx = ((i * 7) % 3 - 1) * 0.07;
+    const dy = ((i * 5) % 3 - 1) * 0.07;
+    const color = i % 2 === 0 ? PALETA.clay : PALETA.rust;
+    caja(g, gx + dx, gy + dy, z, lado, lado, 0.52, color);
+    //  La cinta de la tapa, que es lo que la hace una caja y no un cubo.
+    caja(g, gx + dx + lado * 0.42, gy + dy, z + 0.52, lado * 0.16, lado,
+         0.012, tono(color, 0.3));
+    z += 0.52;
+  }
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * EL BANCO DE PREPARACIÓN: la mesa de trabajo donde se alista y se prueba.
+ *
+ * No es `mesa` —esa es redonda, de reunión— ni `mostrador` —ese atiende a
+ * alguien—. Esto es un tablón con instrumental encima y cajones debajo.
+ */
+function construirBancoDePreparacion(gx: number, gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  const L = Math.max(1.4, largo || 2.6);
+  caja(g, gx, gy, 0.72, 0.9, L, 0.08, PALETA.maderaClara);
+  caja(g, gx + 0.04, gy + 0.04, 0, 0.82, 0.5, 0.72, PALETA.escritorioPata);
+  caja(g, gx + 0.04, gy + L - 0.54, 0, 0.82, 0.5, 0.72, PALETA.escritorioPata);
+  //  Los cajones del módulo izquierdo.
+  for (let i = 0; i < 3; i++) {
+    caja(g, gx + 0.02, gy + 0.08, 0.1 + i * 0.2, 0.02, 0.42, 0.16,
+         tono(PALETA.escritorioPata, 0.18));
+  }
+  nodo.addChild(g);
+
+  //  El instrumental sobre el tablón: un medidor, un par de carretes chicos y
+  //  una bandeja de conectores. Son tres volúmenes y dicen «acá se trabaja con
+  //  las manos».
+  const util = new Graphics();
+  caja(util, gx + 0.18, gy + 0.3, 0.8, 0.34, 0.5, 0.14, PALETA.rackFrente);
+  const p = aPantalla(gx + 0.35, gy + 0.55, 0.95);
+  util.circle(p.x, p.y, 2.4).fill({ color: PALETA.mossClaro, alpha: 0.9 });
+  caja(util, gx + 0.2, gy + L - 0.9, 0.8, 0.5, 0.6, 0.1, PALETA.metal);
+  for (let i = 0; i < 4; i++) {
+    caja(util, gx + 0.26 + i * 0.1, gy + L - 0.84, 0.9, 0.06, 0.48, 0.05,
+         i % 2 === 0 ? PALETA.emberClaro : PALETA.azulTecnoTenue);
+  }
+  nodo.addChild(util);
+  return { nodo };
+}
+
+/**
+ * UNA PIZARRA de ideas, con su bandeja de marcadores y trazos a mano.
+ *
+ * Se distingue de `tablero` a propósito: el tablero es una pantalla de datos
+ * con tarjetas ordenadas, la pizarra es blanca y lo que tiene está escrito.
+ * Comercial y Reuniones piensan en una pizarra; el NOC mira un tablero.
+ */
+function construirPizarra(gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(0.2, gy);
+  const g = new Graphics();
+
+  const L = Math.max(1.6, largo || 2.4);
+  const z0 = 1.35;
+  const z1 = 2.7;
+  panelMuroLateral(g, gy - 0.1, L + 0.2, z0 - 0.08, z1 + 0.08, PALETA.metal);
+  panelMuroLateral(g, gy, L, z0, z1, PALETA.textoClaro, 0.88);
+  //  La bandeja de marcadores.
+  panelMuroLateral(g, gy, L, z0 - 0.1, z0 - 0.02, PALETA.muroRemate);
+  for (let i = 0; i < 3; i++) {
+    panelMuroLateral(g, gy + 0.2 + i * 0.22, 0.14, z0 - 0.08, z0 - 0.03,
+                     [PALETA.ember, PALETA.moss, PALETA.azulTecno][i], 0.9);
+  }
+  nodo.addChild(g);
+
+  //  Lo escrito: dos recuadros unidos por una flecha y unas líneas de texto
+  //  fingido. Trazos, no tarjetas — es lo que la separa del tablero.
+  const trazo = new Graphics();
+  const rect = (y: number, w: number, z: number, h: number) => {
+    const a = aPantalla(0, gy + y, z + h);
+    const b = aPantalla(0, gy + y + w, z + h);
+    const c = aPantalla(0, gy + y + w, z);
+    const d = aPantalla(0, gy + y, z);
+    trazo.poly([a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y].slice(0)).stroke(
+      { width: 1.4, color: PALETA.azulTecno, alpha: 0.8 });
+  };
+  rect(0.25, 0.6, z1 - 0.65, 0.4);
+  rect(L - 0.85, 0.6, z1 - 0.65, 0.4);
+  const a = aPantalla(0, gy + 0.9, z1 - 0.45);
+  const b = aPantalla(0, gy + L - 0.9, z1 - 0.45);
+  trazo.moveTo(a.x, a.y).lineTo(b.x, b.y)
+       .stroke({ width: 1.4, color: PALETA.ember, alpha: 0.8 });
+  for (let i = 0; i < 4; i++) {
+    const p = aPantalla(0, gy + 0.3, z0 + 0.5 - i * 0.14);
+    const q = aPantalla(0, gy + 0.3 + (L - 0.8) * (0.5 + 0.12 * ((i * 3) % 4)), z0 + 0.5 - i * 0.14);
+    trazo.moveTo(p.x, p.y).lineTo(q.x, q.y);
+  }
+  trazo.stroke({ width: 1, color: PALETA.textoTenue, alpha: 0.6 });
+  nodo.addChild(trazo);
+  return { nodo };
+}
+
+/**
+ * UNA IMPRESORA multifunción con su pila de papel.
+ *
+ * Administración es el área que imprime, sella y despacha, y una multifunción
+ * es lo que la distingue de una oficina cualquiera.
+ */
+function construirImpresora(gx: number, gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  caja(g, gx, gy, 0, 0.9, 1.0, 0.62, tono(PALETA.escritorioPata, 0.1));
+  caja(g, gx + 0.05, gy + 0.05, 0.62, 0.8, 0.9, 0.34, PALETA.muroRemate);
+  //  La bandeja de salida: la ranura con el papel asomando.
+  caja(g, gx - 0.01, gy + 0.12, 0.5, 0.04, 0.72, 0.06, PALETA.pisoProfundo);
+  caja(g, gx - 0.06, gy + 0.16, 0.52, 0.1, 0.62, 0.02, PALETA.textoClaro);
+  //  El panel de control, inclinado hacia quien lo usa.
+  caja(g, gx + 0.1, gy + 0.1, 0.97, 0.3, 0.34, 0.03, PALETA.pantallaMarco);
+  const p = aPantalla(gx + 0.25, gy + 0.27, 1.0);
+  g.circle(p.x, p.y, 2.6).fill({ color: PALETA.azulTecnoTenue, alpha: 0.85 });
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * LA PANTALLA DE VIDEOCONFERENCIA, con su barra de cámara encima.
+ *
+ * La pieza protagonista de una sala de reuniones. Se distingue del `tablero`
+ * —que es una pantalla de datos llena de tarjetas— y de la `pizarra` —blanca y
+ * escrita a mano— porque lo que muestra son personas: dos recuadros con una
+ * silueta cada uno.
+ *
+ * Las siluetas son genéricas a propósito: dibujar caras reconocibles sería
+ * inventar gente en una reunión que nadie convocó.
+ */
+function construirVideoconferencia(gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(0.22, gy);
+  const g = new Graphics();
+
+  const L = Math.max(2.0, largo || 2.8);
+  const z0 = 1.5;
+  const z1 = 2.85;
+  panelMuroLateral(g, gy - 0.1, L + 0.2, z0 - 0.1, z1 + 0.1, PALETA.pantallaMarco);
+  panelMuroLateral(g, gy, L, z0, z1, PALETA.noche);
+  //  La barra de la cámara, encima del marco, con su ojo.
+  panelMuroLateral(g, gy + L * 0.3, L * 0.4, z1 + 0.12, z1 + 0.2, PALETA.rackCuerpo);
+  const ojo = aPantalla(0, gy + L * 0.5, z1 + 0.16);
+  g.circle(ojo.x, ojo.y, 2).fill({ color: PALETA.pisoProfundo })
+   .circle(ojo.x, ojo.y, 1).fill({ color: PALETA.azulTecnoTenue, alpha: 0.9 });
+  nodo.addChild(g);
+
+  //  Los dos recuadros de participante, con hombros y cabeza.
+  const gente = new Graphics();
+  for (let i = 0; i < 2; i++) {
+    const y0 = gy + 0.14 + i * (L - 0.28) / 2;
+    const w = (L - 0.28) / 2 - 0.1;
+    panelMuroLateral(gente, y0, w, z0 + 0.14, z1 - 0.14, tono(PALETA.azulTecno, -0.25));
+    //  La cabeza.
+    const c = aPantalla(0, y0 + w / 2, z1 - 0.52);
+    gente.circle(c.x, c.y, 4.6).fill({ color: PALETA.piel, alpha: 0.85 });
+    //  Los hombros, un trapecio bajo la cabeza.
+    panelMuroLateral(gente, y0 + w * 0.2, w * 0.6, z0 + 0.2, z1 - 0.62,
+                     PALETA.camisa, 0.85);
+  }
+  nodo.addChild(gente);
+  return { nodo };
+}
+
+/**
+ * BANDEJAS DE DOCUMENTOS apiladas sobre un módulo bajo.
+ *
+ * La pieza de Finanzas y Auditoría: donde entra, espera y sale el papel. Se
+ * distingue de la estantería —que guarda lo ya archivado— porque esto es lo
+ * que está EN TRÁMITE, y por eso las bandejas van abiertas y con hojas
+ * asomando.
+ */
+function construirBandejas(gx: number, gy: number, cuantas: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  //  El módulo bajo que las sostiene.
+  caja(g, gx, gy, 0, 0.7, 1.0, 0.68, PALETA.escritorioPata);
+  caja(g, gx - 0.02, gy - 0.02, 0.68, 0.74, 1.04, 0.05, PALETA.escritorioTapa);
+
+  const n = Math.max(2, Math.min(5, Math.trunc(cuantas) || 3));
+  for (let i = 0; i < n; i++) {
+    const z = 0.73 + i * 0.17;
+    //  La bandeja: un marco con su suelo, separada de la de abajo por cuatro
+    //  patas cortas. Es ese aire entre bandeja y bandeja lo que las hace una
+    //  pila de bandejas y no un bloque.
+    caja(g, gx + 0.08, gy + 0.1, z, 0.54, 0.8, 0.03, PALETA.metal);
+    caja(g, gx + 0.08, gy + 0.1, z + 0.03, 0.54, 0.03, 0.08, PALETA.metal);
+    caja(g, gx + 0.08, gy + 0.87, z + 0.03, 0.54, 0.03, 0.08, PALETA.metal);
+    //  Las hojas, sobresaliendo un poco: nunca las mismas en cada bandeja.
+    if (i % 3 !== 2) {
+      caja(g, gx + 0.1 + (i % 2) * 0.03, gy + 0.14, z + 0.03,
+           0.5, 0.72, 0.035 + (i % 2) * 0.02, PALETA.textoClaro, 0.92);
+    }
+  }
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
+ * EL TURNERO: la columna con el número de atención, en la sala de espera.
+ *
+ * Es la pieza que dice «acá se hace fila» y no la tiene nadie más en la sede.
+ * Un pedestal con una pantalla de siete segmentos arriba y la ranura de los
+ * tiquetes debajo.
+ *
+ * El número que muestra es FIJO y decorativo: un turnero que contara algo
+ * estaría afirmando cuánta gente espera, y eso es una métrica que ninguna
+ * medición respalda. Es la misma regla que el videowall del NOC.
+ */
+function construirTurnero(gx: number, gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  //  El pedestal, angosto y alto: se ve de lejos sin ocupar sitio de paso.
+  caja(g, gx, gy, 0, 0.34, 0.42, 1.25, tono(PALETA.escritorioPata, 0.06));
+  caja(g, gx - 0.02, gy - 0.02, 0, 0.38, 0.46, 0.06, PALETA.muroRemate);
+  //  La cabeza con la pantalla, inclinada hacia la sala.
+  caja(g, gx - 0.04, gy - 0.04, 1.25, 0.42, 0.5, 0.46, PALETA.pantallaMarco);
+  caja(g, gx - 0.06, gy + 0.02, 1.32, 0.03, 0.38, 0.32, PALETA.noche);
+  nodo.addChild(g);
+
+  //  Los dos dígitos, dibujados como barras: a esta escala un texto no se lee
+  //  y una forma de siete segmentos sí se reconoce.
+  const digitos = new Graphics();
+  for (const [d, patron] of [[0, [1, 1, 1, 0, 1, 1, 1]], [1, [1, 0, 1, 1, 1, 0, 1]]] as const) {
+    const base = gy + 0.1 + d * 0.16;
+    //  arriba, sup-izq, medio, inf-der... siete tramos sobre una retícula.
+    const tramos: [number, number, number][] = [
+      [0.0, 0.11, 1.52], [0.0, 0.0, 1.44], [0.0, 0.11, 1.44],
+      [0.1, 0.0, 1.44], [0.0, 0.11, 1.36], [0.1, 0.0, 1.36], [0.0, 0.11, 1.36]
+    ];
+    patron.forEach((on, i) => {
+      if (!on) return;
+      const [dy, w, z] = tramos[i];
+      caja(digitos, gx - 0.07, base + dy, z, 0.02, Math.max(w, 0.03), w > 0 ? 0.022 : 0.075,
+           ACENTO_CLARO, 0.9);
+    });
+  }
+  nodo.addChild(digitos);
+
+  //  La ranura de los tiquetes.
+  const ranura = new Graphics();
+  caja(ranura, gx - 0.03, gy + 0.1, 0.78, 0.02, 0.2, 0.03, PALETA.pisoProfundo);
+  nodo.addChild(ranura);
+  return { nodo };
+}
+
+/**
+ * UNA MESA DE REVISIÓN: tablero rectangular con dos sillas enfrentadas.
+ *
+ * Auditoría y Recursos Humanos se sientan con alguien enfrente — a revisar un
+ * expediente o a entrevistar—, y eso es distinto de la mesa redonda de reunión
+ * informal que tiene media sede.
+ */
+function construirMesaDeRevision(gx: number, gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  const L = Math.max(1.6, largo || 2.2);
+  caja(g, gx, gy, 0.7, 1.1, L, 0.07, PALETA.maderaClara);
+  for (const [dx, dy] of [[0.08, 0.1], [0.08, L - 0.26], [0.94, 0.1], [0.94, L - 0.26]]) {
+    caja(g, gx + dx, gy + dy, 0, 0.08, 0.16, 0.7, PALETA.escritorioPata);
+  }
+  //  Las dos sillas, enfrentadas a lo ancho: es la pose de una revisión.
+  for (const dx of [-0.52, 1.24]) {
+    caja(g, gx + dx, gy + L / 2 - 0.26, 0.42, 0.44, 0.52, 0.06, PALETA.sillaTela);
+    caja(g, gx + dx + (dx < 0 ? 0 : 0.38), gy + L / 2 - 0.26, 0.48, 0.06, 0.52, 0.5,
+         PALETA.sillaTela);
+    caja(g, gx + dx + 0.18, gy + L / 2 - 0.08, 0, 0.08, 0.14, 0.42, PALETA.sillaBase);
+  }
+  //  El expediente abierto sobre la mesa, con su pila al lado.
+  caja(g, gx + 0.3, gy + L / 2 - 0.3, 0.77, 0.44, 0.6, 0.01, PALETA.textoClaro);
+  caja(g, gx + 0.32, gy + 0.22, 0.77, 0.38, 0.4, 0.08, PALETA.clayClaro);
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
    El montaje del recinto
    ════════════════════════════════════════════════════════════════════════════ */
 
@@ -1719,6 +2208,19 @@ const TIPOS: Record<string, (m: Mueble2D, tx: Texturas) => Mueble> = {
   mostrador: (m) => construirMostrador(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2),
   mesa: (m, tx) => construirMesa(m.gx ?? 0, m.gy ?? 0, tx),
   estanteria: (m) => construirEstanteria(m.gy ?? 0, m.largo ?? 2),
+  //  La biblioteca de las piezas de red. Son las que hacen reconocible un area
+  //  sin leer el letrero.
+  videowall: (m) => construirVideowall(m.gx ?? 0, m.ancho ?? 4),
+  rack: (m) => construirRack(m.gx ?? 0, m.gy ?? 0, m.unidades ?? 5),
+  bobina: (m) => construirBobina(m.gx ?? 0, m.gy ?? 0),
+  cajas: (m) => construirCajasDeMaterial(m.gx ?? 0, m.gy ?? 0, m.cuantas ?? 3),
+  banco_trabajo: (m) => construirBancoDePreparacion(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2.6),
+  pizarra: (m) => construirPizarra(m.gy ?? 0, m.largo ?? 2.4),
+  impresora: (m) => construirImpresora(m.gx ?? 0, m.gy ?? 0),
+  turnero: (m) => construirTurnero(m.gx ?? 0, m.gy ?? 0),
+  bandejas: (m) => construirBandejas(m.gx ?? 0, m.gy ?? 0, m.cuantas ?? 3),
+  videoconferencia: (m) => construirVideoconferencia(m.gy ?? 0, m.largo ?? 2.8),
+  mesa_revision: (m) => construirMesaDeRevision(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2.2),
   //  Los tres del nucleo vertical. Entran al catalogo como cualquier otro: la
   //  escena sabe dibujar TIPOS y no sabe que esto es un nucleo.
   escalera: (m) => construirEscalera(m.gx ?? 0, m.gy ?? 0, m.alto ?? 4,
