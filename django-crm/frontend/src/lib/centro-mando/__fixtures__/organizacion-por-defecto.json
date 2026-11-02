@@ -111,7 +111,7 @@
       "rotulo": "Finanzas y Cartera",
       "direccion": "Dirección Financiera",
       "piso": 1,
-      "plantilla": "expedientes",
+      "plantilla": "finanzas",
       "areas": [
         "cartera",
         "Cartera",
@@ -136,7 +136,7 @@
       "rotulo": "Administración",
       "direccion": "Dirección General",
       "piso": 1,
-      "plantilla": "reuniones",
+      "plantilla": "gestion",
       "areas": [
         "administracion",
         "Administración"
@@ -159,7 +159,7 @@
       "rotulo": "Recursos Humanos",
       "direccion": "Dirección General",
       "piso": 1,
-      "plantilla": "expedientes",
+      "plantilla": "personal",
       "areas": [
         "recursos_humanos",
         "Recursos Humanos",
@@ -174,7 +174,7 @@
       "rotulo": "Auditoría y Cumplimiento",
       "direccion": "Dirección General",
       "piso": 1,
-      "plantilla": "expedientes",
+      "plantilla": "inspeccion",
       "areas": [
         "auditoria",
         "Auditoría y Cumplimiento",
@@ -190,7 +190,7 @@
       "id": "direccion",
       "rotulo": "Dirección",
       "piso": 3,
-      "plantilla": "reuniones",
+      "plantilla": "despacho",
       "acento": "#64748b"
     },
     {

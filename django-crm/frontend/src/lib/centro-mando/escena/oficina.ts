@@ -2020,6 +2020,84 @@ function construirImpresora(gx: number, gy: number): Mueble {
 }
 
 /**
+ * UNA CAJA FUERTE empotrada en su módulo, con su dial y su manija.
+ *
+ * La pieza de la sala que maneja dinero. No la tiene nadie más, y a diferencia
+ * de un armario —que es un mueble— esto se lee como un bloque macizo.
+ */
+function construirCajaFuerte(gx: number, gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  //  El módulo que la sostiene, y la caja encima: una caja fuerte a ras del
+  //  suelo se lee como un cubo de basura.
+  caja(g, gx, gy, 0, 0.8, 0.9, 0.55, PALETA.escritorioPata);
+  caja(g, gx + 0.04, gy + 0.04, 0.55, 0.72, 0.82, 0.78, tono(PALETA.rackCuerpo, 0.1));
+  //  La puerta, un plano hundido respecto del marco.
+  caja(g, gx + 0.02, gy + 0.12, 0.64, 0.03, 0.66, 0.6, tono(PALETA.metal, -0.32));
+  nodo.addChild(g);
+
+  const herraje = new Graphics();
+  //  El dial y la manija, lo único que la identifica a esta escala.
+  const d = aPantalla(gx + 0.01, gy + 0.36, 0.98);
+  herraje.circle(d.x, d.y, 4.2).fill({ color: PALETA.metal })
+         .circle(d.x, d.y, 2.4).fill({ color: tono(PALETA.metal, -0.3) });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    herraje.circle(d.x + Math.cos(a) * 5.6, d.y + Math.sin(a) * 2.8, 0.6)
+           .fill({ color: PALETA.textoTenue, alpha: 0.8 });
+  }
+  const m = aPantalla(gx + 0.01, gy + 0.62, 0.94);
+  herraje.rect(m.x - 1, m.y - 7, 2, 14).fill({ color: PALETA.metal });
+  nodo.addChild(herraje);
+  return { nodo };
+}
+
+/**
+ * UNA BIBLIOTECA de pared: estantes altos con libros de lomo ancho.
+ *
+ * Se distingue de `estanteria` a propósito. Aquélla son cuatro baldas de
+ * CARPETAS de archivo, delgadas y todas iguales, y dice «acá se guardan
+ * expedientes». Ésta tiene libros de distinto grosor y alguno tumbado, y dice
+ * «acá se consulta». Es el mueble de un despacho, no el de un archivo.
+ */
+function construirBiblioteca(gy: number, largo: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(0.25, gy);
+  const g = new Graphics();
+
+  const L = Math.max(1.6, largo || 2.6);
+  caja(g, 0.1, gy, 0, 0.44, L, 3.0, PALETA.madera);
+  //  Cinco baldas, más separadas que las de la estantería: caben libros de pie.
+  for (let i = 0; i < 5; i++) {
+    const z = 0.3 + i * 0.56;
+    panelMuroLateral(g, gy + 0.05, L - 0.1, z, z + 0.055, PALETA.maderaClara);
+    let y = gy + 0.14;
+    let k = i * 5;
+    while (y < gy + L - 0.25) {
+      const ancho = 0.08 + ((k * 11) % 7) * 0.02;
+      const alto = 0.34 + ((k * 17) % 5) * 0.03;
+      //  Uno de cada siete, tumbado sobre los demás: es lo que separa una
+      //  biblioteca en uso de una fila de lomos iguales.
+      const tumbado = k % 7 === 3;
+      const color = [PALETA.rust, PALETA.moss, PALETA.clay, PALETA.azulTecno,
+                     PALETA.maderaClara][k % 5];
+      if (tumbado) {
+        panelMuroLateral(g, y, ancho * 2.4, z + 0.055, z + 0.055 + 0.09, color, 0.8);
+        y += ancho * 2.4 + 0.02;
+      } else {
+        panelMuroLateral(g, y, ancho, z + 0.055, z + 0.055 + alto, color, 0.8);
+        y += ancho + 0.012;
+      }
+      k++;
+    }
+  }
+  nodo.addChild(g);
+  return { nodo };
+}
+
+/**
  * LA PANTALLA DE VIDEOCONFERENCIA, con su barra de cámara encima.
  *
  * La pieza protagonista de una sala de reuniones. Se distingue del `tablero`
@@ -2220,6 +2298,8 @@ const TIPOS: Record<string, (m: Mueble2D, tx: Texturas) => Mueble> = {
   turnero: (m) => construirTurnero(m.gx ?? 0, m.gy ?? 0),
   bandejas: (m) => construirBandejas(m.gx ?? 0, m.gy ?? 0, m.cuantas ?? 3),
   videoconferencia: (m) => construirVideoconferencia(m.gy ?? 0, m.largo ?? 2.8),
+  caja_fuerte: (m) => construirCajaFuerte(m.gx ?? 0, m.gy ?? 0),
+  biblioteca: (m) => construirBiblioteca(m.gy ?? 0, m.largo ?? 2.6),
   mesa_revision: (m) => construirMesaDeRevision(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2.2),
   //  Los tres del nucleo vertical. Entran al catalogo como cualquier otro: la
   //  escena sabe dibujar TIPOS y no sabe que esto es un nucleo.

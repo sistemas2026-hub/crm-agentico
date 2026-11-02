@@ -122,7 +122,10 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
             rotulo="Finanzas y Cartera",
             direccion="Dirección Financiera",
             piso=1,
-            plantilla="expedientes",
+            #  Hasta el 02/11/2026 este departamento, Recursos Humanos y
+            #  Auditoria pedian los tres 'expedientes' y en la oficina se
+            #  veian como la misma sala con otro color de rotulo.
+            plantilla="finanzas",
             areas=["cartera", "Cartera", "Facturación", "Finanzas y Cartera"],
             capacidades=["facturacion"],
             ocupaciones=[Ocupacion(puesto="principal", agente="facturacion_cliente",
@@ -134,7 +137,7 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
             rotulo="Administración",
             direccion="Dirección General",
             piso=1,
-            plantilla="reuniones",
+            plantilla="gestion",
             areas=["administracion", "Administración"],
             capacidades=["administracion"],
             ocupaciones=[Ocupacion(puesto="principal", agente="configuracion_guiada")],
@@ -145,7 +148,7 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
             rotulo="Recursos Humanos",
             direccion="Dirección General",
             piso=1,
-            plantilla="expedientes",
+            plantilla="personal",
             areas=["recursos_humanos", "Recursos Humanos", "Talento Humano"],
             ocupaciones=[],
             acento="#be185d",
@@ -155,7 +158,7 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
             rotulo="Auditoría y Cumplimiento",
             direccion="Dirección General",
             piso=1,
-            plantilla="expedientes",
+            plantilla="inspeccion",
             areas=["auditoria", "Auditoría y Cumplimiento", "Cumplimiento"],
             ocupaciones=[],
             acento="#6b21a8",
@@ -166,7 +169,7 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
     #  a la que se le puedan asignar responsabilidades.
     espacios=[
         EspacioDeTrabajo(id="direccion", rotulo="Dirección", piso=3,
-                         plantilla="reuniones", acento="#64748b"),
+                         plantilla="despacho", acento="#64748b"),
         EspacioDeTrabajo(id="sala_reuniones", rotulo="Sala de Reuniones", piso=3,
                          plantilla="reuniones", acento="#0f766e"),
         EspacioDeTrabajo(id="recepcion", rotulo="Recepción", piso=1,
@@ -233,6 +236,21 @@ _SALAS_BASE = (
     ("expedientes", "Sala de expedientes", 4),
     ("comercial", "Sala comercial", 4),
     ("reuniones", "Sala de reuniones", 2),
+    #  CINCO SALAS AGREGADAS EL 02/11/2026, y el motivo es de dibujo.
+    #
+    #  Con seis plantillas para once departamentos, tres de ellos -- Cartera,
+    #  Recursos Humanos y Auditoria -- pedian 'expedientes' y se veian
+    #  identicos con otro color de rotulo. Lo mismo entre Administracion,
+    #  Direccion y Sala de Reuniones con 'reuniones'.
+    #
+    #  Son ADITIVAS: ninguna configuracion existente deja de ser valida, porque
+    #  'plantilla' es un identificador libre y las seis de arriba siguen donde
+    #  estaban. Una empresa que ya declaro 'expedientes' la sigue teniendo.
+    ("finanzas", "Sala de finanzas", 4),
+    ("personal", "Sala de personal", 3),
+    ("inspeccion", "Sala de inspeccion", 3),
+    ("gestion", "Sala de gestion", 4),
+    ("despacho", "Despacho de direccion", 2),
 )
 
 

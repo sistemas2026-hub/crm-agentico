@@ -259,6 +259,13 @@ const EXPEDIENTES = {
     //  de la sede y era el otro mueble que hacía que todas se parecieran. Acá
     //  alguien se sienta ENFRENTE a que le revisen algo, y eso se ve.
     { tipo: 'mesa_revision', gx: 7.8, gy: 7.2, largo: 2.4 },
+    //  Esta plantilla ya NO la usa la organizacion por defecto -Cartera,
+    //  Recursos Humanos y Auditoria pasaron a tener la suya- pero sigue en el
+    //  catalogo: una empresa que ya la declaro la conserva. Y tiene que
+    //  seguir distinguiendose de `auditoria`, que es la que mas se le parece:
+    //  alla hay caja fuerte y tablero de hallazgos, aca estanterias abiertas
+    //  y un sitio donde sentarse a consultar.
+    { tipo: 'dispensador', gx: 10.9, gy: 2.2 },
     //  Las bandejas de documentos: lo que esta EN TRAMITE, frente a la
     //  estanteria, que guarda lo ya archivado. Es la tercera pieza propia de
     //  esta area y la nombra la especificacion del 02/11/2026.
@@ -344,6 +351,12 @@ const REUNIONES = {
     //  lenguaje del NOC y de comercial.
     { tipo: 'videoconferencia', gy: 1.4, largo: 3.0 },
     { tipo: 'pizarra', gy: 5.6, largo: 2.6 },
+    //  El armario de apoyo -cables, mandos, material de la sala- y el
+    //  dispensador. Son lo que separa esta sala de la comercial, que tambien
+    //  tiene mesa y pizarra: alli se recibe a un cliente, aca se reune el
+    //  equipo y la sala se abastece sola.
+    { tipo: 'armario', gy: 0.4 },
+    { tipo: 'dispensador', gx: 10.8, gy: 7.4 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 4 },
     { tipo: 'banco', gx: 10.6, gy: 1.4 },
@@ -353,6 +366,261 @@ const REUNIONES = {
   puestos: [
     { id: 'principal', nombre: 'Dirección', principal: true, gx: 2.0, gy: 6.0 },
     { id: 'p1', nombre: 'Gestión', gx: 2.2, gy: 2.4 }
+  ]
+};
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LAS CINCO SALAS QUE FALTABAN
+   ────────────────────────────────────────────────────────────────────────────
+   Hasta acá once departamentos se repartían SEIS plantillas, y tres de ellos
+   —Cartera, Recursos Humanos y Auditoría— pedían la misma: se veían idénticos
+   con otro color de rótulo. Lo mismo entre Administración, Dirección y Sala de
+   Reuniones.
+
+   No alcanzaba con cambiar los muebles: cada una tiene su propia COMPOSICIÓN.
+   Mesa en el centro o contra el muro, puestos enfrentados o en fila, el visitante
+   entrando por un lado u otro. Dos salas con el mismo plano y distintos adornos
+   se siguen viendo como la misma sala.
+
+   AGREGAR UN NOMBRE ACÁ NO ALCANZA. El catálogo se escribe a mano en
+   `nucleo/config/organizacion.py` (`_SALAS_BASE`) y el fixture de este
+   directorio se GENERA desde ahí con `cli/exportar_organizacion.py`. Las dos
+   listas se vigilan en las dos direcciones: una sala dibujada que nadie puede
+   elegir es código que no corre, y una elegible sin dibujo sale como «Sala sin
+   plantilla».
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * FINANZAS Y CARTERA: puestos enfrentados en dos filas, con privacidad.
+ *
+ * Su composición es lo que la distingue: las mamparas parten la sala a lo
+ * largo y los puestos van enfrentados de a dos, que es como se sienta un
+ * equipo que no colabora en voz alta. Ninguna otra sala tiene esa disposición.
+ *
+ * Y es la única con caja fuerte, que es lo que se ve antes que nada.
+ */
+const FINANZAS = {
+  rotulo: 'Sala de finanzas',
+  acento: 0x10b981,
+  //  DIEZ DE FONDO Y NO NUEVE. Con nueve, la composicion compacta
+  //  -`edificio-compacto.js`, que apila pisos- dejaba el puesto `cartera/p1`
+  //  tapado por la losa de arriba. Lo cazo su guarda de oclusion, que mide
+  //  la desigualdad y no mira esta plantilla: mide el EFECTO.
+  mundo: { ancho: 12, fondo: 10, alto: 4 },
+  pasillo: { desde: 0, hasta: 2 },
+  cartel: { gx: 6.2 },
+  mural: null,
+  mobiliario: [
+    //  La mampara longitudinal: lo que convierte una sala abierta en dos
+    //  hileras de puestos con privacidad visual.
+    { tipo: 'mampara', gx: 6.2, desde: 1.4, hasta: 8.6, vano: [4.4, 6.2] },
+    { tipo: 'tablero', gy: 0.4 },
+    //  Las bandejas de facturas: lo que está EN TRÁMITE, a mano de los dos
+    //  lados de la mampara.
+    { tipo: 'bandejas', gx: 2.2, gy: 7.6, cuantas: 4 },
+    { tipo: 'bandejas', gx: 8.0, gy: 7.6, cuantas: 3 },
+    { tipo: 'caja_fuerte', gx: 10.4, gy: 0.5 },
+    //  La multifuncion de recibos, al lado de la caja. Finanzas imprime y
+    //  sella todos los dias; la sala de expedientes solo guarda.
+    { tipo: 'impresora', gx: 10.6, gy: 2.4 },
+    //  LA VENTANILLA DE RECAUDO: a esta sala se viene a pagar, y eso no pasa
+    //  en auditoria ni en expedientes.
+    { tipo: 'mostrador', gx: 3.8, gy: 8.0, largo: 2.2 },
+    { tipo: 'armario', gy: 3.4 },
+    { tipo: 'armario', gy: 5.1 },
+    { tipo: 'luminaria', gx: 3.5, gy: 3 },
+    { tipo: 'luminaria', gx: 9, gy: 6 },
+    { tipo: 'planta', gx: 0.7, gy: 8.2 }
+  ],
+  puestos: [
+    //  ENFRENTADOS DE A DOS, a los lados de la mampara.
+    //
+    //  LA SEGUNDA FILA VA EN 4,4 Y NO EN 5,0, y no es estetica: a 5,0 la
+    //  composicion COMPACTA -la que apila pisos, `edificio-compacto.js`-
+    //  dejaba el puesto `cartera/p1` tapado por la losa de arriba. Su guarda
+    //  de oclusion lo midio. Esta sala vive en las dos composiciones y tiene
+    //  que verse en las dos.
+    { id: 'principal', nombre: 'Cartera', principal: true, gx: 2.4, gy: 2.0 },
+    { id: 'p1', nombre: 'Recaudo 1', gx: 2.4, gy: 4.4 },
+    { id: 'p2', nombre: 'Recaudo 2', gx: 8.2, gy: 2.0 },
+    { id: 'p3', nombre: 'Conciliación', gx: 8.2, gy: 4.4 }
+  ]
+};
+
+/**
+ * RECURSOS HUMANOS: un puesto y una mesa de entrevistas, separados.
+ *
+ * Es la sala más vacía después de reuniones, y a propósito. Su composición es
+ * «un rincón de trabajo y un rincón donde se recibe a alguien», con el espacio
+ * libre entre los dos — el que hace que una entrevista no se haga encima del
+ * escritorio de nadie.
+ */
+const PERSONAL = {
+  rotulo: 'Sala de personal',
+  acento: 0x60a5fa,
+  mundo: { ancho: 11, fondo: 9, alto: 4 },
+  pasillo: null,
+  cartel: { gx: 5.4 },
+  mural: null,
+  mobiliario: [
+    //  LA MAMPARA QUE AISLA EL RINCON DE ENTREVISTAS. Es lo que separa esta
+    //  sala de la de reuniones, que tambien tiene mesa, pizarra y armario:
+    //  alli se reune el equipo a la vista, aca se recibe a una persona y
+    //  tiene que sentirse privado. Deja los tres puestos de un lado y la
+    //  mesa del otro.
+    { tipo: 'mampara', gx: 6, desde: 3.0, hasta: 8.8, vano: [5.4, 7.2] },
+    //  LA MESA DE ENTREVISTAS, con sus dos sillas enfrentadas, en el extremo
+    //  opuesto al puesto de gestión.
+    { tipo: 'mesa_revision', gx: 7.4, gy: 5.4, largo: 2.6 },
+    //  EL MURO, en tres tramos y en este orden: primero el calendario de
+    //  personal -lo que se consulta de paso-, despues el panel de formacion
+    //  frente a la mesa de entrevistas, y el armario al fondo. Los tres
+    //  juntos no entraban en los nueve de fondo con el reparto anterior: el
+    //  tablero ocupa 2,74 y el hueco medía 2,1. Lo cazo la guarda de solapes.
+    { tipo: 'tablero', gy: 0.3 },
+    { tipo: 'pizarra', gy: 3.2, largo: 2.8 },
+    { tipo: 'armario', gy: 6.4 },
+    { tipo: 'banco', gx: 9.6, gy: 2.0 },
+    //  El dispensador, junto a la espera de quien viene a una entrevista.
+    { tipo: 'dispensador', gx: 9.9, gy: 0.7 },
+    { tipo: 'luminaria', gx: 3, gy: 2.5 },
+    { tipo: 'luminaria', gx: 8, gy: 6.5 },
+    { tipo: 'planta', gx: 0.8, gy: 8.0 }
+  ],
+  puestos: [
+    { id: 'principal', nombre: 'Gestión de personal', principal: true, gx: 2.2, gy: 2.4 },
+    { id: 'p1', nombre: 'Formación', gx: 2.2, gy: 5.6 },
+    { id: 'p2', nombre: 'Selección', gx: 4.8, gy: 2.4 }
+  ]
+};
+
+/**
+ * AUDITORÍA Y CUMPLIMIENTO: una sala cerrada, con su mesa de inspección.
+ *
+ * Su composición es la contraria a la de finanzas: en vez de dos hileras con
+ * privacidad, un recinto con la mesa de revisión EN EL MEDIO y los armarios
+ * cerrados contra las paredes. Es el plano de un sitio donde se extiende un
+ * expediente y se mira entre varios.
+ *
+ * Sin estantería abierta y sin bandejas: lo que acá se revisa no está a la
+ * vista. Esa ausencia es parte de la identidad del área.
+ */
+const INSPECCION = {
+  rotulo: 'Sala de inspección',
+  acento: 0x9f1239,
+  mundo: { ancho: 11, fondo: 9, alto: 4 },
+  pasillo: null,
+  cartel: { gx: 5.2 },
+  mural: null,
+  mobiliario: [
+    //  LA MESA DE INSPECCIÓN EN EL CENTRO, no contra un muro. Es la única sala
+    //  del catálogo que organiza todo alrededor de una mesa de revisión.
+    { tipo: 'mesa_revision', gx: 4.6, gy: 3.4, largo: 3.0 },
+    { tipo: 'zona', gx: 3.6, gy: 2.6, ancho: 4.0, fondo: 4.6 },
+    //  EL MURO DE CONTROL, en cuatro tramos: el tablero de hallazgos enfrente
+    //  de la mesa, dos archivadores CERRADOS -nunca una estanteria abierta,
+    //  ver mas abajo- y entre ellos la lista de control en pizarra.
+    { tipo: 'tablero', gy: 0.4 },
+    { tipo: 'armario', gy: 3.3 },
+    { tipo: 'armario', gy: 5.0 },
+    { tipo: 'armario', gy: 6.7 },
+    //  LA CUSTODIA DE LA EVIDENCIA: caja fuerte y bandejas de lo que esta en
+    //  revision. Sin pizarra -esa es de personal y de comercial, donde se
+    //  escribe a mano-: aca lo que hay son hallazgos en un tablero y papel
+    //  bajo llave. Eso es lo que separa esta sala de las otras dos que
+    //  tambien reciben a alguien en una mesa.
+    { tipo: 'caja_fuerte', gx: 9.6, gy: 7.4 },
+    { tipo: 'bandejas', gx: 1.4, gy: 1.0, cuantas: 3 },
+    { tipo: 'banco', gx: 1.6, gy: 3.6 },
+    { tipo: 'luminaria', gx: 5, gy: 4 },
+    { tipo: 'luminaria', gx: 9, gy: 7 },
+    { tipo: 'planta', gx: 9.8, gy: 1.0 }
+  ],
+  puestos: [
+    { id: 'principal', nombre: 'Auditoría', principal: true, gx: 1.8, gy: 6.6 },
+    { id: 'p1', nombre: 'Revisión 1', gx: 9.0, gy: 3.0 },
+    { id: 'p2', nombre: 'Revisión 2', gx: 9.0, gy: 6.4 }
+  ]
+};
+
+/**
+ * ADMINISTRACIÓN: el sitio por donde entra y sale lo material.
+ *
+ * Su composición tiene una zona que ninguna otra sala tiene: un área de
+ * despacho con la multifunción, los suministros en estantería y las cajas
+ * etiquetadas, separada del trabajo de escritorio por una mampara corta. Es
+ * media sala de oficina y media de almacén chico.
+ */
+const GESTION = {
+  rotulo: 'Sala de gestión',
+  acento: 0xa78bfa,
+  mundo: { ancho: 13, fondo: 9, alto: 4 },
+  pasillo: { desde: 10, hasta: 13 },
+  cartel: { gx: 4.8 },
+  mural: null,
+  mobiliario: [
+    //  LA FRANJA DE DESPACHO, detrás de la mampara: impresora, suministros y
+    //  cajas. Es lo que separa esta sala de un cuarto con escritorios.
+    { tipo: 'mampara', gx: 10, desde: 0.2, hasta: 8.8, vano: [3.4, 5.2] },
+    { tipo: 'impresora', gx: 10.8, gy: 0.6 },
+    { tipo: 'cajas', gx: 11.0, gy: 2.4, cuantas: 3 },
+    { tipo: 'cajas', gx: 12.0, gy: 2.6, cuantas: 2 },
+    { tipo: 'cajas', gx: 11.2, gy: 6.4, cuantas: 4 },
+    { tipo: 'estanteria', gy: 5.6, largo: 2.8 },
+    { tipo: 'tablero', gy: 0.3 },
+    //  La ventanilla de correspondencia, en el vano de la mampara: es por
+    //  donde entra y sale lo que se despacha.
+    { tipo: 'mostrador', gx: 8.8, gy: 1.2, largo: 2.0 },
+    //  La silla de quien espera a que le reciban un paquete o una factura.
+    { tipo: 'banco', gx: 8.6, gy: 7.8 },
+    { tipo: 'luminaria', gx: 4, gy: 3 },
+    { tipo: 'luminaria', gx: 8, gy: 6 },
+    { tipo: 'planta', gx: 0.8, gy: 8.0 }
+  ],
+  puestos: [
+    { id: 'principal', nombre: 'Administración', principal: true, gx: 2.0, gy: 6.4 },
+    { id: 'p1', nombre: 'Compras', gx: 1.8, gy: 2.6 },
+    { id: 'p2', nombre: 'Proveedores', gx: 4.8, gy: 2.6 },
+    { id: 'p3', nombre: 'Correspondencia', gx: 7.4, gy: 4.8 }
+  ]
+};
+
+/**
+ * DIRECCIÓN: un despacho, no una oficina compartida.
+ *
+ * Su composición es única en el catálogo: UN escritorio grande orientado hacia
+ * la puerta, dos sillas enfrente para quien visita, y una mesa aparte para
+ * sentarse a decidir. Todo el resto de la sala queda vacío, y ese vacío es la
+ * mitad de lo que la hace reconocible — un despacho no se llena de puestos.
+ */
+const DESPACHO = {
+  rotulo: 'Despacho de dirección',
+  acento: 0x1d4ed8,
+  mundo: { ancho: 11, fondo: 9, alto: 4 },
+  pasillo: null,
+  cartel: { gx: 5.2 },
+  mural: null,
+  mobiliario: [
+    //  La biblioteca: libros de lomo ancho y alguno tumbado, no las carpetas
+    //  de archivo de la estantería. Es el mueble de un despacho.
+    { tipo: 'biblioteca', gy: 0.8, largo: 2.4 },
+    //  Las dos sillas de visita, enfrente del escritorio ejecutivo.
+    { tipo: 'mesa_revision', gx: 2.0, gy: 5.8, largo: 2.2 },
+    //  La mesa estratégica, en su propio rincón.
+    { tipo: 'mesa', gx: 8.0, gy: 5.8 },
+    { tipo: 'zona', gx: 6.6, gy: 4.6, ancho: 3.6, fondo: 3.4 },
+    { tipo: 'videoconferencia', gy: 3.4, largo: 2.2 },
+    //  El panel de indicadores generales: lo que mira quien dirige. La sala
+    //  de reuniones no lo tiene -alli se mira a quien esta del otro lado de
+    //  la camara-, y es lo que separa un despacho de una sala de juntas.
+    { tipo: 'tablero', gy: 5.9 },
+    { tipo: 'luminaria', gx: 4, gy: 3 },
+    { tipo: 'luminaria', gx: 8, gy: 6 },
+    { tipo: 'planta', gx: 9.9, gy: 1.2 }
+  ],
+  puestos: [
+    { id: 'principal', nombre: 'Dirección', principal: true, gx: 4.4, gy: 2.0 },
+    { id: 'p1', nombre: 'Asistencia', gx: 8.2, gy: 2.0 }
   ]
 };
 
@@ -653,6 +921,11 @@ export const PLANTILLAS = conTamanos({
   expedientes: EXPEDIENTES,
   comercial: COMERCIAL,
   reuniones: REUNIONES,
+  finanzas: FINANZAS,
+  personal: PERSONAL,
+  inspeccion: INSPECCION,
+  gestion: GESTION,
+  despacho: DESPACHO,
   generica: GENERICA
 });
 

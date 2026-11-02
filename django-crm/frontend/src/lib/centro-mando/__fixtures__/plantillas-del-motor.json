@@ -88,5 +88,80 @@
     "nombre": "reuniones_8",
     "rotulo": "Sala de reuniones - 8 puestos",
     "puestos": 8
+  },
+  {
+    "nombre": "finanzas",
+    "rotulo": "Sala de finanzas",
+    "puestos": 4
+  },
+  {
+    "nombre": "finanzas_7",
+    "rotulo": "Sala de finanzas - 7 puestos",
+    "puestos": 7
+  },
+  {
+    "nombre": "finanzas_10",
+    "rotulo": "Sala de finanzas - 10 puestos",
+    "puestos": 10
+  },
+  {
+    "nombre": "personal",
+    "rotulo": "Sala de personal",
+    "puestos": 3
+  },
+  {
+    "nombre": "personal_6",
+    "rotulo": "Sala de personal - 6 puestos",
+    "puestos": 6
+  },
+  {
+    "nombre": "personal_9",
+    "rotulo": "Sala de personal - 9 puestos",
+    "puestos": 9
+  },
+  {
+    "nombre": "inspeccion",
+    "rotulo": "Sala de inspeccion",
+    "puestos": 3
+  },
+  {
+    "nombre": "inspeccion_6",
+    "rotulo": "Sala de inspeccion - 6 puestos",
+    "puestos": 6
+  },
+  {
+    "nombre": "inspeccion_9",
+    "rotulo": "Sala de inspeccion - 9 puestos",
+    "puestos": 9
+  },
+  {
+    "nombre": "gestion",
+    "rotulo": "Sala de gestion",
+    "puestos": 4
+  },
+  {
+    "nombre": "gestion_7",
+    "rotulo": "Sala de gestion - 7 puestos",
+    "puestos": 7
+  },
+  {
+    "nombre": "gestion_10",
+    "rotulo": "Sala de gestion - 10 puestos",
+    "puestos": 10
+  },
+  {
+    "nombre": "despacho",
+    "rotulo": "Despacho de direccion",
+    "puestos": 2
+  },
+  {
+    "nombre": "despacho_5",
+    "rotulo": "Despacho de direccion - 5 puestos",
+    "puestos": 5
+  },
+  {
+    "nombre": "despacho_8",
+    "rotulo": "Despacho de direccion - 8 puestos",
+    "puestos": 8
   }
 ]

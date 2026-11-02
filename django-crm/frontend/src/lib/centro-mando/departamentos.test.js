@@ -171,13 +171,31 @@ describe('la plantilla es una ELECCIÓN del catálogo', () => {
   });
 
   it('dos departamentos pueden compartir plantilla y siguen siendo dos salas', () => {
-    // Finanzas, Recursos Humanos y Auditoría usan la misma. Compartir
-    // geometría es reutilizar la biblioteca; lo que no pueden compartir es
-    // identidad, rótulo ni puestos.
-    const mismas = DEPTOS.filter((d) => d.plantilla === 'expedientes');
-    expect(mismas.length).toBeGreaterThanOrEqual(3);
-    expect(new Set(mismas.map((d) => d.id)).size).toBe(mismas.length);
-    expect(new Set(mismas.map((d) => d.planta.puestos[0].id)).size).toBe(mismas.length);
+    // Compartir geometría es reutilizar la biblioteca; lo que no pueden
+    // compartir es identidad, rótulo ni puestos.
+    //
+    // EL CASO SE CONSTRUYE ACÁ Y NO SE BUSCA EN EL FIXTURE. Antes contaba los
+    // departamentos del piloto que pedían `expedientes` y exigía tres. El
+    // 02/11/2026 cada uno recibió su propia plantilla y la prueba se puso en
+    // rojo sin que nada estuviera roto: medía el fixture, no la conducta. La
+    // conducta —que compartir plantilla no funde dos salas en una— sigue
+    // siendo verdad y hay que poder probarla sin depender de qué declare una
+    // empresa concreta.
+    const salas = salasDe({
+      departamentos: [
+        { id: 'uno', rotulo: 'Uno', plantilla: 'expedientes' },
+        { id: 'dos', rotulo: 'Dos', plantilla: 'expedientes' },
+        { id: 'tres', rotulo: 'Tres', plantilla: 'expedientes' }
+      ]
+    });
+    expect(salas.length).toBe(3);
+    expect(new Set(salas.map((d) => d.id)).size).toBe(3);
+    expect(new Set(salas.map((d) => d.rotulo)).size).toBe(3);
+    // Los puestos llevan el prefijo de su sala: sin eso, seleccionar uno
+    // seleccionaría el de la otra.
+    expect(new Set(salas.map((d) => d.planta.puestos[0].id)).size).toBe(3);
+    // Y la geometría SÍ es la misma: eso es lo que significa compartirla.
+    expect(salas[0].planta.mundo).toEqual(salas[1].planta.mundo);
   });
 
   it('una plantilla desconocida cae en una sala sosa Y LO DICE', () => {
@@ -506,9 +524,31 @@ describe('la guarda de este archivo: no vuelve a saber de ninguna empresa', () =
     // Una plantilla se llama por lo que ES —un centro de operaciones, una sala
     // de expedientes—, nunca por quién la usa. «noc» o «cartera» como nombre
     // de plantilla ataría la geometría a una organización concreta.
-    const prohibidas = ['noc', 'cartera', 'rrhh', 'auditoria', 'ventas', 'soporte'];
+    //
+    // LA LISTA SALE DE LA ORGANIZACIÓN, NO DE LA MEMORIA. Antes eran seis
+    // palabras escritas a mano —noc, cartera, rrhh, auditoria, ventas,
+    // soporte— y el 02/11/2026 dejaron pasar dos de tres: al agregar cinco
+    // plantillas llamé a una `auditoria` (que sí estaba en la lista y me
+    // frenó) pero también a otras `administracion` y `direccion`, que son
+    // identificadores de la organización por defecto y NO estaban. Una lista
+    // escrita a mano envejece sin avisar; ésta se lee del fixture.
+    const delaEmpresa = new Set([
+      ...(PORDEFECTO.departamentos ?? []).map((d) => d.id),
+      ...(PORDEFECTO.espacios ?? []).map((e) => e.id),
+      //  Las que nunca fueron ids pero nombran un área igual.
+      'noc', 'rrhh', 'ventas', 'soporte'
+    ]);
+    //  `comercial` queda EXENTA, y conviene decir por qué en vez de borrarla
+    //  de la lista en silencio: está en el catálogo desde antes y una empresa
+    //  pudo declararla. Renombrarla dejaría su sala cayendo en «Sala sin
+    //  plantilla» sin que nadie tocara su configuración. La regla aplica a lo
+    //  que se agregue de acá en adelante; esta es una deuda con fecha.
+    delaEmpresa.delete('comercial');
+    expect(delaEmpresa.size, 'la lista salió vacía y la guarda no probaría nada')
+      .toBeGreaterThan(8);
     for (const nombre of Object.keys(PLANTILLAS)) {
-      expect(prohibidas, nombre).not.toContain(nombre);
+      expect(delaEmpresa, `la plantilla «${nombre}» se llama como un departamento`)
+        .not.toContain(nombre);
     }
   });
 

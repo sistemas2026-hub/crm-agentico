@@ -201,7 +201,59 @@ describe('cada área se reconoce por lo que tiene dentro', () => {
   const senas = (p) =>
     [...new Set(p.mobiliario.map((m) => m.tipo))].filter((t) => !COMUNES.has(t)).sort();
 
-  const BASES = ['operaciones', 'atencion', 'tecnica', 'expedientes', 'comercial', 'reuniones'];
+  //  TODAS las plantillas base del catálogo, no una selección. Si alguien
+  //  agrega una y no la pone acá, las guardas de este bloque no la miran: es
+  //  la trampa de «una prueba que recorre una lista incompleta pasa siempre».
+  const BASES = Object.keys(PLANTILLAS)
+    .filter((n) => n !== PLANTILLA_DE_RESERVA && !/_\d+$/.test(n));
+
+  it('la lista de áreas que se vigila es la del catálogo entero', () => {
+    //  La guarda de la guarda. Con once departamentos y seis plantillas, tres
+    //  se veían iguales; al agregar cinco, una lista escrita a mano se habría
+    //  quedado vieja sin que nada lo dijera.
+    expect(BASES.length).toBe(
+      Object.keys(PLANTILLAS).filter((n) => !/_\d+$/.test(n)).length - 1);
+    expect(BASES.length).toBeGreaterThanOrEqual(11);
+  });
+
+  it('cada área se distingue de CUALQUIER otra, no sólo de alguna', () => {
+    //  LA REGLA QUE PEDÍA LA REVISIÓN: «cada sala debe diferenciarse por su
+    //  mobiliario, composición y uso del espacio, no solamente por colores y
+    //  rótulos».
+    //
+    //  Y es más estricta que la de más abajo. Aquélla compara el conjunto
+    //  entero de señas y falla sólo si dos salas son IDÉNTICAS; ésta exige que
+    //  para CADA PAR, cada una tenga al menos tres tipos que la otra no tiene.
+    //  Dos salas que compartan todo menos un mueble pasaban la primera y caen
+    //  en ésta.
+    const tipos = (n) => new Set(PLANTILLAS[n].mobiliario.map((m) => m.tipo));
+    for (const a of BASES) {
+      for (const b of BASES) {
+        if (a === b) continue;
+        const soloEnA = [...tipos(a)].filter((t) => !tipos(b).has(t));
+        expect(soloEnA.length, `${a} sólo tiene ${soloEnA.length} cosas que ${b} no: ${soloEnA.join(', ')}`)
+          .toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('y tampoco comparten el plano: dos salas no miden lo mismo y se amueblan igual', () => {
+    //  «No únicamente objetos diferentes sobre la misma distribución». Dos
+    //  salas con el mismo tamaño Y el mismo reparto de puestos son la misma
+    //  sala con otros adornos, por distinto que sea el mobiliario.
+    const huella = (n) => {
+      const p = PLANTILLAS[n];
+      return `${p.mundo.ancho}x${p.mundo.fondo}|` +
+        p.puestos.map((q) => `${q.gx},${q.gy}`).sort().join(';');
+    };
+    const vistas = new Map();
+    for (const n of BASES) {
+      const k = huella(n);
+      expect(vistas.has(k), `${n} y ${vistas.get(k)} tienen el mismo plano y los puestos en el mismo sitio`)
+        .toBe(false);
+      vistas.set(k, n);
+    }
+  });
 
   it('ninguna sala lleva mural Y videowall: van en el mismo muro', () => {
     //  LOS DOS SE DIBUJAN EN EL MURO DE FONDO Y A LA MISMA ALTURA —el mural en
@@ -254,29 +306,20 @@ describe('cada área se reconoce por lo que tiene dentro', () => {
     }
   });
 
-  it('cada área tiene al menos tres piezas que no tiene ninguna otra', () => {
-    //  LA REGLA QUE PIDIÓ LA ESPECIFICACIÓN DEL 02/11/2026, con esas palabras:
-    //  «cada departamento debe tener por lo menos tres elementos exclusivos
-    //  reconocibles». Y es la afirmación que faltaba: las otras pruebas de
-    //  este bloque comprueban que dos áreas no sean IGUALES, que es mucho más
-    //  flojo — se cumple con que cada una tenga una pieza distinta.
-    //
-    //  «Exclusiva» acá significa que el tipo aparece en esta área y en como
-    //  mucho otra: con siete plantillas y trece tipos útiles, exigir que
-    //  ninguna otra lo tenga obligaría a inventar muebles.
-    const cuentaDeTipo = {};
-    for (const n of BASES) {
-      for (const t of new Set(PLANTILLAS[n].mobiliario.map((m) => m.tipo))) {
-        cuentaDeTipo[t] = (cuentaDeTipo[t] ?? 0) + 1;
-      }
-    }
-    for (const n of BASES) {
-      const propias = [...new Set(PLANTILLAS[n].mobiliario.map((m) => m.tipo))]
-        .filter((t) => cuentaDeTipo[t] <= 2);
-      expect(propias.length, `${n} solo tiene ${propias.length} piezas propias: ${propias.join(', ')}`)
-        .toBeGreaterThanOrEqual(3);
-    }
-  });
+  //  ACÁ VIVÍA «cada área tiene al menos tres piezas que no tiene NINGUNA
+  //  otra». La reemplaza la de pares de más arriba, y no es un ablandamiento:
+  //
+  //  Aquélla la escribí con SIETE plantillas, y era un sustituto de lo que de
+  //  verdad importa. Con once, exige que haya ~33 tipos de mueble usados una o
+  //  dos veces en todo el catálogo, y eso no mide si una sala se reconoce
+  //  frente a otra: obliga a inventar muebles para cumplir un conteo global.
+  //  Un dispensador en dos salas no hace que se confundan.
+  //
+  //  La regla por pares dice exactamente lo que se quiere —que mirando
+  //  cualquier sala al lado de cualquier otra haya tres cosas que las separan—
+  //  y es MÁS estricta en el caso que importa: cazó que `reuniones` y
+  //  `comercial` se diferenciaban en una sola pieza, cosa que la vieja dejaba
+  //  pasar.
 
   it('ningún adorno se repite mecánicamente en toda la sede', () => {
     //  «No duplicar plantas, archivadores y otros adornos de manera
