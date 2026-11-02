@@ -145,15 +145,60 @@ export function mobiliarioDePatio(patio, puertas = []) {
  *
  * @param {{ancho: number, fondo: number}} entrada
  */
-export function mobiliarioDeEntrada(entrada) {
+export function mobiliarioDeEntrada(entrada, puertas = []) {
   const ancho = Number(entrada?.ancho) || 0;
   const fondo = Number(entrada?.fondo) || 0;
   if (ancho < MINIMO.ancho || fondo < 3) return [];
 
   const largo = Math.max(2, Math.min(4, Math.round(ancho * 0.3)));
-  return [
-    { tipo: 'mostrador', gx: Number((ancho / 2).toFixed(2)), gy: ORILLA, largo },
+
+  //  DÓNDE CAE CADA PUERTA, EN DOS DIMENSIONES.
+  //
+  //  La primera versión comparaba la posición del mostrador a lo largo de un
+  //  borde contra el `gy` de puertas que están en OTRO borde: ejes mezclados,
+  //  y la guarda de navegación lo cazó —«hay algo delante de su puerta»—. Una
+  //  puerta del lado izquierdo está en `gx = 0`, una del derecho en
+  //  `gx = ancho`, y las dos a la altura de su vano.
+  const puntosDePuerta = (puertas ?? []).map((v) => ({
+    gx: v.lado === 'izquierda' ? 0 : ancho,
+    gy: (v.desde + v.hasta) / 2
+  }));
+
+  //  EL MOSTRADOR NO SE BORRA NUNCA: SE CORRE.
+  //
+  //  La primera versión del despeje lo quitaba como a cualquier otra pieza
+  //  cuando una puerta le caía cerca, y la guarda de `sede.test.js` lo cazó —
+  //  «la entrada lleva su mostrador», en rojo—. Tenía razón: sin mostrador, la
+  //  franja de entrada deja de leerse como una recepción y pasa a ser un tramo
+  //  más de suelo. Lo que se mueve es el mueble, igual que con las puertas y
+  //  los rótulos: se busca el hueco que ya existe.
+  let gxMostrador = ancho / 2;
+  if (puntosDePuerta.length > 0) {
+    let mejorHolgura = -Infinity;
+    for (let i = 0; i <= 12; i++) {
+      //  Candidatos a lo largo del borde de adentro, con margen en los cantos.
+      const gx = 1.2 + (i / 12) * Math.max(0, ancho - 2.4);
+      const h = Math.min(...puntosDePuerta.map(
+        (q) => Math.hypot(q.gx - gx, q.gy - ORILLA)));
+      if (h > mejorHolgura) { mejorHolgura = h; gxMostrador = gx; }
+    }
+  }
+
+  const piezas = [
+    { tipo: 'mostrador', gx: Number(gxMostrador.toFixed(2)), gy: ORILLA, largo },
     { tipo: 'planta', gx: ORILLA, gy: Number((fondo - ORILLA).toFixed(2)) },
     { tipo: 'planta', gx: Number((ancho - ORILLA).toFixed(2)), gy: Number((fondo - ORILLA).toFixed(2)) }
   ];
+
+  //  Y LA ENTRADA TAMBIÉN DESPEJA LAS PUERTAS. Se le pasó cuando se arregló el
+  //  patio, y costó una puerta: en la empresa del piloto, el macetero de la
+  //  esquina derecha de esta franja caía delante del vano de Recepción. La
+  //  matriz de las once salas lo encontró —«vano dibujado por el que NO se
+  //  pasa»— y la guarda de entonces no, porque probaba una empresa sintética
+  //  en la que esa esquina queda en otro sitio.
+  //  Las macetas SI se quitan si estorban: son adorno, y un adorno delante de
+  //  una puerta es una puerta cerrada. Tambien en dos dimensiones.
+  return piezas.filter((pieza) => pieza.tipo === 'mostrador'
+    || puntosDePuerta.every(
+      (q) => Math.hypot(q.gx - pieza.gx, q.gy - pieza.gy) > DESPEJE_DE_PUERTA));
 }

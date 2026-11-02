@@ -56,6 +56,9 @@ export function sedeDe(salas, agentes, opciones = {}) {
   //  LOS VANOS QUE DAN AL PATIO, para que no se le pongan muebles delante.
   //  Se llena al colocar las salas y se usa al amueblar el patio, mas abajo.
   const vanosAlPatio = [];
+  //  Y los que dan a la franja de ENTRADA, que es otra pieza de circulacion
+  //  con su propio mobiliario. Olvidarla costo la puerta de una sala.
+  const vanosALaEntrada = [];
 
   /**
    * El vano de la puerta lateral de una sala, si hay circulación a su
@@ -236,9 +239,13 @@ export function sedeDe(salas, agentes, opciones = {}) {
     baranda: false,
     //  El mostrador que marca el acceso. No reemplaza a la recepción: esa es
     //  una sala declarada y sigue donde la ponga el reparto.
-    mobiliario: mobiliarioDeEntrada(entrada),
+    //  SE RELLENA MAS ABAJO, cuando ya se sabe donde caen los vanos que dan
+    //  a esta franja: las salas se colocan despues de este bloque.
+    mobiliario: [],
     puestos: []
   });
+  //  La franja de entrada, para amueblarla al final.
+  const plantaDeLaEntrada = plantas[plantas.length - 1];
 
   //  3. Los departamentos, cada uno en su celda y para siempre en la misma.
   const ids = [];
@@ -276,6 +283,22 @@ export function sedeDe(salas, agentes, opciones = {}) {
         });
       }
     }
+    if (entrada) {
+      if (cierre.puertaDerecha && Math.abs(entrada.x - (puesta.x + puesta.ancho)) < 0.01) {
+        vanosALaEntrada.push({
+          lado: 'izquierda',
+          desde: puesta.y + cierre.puertaDerecha[0] - entrada.y,
+          hasta: puesta.y + cierre.puertaDerecha[1] - entrada.y
+        });
+      }
+      if (cierre.puertaLateral && Math.abs(entrada.x + entrada.ancho - puesta.x) < 0.01) {
+        vanosALaEntrada.push({
+          lado: 'derecha',
+          desde: puesta.y + cierre.puertaLateral[0] - entrada.y,
+          hasta: puesta.y + cierre.puertaLateral[1] - entrada.y
+        });
+      }
+    }
     //  EL ANCHO SALE DEL REPARTO, NO DE LA PLANTILLA. `anillo.js` ensancha
     //  cada sala hasta llenar su columna para que no quede suelo muerto al
     //  costado; si acá se dibujara con el ancho de la plantilla, ese suelo
@@ -309,6 +332,11 @@ export function sedeDe(salas, agentes, opciones = {}) {
     });
     ids.push(puesta.sala.id);
   }
+
+  //  3b. YA SE PUEDE AMUEBLAR LA ENTRADA. Hasta acá no se sabía dónde caen
+  //      los vanos que dan a ella, y amueblarla antes fue exactamente el
+  //      defecto que tapó la puerta de una sala.
+  plantaDeLaEntrada.mobiliario = mobiliarioDeEntrada(entrada, vanosALaEntrada);
 
   //  4. EL PATIO. Suelo por el que se pasa, sin muros, y AMUEBLADO: un
   //     rectángulo de suelo liso en el medio de la empresa se lee como un
