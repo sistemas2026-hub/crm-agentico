@@ -22,6 +22,12 @@
 --       abierta conserve el valor viejo.
 --  Hasta el paso 3, B-7 no esta cerrado aunque la compuerta diga que si.
 --
+--  DECIDIDO EL 02/11/2026: se aplica SIN rotar todavia (pasos 2 y 3). Leer el
+--  secreto exigia credenciales de la base, que ya dan acceso total sin el;
+--  PostgREST esta cerrado en Kong; y el riesgo mayor son las contraseñas de la
+--  base filtradas en transcripciones. La rotacion va junto con la de esas
+--  contraseñas (DESPLIEGUE.md §3).
+--
 --  Por que existe (02/11/2026, PRD §8.18)
 --  --------------------------------------
 --  Supabase autoalojado deja el secreto con que se firman los JWT en un GUC de
