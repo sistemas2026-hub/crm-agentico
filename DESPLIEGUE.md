@@ -209,6 +209,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 
 El patrón que más confunde: todas miran al **backend** excepto `CORS_ALLOWED_ORIGINS`, que mira al **frontend** — es la lista de quién tiene permiso de llamarlo. Y `ALLOWED_HOSTS` va sin `https://`; las demás con él.
 
+**`AUTONOMIA_2_ACTIVA` — opcional, y sin ella el sistema no actúa solo** (02/11/2026). Con `1`, el motor abre la etapa de autonomía; sin ella, `frontera` frena **toda** escritura autónoma y **toda** irreversible, también las que aprueba una persona (el reinicio de la ONU, el cierre del Supervisor, la autonomía ganada). Hasta el 02/11 no figuraba en `docker-compose.prod.yml`, así que no llegaba aunque se cargara aquí. No alcanza sola: además tienen que estar el interruptor reactivado y el techo (`cli/autonomia.py`), B-7 cerrado (migración `202611021000_cerrar_b7_secreto_jwt.sql`) y la autorización de cada herramienta (`cli/autorizar_herramienta.py`). Ver PRD §8.18.
+
 ### 4. Dominios
 
 **Uno por servicio.** Traefik enruta por nombre de host, así que dos servicios no pueden compartir dominio.

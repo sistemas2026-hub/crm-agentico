@@ -422,6 +422,21 @@ services:
       # arriba) necesita la MISMA variable como PRIVATE_MOTOR_SERVICE_TOKEN,
       # o sus 30 y pico llamadas empiezan a fallar con 401. Ver DESPLIEGUE.md.
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
+      # LA ETAPA DE AUTONOMIA 2  --  02/11/2026
+      # ----------------------------------------
+      # nucleo/seguridad/autonomia2.py la lee del entorno, y hasta hoy NO
+      # estaba en esta lista: como lo que no se lista no llega, la etapa estaba
+      # apagada en produccion sin que nadie pudiera encenderla desde Dokploy.
+      # Con ella apagada no sale NINGUNA escritura autonoma ni ninguna
+      # irreversible, tampoco las que aprueba una persona (frontera.critica la
+      # exige): ni el reinicio de la ONU, ni el cierre del Supervisor, ni la
+      # autonomia ganada. "En produccion hoy no cierra nada", dice la ficha de
+      # revision-del-cierre (31/10).
+      # Apagada por omision (falla cerrado): se enciende con '1' en Dokploy.
+      # Encenderla NO alcanza sola -- siguen el interruptor, el techo, B-7 y la
+      # autorizacion de cada herramienta (cli/autonomia.py,
+      # cli/autorizar_herramienta.py). PRD §8.18.
+      AUTONOMIA_2_ACTIVA: ${AUTONOMIA_2_ACTIVA:-}
       # Con que nombre aparece este proceso en pg_stat_activity. Ver el porque
       # en nucleo/persistencia/conexion.py: sin esto todas las sesiones llegan
       # firmadas 'Supavisor' y no se puede saber cual las abrio.
