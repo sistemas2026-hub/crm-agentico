@@ -159,7 +159,13 @@ def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dic
                 fila.update({"elegible": not negativas, "faltan": negativas,
                              "no_critica": True})
             if leer_vigente is not None:
-                fila["autonomia"] = vigente(tenant, h.nombre, leer=leer_vigente)
+                fila["autonomia"] = vigente(tenant, h.nombre, leer=leer_vigente,
+                                            config_herramienta=h)
+                #  POR AGENTE (02/11/2026): el estado efectivo en cada agente
+                #  que puede usar la herramienta. Es lo que muestra /agentes.
+                fila["por_agente"] = {
+                    r: vigente(tenant, h.nombre, leer=leer_vigente, config_herramienta=h, rol=r)
+                    for r in agentes_que_la_usan(config, h.nombre)}
         else:
             fila["elegible"] = False
         salida.append(fila)
@@ -169,6 +175,18 @@ def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dic
 # =============================================================================
 #  FASE B  --  promover (una persona), retirar (una persona), y el estado vigente
 # =============================================================================
+
+def agentes_que_la_usan(config, herramienta: str) -> list[str]:
+    """Los agentes (roles del tenant) que pueden usar la herramienta: los que
+    la tienen en 'puede_consultar'. Es lo que decide el motor al armar el
+    catalogo de cada turno -- NO 'Herramienta.roles_permitidos', que nada del
+    runtime consulta (medido el 02/11/2026: reiniciar_ont declara
+    [cliente_final, soporte] y quien de verdad reinicia es
+    soporte_tecnico_cliente)."""
+    roles = getattr(config, "roles", None) or {}
+    return [n for n, r in roles.items()
+            if herramienta in (getattr(r, "puede_consultar", None) or [])]
+
 
 #: Lo que frena aun a lo no critico: hechos en contra dentro de la ventana.
 _CONDICIONES_NEGATIVAS = ("cero_no_confirmadas", "cero_fallidas", "cero_degradaciones")
@@ -192,7 +210,8 @@ class NoPromovible(Exception):
 YA_ES_CRITICA = "promovida_sin_evidencia_y_hoy_critica"
 
 
-def vigente(tenant: str, herramienta: str, *, leer, config_herramienta=None) -> dict:
+def vigente(tenant: str, herramienta: str, *, leer, config_herramienta=None,
+            rol: str | None = None) -> dict:
     """
     Si la herramienta es autonoma AHORA en esta empresa. FALLA CERRADO, como
     el interruptor: sin fila, con la base caida o con la tabla sin instalar,
@@ -203,7 +222,9 @@ def vigente(tenant: str, herramienta: str, *, leer, config_herramienta=None) -> 
     {'autonoma', 'estado', 'promocion_id'}.
     """
     try:
-        fila = leer(tenant, herramienta)
+        #  POR AGENTE (02/11/2026): con 'rol', la fila propia de ese agente
+        #  manda sobre la general (nucleo/persistencia/autonomia_ganada.vigente).
+        fila = leer(tenant, herramienta, rol) if rol else leer(tenant, herramienta)
     except (Exception, SystemExit):                             # noqa: BLE001
         #  SystemExit tambien: sin credenciales la capa de conexion lo lanza
         #  (CLAUDE.md §13, D11), y no hereda de Exception. Una lectura de
@@ -223,12 +244,15 @@ def vigente(tenant: str, herramienta: str, *, leer, config_herramienta=None) -> 
             and getattr(config_herramienta, "critica", True)):
         return {"autonoma": False, "estado": YA_ES_CRITICA,
                 "promocion_id": str(fila.get("id"))}
-    return {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id")),
-            "desde": fila.get("creado_en")}
+    salida = {"autonoma": True, "estado": "activa", "promocion_id": str(fila.get("id")),
+              "desde": fila.get("creado_en")}
+    if fila.get("rol"):
+        salida["rol"] = fila.get("rol")
+    return salida
 
 
 def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escribir,
-             leer_vigente=None) -> dict:
+             leer_vigente=None, rol: str | None = None) -> dict:
     """
     Una PERSONA le da autonomia a una accion. Se vuelve a medir la evidencia
     en este momento -- no la de la pantalla que la persona miro --, y si no
@@ -251,7 +275,15 @@ def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escr
         no_candidata = [*no_candidata, "no_pasa_por_la_puerta_critica"]
     if no_candidata:
         raise NoPromovible("NO_CANDIDATA", no_candidata)
-    if leer_vigente is not None and vigente(tenant, accion, leer=leer_vigente)["autonoma"]:
+    #  POR AGENTE (02/11/2026): solo a un agente que puede usar la herramienta.
+    #  Promover para otro dejaria una fila que nunca decide nada.
+    rol = (rol or "").strip() or None
+    if rol and rol not in agentes_que_la_usan(config, accion):
+        raise NoPromovible("AGENTE_SIN_ESA_HERRAMIENTA",
+                           [{"condicion": "agente_con_la_herramienta", "tiene": rol,
+                             "necesita": agentes_que_la_usan(config, accion)}])
+    escribir_con = (lambda *a: escribir(*a, rol=rol)) if rol else escribir
+    if leer_vigente is not None and vigente(tenant, accion, leer=leer_vigente, rol=rol)["autonoma"]:
         #  Dos clics seguidos dejaban dos filas 'activa'; la segunda tapaba a
         #  la primera y una degradacion bajaba la que no correspondia.
         raise NoPromovible("YA_ES_AUTONOMA")
@@ -281,13 +313,13 @@ def promover(config, tenant: str, accion: str, actor: str, ahora, *, medir, escr
         negativas = _negativas(veredicto(m, u)["faltan"])
         if negativas:
             raise NoPromovible("SIN_EVIDENCIA", negativas)
-        return escribir(tenant, accion, actor.strip(),
+        return escribir_con(tenant, accion, actor.strip(),
                         "promovida sin evidencia previa: la empresa la declara no critica",
                         {"no_critica": True, "evidencia": m, "umbrales": u,
                          "desde": desde.isoformat()})
     v = veredicto(m, u)
     if not v["elegible"]:
         raise NoPromovible("SIN_EVIDENCIA", v["faltan"])
-    return escribir(tenant, accion, actor.strip(), "promovida con la evidencia de la ventana",
+    return escribir_con(tenant, accion, actor.strip(), "promovida con la evidencia de la ventana",
                     {"evidencia": m, "umbrales": u, "desde": desde.isoformat(),
                      "tasa_aprobacion": v["tasa_aprobacion"]})

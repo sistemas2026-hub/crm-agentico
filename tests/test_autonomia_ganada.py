@@ -316,6 +316,70 @@ except ValidationError as e:
     rechazada = "critica: false" in str(e)
 comprobar(rechazada, "B1: crear_ticket (sin irreversible, sin verificacion) no puede ser no critica")
 
+print("\npor agente (02/11/2026): la misma accion sola en un agente y no en otro")
+escritas_rol: list = []
+
+
+def escribir_rol(tenant, accion, actor, motivo, evidencia, rol=None):
+    escritas_rol.append((accion, rol))
+    return {"id": "nueva", "estado": "activa"}
+
+
+try:
+    ag.promover(RAPILINK, "rapilink", "reiniciar_ont", "Ana · u-1", AHORA,
+                medir=lambda *a: sin_evidencia, escribir=escribir_rol,
+                leer_vigente=lambda t, h, r=None: None, rol="facturacion_cliente")
+    #  facturacion_cliente no tiene reiniciar_ont en 'puede_consultar' 
+    error = None
+except ag.NoPromovible as e:
+    error = e
+comprobar(error is not None and error.codigo == "AGENTE_SIN_ESA_HERRAMIENTA" and escritas_rol == [],
+          "a un agente que no usa la herramienta no se le promueve", str(error and error.codigo))
+leidos: list = []
+ag.promover(RAPILINK, "rapilink", "reiniciar_ont", "Ana · u-1", AHORA,
+            medir=lambda *a: sin_evidencia, escribir=escribir_rol,
+            leer_vigente=lambda t, h, r=None: leidos.append(r) or None, rol="soporte_tecnico_cliente")
+comprobar(escritas_rol == [("reiniciar_ont", "soporte_tecnico_cliente")]
+          and leidos == ["soporte_tecnico_cliente"],
+          "con un agente que si la usa: se mira y se escribe SU alcance", f"{escritas_rol} {leidos}")
+por_rol = {"soporte": {"id": "r1", "estado": "retirada", "rol": "soporte"},
+           "soporte_tecnico_cliente": {"id": "p5", "estado": "activa",
+                                       "rol": "soporte_tecnico_cliente", "creado_en": "t0"}}
+filas_pa = ag.evaluar(RAPILINK, "rapilink", AHORA, medir=lambda *a: sin_evidencia,
+                      leer_vigente=lambda t, h, r=None: por_rol.get(r))
+pa = next(f for f in filas_pa if f["accion"] == "reiniciar_ont")["por_agente"]
+comprobar(set(pa) == {"soporte", "soporte_tecnico_cliente"}
+          and pa["soporte_tecnico_cliente"]["autonoma"] is True and pa["soporte"]["autonoma"] is False,
+          "el reporte trae el estado en CADA agente que la tiene en puede_consultar", str(pa))
+comprobar(ag.agentes_que_la_usan(RAPILINK, "reiniciar_ont") == ["soporte", "soporte_tecnico_cliente"],
+          "quien la usa sale de puede_consultar, no de roles_permitidos",
+          str(ag.agentes_que_la_usan(RAPILINK, "reiniciar_ont")))
+v = ag.vigente("t", "reiniciar_ont", leer=lambda t, h, r=None: por_rol.get(r),
+               rol="soporte_tecnico_cliente")
+comprobar(v.get("rol") == "soporte_tecnico_cliente", "vigente dice de que alcance salio", str(v))
+
+print("\nel ultimo metro mira al agente que pidio la accion")
+from nucleo.seguridad import aprobacion as modulo_aprobacion   # noqa: E402
+HUELLA = modulo_aprobacion.hash_de({})
+fila_aprob = {"id": "a1", "herramienta": "reiniciar_ont", "origen": "o", "hash_argumentos": HUELLA,
+              "argumentos": {}, "revisado_por": "autonomia_ganada:p5", "estado": "ejecutando",
+              "revisado_en": "2026-11-02T18:00:00+00:00",
+              "organization_id": "org", "rol_solicitante": "cliente_final"}
+apr = modulo_aprobacion.desde_fila(fila_aprob, "rapilink")
+comprobar(apr.rol == "cliente_final", "la aprobacion lleva el agente de la propuesta", str(apr.rol))
+pedidos_um: list = []
+original_um = modulo_aprobacion._autonomia_vigente
+modulo_aprobacion._autonomia_vigente = lambda t, h, r=None: pedidos_um.append(r) or {
+    "autonoma": True, "promocion_id": "p5"}
+apr_sellada = modulo_aprobacion.Aprobacion(**{**apr.__dict__, "sello": modulo_aprobacion.sello_de(
+    tenant="rapilink", organization_id="org", herramienta="reiniciar_ont", origen="o",
+    huella=HUELLA, aprobador="autonomia_ganada:p5")})
+vered = modulo_aprobacion.veredicto(apr_sellada, tenant="rapilink", herramienta="reiniciar_ont",
+                                    argumentos={})
+modulo_aprobacion._autonomia_vigente = original_um
+comprobar(pedidos_um == ["cliente_final"],
+          "el ultimo metro pregunta por la promocion de ESE agente", f"{pedidos_um} {vered}")
+
 print("\nla ruta GET /reportes/autonomia-ganada")
 from nucleo.canales import api                               # noqa: E402
 from nucleo.persistencia import autonomia_ganada as medicion  # noqa: E402
@@ -337,7 +401,7 @@ print("\nlas rutas de promover y retirar")
 escritas_ruta: list[tuple] = []
 medicion.promover = lambda t, a, actor, motivo, ev: escritas_ruta.append(("promover", a, actor)) or {
     "id": "p9", "estado": "activa"}
-medicion.retirar = lambda t, a, actor, motivo: escritas_ruta.append(("retirar", a, actor, motivo)) or {
+medicion.retirar = lambda t, a, actor, motivo, rol=None: escritas_ruta.append(("retirar", a, actor, motivo)) or {
     "id": "p10", "estado": "retirada"}
 medicion.vigente = lambda t, h: None
 medicion.medir = lambda tenant, h, desde, hasta, canales=None: m()
@@ -389,13 +453,80 @@ comprobar(reinicio.get("autonomia") == {"autonoma": True, "estado": "activa", "p
 print("\nla ejecucion: la que hoy es critica no sale sola, y se degrada (M1)")
 degradadas: list[tuple] = []
 api._degradar_autonomia = lambda t, h, motivo, ev: degradadas.append((h, motivo))
-medicion.vigente = lambda t, h: {"id": "p7", "estado": "activa",
-                                 "evidencia": {"no_critica": True}, "creado_en": None}
+medicion.vigente = lambda t, h, r=None: {"id": "p7", "estado": "activa",
+                                         "evidencia": {"no_critica": True}, "creado_en": None}
+#  La ejecucion lee primero la propuesta, para saber que agente la pidio.
+api.persistencia.accion_propuesta_de = lambda t, a: {"rol_solicitante": None}
 salida = api._ejecutar_si_es_autonoma(RAPILINK_CRITICO, "rapilink", "accion-1",
                                      next(h for h in RAPILINK_CRITICO.herramientas
                                           if h.nombre == "reiniciar_ont"))
 comprobar(salida is None and degradadas and degradadas[0][0] == "reiniciar_ont",
           "M1: no se ejecuta, y la promocion queda degradada con su motivo", str(degradadas))
+
+print("\nla ejecucion autonoma usa el agente de la propuesta, y las rutas lo aceptan")
+roles_leidos: list = []
+api.persistencia.accion_propuesta_de = lambda t, a: {"rol_solicitante": "soporte",
+                                                     "hash_argumentos": "h"}
+medicion.vigente = lambda t, h, r=None: roles_leidos.append(r) or {"id": "r1", "estado": "retirada",
+                                                                   "rol": "soporte"}
+salida = api._ejecutar_si_es_autonoma(RAPILINK, "rapilink", "accion-2",
+                                     por_nombre["reiniciar_ont"])
+comprobar(salida is None and roles_leidos == ["soporte"],
+          "pide la promocion del agente que pidio la accion (y la de soporte esta retirada)",
+          str(roles_leidos))
+promovidas_rol: list = []
+medicion.promover = lambda t, a, actor, motivo, ev, rol=None: promovidas_rol.append(rol) or {
+    "id": "p11", "estado": "activa"}
+medicion.vigente = lambda t, h, r=None: None
+medicion.medir = lambda tenant, h, desde, hasta, canales=None: m(revisadas=0, rechazadas=0, confirmadas=0)
+api._config_de = lambda tenant: RAPILINK
+r = http.post("/autonomia-ganada/promover", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                  "rol": "soporte_tecnico_cliente", **AUTOR})
+comprobar(r.status_code == 201 and promovidas_rol == ["soporte_tecnico_cliente"],
+          "POST promover con 'rol': se escribe para ese agente", f"{r.status_code} {promovidas_rol}")
+r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                 "rol": "ventas", "motivo": "x", **AUTOR})
+comprobar(r.status_code == 409, "retirar para un agente que no usa la herramienta: 409",
+          str(r.status_code))
+retiradas_rol: list = []
+medicion.retirar = lambda t, a, actor, motivo, rol=None: retiradas_rol.append(rol) or {
+    "id": "p12", "estado": "retirada"}
+r = http.post("/autonomia-ganada/retirar", json={"tenant": "rapilink", "accion": "reiniciar_ont",
+                                                 "rol": "soporte", "motivo": "no en soporte", **AUTOR})
+comprobar(r.status_code == 201 and retiradas_rol == ["soporte"],
+          "retirar con 'rol': solo a ese agente", f"{r.status_code} {retiradas_rol}")
+
+from nucleo.modelo import motor as modulo_motor               # noqa: E402
+roles_motor: list = []
+medicion.vigente = lambda t, h, r=None: roles_motor.append(r) or {"id": "p5", "estado": "activa",
+                                                                  "creado_en": None}
+dice_en_curso = modulo_motor._tiene_autonomia_ganada("rapilink", por_nombre["reiniciar_ont"],
+                                                    "cliente_final")
+comprobar(dice_en_curso is True and roles_motor == ["cliente_final"],
+          "lo que se le dice al cliente ('sale solo') mira la promocion de SU agente",
+          str(roles_motor))
+
+#  Y en el punto donde el motor arma la respuesta de la propuesta, no solo la
+#  funcion suelta: el agente que llega es el que la pidio.
+from nucleo.persistencia import db as modulo_db                # noqa: E402
+from nucleo.seguridad.verificacion import Sesion              # noqa: E402
+roles_sitio: list = []
+original_tiene = modulo_motor._tiene_autonomia_ganada
+original_guardar = modulo_db.guardar_accion_propuesta
+modulo_motor._tiene_autonomia_ganada = lambda t, h, r=None: roles_sitio.append(r) or True
+modulo_db.guardar_accion_propuesta = lambda *a, **k: ("accion-9", False)
+try:
+    sesion_prueba = Sesion(identificador_canal="573000000000")
+    sesion_prueba.sn_onu = "ZTEG00000000"
+    salida_prop = modulo_motor._ejecutar_propuesta_de_accion(
+        por_nombre["reiniciar_ont"], sesion_prueba, {"sintoma": "sin_servicio"}, "rapilink",
+        "cliente_final", "573000000000", config=RAPILINK, historial=[], origen="prueba")
+finally:
+    modulo_motor._tiene_autonomia_ganada = original_tiene
+    modulo_db.guardar_accion_propuesta = original_guardar
+comprobar(roles_sitio == ["cliente_final"] and salida_prop.get("estado") == "en_curso",
+          "la propuesta pregunta por la autonomia del agente que la pidio",
+          f"{roles_sitio} {salida_prop.get('estado') if isinstance(salida_prop, dict) else salida_prop}")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

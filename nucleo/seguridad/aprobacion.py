@@ -84,12 +84,13 @@ AUTONOMIA_NO_VIGENTE = "AUTONOMIA_NO_VIGENTE"
 PREFIJO_AUTONOMIA = "autonomia_ganada:"
 
 
-def _autonomia_vigente(tenant: str, herramienta: str) -> dict:
-    """La promocion vigente, sin cache. Se sustituye en las pruebas."""
+def _autonomia_vigente(tenant: str, herramienta: str, rol: str | None = None) -> dict:
+    """La promocion vigente para el agente que pidio la accion, sin cache. Se
+    sustituye en las pruebas."""
     from nucleo.persistencia import autonomia_ganada as registro
     from nucleo.seguridad import autonomia_ganada
 
-    return autonomia_ganada.vigente(tenant, herramienta, leer=registro.vigente)
+    return autonomia_ganada.vigente(tenant, herramienta, leer=registro.vigente, rol=rol)
 
 #  M06-F (22/09/2026): el estado en que una aprobacion VALE es el del ciclo B5
 #  de origin, no uno propio. En B5 aprobar es RESERVAR: una persona pasa la fila
@@ -149,6 +150,9 @@ class Aprobacion:
     #  M06-C: la organizacion de la fila y el sello escrito al aprobar.
     organization_id: str = ""
     sello: str = ""
+    #  El agente que la pidio ('rol_solicitante' de la fila): el ultimo metro
+    #  de la autonomia mira la promocion de ESE agente (02/11/2026).
+    rol: str = ""
 
 
 @dataclass(frozen=True)
@@ -180,6 +184,7 @@ def desde_fila(fila: dict | None, tenant: str) -> Aprobacion | None:
         estado=str(fila.get("estado") or ""),
         organization_id=str(fila.get("organization_id") or ""),
         sello=str(fila.get("sello_aprobacion") or ""),
+        rol=str(fila.get("rol_solicitante") or ""),
     )
 
 
@@ -249,7 +254,7 @@ def veredicto(aprobacion: Aprobacion | None, *, tenant: str, herramienta: str,
                          "quien aprobo desde que se aprobo")
     if aprobacion.aprobador.startswith(PREFIJO_AUTONOMIA):
         promocion = aprobacion.aprobador[len(PREFIJO_AUTONOMIA):]
-        vigente = _autonomia_vigente(tenant.strip(), herramienta)
+        vigente = _autonomia_vigente(tenant.strip(), herramienta, aprobacion.rol or None)
         if not vigente.get("autonoma") or vigente.get("promocion_id") != promocion:
             return Veredicto(False, AUTONOMIA_NO_VIGENTE,
                              f"la autonomia de '{herramienta}' ya no esta vigente "

@@ -3920,6 +3920,8 @@ def autonomia_ganada_promover():
 
     cuerpo = request.get_json(force=True, silent=True) or {}
     tenant, accion = cuerpo.get("tenant"), cuerpo.get("accion")
+    #  El agente, si se da solo a uno (02/11/2026). Sin 'rol': todos.
+    rol = str(cuerpo.get("rol") or "").strip() or None
     if not tenant or not accion:
         return jsonify({"error": "Faltan 'tenant' o 'accion'."}), 400
     try:
@@ -3937,13 +3939,14 @@ def autonomia_ganada_promover():
             _config_de(tenant), tenant, str(accion), f"{autor} · {usuario}",
             datetime.now(timezone.utc),
             medir=lambda t, h, d, hh: medicion.medir(t, h, d, hh, canales=canales.REALES),
-            escribir=medicion.promover, leer_vigente=medicion.vigente)
+            escribir=medicion.promover, leer_vigente=medicion.vigente, rol=rol)
     except autonomia_ganada.NoPromovible as e:
         return jsonify({"error": e.codigo, "faltan": e.faltan}), 409
     except Exception as e:
         return fallo(503, "autonomia_no_promovida", "No se pudo promover: no quedo registrada.",
                      componente="autonomia_ganada", e=e)
-    registrar("autonomia_ganada", "accion promovida", tenant=tenant, accion=str(accion))
+    registrar("autonomia_ganada", "accion promovida", tenant=tenant, accion=str(accion),
+              rol=rol or "*")
     return jsonify({"estado": fila.get("estado"), "id": str(fila.get("id"))}), 201
 
 
@@ -3958,16 +3961,25 @@ def autonomia_ganada_retirar():
     motivo = str(cuerpo.get("motivo") or "").strip()
     if not tenant or not accion or not motivo:
         return jsonify({"error": "Faltan 'tenant', 'accion' o 'motivo'."}), 400
+    rol = str(cuerpo.get("rol") or "").strip() or None
+    if rol:
+        #  Solo un agente que puede usar la herramienta: una fila para otro no
+        #  decide nada y ensucia la historia.
+        from nucleo.seguridad import autonomia_ganada as ag_reglas
+        if rol not in ag_reglas.agentes_que_la_usan(_config_de(tenant), str(accion)):
+            return jsonify({"error": "AGENTE_SIN_ESA_HERRAMIENTA"}), 409
     try:
         autor, usuario, _ = _autor_y_clave(cuerpo)
     except persistencia.AutorInvalido:
         return jsonify({"error": "FALTA_QUIEN_RETIRA"}), 400
     try:
-        fila = medicion.retirar(tenant, str(accion), f"{autor} · {usuario}", motivo[:500])
+        fila = medicion.retirar(tenant, str(accion), f"{autor} · {usuario}", motivo[:500],
+                                rol=rol)
     except Exception as e:
         return fallo(503, "autonomia_no_retirada", "No se pudo retirar: no quedo registrado.",
                      componente="autonomia_ganada", e=e)
-    registrar("autonomia_ganada", "accion retirada", tenant=tenant, accion=str(accion))
+    registrar("autonomia_ganada", "accion retirada", tenant=tenant, accion=str(accion),
+              rol=rol or "*")
     return jsonify({"estado": fila.get("estado"), "id": str(fila.get("id"))}), 201
 
 
@@ -10078,8 +10090,18 @@ def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -
     from nucleo.seguridad import aprobacion, autonomia_ganada
     from nucleo.persistencia import autonomia_ganada as registro
 
+    #  POR AGENTE (02/11/2026): la promocion que vale es la del agente que la
+    #  pidio. Si no se puede leer la propuesta, no se adivina: queda para una
+    #  persona.
+    try:
+        rol_solicitante = (persistencia.accion_propuesta_de(tenant, accion_id) or {}).get(
+            "rol_solicitante") or None
+    except (Exception, SystemExit) as e:                         # noqa: BLE001
+        registrar("autonomia_ganada", "no se pudo leer la propuesta: queda para una persona",
+                  tenant=tenant, herramienta=herramienta.nombre, error=e)
+        return None
     vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente,
-                                       config_herramienta=herramienta)
+                                       config_herramienta=herramienta, rol=rol_solicitante)
     if vigente.get("estado") == autonomia_ganada.YA_ES_CRITICA:
         _degradar_autonomia(tenant, herramienta.nombre,
                             "se promovio sin evidencia por no critica y hoy la empresa "

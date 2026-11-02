@@ -74,7 +74,7 @@ consultas: list[tuple] = []
 estado = {"v": {"autonoma": True, "estado": "activa", "promocion_id": "p1"}}
 
 
-def vigente_falso(tenant, herramienta):
+def vigente_falso(tenant, herramienta, rol=None):
     consultas.append((tenant, herramienta))
     return estado["v"]
 
@@ -141,7 +141,7 @@ api.persistencia.accion_propuesta_de = lambda tenant, i: {"id": i, "hash_argumen
 degradadas_c: list[tuple] = []
 api._degradar_autonomia = lambda tenant, h, motivo, ev: degradadas_c.append((h, motivo))
 TICKET = SimpleNamespace(nombre="crear_ticket", aprobacion_humana=True, irreversible=False)
-registro.vigente = lambda tenant, h: ({"id": "p1", "estado": "activa", "creado_en": "promovida-en"}
+registro.vigente = lambda tenant, h, r=None: ({"id": "p1", "estado": "activa", "creado_en": "promovida-en"}
                                      if h == "reiniciar_ont" else None)
 r = api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO)
 comprobar(desde_pedido[-1:] == ["promovida-en"],
@@ -150,15 +150,15 @@ comprobar(r == {"ok": True} and llamadas == [("rapilink", "acc-9", "autonomia_ga
           "con autonomia vigente: la misma cadena, firmada por la promocion, liberando si una guarda frena",
           str(llamadas))
 llamadas.clear()
-registro.vigente = lambda tenant, h: {"id": "p1", "estado": "activa"}     # aunque la tuviera
+registro.vigente = lambda tenant, h, r=None: {"id": "p1", "estado": "activa"}     # aunque la tuviera
 comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", TICKET) is None and llamadas == [],
           "una que no es irreversible no entra a este camino, aunque figure promovida")
-registro.vigente = lambda tenant, h: {"id": "p1", "estado": "degradada"}
+registro.vigente = lambda tenant, h, r=None: {"id": "p1", "estado": "degradada"}
 comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO) is None and llamadas == [],
           "sin autonomia vigente: queda en la cola, no se ejecuta")
 
 
-def base_caida(tenant, h):
+def base_caida(tenant, h, rol=None):
     raise SystemExit("No hay datos de conexion")
 
 
@@ -167,7 +167,7 @@ comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", R
           "con la base caida: falla cerrado, no se ejecuta")
 
 print("\nlos frenos de la autonomia: lo que nadie midio, y el volumen")
-registro.vigente = lambda tenant, h: {"id": "p1", "estado": "activa"}
+registro.vigente = lambda tenant, h, r=None: {"id": "p1", "estado": "activa"}
 volumen.update(sin_resolver=3)
 llamadas.clear(); degradadas_c.clear()
 comprobar(api._ejecutar_si_es_autonoma(SimpleNamespace(), "rapilink", "acc-9", REINICIO) is None
@@ -320,7 +320,7 @@ for resultado, debe in ((verificacion_accion.NO_CONFIRMADA, True), (verificacion
 print("\nC5 · el turno dice 'quedo pedido', nunca 'ya se hizo'")
 from nucleo.modelo import motor                                  # noqa: E402
 
-registro.vigente = lambda tenant, h: {"id": "p1", "estado": "activa"}
+registro.vigente = lambda tenant, h, r=None: {"id": "p1", "estado": "activa"}
 comprobar(motor._tiene_autonomia_ganada("rapilink", REINICIO) is True
           and motor._tiene_autonomia_ganada("rapilink", TICKET) is False,
           "solo la irreversible con autonomia vigente cuenta como autonoma")
@@ -339,19 +339,19 @@ motor.aprobaciones.desde_fila = lambda fila, tenant: SimpleNamespace(aprobador=f
 HERR_M = SimpleNamespace(nombre="reiniciar_ont", irreversible=True, tipo="http", asincrona=False,
                          inyectar_sesion={}, exige_previas=[], verificacion=None)
 CONF_M = SimpleNamespace(herramientas=[HERR_M], variables_tenant={})
-motor.aprobaciones._autonomia_vigente = lambda t, h: {"autonoma": False, "estado": "degradada"}
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None: {"autonoma": False, "estado": "degradada"}
 res, codigo, _ = motor.ejecutar_accion_irreversible(
     CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
              "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
 comprobar(efectos == [] and codigo == aprobacion.AUTONOMIA_NO_VIGENTE and res.get("bloqueo_de_frontera"),
           "degradada en el ultimo metro: el efecto NO sale, y se marca como bloqueo", f"{codigo} {efectos}")
-motor.aprobaciones._autonomia_vigente = lambda t, h: {"autonoma": True, "estado": "activa", "promocion_id": "p1"}
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None: {"autonoma": True, "estado": "activa", "promocion_id": "p1"}
 res, codigo, _ = motor.ejecutar_accion_irreversible(
     CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
              "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
 comprobar(len(efectos) == 1 and codigo is None, "vigente en el ultimo metro: sale", f"{codigo} {efectos}")
 efectos.clear()
-motor.aprobaciones._autonomia_vigente = lambda t, h: (_ for _ in ()).throw(AssertionError("no consultar"))
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None: (_ for _ in ()).throw(AssertionError("no consultar"))
 res, codigo, _ = motor.ejecutar_accion_irreversible(
     CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
              "revisado_por": "Ana Perez", "contexto": {}}, "rapilink")

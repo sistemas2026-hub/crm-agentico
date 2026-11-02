@@ -100,20 +100,28 @@ def medir(tenant: str, herramienta: str, desde, hasta, *, canales) -> dict:
 #  NO deciden si se puede promover: eso lo decide nucleo/seguridad/
 #  autonomia_ganada.py con la evidencia del momento.
 
-def vigente(tenant: str, herramienta: str) -> dict | None:
-    """La ultima fila de esa herramienta, o None si nunca hubo. LANZA si la
-    base no contesta: quien llama decide que eso es "no autonoma"."""
+def vigente(tenant: str, herramienta: str, rol: str | None = None) -> dict | None:
+    """La fila que decide, o None si nunca hubo. LANZA si la base no contesta:
+    quien llama decide que eso es "no autonoma".
+
+    POR AGENTE (02/11/2026, supabase/202611021200_autonomia_por_agente.sql):
+    con 'rol', la ultima fila PROPIA de ese agente si tiene alguna, y si no la
+    ultima general (rol nulo). Sin 'rol', solo la general. La propia manda:
+    una retirada para 'soporte' frena a 'soporte' aunque la general este activa."""
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select id, estado, actor, motivo, evidencia, creado_en
+            """select id, estado, actor, motivo, evidencia, creado_en, rol
                  from asistente.autonomia_ganada
                 where organization_id = %s and herramienta = %s
-                order by creado_en desc, id desc limit 1""", (org, herramienta))
+                  and (rol is null or rol = %s::text)
+                order by (rol is not null) desc, creado_en desc, id desc limit 1""",
+            (org, herramienta, rol))
         fila = cur.fetchone()
     return dict(fila) if fila else None
 
 
-def promover(tenant: str, herramienta: str, actor: str, motivo: str, evidencia: dict) -> dict:
+def promover(tenant: str, herramienta: str, actor: str, motivo: str, evidencia: dict,
+             rol: str | None = None) -> dict:
     """Una persona le da autonomia a la herramienta, por la funcion de la base
     (estado fijo, una sola activa, solo esta empresa). Con el rol del runtime:
     en produccion el motor no puede asumir 'autonomia_operador' (ver la
@@ -121,16 +129,19 @@ def promover(tenant: str, herramienta: str, actor: str, motivo: str, evidencia: 
     import json
 
     with sesion(tenant) as (cur, org):
-        cur.execute("select * from asistente.autonomia_ganada_promover(%s, %s, %s, %s, %s::jsonb)",
-                    (org, herramienta, actor, motivo, json.dumps(evidencia or {})))
+        cur.execute("select * from asistente.autonomia_ganada_promover_agente("
+                    "%s, %s, %s, %s, %s, %s::jsonb)",
+                    (org, herramienta, rol, actor, motivo, json.dumps(evidencia or {})))
         return dict(cur.fetchone())
 
 
-def retirar(tenant: str, herramienta: str, actor: str, motivo: str) -> dict:
-    """Una persona se la quita, por la funcion de la base."""
+def retirar(tenant: str, herramienta: str, actor: str, motivo: str,
+            rol: str | None = None) -> dict:
+    """Una persona se la quita, por la funcion de la base. Con 'rol', solo a
+    ese agente (y esa fila propia manda sobre la general)."""
     with sesion(tenant) as (cur, org):
-        cur.execute("select * from asistente.autonomia_ganada_retirar(%s, %s, %s, %s)",
-                    (org, herramienta, actor, motivo))
+        cur.execute("select * from asistente.autonomia_ganada_retirar_agente(%s, %s, %s, %s, %s)",
+                    (org, herramienta, rol, actor, motivo))
         return dict(cur.fetchone())
 
 
