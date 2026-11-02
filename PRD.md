@@ -1,7 +1,7 @@
 # PRD — Dexter: la operación de un ISP con IA
 
 > **Documento de Requisitos de Producto (Product Requirements Document)**
-> Plataforma SaaS multi-empresa para proveedores de internet. Reescrito en sus §1–§3 el 30/10/2026 (ver §8.17): la versión anterior describía un asistente interno con un modelo local, que dejó de ser el producto en agosto.
+> Plataforma SaaS multi-empresa para proveedores de internet. Reescrito en sus §1–§3 el 30/10/2026 (ver §8.17): la versión anterior describía un asistente interno con un modelo local, que dejó de ser el producto en agosto. **El objetivo y el principio de autonomía (§1, §2) los fijó el dueño del producto el 02/11/2026 (§8.18)**: mandan sobre cualquier otra línea de este documento que diga lo contrario.
 
 ---
 
@@ -9,7 +9,7 @@
 
 Dexter es una plataforma para ISPs que **atiende a sus clientes por WhatsApp, responde a sus colaboradores por web y coordina su operación de campo** (Supervisor, Despacho, app de técnicos), consultando y actuando sobre los sistemas de la empresa: WispHub, SmartOLT y el CRM. Es multi-empresa: dar de alta un ISP es configuración, no código (ARQUITECTURA.md).
 
-**Lo que se vende es capacidad: que el mismo equipo atienda más clientes, más rápido y con menos errores.** Primer despliegue: Rapilink (~7.272 clientes activos). El modelo de lenguaje es DeepSeek vía API, amparado en la autorización de tratamiento que firma el cliente (RNF-01); la historia del modelo local está en §7.1.
+**El objetivo es reemplazar la mano de obra humana de un ISP en el mayor porcentaje posible.** Los agentes hacen el trabajo; una persona interviene solo para aprobar las acciones **críticas** —las que pueden causar daño a la empresa (§2)— y en lo que el sistema todavía no sabe resolver, que es una lista a achicar, no un estado deseado. Primer despliegue: Rapilink (~7.272 clientes activos). El modelo de lenguaje es DeepSeek vía API, amparado en la autorización de tratamiento que firma el cliente (RNF-01); la historia del modelo local está en §7.1.
 
 El sistema **no entrena** un modelo: lo integra mediante *tool calling* a las APIs de la empresa, con validación, filtrado de datos sensibles y una frontera de autorización en código antes de cualquier efecto.
 
@@ -23,11 +23,11 @@ Un ISP crece en clientes más rápido que en personas. Cada cliente nuevo trae m
 
 ### Tesis de negocio (30/10/2026)
 
-> **Con el mismo equipo, el doble de clientes.**
+> **Los agentes hacen el trabajo de la operación; las personas aprueban lo crítico.**
 
-Dexter absorbe el **volumen** —el primer contacto, el diagnóstico, la clasificación, el reparto, el seguimiento, el aviso— para que las personas del equipo dediquen su tiempo a lo que solo una persona puede resolver.
+Dexter toma el trabajo completo, no solo el volumen: el primer contacto, el diagnóstico, la clasificación, la resolución, el reparto, el seguimiento, el cierre y el aviso. Cada tarea que hoy hace una persona y que no es crítica es una tarea que Dexter debería hacer sola. El resultado para el ISP es operar con mucha menos gente, no solo crecer sin contratar.
 
-Se vende como capacidad y no como reemplazo de personal, por tres motivos: un ISP que crece no despide, deja de contratar, y eso es lo que paga; quien compra "reemplazo" compara contra un sueldo, quien compra capacidad compara contra su crecimiento; y el cliente final tiene que poder llegar a una persona cuando la necesita (§8.17, riesgos).
+*Hasta el 02/11/2026 este párrafo decía "se vende como capacidad y no como reemplazo de personal". El dueño del producto lo corrigió: el objetivo es reemplazar la mano de obra humana lo más posible (§8.18). Lo que sí se conserva de aquel párrafo es que el cliente final puede pedir una persona y llegar a ella (§10): eso es un derecho del cliente, no un paso del trabajo.*
 
 ### Métrica norte y sus contrapesos
 
@@ -44,29 +44,43 @@ Se vende como capacidad y no como reemplazo de personal, por tres motivos: un IS
 
 **Regla:** un cambio que sube *resolución sin persona* mientras sube el *recontacto* o baja la *satisfacción* es una regresión, aunque el número principal mejore.
 
-### Principio: alcance sin techo, autonomía ganada con evidencia
+### Principio: autónomo por defecto, una persona solo en lo crítico (02/11/2026)
 
 | Eje | Dirección |
 |---|---|
 | **Alcance** — cuántos sistemas ve, cuántas preguntas responde, cuántas tareas toma | **Crece sin techo.** Aquí vive el valor |
-| **Autonomía** — qué ejecuta sin que una persona lo apruebe | **Crece acción por acción y empresa por empresa, solo con evidencia y con validación en código antes del efecto** |
+| **Autonomía** — qué ejecuta sin que una persona lo apruebe | **Todo, salvo lo crítico.** Por defecto el agente ejecuta solo; una persona aprueba únicamente las acciones críticas |
 
-*Hasta el 30/10/2026 la segunda fila decía "no crecer". Se cambió porque congelaba la tesis: el reinicio remoto, la rama que resuelve sin visita, exige aprobación humana en cada caso desde M06-A (21/09/2026). El riesgo que motivaba "no crecer" —la lección de `gemma3`, §7.1— sigue intacto: lo que cambia es que la autonomía deja de ser una opinión y pasa a ser una medición.*
+**Qué es crítico — la definición, completa.** Una acción es crítica si un error suyo puede dañar a la empresa, y eso pasa solo cuando:
 
-Una acción pasa de "una persona aprueba" a "la IA ejecuta" **solo si cumple las cuatro**:
+1. **mueve dinero o cambia lo que se le cobra a un cliente**: registrar un pago, una promesa de pago, reactivar a un suspendido, un descuento, anular una factura;
+2. **deja a un cliente sin servicio de una forma que no se recupera sola, o le da un servicio que no paga**: cambiar el tipo de ONU, suspender, cancelar, encender la televisión;
+3. **afecta a muchos clientes a la vez**: un aviso masivo, un cambio sobre un nodo o una OLT entera;
+4. **borra datos o expone datos personales** fuera de lo que autoriza el cliente (Ley 1581);
+5. **compromete a la empresa con un tercero**: un contrato, una compra, cancelar una venta.
+
+Lo que no encaja en ninguna de las cinco **no es crítico, aunque hoy pida aprobación**, y lo hace el agente sin pedir permiso: responder, diagnosticar, clasificar, crear, actualizar y cerrar tickets, reiniciar un equipo, pasar un caso a Despacho, armar la jornada, crear y repartir órdenes, cargar el material, recordarle al técnico, avisarle a un cliente. Que una acción no crítica siga pidiendo aprobación es un pendiente de producto, no una precaución.
+
+**La persona sale; la garantía no.** Lo que antes revisaba una persona lo revisa el código: antes del efecto (la frontera, las precondiciones `exige_previas`, la idempotencia, la auditoría) y después, cuando hay cómo comprobarlo. Quitar la aprobación humana **nunca** quita la validación en código (CLAUDE.md §4: "seguridad en código, nunca solo en el prompt"). El interruptor de autonomía sigue apagando todo de un paso y falla cerrado (CLAUDE.md §8). Y los contrapesos de arriba —recontacto y satisfacción— son los que dicen si el reemplazo es real o solo un número.
+
+**Lo crítico también puede soltarse, con evidencia.** Una acción crítica pasa a salir sola **solo** por el camino de la autonomía ganada (Ola 3, §8.17), que exige las cuatro condiciones de abajo. Ese camino ya no es la puerta de todo lo que se ejecuta: es la puerta de lo crítico.
+
+*Historia de esta fila: hasta el 30/10/2026 decía "no crecer"; del 30/10 al 02/11 decía "crece acción por acción, solo con evidencia", lo que dejaba toda acción pidiendo aprobación hasta medirla. El dueño la fijó como está (§8.18). El riesgo que motivó "no crecer" —la lección de `gemma3`, §7.1— se cubre con validación en código, no con personas.*
+
+Una acción **crítica** pasa de "una persona aprueba" a "la IA ejecuta" **solo si cumple las cuatro**:
 
 1. **Su efecto se verifica en código después** — p. ej. `last_status_change` para un reinicio (§12, decisiones congeladas de CLAUDE.md). Sin verificación posible, siempre una persona (CLAUDE.md §10).
 2. **Sus precondiciones se comprueban en código antes** (`exige_previas`), sobre datos medidos y no sobre el relato del modelo.
 3. **Hay evidencia en esa empresa**: un mínimo de propuestas revisadas por personas en una ventana, con una tasa de aprobación sin cambios por encima de un umbral, y cero verificaciones fallidas atribuibles a la acción. Mínimo, ventana y umbral son configuración por empresa, con un piso fijo del núcleo que ninguna empresa puede bajar.
 4. **Se degrada sola**: si las verificaciones fallidas o el recontacto de esa acción superan su umbral, vuelve a "una persona aprueba" sin intervención.
 
-**Subir lo decide una persona viendo la evidencia; bajar lo hace el código.** El interruptor y el techo de autonomía (CLAUDE.md §8, PRD §8.6) siguen por encima de todo. Por este camino **nunca** salen solas: `registrar_pago`, las cancelaciones, ni ninguna acción cuyo efecto no se pueda medir.
+**Subir lo decide una persona viendo la evidencia; bajar lo hace el código.** El interruptor y el techo de autonomía (CLAUDE.md §8, PRD §8.6) siguen por encima de todo. Por este camino, hoy, **no** salen solas: `registrar_pago`, las cancelaciones, ni ninguna acción crítica cuyo efecto no se pueda medir.
 
 > **Principio central:** *la inteligencia del sistema no está en el modelo, está en el catálogo de herramientas.* El modelo es la interfaz —traduce lenguaje a llamadas y datos a frases—; el conocimiento vive en los sistemas de la empresa y las garantías viven en el código.
 
 ### Requisitos permanentes de seguridad
 - Cero exposición de datos sensibles innecesarios (IP, MAC, credenciales) al modelo.
-- Cero acciones irreversibles sin aprobación humana, salvo las que ganaron autonomía por las cuatro condiciones de arriba.
+- Cero acciones **críticas** sin aprobación humana, salvo las que ganaron autonomía por las cuatro condiciones de arriba. Las no críticas no piden aprobación: piden validación en código antes del efecto.
 
 ---
 
@@ -153,7 +167,7 @@ El orden y el porqué están en §8.17. En una línea cada ola:
 - **RF-17:** Ninguna lectura del backend sirve datos sin una empresa resuelta: sin empresa, nada. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
 - **RF-18:** Un reinicio remoto solo se propone después de comprobar en código que no hay una caída compartida. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
 - **RF-19:** Cada aviso del catálogo de mensajes automáticos sale solo cuando ocurre su evento, si la empresa lo encendió; se agregan caída masiva y visita confirmada. *(Ola 2)* — *visita programada, ticket creado y caída masiva (con aprobación humana, pestaña Fallas de red) en código el 30-31/10/2026, sin desplegar*
-- **RF-20:** Una acción gana o pierde autonomía por empresa según las cuatro condiciones de §2, y la evidencia que la sostiene se puede ver. *(Ola 3)*
+- **RF-20:** Una acción **crítica** gana o pierde autonomía por empresa según las cuatro condiciones de §2, y la evidencia que la sostiene se puede ver. Las no críticas son autónomas sin pasar por acá (§2, §8.18). *(Ola 3)*
 - **RF-21:** Un ISP con WispHub + SmartOLT se da de alta sin cambios de código ni deploy. *(Ola 4)* — *el reloj ya la descubre en la base y el webhook ya no depende de un dominio de empresa (31/10/2026, sin desplegar); falta el paquete base de agentes*
 - **RF-22:** Un despliegue no se come el mensaje que el motor estaba atendiendo. Correr más de un proceso se decide cuando se mida CPU saturada o haga falta una segunda réplica, no antes (§8.17, Ola 4). *(Ola 4)* ✅ en código, sin desplegar
 
@@ -960,7 +974,37 @@ lo diría sin cambiar nada más.
 - **Transcripción con OpenAI.** El usuario decidió el 30/10/2026 que la autorización que firma el cliente la cubre (RNF-01). Para cada empresa nueva, su autorización tiene que cubrir a los proveedores de modelo y de transcripción antes de encenderlos.
 - **El régimen de protección de usuarios de telecomunicaciones** probablemente exige que el usuario pueda llegar a una persona (INFERIDO, no verificado contra la norma). El diseño ya lo cumple —`frases_pide_humano` lo detecta en código— y la tesis no lo toca.
 
-**Lo que la reabre:** que el tablero de la Ola 1 muestre que la resolución sin persona no sube con las olas 2 y 3 (la tesis sería falsa para este producto), o que una empresa cliente pida explícitamente lo contrario de la autonomía ganada.
+**Lo que la reabre:** que el tablero de la Ola 1 muestre que la resolución sin persona no sube con las olas 2 y 3 (la tesis sería falsa para este producto), o que una empresa cliente pida explícitamente lo contrario de la autonomía ganada. **Reabierta el 02/11/2026 por el dueño del producto (§8.18)**: el objetivo y el principio de autonomía de esta sección quedan reemplazados por los de §1 y §2; las olas y su código siguen.
+
+### 8.18 DECISIÓN — reemplazar la mano de obra humana; una persona solo en lo crítico (02/11/2026)
+
+**Quién la tomó.** El dueño del producto, de forma explícita: *"este software yo lo que quiero es reemplazar la mano de obra humana lo más posible"*, y *"solo necesito humano o aprobación en las tareas críticas que repercuten daños para la empresa"*. Pidió además que quede escrito para que ninguna sesión vuelva a razonar al revés.
+
+**El error que la originó.** El 01/11/2026, preguntado si el Supervisor trabaja como una persona frente al computador, una sesión respondió que "a propósito no actúa con libertad" y que "la autonomía se gana con evidencia". El dueño ya había corregido ese criterio el 30/10 (§8.17), y la corrección había quedado a medias por tres caminos, medidos ese día:
+
+| Dónde seguía el criterio viejo | Qué decía |
+|---|---|
+| Este PRD, §2 | "Se vende como capacidad y no como **reemplazo de personal**" — lo opuesto del objetivo |
+| Este PRD, §2, el principio | Toda acción empezaba en "una persona aprueba" y solo se soltaba tras medir aprobaciones empresa por empresa: lo crítico y lo trivial con la misma vara |
+| La copia principal del repositorio (`C:\wisphub\dexter`), en otra rama y **172 commits atrás** de producción | Su CLAUDE.md, lo primero que lee una sesión que arranca ahí, seguía diciendo "crecer en alcance, **no en autonomía**… más cosas que el modelo decide solo: no" |
+
+**La decisión.**
+
+1. **Objetivo** (§1): reemplazar la mano de obra humana de un ISP en el mayor porcentaje posible.
+2. **Principio** (§2): autónomo por defecto; una persona aprueba solo lo crítico, con la definición cerrada de cinco casos de §2.
+3. **La garantía pasa de la persona al código**, no desaparece: frontera, precondiciones, idempotencia, auditoría, verificación posterior, interruptor que falla cerrado, y los contrapesos de recontacto y satisfacción.
+4. **La autonomía ganada (Ola 3) queda como la puerta de lo crítico**, no de todo.
+
+**Lo que no cambia.** Las reglas de seguridad de CLAUDE.md §4–§5 (listas blancas, redacción, guardia de salida, frontera de ocho pasos), el derecho del cliente final a pedir una persona (§10), y "el modelo compone, el código calcula".
+
+**Lo que hay que revisar contra este principio — propuesto, pendiente de que el dueño lo apruebe uno por uno.** Nada de esto está cambiado en código todavía:
+
+- **Qué herramientas piden aprobación.** El catálogo de Rapilink pide aprobación humana en 15. Contra la definición de §2: son críticas `registrar_pago`, `agregar_promesa_pago`, `registrar_promesa_y_reactivar` (dinero), `cambiar_tipo_onu`, `activar_catv` (servicio que no se recupera solo / que no se paga) y `cancelar_solicitud_servicio` (una venta). **No** lo son `reiniciar_ont` (el equipo vuelve solo; ya tiene precondiciones en código y tope de uno por equipo por día) ni las ocho de tickets de WispHub (crear, responder, actualizar, completar, adjuntar, cerrar: un ticket se reabre).
+- **Las tareas del Supervisor.** Hoy cada una de las diez nace apagada y una persona la enciende. Las que no son críticas —pasar a Despacho, armar la jornada, crear y publicar las órdenes, cargar el material, ubicar los asuntos, revisar solo cada hora, cerrar lo que el proveedor ya cerró con diagnóstico— deberían nacer encendidas en una empresa nueva, con la persona pudiendo apagarlas.
+- **La cabecera de `operaciones/supervisor.py`** dice "SHADOW MODE: observa, analiza, propone. No ejecuta", y el mismo archivo ya ejecuta las tareas delegadas: describe un Supervisor que ya no existe y le enseña lo contrario a quien lo lea.
+- **Que el Supervisor mire lo que no tiene programado.** Hoy solo ve las ~20 situaciones que tiene escritas; lo demás no existe para él. Una persona frente al computador nota lo raro aunque nadie se lo haya dicho.
+
+**Lo que la reabre:** que el dueño del producto decida otra cosa. Ninguna sesión la reabre por su cuenta; una medición que muestre daño (recontacto o satisfacción que empeoran con una acción autónoma) se corrige devolviendo **esa acción** a aprobación, no reinstalando la persona en todo.
 
 ---
 
@@ -979,7 +1023,7 @@ Un VPS gestionado con **Dokploy**: el motor, el CRM (backend, Celery, frontend) 
 | Fuga de datos de clientes hacia el modelo | Listas blancas fail-closed + redacción del texto libre + guardia de salida, en código (§7.4) |
 | Una empresa ve datos de otra | `app_backend` + empresa fijada en cada transacción: sin empresa, 0 filas. El backend Django todavía no falla cerrado (Ola 1, §8.17) |
 | Una acción irreversible sale por error del modelo | Frontera de 8 pasos; las irreversibles solo por `frontera.critica()` con aprobación atada (§8.6) |
-| **La autonomía crece más rápido que la evidencia** | Las cuatro condiciones de §2: efecto verificable, previas en código, aprobaciones medidas, degradación automática. Subir lo decide una persona |
+| **Una acción autónoma hace daño** | Lo crítico (cinco casos de §2) siempre pasa por una persona o por las cuatro condiciones de la autonomía ganada. Lo no crítico, por validación en código antes del efecto, verificación después, el interruptor que falla cerrado y los contrapesos de recontacto y satisfacción, que devuelven **esa** acción a aprobación si empeoran |
 | **Se sube la resolución sin persona cerrando casos sin resolverlos** | Contrapesos obligatorios en el tablero: recontacto a 72 h y satisfacción (§2) |
 | El modelo inventa datos | Siempre consultar herramienta; veredictos calculados en código; casos dorados sobre la traza |
 | El modelo calcula mal un dato agregado | No calcula: compone la consulta y Python hace la cuenta (§12.5) |
@@ -997,7 +1041,7 @@ Las reglas de trabajo viven en **CLAUDE.md**, que manda sobre este documento. La
 
 - **Nunca pedirle al modelo que calcule.** Conteos, sumas, promedios y comparaciones se resuelven en Python; el modelo compone los parámetros y redacta (§12.5).
 - **Toda herramienta nueva necesita su lista blanca por rol**: sin ella devuelve nada (fail-closed). Si un campo es texto libre, va también a `campos_texto_libre`.
-- **Quitar una aprobación humana exige las cuatro condiciones de §2**, con su evidencia medida en el tablero de capacidad. Nunca "porque el modelo ya lo hace bien".
+- **El objetivo es reemplazar la mano de obra humana lo más posible (§1, §8.18).** Una acción no crítica que pide aprobación es un pendiente, no una precaución. Quitarle la aprobación a una acción **crítica** (los cinco casos de §2) exige las cuatro condiciones, con su evidencia medida; nunca "porque el modelo ya lo hace bien". Y en ningún caso se quita la validación en código.
 
 *Esta sección hablaba del prototipo `soporte_wisphub.py`, de `CAMPOS_PERMITIDOS` y de una ruta simulada: son de julio de 2026 y ya no describen el motor.*
 
