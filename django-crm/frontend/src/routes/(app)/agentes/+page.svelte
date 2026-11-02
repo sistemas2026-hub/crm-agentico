@@ -20,9 +20,20 @@
   import { invalidateAll } from '$app/navigation';
   import { AlertTriangle, Bot, BotMessageSquare, ScanEye, Radar, ArrowRight } from '@lucide/svelte';
   import { AGENTES_OPERATIVOS } from '$lib/v2/agentes-operativos.js';
+  import AutonomiaDeAccion from '$lib/components/agentes/AutonomiaDeAccion.svelte';
 
   /** @type {{ data: any }} */
-  let { data } = $props();
+  let { data, form } = $props();
+
+  /*
+   * Lo que cada agente hace solo (02/11/2026). Una entrada por accion que
+   * pide aprobacion, con su estado en cada agente ('por_agente'). Las que no
+   * piden aprobacion no aparecen: ya salen solas, con la frontera de por medio.
+   */
+  /** @type {Record<string, any>} */
+  let autonomiaDe = $derived(
+    Object.fromEntries((data.autonomia?.acciones ?? []).map((/** @type {any} */ a) => [a.accion, a]))
+  );
 
   const esAdmin = $derived(data.role === 'ADMIN');
 
@@ -205,6 +216,21 @@
 
         <p class="descripcion">{operativo.descripcion}</p>
 
+        <!-- Lo que hace solo HOY, leido en vivo de sus Ajustes (02/11/2026): es
+             estado, no una metrica que envejece. Se cambia en Supervisor NOC ->
+             Ajustes, que tiene sus propios permisos. -->
+        {#if operativo.clave === 'supervisor-noc' && data.tareasSupervisor}
+          <p class="hace-solo">
+            {#if data.tareasSupervisor.delegadas.length}
+              Hace solo {data.tareasSupervisor.delegadas.length} de {data.tareasSupervisor.total} tareas:
+              {data.tareasSupervisor.delegadas.join(', ')}. Se cambian en sus Ajustes.
+            {:else}
+              No hace sola ninguna de sus {data.tareasSupervisor.total} tareas: todas esperan a una
+              persona. Se encienden en sus Ajustes.
+            {/if}
+          </p>
+        {/if}
+
         <!-- Sin metricas: las que importan cambian cada minuto y su tablero
              las muestra con su fuente. Un numero escrito aqui envejeceria. -->
         <span class="enlace-tablero">
@@ -319,6 +345,14 @@
                         ? ' · pide confirmación antes'
                         : ''}
                     </p>
+                    {#if autonomiaDe[h.nombre]}
+                      <AutonomiaDeAccion
+                        accion={autonomiaDe[h.nombre]}
+                        agente={agente.nombre}
+                        esAdmin={data.esAdmin}
+                        resultado={form?.autonomia ?? null}
+                      />
+                    {/if}
                   {/if}
                 {/each}
               </div>
@@ -515,6 +549,7 @@
     color: var(--v2-ink);
     border-color: color-mix(in oklab, var(--v2-ink) 22%, transparent);
   }
+  .hace-solo { font-size: 12px; color: var(--v2-slate); margin: 0 0 8px; }
   .enlace-tablero {
     display: inline-flex;
     align-items: center;

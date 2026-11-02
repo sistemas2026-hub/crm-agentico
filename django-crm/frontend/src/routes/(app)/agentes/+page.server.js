@@ -1,4 +1,7 @@
+import { fail } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { cambiarAutonomia, leerAutonomiaGanada } from '$lib/server/v2/capacidad.js';
+import { leerAjustes } from '$lib/server/v2/ajustes-supervisor.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
@@ -12,7 +15,29 @@ import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ locals, fetch }) {
+/** Quien puede ver las tareas del Supervisor: el mismo conjunto que su pantalla de Ajustes. */
+const VEN_EL_SUPERVISOR = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
+
+/**
+ * Que tareas hace solo el Supervisor NOC (02/11/2026): se VEN aca, junto a lo
+ * que hace solo cada agente, y se cambian en Supervisor NOC -> Ajustes, que
+ * tiene sus propios permisos (tambien el Jefe de Operaciones, no solo ADMIN).
+ * Nunca rechaza: si no se puede leer, la tarjeta se ve sin el dato.
+ * @param {any} cookies @param {any} locals
+ */
+async function tareasDelSupervisor(cookies, locals) {
+  if (!VEN_EL_SUPERVISOR.has(locals?.profile?.role)) return null;
+  try {
+    const ajustes = /** @type {any} */ (await leerAjustes({ cookies }));
+    const tareas = Array.isArray(ajustes?.tareas) ? ajustes.tareas : null;
+    return tareas && { delegadas: tareas.filter((/** @type {any} */ t) => t.delegada).map(
+      (/** @type {any} */ t) => t.nombre), total: tareas.length };
+  } catch {
+    return null;
+  }
+}
+
+export async function load({ locals, fetch, cookies }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
@@ -20,11 +45,17 @@ export async function load({ locals, fetch }) {
   }
 
   try {
-    const [respAgentes, respCatalogo, respEscalamiento] = await Promise.all([
+    const [respAgentes, respCatalogo, respEscalamiento, ganada, supervisor] = await Promise.all([
       fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
       fetch(`${baseUrl}/agentes/catalogo?tenant=${encodeURIComponent(tenant)}`, { headers: headersMotor() }),
       // No bloquea la pantalla si falla -- ver por que abajo.
-      fetch(`${baseUrl}/reportes/escalamiento?tenant=${encodeURIComponent(tenant)}&dias=14`, { headers: headersMotor() })
+      fetch(`${baseUrl}/reportes/escalamiento?tenant=${encodeURIComponent(tenant)}&dias=14`, { headers: headersMotor() }),
+      //  QUE HACE SOLO CADA AGENTE (02/11/2026). Vivia en /capacidad, para
+      //  toda la empresa; el usuario: "eso deberia ir en cada agente". Nunca
+      //  rechaza (devuelve el error): si no se calcula, los agentes se ven
+      //  igual, sin el estado de su autonomia.
+      leerAutonomiaGanada(locals, fetch),
+      tareasDelSupervisor(cookies, locals)
     ]);
     const datosAgentes = await respAgentes.json();
     const datosCatalogo = await respCatalogo.json();
@@ -38,9 +69,68 @@ export async function load({ locals, fetch }) {
     return {
       agentes: datosAgentes.agentes,
       catalogo: respCatalogo.ok ? datosCatalogo.herramientas : [],
-      escalamiento: datosEscalamiento
+      escalamiento: datosEscalamiento,
+      // La respuesta del motor ENTERA y sin renombrar (CLAUDE.md §6).
+      autonomia: ganada.autonomia,
+      errorAutonomia: ganada.error ?? null,
+      esAdmin: locals.profile?.role === 'ADMIN',
+      tareasSupervisor: supervisor
     };
   } catch (/** @type {any} */ err) {
     return { agentes: [], catalogo: [], escalamiento: null, error: err?.message || 'No se pudo contactar al asistente' };
   }
 }
+
+const NOMBRE = /^[a-z0-9_]{1,64}$/;
+
+/**
+ * Que un agente haga sola una accion, o que vuelva a pedir aprobacion
+ * (02/11/2026, PRD §2 y §8.18). Lo decide una persona ADMIN; el autor y su
+ * rol salen de la SESION, nunca del navegador, y el motor los vuelve a exigir.
+ * Sin 'rol' vale para todos los agentes que usan la herramienta.
+ *
+ * @type {import('./$types').Actions}
+ */
+export const actions = {
+  async promover({ locals, fetch, request }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, { autonomia: { error: 'Solo un administrador puede cambiar lo que un agente hace solo.' } });
+    }
+    const form = await request.formData();
+    const accion = form.get('accion')?.toString().trim() ?? '';
+    const rol = form.get('rol')?.toString().trim() ?? '';
+    if (!NOMBRE.test(accion) || (rol && !NOMBRE.test(rol))) {
+      return fail(400, { autonomia: { error: 'Esa acción o ese agente no se reconocen.' } });
+    }
+    if (form.get('confirmo') !== 'si') {
+      return fail(400, { autonomia: { accion, rol, error: 'Marcá que entendés que la acción va a hacerse sola.' } });
+    }
+    try {
+      await cambiarAutonomia(locals, fetch, 'promover', { accion, ...(rol ? { rol } : {}) });
+    } catch (/** @type {any} */ e) {
+      return fail(e?.codigo === 'SIN_EVIDENCIA' ? 409 : 502,
+        { autonomia: { accion, rol, error: e?.message || 'No se pudo cambiar.', faltan: e?.faltan ?? [] } });
+    }
+    return { autonomia: { accion, rol, ok: 'promovida' } };
+  },
+
+  async retirar({ locals, fetch, request }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, { autonomia: { error: 'Solo un administrador puede cambiar lo que un agente hace solo.' } });
+    }
+    const form = await request.formData();
+    const accion = form.get('accion')?.toString().trim() ?? '';
+    const rol = form.get('rol')?.toString().trim() ?? '';
+    const motivo = form.get('motivo')?.toString().trim() ?? '';
+    if (!NOMBRE.test(accion) || (rol && !NOMBRE.test(rol))) {
+      return fail(400, { autonomia: { error: 'Esa acción o ese agente no se reconocen.' } });
+    }
+    if (!motivo) return fail(400, { autonomia: { accion, rol, error: 'Decí por qué vuelve a pedir aprobación.' } });
+    try {
+      await cambiarAutonomia(locals, fetch, 'retirar', { accion, motivo, ...(rol ? { rol } : {}) });
+    } catch (/** @type {any} */ e) {
+      return fail(502, { autonomia: { accion, rol, error: e?.message || 'No se pudo cambiar.' } });
+    }
+    return { autonomia: { accion, rol, ok: 'retirada' } };
+  }
+};

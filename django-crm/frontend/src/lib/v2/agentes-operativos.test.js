@@ -35,10 +35,15 @@ describe('la ficha del agente operativo', () => {
     expect(s.href).toBe('/supervisor-noc');
   });
 
-  it('dice lo que el Supervisor NO hace, que es la mitad de lo que hay que saber', () => {
+  it('dice lo que hace solo y lo que no, sin prometer de mas', () => {
+    //  Hasta el 02/11/2026 esto exigia "no ejecuta": la prueba fijaba como
+    //  verdad algo que el Supervisor dejo de cumplir en octubre (ejecuta las
+    //  tareas delegadas). Ahora exige lo cierto, en las dos direcciones.
     const d = AGENTES_OPERATIVOS[0].descripcion.toLowerCase();
     expect(d).toMatch(/no conversa/);
-    expect(d).toMatch(/no ejecuta/);
+    expect(d).toMatch(/hace solo las tareas que la empresa le delega/);
+    expect(d).toMatch(/lo crítico sigue esperando a una persona/);
+    expect(d).not.toMatch(/no ejecuta/);
   });
 
   it('NO declara ninguna métrica', () => {

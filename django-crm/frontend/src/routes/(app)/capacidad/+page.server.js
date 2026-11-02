@@ -1,11 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
-import {
-  cambiarAutonomia,
-  guardarDeclaracionCapacidad,
-  leerAutonomiaGanada,
-  leerTableroCapacidad,
-  PERIODOS
-} from '$lib/server/v2/capacidad.js';
+import { guardarDeclaracionCapacidad, leerTableroCapacidad, PERIODOS } from '$lib/server/v2/capacidad.js';
 
 /**
  * Capacidad: cuánto trabajo le resolvió Dexter a la empresa (PRD §2).
@@ -26,16 +20,9 @@ export async function load({ locals, fetch, url }) {
   }
   const pedido = Number(url.searchParams.get('dias'));
   const dias = PERIODOS.includes(pedido) ? pedido : 30;
-  //  Las dos en paralelo: una no espera a la otra, y si una falla la otra se
-  //  muestra igual (31/10/2026: la autonomía ganada, PRD §2).
-  const [{ tablero, error }, ganada] = await Promise.all([
-    leerTableroCapacidad(locals, fetch, dias),
-    leerAutonomiaGanada(locals, fetch)
-  ]);
-  return {
-    tablero, dias, periodos: PERIODOS, error,
-    autonomia: ganada.autonomia, errorAutonomia: ganada.error ?? null
-  };
+  //  La autonomia de cada agente se ve y se decide en /agentes (02/11/2026).
+  const { tablero, error } = await leerTableroCapacidad(locals, fetch, dias);
+  return { tablero, dias, periodos: PERIODOS, error };
 }
 
 /** Los tres números que declara la empresa. Vacío = null = sin declarar. */
@@ -68,48 +55,5 @@ export const actions = {
       return fail(502, { declarar: { error: e?.message || 'No se pudo guardar.' } });
     }
     return { declarar: { ok: true } };
-  },
-
-  /**
-   * Darle autonomía a una acción (31/10/2026, PRD §2, Fase B). Lo decide una
-   * persona ADMIN viendo la evidencia; el motor la vuelve a medir y no
-   * promueve si no alcanza AHORA. La casilla de confirmación es obligatoria:
-   * es una decisión que cambia qué hace Dexter solo.
-   */
-  async promover({ locals, fetch, request }) {
-    if (locals.profile?.role !== 'ADMIN') {
-      return fail(403, { autonomia: { error: 'Solo un administrador puede dar autonomía.' } });
-    }
-    const form = await request.formData();
-    const accion = form.get('accion')?.toString() ?? '';
-    if (!/^[a-z0-9_]{1,64}$/.test(accion)) return fail(400, { autonomia: { error: 'Esa acción no se reconoce.' } });
-    if (form.get('confirmo') !== 'si') {
-      return fail(400, { autonomia: { accion, error: 'Marcá que entendés que la acción va a ejecutarse sola.' } });
-    }
-    try {
-      await cambiarAutonomia(locals, fetch, 'promover', { accion });
-    } catch (/** @type {any} */ e) {
-      return fail(e?.codigo === 'SIN_EVIDENCIA' ? 409 : 502,
-        { autonomia: { accion, error: e?.message || 'No se pudo promover.', faltan: e?.faltan ?? [] } });
-    }
-    return { autonomia: { accion, ok: 'promovida' } };
-  },
-
-  /** Quitarle la autonomía: siempre se puede, con un motivo. */
-  async retirar({ locals, fetch, request }) {
-    if (locals.profile?.role !== 'ADMIN') {
-      return fail(403, { autonomia: { error: 'Solo un administrador puede quitar autonomía.' } });
-    }
-    const form = await request.formData();
-    const accion = form.get('accion')?.toString() ?? '';
-    const motivo = form.get('motivo')?.toString().trim() ?? '';
-    if (!/^[a-z0-9_]{1,64}$/.test(accion)) return fail(400, { autonomia: { error: 'Esa acción no se reconoce.' } });
-    if (!motivo) return fail(400, { autonomia: { accion, error: 'Decí por qué se la quitás.' } });
-    try {
-      await cambiarAutonomia(locals, fetch, 'retirar', { accion, motivo });
-    } catch (/** @type {any} */ e) {
-      return fail(502, { autonomia: { accion, error: e?.message || 'No se pudo retirar.' } });
-    }
-    return { autonomia: { accion, ok: 'retirada' } };
   }
 };
