@@ -5208,15 +5208,21 @@ def interno_vision_evidencias_habilitada():
     tenant = request.args.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    #  Sin 'proposito' vale el de campo: es el unico que existia cuando esta
+    #  ruta nacio y hay un llamador desplegado que no lo manda.
+    proposito = (request.args.get("proposito") or "evidencia_campo").strip()
+    bandera = vision.bandera_de(proposito)
+    if not bandera:
+        #  Un proposito que el codigo no declara no habilita nada. Falla
+        #  cerrado, como el resto de este camino.
+        return jsonify({"habilitada": False, "motivo": "proposito desconocido"}), 200
     try:
         config = _config_de(tenant)
     except Exception as e:                                    # noqa: BLE001
         registrar("vision", "no se pudo leer la config para el interruptor",
                   tenant=tenant, error=e)
         return jsonify({"habilitada": False}), 200
-    return jsonify({
-        "habilitada": bool(getattr(config, "vision_evidencias_campo", False)),
-    }), 200
+    return jsonify({"habilitada": bool(getattr(config, bandera, False))}), 200
 
 
 @app.post("/interno/vision/analizar-evidencia")
@@ -5257,6 +5263,19 @@ def interno_analizar_evidencia():
         return jsonify({"error": "Falta el archivo 'imagen' (multipart)."}), 400
     contenido = archivo.read() or b""
     pie = str(request.form.get("pie") or "")
+    #  QUE SE LE PIDE AL MODELO Y QUE INTERRUPTOR MANDA salen los dos del
+    #  proposito (02/11/2026, vision.PROPOSITOS). Antes estaban fijos en el
+    #  caso de campo; el asistente interno es otro consentimiento y otra
+    #  instruccion, y una ruta por cada uno habria sido tres copias de las
+    #  mismas cuatro garantias.
+    #
+    #  Sin 'proposito' vale el de campo: hay un llamador desplegado que no lo
+    #  manda, y cambiarle el default lo habria roto en silencio.
+    proposito = str(request.form.get("proposito") or "evidencia_campo").strip()
+    bandera = vision.bandera_de(proposito)
+    if not bandera:
+        return jsonify({"estado": "apagado", "texto": "", "error": "",
+                        "motivo": f"proposito desconocido: {proposito}"}), 200
 
     try:
         config = _config_de(tenant)
@@ -5264,11 +5283,11 @@ def interno_analizar_evidencia():
         return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
                      componente="interno", e=e)
 
-    #  EL INTERRUPTOR, y falla CERRADO: sin el campo no se mira nada.
-    if not getattr(config, "vision_evidencias_campo", False):
+    #  EL INTERRUPTOR DE ESTE PROPOSITO, y falla CERRADO.
+    if not getattr(config, bandera, False):
         return jsonify({"estado": "apagado", "texto": "", "error": "",
                         "motivo": "esta empresa no tiene habilitado que se "
-                                  "miren las fotos de evidencia"}), 200
+                                  "miren estas fotos"}), 200
 
     #  EL TOPE DE GASTO, antes de pagar. El gate del turno (mas abajo, en el
     #  webhook) no cubre esta ruta: si no se consultara aca, el tope del
@@ -5310,7 +5329,7 @@ def interno_analizar_evidencia():
 
     modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
     r = vision.analizar(listo, modelo, pie,
-                        instruccion=vision.INSTRUCCION_EVIDENCIA,
+                        instruccion=vision.instruccion_de(proposito),
                         rotulo_del_pie=vision.PIE_DE_LA_PLANTILLA)
 
     #  TEXTO FIJO y conteos. Del contenido no va NADA al log -- ni que se vio
@@ -5330,7 +5349,14 @@ def interno_analizar_evidencia():
 
     return jsonify({"estado": r.estado, "texto": r.texto, "error": r.error,
                     "modelo": r.modelo, "segundos": round(r.segundos, 1),
-                    "tokens": r.tokens, "motivo": ""}), 200
+                    "tokens": r.tokens, "motivo": "",
+                    #  Lo mismo, ya rotulado para entrar a un turno. Lo arma
+                    #  el motor y no quien llama: el rotulo le dice al modelo
+                    #  que esto lo escribio otra IA mirando pixeles, y si lo
+                    #  armara cada pantalla, una se lo olvidaria y el agente
+                    #  repetiria la descripcion como un hecho comprobado.
+                    "para_el_turno": vision.texto_para_el_agente(
+                        r, pie, proposito=proposito)}), 200
 
 
 @app.get("/autonomia")

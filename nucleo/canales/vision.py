@@ -148,6 +148,85 @@ INSTRUCCION = (
 )
 
 
+#: La instruccion para una foto que un COLABORADOR adjunta en el asistente
+#: interno (02/11/2026). Ni el cliente ni una evidencia de orden: alguien de
+#: la empresa que esta preguntando algo y acompana una foto.
+#:
+#: Se parece a la de evidencia --quien lee es la oficina, asi que puede decir
+#: lo que ve del trabajo-- y conserva las tres reglas que no dependen de
+#: quien mira: no afirmar que el servicio funciona, no inventar mediciones, y
+#: no leer datos personales. La diferencia es que aca la foto puede ser de
+#: cualquier cosa, asi que la regla de "si no es de esto, decilo en una
+#: linea" pesa mas.
+INSTRUCCION_ASISTENTE = (
+    "Alguien del equipo de un proveedor de internet te adjunto esta foto "
+    "mientras te preguntaba algo. Describi lo que se ve, para que puedas "
+    "contestarle.\n\n"
+    "Reglas:\n"
+    "1. Deci que se ve: equipos de telecomunicaciones (ONT, router, modem, "
+    "fuente, caja, roseta, conectores, cables), una pantalla, un documento "
+    "tecnico, un lugar. Solo lo que se ve.\n"
+    "2. Marca, modelo y numeros de serie SOLO si se leen en la imagen.\n"
+    "3. Si hay luces indicadoras, deci cuales, de que color y si estan "
+    "fijas o parpadeando. No digas que significan: cambia con cada "
+    "fabricante.\n"
+    "4. Si se ve una instalacion, deci como quedo --cableado, fijacion, "
+    "conectores-- como lo que se OBSERVA y no como un diagnostico.\n"
+    "5. NO digas si el servicio funciona, si hay senal, ni inventes "
+    "mediciones de potencia optica, velocidad o continuidad.\n"
+    "6. Si algo esta borroso, oscuro o tapado, decilo.\n"
+    "7. Si la foto no tiene que ver con equipos, instalaciones ni "
+    "servicio, deci en una linea que se ve y nada mas.\n"
+    "8. NO transcribas documentos, cedulas, telefonos ni datos "
+    "personales, aunque se lean. No describas a las personas que "
+    "aparezcan.\n"
+    "9. Se breve: un parrafo corto. Sin saludos."
+)
+
+#: Cada proposito, con su instruccion, su interruptor en la config del tenant
+#: y como se rotula la foto en el turno. UN SOLO LUGAR donde se declaran, para
+#: que agregar un camino nuevo sea una fila y no tres `if` repartidos.
+#:
+#: CADA UNO TIENE SU INTERRUPTOR, y no es burocracia: no es el mismo
+#: consentimiento la foto que un cliente DECIDE mandar, la que un tecnico toma
+#: DENTRO de su casa, y la que un colaborador adjunta en el chat interno. Una
+#: empresa puede autorizar una y no las otras, y con un solo campo no podria
+#: decirlo. Todos nacen apagados.
+PROPOSITOS = {
+    "whatsapp_cliente": {
+        "bandera": "vision_habilitada",
+        "rotulo": "[Foto que envio el cliente]",
+    },
+    "evidencia_campo": {
+        "bandera": "vision_evidencias_campo",
+        "rotulo": "[Foto de evidencia que subio el tecnico]",
+    },
+    "asistente_interno": {
+        "bandera": "vision_asistente_interno",
+        "rotulo": "[Foto que adjuntaste]",
+    },
+}
+
+
+def instruccion_de(proposito: str) -> str:
+    """La instruccion de ese proposito. Un nombre desconocido cae en la del
+    cliente, que es la MAS restrictiva: no afirma nada sobre instalaciones."""
+    if proposito == "evidencia_campo":
+        return INSTRUCCION_EVIDENCIA
+    if proposito == "asistente_interno":
+        return INSTRUCCION_ASISTENTE
+    return INSTRUCCION
+
+
+def bandera_de(proposito: str) -> str:
+    """El campo de la config que habilita ese proposito, o "" si no existe.
+
+    Falla CERRADO en quien llama: un proposito desconocido no tiene bandera,
+    y sin bandera no se habilita nada.
+    """
+    return (PROPOSITOS.get(proposito) or {}).get("bandera", "")
+
+
 @dataclass
 class Resultado:
     """
@@ -362,7 +441,8 @@ def analizar(contenido: bytes, modelo: str, pie: str = "",
                          error=f"el modelo rechazo la imagen ({type(e).__name__})")
 
 
-def texto_para_el_agente(r: Resultado, pie: str = "") -> str:
+def texto_para_el_agente(r: Resultado, pie: str = "",
+                         proposito: str = "whatsapp_cliente") -> str:
     """
     El Resultado -> las lineas que lee el modelo conversacional.
 
@@ -384,7 +464,13 @@ def texto_para_el_agente(r: Resultado, pie: str = "") -> str:
     if not r.ok:
         return ""
 
-    lineas = ["[Foto que envio el cliente]"]
+    #  EL ROTULO DICE DE DONDE SALIO LA FOTO, y hasta el 02/11/2026 era
+    #  la constante "[Foto que envio el cliente]". Con el asistente
+    #  interno eso pasaba a ser falso: la adjunta un colaborador. El
+    #  modelo no trata igual una foto del cliente que una de la oficina,
+    #  asi que la etiqueta importa.
+    lineas = [(PROPOSITOS.get(proposito) or {}).get(
+        "rotulo", PROPOSITOS["whatsapp_cliente"]["rotulo"])]
 
     if (pie or "").strip():
         lineas.append("")
