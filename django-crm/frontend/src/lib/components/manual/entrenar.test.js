@@ -2,53 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { codigoDesde, huecosDe, siguienteNumero, textoDelHueco } from './entrenar.js';
+import { codigoDesde, huecosDe, textoDelHueco } from './entrenar.js';
 
 /**
  * EL CICLO «se equivocó → lo corrijo → sé si mejoró»  --  02/11/2026
  * ==================================================================
  *
- * Se afirma sobre el EFECTO de cada función, y en la última sección sobre el
- * código fuente del proxy, que es lo único que este harness puede alcanzar:
- * `vitest.config.js` no compila `.svelte` ni resuelve `$env/dynamic/private`,
- * así que un `+server.js` no se puede importar. Una guarda estática sobre ese
- * archivo es menos de lo que uno querría y mucho más que nada: el defecto que
- * cierra —el rol volviendo a quedar fijo en `cliente_final`— es exactamente
- * el que se ve leyendo esa línea.
+ * Se afirma sobre el EFECTO de cada función, y en las últimas secciones
+ * sobre el código fuente de los proxies, que es lo único que este harness
+ * puede alcanzar: `vitest.config.js` no compila `.svelte` ni resuelve
+ * `$env/dynamic/private`, así que un `+server.js` no se puede importar. Una
+ * guarda estática es menos de lo que uno querría y mucho más que nada: los
+ * defectos que cierra se ven leyendo esas líneas.
+ *
+ * El 02/11/2026 el usuario decidió que el simulador de WhatsApp vuelva a
+ * fijar `cliente_final`: entrenar se hace en /asistente, y el simulador
+ * existe para probar ESE canal. Las guardas de aquel selector y del número
+ * que subía al cambiar de agente se quitaron con él -- una prueba de algo
+ * que ya no existe no es cobertura, es ruido que alguien va a creerse.
  */
 
-describe('siguienteNumero · cambiar de agente abre otra conversación', () => {
-  //  La sesión del motor ES el número. Una conversación abierta restaura su
-  //  `rol_efectivo` y PISA el rol que mande la pantalla (api.py:875), así que
-  //  sin número nuevo el selector mostraría un agente y hablaría con otro.
-  it('sube en uno, conservando el largo', () => {
-    expect(siguienteNumero('3001234567')).toBe('3001234568');
-  });
-
-  it('arrastra el acarreo sin perder dígitos', () => {
-    expect(siguienteNumero('3001239999')).toBe('3001240000');
-  });
-
-  it('ignora lo que no sea dígito', () => {
-    expect(siguienteNumero('+57 300 123-4567')).toBe('573001234568');
-  });
-
-  it('sin número usable devuelve uno válido, nunca vacío', () => {
-    //  Vacío haría que el motor abriera una sesión sin identificador y el
-    //  simulador quedaría hablando solo.
-    expect(siguienteNumero('')).toBe('3001234567');
-    expect(siguienteNumero('   ')).toBe('3001234567');
-    expect(siguienteNumero(null)).toBe('3001234567');
-    expect(siguienteNumero('abc')).toBe('3001234567');
-  });
-
-  it('nunca devuelve el mismo número que entró', () => {
-    //  La garantía entera de esta función en una línea.
-    for (const n of ['3001234567', '1', '999', '3159999999']) {
-      expect(siguienteNumero(n)).not.toBe(n);
-    }
-  });
-});
 
 describe('codigoDesde · el código de la habilidad sale del nombre', () => {
   const ahora = () => 1762000000000;
@@ -136,28 +109,6 @@ describe('huecosDe · cada agente ve lo suyo', () => {
   });
 });
 
-describe('el simulador no vuelve a fijar el agente', () => {
-  //  GUARDA ESTÁTICA, y se dice que lo es. El proxy no se puede importar acá
-  //  (`$env/dynamic/private`), así que se lee su fuente. Lo que cierra es el
-  //  defecto concreto que existía hasta el 02/11/2026: `rol: 'cliente_final'`
-  //  escrito en el cuerpo del POST, que hacía imposible probar desde ninguna
-  //  pantalla un agente recién creado.
-  const fuente = readFileSync(
-    resolve(process.cwd(), 'src/routes/api/simulador-whatsapp/+server.js'),
-    'utf-8'
-  );
-
-  it('el rol que se le manda al motor sale del pedido, no de una constante', () => {
-    expect(fuente).toContain('rol: rolElegido');
-    expect(fuente).not.toContain("rol: 'cliente_final'");
-  });
-
-  it('y vacío sigue cayendo en cliente_final, que es su caso normal', () => {
-    //  El simulador existe para probar el canal de WhatsApp: quitarle ese
-    //  default lo rompería para su uso de siempre.
-    expect(fuente).toMatch(/rolElegido\s*=\s*String\(rol \|\| ''\)\.trim\(\) \|\| 'cliente_final'/);
-  });
-});
 
 describe('el asistente no se bloquea por un perfil que el CRM no resuelve', () => {
   //  GUARDA ESTÁTICA, y se dice que lo es: `+server.js` importa
@@ -202,5 +153,27 @@ describe('el asistente no se bloquea por un perfil que el CRM no resuelve', () =
   it('elegir agente sigue siendo solo de ADMIN', () => {
     expect(fuente).toContain("locals.profile?.role === 'ADMIN'");
     expect(fuente).toMatch(/if \(rolPedido && !esAdmin\)/);
+  });
+});
+
+describe('cuando guardar falla, el motivo no se pierde', () => {
+  //  La primera version mostraba siempre «No se pudo guardar.»: si la
+  //  respuesta no traía `error`, o no era JSON, no quedaba con qué
+  //  diagnosticar. El código HTTP es lo que distingue «no sos admin» (403)
+  //  de «ya existe ese código» (400) de «el motor no está» (502).
+  const fuente = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/manual/CorregirAgente.svelte'),
+    'utf-8'
+  );
+
+  it('el mensaje lleva el código HTTP', () => {
+    expect(fuente).toContain('No se pudo guardar (HTTP ${resp.status})');
+  });
+
+  it('y lee el cuerpo como texto antes de parsearlo', () => {
+    //  Con `resp.json()` a secas, una respuesta HTML --un 500 de SvelteKit--
+    //  lanza y el cuerpo se pierde entero.
+    expect(fuente).toContain('const crudo = await resp.text()');
+    expect(fuente).not.toMatch(/await resp\.json\(\)\.catch/);
   });
 });
