@@ -742,6 +742,13 @@ def _agente_json(nombre: str, rol, config) -> dict:
         "area": rol.area,
         "cargo": rol.cargo,
         "orientado_a": rol.orientado_a,
+        #  Lo que el formulario edita desde el 02/11/2026: para que al abrir la
+        #  edicion se vea lo que el agente ya tiene, no un default.
+        "atiende": rol.atiende,
+        "exige_verificacion": rol.exige_verificacion,
+        "nunca_revelar": list(rol.nunca_revelar),
+        "en_el_router": nombre in next(
+            (h.areas_destino or [] for h in config.herramientas if h.deriva_rol), []),
         # El system prompt REAL, partido en piezas con su origen. Sin esto,
         # para saber por que un agente contesto algo hay que reconstruirlo de
         # memoria cruzando cuatro secciones de la configuracion -- y el
@@ -3781,6 +3788,22 @@ def agentes_flujo_guardar():
     return jsonify(_flujo_de(config))
 
 
+def _extras_de_agente(cuerpo: dict) -> dict:
+    """Lo que el formulario de agentes manda ademas desde el 02/11/2026: que
+    temas atiende, si se conecta al router, si verifica identidad y que nunca
+    revela. Solo las claves que vinieron: una ausente no borra lo que habia
+    (ver editor._aplicar_extras)."""
+    extras = {}
+    if "atiende" in cuerpo:
+        extras["atiende"] = str(cuerpo.get("atiende") or "")[:400]
+    for clave in ("conectar_al_router", "exige_verificacion"):
+        if isinstance(cuerpo.get(clave), bool):
+            extras[clave] = cuerpo[clave]
+    if isinstance(cuerpo.get("nunca_revelar"), list):
+        extras["nunca_revelar"] = [str(t)[:300] for t in cuerpo["nunca_revelar"]][:30]
+    return extras
+
+
 @app.post("/agentes")
 def agentes_crear():
     cuerpo = request.get_json(force=True, silent=True) or {}
@@ -3796,6 +3819,7 @@ def agentes_crear():
             descripcion=cuerpo.get("descripcion", ""),
             orientado_a=cuerpo.get("orientado_a", "colaborador"),
             herramientas=cuerpo.get("herramientas", []),
+            extras=_extras_de_agente(cuerpo),
         )
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
@@ -3820,6 +3844,7 @@ def agentes_editar(nombre):
             descripcion=cuerpo.get("descripcion", ""),
             orientado_a=cuerpo.get("orientado_a", "colaborador"),
             herramientas=cuerpo.get("herramientas", []),
+            extras=_extras_de_agente(cuerpo),
         )
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400

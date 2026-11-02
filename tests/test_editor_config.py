@@ -421,6 +421,86 @@ def prueba_catalogo() -> None:
               "una herramienta de verificacion no ofrece campos (no los usa)")
 
 
+def prueba_catalogo_dice_lo_que_hace_cada_una() -> None:
+    #  02/11/2026: el formulario de agentes agrupa las herramientas por lo que
+    #  HACEN y aparta las que dispara el sistema, para que quien crea un
+    #  agente no le de una herramienta "NO la llames tu" sin saberlo.
+    print("\ncatalogo: que hace cada herramienta")
+    config = _validar(TENANT, documento_base())
+    por_nombre = {h["nombre"]: h for h in catalogo_herramientas(config)}
+    claves = {"escribe", "pide_aprobacion", "critica", "deriva", "de_sistema"}
+    comprobar(all(claves <= set(h) for h in por_nombre.values()),
+              "cada entrada dice si escribe, pide aprobacion, es critica, deriva o es del sistema")
+    lectura = next(h for h in config.herramientas if h.solo_lectura and not h.deriva_rol)
+    comprobar(por_nombre[lectura.nombre]["escribe"] is False, "una consulta no escribe")
+    deriva = next((h for h in config.herramientas if h.deriva_rol), None)
+    if deriva is not None:
+        comprobar(por_nombre[deriva.nombre]["deriva"] is True, "la de derivar dice que deriva")
+    aprobacion = next((h for h in config.herramientas if h.aprobacion_humana), None)
+    if aprobacion is not None:
+        comprobar(por_nombre[aprobacion.nombre]["pide_aprobacion"] is True
+                  and por_nombre[aprobacion.nombre]["critica"] == aprobacion.critica,
+                  "la que pide aprobacion lo dice, y si es critica")
+    servicio = next((h for h in config.herramientas if h.invocable_por_servicio), None)
+    if servicio is not None:
+        comprobar(por_nombre[servicio.nombre]["de_sistema"] is True,
+                  "la que invoca un servicio es del sistema")
+
+
+def prueba_agente_completo_desde_la_pantalla() -> None:
+    #  02/11/2026: crear un agente de clientes y que le lleguen conversaciones
+    #  era DOS pantallas -- el formulario y el flujo de derivacion --, y con
+    #  la segunda olvidada el agente quedaba creado e invisible. Y la
+    #  verificacion de identidad y lo que nunca revela solo se podian
+    #  cambiar en el archivo.
+    print("\nun agente completo desde el formulario")
+    doc = documento_base()
+    deriva = next((h for h in doc["herramientas"] if h.get("deriva_rol")), None)
+    if deriva is None:
+        print("  (sin herramienta de derivacion en este tenant: se saltea)")
+        return
+    _mutar_crear(doc, "atencion_nueva", area="Atencion", cargo="Agente",
+                 descripcion="Atiende consultas de saldo.", orientado_a="cliente_final",
+                 herramientas=[],
+                 extras={"atiende": "  saldo, facturas y fechas de corte  ",
+                         "conectar_al_router": True, "exige_verificacion": False,
+                         "nunca_revelar": [" el costo del plan ", "", "el costo del plan"]})
+    config = _validar(TENANT, doc)
+    rol = config.roles["atencion_nueva"]
+    comprobar(rol.atiende == "saldo, facturas y fechas de corte", "guarda que temas atiende, sin espacios")
+    comprobar(rol.exige_verificacion is False, "guarda si verifica identidad")
+    comprobar(rol.nunca_revelar == ["el costo del plan"], "lo que nunca revela, limpio y sin repetir")
+    destinos = next(h for h in config.herramientas if h.deriva_rol).areas_destino
+    comprobar("atencion_nueva" in destinos, "queda conectado al router: el router le puede derivar")
+    comprobar(deriva["nombre"] in rol.puede_consultar,
+              "un agente de clientes recibe sola la herramienta de derivar: nunca queda encerrado")
+
+    doc2 = documento_base()
+    lanza("conectar al router un agente interno se rechaza",
+          lambda: _mutar_crear(doc2, "interno_nuevo", None, None, "x", "colaborador", [],
+                               extras={"conectar_al_router": True}))
+
+    #  Editar SIN extras no toca lo que ya tenia: el formulario viejo, o una
+    #  edicion que no los manda, no los borra.
+    _mutar_editar(doc, "atencion_nueva", area="Atencion", cargo="Agente",
+                  descripcion="Atiende consultas de saldo y pagos.",
+                  orientado_a="cliente_final", herramientas=[])
+    config = _validar(TENANT, doc)
+    rol = config.roles["atencion_nueva"]
+    comprobar(rol.atiende == "saldo, facturas y fechas de corte" and rol.exige_verificacion is False
+              and rol.nunca_revelar == ["el costo del plan"]
+              and "atencion_nueva" in next(h for h in config.herramientas if h.deriva_rol).areas_destino,
+              "editar sin esos datos no borra lo que ya tenia")
+
+    _mutar_editar(doc, "atencion_nueva", area="Atencion", cargo="Agente",
+                  descripcion="Atiende consultas de saldo y pagos.",
+                  orientado_a="cliente_final", herramientas=[],
+                  extras={"conectar_al_router": False})
+    config = _validar(TENANT, doc)
+    comprobar("atencion_nueva" not in next(h for h in config.herramientas if h.deriva_rol).areas_destino,
+              "desconectar lo saca del router")
+
+
 # =============================================================================
 #  LA BANDA 'SIN GESTION' NO SE PUEDE GUARDAR DE FORMA QUE NO HAGA NADA
 # =============================================================================
@@ -763,6 +843,8 @@ if __name__ == "__main__":
     prueba_persona()
     prueba_ida_y_vuelta()
     prueba_catalogo()
+    prueba_catalogo_dice_lo_que_hace_cada_una()
+    prueba_agente_completo_desde_la_pantalla()
     prueba_banda_sin_gestion()
     prueba_origen_de_la_config()
     prueba_umbral_efectivo_de_la_banda()
