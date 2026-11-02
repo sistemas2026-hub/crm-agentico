@@ -53,11 +53,51 @@
 /** La franja del frente del patio: por donde se entra. */
 export const ENTRADA = { fondo: 8 };
 
-/** El pasillo entre las salas y el patio. */
-export const PASILLO = 4;
+/**
+ * El pasillo entre dos columnas de una misma manzana.
+ *
+ * SIN ESTO NO SE ENTRA A LAS SALAS DE ATRÁS, y durante un rato no se entró.
+ * Una manzana de dos columnas deja a la columna exterior sin frente a ninguna
+ * circulación: su única salida daba contra el muro de la sala de adelante.
+ * Medido sobre el piloto: **5 de 11 salas** —NOC, Comercial, Recursos Humanos,
+ * Dirección y Recepción— no tocaban ni el patio ni nada por donde pasar.
+ *
+ * TRES Y NO CUATRO, y sale de comparar los dos edificios posibles. Con el
+ * pasillo cobrando su suelo, el criterio de `fondoObjetivo` se va solo al plano
+ * de UNA columna por manzana, donde toda sala da al patio y no hace falta
+ * pasillo. Parece más limpio y es peor: ese plano devuelve el patio al **29%
+ * del suelo**, más vacío que el 24% del que venía la queja que originó todo
+ * esto. Con dos columnas y pasillo de tres: salas 61%, pasillos 8%, patio 15%.
+ *
+ * Por eso el pasillo NO entra en el criterio como desperdicio: es circulación,
+ * igual que el patio. Entra como una condición — toda sala tiene que dar a
+ * algo por donde se pase — y eso se mide en `anillo.test.js`.
+ */
+export const PASILLO = 3;
 
 /** Lo mínimo que mide el patio, aunque las manzanas sean cortas. */
-export const PATIO_MINIMO = { ancho: 14, fondo: 10 };
+/**
+ * Lo mínimo que mide el patio, aunque las manzanas sean cortas.
+ *
+ * DIEZ, Y ESO DECIDE LA FORMA DEL EDIFICIO ENTERO. Era 14, y a esa medida el
+ * criterio de `fondoObjetivo` rechazaba el plano de una columna por manzana
+ * —el patio se le iba al 34% del suelo— y elegía dos columnas, que es
+ * exactamente el plano donde la columna de atrás se queda sin entrada.
+ *
+ * Intenté arreglarlo por el otro lado, con un tope a la cuota del patio que
+ * forzara las dos columnas y un pasillo entre ellas. Funcionaba sobre el
+ * piloto y empeoraba todo lo demás: medido sobre empresas de 1 a 40 salas, el
+ * suelo muerto llegaba al **27%**. Con el patio en 10 y sin tope: **19% en el
+ * peor caso**, y la mayoría entre 12 y 16%.
+ *
+ * El patio no necesitaba ser ancho, necesitaba ser angosto. Diez de ancho con
+ * oficinas a los dos lados es una calle interior por la que se pasa; catorce
+ * vacíos son un descampado. Y el plano que sale de ahí tiene UNA columna por
+ * manzana hasta las diecisiete salas, así que **no hay oficinas atrás**: todas
+ * dan al patio. Los pasillos siguen apareciendo cuando la empresa crece lo
+ * suficiente para necesitar dos columnas.
+ */
+export const PATIO_MINIMO = { ancho: 10, fondo: 10 };
 
 const medida = (s) => s?.planta?.mundo ?? { ancho: 10, fondo: 8 };
 
@@ -97,12 +137,33 @@ export function repartirManzanas(lista) {
  * @param {number} objetivo
  */
 export function columnasHasta(grupo, objetivo) {
+  if (grupo.length === 0) return [];
+
+  //  DOS PASADAS, Y LA PRIMERA ES SOLO PARA CONTAR.
+  //
+  //  Llenar hasta el objetivo y abrir otra columna al pasarse es lo obvio y
+  //  deja muñones: con cinco salas de nueve y un objetivo de treinta y seis
+  //  salen columnas de 36 y 9, una con cuatro salas y otra con una. Es la
+  //  misma columna huérfana que originó todo esto, entrando por otra puerta —
+  //  lo cazó la guarda de este archivo con el mensaje «columnas de fondo
+  //  36, 8».
+  //
+  //  Entonces primero se cuenta CUÁNTAS columnas harían falta, y recién
+  //  después se reparte el fondo total entre ellas. Cinco salas de nueve en
+  //  dos columnas dan 27 y 18, no 36 y 9.
+  const total = grupo.reduce((t, s) => t + medida(s).fondo, 0);
+  const cuantas = Math.max(1, Math.ceil(total / Math.max(1, objetivo)));
+  const reparto = total / cuantas;
+
   const columnas = [];
   let actual = [];
   let fondo = 0;
   for (const sala of grupo) {
     const f = medida(sala).fondo;
-    if (actual.length > 0 && fondo + f > objetivo) {
+    //  Se abre columna nueva si pasarse deja la actual MÁS lejos del reparto
+    //  que cerrarla acá, y siempre que queden columnas por abrir.
+    const sobra = Math.abs(fondo + f - reparto) > Math.abs(fondo - reparto);
+    if (actual.length > 0 && sobra && columnas.length < cuantas - 1) {
       columnas.push(actual);
       actual = [];
       fondo = 0;
@@ -114,13 +175,21 @@ export function columnasHasta(grupo, objetivo) {
   return columnas;
 }
 
-/** La forma de una manzana: sus columnas, su ancho y su fondo. */
+/**
+ * La forma de una manzana: sus columnas, su ancho y su fondo.
+ *
+ * El ancho incluye un pasillo entre cada par de columnas. Una manzana de una
+ * sola columna no lleva ninguno: da al patio y con eso alcanza.
+ */
 function formaDe(grupo, objetivo) {
   const columnas = columnasHasta(grupo, objetivo);
+  const anchos = columnas.map(
+    (c) => c.reduce((m, s) => Math.max(m, medida(s).ancho), 0));
   return {
     columnas,
-    ancho: columnas.reduce(
-      (t, c) => t + c.reduce((m, s) => Math.max(m, medida(s).ancho), 0), 0),
+    anchos,
+    pasillos: Math.max(0, columnas.length - 1),
+    ancho: anchos.reduce((a, b) => a + b, 0) + Math.max(0, columnas.length - 1) * PASILLO,
     fondo: columnas.reduce(
       (m, c) => Math.max(m, c.reduce((t, s) => t + medida(s).fondo, 0)), 0)
   };
@@ -132,20 +201,37 @@ function planoCon(lista, objetivo) {
   const izq = formaDe(izquierda, objetivo);
   const der = formaDe(derecha, objetivo);
   const fondo = Math.max(izq.fondo, der.fondo, PATIO_MINIMO.fondo);
+  //  EL PATIO CRECE CON LAS MANZANAS, PERO NUNCA PASA A LA SALA MÁS ANCHA.
+  //
+  //  Sin ese techo, una empresa de veinte departamentos sacaba un patio de 18
+  //  contra oficinas de 14: más ancho que cualquier sala del edificio, que es
+  //  justo cuando deja de leerse como el sitio por donde se pasa y empieza a
+  //  leerse como terreno sobrante. Con el techo, el patio más grande que puede
+  //  haber es del tamaño de la oficina más grande.
+  const salaMasAncha = lista.reduce((m, s) => Math.max(m, medida(s).ancho), 0);
   const anchoPatio = Math.max(
-    PATIO_MINIMO.ancho, Math.round((izq.ancho + der.ancho) * 0.3));
+    PATIO_MINIMO.ancho,
+    Math.min(Math.round((izq.ancho + der.ancho) * 0.3), salaMasAncha));
   const ancho = izq.ancho + anchoPatio + der.ancho;
   const areaSalas = lista.reduce(
     (t, s) => t + medida(s).ancho * medida(s).fondo, 0);
+  const areaPasillos = (izq.pasillos + der.pasillos) * PASILLO * fondo;
+  const areaPatio = anchoPatio * fondo;
   return {
-    izq, der, fondo, anchoPatio, ancho, areaSalas,
-    //  Suelo dentro de las manzanas que no es sala. El patio NO cuenta: el
-    //  patio tiene que estar, el hueco al lado de una columna no.
-    muerto: izq.ancho * fondo + der.ancho * fondo - areaSalas,
+    izq, der, fondo, anchoPatio, ancho, areaSalas, areaPasillos, areaPatio,
+    //  Suelo dentro de las manzanas que no es sala NI pasillo. Ni el patio ni
+    //  el pasillo cuentan como muerto: los dos son sitios por donde se pasa.
+    //  El hueco al lado de una columna no lo es.
+    muerto: izq.ancho * fondo + der.ancho * fondo - areaSalas - areaPasillos,
+    //  Qué parte del plano se lleva el patio. No entra en el criterio —se
+    //  intentó y fue la palanca equivocada, ver `PATIO_MINIMO`— pero lo mide
+    //  `anillo.test.js`.
+    cuotaDelPatio: areaPatio / (ancho * fondo),
     //  CUÁNTA OFICINA ENTRA EN PANTALLA. Ver `fondoObjetivo`.
     enPantalla: 2 * areaSalas / ((ancho + fondo) ** 2)
   };
 }
+
 
 /**
  * El fondo al que se cortan las columnas, y por qué ese número.
@@ -210,6 +296,7 @@ export function repartirAnillo(salas) {
   if (lista.length === 0) {
     return {
       puestas: [],
+      pasillos: [],
       huella: { ancho: PATIO_MINIMO.ancho, fondo: PATIO_MINIMO.fondo },
       patio: null,
       entrada: {
@@ -234,18 +321,36 @@ export function repartirAnillo(salas) {
   const huella = { ancho, fondo };
 
   const puestas = [];
+  const pasillos = [];
   const colocar = (forma, x0, banda) => {
     let x = x0;
-    for (const columna of forma.columnas) {
-      const anchoCol = columna.reduce((m, s) => Math.max(m, medida(s).ancho), 0);
+    forma.columnas.forEach((columna, i) => {
+      const anchoCol = forma.anchos[i];
       let y = 0;
       for (const sala of columna) {
         const m = medida(sala);
-        puestas.push({ sala, x, y, ancho: m.ancho, fondo: m.fondo, banda });
+        //  PEGADA AL LADO POR DONDE SE ENTRA, y esto no es un detalle.
+        //
+        //  Una columna es tan ancha como su sala mayor, así que una sala más
+        //  angosta deja un resto. Pegándola al lado equivocado, ese resto
+        //  queda ENTRE la sala y el pasillo y la sala no llega a tocarlo:
+        //  medido, en el plano de una columna por manzana **4 de 11 salas** no
+        //  alcanzaban el patio por dos unidades de suelo.
+        //
+        //  La manzana izquierda tiene su circulación a la derecha y la derecha
+        //  la tiene a la izquierda, así que cada una se pega hacia su lado.
+        const x0Sala = banda === 'izquierda' ? x + (anchoCol - m.ancho) : x;
+        puestas.push({ sala, x: x0Sala, y, ancho: m.ancho, fondo: m.fondo, banda });
         y += m.fondo;
       }
       x += anchoCol;
-    }
+      //  El pasillo va DESPUÉS de cada columna menos la última: es lo que le
+      //  da frente a la columna de atrás, que si no queda sin entrada.
+      if (i < forma.columnas.length - 1) {
+        pasillos.push({ x, y: 0, ancho: PASILLO, fondo, banda });
+        x += PASILLO;
+      }
+    });
   };
   colocar(izq, 0, 'izquierda');
   colocar(der, izq.ancho + anchoPatio, 'derecha');
@@ -257,6 +362,7 @@ export function repartirAnillo(salas) {
 
   return {
     puestas: ordenadas,
+    pasillos,
     huella,
     patio: {
       x: izq.ancho,

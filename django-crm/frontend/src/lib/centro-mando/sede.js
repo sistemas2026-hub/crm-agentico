@@ -45,9 +45,36 @@ export function sedeDe(salas, agentes, opciones = {}) {
     return { plantas: [], niveles: [], mundo: { ancho: 0, fondo: 0, alto: 0 } };
   }
 
-  const { puestas, huella, patio, entrada } = repartirAnillo(lista);
+  const { puestas, pasillos, huella, patio, entrada } = repartirAnillo(lista);
   const soloSala = opciones.soloSala ?? null;
   const plantas = [];
+
+  //  TODO LO QUE ES CIRCULACIÓN, junto: por acá se entra a las salas y por acá
+  //  cruzan las figuras de ambiente.
+  const circulacion = [...pasillos, patio, entrada].filter(Boolean);
+
+  /**
+   * El vano de la puerta lateral de una sala, si hay circulación a su
+   * izquierda.
+   *
+   * SE DECIDE POR GEOMETRÍA Y NO POR BANDA. Hoy son las salas de la manzana
+   * derecha las que tienen el pasillo contra el muro, pero eso es consecuencia
+   * de cómo reparte `anillo.js`, no una ley. Preguntarle al plano —¿hay algo
+   * por donde se pase pegado a mi muro izquierdo?— sigue siendo cierto el día
+   * que el reparto cambie.
+   *
+   * A un cuarto del fondo y de 1,8 de ancho, los mismos números que
+   * `edificio.js`: centrada queda detrás del puesto principal en casi todas
+   * las plantillas, y una puerta tapada por una silla no se lee como puerta.
+   */
+  const puertaLateralDe = (p) => {
+    const pegada = circulacion.some((c) =>
+      Math.abs(c.x + c.ancho - p.x) < 0.01
+      && c.y < p.y + p.fondo && p.y < c.y + c.fondo);
+    if (!pegada) return undefined;
+    const desde = Math.max(0.6, Math.round(p.fondo * 0.25 * 10) / 10);
+    return [desde, desde + 1.8];
+  };
 
   //  1. EL SUELO DE LA SEDE, bajo todo.
   //
@@ -109,8 +136,10 @@ export function sedeDe(salas, agentes, opciones = {}) {
     //  que sobra no queda repartido alrededor de cada sala sino junto, al
     //  frente y a la derecha, y eso se lee como pasillo.
     const planta = plantaDe(puesta.sala, agentes);
+    const vano = puertaLateralDe(puesta);
     plantas.push({
       ...planta,
+      mundo: vano ? { ...planta.mundo, puertaLateral: vano } : planta.mundo,
       origen: { gx: puesta.x, gy: puesta.y, gz: 0 },
       //  SIN LOSA PROPIA: el suelo ya está, y dos suelos a la misma altura se
       //  solapan de forma indefinida —ahí aparece el parpadeo entre
@@ -144,6 +173,28 @@ export function sedeDe(salas, agentes, opciones = {}) {
       losa: true,
       baranda: false,
       mobiliario: mobiliarioDePatio(patio),
+      puestos: []
+    });
+  }
+
+  //  4b. LOS PASILLOS entre columnas de una misma manzana. Sin ellos la
+  //      columna de atrás no tiene por dónde entrar: su única salida da contra
+  //      el muro de la sala de adelante. Van SIN mobiliario —un pasillo de
+  //      tres de ancho con un banco deja de ser un pasillo— y como
+  //      `circulacion`, así que las figuras de ambiente también los recorren.
+  for (const pasillo of pasillos) {
+    plantas.push({
+      mundo: { ancho: pasillo.ancho, fondo: pasillo.fondo, alto: 0 },
+      origen: { gx: pasillo.x, gy: pasillo.y, gz: 0 },
+      nivel: null,
+      papel: 'circulacion',
+      pasillo: { desde: 0, hasta: pasillo.ancho },
+      cartel: null,
+      mural: null,
+      muros: false,
+      losa: true,
+      baranda: false,
+      mobiliario: [],
       puestos: []
     });
   }

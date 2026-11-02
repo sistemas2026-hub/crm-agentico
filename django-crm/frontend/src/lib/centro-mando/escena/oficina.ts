@@ -571,7 +571,29 @@ function construirMuros(mundo: Mundo): Graphics {
   } else {
     panelMuroFondo(g, 0, mundo.ancho, 0, h, PALETA.muroFondo);
   }
-  panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
+  //  EL MURO LATERAL, con su propio vano. Mismo criterio que el de fondo: sin
+  //  `puertaLateral` se pinta entero. Lo necesita la sede de una planta, donde
+  //  una manzana entera tiene la circulación de este lado.
+  const vanoLateral = mundo.puertaLateral;
+  if (vanoLateral) {
+    panelMuroLateral(g, 0, Math.max(0, vanoLateral[0]), 0, h, PALETA.muroLateral);
+    panelMuroLateral(
+      g, Math.min(mundo.fondo, vanoLateral[1]),
+      Math.max(0, mundo.fondo - vanoLateral[1]), 0, h, PALETA.muroLateral);
+    //  Dintel.
+    panelMuroLateral(g, vanoLateral[0], vanoLateral[1] - vanoLateral[0], 2.2, h, PALETA.muroLateral);
+    //  Jambas: es lo que le da espesor al muro y hace que el hueco se lea como
+    //  una puerta y no como pared que falta.
+    panelMuroLateral(g, vanoLateral[0] - 0.12, 0.12, 0, 2.2, PALETA.muroRemate);
+    panelMuroLateral(g, vanoLateral[1], 0.12, 0, 2.2, PALETA.muroRemate);
+    //  El umbral en el suelo, que es lo que dice por dónde se entra.
+    const a = aPantalla(0, vanoLateral[0], 0.02);
+    const b = aPantalla(0, vanoLateral[1], 0.02);
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y)
+     .stroke({ color: PALETA.muroBanda, width: 2, alpha: 0.8 });
+  } else {
+    panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
+  }
 
   // Sombra de contacto al pie de cada muro: sin esto los muros flotan y el
   // síntoma se describe como «la escena se ve plana».

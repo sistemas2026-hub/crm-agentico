@@ -112,21 +112,27 @@ describe('el suelo vacío, que es lo que se veía mal', () => {
     }
   });
 
-  it('las dos manzanas quedan parejas de fondo', () => {
-    //  La otra mitad del hueco: con una manzana 11 unidades más honda que la
-    //  otra, la corta deja una franja vacía al frente que va de punta a punta.
-    for (const lista of [PILOTO, empresaDe(9), empresaDe(16), empresaDe(31)]) {
-      const r = repartirAnillo(lista);
-      const hasta = (banda) => r.puestas
-        .filter((p) => p.banda === banda)
-        .reduce((m, p) => Math.max(m, p.y + p.fondo), 0);
-      const izq = hasta('izquierda');
-      const der = hasta('derecha');
-      if (izq === 0 || der === 0) continue;
-      const masHonda = Math.max(...lista.map((s) => s.planta.mundo.fondo));
-      expect(Math.abs(izq - der), `izquierda ${izq}, derecha ${der}`)
-        .toBeLessThanOrEqual(masHonda);
+  it('el suelo muerto se queda abajo del quinto, en cualquier tamaño de empresa', () => {
+    //  AFIRMA EL EFECTO, no la paridad de fondos entre manzanas, que era el
+    //  proxy que esta prueba usaba antes. Dos manzanas pueden quedar
+    //  desparejas y desperdiciar poco, o parejas y desperdiciar mucho; lo que
+    //  importa es el suelo que no es ni sala, ni patio, ni pasillo, ni
+    //  entrada.
+    //
+    //  El peor caso medido sobre 1 a 40 salas es 19%, con tres. Con el tope de
+    //  cuota del patio que se probó y se descartó, llegaba al 27%.
+    let peor = { pct: 0, n: 0 };
+    for (let n = 1; n <= 40; n++) {
+      const r = repartirAnillo(empresaDe(n));
+      const total = area(r);
+      const muerto = total - areaSalas(r)
+        - r.pasillos.reduce((t, p) => t + p.ancho * p.fondo, 0)
+        - (r.patio ? r.patio.ancho * r.patio.fondo : 0)
+        - r.entrada.ancho * r.entrada.fondo;
+      if (muerto / total > peor.pct) peor = { pct: muerto / total, n };
     }
+    expect(peor.pct, `${(peor.pct * 100).toFixed(0)}% con ${peor.n} salas`)
+      .toBeLessThan(0.2);
   });
 });
 
@@ -172,6 +178,103 @@ describe('crecer no reubica lo que ya estaba', () => {
   it('el orden de salida es el de entrada, no el de las manzanas', () => {
     const r = repartirAnillo(PILOTO);
     expect(r.puestas.map((p) => p.sala.id)).toEqual(PILOTO.map((s) => s.id));
+  });
+});
+
+describe('a toda sala se puede entrar', () => {
+  /** ¿Comparten un tramo de borde estas dos cajas? */
+  const pegadas = (a, b) => {
+    const porLado = (Math.abs(a.x - (b.x + b.ancho)) < 0.01 || Math.abs(b.x - (a.x + a.ancho)) < 0.01)
+      && !(a.y + a.fondo <= b.y || b.y + b.fondo <= a.y);
+    const porFrente = (Math.abs(a.y - (b.y + b.fondo)) < 0.01 || Math.abs(b.y - (a.y + a.fondo)) < 0.01)
+      && !(a.x + a.ancho <= b.x || b.x + b.ancho <= a.x);
+    return porLado || porFrente;
+  };
+
+  it('ninguna sala queda sin frente a una circulación', () => {
+    //  LA PREGUNTA QUE ORIGINÓ ESTE BLOQUE, hecha mirando una captura: «¿por
+    //  dónde se entra a las oficinas que están atrás?». La respuesta medida
+    //  era: por ningún lado. Con dos columnas por manzana y sin pasillo, la
+    //  columna exterior daba contra el muro de la de adelante — **5 de 11
+    //  salas** del piloto: NOC, Comercial, Recursos Humanos, Dirección y
+    //  Recepción.
+    for (const lista of [PILOTO, ...Array.from({ length: 24 }, (_, i) => empresaDe(i + 1))]) {
+      const r = repartirAnillo(lista);
+      const circulacion = [...r.pasillos, r.patio, r.entrada].filter(Boolean);
+      for (const p of r.puestas) {
+        expect(circulacion.some((c) => pegadas(p, c)),
+          `${p.sala.id} no da a ninguna circulación (empresa de ${lista.length})`).toBe(true);
+      }
+    }
+  });
+
+  it('una sala más angosta que su columna igual llega al borde', () => {
+    //  El corte que casi se escapa: una columna es tan ancha como su sala
+    //  mayor, y la sala angosta dejaba el resto ENTRE ella y el pasillo. Dos
+    //  unidades de suelo alcanzaban para dejarla sin entrada.
+    const desparejas = [sala('ancha', 16, 9), sala('angosta', 9, 9), sala('media', 12, 10), sala('otra', 10, 8)];
+    const r = repartirAnillo(desparejas);
+    const circulacion = [...r.pasillos, r.patio, r.entrada].filter(Boolean);
+    for (const p of r.puestas) {
+      expect(circulacion.some((c) => pegadas(p, c)), `${p.sala.id} quedó corta`).toBe(true);
+    }
+  });
+
+  it('los pasillos no pisan ninguna sala ni el patio', () => {
+    for (const lista of [PILOTO, empresaDe(13), empresaDe(26)]) {
+      const r = repartirAnillo(lista);
+      for (const pasillo of r.pasillos) {
+        for (const p of r.puestas) {
+          expect(seSolapan(pasillo, p), `un pasillo pisa ${p.sala.id}`).toBe(false);
+        }
+        expect(seSolapan(pasillo, r.patio), 'un pasillo pisa el patio').toBe(false);
+      }
+    }
+  });
+
+  it('una manzana de una sola columna no gasta pasillo', () => {
+    //  Da al patio y con eso alcanza. Un pasillo ahí es suelo pagado dos veces.
+    const r = repartirAnillo([sala('a', 12, 9), sala('b', 12, 9)]);
+    expect(r.pasillos).toEqual([]);
+  });
+
+  it('el patio nunca es más ancho que el departamento más grande', () => {
+    //  LO QUE SEPARA UNA CALLE INTERIOR DE UN DESCAMPADO, y es una medida
+    //  mejor que la cuota del suelo. Un patio más ancho que una oficina se lee
+    //  como terreno sobrante por mucho que se lo amueble; uno más angosto se
+    //  lee como el sitio por el que se pasa entre dos filas de oficinas.
+    //
+    //  Con `PATIO_MINIMO.ancho` en 14 el patio del piloto era más ancho que
+    //  seis de sus once salas. Y en una empresa de veinte departamentos el
+    //  patio proporcional llegaba a 18 contra oficinas de 14.
+    for (let n = 1; n <= 30; n++) {
+      const lista = empresaDe(n);
+      const r = repartirAnillo(lista);
+      const masAncha = Math.max(...lista.map((s) => s.planta.mundo.ancho));
+      expect(r.patio.ancho, `con ${n} salas: patio ${r.patio.ancho} contra sala ${masAncha}`)
+        .toBeLessThanOrEqual(Math.max(masAncha, PATIO_MINIMO.ancho));
+    }
+  });
+
+  it('y el suelo que no es sala cae un 40%', () => {
+    //  El reparto viejo dejaba 1275 de suelo que no era sala sobre un plano de
+    //  2688 —el 47%—: el patio con su entrada (768) más la columna huérfana
+    //  (507). Ahora son 759 sobre 2035, el 37%.
+    const r = repartirAnillo(PILOTO);
+    const noEsSala = area(r) - areaSalas(r);
+    expect(noEsSala, `${noEsSala} de suelo que no es sala`).toBeLessThan(1275 * 0.65);
+    expect(noEsSala / area(r)).toBeLessThan(0.4);
+  });
+
+  it('con una sola columna por manzana no hay oficinas atrás', () => {
+    //  La respuesta a «¿por dónde se entra a las de atrás?» que no necesita
+    //  pasillos: que no haya salas atrás. Hasta diecisiete salas el plano
+    //  elegido es de una columna por manzana.
+    const r = repartirAnillo(PILOTO);
+    expect(r.pasillos).toEqual([]);
+    const bordes = new Set(r.puestas.map((p) =>
+      p.banda === 'izquierda' ? p.x + p.ancho : p.x));
+    expect(bordes.size, 'todas comparten el borde del patio').toBe(2);
   });
 });
 

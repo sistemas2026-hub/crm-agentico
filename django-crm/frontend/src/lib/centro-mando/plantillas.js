@@ -113,7 +113,13 @@ const ATENCION = {
     //  mostrador. Dos tableros -la cola y los avisos- y el mostrador por
     //  donde se atiende.
     { tipo: 'tablero', gy: 0.2 },
-    { tipo: 'estanteria', gy: 3.2, largo: 2.0 },
+    //  SIN ESTANTERÍA DE CARPETAS, a propósito: ver `expedientes`. Lo que se
+    //  atiende acá llega por pantalla, no se guarda en una balda.
+    //
+    //  Y sin nada en su lugar: el hueco que deja mide 2,56 y un tablero ocupa
+    //  2,74, así que un tercer tablero se monta sobre el de 5,5 —lo cazó la
+    //  guarda de solapes de este archivo—. Entre dejar el muro con un tramo
+    //  libre y apilar dos tableros que se dibujan como uno, el tramo libre.
     { tipo: 'tablero', gy: 5.5 },
     { tipo: 'mostrador', gx: 8.2, gy: 8.2, largo: 2.4 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
@@ -162,7 +168,9 @@ const TECNICA = {
     //  había forma de distinguir la sala de redes de una oficina cualquiera.
     { tipo: 'panel_fibra', gy: 0.4 },
     { tipo: 'tablero', gy: 2.7 },
-    { tipo: 'estanteria', gy: 5.5, largo: 2.2 },
+    //  Gabinete de equipos, no estantería de carpetas: en una sala de redes lo
+    //  que se guarda son ONT, transceptores y herramienta. Ver `expedientes`.
+    { tipo: 'armario', gy: 5.5 },
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 5 },
     //  La mesa de trabajo: en un NOC es donde se arma y se prueba un equipo
@@ -197,8 +205,19 @@ const EXPEDIENTES = {
   mobiliario: [
     { tipo: 'mampara', gx: 2, desde: 0.2, hasta: 9.8, vano: [4.0, 5.8] },
     { tipo: 'zona', gx: 4.0, gy: 6.0, ancho: 5.0, fondo: 3.4 },
-    //  Estanterías Y archivadores: finanzas y auditoría viven de expedientes
-    //  guardados, y un armario cerrado dice eso mejor que otro estante.
+    //  LA ESTANTERÍA DE CARPETAS VIVE ACÁ, Y CASI SOLO ACÁ.
+    //
+    //  `construirEstanteria` dibuja cuatro baldas llenas de carpetas de
+    //  colores: es la pieza más reconocible del catálogo y dice «acá se
+    //  guardan documentos» más fuerte que ninguna otra. Estaba en **6 de las 7
+    //  plantillas**, así que lo que decía en realidad era «todas las áreas son
+    //  la misma». La pregunta que lo destapó fue mirando una captura: «¿por
+    //  qué todas las oficinas tienen mueble de documentos?».
+    //
+    //  Ahora queda en dos: acá, donde el trabajo ES el expediente guardado, y
+    //  una sola en `generica`. Las demás recibieron la pieza que corresponde a
+    //  lo que hacen: un gabinete de equipos en redes, un tablero más en
+    //  comercial y en reuniones, nada en atención.
     { tipo: 'estanteria', gy: 0.8, largo: 3.0 },
     { tipo: 'armario', gy: 4.2 },
     { tipo: 'estanteria', gy: 6.0, largo: 3.0 },
@@ -240,7 +259,9 @@ const COMERCIAL = {
     //  lo que se mira en comercial son números en la pared.
     { tipo: 'tablero', gy: 0.3 },
     { tipo: 'tablero', gy: 3.2 },
-    { tipo: 'estanteria', gy: 6.1, largo: 2.6 },
+    //  Un tercer tablero y no una estantería: en comercial lo que se mira son
+    //  números en la pared. Ver `expedientes`.
+    { tipo: 'tablero', gy: 6.1 },
     { tipo: 'mampara', gx: 9, desde: 0.2, hasta: 9.8, vano: [6.6, 8.4] },
     { tipo: 'zona', gx: 1.6, gy: 5.8, ancho: 4.6, fondo: 3.4 },
     //  La mesa donde se sienta el cliente que viene a contratar.
@@ -280,7 +301,9 @@ const REUNIONES = {
   mobiliario: [
     { tipo: 'mesa', gx: 7.6, gy: 4.2 },
     { tipo: 'zona', gx: 1.6, gy: 5.4, ancho: 4.0, fondo: 2.8 },
-    { tipo: 'estanteria', gy: 2.0, largo: 4.0 },
+    //  Una sala de reuniones no archiva: tiene mesa y tablero. Ver
+    //  `expedientes` para por qué la estantería no está acá.
+    { tipo: 'tablero', gy: 2.0 },
     { tipo: 'tablero', gy: 6.4 },
     { tipo: 'luminaria', gx: 3, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 4 },
@@ -336,8 +359,10 @@ const GENERICA = {
     //  que llevaban antes no lo mira nadie, y los tres quedaban apilados en el
     //  mismo punto del muro dibujando uno solo.
     { tipo: 'tablero', gy: 0.3 },
+    //  UNA sola estantería, no dos: ésta es la plantilla de reserva, la que se
+    //  usa cuando la empresa no declaró de qué es el departamento. Tiene que
+    //  verse sobria, no como un archivo. Ver `expedientes`.
     { tipo: 'estanteria', gy: 3.1, largo: 1.6 },
-    { tipo: 'estanteria', gy: 4.9, largo: 1.2 },
     { tipo: 'armario', gy: 6.3 },
     { tipo: 'mesa', gx: 7.4, gy: 3.2 },
     { tipo: 'luminaria', gx: 3, gy: 3 },

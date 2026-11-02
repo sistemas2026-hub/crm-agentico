@@ -203,6 +203,31 @@ describe('cada área se reconoce por lo que tiene dentro', () => {
 
   const BASES = ['operaciones', 'atencion', 'tecnica', 'expedientes', 'comercial', 'reuniones'];
 
+  it('el mueble de documentos no está en casi todas las áreas', () => {
+    //  LA PREGUNTA QUE ESTA GUARDA NO SABÍA HACER. La de más abajo comprueba
+    //  que no haya DOS áreas amuebladas igual, y pasaba en verde mientras la
+    //  estantería de carpetas estaba en **6 de 7 plantillas**: cada área era
+    //  distinta de las demás por otras piezas, y aun así todas se veían como
+    //  un archivo. «¿Por qué todas las oficinas tienen mueble de documento?».
+    //
+    //  Afirma sobre la pieza más reconocible del catálogo —cuatro baldas de
+    //  carpetas de colores— y no sobre el mobiliario en bloque.
+    const todas = [...BASES, 'generica'];
+    const conEstante = todas.filter((n) =>
+      PLANTILLAS[n].mobiliario.some((m) => m.tipo === 'estanteria'));
+    expect(conEstante.length, `estantería en ${conEstante.join(', ')}`)
+      .toBeLessThanOrEqual(Math.floor(todas.length / 3));
+  });
+
+  it('y donde está, está porque el trabajo son los expedientes', () => {
+    const cuantas = (n) =>
+      PLANTILLAS[n].mobiliario.filter((m) => m.tipo === 'estanteria').length;
+    for (const otra of BASES.filter((n) => n !== 'expedientes')) {
+      expect(cuantas('expedientes'), `${otra} tiene tantas como expedientes`)
+        .toBeGreaterThan(cuantas(otra));
+    }
+  });
+
   it('ninguna sala se queda sin mobiliario propio de su oficio', () => {
     //  Todas tenían estantería y planta, así que una de ventas se veía igual
     //  que una de auditoría. El veredicto del 01/11/2026 fue «solo veo cuartos

@@ -81,13 +81,29 @@ export interface Mundo {
   fondo: number;
   alto: number;
   /**
-   * El vano de la puerta en el muro lateral (`gx = 0`), en celdas `gy`.
+   * El vano de la puerta en el muro de FONDO (`gy = 0`), en celdas `gx`.
+   *
+   * Decía «muro lateral (`gx = 0`), en celdas `gy`» y era falso: `oficina.ts`
+   * la pinta con `panelMuroFondo` recorriendo `gx`. Nadie lo notó porque el
+   * único que la usaba —`edificio.js`— pone su circulación justo al fondo, así
+   * que el resultado era correcto por el muro equivocado.
    *
    * Lo pone el compositor del edificio y NO la plantilla: una sala no sabe si
    * da a un pasillo. Mirada sola no lleva puerta, y es correcto — un hueco que
    * no da a ningún sitio es un agujero, no una puerta.
    */
   puerta?: [number, number];
+
+  /**
+   * El vano en el muro LATERAL (`gx = 0`), en celdas `gy`.
+   *
+   * Hace falta porque una sala solo tiene dos muros —el de fondo y el
+   * lateral— y los otros dos lados están abiertos hacia la cámara. En la sede
+   * de una planta eso deja sin entrada a toda una manzana: sus salas tienen la
+   * circulación contra el muro lateral, no contra un lado abierto. Medido
+   * sobre el piloto: 5 de 11 salas sin forma de entrar.
+   */
+  puertaLateral?: [number, number];
 }
 
 /** Una caja ocupada de verdad: dónde empieza y cuánto mide. */
