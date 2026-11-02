@@ -50,34 +50,42 @@ const OPERACIONES = {
   mundo: { ancho: 14, fondo: 10, alto: 4 },
   pasillo: { desde: 11, hasta: 14 },
   cartel: { gx: 7.4 },
-  mural: {
-    paneles: [
-      { gx: 2.6, ancho: 3.0 },
-      { gx: 5.9, ancho: 3.0 },
-      { gx: 9.2, ancho: 3.0 }
-    ]
-  },
+  //  SIN MURAL: lo reemplaza el videowall, que va en el MISMO muro de fondo y
+  //  a la misma altura. Los dos a la vez se dibujaban uno encima del otro
+  //  -mural en z 1,45..3,35, videowall en 1,15..3,3- y en la captura se veia
+  //  una fila de pantallas con el borde de otra asomando. La guarda de solapes
+  //  no podia verlo porque el mural no vive en `mobiliario`.
+  mural: null,
   mobiliario: [
-    //  LA MAMPARA PARTE LA SALA EN DOS, y eso es la distribución de un
-    //  despacho: coordinación de un lado, alistamiento del otro, con un vano
-    //  por donde sale el material hacia la calle.
+    //  ESTA ES LA SALA DE SUPERVISIÓN, Y ME EQUIVOQUÉ DE PLANTILLA UNA VEZ.
+    //
+    //  Puse el videowall y los racks en `tecnica` creyendo que era el NOC, y
+    //  el material de campo acá. La empresa del piloto declara lo contrario:
+    //  su departamento «NOC y Redes» pide `operaciones` y «Operaciones de
+    //  Campo» pide `tecnica`. Lo vi mirando el navegador —la sala rotulada NOC
+    //  tenía cajas apiladas— y no leyendo código.
+    //
+    //  Los PUESTOS ya lo decían y no los miré: acá se llaman «Monitoreo 1, 2,
+    //  3» y «Supervisión». Una sala cuyos asientos son de monitoreo es la que
+    //  mira pantallas, y la plantilla se llama «Centro de operaciones», que es
+    //  exactamente lo que un NOC es.
+
+    //  EL VIDEOWALL, en el muro de FONDO y con los puestos de monitoreo
+    //  mirando hacia él. Es la pieza protagonista: si se lee algo al mirar
+    //  esta sala, tiene que ser «acá se vigila una red».
+    { tipo: 'videowall', gx: 1.6, ancho: 8.6 },
+
+    //  LA MAMPARA DEJA LOS RACKS DEL OTRO LADO, que es como está un cuarto de
+    //  equipos: a la vista y con acceso aparte. El vano es por donde se pasa.
     { tipo: 'mampara', gx: 11, desde: 0.2, hasta: 9.8, vano: [4.6, 6.4] },
+    { tipo: 'rack', gx: 11.9, gy: 0.5, unidades: 6 },
+    { tipo: 'rack', gx: 11.9, gy: 1.8, unidades: 4 },
+    { tipo: 'rack', gx: 11.9, gy: 3.1, unidades: 7 },
+    { tipo: 'rack', gx: 11.9, gy: 7.0, unidades: 5 },
+
     { tipo: 'ducto', gy: 5.3, desde: 1.0, hasta: 10.6 },
-
-    //  EL TABLERO DE CUADRILLAS, al frente de la zona de coordinación: es lo
-    //  que se mira acá, y es lo primero que ve quien entra.
-    { tipo: 'tablero', gy: 0.3 },
-    { tipo: 'armario', gy: 3.2 },
-
-    //  LA ZONA DE ALISTAMIENTO, que es lo que ninguna otra área tiene: banco
-    //  de preparación, cajas de material y bobinas de cable drop. Todo del
-    //  lado de afuera de la mampara, junto a la salida operativa.
-    { tipo: 'banco_trabajo', gx: 11.6, gy: 0.6, largo: 3.2 },
-    { tipo: 'cajas', gx: 11.8, gy: 4.2, cuantas: 3 },
-    { tipo: 'cajas', gx: 12.8, gy: 4.4, cuantas: 2 },
-    { tipo: 'bobina', gx: 11.7, gy: 6.3 },
-    { tipo: 'bobina', gx: 12.9, gy: 6.5 },
     { tipo: 'panel_fibra', gy: 6.7 },
+    { tipo: 'armario', gy: 3.2 },
 
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 9, gy: 6 },
@@ -174,32 +182,33 @@ const TECNICA = {
   mobiliario: [
     { tipo: 'ducto', gy: 3.8, desde: 1.0, hasta: 9.8 },
 
-    //  LAS TRES PIEZAS QUE NADIE MÁS TIENE: videowall, racks y panel de fibra.
+    //  ESTA ES LA SALA DE CAMPO: acá se alista lo que sale a la calle.
     //
-    //  El videowall va en el muro de FONDO y los puestos miran hacia él: es la
-    //  distribución de un NOC y no la de una oficina. Ocupa casi todo el muro
-    //  porque es la pieza protagonista — si se lee algo al mirar esta sala,
-    //  tiene que ser «acá se vigila una red».
-    { tipo: 'videowall', gx: 1.4, ancho: 8.0 },
+    //  La empresa del piloto declara `tecnica` para su departamento
+    //  «Operaciones de Campo», y los puestos de esta plantilla —«Coordinación»
+    //  y dos puestos sueltos, en la sala más chica del catálogo— son los de un
+    //  equipo que despacha, no los de uno que mira pantallas. Las de monitoreo
+    //  están en `operaciones`, que es donde fue el videowall.
 
-    //  La fila de racks contra el costado, en zona protegida. Tres cuerpos y
-    //  no uno: un rack suelto parece un armario, una fila es una sala de
-    //  equipos.
-    { tipo: 'rack', gx: 9.9, gy: 0.5, unidades: 6 },
-    { tipo: 'rack', gx: 9.9, gy: 1.8, unidades: 4 },
-    { tipo: 'rack', gx: 9.9, gy: 3.1, unidades: 7 },
+    //  EL TABLERO DE ÓRDENES, al frente: es lo que se mira acá y lo primero
+    //  que ve quien entra.
+    { tipo: 'tablero', gy: 0.4 },
 
-    { tipo: 'panel_fibra', gy: 0.4 },
-    { tipo: 'armario', gy: 3.2 },
+    //  LA ZONA DE ALISTAMIENTO, que no tiene ninguna otra área: banco de
+    //  preparación con instrumental, cajas de material y bobinas de cable de
+    //  acometida.
+    { tipo: 'banco_trabajo', gx: 7.2, gy: 0.5, largo: 2.6 },
+    { tipo: 'cajas', gx: 9.9, gy: 3.4, cuantas: 3 },
+    { tipo: 'cajas', gx: 9.9, gy: 4.6, cuantas: 2 },
+    { tipo: 'bobina', gx: 9.7, gy: 6.1 },
+    { tipo: 'bobina', gx: 8.4, gy: 6.3 },
 
-    //  El banco donde se arma y se prueba un equipo antes de montarlo. No es
-    //  la mesa redonda de reunión que tenía media sede.
-    { tipo: 'banco_trabajo', gx: 7.4, gy: 5.6, largo: 2.2 },
+    { tipo: 'panel_fibra', gy: 5.5 },
 
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 5 },
-    //  UNA sola maceta, y al fondo. Un NOC no es un sitio con plantas; la que
-    //  hay está para que la sala no se lea como un sótano.
+    //  UNA sola maceta, y al fondo. Una sala de campo no es un sitio con
+    //  plantas; la que hay está para que no se lea como un depósito.
     { tipo: 'planta', gx: 0.8, gy: 7.0 }
   ],
   puestos: [

@@ -203,6 +203,57 @@ describe('cada área se reconoce por lo que tiene dentro', () => {
 
   const BASES = ['operaciones', 'atencion', 'tecnica', 'expedientes', 'comercial', 'reuniones'];
 
+  it('ninguna sala lleva mural Y videowall: van en el mismo muro', () => {
+    //  LOS DOS SE DIBUJAN EN EL MURO DE FONDO Y A LA MISMA ALTURA —el mural en
+    //  z 1,45..3,35 y el videowall en 1,15..3,3—, así que juntos se pintan uno
+    //  encima del otro. En la captura del NOC se veía una fila de pantallas
+    //  con el borde de otra asomando por debajo.
+    //
+    //  Y LA GUARDA DE SOLAPES DE ABAJO NO PODÍA VERLO: recorre `mobiliario`, y
+    //  el mural no vive ahí sino en su propio campo de la plantilla. Es el
+    //  mismo error que cometí con los rótulos —medir el par que se me ocurre y
+    //  no el que está roto— repetido en otro sitio.
+    for (const n of [...BASES, 'generica']) {
+      const p = PLANTILLAS[n];
+      const tieneVideowall = p.mobiliario.some((m) => m.tipo === 'videowall');
+      const tieneMural = Boolean(p.mural?.paneles?.length);
+      expect(tieneVideowall && tieneMural, `${n} lleva mural y videowall`).toBe(false);
+    }
+  });
+
+  it('el videowall está en la sala cuyos puestos son de monitoreo', () => {
+    //  LA GUARDA QUE HABRÍA CAZADO MI ERROR, y los datos ya lo decían.
+    //
+    //  Puse el videowall y los racks en `tecnica` creyendo que era el NOC, y
+    //  el material de campo en `operaciones`. La empresa del piloto declara lo
+    //  contrario —su «NOC y Redes» pide `operaciones`— y lo descubrí mirando
+    //  el navegador: la sala rotulada NOC tenía cajas apiladas.
+    //
+    //  Lo que no miré fueron los PUESTOS de cada plantilla. En `operaciones`
+    //  se llaman «Monitoreo 1, 2, 3» y «Supervisión». Una sala cuyos asientos
+    //  son de monitoreo es la que mira pantallas, y eso está escrito en este
+    //  mismo archivo desde antes de que yo tocara nada.
+    const mira = (n) => PLANTILLAS[n].puestos
+      .some((p) => /monitore|supervis/i.test(p.nombre ?? ''));
+    const conVideowall = BASES.filter((n) =>
+      PLANTILLAS[n].mobiliario.some((m) => m.tipo === 'videowall'));
+    expect(conVideowall.length, 'nadie tiene videowall').toBeGreaterThan(0);
+    for (const n of conVideowall) {
+      expect(mira(n), `${n} tiene videowall y ningún puesto de monitoreo`).toBe(true);
+    }
+  });
+
+  it('ninguna sala mira pantallas Y alista material a la vez', () => {
+    //  Son dos funciones distintas y una sala que tuviera las dos no se
+    //  reconocería por ninguna. Es la otra mitad del mismo error.
+    for (const n of BASES) {
+      const tipos = new Set(PLANTILLAS[n].mobiliario.map((m) => m.tipo));
+      const vigila = tipos.has('videowall') || tipos.has('rack');
+      const alista = tipos.has('cajas') || tipos.has('bobina');
+      expect(vigila && alista, `${n} vigila y alista al mismo tiempo`).toBe(false);
+    }
+  });
+
   it('cada área tiene al menos tres piezas que no tiene ninguna otra', () => {
     //  LA REGLA QUE PIDIÓ LA ESPECIFICACIÓN DEL 02/11/2026, con esas palabras:
     //  «cada departamento debe tener por lo menos tres elementos exclusivos
