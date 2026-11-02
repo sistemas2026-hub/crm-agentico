@@ -91,9 +91,21 @@
           roles_permitidos: [rol]
         })
       });
-      const datos = await resp.json().catch(() => ({}));
+      //  EL MOTIVO NO SE PIERDE. La primera version mostraba siempre «No se
+      //  pudo guardar.» cuando la respuesta no traía `error` --o no era
+      //  JSON-- y entonces no había con qué diagnosticar: el código HTTP es
+      //  lo que distingue «no sos admin» (403) de «ya existe ese código»
+      //  (400) de «el motor no está» (502), y se perdía entero.
+      const crudo = await resp.text();
+      let datos = {};
+      try {
+        datos = JSON.parse(crudo);
+      } catch {
+        datos = {};
+      }
       if (!resp.ok) {
-        error = datos?.error || 'No se pudo guardar.';
+        const detalle = datos?.error || crudo.slice(0, 120).trim();
+        error = `No se pudo guardar (HTTP ${resp.status})${detalle ? `: ${detalle}` : ''}`;
         return;
       }
       guardada = true;

@@ -204,3 +204,25 @@ describe('el asistente no se bloquea por un perfil que el CRM no resuelve', () =
     expect(fuente).toMatch(/if \(rolPedido && !esAdmin\)/);
   });
 });
+
+describe('cuando guardar falla, el motivo no se pierde', () => {
+  //  La primera version mostraba siempre «No se pudo guardar.»: si la
+  //  respuesta no traía `error`, o no era JSON, no quedaba con qué
+  //  diagnosticar. El código HTTP es lo que distingue «no sos admin» (403)
+  //  de «ya existe ese código» (400) de «el motor no está» (502).
+  const fuente = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/manual/CorregirAgente.svelte'),
+    'utf-8'
+  );
+
+  it('el mensaje lleva el código HTTP', () => {
+    expect(fuente).toContain('No se pudo guardar (HTTP ${resp.status})');
+  });
+
+  it('y lee el cuerpo como texto antes de parsearlo', () => {
+    //  Con `resp.json()` a secas, una respuesta HTML --un 500 de SvelteKit--
+    //  lanza y el cuerpo se pierde entero.
+    expect(fuente).toContain('const crudo = await resp.text()');
+    expect(fuente).not.toMatch(/await resp\.json\(\)\.catch/);
+  });
+});
