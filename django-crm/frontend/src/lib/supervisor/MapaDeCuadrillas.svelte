@@ -23,6 +23,8 @@
 <script>
   import { onMount } from 'svelte';
 
+  import { opcionesDelIcono } from './icono-de-cuadrilla.js';
+
   /** @type {{ cuadrillas: any[] }} */
   let { cuadrillas } = $props();
 
@@ -38,6 +40,55 @@
   let capa = null;
   /** @type {any} */
   let L = null;
+  /** @type {any} */
+  let capasBase = null;
+
+  /** Qué capa se está viendo. Sobrevive al redibujo de los pines. */
+  let vista = $state('mapa');
+
+  /**
+   * LAS DOS CAPAS (02/11/2026). El usuario: «el mapa se ve viejo, ¿no se
+   * puede importar un mapa y cambiar a modo satélite?».
+   *
+   * Ninguna de las dos pide cuenta, clave ni tarjeta, y ninguna recibe la
+   * ubicación de nadie: un servidor de tiles solo ve QUÉ ZONA se está
+   * mirando, nunca las coordenadas del técnico. Es la misma exposición que
+   * ya tenía OpenStreetMap.
+   *
+   *   mapa     CARTO Voyager — el mismo dato de OSM con un diseño limpio;
+   *            el OSM crudo es lo que se veía viejo.
+   *   satelite Esri World Imagery.
+   *
+   * Las dos son gratis con atribución y uso razonable. Si esto creciera a
+   * muchas empresas mirando mapas todo el día, hay que revisar sus términos.
+   */
+  const CAPAS = {
+    mapa: {
+      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      opciones: {
+        maxZoom: 20,
+        subdomains: 'abcd',
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
+      }
+    },
+    satelite: {
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      opciones: {
+        maxZoom: 19,
+        attribution: 'Imágenes &copy; Esri'
+      }
+    }
+  };
+
+  /** @param {'mapa' | 'satelite'} cual */
+  function cambiarCapa(cual) {
+    vista = cual;
+    if (!mapa || !L || !capasBase) return;
+    for (const [nombre, capaBase] of Object.entries(capasBase)) {
+      if (nombre === cual) capaBase.addTo(mapa);
+      else mapa.removeLayer(capaBase);
+    }
+  }
 
   //  LA LIMPIEZA VA EN UN `onMount` SÍNCRONO (01/11/2026). Un `onMount`
   //  asíncrono devuelve una promesa, y Svelte ignora lo que resuelva: la
@@ -52,10 +103,10 @@
       //  Entre el import y acá el supervisor pudo haberse ido de la pantalla.
       if (!vivo || !caja) return;
       mapa = L.map(caja, { attributionControl: true, zoomControl: true });
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(mapa);
+      capasBase = Object.fromEntries(
+        Object.entries(CAPAS).map(([n, c]) => [n, L.tileLayer(c.url, c.opciones)])
+      );
+      capasBase[vista].addTo(mapa);
       capa = L.layerGroup().addTo(mapa);
       //  Sin nada que mostrar, el mapa igual tiene que verse: Soledad.
       mapa.setView([10.9185, -74.7668], 13);
@@ -83,12 +134,12 @@
     for (const c of conPosicion) {
       const p = c.posicion;
       const color = p.fresca ? '#1f7a3d' : '#6b7280';
-      const marca = L.circleMarker([p.latitud, p.longitud], {
-        radius: p.fresca ? 9 : 7,
-        color: '#fff',
-        weight: 2,
-        fillColor: color,
-        fillOpacity: p.fresca ? 0.95 : 0.55
+      //  LA MOTO CON TRÁILER (02/11/2026), en vez de un punto. El color
+      //  sigue diciendo lo mismo: lleno = reportó hace poco, apagado = es
+      //  dónde estuvo. Ver `icono-de-cuadrilla.js`.
+      const marca = L.marker([p.latitud, p.longitud], {
+        icon: L.divIcon(opcionesDelIcono(color, p.fresca)),
+        title: c.cuadrilla ?? ''
       });
       marca.bindPopup(textoDelPopup(c));
       marca.addTo(capa);
@@ -135,7 +186,15 @@
     </span>
   </div>
 
-  <div class="mp-caja" bind:this={caja}></div>
+  <div class="mp-caja" bind:this={caja}>
+    <!-- MAPA / SATÉLITE: encima del mapa, como en el boceto del usuario. -->
+    <div class="mp-capas">
+      <button type="button" class:on={vista === 'mapa'}
+              onclick={() => cambiarCapa('mapa')}>Mapa</button>
+      <button type="button" class:on={vista === 'satelite'}
+              onclick={() => cambiarCapa('satelite')}>Satélite</button>
+    </div>
+  </div>
 
   <!-- SIN CUADRILLAS ARMADAS (01/11/2026): se dice, en vez de dejar un mapa
        vacío que no se distingue de uno roto. -->
@@ -162,6 +221,7 @@
   .mp-cab { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
   .mp-cuenta { font-size: 12px; }
   .mp-caja {
+    position: relative;
     height: 360px;
     border-radius: var(--snoc-r-xl);
     border: 1px solid var(--snoc-outline-variant);
@@ -171,6 +231,36 @@
   .mp-nota, .mp-sin, .mp-vacio { margin: 0; font-size: 12px; }
   .mp-vacio { font-weight: 600; }
   .mp-sin { font-weight: 600; }
+  .mp-capas {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 500;
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 999px;
+    background: var(--snoc-surface-container-lowest);
+    border: 1px solid var(--snoc-outline-variant);
+    box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+  }
+  .mp-capas button {
+    border: none;
+    background: transparent;
+    color: var(--snoc-on-surface-variant);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .mp-capas button.on {
+    background: var(--snoc-primary);
+    color: var(--snoc-on-primary, #fff);
+  }
+  /* El ícono del vehículo: sin fondo ni borde propios de Leaflet. */
+  :global(.mp-vehiculo) { background: none; border: none; }
   /* Leaflet dibuja dentro de la caja; su CSS llega con el módulo. */
   :global(.leaflet-container) { font: inherit; background: var(--snoc-surface-container); }
 </style>

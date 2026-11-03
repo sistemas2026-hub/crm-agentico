@@ -3,6 +3,7 @@ import { render } from 'svelte/server';
 
 import MapaDeCuadrillas from './MapaDeCuadrillas.svelte';
 import { seDibujaElMapa } from './dia-publicado.js';
+import { motoConTrailer, opcionesDelIcono } from './icono-de-cuadrilla.js';
 
 /**
  * EL MAPA DE CUADRILLAS (31/10/2026).
@@ -48,6 +49,22 @@ describe('el mapa de cuadrillas', () => {
 
   it('con todas reportando no dice que falte ninguna', () => {
     expect(html([cuadrilla()])).not.toContain('Sin señal:');
+  });
+
+  it('ofrece Mapa y Satélite, y arranca en Mapa', () => {
+    const h = html([cuadrilla()]);
+
+    expect(h).toContain('>Mapa<');
+    expect(h).toContain('>Satélite<');
+    //  Y SE VE: un selector escondido pasa un `toContain` y no sirve a
+    //  nadie. Se mira la etiqueta entera, no un patrón con el orden de los
+    //  atributos adentro -- ese orden lo decide Svelte y ya me engañó una vez.
+    const etiqueta = h.match(/<div[^>]*mp-capas[^>]*>/)?.[0] ?? '';
+    expect(etiqueta).not.toBe('');
+    expect(etiqueta).not.toContain('hidden');
+    //  Svelte pone su sufijo PRIMERO: `class="svelte-… on"`.
+    expect(h).toMatch(/class="[^"]*\bon"[^>]*>Mapa</);
+    expect(h).not.toMatch(/class="[^"]*\bon"[^>]*>Satélite</);
   });
 
   it('dice siempre qué significa un punto y qué significa lo atenuado', () => {
@@ -101,5 +118,36 @@ describe('cuándo se dibuja el mapa', () => {
     for (const sinHoy of ['', null, undefined]) {
       expect(seDibujaElMapa('2026-11-01', sinHoy)).toBe(false);
     }
+  });
+});
+
+
+describe('el vehículo de la cuadrilla', () => {
+  it('el color dice lo mismo que decía el punto: lleno es de ahora', () => {
+    const fresca = motoConTrailer('#1f7a3d', true);
+    const vieja = motoConTrailer('#6b7280', false);
+
+    //  TIÑE EL VEHÍCULO ENTERO, no una franja suelta: el cuerpo, su lado y
+    //  su techo. Con un solo `toContain` sobrevivía despintar la carrocería.
+    expect(fresca.match(/#1f7a3d/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(fresca).toContain('opacity:1');
+    //  Lo viejo se ve viejo: es dónde estuvo, no dónde está.
+    expect(vieja).toContain('opacity:0.5');
+  });
+
+  it('es un dibujo, no una imagen: nítido en cualquier zoom', () => {
+    const svg = motoConTrailer('#1f7a3d', true);
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('viewBox="0 0 46 34"');
+    expect(svg).not.toContain('<img');
+  });
+
+  it('el punto cae en la rueda de atrás, no en el centro del dibujo', () => {
+    //  Si se ancla al medio, el vehículo queda corrido respecto de la calle
+    //  y el supervisor lo lee como que está en otro lado.
+    const o = opcionesDelIcono('#1f7a3d', true);
+    expect(o.iconAnchor).toEqual([12, 29]);
+    expect(o.iconSize).toEqual([46, 34]);
+    expect(o.className).toBe('mp-vehiculo');
   });
 });
