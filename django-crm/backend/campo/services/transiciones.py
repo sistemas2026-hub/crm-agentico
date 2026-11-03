@@ -336,8 +336,21 @@ def cerrar_orden(
     profile=None,
     metadatos: dict | None = None,
 ) -> OrdenTrabajo:
-    """Cierre definitivo de la orden (por supervisor o conciliación posterior)."""
-    return _aplicar_transicion(
+    """Cierre definitivo de la orden (por supervisor o conciliación posterior).
+
+    Y DEVUELVE AL TICKET lo que pasó en campo (02/11/2026). Va acá dentro y no
+    en quien llama, a propósito: hay dos caminos que cierran una orden —la
+    pantalla y el Supervisor— y cualquiera nuevo heredaría el olvido. El
+    usuario encontró el defecto con dos pantallas abiertas: la orden cerrada
+    en Supervisor y el ticket «Nuevo» hacía 26 días.
+
+    Si eso falla, la orden queda cerrada igual: `devolver` nunca levanta. Un
+    ticket sin actualizar es un problema; una orden que no se puede cerrar
+    porque el CRM tuvo un hipo es uno peor.
+    """
+    from campo.devolver_al_ticket import devolver
+
+    cerrada = _aplicar_transicion(
         orden=orden,
         nuevo_estado=OrdenTrabajo.CERRADA,
         tipo_evento="orden_cerrada",
@@ -345,6 +358,8 @@ def cerrar_orden(
         metadatos=metadatos or {},
         establecer_fecha_cierre=True,
     )
+    devolver(cerrada, profile=profile)
+    return cerrada
 
 
 def aplicar_transicion(
