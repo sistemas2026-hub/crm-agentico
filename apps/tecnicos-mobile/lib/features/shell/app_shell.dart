@@ -181,14 +181,14 @@ class ShellDependencias {
       resumenInicial: sincronizacion.lastSummary,
       sincronizarAhora: sincronizacion.procesarCola,
       conectividad: _conectividadDelTelefono(),
-      //  COMPARTIR LA UBICACION (02/11/2026). Nace ENCENDIDA: `alArrancar`
-      //  pide el permiso del sistema y empieza, salvo que el tecnico la haya
-      //  apagado a mano.
+      //  LA UBICACION LA ENCIENDE EL ARRANQUE DE LA JORNADA (02/11/2026):
+      //  `alArrancar` solo retoma si el dia guardado es HOY. El boton de
+      //  Inicio es el que pide el permiso y lo deja escrito.
       ubicacion: CompartirUbicacion(
         enviar: (Position p, int? bateria) =>
             mandarUbicacion(ApiClient(), p, bateria),
-        leerApagada: almacenamiento.getUbicacionApagada,
-        guardarApagada: almacenamiento.setUbicacionApagada,
+        leerDiaIniciado: almacenamiento.getJornadaIniciada,
+        guardarDiaIniciado: almacenamiento.setJornadaIniciada,
       ),
       sesionVencida: ApiClient.sesionVencida,
       recepcion: RecepcionDelKit.real(),

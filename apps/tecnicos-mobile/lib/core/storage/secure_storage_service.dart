@@ -33,12 +33,10 @@ class SecureStorageService implements SecureStorageLectura {
   /// La labor del día, para verla sin señal (29/10/2026). Se borra al cerrar
   /// sesión: es de quien la tenía.
   static const _keyLaborDeHoy = 'dexter_labor_de_hoy';
-  /// Si el tecnico APAGO a mano el compartir su ubicacion (02/11/2026).
-  /// Se guarda el apagado y no el encendido: lo normal es compartir --se
-  /// decidio que no tenga que prenderlo cada dia-- asi que lo que hay que
-  /// recordar es la excepcion. Un telefono recien instalado no tiene nada
-  /// guardado y comparte.
-  static const _keyUbicacion = 'dexter_ubicacion_apagada';
+  /// El DIA en que el tecnico arranco su jornada (02/11/2026), AAAA-MM-DD.
+  /// La ubicacion se comparte los dias que el arranco, no todos: manana esa
+  /// fecha ya no es hoy y deja de compartirse sola, sin apagar nada.
+  static const _keyUbicacion = 'dexter_jornada_iniciada';
   static const _keyUserEmail = 'dexter_user_email';
   static const _keyUserName = 'dexter_user_name';
   static const _keyBaseUrl = 'dexter_api_base_url';
@@ -53,27 +51,22 @@ class SecureStorageService implements SecureStorageLectura {
   /// rechazada" sin ninguna pista de por qué.
   static String get defaultBaseUrl => ApiEndpoints.defaultEnvironmentUrl;
 
-  /// Si el tecnico la apago. Falso ante cualquier duda: lo normal es
-  /// compartir, y una lectura que falla no puede apagar el seguimiento de
-  /// toda una cuadrilla en silencio.
-  Future<bool> getUbicacionApagada() async {
+  /// El dia que arranco, o null. Null ante cualquier duda: no compartir es
+  /// el lado seguro de una lectura que fallo.
+  Future<String?> getJornadaIniciada() async {
     try {
-      return await _storage.read(key: _keyUbicacion) == '1';
+      return await _storage.read(key: _keyUbicacion);
     } catch (_) {
-      return false;
+      return null;
     }
   }
 
-  Future<void> setUbicacionApagada(bool apagada) async {
+  Future<void> setJornadaIniciada(String dia) async {
     try {
-      if (apagada) {
-        await _storage.write(key: _keyUbicacion, value: '1');
-      } else {
-        await _storage.delete(key: _keyUbicacion);
-      }
+      await _storage.write(key: _keyUbicacion, value: dia);
     } catch (_) {
-      //  Que no se pueda recordar la preferencia no puede tumbar nada: lo
-      //  peor que pasa es que manana tenga que prenderlo otra vez.
+      //  Que no se pueda recordar no tumba nada: lo peor que pasa es que al
+      //  reabrir la aplicacion tenga que volver a tocar «Iniciar jornada».
     }
   }
 

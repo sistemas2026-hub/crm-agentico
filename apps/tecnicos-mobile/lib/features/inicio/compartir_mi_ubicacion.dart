@@ -3,40 +3,49 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/ubicacion/compartir_ubicacion.dart';
+import '../materiales/estado_de_jornada.dart';
+import 'arranque_de_jornada.dart';
 
-/// EL INTERRUPTOR DE LA UBICACIÓN, en Inicio (31/10/2026).
+/// ARRANCAR LA JORNADA, en Inicio (02/11/2026).
 ///
-/// Dice las tres cosas que el técnico necesita para decidir, en su idioma:
-/// qué se comparte, cuándo deja de compartirse, y que lo puede apagar él.
-/// Sin eso, un interruptor de ubicación en una aplicación de trabajo se lee
-/// como «la empresa me está siguiendo», y la respuesta razonable del técnico
-/// sería no prenderlo nunca.
+/// El usuario: «en la pantalla de inicio colocá un botón para iniciar la
+/// jornada y así se empieza a tomar la ubicación automática», y después:
+/// «ponés el botón y enseguida le indique pa qué va, y lo muestre, que revise
+/// el inventario para salir».
+///
+/// DOS ESTADOS, Y UNO SOLO SE TOCA:
+///
+///   - antes de arrancar: el botón. Al tocarlo se abre la hoja que explica
+///     qué va a pasar y le muestra su material (`ArranqueDeJornada`); recién
+///     si confirma, el sistema le pide el permiso y empieza a compartir;
+///   - ya arrancada: informa, y no se toca. Lo que la apaga es que termine
+///     el día: la marca es la FECHA, así que a medianoche deja de ser hoy
+///     sola, sin que nadie apague nada.
 ///
 /// NO MUESTRA LA COORDENADA. Al técnico no le sirve ver sus grados; le sirve
 /// saber si la oficina lo está viendo ahora mismo.
-///
-/// SIN INTERRUPTOR (02/11/2026). El usuario: «quita el botón de la app de
-/// compartir mi ubicación». La tarjeta informa y no se toca: el técnico tiene
-/// que estar enterado —para eso sigue acá— pero no decide cada día.
-///
-/// Lo que NO queda sin salida: apagarlo sigue siendo posible desde los
-/// ajustes del teléfono, revocando el permiso de ubicación. Ese control lo
-/// garantiza Android y ninguna aplicación lo puede quitar, así que esto no
-/// deja a nadie compartiendo sin forma de pararlo.
 class CompartirMiUbicacion extends StatelessWidget {
   const CompartirMiUbicacion({
     super.key,
     required this.servicio,
+    this.estadoDeJornada,
+    this.alArrancar,
   });
 
   final CompartirUbicacion servicio;
+
+  /// El kit del día, para mostrarlo en la hoja. Null si no se pudo leer.
+  final EstadoDeJornada? estadoDeJornada;
+
+  /// Para que la pantalla se redibuje cuando la jornada arranca.
+  final VoidCallback? alArrancar;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<EstadoDeUbicacion>(
       valueListenable: servicio.estado,
       builder: (BuildContext contexto, EstadoDeUbicacion estado, _) {
-        final bool prendido = servicio.encendido;
+        final bool arrancada = servicio.jornadaIniciada;
         final bool mal = estado == EstadoDeUbicacion.sinPermiso ||
             estado == EstadoDeUbicacion.fueraDeJornada;
         return Container(
@@ -46,7 +55,7 @@ class CompartirMiUbicacion extends StatelessWidget {
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(AppSpacing.md),
             border: Border.all(
-              color: prendido ? AppColors.secondary : AppColors.outlineVariant,
+              color: arrancada ? AppColors.secondary : AppColors.outlineVariant,
             ),
           ),
           child: Column(
@@ -55,38 +64,70 @@ class CompartirMiUbicacion extends StatelessWidget {
               Row(
                 children: <Widget>[
                   Icon(
-                    prendido ? Icons.location_on : Icons.location_off,
-                    color: prendido ? AppColors.secondary : AppColors.onSurfaceVariant,
+                    arrancada ? Icons.location_on : Icons.wb_sunny_outlined,
+                    color: arrancada
+                        ? AppColors.secondary
+                        : AppColors.onSurfaceVariant,
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Compartir mi ubicación',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                      arrancada ? 'Tu jornada está en marcha' : 'Tu jornada',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 15),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: AppSpacing.xs),
-              Text(
-                textoDeUbicacion(estado),
-                style: TextStyle(
-                  fontSize: 13,
-                  color: mal ? AppColors.error : AppColors.onSurfaceVariant,
+              if (arrancada) ...<Widget>[
+                Text(
+                  textoDeUbicacion(estado),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: mal ? AppColors.error : AppColors.onSurfaceVariant,
+                  ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              const Text(
-                'Se comparte sola mientras dura tu jornada y tengas la app '
-                'abierta, para que la oficina sepa a quién mandar al próximo '
-                'caso. No guarda por dónde pasaste. Si la apagás, no vuelve a '
-                'encenderse sola.',
-                style: TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
-              ),
+                const SizedBox(height: AppSpacing.xs),
+                const Text(
+                  'Termina sola al final del día. Mañana no se comparte nada '
+                  'hasta que vuelvas a arrancar.',
+                  style: TextStyle(
+                      fontSize: 12, color: AppColors.onSurfaceVariant),
+                ),
+              ] else ...<Widget>[
+                const Text(
+                  'Arrancá tu día: revisás el material que llevás y la oficina '
+                  'sabe a quién mandar al próximo caso.',
+                  style: TextStyle(
+                      fontSize: 13, color: AppColors.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Iniciar jornada'),
+                    onPressed: () => _arrancar(contexto),
+                  ),
+                ),
+              ],
             ],
           ),
         );
       },
     );
+  }
+
+  Future<void> _arrancar(BuildContext contexto) async {
+    //  PRIMERO SE LE EXPLICA, DESPUÉS EL SISTEMA LE PREGUNTA. Al revés, el
+    //  diálogo de Android aparece sin contexto y lo razonable es negarlo.
+    final bool confirmo = await ArranqueDeJornada.mostrar(
+      contexto,
+      estado: estadoDeJornada,
+    );
+    if (!confirmo) return;
+    await servicio.iniciarJornada();
+    alArrancar?.call();
   }
 }

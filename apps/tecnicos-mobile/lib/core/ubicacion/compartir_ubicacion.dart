@@ -8,25 +8,26 @@ import 'package:geolocator/geolocator.dart';
 /// El usuario: «un mapa donde uno pueda ver la posición actual de cada
 /// técnico, con el fin de hacerle seguimiento».
 ///
-/// COMPARTE SOLA, Y ESA ES LA DECISIÓN (02/11/2026)
-/// ------------------------------------------------
-/// El usuario: «es mejor que el técnico no tenga que estar presionando un
-/// botón; solo estará enterado de que la aplicación comparte la ubicación, y
-/// al momento de instalar la app que pida el permiso y ya».
+/// LA ENCIENDE EL ARRANQUE DE LA JORNADA (02/11/2026)
+/// --------------------------------------------------
+/// El usuario, en dos pasos. Primero: «es mejor que el técnico no tenga que
+/// estar presionando un botón... que al instalar la app pida el permiso y
+/// ya». Después: «en la pantalla de inicio colocá un botón para iniciar la
+/// jornada y así se empieza a tomar la ubicación automática».
 ///
-/// Tiene razón en lo que importa: un técnico que tiene que acordarse de
-/// prender algo cada mañana, no lo prende, y entonces el mapa miente por
-/// omisión. Así que **nace encendida**: al abrir la aplicación pide el
-/// permiso del sistema y empieza.
+/// Lo segundo es mejor que lo primero y resuelve lo mismo. Un botón que hay
+/// que prender *para compartir ubicación* se siente vigilancia y nadie lo
+/// toca; **«Iniciar jornada» es algo que el técnico quiere tocar**, porque es
+/// el arranque de su día. Y encima deja la ubicación atada a un hecho real:
+/// se comparte los días que él trabajó, no todos.
 ///
-/// EL CONSENTIMIENTO NO DESAPARECE, CAMBIA DE LUGAR. Android obliga a mostrar
-/// el diálogo de permiso, y sin un «permitir» del técnico no se lee ni una
-/// coordenada. Lo que se fue es tener que repetirlo cada día.
+/// POR ESO LA MARCA ES UN DÍA, NO UN BOOLEANO. Se guarda la FECHA en que
+/// arrancó. Mañana esa fecha ya no es hoy, y la ubicación no sale hasta que
+/// vuelva a arrancar. No hay que apagar nada: se apaga sola a medianoche.
 ///
-/// Y SIGUE PUDIENDO APAGARLA. El interruptor queda, encendido por omisión:
-/// una aplicación de trabajo que comparte dónde está alguien y no le deja
-/// pararlo es otra cosa. Apagarla se recuerda --no se vuelve a encender sola
-/// al día siguiente-- hasta que él la prenda.
+/// EL CONSENTIMIENTO SIGUE SIENDO SUYO, dos veces: Android le pide el permiso
+/// --sin un «permitir» no se lee ni una coordenada-- y él decide cuándo
+/// empieza su día.
 ///
 /// LO QUE NO SE HACE, Y POR QUÉ
 /// ----------------------------
@@ -49,25 +50,34 @@ import 'package:geolocator/geolocator.dart';
 class CompartirUbicacion {
   CompartirUbicacion({
     required this.enviar,
-    required this.leerApagada,
-    required this.guardarApagada,
+    required this.leerDiaIniciado,
+    required this.guardarDiaIniciado,
+    String Function()? hoyTexto,
+
     this.cada = const Duration(minutes: 3),
     this.plazoDeLectura = const Duration(seconds: 20),
-  });
+  }) : hoyTexto = hoyTexto ?? _hoyDelSistema;
+
+  static String _hoyDelSistema() {
+    final DateTime d = DateTime.now();
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+  }
 
   /// Manda la posición. Devuelve `false` si el servidor la rechazó por estar
   /// fuera de la jornada o del horario: entonces se deja de insistir hasta la
   /// próxima vez que el técnico abra la aplicación.
   final Future<bool> Function(Position posicion, int? bateria) enviar;
 
-  /// Si el técnico la APAGÓ a mano (sobrevive a cerrar la aplicación).
-  ///
-  /// Se guarda el apagado y no el encendido, a propósito: lo normal es
-  /// compartir, así que lo que hay que recordar es la excepción. Un teléfono
-  /// recién instalado no tiene nada guardado y comparte, que es lo que se
-  /// decidió.
-  final Future<bool> Function() leerApagada;
-  final Future<void> Function(bool) guardarApagada;
+  /// El día (AAAA-MM-DD) en que el técnico arrancó su jornada, o null.
+  /// Sobrevive a cerrar la aplicación; a medianoche deja de ser hoy solo.
+  final Future<String?> Function() leerDiaIniciado;
+  final Future<void> Function(String) guardarDiaIniciado;
+
+  /// Hoy, en texto AAAA-MM-DD. Inyectable para poder probar el cambio de día
+  /// sin esperar a medianoche.
+  final String Function() hoyTexto;
 
   final Duration cada;
   final Duration plazoDeLectura;
@@ -83,17 +93,33 @@ class CompartirUbicacion {
 
   bool get encendido => _encendido;
 
-  /// Al abrir la aplicación: comparte, salvo que el técnico la haya apagado.
+  /// Si el técnico ya arrancó su jornada HOY.
+  bool _jornadaDeHoy = false;
+  bool get jornadaIniciada => _jornadaDeHoy;
+
+  /// Al abrir la aplicación: retoma solo si la jornada arrancada es la de HOY.
   ///
-  /// PIDE EL PERMISO ACÁ. Es el «al momento de instalar la app que pida el
-  /// permiso»: la primera vez que se abre. Si el técnico lo niega, Android
-  /// deja de preguntar solo, y la tarjeta se lo dice.
+  /// NO pide el permiso acá: el diálogo del sistema aparece cuando el técnico
+  /// toca «Iniciar jornada», que es cuando tiene sentido explicárselo. Abrir
+  /// la aplicación no es decir que empezó a trabajar.
   Future<void> alArrancar() async {
-    if (await leerApagada()) {
+    _jornadaDeHoy = await leerDiaIniciado() == hoyTexto();
+    if (!_jornadaDeHoy) {
       estado.value = EstadoDeUbicacion.apagado;
       return;
     }
-    await encender();
+    await encender(pedirPermiso: false);
+  }
+
+  /// ARRANCA LA JORNADA: pide el permiso, lo deja escrito para hoy y empieza
+  /// a compartir. Es lo que hace el botón de Inicio.
+  Future<bool> iniciarJornada() async {
+    final bool pudo = await encender();
+    if (pudo) {
+      _jornadaDeHoy = true;
+      await guardarDiaIniciado(hoyTexto());
+    }
+    return pudo;
   }
 
   /// La prende: la primera vez pide el permiso del sistema si falta.
@@ -103,7 +129,6 @@ class CompartirUbicacion {
       return false;
     }
     _encendido = true;
-    await guardarApagada(false);
     estado.value = EstadoDeUbicacion.compartiendo;
     _reloj?.cancel();
     _reloj = Timer.periodic(cada, (_) => _mandarUna());
@@ -111,17 +136,14 @@ class CompartirUbicacion {
     return true;
   }
 
-  /// La apaga el técnico, o el servidor al decir que no corresponde.
-  ///
-  /// `recordarlo` distingue las dos: lo que el técnico apaga se recuerda y no
-  /// vuelve solo; lo que para el servidor --fuera de jornada u horario-- NO
-  /// se recuerda, porque mañana a las siete sí corresponde y nadie tendría
-  /// que volver a prenderla a mano.
-  Future<void> apagar({bool recordarlo = true}) async {
+  /// Para de compartir. NO borra el día arrancado: la jornada sigue siendo
+  /// la de hoy, y si el motivo fue el horario, al reabrir la aplicación
+  /// dentro de la ventana vuelve sola. A medianoche se apaga sin que nadie
+  /// haga nada: el día guardado deja de ser hoy.
+  Future<void> apagar() async {
     _encendido = false;
     _reloj?.cancel();
     _reloj = null;
-    if (recordarlo) await guardarApagada(true);
     estado.value = EstadoDeUbicacion.apagado;
   }
 
@@ -148,7 +170,7 @@ class CompartirUbicacion {
         //  horario): se para por hoy, pero NO se recuerda apagada --mañana
         //  dentro del horario sí corresponde, y el técnico no tiene por qué
         //  volver a prenderla.
-        await apagar(recordarlo: false);
+        await apagar();
         estado.value = EstadoDeUbicacion.fueraDeJornada;
         return;
       }
@@ -191,7 +213,14 @@ class CompartirUbicacion {
   @visibleForTesting
   bool? permisoDePrueba;
 
+  /// Si se le PIDIÓ el permiso al sistema en la última vuelta. Importa por sí
+  /// solo: abrir la aplicación no puede tirarle un diálogo en la cara a quien
+  /// todavía no dijo que empezó a trabajar.
+  @visibleForTesting
+  bool? sePidioElPermiso;
+
   Future<bool> _hayPermiso({required bool pedir}) async {
+    sePidioElPermiso = pedir;
     if (permisoDePrueba != null) return permisoDePrueba!;
     try {
       LocationPermission permiso = await Geolocator.checkPermission();

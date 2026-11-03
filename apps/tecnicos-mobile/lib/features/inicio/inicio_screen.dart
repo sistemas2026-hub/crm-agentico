@@ -217,11 +217,18 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ] else ...<Widget>[
               _saludo(sync),
-              // COMPARTIR LA UBICACIÓN (31/10/2026): arriba, con el saludo,
-              // porque es una decisión del técnico sobre su día y no un
-              // ajuste escondido. Nace apagado.
+              // ARRANCAR LA JORNADA (02/11/2026): arriba, con el saludo,
+              // porque es lo primero del día. El botón abre la hoja que
+              // explica qué va a pasar y le muestra el material que lleva;
+              // recién si confirma, empieza a compartir la ubicación.
               if (widget.ubicacion != null)
-                CompartirMiUbicacion(servicio: widget.ubicacion!),
+                CompartirMiUbicacion(
+                  servicio: widget.ubicacion!,
+                  estadoDeJornada: _jornada,
+                  alArrancar: () {
+                    if (mounted) setState(() {});
+                  },
+                ),
               // LA NOVEDAD DE LA CUADRILLA (30/10/2026): «se pinchó la llanta»
               // sin escribir en ningún ticket. Arriba, junto al saludo: es lo
               // que cambia el día.
