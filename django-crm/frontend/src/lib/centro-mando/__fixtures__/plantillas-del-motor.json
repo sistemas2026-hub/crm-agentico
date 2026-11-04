@@ -20,6 +20,21 @@
     "puestos": 4
   },
   {
+    "nombre": "vestibulo",
+    "rotulo": "Vestibulo",
+    "puestos": 2
+  },
+  {
+    "nombre": "vestibulo_5",
+    "rotulo": "Vestibulo - 5 puestos",
+    "puestos": 5
+  },
+  {
+    "nombre": "vestibulo_8",
+    "rotulo": "Vestibulo - 8 puestos",
+    "puestos": 8
+  },
+  {
     "nombre": "atencion_7",
     "rotulo": "Sala de atencion - 7 puestos",
     "puestos": 7

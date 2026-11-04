@@ -111,7 +111,7 @@ const OPERACIONES = {
  * vez de tres porque acá lo que se mira es una cola, no una red.
  */
 const ATENCION = {
-  rotulo: 'Sala de atención',
+  rotulo: 'Centro de contacto',
   privacidad: 'semipublico',
   acento: 0x0ea5a4,
   mundo: { ancho: 13, fondo: 9, alto: 4 },
@@ -124,40 +124,47 @@ const ATENCION = {
     ]
   },
   mobiliario: [
-    //  LA SALA DE ESPERA ES LO QUE DEFINE ESTA ÁREA. La mampara separa a quien
-    //  espera de quien atiende, y del lado de afuera va la espera entera:
-    //  bancos en fila, dispensador y una planta. Ninguna otra área recibe
-    //  gente sentada.
+    //  ESTO ES UN CENTRO DE CONTACTO, NO UNA VENTANILLA.
+    //
+    //  Tenía mostrador, turnero y cuatro bancos en fila, y era la MISMA sala
+    //  que Recepción pieza por pieza: las dos declaraban esta plantilla. La
+    //  sede acababa con dos máquinas de turnos y dos salas de espera, y un
+    //  cliente saca turno una vez, al entrar. Todo eso vive ahora en
+    //  `RECEPCION`, que es la que da a la calle.
+    //
+    //  Lo que queda es lo que un turno de atención usa de verdad: la mampara
+    //  que separa al equipo del paso, los tableros que mira mientras trabaja,
+    //  un rincón de apoyo y dónde guardar.
     { tipo: 'mampara', gx: 10, desde: 0.2, hasta: 8.8, vano: [3.8, 5.6] },
-    { tipo: 'ducto', gy: 4.6, desde: 1.0, hasta: 9.6 },
 
-    //  Los dos tableros: la cola y los avisos. Es lo que se mira desde la
-    //  espera, y por eso están en el muro que la espera ve.
+    //  Los dos tableros: la cola y los avisos. Es lo que mira el turno
+    //  mientras atiende, y por eso siguen siendo dos.
     { tipo: 'tablero', gy: 0.2 },
     { tipo: 'tablero', gy: 5.5 },
 
-    //  EL MOSTRADOR, junto al vano: es por donde se atiende, y está donde se
-    //  cruzan los dos lados.
-    { tipo: 'mostrador', gx: 8.2, gy: 8.2, largo: 2.4 },
-
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 6 },
-    //  CUATRO BANCOS EN FILA, no dos sueltos: una fila se lee como una sala de
-    //  espera; dos bancos separados, como asientos de descanso.
-    { tipo: 'banco', gx: 10.6, gy: 0.9 },
-    { tipo: 'banco', gx: 10.6, gy: 2.4 },
-    //  LOS DOS DE ATRAS, PASADO EL HUECO DEL TABIQUE. Estaban en 3,9 y 5,4,
-    //  justo sobre el vano -3,8 a 5,6-, y lo taponaban entero: la mampara se
-    //  dibujaba con su paso y no se podia pasar. Medido el 02/11/2026, el dia
-    //  que la rejilla empezo a tratar una mampara como el tabique que es.
-    { tipo: 'banco', gx: 10.6, gy: 6.6 },
-    { tipo: 'banco', gx: 10.6, gy: 8.1 },
-    //  EL TURNERO, a la entrada de la espera: la pieza que dice «acá se hace
-    //  fila» y que no tiene nadie más en la sede.
-    { tipo: 'turnero', gx: 12.1, gy: 7.9 },
+    //  EL RINCÓN DE APOYO del turno: una banqueta sobre su alfombra. Es donde
+    //  se para quien consulta algo con quien tiene al lado, y es lo que
+    //  reemplaza a la sala de espera que esta sala no necesita.
+    { tipo: 'zona', gx: 10.4, gy: 5.8, ancho: 2.4, fondo: 2.6 },
+    { tipo: 'banco', gx: 10.8, gy: 6.4 },
+    //  LAS DOS CABINAS ACÚSTICAS: donde se mete quien necesita hablar sin que
+    //  lo oiga el resto del turno. Es la pieza que nombra a esta sala, igual
+    //  que el rack nombra al NOC, y no la tiene nadie más en la sede.
+    { tipo: 'cabina', gx: 10.6, gy: 0.6 },
+    { tipo: 'cabina', gx: 10.6, gy: 2.0 },
+    //  EL ARMARIO DEL TURNO: diademas de repuesto, guiones, material de
+    //  campaña. Un centro de contacto guarda cosas; una ventanilla no.
+    //
+    //  A 2,8 y no a 7,2: ahí se montaba sobre el tablero de 5,5, que ocupa
+    //  hasta 8,12. El hueco libre del muro es el de 2,62 a 5,38.
+    { tipo: 'armario', gy: 2.85 },
+    //  Las bandejas del papeleo que una atención deja: reclamos firmados,
+    //  copias de contrato.
+    { tipo: 'bandejas', gx: 8.6, gy: 6.8, cuantas: 3 },
     { tipo: 'dispensador', gx: 12.0, gy: 1.4 },
-    //  UNA maceta, en la espera, que es donde una planta tiene sentido.
-    { tipo: 'planta', gx: 12.0, gy: 5.0 }
+    { tipo: 'planta', gx: 12.0, gy: 3.4 }
   ],
   puestos: [
     //  Corrido a la izquierda respecto de la fila de atrás: con los dos
@@ -168,6 +175,68 @@ const ATENCION = {
     { id: 'p1', nombre: 'Atención 1', gx: 1.2, gy: 3.0 },
     { id: 'p2', nombre: 'Atención 2', gx: 4.2, gy: 3.0 },
     { id: 'p3', nombre: 'Atención 3', gx: 7.2, gy: 3.0 }
+  ]
+};
+
+/**
+ * EL VESTÍBULO: la entrada, y la única sala con fila.
+ *
+ * Se llama por el TIPO DE SALA y no por el departamento que la ocupa:
+ * una guarda de `departamentos.test.js` lo exige, y tiene razón —el
+ * catálogo es genérico y `recepcion` es el id de un espacio de esta
+ * empresa, no un tipo de recinto—.
+ *
+ * Nació porque no existía. `recepcion` venía declarada con la plantilla
+ * `atencion`, así que las dos salas eran la MISMA pieza por pieza: la sede
+ * tenía dos mostradores, dos máquinas de turnos y dos salas de espera de
+ * cuatro bancos. Un cliente saca turno una vez, al entrar.
+ *
+ * Lo que la define es que da a la calle y que trabaja poca gente: mostrador
+ * largo y atravesado, turnero, espera de verdad y un directorio en la pared.
+ * No lleva tableros de indicadores —eso es de quien opera, no de quien
+ * recibe— ni mural de pantallas.
+ */
+const VESTIBULO = {
+  rotulo: 'Vestíbulo',
+  privacidad: 'semipublico',
+  acento: 0x92400e,
+  //  Más ancha y menos honda que el centro de contacto: una entrada es un
+  //  frente largo. Y la guarda del plano exige que dos salas no midan lo
+  //  mismo y se amueblen igual.
+  mundo: { ancho: 15, fondo: 8, alto: 4 },
+  pasillo: { desde: 0, hasta: 3 },
+  cartel: { gx: 6.4 },
+  mural: null,
+  mobiliario: [
+    //  EL MOSTRADOR, largo y atravesado: es lo primero que se ve al entrar y
+    //  lo que separa a quien llega de quien atiende.
+    { tipo: 'mostrador', gx: 4.0, gy: 2.2, largo: 4.2 },
+    //  LA ESPERA: cuatro bancos sobre su alfombra, lejos del mostrador.
+    { tipo: 'zona', gx: 9.0, gy: 0.8, ancho: 5.4, fondo: 4.0 },
+    { tipo: 'banco', gx: 9.6, gy: 1.4 },
+    { tipo: 'banco', gx: 11.2, gy: 1.4 },
+    { tipo: 'banco', gx: 9.6, gy: 3.4 },
+    { tipo: 'banco', gx: 11.2, gy: 3.4 },
+    //  EL SOFÁ DE LA ESPERA. Una sala de espera de verdad tiene uno, y es lo
+    //  que termina de separarla del centro de contacto: allí se trabaja de
+    //  pie o sentado a un puesto, aquí se espera.
+    { tipo: 'sofa', gx: 12.6, gy: 1.2 },
+    //  EL TURNERO, a la entrada de la espera: la pieza que dice «acá se hace
+    //  fila», y ahora la tiene UNA sola sala en toda la sede.
+    { tipo: 'turnero', gx: 13.6, gy: 2.4 },
+    //  El directorio: la única pieza de pared, y dice a dónde ir.
+    { tipo: 'tablero', gy: 0.4 },
+    { tipo: 'dispensador', gx: 13.8, gy: 5.6 },
+    { tipo: 'luminaria', gx: 4, gy: 4 },
+    { tipo: 'luminaria', gx: 11, gy: 5 },
+    { tipo: 'planta', gx: 1.2, gy: 6.6 }
+  ],
+  puestos: [
+    //  Dos, y no cuatro: en una recepción no se sientan cuatro personas.
+    //  DETRAS del mostrador, que cruza a gy 2,2: a 4,6 quedaban a 2,5 de el y
+    //  la guarda de «ningun mueble se sienta encima de un puesto» lo cazo.
+    { id: 'principal', nombre: 'Recepción', principal: true, gx: 4.2, gy: 5.4 },
+    { id: 'p1', nombre: 'Información', gx: 6.8, gy: 5.4 }
   ]
 };
 
@@ -205,6 +274,13 @@ const TECNICA = {
     //  preparación con instrumental, cajas de material y bobinas de cable de
     //  acometida.
     { tipo: 'banco_trabajo', gx: 7.2, gy: 0.5, largo: 2.6 },
+    //  EL ARMARIO DE HERRAMIENTA. Esta sala mueve material —bobinas, cajas,
+    //  empalmes— y no tenía dónde guardarlo: era la única del catálogo que
+    //  maneja cosas y no tiene ni armario ni estantería.
+    //
+    //  A 3,1: el tablero ocupa el muro hasta 3,01 y el panel de empalmes
+    //  arranca en 5,5, así que ese es el único hueco de 1,5 que queda.
+    { tipo: 'armario', gy: 3.1 },
     { tipo: 'cajas', gx: 9.9, gy: 3.4, cuantas: 3 },
     { tipo: 'cajas', gx: 9.9, gy: 4.6, cuantas: 2 },
     { tipo: 'bobina', gx: 9.7, gy: 6.1 },
@@ -278,13 +354,20 @@ const EXPEDIENTES = {
     //  estanteria, que guarda lo ya archivado. Es la tercera pieza propia de
     //  esta area y la nombra la especificacion del 02/11/2026.
     { tipo: 'bandejas', gx: 2.4, gy: 0.4, cuantas: 4 },
+    //  LA MULTIFUNCION del archivo: un expediente que entra en papel sale
+    //  digitalizado. Es la tercera seña que lo separa del centro de contacto,
+    //  y dice lo que hace esta sala mejor que un mueble más.
+    { tipo: 'impresora', gx: 10.6, gy: 0.6 },
     { tipo: 'planta', gx: 0.6, gy: 3.0 }
   ],
   puestos: [
+    //  «Revisión» y no «Gestión»: quien trabaja contra un archivo revisa
+    //  expedientes. Sirve igual para un área de cumplimiento que para una de
+    //  documentación, que son las dos que piden esta plantilla.
     { id: 'principal', nombre: 'Coordinación', principal: true, gx: 4.6, gy: 6.8 },
-    { id: 'p1', nombre: 'Gestión 1', gx: 3.0, gy: 3.2 },
-    { id: 'p2', nombre: 'Gestión 2', gx: 6.4, gy: 3.2 },
-    { id: 'p3', nombre: 'Gestión 3', gx: 9.0, gy: 5.6 }
+    { id: 'p1', nombre: 'Revisión 1', gx: 3.0, gy: 3.2 },
+    { id: 'p2', nombre: 'Revisión 2', gx: 6.4, gy: 3.2 },
+    { id: 'p3', nombre: 'Revisión 3', gx: 9.0, gy: 5.6 }
   ]
 };
 
@@ -487,6 +570,12 @@ const PERSONAL = {
     //  LA MESA DE ENTREVISTAS, con sus dos sillas enfrentadas, en el extremo
     //  opuesto al puesto de gestión.
     { tipo: 'mesa_revision', gx: 7.4, gy: 6.8, largo: 2.6 },
+    //  LA ESTANTERÍA DE LOS LEGAJOS. Un área de personal archiva: contratos,
+    //  hojas de vida, formación. Era la única que guardaba papel de gente y
+    //  no tenía dónde ponerlo.
+    //
+    //  A 3,0: el tablero ocupa el muro hasta 2,91.
+    { tipo: 'estanteria', gy: 3.0, largo: 2.2 },
     //  EL MURO, en tres tramos y en este orden: primero el calendario de
     //  personal -lo que se consulta de paso-, despues el panel de formacion
     //  frente a la mesa de entrevistas, y el armario al fondo. Los tres
@@ -549,6 +638,10 @@ const INSPECCION = {
     //  escribe a mano-: aca lo que hay son hallazgos en un tablero y papel
     //  bajo llave. Eso es lo que separa esta sala de las otras dos que
     //  tambien reciben a alguien en una mesa.
+    //  LA PIZARRA DE HALLAZGOS: una inspección anota lo que encuentra a mano
+    //  antes de que sea un informe. Es lo que la separa del archivo, que
+    //  guarda expedientes cerrados, y del centro de contacto.
+    { tipo: 'pizarra', gy: 6.4, largo: 2.2 },
     { tipo: 'caja_fuerte', gx: 9.6, gy: 7.4 },
     { tipo: 'bandejas', gx: 1.4, gy: 1.0, cuantas: 3 },
     { tipo: 'banco', gx: 1.6, gy: 3.6 },
@@ -637,11 +730,13 @@ const DESPACHO = {
     //  La mesa estratégica, en su propio rincón.
     { tipo: 'mesa', gx: 8.0, gy: 5.8 },
     { tipo: 'zona', gx: 6.6, gy: 4.6, ancho: 3.6, fondo: 3.4 },
-    //  La caja fuerte de los documentos de la empresa -contratos, actas-.
-    //  Entra al salir el tablero: la guarda de identidad exige tres cosas que
-    //  la sala de reuniones no tenga, y sin ella quedaban dos. No va pegada
-    //  al muro a proposito: ahi estorbaria la eleccion del vano.
-    { tipo: 'caja_fuerte', gx: 2.6, gy: 1.2 },
+    //  EL SOFÁ DE VISITA. Reemplaza a una caja fuerte que había entrado el
+    //  mismo día por el motivo equivocado: hacía falta una tercera seña que la
+    //  sala de reuniones no tuviera, y una caja fuerte servía para la guarda
+    //  sin decir nada de un despacho —ya había dos en la sede, en Cartera y en
+    //  el archivo—. Un sofá sí: es donde se sienta quien viene a hablar, y no
+    //  lo tiene nadie más.
+    { tipo: 'sofa', gx: 2.4, gy: 1.4 },
     { tipo: 'videoconferencia', gy: 2.5, largo: 1.8 },
     //  SIN TABLERO, y es una resta medida, no un olvido. Este muro mide 9 y
     //  la puerta se lleva 2,2; quedan 6,4 utiles. La biblioteca (1,8), la
@@ -957,6 +1052,7 @@ function conTamanos(catalogo) {
 export const PLANTILLAS = conTamanos({
   operaciones: OPERACIONES,
   atencion: ATENCION,
+  vestibulo: VESTIBULO,
   tecnica: TECNICA,
   expedientes: EXPEDIENTES,
   comercial: COMERCIAL,

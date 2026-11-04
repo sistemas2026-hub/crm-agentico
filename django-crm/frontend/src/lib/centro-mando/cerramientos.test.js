@@ -445,3 +445,49 @@ describe('el edificio cierra por sus cuatro lados', () => {
     }
   });
 });
+
+describe('dos salas de la sede no pueden ser la misma sala', () => {
+  //  POR QUE HACIA FALTA, Y QUE NO VEIA LA OTRA.
+  //
+  //  `plantillas.test.js` ya exige que cada plantilla tenga tres tipos de
+  //  mueble que cualquier otra no tenga. Pero compara PLANTILLAS, y dos
+  //  salas que declaran la MISMA plantilla nunca se comparan entre si: el
+  //  par no existe en esa matriz.
+  //
+  //  Asi vivieron Recepcion y Atencion al Cliente, las dos con `atencion`:
+  //  identicas pieza por pieza, con dos mostradores, dos maquinas de turnos
+  //  y dos salas de espera de cuatro bancos en la misma sede. La guarda de
+  //  plantillas estaba en verde y tenia razon —habia una sola plantilla—.
+  //
+  //  Esta mira lo que de verdad se dibuja: las once salas compuestas.
+  const tipos = (p) => new Set((p.mobiliario ?? []).map((m) => m.tipo));
+
+  it('cada sala tiene tres muebles que cualquier otra no tiene', () => {
+    const mal = [];
+    for (const a of SALAS) {
+      for (const b of SALAS) {
+        if (a.sala === b.sala) continue;
+        const solo = [...tipos(a)].filter((t) => !tipos(b).has(t));
+        if (solo.length < 3) {
+          mal.push(`${a.sala} sólo tiene ${solo.length} que ${b.sala} no: ${solo.join(',') || '—'}`);
+        }
+      }
+    }
+    expect(mal, mal.join(' | ')).toEqual([]);
+  });
+
+  it('y ninguna pareja comparte plantilla', () => {
+    //  LA CAUSA, no el sintoma. Dos salas pueden diferenciarse hoy por como
+    //  las amueble el compositor y volver a ser la misma mañana si comparten
+    //  plantilla. Que cada sala tenga la suya es lo que lo impide de raiz.
+    const porPlantilla = new Map();
+    for (const p of SALAS) {
+      const n = PLANTILLA_DE.get(p.sala) ?? 'generica';
+      porPlantilla.set(n, [...(porPlantilla.get(n) ?? []), p.sala]);
+    }
+    const repetidas = [...porPlantilla.entries()]
+      .filter(([, cuales]) => cuales.length > 1)
+      .map(([n, cuales]) => `${n}: ${cuales.join(' y ')}`);
+    expect(repetidas, repetidas.join(' | ')).toEqual([]);
+  });
+});

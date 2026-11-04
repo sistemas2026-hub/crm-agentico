@@ -58,6 +58,10 @@ export const BULTO = {
   banco_trabajo: 1.4,
   mostrador: 1.5,
   banco: 0.8,
+  //  Mas que un banco: tiene brazos y respaldo, y nadie lo atraviesa.
+  sofa: 1.3,
+  //  Una caseta cerrada: se rodea entera.
+  cabina: 0.9,
   dispensador: 0.5,
   planta: 0.6,
   cajas: 0.7,

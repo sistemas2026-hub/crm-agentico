@@ -3546,3 +3546,72 @@ repetir el error**. Un comentario equivocado es peor que ninguno.
 
 **`centro-mando`: 785 verdes, 0 rojas.**
 
+## P16 · Revision de mobiliario, departamento por departamento — 04/11/2026
+
+### El hallazgo: dos salas eran la misma sala
+
+`recepcion` venia declarada con la plantilla `atencion`, asi que **Recepcion y
+Atencion al Cliente eran identicas pieza por pieza**. La sede tenia dos
+mostradores, dos maquinas de turnos y dos salas de espera de cuatro bancos. Un
+cliente saca turno una vez, al entrar.
+
+**Y ninguna guarda podia verlo.** `plantillas.test.js` exige que cada plantilla
+tenga tres muebles que cualquier otra no tenga, pero compara PLANTILLAS: dos
+salas que declaran la misma nunca se comparan entre si, el par no existe en esa
+matriz. La guarda estaba en verde y tenia razon — habia una sola plantilla.
+
+La guarda nueva mira las once salas COMPUESTAS, y con la mutacion puesta lo
+dice en una linea: *«atencion_cliente solo tiene 0 que recepcion no»*.
+
+### Las cinco correcciones
+
+| # | Area | Que cambia |
+|---|---|---|
+| 1 | **Recepcion** | Plantilla propia `vestibulo`: mostrador largo, turnero, espera con sofa, directorio. 15×8 y dos puestos, no cuatro |
+| 2 | **Atencion al Cliente** | Deja de ser una ventanilla. Pierde mostrador, turnero y los cuatro bancos; gana **dos cabinas acusticas**, armario de turno y bandejas |
+| 3 | **Operaciones de Campo** | Gana el armario de herramienta: era la unica sala que mueve material y no tenia donde guardarlo |
+| 4 | **Auditoria** | Pasa a `expedientes` —un archivo de verdad, con estanterias— en vez de improvisarlo con tres armarios sueltos |
+| 5 | **Direccion** | Fuera la caja fuerte que entro en P11 por el motivo equivocado; entra un **sofa de visita** |
+
+### Lo que la revision corrigio, en numeros
+
+| Pieza | Antes | Ahora |
+|---|---|---|
+| maquinas de turno | 2 | **1** |
+| cajas fuertes | 3 | **1** (solo Cartera) |
+| mostradores | 5 | **4** |
+| tableros | 11 | **9** |
+| ductos de cable en salas de publico | 2 | **0** |
+
+### Dos piezas nuevas, y por que no fueron muebles sueltos
+
+Al separar las dos salas, **diez pares** de la matriz de identidad cayeron por
+debajo de tres. La tentacion era repartir muebles genericos hasta que el
+contador diera — eso es programar para la guarda. Cada sala recibio en cambio
+la pieza que la nombra:
+
+- **`cabina`**: una caseta acustica de una plaza. En un centro de contacto es
+  tan reconocible como un rack en un NOC, y no la tiene nadie mas.
+- **`sofa`**: distinto de un `banco` a proposito. Un banco es asiento de paso;
+  un sofa es donde se sienta quien viene a hablar. Esta en Direccion y en la
+  espera del vestibulo.
+
+Y dos muebles entraron donde faltaban por oficio: la **estanteria de legajos**
+en Recursos Humanos y la **multifuncion** del archivo.
+
+### Tres cosas que salieron mal por el camino, y lo que ensenan
+
+1. **La plantilla se llamo `recepcion` y una guarda la rechazo**: el catalogo
+   es generico y `recepcion` es el id de un espacio de ESTA empresa. Paso a
+   llamarse `vestibulo`, que es un tipo de recinto. La guarda tenia razon.
+2. **Mi parche corrio dos veces** —fallo en el ultimo archivo despues de haber
+   escrito los dos primeros— y dejo `construirCabina` declarada dos veces. No
+   lo vio ninguna guarda roja: lo vio el contador, 559 verdes donde habia 792,
+   porque un archivo que no carga no falla, **falta**. Es el mismo patron de
+   P11 con `camara.test.js`.
+3. **La caja fuerte que agregue a `expedientes`** rompio su par con
+   `inspeccion`. Salio, y de paso dejo a Cartera como la unica sala con caja
+   fuerte de la sede — que es mejor que lo que yo habia propuesto.
+
+**`centro-mando`: 802 verdes, 0 rojas.**
+

@@ -2362,6 +2362,83 @@ function construirCajasDeMaterial(gx: number, gy: number, cuantas: number): Mueb
  * No es `mesa` —esa es redonda, de reunión— ni `mostrador` —ese atiende a
  * alguien—. Esto es un tablón con instrumental encima y cajones debajo.
  */
+/**
+ * UN SOFÁ DE VISITA, de dos plazas.
+ *
+ * Se distingue del `banco` a propósito, y no es un matiz: un banco es un
+ * asiento de espera —tabla y dos patas, se usa de paso— y un sofá es donde se
+ * sienta alguien a hablar un rato. Por eso lleva respaldo, brazos y dos
+ * cojines, que son las tres cosas que lo dicen sin explicarlo.
+ *
+ * Entró en Dirección reemplazando a una caja fuerte que estaba ahí por el
+ * motivo equivocado: hacía falta una tercera seña que la sala de reuniones no
+ * tuviera, y una caja fuerte la daba sin decir nada de un despacho.
+ */
+/**
+ * UNA CABINA ACÚSTICA: el mueble que nombra a un centro de contacto.
+ *
+ * Es la caseta de una plaza donde alguien se mete a hablar sin que el resto
+ * del turno lo oiga —y sin oír al resto—. En una oficina de atención es una
+ * pieza tan reconocible como un rack en un NOC, y no la tiene nadie más.
+ *
+ * Entró resolviendo un problema de identidad, y conviene decir cómo: al
+ * separar Recepción del centro de contacto, las dos salas quedaron amuebladas
+ * de oficina genérica y la guarda que exige tres señas propias se puso en
+ * rojo. Repartir muebles sueltos hasta que el contador diera habría sido
+ * programar para la guarda; lo que hacía falta era la pieza que la sala
+ * merecía.
+ */
+function construirCabina(gx: number, gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  const L = 1.1;
+  const F = 1.1;
+  const H = 2.2;
+  //  El zócalo y el cuerpo opaco hasta la altura de una mesa.
+  caja(g, gx, gy, 0, F, L, 0.1, PALETA.escritorioPata);
+  caja(g, gx, gy, 0.1, F, L, 0.85, PALETA.tapizado);
+  //  El vidrio, de ahí al techo de la caseta: es lo que la hace una cabina y
+  //  no un armario. Translúcido, como el resto del vidrio de la sede.
+  caja(g, gx, gy, 0.95, F, L, H - 1.15, PALETA.vidrio, 0.34);
+  //  El marco: cuatro cantos verticales y el remate de arriba.
+  caja(g, gx, gy, H - 0.2, F, L, 0.2, PALETA.metal);
+  caja(g, gx, gy, 0.95, 0.07, L, H - 1.15, PALETA.metal, 0.9);
+  caja(g, gx + F - 0.07, gy, 0.95, 0.07, L, H - 1.15, PALETA.metal, 0.9);
+  //  Y el testigo de ocupada, en el canto.
+  const p = aPantalla(gx + F * 0.5, gy + 0.04, 1.75);
+  g.circle(p.x, p.y, 2).fill({ color: PALETA.mossClaro, alpha: 0.9 });
+
+  nodo.addChild(g);
+  return { nodo };
+}
+
+function construirSofa(gx: number, gy: number): Mueble {
+  const nodo = new Container();
+  nodo.zIndex = profundidad(gx, gy);
+  const g = new Graphics();
+
+  const LARGO = 2.3;
+  const FONDO = 0.95;
+  //  La base, que es lo que lo apoya en el suelo.
+  caja(g, gx + 0.06, gy + 0.06, 0, FONDO - 0.12, LARGO - 0.12, 0.18, PALETA.escritorioPata);
+  //  El asiento.
+  caja(g, gx, gy, 0.18, FONDO, LARGO, 0.3, PALETA.tapizado);
+  //  El respaldo, contra el lado de atrás.
+  caja(g, gx, gy, 0.48, 0.26, LARGO, 0.62, tono(PALETA.tapizado, -0.12));
+  //  Los dos brazos.
+  caja(g, gx, gy, 0.48, FONDO, 0.22, 0.26, tono(PALETA.tapizado, 0.1));
+  caja(g, gx, gy + LARGO - 0.22, 0.48, FONDO, 0.22, 0.26, tono(PALETA.tapizado, 0.1));
+  //  Y los dos cojines: la junta del medio es lo que lo vuelve de DOS plazas.
+  for (const d of [0.3, 1.24]) {
+    caja(g, gx + 0.3, gy + d, 0.48, 0.5, 0.76, 0.06, tono(PALETA.tapizado, 0.2));
+  }
+
+  nodo.addChild(g);
+  return { nodo };
+}
+
 function construirBancoDePreparacion(gx: number, gy: number, largo: number): Mueble {
   const nodo = new Container();
   nodo.zIndex = profundidad(gx, gy);
@@ -2733,6 +2810,8 @@ const TIPOS: Record<string, (m: Mueble2D, tx: Texturas) => Mueble> = {
   luminaria: (m, tx) => construirLuminaria(m.gx ?? 0, m.gy ?? 0, tx),
   planta: (m, tx) => construirPlanta(m.gx ?? 0, m.gy ?? 0, tx),
   banco: (m) => construirBanco(m.gx ?? 0, m.gy ?? 0),
+  sofa: (m) => construirSofa(m.gx ?? 0, m.gy ?? 0),
+  cabina: (m) => construirCabina(m.gx ?? 0, m.gy ?? 0),
   dispensador: (m) => construirDispensador(m.gx ?? 0, m.gy ?? 0),
   mostrador: (m) => construirMostrador(m.gx ?? 0, m.gy ?? 0, m.largo ?? 2),
   mesa: (m, tx) => construirMesa(m.gx ?? 0, m.gy ?? 0, tx),

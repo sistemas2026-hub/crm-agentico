@@ -146,6 +146,9 @@ export const PALETA = {
   luzCalidaTenue: 0xc79a5e,
   /** Madera del revestimiento del fondo: el único material templado del
    *  exterior, y lo que impide que la fachada sea sólo vidrio y hormigón. */
+  //  El tapizado de un sofa: el unico textil de la sede, y por eso no
+  //  comparte tono con la madera ni con el gris del mobiliario.
+  tapizado: 0x4a4668,
   madera: 0x5d4330,
   maderaClara: 0x8a6442,
   /** El acento tecnológico: la franja del ascensor, los testigos del núcleo. */
