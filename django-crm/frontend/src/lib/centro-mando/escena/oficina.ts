@@ -1993,7 +1993,17 @@ function construirPuesto(def: DefinicionDePuesto, texturas: Texturas): Puesto {
   //  nombre cortado— no señala a la geometría. Separarlas en ALTURA funciona
   //  para cualquier reparto, y además es lo natural: lo que está más lejos se
   //  rotula más arriba.
-  const alturaPlaca = def.principal ? 2.9 : 3.65;
+  //  Y LAS DOS, MAS ALTAS QUE LA CABEZA DEL AGENTE.
+  //
+  //  Medido el 04/11/2026 en el banco: la placa de «Coordinación» terminaba en
+  //  y=340,8 y el cuerpo del agente empezaba en y=335. Se superponían 6 px, y
+  //  el efecto era que la placa le caía encima: en un recorte al maximo zoom,
+  //  de la persona solo asomaba la frente debajo del cartel.
+  //
+  //  +0,55 en las dos, que a escala de sala son unos 22 px: la placa despega
+  //  de la cabeza sin dejar de pertenecerle al puesto. La diferencia entre las
+  //  dos se mantiene, que es lo que resuelve el choque entre placas.
+  const alturaPlaca = def.principal ? 3.45 : 4.2;
   const puntoPlaca = aPantalla(def.gx + ancho / 2, def.gy - 0.4, alturaPlaca);
   placa.position.set(puntoPlaca.x, puntoPlaca.y);
 

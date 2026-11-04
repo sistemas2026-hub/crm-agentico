@@ -806,7 +806,20 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
       const marca = marcadores.get(h.puesto.def.id);
       if (marca) marca.nodo.tint = h.puesto.def.agente ? color : PALETA.luzCalida;
       h.puesto.halo.tint = color;
-      h.puesto.halo.alpha = h.puesto.def.agente ? pose.aura * 0.42 : 0;
+      //  EL HALO ES LO QUE DICE SI ALGUIEN ESTA TRABAJANDO, y hasta hoy no lo
+      //  decia. El dato ya distinguia de sobra -`aura` vale 0,55 tecleando,
+      //  0,85 en alerta y 0,12 en reposo, casi cinco veces- pero multiplicado
+      //  por 0,42 quedaba en alfa 0,23 contra 0,05: las dos invisibles.
+      //
+      //  Medido el 04/11/2026 sobre el mismo cuerpo, misma caja y mismo fondo:
+      //  teclear movia 5,00 y reposo 4,79, un 4% de diferencia. O sea ruido.
+      //  La animacion llegaba, se aplicaba, y no se veia.
+      //
+      //  Y el halo es DONDE SI SE VE: esta en el suelo, alrededor del puesto,
+      //  fuera de la linea del monitor. Las manos del agente no se ven nunca
+      //  -el escritorio las tapa- asi que teclear era invisible por
+      //  construccion, por bien animado que estuviera.
+      h.puesto.halo.alpha = h.puesto.def.agente ? pose.aura * 0.95 : 0;
       h.puesto.testigo.tint = color;
 
       for (const b of h.puesto.brillos) b.pieza.alpha = b.base * pose.brilloPantalla;
