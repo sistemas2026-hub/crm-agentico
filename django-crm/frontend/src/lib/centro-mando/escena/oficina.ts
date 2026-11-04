@@ -448,50 +448,35 @@ function dibujarPuerta(
   //  EN CRISTAL cuando la puerta está en el cerramiento acristalado. No es un
   //  adorno: una hoja de madera opaca en mitad de una mampara de vidrio sería
   //  justo el tapón que el vidrio existe para no poner.
-  acristalada = false,
-  //  EL COLOR DEL ÁREA, para el marco y el umbral. Ver el bloque 1.
-  acento?: number
+  acristalada = false
 ) {
   const [a, b] = vano;
   const hHoja = Math.min(alto, acristalada ? 2.5 : 2.2);
-  //  SEMIPÚBLICA: sin hoja. Una sala a la que entra gente de la calle tiene un
-  //  acceso abierto, y ponerle una hoja diría lo contrario.
-  const conHoja = privacidad !== 'semipublico';
+  //  TODAS LLEVAN HOJA, y la semipública la lleva ABIERTA DE PAR EN PAR.
+  //
+  //  Antes no llevaba ninguna, con un motivo que seguía siendo bueno —a una
+  //  sala donde entra gente de la calle no se le pone una puerta cerrada—
+  //  pero el dibujo decía otra cosa: un vano pelado no se lee como «acceso
+  //  abierto», se lee como que **falta la puerta**. Se vio en la revisión,
+  //  con esas palabras, sobre Atención al Cliente y Recepción.
+  //
+  //  Así que la diferencia deja de ser «hay hoja o no» y pasa a ser CUÁNTO
+  //  ABRE: la semipública casi pegada a la jamba, el resto entreabierta.
+  const aperturaDeLaHoja = privacidad === 'semipublico' ? 0.17 : 0.34;
 
-  //  1 · EL MARCO, DEL COLOR DEL ÁREA. Sobresale del muro —por eso va un poco
-  //  más ancho que el vano y con su propio tono— y es lo primero que hace que
-  //  el hueco se lea como una abertura hecha a propósito.
+  //  1 · EL MARCO. Sobresale del muro —por eso va un poco más ancho que el
+  //  vano y con su propio tono— y es lo primero que hace que el hueco se lea
+  //  como una abertura hecha a propósito.
   //
-  //  POR QUÉ EL COLOR Y NO UN GRIS. Medido el 04/11/2026 sobre la sede a
-  //  escala de plano (0,67), comparando el vano contra el muro inmediato: una
-  //  puerta de obra contrasta 85-175, y una de cristal **8,3** en el NOC y
-  //  **10,8** en Auditoría. Las dos cosas eran ciertas otra vez —la puerta
-  //  estaba dibujada, con marco, hoja, tirador y umbral— y aun así, mirando
-  //  la planta, esas oficinas se leen como selladas. Una hoja translúcida
-  //  dentro de una pared translúcida no tiene de qué destacar.
-  //
-  //  El acento del departamento ya se usa exactamente para esto: el letrero
-  //  de cada sala se tiñe con él porque «de lejos el nombre no se lee y el
-  //  color sí». Ponerlo también en la puerta hace que encontrar la entrada e
-  //  identificar de quién es sean el mismo gesto, sin agregar un elemento
-  //  nuevo a la escena.
-  //
-  //  LAS JAMBAS, NEUTRAS. Se probó pintarlas del color del área y encontraba
-  //  la puerta —diez de once— pero se veía mal, y el motivo es geométrico: una
-  //  jamba es vertical, delgada y se ve de canto, así que a todo color sale
-  //  como un CONTORNO encendido y no como una superficie. En el cerramiento
-  //  acristalado, donde el marco es lo único opaco, quedaba un rectángulo de
-  //  neón flotando; y en Atención al Cliente, que por semipública no lleva
-  //  hoja, un hueco vacío con el borde brillante.
+  //  TODO EL MARCO VA NEUTRO, y se probaron las dos alternativas: pintar la
+  //  jamba del color del departamento y pintar el dintel. Las dos encontraban
+  //  la puerta —medido— y las dos se veían mal, porque en isometría el marco
+  //  se ve de CANTO: el color sale como una línea que rodea el vano en vez de
+  //  como una superficie que lo señala. Ver P8 en la ficha del objetivo.
   panel(g, a - 0.18, 0.18, 0, hHoja + 0.12, PALETA.muroRemate);
   panel(g, b, 0.18, 0, hHoja + 0.12, PALETA.muroRemate);
-  //  EL DINTEL LLEVA EL COLOR, y es el sitio correcto: es una banda horizontal
-  //  sobre el hueco, se ve de frente y es exactamente donde una oficina de
-  //  verdad pone su señalética. Lee como área, no como línea.
-  //
-  //  Sin acento se cae al tono de remate, que es lo que hacía antes: una sala
-  //  mirada sola fuera del edificio no tiene área.
-  panel(g, a - 0.18, (b - a) + 0.36, hHoja, hHoja + 0.12, acento ?? PALETA.muroRemate);
+  //  El dintel, cruzando por encima.
+  panel(g, a - 0.18, (b - a) + 0.36, hHoja, hHoja + 0.12, PALETA.muroRemate);
 
   //  2 · EL FONDO DEL VANO, oscuro: es lo que da profundidad y evita que la
   //  puerta se lea como un cuadro pintado en la pared.
@@ -499,10 +484,11 @@ function dibujarPuerta(
   //  apenas una sombra; en la de obra es un hueco oscuro de verdad.
   panel(g, a, b - a, 0, hHoja, PALETA.pisoProfundo, acristalada ? 0.2 : 0.55);
 
-  if (conHoja) {
-    //  3 · LA HOJA, ENTREABIERTA. Ocupa un tercio del vano desde la jamba
-    //  izquierda: se ve que hay una puerta y queda sitio por donde pasar.
-    const anchoHoja = (b - a) * 0.34;
+  {
+    //  3 · LA HOJA. Ocupa desde la jamba izquierda lo que diga su apertura:
+    //  un tercio del vano entreabierta, la mitad de eso abierta de par en par.
+    //  Se ve que hay una puerta y queda sitio por donde pasar.
+    const anchoHoja = (b - a) * aperturaDeLaHoja;
     if (acristalada) {
       //  Hoja de vidrio con bastidor: el paño translúcido, y los cantos de
       //  perfil metálico, que es lo que de verdad se ve de una puerta así.
@@ -527,13 +513,10 @@ function dibujarPuerta(
 
   //  5 · EL UMBRAL. Una banda en el suelo y no una línea: a la escala de la
   //  vista de conjunto, una línea de un píxel desaparece.
-  //  Va del color del área por el mismo motivo que el marco, y más gruesa:
-  //  a escala de conjunto es la única parte de la puerta que se ve desde
-  //  arriba, porque el marco queda de canto.
   const p0 = aSuelo(a);
   const p1 = aSuelo(b);
   g.moveTo(p0.x, p0.y).lineTo(p1.x, p1.y)
-   .stroke({ color: acento ?? PALETA.muroBanda, width: 4, alpha: 0.95 });
+   .stroke({ color: PALETA.muroBanda, width: 3, alpha: 0.95 });
 
   //  6 · EL LECTOR DE ACCESO, sólo en las salas restringidas. Un cuerpo chico
   //  junto a la jamba derecha, con su testigo.
@@ -592,7 +575,7 @@ const PASO_DE_MONTANTE = 2.5;
  *     justamente porque es transparente: dibujar la verdad deja de costar
  *     nada en cuanto el material no esconde.
  */
-function construirCerramiento(mundo: Mundo, acento?: number): { peto: Graphics; cristal: Graphics } {
+function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics } {
   const g = new Graphics();
   const c = new Graphics();
   const h = ALTURA_DE_ANTEPECHO;
@@ -663,7 +646,7 @@ function construirCerramiento(mundo: Mundo, acento?: number): { peto: Graphics; 
       pano(pintar, Math.min(largoTotal, vano[1]), largoTotal);
       //  LA PUERTA VA EN EL CRISTAL, no en el peto: sube hasta el travesano
       //  alto y es lo que se busca con la vista al entrar.
-      dibujarPuerta(c, vano, hc, mundo.privacidad, pintar, aSuelo, true, acento);
+      dibujarPuerta(c, vano, hc, mundo.privacidad, pintar, aSuelo, true);
     } else {
       tramo(pintar, 0, largoTotal);
       pano(pintar, 0, largoTotal);
@@ -844,7 +827,7 @@ function construirRotuloFrontal(rotulo: string, mundo: Mundo): Container {
   return nodo;
 }
 
-function construirMuros(mundo: Mundo, acento?: number): Graphics {
+function construirMuros(mundo: Mundo): Graphics {
   const g = new Graphics();
   const h = mundo.alto;
 
@@ -870,7 +853,7 @@ function construirMuros(mundo: Mundo, acento?: number): Graphics {
     dibujarPuerta(
       g, vano, 2.2, mundo.privacidad,
       (gg, desde, largo, z0, z1, c, al) => panelMuroFondo(gg, desde, desde + largo, z0, z1, c, al),
-      (u) => aPantalla(u, 0, 0.02), false, acento);
+      (u) => aPantalla(u, 0, 0.02));
   } else {
     panelMuroFondo(g, 0, mundo.ancho, 0, h, PALETA.muroFondo);
   }
@@ -890,7 +873,7 @@ function construirMuros(mundo: Mundo, acento?: number): Graphics {
     dibujarPuerta(
       g, vanoLateral, 2.2, mundo.privacidad,
       (gg, desde, largo, z0, z1, c, al) => panelMuroLateral(gg, desde, largo, z0, z1, c, al),
-      (u) => aPantalla(0, u, 0.02), false, acento);
+      (u) => aPantalla(0, u, 0.02));
   } else {
     panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
   }
@@ -2678,7 +2661,7 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
       piel.eventMode = 'none';
       raiz.addChild(piel);
     } else {
-      const muros = construirMuros(mundo, planta.acento);
+      const muros = construirMuros(mundo);
       muros.zIndex = -1000;
       raiz.addChild(muros);
     }
@@ -2698,7 +2681,7 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   //  `construirCerramiento`: antepecho opaco abajo, cristal arriba, y la
   //  puerta en el cristal.
   if (mundo.antepecho?.frente || mundo.antepecho?.derecha) {
-    const { peto, cristal } = construirCerramiento(mundo, planta.acento);
+    const { peto, cristal } = construirCerramiento(mundo);
     //  El peto, al mismo nivel que la baranda: por encima del suelo y por
     //  debajo del mobiliario, que si no tacharia el escritorio de delante.
     peto.zIndex = -1500;

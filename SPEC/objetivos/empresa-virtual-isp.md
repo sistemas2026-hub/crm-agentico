@@ -3088,3 +3088,73 @@ barata de evitar: nada avisó porque un archivo que no carga no falla, falta.
 **`centro-mando`: 776 verdes, 0 rojas.** Siguen sin cargar `eventos.test.js` y
 `flujo.test.js`, que ya estaban así y son limitación del arnés, no del código.
 
+## P9 · El color se revierte, la puerta se completa y el mapa se deja andar — 04/11/2026
+
+Tres correcciones de una misma revisión, y la primera **deshace P8 entero**.
+
+### 1 · El color del área se va de la puerta
+
+P8 probó el acento en la **jamba** y, tras la primera objeción, en el
+**dintel**. Las dos versiones encontraban la puerta —medido— y las dos se
+veían mal. La revisión fue *«quita la línea de color que las rodea»*, y esa
+palabra, **rodear**, es el diagnóstico completo:
+
+> En isometría el marco de una puerta se ve de **canto**. Cualquier color
+> puesto ahí no sale como una superficie que señala el vano: sale como una
+> **línea que lo rodea**.
+
+No es un problema de saturación ni de qué pieza se pinta —se probaron dos—
+sino de la geometría del marco. Así que el acento se retira de la puerta por
+completo, y **la deuda vuelve a estar abierta**: a escala de plano las cinco
+puertas de cristal siguen contrastando 8-11 con su muro. Lo que la cierre
+tendrá que ser algo que se vea **de frente**, no de canto.
+
+Queda registrado porque es la clase de idea que se vuelve a proponer sola:
+*«¿y si pintamos la puerta del color del departamento?»* — ya se hizo, dos
+veces, y el dibujo lo rechaza por su geometría, no por su gusto.
+
+### 2 · Todas las oficinas tienen hoja; la semipública la lleva abierta
+
+La otra mitad de la misma revisión fue *«no todas las oficinas tienen»*
+puerta. Era cierto a la vista, y el dato estaba bien: Atención al Cliente y
+Recepción son **semipúblicas** y el dibujo les quitaba la hoja a propósito
+—*«a una sala donde entra gente de la calle no se le pone una puerta
+cerrada»*—. El razonamiento sigue siendo bueno y el resultado era malo:
+
+> Un vano pelado no se lee como «acceso abierto». Se lee como que **falta la
+> puerta**. Y con el acento encima, como una línea de color rodeando un hueco
+> vacío — la peor de las once.
+
+La distinción deja de ser *«hay hoja o no»* y pasa a ser **cuánto abre**: la
+semipública casi pegada a la jamba (0,17 del vano), el resto entreabierta
+(0,34). Se dice lo mismo y se ve una puerta.
+
+### 3 · Por el mapa ahora se anda
+
+*«No está permitiendo moverse bien por el mapa, estilo Canva.»* Dos causas,
+las dos en la cámara:
+
+- **`acotarCentro` recentraba la vista en cuanto el plano cabía entero.** El
+  comentario lo decía sin rodeos —*«permitir arrastre cuando todo se ve ya no
+  es libertad, es que la escena se vaya sin motivo»*— y el efecto era que, a
+  partir de cierto zoom, **arrastrar no hacía nada**. Un mapa que se niega a
+  moverse se siente roto. Ahora el acotado no asume cuál de sus dos extremos
+  es el menor: con el recinto más grande que la vista se comporta igual que
+  antes, y cuando cabe, los extremos se invierten y entre ellos queda justo el
+  recorrido en el que el recinto se sigue viendo entero con su margen.
+- **La rueda sólo hacía zoom.** Ahora desplaza, con `ctrl`/`⌘` para el zoom,
+  que es la convención de Canva y de Figma — y de regalo el pellizco de un
+  panel táctil llega como rueda con `ctrlKey`, así que el zoom de dos dedos
+  funciona sin escribir nada más. `shift` + rueda desplaza en horizontal.
+
+Medido en el navegador a escala 0,16, con el plano entero a la vista: el
+arrastre mueve el mundo **+439 y +229 px** (antes, cero), y una muesca de
+rueda sin `ctrl` desplaza **168 px** dejando la escala intacta.
+
+La guarda vieja afirmaba el recentrado y se reemplazó por dos: que se pueda
+arrastrar con el plano a la vista, y que **aun así el recinto nunca se salga
+de la vista** —que era lo que la vieja protegía, y sigue protegido—. Mutación
+probada: reponer el recentrado deja la primera en rojo.
+
+**`centro-mando`: 777 verdes, 0 rojas.**
+

@@ -98,10 +98,28 @@ describe('el recinto no se escapa de la vista', () => {
     expect(centro.y).toBeGreaterThan(ext.minY - LIMITES.margen);
   });
 
-  it('si el recinto cabe de sobra, se queda centrado', () => {
-    const centro = acotarCentro({ x: 400, y: 400 }, 0.1, ext, { ancho: 4000, alto: 4000 });
-    expect(centro.x).toBeCloseTo(ext.centro.x, 6);
-    expect(centro.y).toBeCloseTo(ext.centro.y, 6);
+  it('si el recinto cabe de sobra TAMBIEN se puede arrastrar', () => {
+    //  Antes esta prueba afirmaba lo contrario —que el centro volvia a
+    //  `ext.centro`— y esa era la causa de que el mapa no se dejara mover:
+    //  con el plano entero a la vista, arrastrar no hacia nada.
+    const vistaGrande = { ancho: 4000, alto: 4000 };
+    const quieto = acotarCentro(ext.centro, 0.1, ext, vistaGrande);
+    const movido = acotarCentro({ x: ext.centro.x + 300, y: ext.centro.y }, 0.1, ext, vistaGrande);
+    expect(movido.x).not.toBeCloseTo(quieto.x, 6);
+  });
+
+  it('y aun asi el recinto nunca se sale de la vista', () => {
+    //  LA AFIRMACION QUE IMPORTA, y la que la version vieja protegia a costa
+    //  de no dejar mover nada: por lejos que se arrastre, el recinto sigue
+    //  dentro de la vista. Se comprueba sobre el resultado, no sobre la
+    //  entrada, que es lo unico que dice si el acotado sirvio.
+    const vistaGrande = { ancho: 4000, alto: 4000 };
+    const medioAncho = vistaGrande.ancho / (2 * 0.1);
+    const lejos = acotarCentro({ x: 9e6, y: 0 }, 0.1, ext, vistaGrande);
+    //  El borde izquierdo de la vista queda a la izquierda del recinto.
+    expect(lejos.x - medioAncho).toBeLessThanOrEqual(ext.minX);
+    //  Y el derecho, a su derecha.
+    expect(lejos.x + medioAncho).toBeGreaterThanOrEqual(ext.maxX);
   });
 });
 

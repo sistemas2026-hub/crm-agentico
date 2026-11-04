@@ -147,16 +147,24 @@ export function acotarCentro(
   const medioAlto = vista.alto / (2 * escala);
   const m = limites.margen;
 
-  // Si el recinto cabe de sobra, se queda centrado: permitir arrastre cuando
-  // todo se ve ya no es libertad, es que la escena se vaya sin motivo.
-  const x =
-    ext.ancho + m * 2 <= medioAncho * 2
-      ? ext.centro.x
-      : Math.min(Math.max(centro.x, ext.minX - m + medioAncho), ext.maxX + m - medioAncho);
-  const y =
-    ext.alto + m * 2 <= medioAlto * 2
-      ? ext.centro.y
-      : Math.min(Math.max(centro.y, ext.minY - m + medioAlto), ext.maxY + m - medioAlto);
+  //  SE PUEDE ARRASTRAR SIEMPRE, TAMBIÉN CUANDO TODO CABE.
+  //
+  //  Antes, si el recinto entraba entero en la vista, el centro volvía a
+  //  `ext.centro` y arrastrar no hacía NADA. El motivo era bueno —que la
+  //  escena no se fuera sin razón— pero el efecto era peor que el problema:
+  //  un mapa que se niega a moverse se siente roto, y así llegó la revisión
+  //  («no está permitiendo moverse bien por el mapa, estilo Canva»).
+  //
+  //  Los dos extremos del acotado son los mismos de siempre; lo único que
+  //  cambia es que ya no se asume cuál es el menor. Cuando el recinto es más
+  //  grande que la vista, el de la izquierda es menor y esto se comporta
+  //  exactamente como antes. Cuando CABE, se invierten, y entre ellos queda
+  //  justo el recorrido en el que el recinto sigue viéndose entero con su
+  //  margen — que es la libertad que se quería, sin la pantalla en negro.
+  const entre = (v: number, a: number, b: number) =>
+    Math.min(Math.max(v, Math.min(a, b)), Math.max(a, b));
+  const x = entre(centro.x, ext.minX - m + medioAncho, ext.maxX + m - medioAncho);
+  const y = entre(centro.y, ext.minY - m + medioAlto, ext.maxY + m - medioAlto);
   return { x, y };
 }
 

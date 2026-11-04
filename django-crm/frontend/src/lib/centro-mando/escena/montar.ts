@@ -577,7 +577,20 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     // Sin esto la rueda hace rodar la página además de la escena, y se pierde
     // la pantalla de vista mientras se intenta hacer zoom.
     e.preventDefault();
-    camara.rueda(e.deltaY, enVista(e));
+    //  LA RUEDA DESPLAZA; EL ZOOM PIDE CTRL. Es como se mueve un lienzo en
+    //  Canva o en Figma, y es lo que la revisión pidió por su nombre. De
+    //  regalo, el pellizco de un panel táctil llega como una rueda con
+    //  `ctrlKey`, así que el zoom de dos dedos funciona sin nada más.
+    if (e.ctrlKey || e.metaKey) {
+      camara.rueda(e.deltaY, enVista(e));
+      return;
+    }
+    //  Con mayúsculas, la rueda vertical desplaza en horizontal: es la
+    //  convención de todos los lienzos y la única forma de recorrer una
+    //  planta ancha con un ratón de una sola rueda.
+    const dx = e.shiftKey ? -e.deltaY : -e.deltaX;
+    const dy = e.shiftKey ? 0 : -e.deltaY;
+    camara.arrastrar(dx, dy);
   };
 
   app.canvas.addEventListener('pointerdown', alBajar);
