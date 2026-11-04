@@ -101,13 +101,21 @@ export function separarRotulos(cajas: CajaDeRotulo[], holgura = 2): number[] {
 export function anclaDelNombre(
   ancho: number,
   fondo: number,
-  puestos: { gx?: number; gy?: number }[]
+  puestos: { gx?: number; gy?: number }[],
+  //  A QUE PROFUNDIDAD SE ANCLA, en celdas de la propia sala.
+  //
+  //  Por omision 0,6 POR DELANTE del frente, que es como nacio y como se
+  //  sigue usando fuera de la sede. En la sede de una planta no sirve: ese
+  //  punto cae ya en la franja de circulacion, y justo ahi empieza la PUERTA
+  //  de la sala siguiente -su vano arranca a 0,6 de su propio origen-. Medido
+  //  el 04/11/2026 en el navegador: cuatro letreros tapaban un 28% del vano
+  //  del vecino, uno detras de otro por toda la columna.
+  gyAncla = fondo + 0.6
 ): number {
   //  El frente de la sala, muestreado. Diez puntos alcanzan: la placa mide
   //  unos 120 px y el frente entero de una sala de 13 celdas mide 416.
   const CANDIDATOS = 10;
-  //  El nombre se ancla un poco por delante del borde, sobre el suelo.
-  const gyAncla = fondo + 0.6;
+
   //  La placa de un puesto cuelga por encima del escritorio.
   const GZ_PLACA = 2.6;
 

@@ -359,7 +359,8 @@ const REUNIONES = {
     //  La pantalla de videoconferencia es la pieza protagonista de esta sala:
     //  muestra PERSONAS, no datos ni trazos. Reemplaza al tablero, que es el
     //  lenguaje del NOC y de comercial.
-    { tipo: 'videoconferencia', gy: 1.4, largo: 3.0 },
+    //  A 1,4 se comia 0,6 del armario, que empieza en 0,4 y mide 1,5.
+    { tipo: 'videoconferencia', gy: 2.1, largo: 3.0 },
     { tipo: 'pizarra', gy: 5.6, largo: 2.6 },
     //  El armario de apoyo -cables, mandos, material de la sala- y el
     //  dispensador. Son lo que separa esta sala de la comercial, que tambien
@@ -636,11 +637,22 @@ const DESPACHO = {
     //  La mesa estratégica, en su propio rincón.
     { tipo: 'mesa', gx: 8.0, gy: 5.8 },
     { tipo: 'zona', gx: 6.6, gy: 4.6, ancho: 3.6, fondo: 3.4 },
+    //  La caja fuerte de los documentos de la empresa -contratos, actas-.
+    //  Entra al salir el tablero: la guarda de identidad exige tres cosas que
+    //  la sala de reuniones no tenga, y sin ella quedaban dos. No va pegada
+    //  al muro a proposito: ahi estorbaria la eleccion del vano.
+    { tipo: 'caja_fuerte', gx: 2.6, gy: 1.2 },
     { tipo: 'videoconferencia', gy: 2.5, largo: 1.8 },
-    //  El panel de indicadores generales: lo que mira quien dirige. La sala
-    //  de reuniones no lo tiene -alli se mira a quien esta del otro lado de
-    //  la camara-, y es lo que separa un despacho de una sala de juntas.
-    { tipo: 'tablero', gy: 4.4 },
+    //  SIN TABLERO, y es una resta medida, no un olvido. Este muro mide 9 y
+    //  la puerta se lleva 2,2; quedan 6,4 utiles. La biblioteca (1,8), la
+    //  pantalla (2,0) y el tablero (2,74) suman 6,54: no caben, y el que
+    //  sobraba se montaba encima de la pantalla y tapaba 0,42 del vano -la
+    //  ultima puerta de las once que seguia obstruida-.
+    //
+    //  Sale el tablero y no otro porque es el que menos dice aqui: habia 12
+    //  repartidos por 10 de las 11 salas, y lo que distingue un despacho ya
+    //  son la biblioteca, la pantalla de videoconferencia y la mesa
+    //  estrategica. Ver P11 en la ficha del objetivo.
     { tipo: 'luminaria', gx: 4, gy: 3 },
     { tipo: 'luminaria', gx: 8, gy: 6 },
     { tipo: 'planta', gx: 9.9, gy: 1.2 }

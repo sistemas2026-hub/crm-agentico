@@ -1167,53 +1167,59 @@ interface Mueble {
 }
 
 /** Un armario de equipos contra el muro lateral, con sus testigos. */
+/**
+ * UN ARMARIO DE OFICINA. No un rack.
+ *
+ * Esto se dibujaba con el cuerpo de un rack, nueve bandejas de rack y
+ * DIECIOCHO testigos parpadeando, y la revisión del 04/11/2026 lo leyó
+ * exactamente como lo que parecía: *«hay departamentos que tienen rack de
+ * datos aparte del NOC»*. Medido: `rack` sólo existe en el NOC —cuatro— y los
+ * ocho armarios estaban repartidos por Finanzas y Cartera, Auditoría,
+ * Recursos Humanos y Sala de Reuniones, donde un servidor con luces no
+ * significa nada.
+ *
+ * El dato estaba bien y el dibujo mentía, que es el defecto que este objetivo
+ * lleva encontrando desde P7. Un armario ahora es un armario: dos puertas con
+ * su junta, tiradores, zócalo y nada que parpadee.
+ */
 function construirArmario(gy: number, texturas: Texturas): Mueble {
   const nodo = new Container();
   nodo.zIndex = profundidad(0.4, gy);
 
   const g = new Graphics();
-  caja(g, 0.1, gy, 0, 0.75, 1.5, 3.1, PALETA.rackCuerpo);
-  // El frente, con sus bandejas. Las ranuras son lo que lo distingue de una
-  // caja: sin ellas es un bloque.
-  for (let i = 0; i < 9; i++) {
-    const z = 0.22 + i * 0.32;
-    panelMuroLateral(g, gy + 0.08, 1.34, z, z + 0.24, PALETA.rackFrente);
-  }
-  nodo.addChild(g);
+  const ALTO = 2.2;
+  caja(g, 0.1, gy, 0, 0.62, 1.5, ALTO, PALETA.maderaClara);
 
-  const testigos: Graphics[] = [];
-  for (let i = 0; i < 9; i++) {
-    for (let j = 0; j < 2; j++) {
-      const p = aPantalla(0.1, gy + 0.22 + j * 0.22, 0.34 + i * 0.32);
-      const led = new Graphics();
-      led.circle(0, 0, 1.5).fill({ color: j === 0 ? PALETA.mossClaro : ACENTO_CLARO });
-      led.position.set(p.x, p.y);
-      nodo.addChild(led);
-      testigos.push(led);
-    }
+  //  El zócalo, más oscuro: sin él el mueble flota, igual que los muros.
+  panelMuroLateral(g, gy + 0.04, 1.42, 0, 0.16, PALETA.madera);
+
+  //  LAS DOS PUERTAS. La junta vertical es lo que lo distingue de un bloque,
+  //  y es lo que antes hacían las ranuras —pero una ranura horizontal repetida
+  //  nueve veces es un rack, no un armario—.
+  for (const j of [0, 1]) {
+    const d = gy + 0.08 + j * 0.715;
+    panelMuroLateral(g, d, 0.67, 0.2, ALTO - 0.08, PALETA.madera, 0.55);
+    //  El tirador, vertical y junto a la junta central.
+    const t = j === 0 ? d + 0.59 : d + 0.04;
+    panelMuroLateral(g, t, 0.04, ALTO * 0.42, ALTO * 0.6, PALETA.metal);
   }
+
+  //  El canto superior, que es lo que le da espesor visto desde arriba.
+  panelMuroLateral(g, gy + 0.04, 1.42, ALTO - 0.08, ALTO, PALETA.muroRemate, 0.8);
+  nodo.addChild(g);
 
   const sombra = new Sprite(texturas.sombra);
   sombra.anchor.set(0.5);
-  const pie = aPantalla(0.48, gy + 0.75, 0);
+  const pie = aPantalla(0.42, gy + 0.75, 0);
   sombra.position.set(pie.x, pie.y);
   sombra.width = 95;
   sombra.height = 48;
   sombra.alpha = 0.6;
   nodo.addChildAt(sombra, 0);
 
-  return {
-    nodo,
-    animar(t) {
-      // Los testigos no parpadean al unísono: eso se lee como una guirnalda.
-      // Cada uno con su fase, y uno de cada siete se queda apagado un rato.
-      for (let i = 0; i < testigos.length; i++) {
-        const fase = i * 2.39;
-        const v = Math.sin(t * (3 + (i % 5)) + fase);
-        testigos[i].alpha = i % 7 === 3 ? 0.12 + Math.max(0, v) * 0.2 : 0.4 + Math.max(0, v) * 0.6;
-      }
-    }
-  };
+  //  Sin `animar`: un armario no hace nada, y una animación de más es
+  //  justamente lo que lo hacía parecer un equipo encendido.
+  return { nodo };
 }
 
 /** El panel de empalmes: una rejilla de bocas con hebras que salen de ellas. */

@@ -281,8 +281,12 @@
               //  EL ANCLA SE CORRE HASTA EL HUECO. Pegada a la esquina, el
               //  nombre de la sala caia encima de la placa de un puesto en
               //  6 de las 11 salas. Ver `anclaDelNombre`.
-              gx: p.origen.gx + anclaDelNombre(p.mundo.ancho, p.mundo.fondo, p.puestos ?? []),
-              gy: p.origen.gy + p.mundo.fondo + 0.6,
+              //  DENTRO DE SU PROPIA SALA, no 0,6 por delante: ese punto
+              //  cae en la circulacion y es donde empieza la puerta de la
+              //  sala siguiente. Ver `anclaDelNombre`.
+              gx: p.origen.gx + anclaDelNombre(
+                p.mundo.ancho, p.mundo.fondo, p.puestos ?? [], p.mundo.fondo - 1.6),
+              gy: p.origen.gy + p.mundo.fondo - 1.6,
               gz: p.origen.gz,
               hacia: /** @type {const} */ ('derecha'),
               cuerpo: 10,

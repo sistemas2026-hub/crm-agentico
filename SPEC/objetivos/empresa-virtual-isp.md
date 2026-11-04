@@ -3214,3 +3214,87 @@ Dos lecturas que vale la pena dejar escritas:
 
 **`centro-mando`: 777 verdes, 0 rojas.**
 
+## P11 · Cuatro observaciones a ojo, cuatro mediciones — 04/11/2026
+
+Una revision mirando el plano, sin herramientas: *«todos los departamentos
+tienen tablero; hay departamentos que tienen rack de datos aparte del NOC; los
+avisos tapan la puerta; hay objetos que se superponen»*. Las cuatro eran
+ciertas, y ninguna la habia visto una prueba.
+
+### 1 · El armario se dibujaba como un rack
+
+`rack` solo existe en el NOC —cuatro—. Lo que se veia eran los **armarios**, y
+el dibujo les daba la razon: cuerpo `rackCuerpo`, nueve bandejas `rackFrente`
+y **18 testigos parpadeando**, con su animacion de guirnalda. Hay ocho
+armarios y **siete estan fuera del NOC**: Finanzas y Cartera, Auditoria,
+Recursos Humanos y Sala de Reuniones.
+
+El dato estaba bien y el dibujo mentia — el mismo defecto que P7, P9 y P10. Un
+armario ahora es un armario: dos puertas con su junta, tiradores, zocalo,
+canto superior y **nada que parpadee**. La escena baja de 2.153 a 2.007
+objetos, y los 146 que se van son esos testigos.
+
+### 2 · Los letreros tapaban la puerta de la sala VECINA
+
+Medido en el navegador, area del vano cubierta por el letrero de pantalla:
+
+| Letrero | Tapaba la puerta de | Cuanto |
+|---|---|---|
+| NOC y Redes | Comercial y Marketing | **28%** |
+| Comercial y Marketing | Administracion | **28%** |
+| Administracion | Auditoria y Cumplimiento | **28%** |
+| Auditoria y Cumplimiento | Sala de Reuniones | **28%** |
+
+No era casualidad ni un caso: era **sistematico**, uno detras de otro por toda
+la columna izquierda. El letrero de cada sala se anclaba `fondo + 0,6`, o sea
+0,6 **por delante** de su propio frente — un punto que en la sede de una
+planta ya cae en la franja de circulacion, y que es exactamente donde arranca
+el vano de la sala siguiente (`puertaDerecha` empieza en 0,6 de su origen).
+
+`anclaDelNombre` gano un parametro `gyAncla` —por omision el de siempre, para
+no mover a quien lo usa fuera de la sede— y la sede ancla a `fondo - 1,6`,
+dentro de la propia sala. Los cuatro bajan a **0%**. Quedan dos solapes de
+~5-10%, y son otra cosa: el texto pintado en el muro de la sala vecina, que
+esta en su pared y no flota.
+
+### 3 · Dos muebles de pared se pisaban, no seis
+
+El primer instrumento reporto **seis** pares. Cuatro eran **error mio**:
+trataba el `ducto` como mobiliario del muro izquierdo cuando
+`construirDucto(gy, desde, hasta)` corre a lo largo de `gx`. Los reales eran
+dos: `videoconferencia` sobre `armario` en Sala de Reuniones (0,60) y
+`videoconferencia` bajo `tablero` en Direccion (0,12).
+
+Vale anotarlo porque es la leccion de §6 aplicada al propio instrumento: una
+medicion que no se comprueba contra el codigo que mide **inventa defectos**,
+y cuatro de seis es una tasa que habria mandado a corregir plantillas sanas.
+
+### 4 · Y Direccion se quedo sin tablero
+
+El muro de Direccion mide 9 y la puerta se lleva 2,2: quedan **6,4 utiles**.
+La biblioteca (1,8), la pantalla (2,0) y el tablero (2,74) suman **6,54**. No
+caben, y ese era el origen de las tres cosas a la vez: el solape, y que fuera
+**la ultima puerta de las once que seguia obstruida** (0,42 de 1,8).
+
+Sale el tablero. Habia **12 repartidos por 10 de las 11 salas** —la
+observacion 1 de la revision— y es el que menos dice en un despacho que ya
+tiene biblioteca, pantalla de videoconferencia y mesa estrategica.
+
+Al quitarlo, la guarda `cada area se distingue de CUALQUIER otra` se puso en
+**rojo**: Direccion quedaba con dos cosas que Sala de Reuniones no tuviera, y
+exige tres. Entro una caja fuerte —documentos de la empresa, lejos del muro
+para no estorbar la eleccion del vano— y vuelve a verde. **Esa guarda hizo
+exactamente su trabajo**: impidio que una resta razonable dejara dos salas
+indistinguibles.
+
+### Donde queda
+
+- Mobiliario de pared solapado: **0**.
+- Puertas tapadas por mobiliario: **1 de 11**, y al 0,10 de 1,8 (94% libre).
+  Direccion, que era la peor, queda limpia.
+- Tableros: **11 en 8 de las 11 salas**, contra 12 en 10. Sigue siendo mucho
+  y la observacion 1 de la revision **sigue abierta**: reducirla de verdad es
+  decidir que mueble propio lleva cada area, no quitar tableros sueltos.
+
+**`centro-mando`: 777 verdes, 0 rojas.**
+
