@@ -168,6 +168,19 @@ describe('que un agente haga sola una accion, o que vuelva a pedir aprobacion', 
     expect(r.data.autonomia.error).toBe('Este agente no usa esa herramienta.');
   });
 
+  it('criticidad: no critica pide la casilla; viaja al motor con el autor de la sesion', async () => {
+    const sin = /** @type {any} */ (await actions.criticidad(accion({ accion: 'reiniciar_ont', critica: 'no' })));
+    expect(sin.status).toBe(400);
+    expect(pedidos).toEqual([]);
+    const usuario = /** @type {any} */ (await actions.criticidad(accion({ accion: 'reiniciar_ont', critica: 'si' }, 'USER')));
+    expect(usuario.status).toBe(403);
+    const r = await actions.criticidad(accion({ accion: 'reiniciar_ont', critica: 'no', confirmo: 'si' }));
+    expect(pedidos[0].url).toBe('http://motor/agentes/herramientas/reiniciar_ont/critica');
+    expect(pedidos[0].cuerpo).toMatchObject({ tenant: 'rapilink', critica: false, autor: 'Ana Perez',
+                                              autor_rol: 'ADMIN' });
+    expect(r).toEqual({ autonomia: { accion: 'reiniciar_ont', criticidad: true, ok: 'no_critica' } });
+  });
+
   it('retirar exige un motivo y manda el agente', async () => {
     const sin = /** @type {any} */ (await actions.retirar(accion({ accion: 'reiniciar_ont', rol: 'soporte' })));
     expect(sin.status).toBe(400);

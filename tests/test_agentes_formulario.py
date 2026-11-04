@@ -108,6 +108,26 @@ agentes = (http.get("/agentes?tenant=t").get_json() or {}).get("agentes", [])
 comprobar(all("motivos_escalada" in x for x in agentes if not x.get("automatico")),
           "cada agente dice sus motivos (vacio = todos)")
 
+print("\nsi una accion es critica: solo ADMIN, y llega al editor")
+cambios: list = []
+editor.guardar_criticidad = lambda tenant, herramienta, critica: cambios.append(
+    (herramienta, critica)) or CONFIG
+AUTOR = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+r = http.put("/agentes/herramientas/reiniciar_ont/critica",
+             json={"tenant": "t", "critica": True, "autor_rol": "SUPERVISOR", **AUTOR})
+comprobar(r.status_code == 403 and cambios == [], "quien no es ADMIN no la cambia", str(r.status_code))
+r = http.put("/agentes/herramientas/reiniciar_ont/critica", json={"tenant": "t", "critica": True, **AUTOR,
+                                                                  "autor_rol": "ADMIN"})
+comprobar(r.status_code == 200 and cambios == [("reiniciar_ont", True)], "ADMIN la cambia",
+          f"{r.status_code} {cambios}")
+r = http.put("/agentes/herramientas/reiniciar_ont/critica", json={"tenant": "t", "critica": "no", **AUTOR,
+                                                                  "autor_rol": "ADMIN"})
+comprobar(r.status_code == 400 and len(cambios) == 1, "un valor que no es si/no no se adivina",
+          str(r.status_code))
+r = http.put("/agentes/herramientas/reiniciar_ont/critica", json={"tenant": "t", "critica": False,
+                                                                  "autor_rol": "ADMIN"})
+comprobar(r.status_code == 400 and len(cambios) == 1, "sin quien lo decide, no", str(r.status_code))
+
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s)")
     sys.exit(1)

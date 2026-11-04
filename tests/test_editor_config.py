@@ -38,6 +38,7 @@ sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import cargar_config                              # noqa: E402
 from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa: E402
+                                  _mutar_criticidad,
                                   _mutar_borrar,
                                   _mutar_crear, _mutar_editar,
                                   _mutar_marcas_precio,
@@ -445,6 +446,38 @@ def prueba_catalogo_dice_lo_que_hace_cada_una() -> None:
     if servicio is not None:
         comprobar(por_nombre[servicio.nombre]["de_sistema"] is True,
                   "la que invoca un servicio es del sistema")
+
+
+def prueba_criticidad_desde_la_pantalla() -> None:
+    #  04/11/2026: si una accion es critica es un dato de cada empresa
+    #  (CLAUDE.md §3.3) y solo se cambiaba en el archivo.
+    print("\nsi una accion es critica, desde la pantalla")
+    doc = documento_base()
+    candidata = next((h for h in doc["herramientas"]
+                      if h.get("aprobacion_humana") and h.get("irreversible")
+                      and (h.get("verificacion") or {}).get("comprobaciones") and h.get("exige_previas")),
+                     None)
+    if candidata is None:
+        print("  (sin una accion con las garantias en codigo: se saltea)")
+        return
+    _mutar_criticidad(doc, candidata["nombre"], True)
+    comprobar(_validar(TENANT, doc) and next(h for h in _validar(TENANT, doc).herramientas
+                                            if h.nombre == candidata["nombre"]).critica is True,
+              "una accion se puede volver a declarar critica")
+    _mutar_criticidad(doc, candidata["nombre"], False)
+    comprobar(next(h for h in _validar(TENANT, doc).herramientas
+                   if h.nombre == candidata["nombre"]).critica is False,
+              "y no critica, si tiene las garantias en codigo")
+    sin_garantias = next(h for h in doc["herramientas"] if not h.get("solo_lectura", True)
+                         and not h.get("irreversible"))
+    _mutar_criticidad(doc, sin_garantias["nombre"], False)
+    try:
+        _validar(TENANT, doc)
+        comprobar(False, "no critica sin las garantias en codigo se rechaza")
+    except ErrorEdicion:
+        comprobar(True, "no critica sin las garantias en codigo se rechaza")
+    lanza("una herramienta que no existe se rechaza",
+          lambda: _mutar_criticidad(documento_base(), "no_existe_esta", False))
 
 
 def prueba_agente_completo_desde_la_pantalla() -> None:
@@ -864,6 +897,7 @@ if __name__ == "__main__":
     prueba_catalogo()
     prueba_catalogo_dice_lo_que_hace_cada_una()
     prueba_agente_completo_desde_la_pantalla()
+    prueba_criticidad_desde_la_pantalla()
     prueba_banda_sin_gestion()
     prueba_origen_de_la_config()
     prueba_umbral_efectivo_de_la_banda()

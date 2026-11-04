@@ -3812,6 +3812,37 @@ def _extras_de_agente(cuerpo: dict) -> dict:
     return extras
 
 
+@app.put("/agentes/herramientas/<nombre>/critica")
+def agentes_herramienta_critica(nombre):
+    """
+    Si una accion es critica en esta empresa (04/11/2026, PRD §2). Solo un
+    ADMIN, y el motor lo vuelve a exigir (como al promover). Cuerpo: {tenant,
+    critica: bool, autor, autor_usuario_id, autor_rol}. El esquema rechaza
+    declarar no critica una accion sin las garantias en codigo.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    critica = cuerpo.get("critica")
+    if not tenant or not isinstance(critica, bool):
+        return jsonify({"error": "Faltan 'tenant' o 'critica' (si o no)."}), 400
+    try:
+        autor, usuario, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido:
+        return jsonify({"error": "FALTA_QUIEN_LO_DECIDE"}), 400
+    if (cuerpo.get("autor_rol") or "").upper() != "ADMIN":
+        return jsonify({"error": "SOLO_ADMIN"}), 403
+    try:
+        editor.guardar_criticidad(tenant, nombre, critica)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    registrar("agentes", "criticidad de una accion cambiada", tenant=tenant, herramienta=nombre,
+              critica=critica, autor_usuario_id=usuario)
+    return jsonify({"herramienta": nombre, "critica": critica}), 200
+
+
 @app.post("/agentes")
 def agentes_crear():
     cuerpo = request.get_json(force=True, silent=True) or {}

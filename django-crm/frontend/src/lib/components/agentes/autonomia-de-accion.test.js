@@ -75,6 +75,17 @@ describe('la autonomia de una accion, en cada agente', () => {
       .not.toContain('para todos los agentes');
   });
 
+  it('si es critica: un ADMIN la puede cambiar, solo en las que tienen garantias', () => {
+    const noCritica = dibujar({ accion: REINICIO, agente: 'soporte', esAdmin: true });
+    expect(noCritica).toContain('action="?/criticidad"');
+    expect(noCritica).toContain('Marcarla crítica');
+    const critica = dibujar({ accion: { ...REINICIO, no_critica: false }, agente: 'soporte', esAdmin: true });
+    expect(critica).toContain('Marcarla no crítica');
+    expect(critica).toContain('name="confirmo"');
+    expect(dibujar({ accion: PAGO, agente: 'facturacion', esAdmin: true })).not.toContain('?/criticidad');
+    expect(dibujar({ accion: REINICIO, agente: 'soporte', esAdmin: false })).not.toContain('?/criticidad');
+  });
+
   it('el resultado de un cambio se muestra solo en el agente donde se hizo', () => {
     const resultado = { accion: 'reiniciar_ont', rol: 'soporte', ok: 'promovida' };
     expect(dibujar({ accion: REINICIO, agente: 'soporte', esAdmin: true, resultado }))

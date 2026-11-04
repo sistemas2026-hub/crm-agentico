@@ -1330,6 +1330,27 @@ def guardar_canal_whatsapp(tenant: str, activo: bool,
     return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))
 
 
+def _mutar_criticidad(doc: dict, herramienta: str, critica: bool) -> None:
+    """
+    Si una accion es critica, desde la pantalla (04/11/2026, PRD §2).
+
+    Es un dato de cada empresa (CLAUDE.md §3.3) y solo se cambiaba en el
+    archivo. Lo que NO se afloja: declararla no critica exige las garantias en
+    codigo (aprobacion, irreversible, verificacion, previas) y lo rechaza el
+    esquema al validar (Herramienta._coherencia); y volver a declararla
+    critica deja sin efecto la autonomia que se le dio sin evidencia
+    (nucleo/seguridad/autonomia_ganada.vigente, YA_ES_CRITICA).
+    """
+    h = next((x for x in doc.get("herramientas") or [] if x.get("nombre") == herramienta), None)
+    if h is None:
+        raise ErrorEdicion(f"'{herramienta}' no es una herramienta de esta empresa.")
+    h["critica"] = bool(critica)
+
+
+def guardar_criticidad(tenant: str, herramienta: str, critica: bool) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_criticidad(doc, herramienta, critica))
+
+
 def guardar_flujo_derivacion(tenant: str, destinos: list[str],
                              atiende: dict) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_flujo_derivacion(doc, destinos, atiende))
