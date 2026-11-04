@@ -742,6 +742,23 @@
     display: none;
   }
 
+  /* 04/11/2026, a pedido: en pantalla ancha los módulos se van. La barra
+     lateral del CRM ya lleva a los mismos cuatro lugares, y el botón de
+     arriba a la izquierda la trae de vuelta cuando está recogida. En
+     angosto SE QUEDAN: ahí la barra lateral no existe (v2.css la oculta
+     bajo 769 px) y el shell no dibuja su tabbar en la Bandeja, así que esta
+     tira es la única forma de salir a Tickets. Es el mismo corte que v2.css. */
+  @media (min-width: 769px) {
+    .consola-nav {
+      display: none;
+    }
+    /* La tira era la que ocupaba el espacio sobrante y empujaba los
+       indicadores a la derecha; sin ella, lo hacen ellos solos. */
+    .consola-datos {
+      margin-left: auto;
+    }
+  }
+
   /* El módulo, en la letra de los títulos y escrito normal (04/11/2026). Era
      mono de 9.5px en versalita espaciada: a ese tamaño una palabra en
      mayúsculas se descifra, no se lee, y estas son las cuatro puertas de
