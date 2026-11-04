@@ -77,6 +77,9 @@ export function plazoDeToma(c, objetivoMinutos, ahora = Date.now()) {
 export function textoDePlazo(/** @type {ReturnType<typeof plazoDeToma>} */ p) {
   if (!p) return '';
   const m = Math.abs(p.restanMinutos);
-  const cuerpo = m >= 120 ? `${Math.round(m / 60)}h` : `${m}m`;
+  // Desde dos días, en días: «+1488h» (visto en producción el 04/11/2026)
+  // obligaba a dividir por 24 para saber que eran dos meses.
+  const cuerpo =
+    m >= 48 * 60 ? `${Math.round(m / 1440)}d` : m >= 120 ? `${Math.round(m / 60)}h` : `${m}m`;
   return p.vencido ? `+${cuerpo}` : cuerpo;
 }

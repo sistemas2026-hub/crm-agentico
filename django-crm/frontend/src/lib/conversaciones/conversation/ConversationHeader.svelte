@@ -107,7 +107,9 @@
          que se marca, no un título-- y el canal como ficha gris. -->
     <div class="centro-identidad">
       <h2>{nombre || quien(conversacion.usuario_externo)}</h2>
-      {#if telefono}
+      <!-- Sin nombre, el título YA es el teléfono: repetirlo al lado era el
+           mismo número dos veces (visto en producción el 04/11/2026). -->
+      {#if telefono && nombre}
         <span class="centro-tel v2-num">{telefono}</span>
       {/if}
       <span class="cab-chip">{canalLabel(conversacion.canal)}</span>

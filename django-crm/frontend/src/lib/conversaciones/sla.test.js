@@ -114,4 +114,11 @@ describe('cómo se escribe', () => {
   it('a partir de dos horas se escribe en horas', () => {
     expect(textoDePlazo(plazoDeToma(esperando(10), 240, AHORA))).toBe('4h');
   });
+
+  it('a partir de dos días se escribe en días, no en cientos de horas', () => {
+    // 62 días vencido: era «+1488h».
+    expect(textoDePlazo(plazoDeToma(esperando(62 * 1440 + 15), 15, AHORA))).toBe('+62d');
+    // 47 h todavía en horas.
+    expect(textoDePlazo(plazoDeToma(esperando(47 * 60 + 15), 15, AHORA))).toBe('+47h');
+  });
 });
