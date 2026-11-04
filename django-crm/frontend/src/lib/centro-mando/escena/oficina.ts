@@ -476,13 +476,22 @@ function dibujarPuerta(
   //  identificar de quién es sean el mismo gesto, sin agregar un elemento
   //  nuevo a la escena.
   //
+  //  LAS JAMBAS, NEUTRAS. Se probó pintarlas del color del área y encontraba
+  //  la puerta —diez de once— pero se veía mal, y el motivo es geométrico: una
+  //  jamba es vertical, delgada y se ve de canto, así que a todo color sale
+  //  como un CONTORNO encendido y no como una superficie. En el cerramiento
+  //  acristalado, donde el marco es lo único opaco, quedaba un rectángulo de
+  //  neón flotando; y en Atención al Cliente, que por semipública no lleva
+  //  hoja, un hueco vacío con el borde brillante.
+  panel(g, a - 0.18, 0.18, 0, hHoja + 0.12, PALETA.muroRemate);
+  panel(g, b, 0.18, 0, hHoja + 0.12, PALETA.muroRemate);
+  //  EL DINTEL LLEVA EL COLOR, y es el sitio correcto: es una banda horizontal
+  //  sobre el hueco, se ve de frente y es exactamente donde una oficina de
+  //  verdad pone su señalética. Lee como área, no como línea.
+  //
   //  Sin acento se cae al tono de remate, que es lo que hacía antes: una sala
   //  mirada sola fuera del edificio no tiene área.
-  const marco = acento ?? PALETA.muroRemate;
-  panel(g, a - 0.18, 0.18, 0, hHoja + 0.12, marco);
-  panel(g, b, 0.18, 0, hHoja + 0.12, marco);
-  //  El dintel, cruzando por encima.
-  panel(g, a - 0.18, (b - a) + 0.36, hHoja, hHoja + 0.12, marco);
+  panel(g, a - 0.18, (b - a) + 0.36, hHoja, hHoja + 0.12, acento ?? PALETA.muroRemate);
 
   //  2 · EL FONDO DEL VANO, oscuro: es lo que da profundidad y evita que la
   //  puerta se lea como un cuadro pintado en la pared.

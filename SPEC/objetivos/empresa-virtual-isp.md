@@ -2998,7 +2998,7 @@ destacar. Es el mismo patrón que P7 ya había encontrado una vez —el dato
 correcto y el dibujo ilegible— y por eso vale anotarlo otra vez: **que una
 cosa esté construida, medida y navegable no dice nada sobre si se ve.**
 
-### La corrección: el marco y el umbral llevan el acento del área
+### La corrección: el dintel y el umbral llevan el acento del área
 
 `acento` ya existía y ya se usaba exactamente para esto: el letrero de cada
 sala se tiñe con él porque *«de lejos el nombre no se lee y el color sí»*.
@@ -3011,27 +3011,51 @@ porque choca con una decisión ya medida: `anclaDelNombre` existe porque el
 nombre caía encima de la placa de un puesto en 6 de las 11 salas, y tiene tres
 guardas que lo sostienen.
 
+#### El primer intento pintaba la JAMBA, y se veía mal
+
+Vale dejarlo escrito porque **encontraba la puerta y aun así había que
+deshacerlo**: la revisión fue «las puertas de la oficina que están a la
+derecha se ven mal», y era cierto.
+
+El motivo es geométrico. Una jamba es una pieza **vertical, delgada y vista de
+canto**: a todo color no sale como una superficie, sale como un **contorno
+encendido**. En el cerramiento acristalado, donde el marco es lo único opaco,
+quedaba un rectángulo de neón flotando sobre el vidrio; y en Atención al
+Cliente, que por semipública no lleva hoja, un hueco vacío con el borde
+brillante — la peor de las once.
+
+El color se movió a las dos piezas **horizontales**: el **dintel**, que es la
+banda sobre el hueco y es justo donde una oficina de verdad pone su
+señalética, y el **umbral**, la banda del suelo. Las dos se ven de frente y
+leen como área, no como línea.
+
 Medición A/B, misma ventana y mismo encuadre (escala 0,75 en las dos
 capturas), contando píxeles de color —los que se apartan del gris más de 55—
-en un cuadrado de 1,6 celdas de radio centrado en cada vano:
+en un cuadrado de 1,6 celdas de radio centrado en cada vano. La columna
+«jamba» es el intento descartado; la que vale es «dintel»:
 
-| Sala | Antes | Después |
-|---|---|---|
-| NOC y Redes | 75 | **699** |
-| Administración | 268 | **871** |
-| Auditoría y Cumplimiento | 269 | **764** |
-| Comercial y Marketing | 288 | **744** |
-| Sala de Reuniones | 257 | **670** |
-| Atención al Cliente | 80 | **605** |
-| Recepción | 76 | **549** |
-| Operaciones de Campo | 118 | **493** |
-| Finanzas y Cartera | 85 | **472** |
-| Recursos Humanos | 71 | **247** |
-| **Dirección** | 199 | **196** |
+| Sala | Sin color | En la jamba *(descartado)* | **En el dintel** |
+|---|---|---|---|
+| Administración | 268 | 871 | **448** |
+| Auditoría y Cumplimiento | 269 | 764 | **423** |
+| Comercial y Marketing | 288 | 744 | **421** |
+| Sala de Reuniones | 257 | 670 | **370** |
+| Atención al Cliente | 80 | 605 | **309** |
+| Finanzas y Cartera | 85 | 472 | **289** |
+| Recepción | 76 | 549 | **285** |
+| Operaciones de Campo | 118 | 493 | **261** |
+| NOC y Redes | 75 | 699 | **255** |
+| Recursos Humanos | 71 | 247 | **175** |
+| **Dirección** | 199 | 196 | **201** |
 
-**Diez de once.** Dirección no se mueve y no es un fallo del dibujo: su acento
-es `#64748b`, un gris azulado. Un color que no es un color no puede marcar
-nada, y eso es una decisión de la paleta de áreas, no de la puerta.
+**Diez de once**, entre 2,5 y 3,9 veces el área de color que había. Menos que
+con la jamba —entre 7 y 9 veces— y ese es exactamente el intercambio que se
+buscaba: **se sigue encontrando y deja de gritar.**
+
+Dirección no se mueve en ninguna de las dos versiones, y no es un fallo del
+dibujo: su acento es `#64748b`, un gris azulado. Un color que no es un color
+no puede marcar nada, y eso se arregla en la paleta de áreas, no en la
+puerta.
 
 Dos notas de método sobre esta medición, porque los dos primeros intentos
 midieron mal:
