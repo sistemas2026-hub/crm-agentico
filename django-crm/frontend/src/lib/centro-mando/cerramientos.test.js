@@ -239,6 +239,10 @@ describe('ningun mueble se pone delante de la puerta', () => {
     for (const mu of p.mobiliario ?? []) {
       const def = LARGO[mu.tipo];
       if (!def) continue;
+      //  LO QUE SE MUDO AL FONDO YA NO ESTA EN ESTE MURO. Sin esta linea,
+      //  `mu.gy ?? 0` lo colocaba en el 0 del muro lateral —un sitio donde no
+      //  esta— y la guarda seguia verde midiendo algo que no ocurre.
+      if (mu.muro === 'fondo') continue;
       const desde = (mu.gy ?? 0) + def[0];
       const largo = def[1] ?? ((mu.largo ?? 2) + (def[0] < 0 ? 0.2 : 0));
       const solape = Math.min(desde + largo, v[1]) - Math.max(desde, v[0]);
@@ -285,5 +289,74 @@ describe('ningun mueble se pone delante de la puerta', () => {
       expect(cuenta(p.mobiliario), `${p.sala} perdio o gano muebles al colocarse`)
         .toEqual(cuenta(dePlantilla.mobiliario));
     }
+  });
+});
+
+describe('lo que cuelga de la pared no se queda sobre el cristal', () => {
+  //  Cuando el muro lateral pasa a ser el cerramiento acristalado que da al
+  //  pasillo, un tablero atornillado ahi no tiene de donde colgar. El
+  //  compositor lo muda al muro del fondo. Los que se APOYAN -armario,
+  //  biblioteca, estanteria- no se tocan y por eso no estan en esta lista.
+  const COLGADOS = new Set(['tablero', 'pizarra', 'videoconferencia', 'panel_fibra']);
+  const LARGO_DE = {
+    tablero: 2.74, panel_fibra: 2.1,
+    pizarra: (mu) => (mu.largo ?? 2) + 0.2,
+    videoconferencia: (mu) => (mu.largo ?? 2) + 0.2
+  };
+  const largoDe = (mu) => {
+    const d = LARGO_DE[mu.tipo];
+    return typeof d === 'function' ? d(mu) : d;
+  };
+
+  const deVidrio = SALAS.filter((p) => p.mundo.antepecho?.izquierda);
+
+  it('hay salas con la cara del pasillo acristalada: si no, esto no mira nada', () => {
+    expect(deVidrio.length).toBeGreaterThan(0);
+  });
+
+  it('y lo que sigue colgado del cristal es SOLO lo que no cabia en el fondo', () => {
+    //  LA AFIRMACION QUE IMPORTA. No se exige que se mude todo -Atencion al
+    //  Cliente y Recepcion tienen 6,4 de mural sobre 13 y no hay sitio- sino
+    //  que lo que se queda sea exactamente lo que NO CABE. Un compositor que
+    //  deje de mudar por vagancia cae aqui.
+    const SEPARACION = 0.25;
+    const mal = [];
+    for (const p of deVidrio) {
+      const ocupados = (p.mural?.paneles ?? []).map((q) => [q.gx, q.gx + q.ancho]);
+      for (const mu of p.mobiliario ?? []) {
+        if (mu.muro === 'fondo') {
+          ocupados.push([mu.gx, mu.gx + largoDe(mu)]);
+        }
+      }
+      const pisa = (a, b, c, d) => Math.min(b, d) - Math.max(a, c) > 0.001;
+      for (const mu of p.mobiliario ?? []) {
+        if (!COLGADOS.has(mu.tipo) || mu.muro === 'fondo') continue;
+        const largo = largoDe(mu);
+        let cabia = false;
+        for (let d = 0.3; d + largo <= p.mundo.ancho - 0.3 + 1e-9; d += 0.05) {
+          if (ocupados.some(([a, b]) => pisa(d, d + largo, a - SEPARACION, b + SEPARACION))) continue;
+          cabia = true;
+          break;
+        }
+        if (cabia) mal.push(`${p.sala}: ${mu.tipo} sigue en el cristal y SI cabia en el fondo`);
+      }
+    }
+    expect(mal, mal.join(' | ')).toEqual([]);
+  });
+
+  it('y lo mudado no se monta encima del mural', () => {
+    //  El mural son pantallas: es lo unico del muro del fondo con lo que de
+    //  verdad no puede compartir sitio. Sobre el cartel pintado si puede.
+    const mal = [];
+    for (const p of deVidrio) {
+      for (const mu of (p.mobiliario ?? []).filter((m) => m.muro === 'fondo')) {
+        const a = mu.gx; const b = mu.gx + largoDe(mu);
+        for (const q of p.mural?.paneles ?? []) {
+          const sol = Math.min(b, q.gx + q.ancho) - Math.max(a, q.gx);
+          if (sol > 0.05) mal.push(`${p.sala}: ${mu.tipo} pisa ${sol.toFixed(2)} del mural`);
+        }
+      }
+    }
+    expect(mal, mal.join(' | ')).toEqual([]);
   });
 });

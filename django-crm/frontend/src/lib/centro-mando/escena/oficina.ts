@@ -581,9 +581,14 @@ const PASO_DE_MONTANTE = 2.5;
  *     justamente porque es transparente: dibujar la verdad deja de costar
  *     nada en cuanto el material no esconde.
  */
-function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics } {
+function construirCerramiento(mundo: Mundo):
+    { peto: Graphics; cristal: Graphics; detras: Graphics } {
   const g = new Graphics();
   const c = new Graphics();
+  //  LA CARA IZQUIERDA VA EN SU PROPIO NODO. Está detrás del contenido de
+  //  la sala, no delante, así que no puede compartir capa con el cristal
+  //  de la derecha: montado en 950 taparía los muebles que tiene delante.
+  const d = new Graphics();
   const h = ALTURA_DE_ANTEPECHO;
   const hc = ALTURA_DE_CRISTAL;
   const remate = 0.1;
@@ -594,13 +599,13 @@ function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics
   ) => void;
 
   /** Un tramo del peto, con su remate mas claro arriba. */
-  const tramo = (pintar: Pintar, desde: number, hasta: number) => {
+  const tramo = (pintar: Pintar, desde: number, hasta: number, gg = g) => {
     const largo = hasta - desde;
     if (largo <= 0.01) return;
-    pintar(g, desde, largo, 0, h - remate, PALETA.muroLateral);
-    pintar(g, desde, largo, h - remate, h, PALETA.muroRemate);
+    pintar(gg, desde, largo, 0, h - remate, PALETA.muroLateral);
+    pintar(gg, desde, largo, h - remate, h, PALETA.muroRemate);
     //  La sombra de contacto al pie: sin ella el peto flota sobre el suelo.
-    pintar(g, desde, largo, 0, 0.22, PALETA.pisoProfundo, 0.6);
+    pintar(gg, desde, largo, 0, 0.22, PALETA.pisoProfundo, 0.6);
   };
 
   /**
@@ -611,13 +616,13 @@ function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics
    * carpinteria —dos travesanos y los montantes—, que es lo que de verdad se
    * ve a esta escala y lo que lo convierte en una pared.
    */
-  const pano = (pintar: Pintar, desde: number, hasta: number) => {
+  const pano = (pintar: Pintar, desde: number, hasta: number, cc = c) => {
     const largo = hasta - desde;
     if (largo <= 0.01) return;
-    pintar(c, desde, largo, h, hc - 0.15, PALETA.vidrio, 0.1);
-    pintar(c, desde, largo, hc - 0.9, hc - 0.45, PALETA.vidrioBrillo, 0.18);
-    pintar(c, desde, largo, h, h + 0.12, PALETA.muroRemate);
-    pintar(c, desde, largo, hc - 0.15, hc, PALETA.muroRemate);
+    pintar(cc, desde, largo, h, hc - 0.15, PALETA.vidrio, 0.1);
+    pintar(cc, desde, largo, hc - 0.9, hc - 0.45, PALETA.vidrioBrillo, 0.18);
+    pintar(cc, desde, largo, h, h + 0.12, PALETA.muroRemate);
+    pintar(cc, desde, largo, hc - 0.15, hc, PALETA.muroRemate);
     //  Los montantes se reparten para que el ultimo caiga en el borde del
     //  tramo: un pano que termina sin montante se deshilacha.
     //  LA CARPINTERIA ES LO QUE SE LEE, no el pano.
@@ -635,7 +640,7 @@ function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics
     for (let i = 0; i <= cuantos; i++) {
       const u = desde + (i / cuantos) * largo;
       const x = Math.min(Math.max(u - ancho / 2, desde), hasta - ancho);
-      pintar(c, x, ancho, h, hc, PALETA.muroRemate, 0.92);
+      pintar(cc, x, ancho, h, hc, PALETA.muroRemate, 0.92);
     }
   };
 
@@ -643,19 +648,21 @@ function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics
     pintar: Pintar,
     largoTotal: number,
     vano: [number, number] | undefined,
-    aSuelo: (u: number) => { x: number; y: number }
+    aSuelo: (u: number) => { x: number; y: number },
+    //  Dónde se pinta. La cara izquierda va entera a su propio nodo.
+    gg = g, cc = c
   ) => {
     if (vano) {
-      tramo(pintar, 0, Math.max(0, vano[0]));
-      tramo(pintar, Math.min(largoTotal, vano[1]), largoTotal);
-      pano(pintar, 0, Math.max(0, vano[0]));
-      pano(pintar, Math.min(largoTotal, vano[1]), largoTotal);
+      tramo(pintar, 0, Math.max(0, vano[0]), gg);
+      tramo(pintar, Math.min(largoTotal, vano[1]), largoTotal, gg);
+      pano(pintar, 0, Math.max(0, vano[0]), cc);
+      pano(pintar, Math.min(largoTotal, vano[1]), largoTotal, cc);
       //  LA PUERTA VA EN EL CRISTAL, no en el peto: sube hasta el travesano
       //  alto y es lo que se busca con la vista al entrar.
-      dibujarPuerta(c, vano, hc, mundo.privacidad, pintar, aSuelo, true);
+      dibujarPuerta(cc, vano, hc, mundo.privacidad, pintar, aSuelo, true);
     } else {
-      tramo(pintar, 0, largoTotal);
-      pano(pintar, 0, largoTotal);
+      tramo(pintar, 0, largoTotal, gg);
+      pano(pintar, 0, largoTotal, cc);
     }
   };
 
@@ -673,7 +680,21 @@ function construirCerramiento(mundo: Mundo): { peto: Graphics; cristal: Graphics
     );
   }
 
-  return { peto: g, cristal: c };
+  //  LA CARA IZQUIERDA. Lleva cristal cuando da a una circulación, que es lo
+  //  que la vuelve una cara pública: el pasillo central de la sede tiene salas
+  //  a los dos lados, y para las de la derecha ese pasillo cae justo aquí.
+  //  Antes el pasillo tenía cristal de un lado y muro ciego del otro.
+  //
+  //  Reutiliza `puertaLateral`, que es el mismo vano que antes se abría en el
+  //  muro de obra: lo que cambia es el material, no dónde se entra.
+  if (mundo.antepecho?.izquierda) {
+    lado(
+      (gg, desde, largo, z0, z1, col, a = 1) => panelEnX(gg, 0, desde, largo, z0, z1, col, a),
+      mundo.fondo, mundo.puertaLateral, (u) => aPantalla(0, u, 0.02), d, d
+    );
+  }
+
+  return { peto: g, cristal: c, detras: d };
 }
 
 function construirBaranda(mundo: Mundo): Graphics {
@@ -866,8 +887,13 @@ function construirMuros(mundo: Mundo): Graphics {
   //  EL MURO LATERAL, con su propio vano. Mismo criterio que el de fondo: sin
   //  `puertaLateral` se pinta entero. Lo necesita la sede de una planta, donde
   //  una manzana entera tiene la circulación de este lado.
-  const vanoLateral = mundo.puertaLateral;
-  if (vanoLateral) {
+  //  CUANDO ESA CARA ES DE CRISTAL, el muro de obra no se dibuja: lo hace
+  //  `construirCerramiento`. Dibujar los dos es la «pared duplicada» que el
+  //  compositor evita en los bordes, aquí dentro de la misma sala.
+  const vanoLateral = mundo.antepecho?.izquierda ? null : mundo.puertaLateral;
+  if (mundo.antepecho?.izquierda) {
+    //  nada: la cara es de vidrio
+  } else if (vanoLateral) {
     panelMuroLateral(g, 0, Math.max(0, vanoLateral[0]), 0, h, PALETA.muroLateral);
     panelMuroLateral(
       g, Math.min(mundo.fondo, vanoLateral[1]),
@@ -883,6 +909,7 @@ function construirMuros(mundo: Mundo): Graphics {
   } else {
     panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
   }
+  const caraIzquierdaDeVidrio = mundo.antepecho?.izquierda === true;
 
   //  LAS FRANJAS DEL MURO SE PARTEN EN EL VANO.
   //
@@ -911,24 +938,30 @@ function construirMuros(mundo: Mundo): Graphics {
     // toda la escena: la pared deja de ser un plano de color.
     panelMuroFondo(g, d, f, 1.02, 1.1, PALETA.muroBanda, 0.9);
   }
-  for (const [d, f] of tramos(mundo.puertaLateral, mundo.fondo)) {
-    panelMuroLateral(g, d, f - d, 0, 0.45, PALETA.pisoProfundo, 0.75);
-    panelMuroLateral(g, d, f - d, 1.02, 1.1, PALETA.muroBanda, 0.9);
+  if (!caraIzquierdaDeVidrio) {
+    for (const [d, f] of tramos(mundo.puertaLateral, mundo.fondo)) {
+      panelMuroLateral(g, d, f - d, 0, 0.45, PALETA.pisoProfundo, 0.75);
+      panelMuroLateral(g, d, f - d, 1.02, 1.1, PALETA.muroBanda, 0.9);
+    }
   }
 
   // Remate superior, con su canto: lo que le da espesor al muro.
   panelMuroFondo(g, 0, mundo.ancho, h - 0.12, h, PALETA.muroRemate);
-  panelMuroLateral(g, 0, mundo.fondo, h - 0.12, h, PALETA.muroRemate);
+  if (!caraIzquierdaDeVidrio) {
+    panelMuroLateral(g, 0, mundo.fondo, h - 0.12, h, PALETA.muroRemate);
+  }
 
   // Bandeja de cables bajo el remate, en el muro lateral. Son tres líneas y
   // dicen «esto es una sala técnica» más que cualquier otra cosa.
-  for (let i = 0; i < 3; i++) {
-    const z = h - 0.45 - i * 0.1;
-    const a = aPantalla(0, 0.3, z);
-    const b = aPantalla(0, mundo.fondo - 0.3, z);
-    g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+  if (!caraIzquierdaDeVidrio) {
+    for (let i = 0; i < 3; i++) {
+      const z = h - 0.45 - i * 0.1;
+      const a = aPantalla(0, 0.3, z);
+      const b = aPantalla(0, mundo.fondo - 0.3, z);
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+    }
+    g.stroke({ width: 2, color: PALETA.metal, alpha: 0.5 });
   }
-  g.stroke({ width: 2, color: PALETA.metal, alpha: 0.5 });
 
   return g;
 }
@@ -2714,8 +2747,13 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
   //  EL CERRAMIENTO de los dos lados que miran a la camara. Ver
   //  `construirCerramiento`: antepecho opaco abajo, cristal arriba, y la
   //  puerta en el cristal.
-  if (mundo.antepecho?.frente || mundo.antepecho?.derecha) {
-    const { peto, cristal } = construirCerramiento(mundo);
+  if (mundo.antepecho?.frente || mundo.antepecho?.derecha || mundo.antepecho?.izquierda) {
+    const { peto, cristal, detras } = construirCerramiento(mundo);
+    //  LA CARA IZQUIERDA, DETRÁS DE TODO lo de esta sala: está al fondo, no
+    //  delante. Al nivel de los muros, que es lo que reemplaza.
+    detras.zIndex = -1000;
+    detras.eventMode = 'none';
+    raiz.addChild(detras);
     //  El peto, al mismo nivel que la baranda: por encima del suelo y por
     //  debajo del mobiliario, que si no tacharia el escritorio de delante.
     peto.zIndex = -1500;
@@ -2755,6 +2793,25 @@ export function construirOficina(planta: Planta, texturas: Texturas): Oficina {
     const hacer = TIPOS[m?.tipo];
     if (!hacer) {
       sinTipo++;
+      continue;
+    }
+    //  LA MISMA PIEZA, EN EL MURO DEL FONDO.
+    //
+    //  En esta isometría el muro del fondo es el lateral con la x cambiada de
+    //  signo —`aPantalla(0,u,z) = (-32u, …)` y `aPantalla(u,0,z) = (+32u, …)`—
+    //  así que la pieza se construye con su parámetro de siempre y se mete en
+    //  un contenedor reflejado. Eso evita escribir una segunda versión de los
+    //  siete constructores que dibujan contra una pared.
+    //
+    //  Lo decide el compositor, no la plantilla: una plantilla no sabe cuál de
+    //  sus muros da al pasillo, y es ese muro el que se vuelve de cristal.
+    if (m.muro === 'fondo') {
+      const pieza = hacer({ ...m, gy: m.gx ?? 0 }, texturas);
+      const espejo = new Container();
+      espejo.scale.x = -1;
+      espejo.zIndex = profundidad(m.gx ?? 0, 0.4);
+      espejo.addChild(pieza.nodo);
+      muebles.push({ nodo: espejo, animar: pieza.animar });
       continue;
     }
     muebles.push(hacer(m, texturas));

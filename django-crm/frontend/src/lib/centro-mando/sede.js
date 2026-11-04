@@ -306,6 +306,61 @@ export function sedeDe(salas, agentes, opciones = {}) {
     biblioteca: [0, null]
   };
 
+  /**
+   * LO QUE CUELGA DEL MURO SE MUDA AL FONDO CUANDO EL LATERAL ES DE VIDRIO.
+   *
+   * Un tablero, una pizarra, una pantalla de videoconferencia o un panel de
+   * empalmes van atornillados a una pared. En cuanto esa pared pasa a ser el
+   * cerramiento acristalado que da al pasillo, no tienen de dónde colgar.
+   *
+   * Los que se APOYAN —armario, biblioteca, estantería— no se tocan: un
+   * armario contra una mampara de vidrio es lo que hay en cualquier oficina.
+   *
+   * Se empaqueta a lo largo del muro del fondo respetando el MURAL, que son
+   * pantallas y es lo único con lo que de verdad no puede compartir sitio.
+   * Sobre el cartel pintado sí puede pasar: es texto en la pared y la sala ya
+   * lleva su nombre en un letrero de pantalla.
+   *
+   * MUEVE, NO BORRA, igual que `apartarDelVano`: si en el fondo no queda
+   * hueco —Atención al Cliente y Recepción tienen 6,4 de mural sobre 13— la
+   * pieza se queda donde estaba y la medición lo dice.
+   */
+  const COLGADOS = new Set(['tablero', 'pizarra', 'videoconferencia', 'panel_fibra']);
+
+  const alMuroDelFondo = (mobiliario, cierre, puesta, mural) => {
+    if (!cierre.antepecho?.izquierda || !mobiliario?.length) return mobiliario ?? [];
+    const SEPARACION = 0.25;
+    //  Lo que ya ocupa el muro del fondo: los paneles del mural.
+    const ocupados = (mural?.paneles ?? []).map((p) => [p.gx, p.gx + p.ancho]);
+    const pisa = (a, b, c, d) => Math.min(b, d) - Math.max(a, c) > 0.001;
+
+    const salida = mobiliario.slice();
+    //  De mayor a menor: al grande le cuesta más encontrar sitio.
+    const candidatos = mobiliario
+      .map((mu, i) => ({ mu, i, t: tramoEnElMuro(mu) }))
+      .filter((c) => c.t !== null && COLGADOS.has(c.mu.tipo))
+      .sort((a, b) => b.t.largo - a.t.largo);
+
+    for (const c of candidatos) {
+      const largo = c.t.largo;
+      let sitio = null;
+      for (let d = 0.3; d + largo <= puesta.ancho - 0.3 + 1e-9; d += 0.05) {
+        if (ocupados.some(([a, b]) => pisa(d, d + largo, a - SEPARACION, b + SEPARACION))) continue;
+        sitio = d;
+        break;
+      }
+      if (sitio === null) continue;        // no cabe: se queda donde está
+      ocupados.push([sitio, sitio + largo]);
+      salida[c.i] = {
+        ...c.mu,
+        muro: 'fondo',
+        gx: Number((sitio - c.t.borde).toFixed(2)),
+        gy: undefined
+      };
+    }
+    return salida;
+  };
+
   /** El tramo que ocupa en su muro un mueble de pared, o `null` si no va ahí. */
   const tramoEnElMuro = (mu) => {
     const def = LARGO_EN_EL_MURO[mu.tipo];
@@ -419,8 +474,15 @@ export function sedeDe(salas, agentes, opciones = {}) {
     const con = (lado) => estorbosDe(planta, lado);
     return {
       puertaLateral: ladoIzq ? vanoDe(p.fondo, con('izquierda')) : undefined,
-      antepecho: (petoDerecha || petoFrente)
-        ? { frente: petoFrente, derecha: petoDerecha }
+      //  LA CARA IZQUIERDA ES DE CRISTAL CUANDO DA A UN PASILLO.
+      //
+      //  Es la misma pregunta geométrica que decide todo lo demás acá, y sale
+      //  de que el pasillo central tiene salas a los dos lados: para las de
+      //  la derecha, ese pasillo cae en su cara izquierda. Mientras sólo
+      //  hubo cristal en las dos caras de la cámara, el pasillo tenía vidrio
+      //  de un lado y muro ciego del otro.
+      antepecho: (petoDerecha || petoFrente || ladoIzq)
+        ? { frente: petoFrente, derecha: petoDerecha, izquierda: ladoIzq }
         : undefined,
       puertaDerecha: petoDerecha && ladoDer ? vanoDe(p.fondo, con('derecha')) : undefined,
       puertaFrente: petoFrente && alFrente ? vanoDe(p.ancho, con('frente')) : undefined
@@ -536,7 +598,13 @@ export function sedeDe(salas, agentes, opciones = {}) {
       ...planta,
       //  CON LA PUERTA DESPEJADA. Ver `apartarDelVano`: el vano se acaba de
       //  elegir arriba, y lo que lo tape se corre por el muro.
-      mobiliario: apartarDelVano(planta.mobiliario, cierre.puertaLateral, puesta.fondo),
+      //  PRIMERO SE MUDA LO QUE CUELGA —si ese muro pasó a ser de vidrio— y
+      //  sólo después se aparta de la puerta lo que haya quedado: apartar algo
+      //  que ya no está en ese muro sería mover un mueble por un motivo que
+      //  dejó de existir.
+      mobiliario: apartarDelVano(
+        alMuroDelFondo(planta.mobiliario, cierre, puesta, planta.mural),
+        cierre.puertaLateral, puesta.fondo),
       mundo: {
         ...planta.mundo,
         ancho: puesta.ancho,

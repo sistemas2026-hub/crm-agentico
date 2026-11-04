@@ -113,7 +113,7 @@ export interface Mundo {
    * media sala. El peto los cierra sin tapar a nadie. Ver
    * `construirCerramiento`.
    */
-  antepecho?: { frente?: boolean; derecha?: boolean };
+  antepecho?: { frente?: boolean; derecha?: boolean; izquierda?: boolean };
 
   /** El vano de la puerta en el peto del frente, en celdas `gx`. */
   puertaFrente?: [number, number];

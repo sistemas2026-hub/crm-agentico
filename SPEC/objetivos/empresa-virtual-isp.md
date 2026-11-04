@@ -3298,3 +3298,86 @@ indistinguibles.
 
 **`centro-mando`: 777 verdes, 0 rojas.**
 
+## P12 · El pasillo tiene cristal en los dos lados — 04/11/2026
+
+*«En las oficinas de la derecha, las paredes de cristal deberian ir hacia el
+pasillo con su puerta, asi como estan las de la izquierda.»* Tenia razon, y el
+motivo era estructural.
+
+### Por que estaba al reves
+
+El cristal nacio para resolver OCLUSION: en las dos caras que miran a la
+camara —frente y derecha— un muro opaco tapa a la gente. La cara izquierda no
+tiene ese problema, asi que se dibujaba de obra.
+
+Pero el pasillo central tiene salas a los dos lados, y **para las seis de la
+derecha ese pasillo cae en su cara izquierda**. Resultado: vidrio de un lado
+del pasillo y muro ciego del otro, y la puerta de esas seis salas era una
+puerta de madera en un muro macizo mientras las cinco de enfrente tenian
+puerta de vidrio.
+
+La regla que ahora lo decide es geometrica y ya existia: `daACirculacion(p,
+'izquierda')`. Si esa cara da a un pasillo, es una cara publica y va de
+cristal. Nada de esto conoce el nombre de un departamento.
+
+### El obstaculo, medido
+
+El mobiliario de pared cuelga del muro `gx = 0` en **las once salas**. En el
+bloque izquierdo ese muro es el del fondo y no estorba. En el derecho **es el
+del pasillo**, y estaba ocupado asi:
+
+| Sala | Ocupa su muro del pasillo |
+|---|---|
+| Recursos Humanos | **74%** |
+| Operaciones de Campo · Atencion al Cliente · Recepcion | 61% |
+| Finanzas y Cartera | 57% |
+| Direccion | 42% |
+
+Se eligio la opcion limpia: el muro queda de cristal entero y **lo que cuelga
+se muda al muro del fondo**.
+
+### La distincion que hizo falta: colgar no es apoyar
+
+Un tablero, una pizarra, una pantalla de videoconferencia o un panel de
+empalmes van **atornillados**: sin pared no tienen de donde agarrarse. Un
+armario, una biblioteca o una estanteria se **apoyan**, y un armario contra
+una mampara de vidrio es lo que hay en cualquier oficina. Solo se mudan los
+cuatro primeros.
+
+### El espejo, que evito escribir siete constructores
+
+En esta isometria el muro del fondo es el lateral con la x cambiada de signo:
+
+```
+aPantalla(0, u, z) = (-32u, 16u - 26z)
+aPantalla(u, 0, z) = (+32u, 16u - 26z)
+```
+
+Asi que la misma pieza, construida con su parametro de siempre y metida en un
+contenedor con `scale.x = -1`, cae exactamente sobre el muro del fondo. Siete
+constructores —tablero, pizarra, videoconferencia, panel de fibra, armario,
+biblioteca, estanteria— se habrian tenido que escribir dos veces.
+
+### Resultado
+
+**8 de 10 piezas colgadas se mudaron.** Las dos que no son el segundo tablero
+de Atencion al Cliente y de Recepcion, y el motivo esta medido: su muro del
+fondo lleva un mural de **6,4 sobre 13** y no queda un hueco de 2,74. El
+compositor **mueve, no borra**, igual que `apartarDelVano`.
+
+Tres guardas nuevas en `cerramientos.test.js`, y una correccion que importa
+mas que las tres:
+
+- `tapadoDe` leia `mu.gy`, y los muebles mudados ya no lo tienen. Con
+  `mu.gy ?? 0` los colocaba en el 0 del muro lateral —un sitio donde no
+  estan— y **la guarda seguia en verde midiendo algo que no ocurre**. Es el
+  defecto que §6 llama *una prueba que dice que algo existe no prueba que
+  funcione*, y aparecio por mirar el verde con desconfianza, no por fallar.
+- *«lo que sigue colgado del cristal es SOLO lo que no cabia en el fondo»*: no
+  exige que se mude todo —no se puede— sino que lo que se queda sea
+  exactamente lo que no cabe. **Mutacion probada**: un compositor que no mude
+  nada cae en rojo nombrando las diez piezas.
+- *«lo mudado no se monta encima del mural»*.
+
+**`centro-mando`: 780 verdes, 0 rojas.**
+
