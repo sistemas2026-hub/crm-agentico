@@ -158,7 +158,10 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
             rotulo="Auditoría y Cumplimiento",
             direccion="Dirección General",
             piso=1,
-            plantilla="inspeccion",
+            #  `expedientes` y no `inspeccion`: un area de cumplimiento trabaja
+            #  contra un ARCHIVO -estanterias, mesa de revision, bandejas- y con
+            #  `inspeccion` lo improvisaba con tres armarios sueltos.
+            plantilla="expedientes",
             areas=["auditoria", "Auditoría y Cumplimiento", "Cumplimiento"],
             ocupaciones=[],
             acento="#6b21a8",
@@ -172,8 +175,10 @@ ORGANIZACION_POR_DEFECTO = Organizacion(
                          plantilla="despacho", acento="#64748b"),
         EspacioDeTrabajo(id="sala_reuniones", rotulo="Sala de Reuniones", piso=3,
                          plantilla="reuniones", acento="#0f766e"),
+        #  `vestibulo` y no `atencion`: con `atencion` esta sala salia identica
+        #  al centro de contacto, mostrador y maquina de turnos incluidos.
         EspacioDeTrabajo(id="recepcion", rotulo="Recepción", piso=1,
-                         plantilla="atencion", acento="#92400e"),
+                         plantilla="vestibulo", acento="#92400e"),
     ],
 )
 
@@ -251,6 +256,15 @@ _SALAS_BASE = (
     ("inspeccion", "Sala de inspeccion", 3),
     ("gestion", "Sala de gestion", 4),
     ("despacho", "Despacho de direccion", 2),
+    #  EL VESTIBULO, agregado el 04/11/2026, y por el mismo motivo de dibujo.
+    #
+    #  `recepcion` declaraba 'atencion' y las dos salas salian IDENTICAS pieza
+    #  por pieza: la sede tenia dos mostradores, dos maquinas de turnos y dos
+    #  salas de espera. Una recepcion recibe; un centro de contacto atiende.
+    #
+    #  Tambien es ADITIVA: una empresa que ya declaro 'atencion' para su
+    #  recepcion la sigue teniendo y nada deja de ser valido.
+    ("vestibulo", "Vestibulo", 2),
 )
 
 
