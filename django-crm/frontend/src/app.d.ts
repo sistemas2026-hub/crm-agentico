@@ -25,6 +25,9 @@ declare global {
        * necesita llama a `tenantDeLaSesion`, nunca lee este campo directo.
        */
       tenant?: string;
+      // La pregunta al motor por el tenant mientras está en vuelo, para que
+      // las lecturas en paralelo de un mismo request la compartan (tenant.js).
+      _tenantEnVuelo?: Promise<string | null>;
     }
     // interface PageData {}
     // interface PageState {}

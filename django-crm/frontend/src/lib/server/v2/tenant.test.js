@@ -163,3 +163,67 @@ describe('el destino, que reemplaza ocho copias idénticas', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('una sola pregunta al motor por request (04/11/2026)', () => {
+  it('EL EFECTO: nueve lecturas en paralelo hacen UNA llamada, y todas reciben el tenant', async () => {
+    // El hub de Configuración dispara nueve lecturas del motor a la vez; cada
+    // una pasa por acá ANTES de que la primera haya guardado `locals.tenant`.
+    // Nueve llamadas iguales contra un motor de 8 hilos era parte de
+    // "Configuración demora o no muestra nada".
+    const locals = /** @type {any} */ ({ org: { id: 'org-1' } });
+    const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'rapilink' }) });
+    const nueve = await Promise.all(Array.from({ length: 9 }, () => tenantDeLaSesion(locals, fetch)));
+    expect(nueve).toEqual(Array(9).fill('rapilink'));
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('y la que llega después tampoco vuelve a preguntar', async () => {
+    const locals = /** @type {any} */ ({ org: { id: 'org-1' } });
+    const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'rapilink' }) });
+    await tenantDeLaSesion(locals, fetch);
+    await tenantDeLaSesion(locals, fetch);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('dos requests distintos (dos `locals`) NO comparten la respuesta', async () => {
+    // La memoria es por request, nunca global: es la garantía de que una
+    // empresa no recibe el tenant de la anterior.
+    const a = /** @type {any} */ ({ org: { id: 'org-a' } });
+    const b = /** @type {any} */ ({ org: { id: 'org-b' } });
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tenant: 'primera' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tenant: 'segunda' }) });
+    expect(await tenantDeLaSesion(a, fetch)).toBe('primera');
+    expect(await tenantDeLaSesion(b, fetch)).toBe('segunda');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('un motor que no contesta: null dentro del plazo, no una espera infinita', async () => {
+    vi.useFakeTimers();
+    try {
+      const locals = /** @type {any} */ ({ org: { id: 'org-1' } });
+      // fetch respeta la señal: rechaza cuando el plazo la aborta.
+      const fetch = vi.fn((_url, { signal }) => new Promise((_, rechazar) => {
+        signal.addEventListener('abort', () => rechazar(signal.reason));
+      }));
+      const pendiente = tenantDeLaSesion(locals, fetch);
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(await pendiente).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tras un fallo, el siguiente llamado del mismo request vuelve a intentar', async () => {
+    // El "en vuelo" se limpia al terminar: un fallo no deja pegada una promesa
+    // resuelta en null para el resto del request.
+    const locals = /** @type {any} */ ({ org: { id: 'org-1' } });
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new Error('caído'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tenant: 'rapilink' }) });
+    expect(await tenantDeLaSesion(locals, fetch)).toBeNull();
+    expect(await tenantDeLaSesion(locals, fetch)).toBe('rapilink');
+  });
+});
