@@ -94,9 +94,8 @@
             <span class="tile" class:tile-urg={data.dexter.fallosHoy > 0}><TriangleAlert /></span>
             <span><b class="v2-num" class:urg={data.dexter.fallosHoy > 0}>{data.dexter.fallosHoy}</b><small>fallos de herramientas hoy</small></span>
           </div>
-          <!-- UN SOLO ENLACE, Y LLEVA A LA OFICINA. `/centro-mando` ES ahora la
-               sede virtual; la pantalla anterior vive en `/centro-mando/clasico`
-               y no se enlaza: esto es un reemplazo, no una opcion mas. -->
+          <!-- `/centro-mando` ES la sede virtual, y es la unica: la pantalla
+               anterior se borro el 04/11/2026 con sus once componentes. -->
           <a class="franja-celda franja-enlace" href="/centro-mando"><Building2 /> Centro de mando</a>
         </div>
       {/if}

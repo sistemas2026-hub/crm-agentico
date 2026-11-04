@@ -5,8 +5,9 @@
    * ESTA ES `/centro-mando`. Nació como `/v2`, una ruta aparte para no
    * tocar lo que estaba en producción mientras se construía; el 04/11/2026
    * la reemplazó. La pantalla anterior sigue entera en
-   * `/centro-mando/clasico`, sin enlace: un reemplazo que no borra nada es
-   * un reemplazo que se puede deshacer. El centro de mando que estaba
+   * el 04/11/2026 la reemplazó y la anterior se borró: una pantalla que
+   * nadie abre no es un respaldo, es codigo muerto que alguien va a creer
+   * vivo. Esta es la unica. El centro de mando que estaba
    * no se toca: comparte los módulos de datos (`proyeccion`, `frescura`) y nada
    * más. Si esto se cae, aquello sigue.
    *
