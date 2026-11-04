@@ -462,7 +462,16 @@ function dibujarPuerta(
   //
   //  Así que la diferencia deja de ser «hay hoja o no» y pasa a ser CUÁNTO
   //  ABRE: la semipública casi pegada a la jamba, el resto entreabierta.
-  const aperturaDeLaHoja = privacidad === 'semipublico' ? 0.17 : 0.34;
+  //
+  //  PERO SÓLO EN MURO DE OBRA. Abrir una hoja de vidrio de par en par la
+  //  deja en un filo de 0,31 translúcido sobre un hueco que tampoco es
+  //  oscuro, y el resultado fue la pregunta «¿qué pasó con esa puerta?»: no
+  //  se ve ninguna. En obra funcionaba porque el hueco es oscuro y la madera
+  //  resalta contra él. En el cerramiento acristalado el mensaje de «se
+  //  entra sin pedir permiso» ya lo da la pared entera, así que la hoja se
+  //  queda entreabierta como las demás.
+  const aperturaDeLaHoja =
+    privacidad === 'semipublico' && !acristalada ? 0.17 : 0.34;
 
   //  1 · EL MARCO. Sobresale del muro —por eso va un poco más ancho que el
   //  vano y con su propio tono— y es lo primero que hace que el hueco se lea
@@ -488,7 +497,11 @@ function dibujarPuerta(
   //  suelo iluminado de la sala de atrás. A 0,55 el resultado salía MÁS CLARO
   //  que el muro, y entonces el hueco dejaba de leerse como profundidad: la
   //  puerta parecía una hoja de madera al lado de un panel gris.
-  panel(g, a, b - a, 0, hHoja, PALETA.pisoProfundo, acristalada ? 0.2 : 0.82);
+  //  0,32 en la acristalada y no 0,2: con la pared tambien de vidrio, a 0,2
+  //  el hueco y el pano quedaban del mismo tono y la puerta no tenia contra
+  //  que recortarse. Sigue muy por debajo del 0,82 de la de obra, que ahi
+  //  detras hay un muro y aqui se ve el pasillo.
+  panel(g, a, b - a, 0, hHoja, PALETA.pisoProfundo, acristalada ? 0.32 : 0.82);
 
   {
     //  3 · LA HOJA. Ocupa desde la jamba izquierda lo que diga su apertura:
@@ -661,8 +674,20 @@ function construirCerramiento(mundo: Mundo):
       //  alto y es lo que se busca con la vista al entrar.
       dibujarPuerta(cc, vano, hc, mundo.privacidad, pintar, aSuelo, true);
     } else {
+      //  SIN VANO NO HAY CRISTAL, SOLO PETO.
+      //
+      //  Una cara lleva puerta exactamente cuando da a una circulación —lo
+      //  decide `cerramientoDe`— así que una cara sin puerta es una cara que
+      //  no da a nadie: el borde del edificio. Acristalarla era darle a cada
+      //  sala del bloque derecho DOS paredes de vidrio, una de ellas mirando
+      //  al vacío, y la revisión lo dijo: «la pared de cristal que está a la
+      //  derecha ya debe ser de material».
+      //
+      //  Se cierra con el peto opaco y nada más. No sube a muro entero por el
+      //  motivo de siempre: esa cara mira a la cámara, y la tabla de oclusión
+      //  dice que a 1,2 no tapa a nadie y a 2,2 ya se come 2,4 celdas de
+      //  escritorio.
       tramo(pintar, 0, largoTotal, gg);
-      pano(pintar, 0, largoTotal, cc);
     }
   };
 

@@ -360,3 +360,37 @@ describe('lo que cuelga de la pared no se queda sobre el cristal', () => {
     expect(mal, mal.join(' | ')).toEqual([]);
   });
 });
+
+describe('el vidrio es para la cara publica, y solo para esa', () => {
+  const CARAS = ['frente', 'derecha', 'izquierda'];
+  const vanoDe = (p, cara) => (cara === 'izquierda' ? p.mundo.puertaLateral
+    : cara === 'derecha' ? p.mundo.puertaDerecha : p.mundo.puertaFrente);
+
+  it('cada sala tiene exactamente UNA cara con puerta', () => {
+    //  Una cara lleva puerta cuando da a una circulacion. Dos puertas serian
+    //  dos accesos al mismo recinto, y cero es una sala a la que no se entra.
+    const mal = [];
+    for (const p of SALAS) {
+      const con = CARAS.filter((c) => p.mundo.antepecho?.[c] && vanoDe(p, c));
+      if (con.length !== 1) mal.push(`${p.sala}: ${con.length} caras con puerta (${con.join('+') || '—'})`);
+    }
+    expect(mal, mal.join(' | ')).toEqual([]);
+  });
+
+  it('y ninguna sala queda con dos paredes de vidrio', () => {
+    //  LA AFIRMACION QUE IMPORTA, y la que la revision pidio: «la pared de
+    //  cristal que esta a la derecha ya debe ser de material». Acristalar una
+    //  cara que no da a nadie le daba a cada sala del bloque derecho DOS
+    //  paredes de vidrio, una de ellas mirando al borde del edificio.
+    //
+    //  Se afirma sobre el DATO que decide el dibujo: `construirCerramiento`
+    //  levanta pano solo donde hay vano, asi que una cara con peto y sin
+    //  puerta es peto opaco y nada mas.
+    const mal = [];
+    for (const p of SALAS) {
+      const vidrio = CARAS.filter((c) => p.mundo.antepecho?.[c] && vanoDe(p, c));
+      if (vidrio.length > 1) mal.push(`${p.sala}: vidrio en ${vidrio.join(' y ')}`);
+    }
+    expect(mal, mal.join(' | ')).toEqual([]);
+  });
+});

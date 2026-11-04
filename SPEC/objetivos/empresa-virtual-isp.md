@@ -3381,3 +3381,62 @@ mas que las tres:
 
 **`centro-mando`: 780 verdes, 0 rojas.**
 
+## P13 · El vidrio es para la cara publica, y solo para esa — 04/11/2026
+
+Dos correcciones a P12, las dos de la misma revision y las dos correctas.
+
+### La hoja de cristal no se abre de par en par
+
+*«¿Que paso con esa puerta?»* — y no se veia ninguna.
+
+En P9 la sala **semipublica** paso a llevar la hoja casi pegada a la jamba
+(0,17 del vano en vez de 0,34) para decir «aqui se entra sin pedir permiso».
+Funcionaba en muro de obra, donde el hueco es oscuro —0,82 de sombra— y la
+madera recorta contra el. En el cerramiento acristalado **las dos cosas son
+translucidas a la vez**: una hoja de vidrio de 0,31 sobre un hueco que apenas
+tiñe no es una puerta, es un filo.
+
+Atencion al Cliente y Recepcion son las dos semipublicas y las dos acabaron
+en P12 con su puerta en el cristal, asi que el defecto les toco justo a ellas.
+
+La apertura reducida queda **solo para el muro de obra**. En vidrio el mensaje
+de acceso abierto ya lo da la pared entera. Y el hueco de una puerta
+acristalada sube de 0,2 a 0,32 de sombra: sigue muy por debajo del 0,82 de la
+de obra —detras hay pasillo, no muro— pero le da a la hoja contra que
+recortarse.
+
+### Una cara sin puerta no lleva vidrio
+
+*«La pared de cristal que esta a la derecha ya debe ser de material.»*
+
+P12 acristalo la cara que da al pasillo y **dejo la otra tambien de vidrio**:
+cada sala del bloque derecho quedo con dos paredes de cristal, una de ellas
+mirando al borde del edificio. Dos caras transparentes no cierran un recinto,
+lo disuelven.
+
+La regla ahora es una sola frase: **una cara lleva vidrio cuando lleva
+puerta**, y lleva puerta cuando da a una circulacion. La que no da a nadie se
+cierra con el peto opaco y nada mas.
+
+No sube a muro entero, y el motivo es la misma tabla de oclusion que creo el
+peto en P7: esa cara mira a la camara, a 1,2 no tapa a nadie y a 2,2 ya se
+come 2,4 celdas de escritorio. «De material» tiene un techo medido.
+
+| Bloque | Cara publica (vidrio + puerta) | Las demas |
+|---|---|---|
+| izquierdo | `derecha` | peto opaco |
+| derecho | `izquierda` | peto opaco |
+
+Once salas, **once caras de vidrio, una por sala**.
+
+### Guardas
+
+Dos nuevas, y las dos caen con la misma mutacion —permitir puerta en una cara
+que no da a circulacion—, nombrando las seis salas del bloque derecho:
+
+- *«cada sala tiene exactamente UNA cara con puerta»*: dos accesos al mismo
+  recinto es un error de plano, y cero es una sala a la que no se entra.
+- *«ninguna sala queda con dos paredes de vidrio»*.
+
+**`centro-mando`: 782 verdes, 0 rojas.**
+
