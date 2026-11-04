@@ -3158,3 +3158,59 @@ probada: reponer el recentrado deja la primera en rojo.
 
 **`centro-mando`: 777 verdes, 0 rojas.**
 
+## P10 · La decoracion del muro le pasaba por encima a la puerta — 04/11/2026
+
+La revision fue una pregunta de tres palabras —«esas puertas, ¿las ves
+bien?»— con tres recortes al maximo zoom. Y no, no se veian bien.
+
+`construirMuros` pinta la puerta y **despues** dos franjas que cruzan el muro
+de lado a lado: la sombra de contacto, de 0 a 0,45, y la banda de luz
+indirecta, de 1,02 a 1,10. Esa segunda altura es **justo media hoja**, asi que
+salia una linea dorada atravesando la madera; y la primera cruzaba el umbral.
+
+Ninguna prueba podia verlo, y el motivo es el de siempre en este objetivo:
+**el dato estaba bien.** El vano existia, el muro lo salteaba y la puerta se
+dibujaba entera. Lo que fallaba era lo que se pintaba encima, tres lineas mas
+abajo en el mismo archivo.
+
+Ahora las dos franjas se parten por el mismo vano que el muro.
+
+### Y el hueco no era un hueco
+
+En los mismos recortes, el vano se veia **mas claro que el muro**: la puerta
+parecia una hoja de madera pegada al lado de un panel gris, en vez de una hoja
+dentro de un agujero.
+
+La causa es que el muro **no pinta el vano** —eso es lo que lo hace un hueco—
+asi que la sombra del fondo del vano no cae sobre pared sino sobre el suelo
+iluminado de la sala de atras. A 0,55 de opacidad el resultado quedaba por
+encima del tono del muro. Subida a 0,82, el hueco vuelve a leerse como
+profundidad.
+
+### Medido
+
+Mismo encuadre determinista (escala 0,75), luminancia media en un cuadrado de
+1,6 celdas centrado en cada vano:
+
+| Puerta | Antes | Despues |
+|---|---|---|
+| Recepcion | 127 | **118** |
+| Atencion al Cliente | 125 | **116** |
+| Operaciones de Campo | 120 | **114** |
+| Recursos Humanos | 125 | **123** |
+| Finanzas y Cartera | 115 | **112** |
+| Direccion | 120 | 120 |
+| **las cinco de cristal** | — | **sin cambio (0,0)** |
+
+Dos lecturas que vale la pena dejar escritas:
+
+- **Las cinco de cristal salen con diferencia exactamente 0,0.** No es que no
+  se hayan medido: el cerramiento acristalado ya partia sus propias bandas en
+  el vano, asi que el defecto era **solo del muro de obra**. La medicion lo
+  distingue sola, sin tener que saberlo de antemano.
+- **Direccion no se mueve**, y es el tercer sintoma del mismo problema de
+  siempre: su vano sigue tapado en 0,42 de 1,8 por mobiliario que
+  `apartarDelVano` no pudo correr porque el muro esta genuinamente lleno.
+
+**`centro-mando`: 777 verdes, 0 rojas.**
+

@@ -482,7 +482,13 @@ function dibujarPuerta(
   //  puerta se lea como un cuadro pintado en la pared.
   //  En la de cristal se ve la sala a través del hueco, así que el fondo es
   //  apenas una sombra; en la de obra es un hueco oscuro de verdad.
-  panel(g, a, b - a, 0, hHoja, PALETA.pisoProfundo, acristalada ? 0.2 : 0.55);
+  //
+  //  0,82 y no 0,55. El muro NO pinta el vano —lo saltea, que es lo que lo
+  //  hace un hueco— así que esta sombra no cae sobre pared sino sobre el
+  //  suelo iluminado de la sala de atrás. A 0,55 el resultado salía MÁS CLARO
+  //  que el muro, y entonces el hueco dejaba de leerse como profundidad: la
+  //  puerta parecía una hoja de madera al lado de un panel gris.
+  panel(g, a, b - a, 0, hHoja, PALETA.pisoProfundo, acristalada ? 0.2 : 0.82);
 
   {
     //  3 · LA HOJA. Ocupa desde la jamba izquierda lo que diga su apertura:
@@ -878,15 +884,37 @@ function construirMuros(mundo: Mundo): Graphics {
     panelMuroLateral(g, 0, mundo.fondo, 0, h, PALETA.muroLateral);
   }
 
-  // Sombra de contacto al pie de cada muro: sin esto los muros flotan y el
-  // síntoma se describe como «la escena se ve plana».
-  panelMuroFondo(g, 0, mundo.ancho, 0, 0.45, PALETA.pisoProfundo, 0.75);
-  panelMuroLateral(g, 0, mundo.fondo, 0, 0.45, PALETA.pisoProfundo, 0.75);
+  //  LAS FRANJAS DEL MURO SE PARTEN EN EL VANO.
+  //
+  //  Las dos cruzan el muro de lado a lado y se pintan DESPUÉS de la puerta,
+  //  así que le pasaban por encima: la banda de luz va a 1,02-1,10, que es
+  //  justo media hoja, y salía como una línea dorada atravesando la madera.
+  //  La sombra de contacto hacía lo mismo contra el umbral. Es el defecto que
+  //  la revisión vio antes que ninguna medición —«esas puertas, ¿las ves
+  //  bien?»— y no lo veía ninguna prueba, porque el dato estaba bien: el
+  //  hueco existía, el muro lo salteaba, y la decoración volvía a taparlo.
+  //
+  //  Se parten igual que el muro, por el mismo vano. `panelMuroFondo` toma
+  //  (desde, HASTA) y `panelMuroLateral` (desde, LARGO), de ahí los dos
+  //  bucles en vez de uno.
+  const tramos = (vano: [number, number] | undefined, total: number) =>
+    (vano
+      ? [[0, Math.max(0, vano[0])], [Math.min(total, vano[1]), total]]
+      : [[0, total]]
+    ).filter(([d, f]) => f - d > 0.001);
 
-  // Banda de luz indirecta a media altura. Es el detalle más rentable de toda
-  // la escena: dos rectángulos y la pared deja de ser un plano de color.
-  panelMuroFondo(g, 0, mundo.ancho, 1.02, 1.1, PALETA.muroBanda, 0.9);
-  panelMuroLateral(g, 0, mundo.fondo, 1.02, 1.1, PALETA.muroBanda, 0.9);
+  for (const [d, f] of tramos(mundo.puerta, mundo.ancho)) {
+    // Sombra de contacto al pie: sin esto los muros flotan y el síntoma se
+    // describe como «la escena se ve plana».
+    panelMuroFondo(g, d, f, 0, 0.45, PALETA.pisoProfundo, 0.75);
+    // Banda de luz indirecta a media altura. Es el detalle más rentable de
+    // toda la escena: la pared deja de ser un plano de color.
+    panelMuroFondo(g, d, f, 1.02, 1.1, PALETA.muroBanda, 0.9);
+  }
+  for (const [d, f] of tramos(mundo.puertaLateral, mundo.fondo)) {
+    panelMuroLateral(g, d, f - d, 0, 0.45, PALETA.pisoProfundo, 0.75);
+    panelMuroLateral(g, d, f - d, 1.02, 1.1, PALETA.muroBanda, 0.9);
+  }
 
   // Remate superior, con su canto: lo que le da espesor al muro.
   panelMuroFondo(g, 0, mundo.ancho, h - 0.12, h, PALETA.muroRemate);
