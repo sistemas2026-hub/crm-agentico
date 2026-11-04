@@ -35,8 +35,9 @@
   // clase de la mesa de abajo: cubre las tres columnas y la conversación
   // abierta, y no puede alcanzar ninguna otra ruta del CRM.
   import '$lib/conversaciones/estilos/bandeja.css';
-  import { pendiente, resuelta, enAtencion } from '$lib/conversaciones/estado.js';
+  import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
   import { ordenar, tramoEspera, esperaMaximaDe } from '$lib/conversaciones/cola/ordenamiento.js';
+  import { deLaPestana, contarPestanas, titularDeCola } from '$lib/conversaciones/cola/pestanas.js';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import CargaEquipo from '$lib/conversaciones/cola/CargaEquipo.svelte';
   import { restanteDeVentana } from '$lib/conversaciones/ventana.js';
@@ -212,6 +213,13 @@
      la cola se está quedando sin atender. */
   /* Cada fila es un CHAT (21/10/2026): lo lleva una persona si CUALQUIERA de
      sus abiertas está en manos de personas, no solo la que lo representa. */
+  /* OJO (04/11/2026): lo de arriba es la intención, no lo que llega. El
+     listado (`GET /conversaciones`, api.py) NO manda `control_efectivo`: solo
+     el detalle de una conversación lo trae. Lo que se cuenta es la columna
+     cruda `control`, y en una legada (relevo_version = 0) el control efectivo
+     sale de otras dos columnas. No se deduce acá -- sería reimplementar
+     control.py en la pantalla --: el arreglo es que el motor lo proyecte en
+     el listado, y entonces esto pasa a `x.control_efectivo ?? x.control`. */
   const abiertasDe = (/** @type {any} */ c) =>
     [c, ...(c.abiertas || [])].filter((/** @type {any} */ x) => x.estado !== 'cerrada');
   const enManosDePersonas = (/** @type {any} */ c) =>
@@ -297,9 +305,13 @@
   // Todas ordenaba por prioridad, y eso la hacia inutil para vigilar: un
   // mensaje que acababa de entrar quedaba en la posicion 40 de 169, detras de
   // las 39 que esperan a alguien. Medido el 07/09/2026 con un mensaje real.
+  //
+  // Lleva la IA (04/11/2026) es "que pasa sin nosotros": Todas sin lo que ya
+  // tiene dueño o esta cerrado -> actividad, por el mismo motivo.
   const ORDEN_POR_PESTANA = {
     'por-atender': 'recomendado',
     'en-atencion': 'actividad',
+    'lleva-ia': 'actividad',
     resueltas: 'creacion',
     todas: 'actividad'
   };
@@ -320,64 +332,60 @@
   // Se cuentan sobre la PESTAÑA actual, no sobre todo: estando en "Resueltas",
   // unos chips que cuentan las que estan por atender ofrecen filtros que no
   // devuelven nada.
+  // El predicado de cada pestaña vive en cola/pestanas.js (04/11/2026): esta
+  // cuenta y `visibles` usaban la misma cadena de ternarios escrita dos veces.
   let motivos = $derived.by(() => {
-    const enPestana = base.filter((/** @type {any} */ c) =>
-      filtro === 'por-atender' ? pendiente(c)
-      : filtro === 'en-atencion' ? enAtencion(c)
-      : filtro === 'resueltas' ? resuelta(c)
-      : true
-    );
     const cuenta = new Map();
-    for (const c of enPestana) {
+    for (const c of deLaPestana(base, filtro)) {
       if (!c.motivo_escalamiento) continue;
       cuenta.set(c.motivo_escalamiento, (cuenta.get(c.motivo_escalamiento) ?? 0) + 1);
     }
+    /* El elegido se queda aunque en esta pestaña cuente 0: un filtro activo
+       que no se ve es la forma mas rapida de creer que la bandeja esta vacia,
+       y sin su chip no hay donde tocar para sacarlo. */
+    if (motivo && !cuenta.has(motivo)) cuenta.set(motivo, 0);
     return [...cuenta.entries()].sort((a, b) => b[1] - a[1]);
   });
 
-  // Con muchos motivos la fila de chips se come la lista, que es lo que
-  // importa. Se muestran los mas frecuentes y el resto se despliega -- salvo
-  // que el elegido este escondido, en cuyo caso se abre sola: un filtro
-  // activo que no se ve es la forma mas rapida de creer que la bandeja esta
-  // vacia.
-  const MOTIVOS_A_LA_VISTA = 4;
-  let motivosDesplegados = $state(false);
-  let motivosVisibles = $derived(
-    motivosDesplegados || motivos.length <= MOTIVOS_A_LA_VISTA + 1
-      ? motivos
-      : motivos.slice(0, MOTIVOS_A_LA_VISTA)
-  );
-  $effect(() => {
-    if (motivo && !motivosVisibles.some(([m]) => m === motivo)) motivosDesplegados = true;
-  });
+  /* Los chips de motivo ya no se recortan a cuatro con un «+N más»
+     (04/11/2026): van todos en una tira que se desplaza de costado, en un solo
+     renglón. Ver QueueFilters. */
 
   // La palabra de la empresa si la tiene (lib/conversaciones/rotulos.js).
   const motivoLabel = (/** @type {string} */ m) => rotuloDe(m, data.rotulos);
 
-  // Cuatro estados, en el orden en que transcurre un caso. La pestaña
-  // "Asistente" (las que el bot lleva solo) desaparecio: no era un estado de
-  // atencion sino su ausencia, y ocupaba el lugar de "Resueltas", que si es
-  // trabajo terminado y alguien quiere revisar. Para una conversacion se
-  // excluyen entre si; un CHAT con dos abiertas cuenta en la pestaña de cada
-  // una (contrato §4.5, regla 2), asi que la suma puede pasar del total.
+  // Los estados, en el orden en que transcurre un caso. Para una conversacion
+  // se excluyen entre si; un CHAT con dos abiertas cuenta en la pestaña de
+  // cada una (contrato §4.5, regla 2), asi que la suma puede pasar del total
+  // -- y QueueTabs lo dice cuando pasa.
+  // La pestaña de las que el bot lleva solo se habia quitado por "no ser un
+  // estado de atencion sino su ausencia". Vuelve el 04/11/2026 como «Lleva la
+  // IA», despues de «En atención»: sin ella los números no cerraban, y una
+  // cuenta que no cierra hace desconfiar de todas.
   /* Los números cuentan CHATS, no conversaciones (21/10/2026, D7): un número
      que escribió tres veces es una fila. El Centro de mando sigue contando
      conversaciones; por eso cada bloque lo dice al pasar el cursor. */
   const CUENTA_CHATS = 'Cuenta chats: todas las conversaciones de un mismo número son una fila';
+  /* «Lleva la IA» (04/11/2026): los abiertos que nadie pidió ni tomó. Sin
+     ella las cuatro de antes no sumaban el total -- 20 + 2 + 17 sobre 50 --
+     y los 11 que faltaban solo se veían mezclados en «Todos». */
+  let cuenta = $derived(contarPestanas(base));
   let pestanas = $derived([
-    { id: 'por-atender', label: 'Por atender', n: pendientes, urge: true, titulo: CUENTA_CHATS },
-    { id: 'en-atencion', label: 'En atención', n: base.filter(enAtencion).length, titulo: CUENTA_CHATS },
-    { id: 'resueltas', label: 'Resueltas', n: base.filter(resuelta).length, titulo: CUENTA_CHATS },
-    { id: 'todas', label: 'Todos los chats', n: base.length, titulo: CUENTA_CHATS }
+    { id: 'por-atender', label: 'Por atender', n: cuenta.n['por-atender'], titulo: CUENTA_CHATS },
+    { id: 'en-atencion', label: 'En atención', n: cuenta.n['en-atencion'], titulo: CUENTA_CHATS },
+    { id: 'lleva-ia', label: 'Lleva la IA', n: cuenta.n['lleva-ia'],
+      titulo: 'Chats abiertos que la IA contesta sola: nadie los pidió ni los tomó' },
+    { id: 'resueltas', label: 'Resueltas', n: cuenta.n.resueltas, titulo: CUENTA_CHATS },
+    { id: 'todas', label: 'Todos', n: cuenta.n.todas, titulo: CUENTA_CHATS }
   ]);
+  /* La frase de arriba de la columna. Los mismos dos números que ya mostraba
+     la barra de consola, que ahora no repite el primero. */
+  let titular = $derived(titularDeCola(pendientes, esperaMaxima));
 
   let visibles = $derived.by(() => {
     // La vista por canal ya esta aplicada en 'base': la lista y las cuentas
     // de la cabecera salen del MISMO conjunto, o dicen numeros distintos.
-    let lista = base;
-    if (filtro === 'por-atender') lista = lista.filter(pendiente);
-    else if (filtro === 'en-atencion') lista = lista.filter(enAtencion);
-    else if (filtro === 'resueltas') lista = lista.filter(resuelta);
+    let lista = deLaPestana(base, filtro);
 
     if (soloEscaladas) lista = lista.filter((/** @type {any} */ c) => c.escalada_a_humano);
     // «Mi área» (T22): lo escalado al área de quien mira.
@@ -409,6 +417,20 @@
     return ordenar(lista, orden);
   });
 </script>
+
+<!-- 04/11/2026: la Bandeja habla el mismo idioma que el Supervisor NOC --
+     Barlow Semi Condensed para nombres, títulos y cifras; Atkinson Hyperlegible
+     para leer mensajes durante horas. Los tokens están en bandeja.css. JetBrains
+     Mono se carga en 600 porque los datos la piden en ese peso: app.html la
+     trae solo en 400 y 500, y el navegador inventaba la negrita. -->
+<svelte:head>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@500;600&display=swap"
+    rel="stylesheet"
+  />
+</svelte:head>
 
 <!-- LA BARRA DE CONSOLA.
      Era un `<PageHeader>` del CRM: título "Conversaciones" a 26px con su
@@ -493,17 +515,15 @@
   {/if}
 
   <span class="consola-datos">
-    {#if pendientes > 0}
-      <!-- Solo las que de verdad esperan: ni cerradas ni las que traian
-           puesta la marca por el default viejo. Decia 155 y eran 31. -->
-      <span class="consola-dato" title={CUENTA_CHATS}>
-        Por atender <b class="v2-num">{pendientes}</b>
-      </span>
+    <!-- «Por atender N» se fue de acá el 04/11/2026: lo dice la frase de
+         arriba de la columna, a 18px, y dos veces el mismo número en la misma
+         pantalla es uno de más. Con él se fue «Ninguna esperando», que era su
+         otra cara: la columna dice «Nada por atender». La espera máxima
+         queda porque es el número de la barra que pide una reacción. -->
+    {#if pendientes > 0 && esperaMaxima !== null}
       <span class="consola-dato" class:consola-critico={criticas > 0}>
-        Espera máx. <b class="v2-num">{enHoras(esperaMaxima)}</b>
+        Espera máx. <b class="b-cifra">{enHoras(esperaMaxima)}</b>
       </span>
-    {:else}
-      <span class="consola-dato">Ninguna esperando</span>
     {/if}
 
     <!-- El estado del enlace con el motor. No es un "99.99% uptime"
@@ -531,7 +551,7 @@
       <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet consola-equipo"
         aria-pressed={soloMiArea} onclick={() => (soloMiArea = !soloMiArea)}
         title="Lo que se escaló a tu área">
-        Mi área <b class="v2-num">{cuantasMiArea}</b>
+        Mi área <b class="b-cifra">{cuantasMiArea}</b>
       </button>
     {/if}
     {#if esAdmin}
@@ -550,10 +570,11 @@
 <div class="mesa bandeja" data-privado>
   <aside class="columna" class:hay-abierta={abierta} aria-label="Conversaciones">
     {#if !data.error && conversaciones.length > 0}
-      <!-- Pestanas de estado. Nunca ember en la activa: "donde estoy" no es una
-           accion. El contador de "Sin atender" si lo lleva, porque ese numero
-           es trabajo sin tomar. -->
-      <QueueTabs {pestanas} {filtro} onIr={irA} />
+      <!-- La frase de cuánto espera y las pestañas de estado. Nunca rojo en la
+           activa: "donde estoy" no es una accion. El rojo es de la cifra de
+           la frase, y solo si hay alguna crítica. -->
+      <QueueTabs {pestanas} {filtro} onIr={irA} {titular}
+        critico={criticas > 0} cierra={cuenta.cierra} />
 
       {#if esAdmin && verCarga}
         <CargaEquipo
@@ -566,8 +587,8 @@
 
       <QueueFilters
         bind:vista bind:orden bind:ordenElegido
-        bind:soloEscaladas bind:motivo bind:motivosDesplegados
-        {motivos} {motivosVisibles} {motivoLabel} {ORDENES}
+        bind:soloEscaladas bind:motivo
+        {motivos} {motivoLabel} {ORDENES}
       />
     {/if}
 
@@ -612,14 +633,14 @@
   <span class="pie-rotulo">Control ahora</span>
   <span class="pie-dato" title="Chats abiertos que hoy contesta la IA">
     <span class="pie-marca pie-ia"></span>
-    IA <b class="v2-num">{llevaIA}</b>
+    IA <b class="b-cifra">{llevaIA}</b>
   </span>
   <span class="pie-dato" title="Chats abiertos con el control en manos de una persona. No es lo mismo que «En atención»: esa pestaña cuenta quién se hizo cargo, aunque después lo haya devuelto a la IA">
     <span class="pie-marca pie-humano"></span>
-    Persona <b class="v2-num">{llevaHumano}</b>
+    Persona <b class="b-cifra">{llevaHumano}</b>
   </span>
   {#if sinDueno > 0}
-    <span class="pie-dato pie-alerta">Sin dueño <b class="v2-num">{sinDueno}</b></span>
+    <span class="pie-dato pie-alerta">Sin dueño <b class="b-cifra">{sinDueno}</b></span>
   {/if}
   <!-- Hace cuánto se leyó la cola ya lo dice «En vivo» arriba, y cambia a
        «Hace …» cuando se enfría: acá solo queda el corte, que es lo que no
@@ -721,17 +742,18 @@
     display: none;
   }
 
-  /* El módulo, en mono y versalita: es un rótulo, igual que los de la cola,
-     el hilo y la columna de contexto. El activo lleva el azul de "acá
-     estás", el mismo que las pestañas de la cola y las del contexto. */
+  /* El módulo, en la letra de los títulos y escrito normal (04/11/2026). Era
+     mono de 9.5px en versalita espaciada: a ese tamaño una palabra en
+     mayúsculas se descifra, no se lee, y estas son las cuatro puertas de
+     la consola. La mono queda para los datos. El activo lleva el azul de
+     "acá estás", el mismo que las pestañas de la cola y las del contexto. */
   .consola-modulo {
     padding: 4px 8px;
     border-radius: var(--bandeja-radio-sm);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-family: var(--bandeja-titulo);
+    font-size: 15px;
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    line-height: 20px;
     color: var(--bandeja-texto-2);
     text-decoration: none;
     white-space: nowrap;
@@ -756,36 +778,34 @@
     min-width: 0;
   }
 
+  /* El rótulo de un indicador: los valores de `.b-rotulo` (texto chico gris,
+     escrito normal); la cifra, en `.b-cifra`. Mismo motivo que el módulo. */
   .consola-dato {
     display: inline-flex;
     align-items: baseline;
-    gap: 5px;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    gap: 4px;
+    font-family: var(--bandeja-sans);
+    font-size: var(--bandeja-rotulo-tam);
     color: var(--bandeja-texto-2);
     white-space: nowrap;
   }
 
   .consola-dato b {
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 14px;
     color: var(--bandeja-texto);
   }
 
   /* El único número de la barra que pide una reacción. */
   .consola-critico,
   .consola-critico b {
-    color: var(--v2-rust);
+    color: var(--bandeja-error);
   }
 
   /* El latido del sondeo. Verde mientras la cola es reciente; apagado cuando
      pasó más de un minuto sin releerla, que con un intervalo de 8s significa
-     que algo no está andando. */
+     que algo no está andando. Es «en vivo», uno de los dos usos del verde. */
   .consola-sondeo {
-    color: var(--v2-moss);
+    color: var(--bandeja-ok);
   }
 
   .consola-punto {
@@ -805,7 +825,7 @@
      ninguno, apagado cuando no hay con qué afirmar nada -- que NO es lo
      mismo que estar bien. */
   .consola-canal {
-    color: var(--v2-moss);
+    color: var(--bandeja-ok);
   }
 
   .consola-canal-mal {
@@ -843,8 +863,9 @@
   }
 
   /* ── la barra de estado ─────────────────────────────────────────────────
-     Mismo lenguaje que la de arriba --mono, versalita, filete-- y la mitad de
-     alto: es cromo de fondo, no algo que se lea todo el tiempo. */
+     Mismo lenguaje que la de arriba -- rótulo chico gris escrito normal, la
+     cifra en Barlow, filete -- y menos alto: es cromo de fondo, no algo que
+     se lea todo el tiempo. */
   .pie-consola {
     flex: none;
     display: flex;
@@ -857,11 +878,8 @@
   }
 
   .pie-rotulo {
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    font-family: var(--bandeja-sans);
+    font-size: var(--bandeja-rotulo-tam);
     color: var(--bandeja-texto-2);
     margin-right: -8px;
   }
@@ -869,20 +887,16 @@
   .pie-dato {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-3);
+    gap: 4px;
+    font-family: var(--bandeja-sans);
+    font-size: var(--bandeja-rotulo-tam);
+    color: var(--bandeja-texto-2);
     white-space: nowrap;
   }
 
   .pie-dato b {
-    font-size: 10.5px;
-    font-weight: 700;
-    color: var(--bandeja-texto-2);
+    font-size: 13px;
+    color: var(--bandeja-texto);
   }
 
   /* Los dos puntos de color son los mismos dos de toda la Bandeja: violeta la
@@ -929,7 +943,9 @@
     min-height: 0;
     display: flex;
     align-items: stretch;
-    border-top: 1px solid var(--v2-line);
+    /* Sin `border-top` (04/11/2026): la barra de consola ya cierra con su
+       filete, y los dos juntos dibujaban una línea de 2px que no separaba
+       nada que la de arriba no separara. */
   }
   .columna {
     /* 360px: el número EXACTO de la referencia, que ahora sí se puede usar
@@ -942,7 +958,11 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    border-right: 1px solid var(--v2-line);
+    /* Apenas gris (04/11/2026): la columna es el índice, y la conversación
+       abierta, en blanco al lado, es lo que se lee. Con las dos en blanco no
+       había un lugar adonde mirar primero. */
+    background: var(--bandeja-canvas);
+    border-right: 1px solid var(--bandeja-borde);
   }
 
   /* ── filas ──────────────────────────────────────────────────────────── */

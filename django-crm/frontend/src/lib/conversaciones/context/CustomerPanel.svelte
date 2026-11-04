@@ -26,8 +26,9 @@
    * `id_cliente` es además la señal de que hubo verificación: los campos
    * técnicos sólo se escriben al verificar, y verificar exige id_cliente.
    */
-  import { ShieldCheck, ShieldQuestion } from '@lucide/svelte';
-  import { tonoDeEstadoServicio } from '$lib/conversaciones/formato.js';
+  import { ShieldCheck, ShieldQuestion, ChevronDown } from '@lucide/svelte';
+  import { tonoDeEstadoServicio, fechaLegible, montoLegible } from '$lib/conversaciones/formato.js';
+  import { avisoDeCorte, telefonoDelCanal } from './ficha-cliente.js';
 
   let {
     conversacion,
@@ -45,15 +46,6 @@
   const verificado = $derived(!!conversacion?.id_cliente);
   const equipo = $derived(Object.entries(conversacion?.equipo ?? {}).filter(([, v]) => v));
 
-  // Mismo criterio que el encabezado: diez dígitos seguidos no se leen.
-  function telefono(v) {
-    const crudo = (v ?? '').toString();
-    const d = crudo.replace(/\D/g, '');
-    if (/^\+?\d[\d\s-]{5,}$/.test(crudo) && d.length === 10) {
-      return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
-    }
-    return crudo;
-  }
   /* Una seccion se dibuja si tiene AL MENOS un dato. Se calcula acá y no en
      el marcado para que el titulo y el contenido no puedan desincronizarse --
      un rotulo "Ubicacion" sin nada debajo es peor que no tenerlo. */
@@ -73,6 +65,20 @@
   const esIdOpaco = $derived(
     !!conversacion?.usuario_externo && !/^\+?\d[\d\s-]{5,}$/.test(conversacion.usuario_externo)
   );
+
+  /* 04/11/2026: LO QUE SÓLO SIRVE PARA BUSCAR EN OTRO SISTEMA, PLEGADO.
+     El identificador opaco del canal (`CO.1360399936298471`) ocupaba el
+     segundo renglón de Identidad, donde se busca a quién se le está
+     contestando, y no le dice nada a quien atiende. Lo mismo el serial y la
+     interfaz del equipo: el header de este archivo los llama «identificadores
+     TÉCNICOS», y la pestaña Equipo ya muestra el serial con su botón de
+     copiar. Siguen estando --quien depura los necesita--, pero cerrados. */
+  const hayTecnicos = $derived(esIdOpaco || equipo.length > 0);
+
+  /* La fecha de corte con su aviso: es lo que hay que saber ANTES de
+     contestarle a un cliente que pregunta por su servicio. La regla vive en
+     ficha-cliente.js, probada; acá sólo se dibuja. */
+  const avisoCorte = $derived(avisoDeCorte(ficha?.fecha_corte));
 </script>
 
 <section class="cliente">
@@ -91,14 +97,18 @@
       </div>
     {/if}
 
-    <div class="panel-fila">
-      <span class="panel-etiqueta">{esIdOpaco ? 'Identificador del canal' : 'Teléfono'}</span>
-      {#if conversacion?.usuario_externo}
-        <span class="panel-valor panel-mono">{telefono(conversacion.usuario_externo)}</span>
-      {:else}
-        <span class="panel-valor sin-dato">Sin identificar</span>
-      {/if}
-    </div>
+    <!-- Sólo cuando es un teléfono. El id opaco se fue al pie, a
+         «Identificadores técnicos» (04/11/2026). -->
+    {#if !esIdOpaco}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Teléfono</span>
+        {#if conversacion?.usuario_externo}
+          <span class="panel-valor panel-mono">{telefonoDelCanal(conversacion.usuario_externo)}</span>
+        {:else}
+          <span class="panel-valor sin-dato">Sin identificar</span>
+        {/if}
+      </div>
+    {/if}
 
     {#if conversacion?.id_cliente}
       <div class="panel-fila">
@@ -135,7 +145,7 @@
        tres guiones se lee como "el sistema está roto", y lo que pasa es que
        ese cliente no tiene ese campo cargado. -->
   {#if hayUbicacion}
-    <p class="panel-titulo separado">Ubicación</p>
+    <p class="panel-titulo panel-seccion">Ubicación</p>
     <div class="bloque">
       {#if ficha.direccion}
         <div class="panel-fila"><span class="panel-etiqueta">Dirección</span>
@@ -153,7 +163,7 @@
   {/if}
 
   {#if hayServicio}
-    <p class="panel-titulo separado">Servicio</p>
+    <p class="panel-titulo panel-seccion">Servicio</p>
     <div class="bloque">
       {#if ficha.plan_internet}
         <div class="panel-fila"><span class="panel-etiqueta">Plan</span>
@@ -174,13 +184,13 @@
       {/if}
       {#if ficha.fecha_instalacion}
         <div class="panel-fila"><span class="panel-etiqueta">Instalado</span>
-          <span class="panel-valor panel-mono">{ficha.fecha_instalacion}</span></div>
+          <span class="panel-valor cifra">{fechaLegible(ficha.fecha_instalacion)}</span></div>
       {/if}
     </div>
   {/if}
 
   {#if hayFacturacion}
-    <p class="panel-titulo separado">Facturación</p>
+    <p class="panel-titulo panel-seccion">Facturación</p>
     <div class="bloque">
       {#if ficha.estado_facturas}
         <div class="panel-fila"><span class="panel-etiqueta">Cobranza</span>
@@ -188,28 +198,47 @@
       {/if}
       {#if ficha.saldo !== undefined && ficha.saldo !== null}
         <div class="panel-fila"><span class="panel-etiqueta">Saldo</span>
-          <span class="panel-valor panel-mono">{ficha.saldo}</span></div>
+          <!-- Sin moneda: varía por empresa y no se inventa. -->
+          <span class="panel-valor cifra">{montoLegible(ficha.saldo)}</span></div>
       {/if}
       {#if ficha.fecha_corte}
         <div class="panel-fila"><span class="panel-etiqueta">Fecha de corte</span>
-          <span class="panel-valor panel-mono">{ficha.fecha_corte}</span></div>
+          <span class="panel-valor cifra">
+            {fechaLegible(ficha.fecha_corte)}
+            {#if avisoCorte}<span class="corte-aviso">{avisoCorte}</span>{/if}
+          </span></div>
       {/if}
     </div>
   {/if}
 
-  {#if equipo.length > 0}
-    <p class="panel-titulo separado">Equipo</p>
-    <div class="bloque">
-      {#each equipo as [clave, valor] (clave)}
-        <div class="panel-fila">
-          <!-- Si el tenant captura un campo nuevo, aparece con su clave cruda
-               en vez de no aparecer: el motor ya lo manda, y esconderlo sería
-               perder un dato que alguien fue a buscar. -->
-          <span class="panel-etiqueta">{ROTULO_EQUIPO[clave] ?? clave.replaceAll('_', ' ')}</span>
-          <span class="panel-valor panel-mono">{valor}</span>
-        </div>
-      {/each}
-    </div>
+  <!-- ── IDENTIFICADORES TÉCNICOS ──────────────────────────────────────
+       Cerrado de entrada (04/11/2026): son datos para buscar en otro
+       sistema, no para contestarle al cliente. Se dibuja sólo si hay algo
+       adentro -- un plegable vacío es un clic que no lleva a nada. -->
+  {#if hayTecnicos}
+    <details class="panel-seccion tecnicos">
+      <summary class="tecnicos-cabeza">
+        <span class="panel-titulo">Identificadores técnicos</span>
+        <ChevronDown size={14} class="tecnicos-flecha" />
+      </summary>
+      <div class="bloque">
+        {#if esIdOpaco}
+          <div class="panel-fila">
+            <span class="panel-etiqueta">Identificador del canal</span>
+            <span class="panel-valor panel-mono">{conversacion.usuario_externo}</span>
+          </div>
+        {/if}
+        {#each equipo as [clave, valor] (clave)}
+          <div class="panel-fila">
+            <!-- Si el tenant captura un campo nuevo, aparece con su clave cruda
+                 en vez de no aparecer: el motor ya lo manda, y esconderlo sería
+                 perder un dato que alguien fue a buscar. -->
+            <span class="panel-etiqueta">{ROTULO_EQUIPO[clave] ?? clave.replaceAll('_', ' ')}</span>
+            <span class="panel-valor panel-mono">{valor}</span>
+          </div>
+        {/each}
+      </div>
+    </details>
   {/if}
 
   <p class="panel-nota">
@@ -236,19 +265,18 @@
   }
 
   /* Las filas de una sección van juntas y apretadas: son una tabla, no una
-     lista de párrafos. */
+     lista de párrafos. 04/11/2026: 8px y no 7/10, la escala de 4px de la
+     Bandeja. */
   .bloque {
     display: flex;
     flex-direction: column;
-    gap: 7px;
-    margin-top: 10px;
+    gap: 8px;
+    margin-top: 8px;
   }
 
-  .separado {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--bandeja-borde);
-  }
+  /* 04/11/2026: la separación entre secciones es `.panel-seccion` de
+     bandeja.css. Acá había un `.separado` con los mismos tres valores --la
+     copia que ese archivo existe para evitar--. */
 
   .nombre {
     font-weight: 600;
@@ -258,15 +286,37 @@
     color: var(--bandeja-texto-3);
   }
 
+  /* Fechas y saldo: cifras alineadas, pero en la letra del texto. Se leen,
+     no se copian a otro sistema carácter por carácter, así que no van en
+     mono (04/11/2026). */
+  .cifra {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* El corte que está cerca, o que ya pasó. Ámbar porque pide atención antes
+     de contestar, no porque algo esté roto; y con palabra, nunca sólo color. */
+  .corte-aviso {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-aviso-fondo);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--bandeja-aviso);
+    white-space: nowrap;
+  }
+
   .verificacion {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin: 3px 0 0;
-    padding: 5px 8px;
+    margin: 4px 0 0;
+    padding: 4px 8px;
     border: 1px solid;
     border-radius: var(--bandeja-radio-sm);
-    font-size: 11.5px;
+    font-size: 12px;
     line-height: 1.35;
   }
   .verificacion :global(svg) {
@@ -292,12 +342,12 @@
   .estado-servicio {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 1px 6px;
-    border-radius: 3px;
+    gap: 4px;
+    padding: 0 6px;
+    border-radius: var(--bandeja-radio-sm);
     border: 1px solid color-mix(in srgb, var(--bandeja-ok) 30%, transparent);
     background: color-mix(in srgb, var(--bandeja-ok) 10%, transparent);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--bandeja-ok);
     white-space: nowrap;
@@ -317,10 +367,45 @@
   }
 
   .estado-neutro {
-    color: var(--bandeja-texto-2);
-    border-color: var(--bandeja-borde);
-    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-neutro-texto);
+    border-color: var(--bandeja-neutro-borde);
+    background: var(--bandeja-neutro-fondo);
   }
 
+  /* ── identificadores técnicos ──────────────────────────────────────────
+     Plegable con el mismo gesto que «Proceso de la IA»: la flecha gira al
+     abrir y es el único indicio de que se despliega. */
+  .tecnicos-cabeza {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    color: var(--bandeja-texto-3);
+  }
+  .tecnicos-cabeza::-webkit-details-marker {
+    display: none;
+  }
+  .tecnicos :global(.tecnicos-flecha) {
+    flex: none;
+    transition: transform 0.15s ease;
+  }
+  .tecnicos[open] :global(.tecnicos-flecha) {
+    transform: rotate(180deg);
+  }
+  .tecnicos-cabeza:focus-visible {
+    outline: 2px solid var(--bandeja-accion);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
 
+  /* Acá los rótulos son largos («Identificador del canal») y la columna fija
+     de `.panel-fila` los cortaba con puntos suspensivos. Dentro de este
+     plegable el rótulo toma lo que necesita y el valor --un id que puede
+     medir cualquier cosa-- se parte donde haga falta. */
+  .tecnicos .panel-fila {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
 </style>

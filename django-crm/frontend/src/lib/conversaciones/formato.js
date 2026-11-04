@@ -171,3 +171,119 @@ export function tonoDeEstadoServicio(estado) {
   if (/^(activo|activa|active|gratis|gratuito|free)$/.test(e)) return 'ok';
   return 'neutro';
 }
+
+/*
+ * 04/11/2026: cómo se LEEN los datos que llegan crudos del ISP o del canal.
+ *
+ * Ninguna de estas funciones inventa: si el valor no tiene la forma que
+ * reconocen, devuelven el texto tal como vino. Un dato mal formateado se ve
+ * raro; un dato «corregido» a ciegas se ve bien y está mal.
+ *
+ * Y ninguna supone la empresa: no hay símbolo de moneda (el saldo de un ISP
+ * puede estar en pesos, soles o dólares) ni prefijo de país inventado (el
+ * teléfono ya lo trae, porque el canal entrega el número internacional).
+ */
+
+/**
+ * El número del canal, legible: `573023608750` → `+57 302 360 8750`.
+ *
+ * Solo se agrupa lo que se reconoce con certeza --el plan colombiano, 57 más
+ * diez cifras--; cualquier otro número internacional va entero con su `+`, y
+ * lo que no es un número (un id opaco, un nombre) vuelve sin tocar.
+ *
+ * @param {unknown} valor
+ * @returns {string}
+ */
+export function telefonoLegible(valor) {
+  const texto = String(valor ?? '').trim();
+  const cifras = texto.replace(/^\+/, '');
+  if (!/^\d{8,15}$/.test(cifras)) return texto;
+  if (/^57\d{10}$/.test(cifras)) {
+    return `+57 ${cifras.slice(2, 5)} ${cifras.slice(5, 8)} ${cifras.slice(8)}`;
+  }
+  // Diez cifras sin indicativo son un número nacional: agruparlo se lee
+  // mejor, y ponerle un `+` inventaría un número internacional que no existe
+  // (`+3001234567`).
+  if (/^\d{10}$/.test(cifras) && !texto.startsWith('+')) {
+    return `${cifras.slice(0, 3)} ${cifras.slice(3, 6)} ${cifras.slice(6)}`;
+  }
+  // Con once o más cifras es el número internacional que entrega el canal.
+  if (cifras.length >= 11) return `+${cifras}`;
+  return texto;
+}
+
+/**
+ * Lee una fecha del ISP en las formas que llegan (`30/05/2025 10:58:00`,
+ * `6/11/2026`, `2026-11-06`, ISO). Devuelve las partes, o null si no la
+ * reconoce. Día/mes, nunca mes/día: así las escribe el ISP.
+ *
+ * @param {unknown} valor
+ * @returns {{ dia: number, mes: number, anio: number, hora: string|null }|null}
+ */
+function partesDeFecha(valor) {
+  const t = String(valor ?? '').trim();
+  let m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::\d{2})?)?$/);
+  if (m) {
+    return {
+      dia: +m[1],
+      mes: +m[2],
+      anio: +m[3],
+      hora: m[4] ? `${m[4].padStart(2, '0')}:${m[5]}` : null
+    };
+  }
+  m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (m) {
+    return { dia: +m[3], mes: +m[2], anio: +m[1], hora: m[4] ? `${m[4]}:${m[5]}` : null };
+  }
+  return null;
+}
+
+/**
+ * Una fecha en un solo formato: `dd/mm/aaaa`, y la hora sin segundos si la
+ * trae. `30/05/2025 10:58:00` → `30/05/2025 10:58`; `6/11/2026` →
+ * `06/11/2026`.
+ *
+ * @param {unknown} valor
+ * @returns {string}
+ */
+export function fechaLegible(valor) {
+  const p = partesDeFecha(valor);
+  if (!p) return String(valor ?? '').trim();
+  const f = `${String(p.dia).padStart(2, '0')}/${String(p.mes).padStart(2, '0')}/${p.anio}`;
+  return p.hora ? `${f} ${p.hora}` : f;
+}
+
+/**
+ * Cuántos días de calendario faltan para una fecha del ISP (negativo si ya
+ * pasó). null si la fecha no se reconoce: sin fecha no hay «faltan N días».
+ *
+ * @param {unknown} valor
+ * @param {Date} [hoy]
+ * @returns {number|null}
+ */
+export function diasHasta(valor, hoy = new Date()) {
+  const p = partesDeFecha(valor);
+  if (!p) return null;
+  const objetivo = Date.UTC(p.anio, p.mes - 1, p.dia);
+  const base = Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  return Math.round((objetivo - base) / 86_400_000);
+}
+
+/**
+ * El saldo, legible y sin moneda inventada: `0.00` → `0`; `45000.00` →
+ * `45.000`; `1234.5` → `1.234,50`. Los decimales se muestran solo si no son
+ * cero. Lo que no es un número vuelve tal cual.
+ *
+ * @param {unknown} valor
+ * @returns {string}
+ */
+export function montoLegible(valor) {
+  const texto = String(valor ?? '').trim();
+  if (!/^-?\d+(\.\d+)?$/.test(texto)) return texto;
+  const n = Number(texto);
+  const conDecimales = !Number.isInteger(n);
+  return new Intl.NumberFormat('es-CO', {
+    minimumFractionDigits: conDecimales ? 2 : 0,
+    maximumFractionDigits: conDecimales ? 2 : 0
+  }).format(n);
+}

@@ -61,30 +61,30 @@
   </div>
 
 <style>
-
-
   /* ── conservar ──────────────────────────────────────────────────────── */
   /* Sin recuadro mientras está apagada: es una casilla más, no una alerta.
      Al encenderla toma superficie, porque a partir de ahí sí es un estado
-     que hay que poder ver de un vistazo. */
+     que hay que poder ver de un vistazo.
+     04/11/2026: con los tokens de la Bandeja y no los del CRM (`--v2-*`),
+     y el mismo recuadro que `.panel-tarjeta`: borde de 1px y radio chico. */
   .conservar {
-    padding: 0 0 14px;
-    border-bottom: 1px solid var(--v2-line-soft);
+    padding: 0 0 12px;
+    border-bottom: 1px solid var(--bandeja-borde);
   }
 
   .conservar.activa {
-    background: var(--v2-line-soft);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 14px;
-    border-bottom: 0;
+    background: var(--bandeja-superficie-suave);
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio-sm);
+    padding: 8px 12px;
+    margin-bottom: 12px;
   }
 
   .conservar-linea {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: 13px;
     line-height: 1.4;
     cursor: pointer;
   }
@@ -92,7 +92,7 @@
   .conservar-linea input {
     margin-top: 2px;
     flex: none;
-    accent-color: var(--v2-ink);
+    accent-color: var(--bandeja-accion);
   }
 
   .conservar-motivo {
@@ -110,7 +110,7 @@
   .conservar-nota {
     margin: 6px 0 0 22px;
     font-size: 11.5px;
-    color: var(--v2-slate);
+    color: var(--bandeja-texto-2);
     line-height: 1.4;
   }
 

@@ -160,7 +160,7 @@
     background: var(--bandeja-superficie-suave);
   }
   .docs-buscar:focus-within {
-    border-color: var(--bandeja-humano);
+    border-color: var(--bandeja-accion);
     background: var(--bandeja-superficie);
   }
 
@@ -200,17 +200,17 @@
     color: var(--bandeja-texto);
   }
 
+  /* 04/11/2026: «Buscar» es un botón con una palabra, no un sello: escrito
+     normal y en la letra del texto. */
   .docs-ir {
     flex: none;
-    padding: 1px 7px;
+    padding: 0 8px;
     border: 1px solid var(--bandeja-borde);
-    border-radius: 3px;
+    border-radius: var(--bandeja-radio-sm);
     background: var(--bandeja-superficie);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-family: var(--bandeja-sans);
+    font-size: 12px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--bandeja-texto-2);
     cursor: pointer;
   }
@@ -292,15 +292,18 @@
     overflow-wrap: anywhere;
   }
 
+  /* En marino, el color de acción de la Bandeja (04/11/2026). El azul
+     eléctrico de `--bandeja-humano` firma lo que escribió una persona, y
+     copiar un fragmento no es eso. */
   .doc-copiar {
     flex: none;
     padding: 0;
     border: 0;
     background: none;
     font: inherit;
-    font-size: 10.5px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--bandeja-humano);
+    color: var(--bandeja-accion);
     cursor: pointer;
   }
   .doc-copiar:hover {

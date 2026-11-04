@@ -318,14 +318,18 @@
           {/if}
         </span>
       </span>
-      <span class="alarma-chip">{caido ? 'OFFLINE' : 'DEGRADADO'}</span>
+      <span class="alarma-chip">{caido ? 'Sin enlace' : 'Degradado'}</span>
     </div>
   {/if}
 
+  <!-- 04/11/2026: los sellos «LIVE», «OFFLINE» y «DEGRADADO» venían en
+       inglés y en mayúscula, copiados de la referencia. Dicen lo mismo en
+       español y escritos normal: el color y el recuadro ya los separan del
+       texto, la mayúscula sólo los hacía más difíciles de leer. -->
   <div class="procedencia">
     <span class="procedencia-punto" class:procedencia-punto-mal={!medicion} aria-hidden="true"></span>
     <span class="procedencia-rotulo">Confirmado — en vivo desde SmartOLT</span>
-    {#if medicion}<span class="procedencia-vivo">LIVE</span>{/if}
+    {#if medicion}<span class="procedencia-vivo">En vivo</span>{/if}
   </div>
 
   {#if medicion}
@@ -668,7 +672,7 @@
     {/if}
   {/if}
 
-  <p class="panel-titulo opt-sep">Acciones sobre el equipo</p>
+  <p class="panel-titulo panel-seccion">Acciones sobre el equipo</p>
 
   {#if lineas.length === 0}
     <!-- Estado vacío honesto: no es que falte el dato, es que no se hizo nada.
@@ -752,11 +756,11 @@
     background: var(--bandeja-texto-3);
   }
 
+  /* 04/11/2026: escrito normal. En versalita con espaciado se leía como un
+     sello y competía con el título de la tarjeta de abajo. */
   .procedencia-rotulo {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--bandeja-texto);
     line-height: 1.3;
   }
@@ -770,43 +774,9 @@
     border: 1px solid color-mix(in srgb, var(--bandeja-ok) 30%, transparent);
     border-radius: 3px;
     background: color-mix(in srgb, var(--bandeja-ok) 10%, transparent);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.04em;
     color: var(--bandeja-ok);
-  }
-
-  /* ── la medición óptica ────────────────────────────────────────────────
-     Rótulo a la izquierda y valor a la derecha, en la misma retícula que el
-     resto de los paneles de contexto. Denso: son siete renglones en una
-     columna de 304px. */
-  .optica {
-    margin: 6px 0 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .opt-fila {
-    display: grid;
-    grid-template-columns: 5.5rem 1fr;
-    gap: 8px;
-    align-items: baseline;
-    font-size: 11.5px;
-  }
-
-
-
-  /* El enlace es lo único de la ficha que es un veredicto, y va con palabra:
-     el color refuerza, no informa. */
-  .opt-estado {
-    font-weight: 650;
-    color: var(--bandeja-ok);
-  }
-
-  .opt-caido {
-    color: var(--bandeja-error);
   }
 
   .opt-pie {
@@ -818,12 +788,11 @@
   }
 
   /* Cuándo se leyó. Va al lado del botón y no escondida: es la diferencia
-     entre un dato que sirve para decidir y uno que hay que volver a pedir. */
+     entre un dato que sirve para decidir y uno que hay que volver a pedir.
+     04/11/2026: es una frase («Leído hace 3 min»), no un dato: letra del
+     texto, escrita normal. */
   .opt-hora {
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: 12px;
     color: var(--bandeja-texto-3);
   }
 
@@ -833,114 +802,19 @@
     color: var(--bandeja-aviso);
   }
 
-  .opt-sep {
-    margin-top: 14px;
-    padding-top: 10px;
-    border-top: 1px solid var(--bandeja-borde);
-  }
-
-
-
-
-
-
-  /* El veredicto del enlace, con palabra. Nunca sólo color. */
-  .insignia {
-    padding: 1px 6px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-superficie-suave);
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--bandeja-ok);
-    white-space: nowrap;
-  }
-
-  .insignia-mal {
-    color: var(--bandeja-error);
-    background: var(--bandeja-error-fondo);
-    border-color: var(--bandeja-error-borde);
-  }
-
-  /* LA POTENCIA, EN GRANDE. Es el dato por el que se abre esta pestaña y en
-     la referencia ocupa una línea entera. */
-  .rx {
-    margin: 2px 0 0;
-    font-family: var(--bandeja-mono);
-    font-size: 24px;
-    font-weight: 700;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-    color: var(--bandeja-texto);
-  }
-
   .rx-mal {
     color: var(--bandeja-error);
   }
 
-  /* Gris y en peso normal: acompana al numero, no compite con el. */
-  .rx-clase {
-    margin-left: 8px;
-    font-family: var(--bandeja-sans);
-    font-size: 11.5px;
-    font-weight: 500;
-    color: var(--bandeja-texto-2);
-    letter-spacing: 0;
-  }
-
-  .rx-unidad {
-    margin-left: 5px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--bandeja-texto-2);
-  }
-
-  .rx-umbral {
-    margin: 2px 0 0;
-    font-size: 10.5px;
-    color: var(--bandeja-texto-2);
-  }
-
-  .rx-umbral-mal {
-    color: var(--bandeja-error);
-    font-weight: 600;
-  }
-
-  /* ── identificadores ───────────────────────────────────────────────── */
-  .ident-fila {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 2px 6px;
-    align-items: center;
-  }
-
-  .ident-rotulo {
-    grid-column: 1 / -1;
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-  }
-
-  .ident-valor {
-    padding: 3px 6px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-superficie-suave);
-    font-size: 11.5px;
-    overflow-wrap: anywhere;
-  }
-
-  .ident-copiar {
+  /* ── copiar un identificador ───────────────────────────────────────────
+     04/11/2026. El botón de copiar el serial lleva `class="copiar"` y esta
+     regla se llamaba `.ident-copiar`, de una versión anterior de la tarjeta:
+     el botón salía sin estilo. Mismo dibujo que el de CasePanel. */
+  .copiar {
     display: grid;
     place-items: center;
-    padding: 4px;
+    flex: none;
+    padding: 3px;
     border: 1px solid var(--bandeja-borde);
     border-radius: var(--bandeja-radio-sm);
     background: var(--bandeja-superficie);
@@ -948,7 +822,7 @@
     cursor: pointer;
   }
 
-  .ident-copiar:hover {
+  .copiar:hover {
     color: var(--bandeja-texto);
     border-color: var(--bandeja-texto-3);
   }
@@ -980,22 +854,18 @@
     color: var(--bandeja-error);
   }
 
+  /* El rótulo del motivo, como el de cualquier campo: chico, gris y escrito
+     normal (04/11/2026). */
   .opt-motivo {
     display: grid;
-    gap: 3px;
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    gap: 4px;
+    font-size: var(--bandeja-rotulo-tam);
     color: var(--bandeja-texto-2);
   }
 
   .opt-motivo input {
     font-family: var(--bandeja-sans);
-    font-size: 12px;
-    text-transform: none;
-    letter-spacing: normal;
+    font-size: 13px;
     color: var(--bandeja-texto);
     padding: 5px 7px;
     border: 1px solid var(--bandeja-borde);
@@ -1024,7 +894,6 @@
     padding-bottom: 16px;
     border-bottom: 1px solid var(--v2-line-soft);
   }
-
 
   .vacio {
     margin: 0;
@@ -1113,8 +982,6 @@
     font-size: 11.5px;
   }
 
-
-
   .con-punto {
     display: inline-flex;
     align-items: center;
@@ -1140,15 +1007,12 @@
     color: var(--bandeja-texto-3);
   }
 
-
-
   .rx-chip {
     padding: 1px 5px;
     border-radius: 3px;
     border: 1px solid color-mix(in srgb, var(--bandeja-ok) 30%, transparent);
     background: color-mix(in srgb, var(--bandeja-ok) 10%, transparent);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--bandeja-ok);
     white-space: nowrap;
@@ -1158,19 +1022,6 @@
     background: var(--bandeja-error-fondo);
     color: var(--bandeja-error);
   }
-
-
-  .id-con-copia {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    justify-content: flex-end;
-  }
-
-
-
-
-
 
   .eq-serial {
     display: inline-flex;
@@ -1255,7 +1106,7 @@
     justify-content: space-between;
     gap: 6px;
     font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-size: 10px;
     font-variant-numeric: tabular-nums;
     color: var(--bandeja-texto-3);
   }
@@ -1300,7 +1151,7 @@
   }
 
   .eq-celda-rotulo {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--bandeja-texto-2);
   }
 
@@ -1362,10 +1213,8 @@
     border-radius: 3px;
     background: var(--bandeja-error);
     color: #fff;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.06em;
   }
 
   /* El pie que separa las dos ausencias. Sin él, seis guiones seguidos se

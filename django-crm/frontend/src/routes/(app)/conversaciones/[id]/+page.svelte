@@ -31,6 +31,7 @@
   import MessageThread from '$lib/conversaciones/messages/MessageThread.svelte';
   import { diaDe, etiquetaDia } from '$lib/conversaciones/formato.js';
   import { itemsDelChat } from '$lib/conversaciones/chat.js';
+  import { estadoDeLaConversacion, cierreDe } from '$lib/conversaciones/estado-unico.js';
   import { estadoDeDevolucion } from '$lib/conversaciones/devolucion.js';
   import {
     sesionDeGrabacion,
@@ -49,7 +50,8 @@
     Smile,
     Mic,
     Image as ImageIcon,
-    FileText
+    FileText,
+    PanelRightClose
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -265,14 +267,21 @@
   // Un renglón que falta se lee como que la pantalla está incompleta. Uno que
   // dice qué falta y por qué se lee como información. Y el orden es el de
   // quien toma el caso: qué pide, qué se intentó, qué se le dijo, qué queda.
+  /* Sin resumen del modelo, el renglón es una CITA, y el rótulo lo dice
+     (04/11/2026): «Qué quiere: Hola» presentaba un saludo como el pedido.
+     `cita` también le avisa a EscalationSummary que no lo muestre como el
+     motivo de la escalada. */
+  let resumenDelCaso = $derived((conversacion?.resumen ?? '').trim());
+  let pedidoEsCita = $derived(!resumenDelCaso && !!primerPedido);
   let resumenEscalada = $derived([
     {
-      rotulo: 'Qué quiere',
+      rotulo: pedidoEsCita ? 'Primer mensaje del cliente' : 'Qué quiere',
       orden: 0,
-      texto: (conversacion?.resumen ?? '').trim() || primerPedido,
+      texto: resumenDelCaso || primerPedido,
+      cita: pedidoEsCita,
       // Se dice que es el mensaje del cliente y no un resumen: quien lee
       // tiene que saber si está viendo una síntesis o una cita.
-      nota: (conversacion?.resumen ?? '').trim() ? '' : 'lo que escribió, sin resumir',
+      nota: resumenDelCaso ? '' : 'lo que escribió, sin resumir',
       vacio: 'Sin mensajes del cliente todavía.'
     },
     {
@@ -298,10 +307,16 @@
       // qué sigue": es que el asistente no lo dejó escrito, y el caso está
       // en una cola. Lo que SÍ merece alarma es lo otro: ni paso anotado ni
       // caso abierto, que es un cliente esperando a nadie.
-      alerta: !tieneCaso,
+      //
+      // 04/11/2026: y solo mientras está abierta. Cerrada, nadie espera: la
+      // alarma en ámbar sobre un caso resuelto era el mismo ruido que esta
+      // regla vino a quitar.
+      alerta: !tieneCaso && conversacion.estado !== 'cerrada',
       vacio: tieneCaso
         ? 'El asistente no dejó anotado el próximo paso. El caso quedó abierto en el CRM.'
-        : 'Sin próximo paso anotado y sin caso abierto en el CRM: no está en ninguna cola.'
+        : conversacion.estado === 'cerrada'
+          ? 'Se cerró sin próximo paso anotado.'
+          : 'Sin próximo paso anotado y sin caso abierto en el CRM: no está en ninguna cola.'
     },
     {
       rotulo: 'No se pudo comprobar',
@@ -1215,6 +1230,17 @@
     conversacion.estado === 'cerrada' && chat.agrupa !== false &&
       (!chat.mas_reciente_id || chat.mas_reciente_id === conversacion.id)
   );
+
+  /* EL ESTADO, EN UNA SOLA LÍNEA (04/11/2026). Una conversación cerrada
+     mostraba a la vez el chip «cerrada», la caja «Control humano · Sin
+     asignar», la franja del relevo, el motivo y «Resuelta» en verde, y
+     varios se contradecían. estado-unico.js elige cuál de esas verdades --ya
+     resueltas por el motor y por esta página-- se dice primero; la dibuja
+     HandoffControls y nadie más. `relevo` trae quién cerró y cuándo. */
+  let cierre = $derived(cierreDe(relevo, conversacion));
+  let estadoUnico = $derived(estadoDeLaConversacion({
+    estado: conversacion.estado, iaEnPausa, escalada, atendida, esMia, asignadaA, cierre
+  }));
   /* Un enlace viejo: hay una conversación más reciente de este mismo chat. */
   let hayMasReciente = $derived(!!chat.mas_reciente_id && chat.mas_reciente_id !== conversacion.id);
   /* Esta es la actual del chat, pero el número tiene OTRA abierta (más vieja):
@@ -1825,8 +1851,6 @@
 <section class="centro">
   <ConversationHeader
     {conversacion}
-    {escalada}
-    {asignadaA}
     contextoAbierto={pantallaAncha ? !contextoRecogido : contextoAbierto}
     rotulos={data.rotulos ?? {}}
     ficha={data.fichaCliente?.cliente ?? null}
@@ -1841,6 +1865,7 @@
     {escalandoArea} {errorEscalarArea} onEscalarArea={escalarArea}
     operadores={data.operadores ?? []}
     {iaEnPausa} {escalada} {atendida} {esMia} {asignadaA} {esAdmin} {gobernada}
+    {estadoUnico}
     {marcandoAtendida} {errorAtender} onAtender={marcarAtendida}
     {resolviendo} {errorResolver} onResolver={resolver}
     bind:reasignando bind:destinoReasignar bind:motivoReasignar
@@ -1873,7 +1898,8 @@
        quedan vacias igual, y por eso el estado vacio tiene que seguir
        diciendo algo util en vez de un renglon en blanco. -->
   {#if hayResumenDelCaso}
-    <EscalationSummary {resumenEscalada} {hizoLaIA} />
+    <!-- Rojo solo si espera a una persona y nadie la tomó (04/11/2026). -->
+    <EscalationSummary {resumenEscalada} {hizoLaIA} urgente={estadoUnico.clave === 'espera'} />
   {/if}
 
   {#if continuaEn}
@@ -1917,12 +1943,10 @@
     rolActivo={conversacion.rol_efectivo ?? ''}
   />
 
-  {#if chatCerrado}
-    <p class="chat-aviso" role="note">
-      Esta conversación está cerrada. Si le escribís, se abre una nueva en este
-      mismo chat, a tu cargo; lo de arriba no se modifica.
-    </p>
-  {/if}
+  <!-- El aviso gris «Esta conversación está cerrada. Si le escribís, se abre
+       una nueva…» se fue el 04/11/2026: lo dice la línea de estado de arriba
+       (estado-unico.js, `detalle` de la cerrada), y con la ventana de WhatsApp
+       cerrada la pantalla llegaba a repetir lo mismo cuatro veces. -->
   {#if conversacion.estado === 'abierta' || chatCerrado}
     <MessageComposer
       {conversacion} {error} escalada={escalada || chatCerrado} {chatCerrado} {enviando} {avisoDevolucion}
@@ -1991,7 +2015,14 @@
     class="v2-btn v2-btn-sm info-cerrar"
     onclick={() => (pantallaAncha ? recogerContexto(true) : (contextoAbierto = false))}
   >
-    <X size={14} /> {pantallaAncha ? 'Recoger' : 'Cerrar'}
+    <!-- «Ocultar panel» y no «✕ Recoger» (04/11/2026): la cruz se lee como
+         cerrar algo para siempre, y esto se vuelve a abrir con «Contexto».
+         En angosta es un cajón encima del hilo, y ahí sí se cierra. -->
+    {#if pantallaAncha}
+      <PanelRightClose size={14} aria-hidden="true" /> Ocultar panel
+    {:else}
+      <X size={14} aria-hidden="true" /> Cerrar
+    {/if}
   </button>
 
   <ContextTabs
@@ -2103,20 +2134,24 @@
   }
 
   /* ── columna del centro: la conversación ────────────────────────────── */
+  /* El centro en blanco y el contexto apenas gris (04/11/2026): la
+     conversación es lo que se viene a leer, y el contraste de superficies
+     dice cuál de las dos columnas es la principal sin un filete más. */
   .centro {
     flex: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
+    background: var(--bandeja-superficie);
   }
 
   /* ── columna de la derecha: el contexto ─────────────────────────────── */
   .info {
-    /* Superficie propia, como las otras dos zonas. Sin esto hereda el lienzo y
-       la columna se lee como el hueco que queda al costado en vez de como un
-       panel. */
-    background: var(--bandeja-superficie);
+    /* Superficie propia, como las otras dos zonas. Desde el 04/11/2026 es el
+       gris apenas marcado del lienzo y no blanco: el blanco es del centro, y
+       con el filete de la izquierda la columna sigue leyéndose como panel. */
+    background: var(--bandeja-canvas);
     /* Ningun contenido de esta columna puede desbordarla. Es la red por si
        algo nuevo se agrega sin acordarse de truncarlo. */
     overflow-x: hidden;
@@ -2159,12 +2194,12 @@
     padding: 5px 9px;
     border: 1px solid var(--bandeja-borde);
     border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-superficie-suave);
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
+    background: var(--bandeja-superficie);
+    /* Escrito normal desde el 04/11/2026, como todos los rótulos de la
+       Bandeja. La jerarquía la siguen marcando la franja y el filete. */
+    font-family: var(--bandeja-sans);
+    font-size: var(--bandeja-rotulo-tam);
+    font-weight: 600;
     color: var(--bandeja-texto);
   }
 
@@ -2182,8 +2217,10 @@
      pestañas. */
   .info-cerrar {
     display: flex;
+    align-items: center;
+    gap: 6px;
     width: fit-content;
-    margin: 6px 8px 0 auto;
+    margin: 8px 8px 0 auto;
   }
   @media (min-width: 1241px) {
     .info.recogida {

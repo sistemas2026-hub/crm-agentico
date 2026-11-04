@@ -17,6 +17,7 @@
   import CorregirAgente from '$lib/components/manual/CorregirAgente.svelte';
   import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
   import { partirMensaje, resumir } from './analisis-imagen.js';
+  import { agruparMensajes } from './agrupar.js';
 
   let {
     /** El hilo ya agrupado por día: {tipo:'dia'|'msg'} */
@@ -66,6 +67,11 @@
       agente, asi que ahora la condicion lo dice. */
   const conPie = (/** @type {any} */ m) =>
     !!(m.sinEntregar || m.estado_entrega === 'fallido' || m.rol === 'assistant');
+
+  /* RÁFAGAS (04/11/2026): el nombre del autor va una vez por grupo de
+     mensajes seguidos suyos, no en cada burbuja. La regla vive en
+     agrupar.js, con sus pruebas; acá solo se dibuja. */
+  const hiloAgrupado = $derived(agruparMensajes(hilo));
 
   /** @type {HTMLElement | undefined} */
   let hiloEl = $state();
@@ -204,13 +210,15 @@
 
 <div class="hilo" bind:this={hiloEl} onscroll={alScrollear}>
   <div class="chat-mensajes">
-    {#each hilo as item (item.clave)}
+    {#each hiloAgrupado as item (item.clave)}
       {#if item.tipo === 'dia'}
         <!-- El separador de día es una FICHA CENTRADA, no un renglón con dos
              filetes. La referencia lo dibuja así, y el motivo se ve al
              apilarlos: los filetes a los lados se confundían con el riel del
              evento de sistema, que sí es una línea que cruza. Dos separadores
              distintos tienen que verse distintos. -->
+        <!-- 04/11/2026: escrito normal y sin ficha con filete; es un rótulo
+             de orientación, no un dato que compita con los mensajes. -->
         <div class="dia"><span class="dia-chip">{item.texto}</span></div>
       {:else if item.tipo === 'mas'}
         <div class="mas">
@@ -274,43 +282,48 @@
         <div
           class="msg {sale ? 'msg-sale' : 'msg-entra'} {autor.clase}"
           class:msg-apagado={item.m.estado_entrega === 'descartado'}
+          class:msg-sigue={!item.inicioDeGrupo}
         >
           <!-- QUIÉN escribió esto, dicho con palabras y no sólo con un color
                (D30). `rol` 'assistant' cubre por igual a la IA, a una persona
                y a las filas históricas sin origen: las tres se veían como si
                las hubiera escrito Dexter.
 
-               El cliente lleva su nombre en texto llano y los demás una ficha
-               con punto: es la misma distinción que hace la referencia --lo
-               que ENTRA es una persona, lo que SALE es un sistema o un puesto
-               de trabajo. -->
-          <div class="msg-cabeza">
-            {#if autor.clase === 'a-cliente'}
-              <!-- El nombre es el del cliente de ESTA conversación. Un mensaje
-                   de una anterior del chat lleva la etiqueta neutra: el número
-                   pudo ser de otra persona (revisor de PII, 21/10/2026). -->
-              <span class="msg-quien">
-                <User size={12} aria-hidden="true" />
-                {(!item.m.deOtraConversacion && nombreCliente) || autor.etiqueta}
-              </span>
-            {:else}
-              <!-- El ícono es la tercera señal, además de la palabra y el color
-                   (29/10/2026): un robot para la IA y una persona para el
-                   equipo se distinguen de reojo, sin leer y sin depender de
-                   distinguir violeta de azul. -->
-              <span class="msg-chip">
-                {#if autor.clase === 'a-ia'}
-                  <Bot size={12} aria-hidden="true" />
-                {:else if autor.clase === 'a-humano'}
-                  <UserRound size={12} aria-hidden="true" />
-                {:else}
-                  <span class="msg-punto" aria-hidden="true"></span>
-                {/if}
-                {autor.etiqueta}
-              </span>
-            {/if}
-            <span class="msg-hora v2-num">{hora(item.m.creado_en)}</span>
-          </div>
+               El nombre va en texto chico escrito normal, arriba del globo
+               (04/11/2026). Era una pastilla en mayúscula rellena del color
+               de cada uno, y «ADMIN» en blanco sobre azul gritaba más que el
+               mensaje: el color ya lo lleva el globo, acá alcanzan la palabra
+               y el ícono. Y solo en el primero de una ráfaga (agrupar.js): en
+               los siguientes la hora va al pie. -->
+          {#if item.inicioDeGrupo}
+            <div class="msg-cabeza">
+              {#if autor.clase === 'a-cliente'}
+                <!-- El nombre es el del cliente de ESTA conversación. Un mensaje
+                     de una anterior del chat lleva la etiqueta neutra: el número
+                     pudo ser de otra persona (revisor de PII, 21/10/2026). -->
+                <span class="msg-quien">
+                  <User size={12} aria-hidden="true" />
+                  {(!item.m.deOtraConversacion && nombreCliente) || autor.etiqueta}
+                </span>
+              {:else}
+                <!-- El ícono es la tercera señal, además de la palabra y el color
+                     (29/10/2026): un robot para la IA y una persona para el
+                     equipo se distinguen de reojo, sin leer y sin depender de
+                     distinguir violeta de azul. -->
+                <span class="msg-quien">
+                  {#if autor.clase === 'a-ia'}
+                    <Bot size={12} aria-hidden="true" />
+                  {:else if autor.clase === 'a-humano'}
+                    <UserRound size={12} aria-hidden="true" />
+                  {:else}
+                    <span class="msg-punto" aria-hidden="true"></span>
+                  {/if}
+                  {autor.etiqueta}
+                </span>
+              {/if}
+              <span class="msg-hora v2-num">{hora(item.m.creado_en)}</span>
+            </div>
+          {/if}
 
           <div class="burbuja" class:sin-entregar={item.m.sinEntregar}>
             <!-- Un mensaje sin texto Y sin adjunto que se pueda dibujar no
@@ -400,6 +413,11 @@
 
           {#if conPie(item.m)}
             <div class="msg-pie">
+              <!-- Sin cabecera (sigue una ráfaga), la hora baja al pie: cada
+                   mensaje conserva cuándo se dijo. -->
+              {#if !item.inicioDeGrupo}
+                <span class="msg-hora v2-num">{hora(item.m.creado_en)}</span>
+              {/if}
               <!-- Por qué no alcanza con 'sinEntregar': ése es el aviso del
                    POST, existe una sola vez y se pierde al recargar. El estado
                    viene de la base (messages.estado_entrega) y sobrevive. Se
@@ -438,23 +456,36 @@
                 <span class="entrega">{ENTREGA_TEXTO.descartado}</span>
               {/if}
               {#if item.m.rol === 'assistant'}
-                {#if casos.length > 0}
-                  <MarcarEjemplo
+                <!-- ENTRENAR APARECE AL ACERCARSE (04/11/2026). «Buen ejemplo»
+                     y «Corregir» iban debajo de cada respuesta, siempre: en un
+                     hilo de veinte respuestas eran cuarenta controles que
+                     nadie estaba usando. Se muestran con el mouse encima o con
+                     el foco adentro, y siempre en pantallas táctiles, donde no
+                     hay «encima». El fallo de entrega de arriba NO entra acá:
+                     ese se ve siempre. -->
+                <span class="pie-entrenar">
+                  {#if casos.length > 0}
+                    <MarcarEjemplo
+                      conversacionId={item.m.conversation_id || conversacionId}
+                      mensajeId={item.m.id}
+                      casoInicial={item.m.caso_marcado}
+                      {casos}
+                    />
+                  {/if}
+                  <!-- El otro lado: esta respuesta estuvo mal y así se hace.
+                       NO depende de `casos` --eso es la taxonomía del manual--
+                       sino del rol, que es a quien se le enseña. -->
+                  <CorregirAgente
+                    rol={rolActivo}
+                    textoDeLaRespuesta={item.m.contenido || item.m.texto || ''}
                     conversacionId={item.m.conversation_id || conversacionId}
-                    mensajeId={item.m.id}
-                    casoInicial={item.m.caso_marcado}
-                    {casos}
                   />
-                {/if}
-                <!-- El otro lado: esta respuesta estuvo mal y así se hace.
-                     NO depende de `casos` --eso es la taxonomía del manual--
-                     sino del rol, que es a quien se le enseña. -->
-                <CorregirAgente
-                  rol={rolActivo}
-                  textoDeLaRespuesta={item.m.contenido || item.m.texto || ''}
-                  conversacionId={item.m.conversation_id || conversacionId}
-                />
+                </span>
               {/if}
+            </div>
+          {:else if !item.inicioDeGrupo}
+            <div class="msg-pie">
+              <span class="msg-hora v2-num">{hora(item.m.creado_en)}</span>
             </div>
           {/if}
         </div>
@@ -482,8 +513,10 @@
        lo primero. 140px son dos burbujas cortas. */
     min-height: 140px;
     overflow-y: auto;
-    /* p-5 en la referencia. */
-    padding: 20px;
+    /* p-5 en la referencia; 24 a los costados desde el 04/11/2026: con el
+       centro en blanco y los globos más claros, el hilo pegado a los bordes
+       se leía apretado contra la columna de contexto. */
+    padding: 20px 24px;
   }
 
   /* space-y-4 en la referencia: 16px entre bloques, y cada bloque decide su
@@ -503,17 +536,15 @@
     margin: 2px 0;
   }
 
+  /* Escrito normal, sin mono ni versalita (04/11/2026): «Hoy» o «Lunes 3 de
+     noviembre» se leen como palabras, no como un código. Sigue centrado y
+     sin filetes a los lados, por lo que dice el comentario del marcado. */
   .dia-chip {
-    padding: 2px 10px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: 3px;
-    background: var(--bandeja-superficie-suave);
+    padding: 2px 8px;
     color: var(--bandeja-texto-3);
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
+    font-family: var(--bandeja-titulo);
+    font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
 
   /* ── el chat: la marca entre conversaciones y "ver anteriores" ─────── */
@@ -590,11 +621,20 @@
   /* `max-w-xl` de la referencia = 36rem. Sobre 720px una frase corta quedaba
      estirada y una larga se leía como un párrafo de documento; 576 es el
      ancho con el que la referencia acomoda tres renglones. */
+  /* 68ch desde el 04/11/2026: el ancho se mide en caracteres del texto que
+     se lee, no en rem; ~68 es el renglón cómodo con la fuente del mensaje. */
   .msg {
     display: flex;
     flex-direction: column;
-    max-width: 36rem;
+    max-width: 68ch;
     min-width: 0;
+  }
+
+  /* El segundo y siguientes de una ráfaga van pegados al anterior: el hueco
+     de 16px entre bloques es lo que separa a un autor del otro, y dentro de
+     un grupo diría lo contrario. 16 - 12 = 4px. */
+  .msg-sigue {
+    margin-top: -12px;
   }
 
   /* LO QUE ENTRA A LA IZQUIERDA. Estuvo al revés hasta el 21/09/2026: el
@@ -628,11 +668,18 @@
     min-width: 0;
   }
 
+  /* EL NOMBRE, NO UNA FICHA (04/11/2026). Barlow 13 escrito normal: es un
+     nombre propio y se lee como tal. La pastilla rellena en mayúscula que
+     había antes se llevaba la mirada antes que el mensaje. El color NO es la
+     señal: va la palabra, y el ícono la refuerza -- un 8% de la gente no
+     distingue violeta de azul. */
   .msg-quien {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    min-width: 0;
+    font-family: var(--bandeja-titulo);
+    font-size: 13px;
     font-weight: 600;
     color: var(--bandeja-texto);
     overflow: hidden;
@@ -640,31 +687,21 @@
     white-space: nowrap;
   }
 
+  /* El ícono en el color de quien habla: es la única marca de color de la
+     cabecera, y repite la del globo de abajo. */
+  .a-ia .msg-quien :global(svg) {
+    color: var(--bandeja-ia);
+  }
+  .a-humano .msg-quien :global(svg) {
+    color: var(--bandeja-humano);
+  }
+
+  /* La hora es un dato: mono y chica, en gris. */
   .msg-hora {
     flex: none;
     font-family: var(--bandeja-mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--bandeja-texto-3);
-  }
-
-  /* La ficha de autor. El color NO es la señal: adentro va la palabra, y el
-     punto es refuerzo -- un 8% de la gente no distingue violeta de azul, y un
-     punto de color sin texto no dice QUÉ pasó. */
-  .msg-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 2px 7px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: 3px;
-    background: var(--bandeja-superficie-suave);
-    color: var(--bandeja-texto-2);
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
   }
 
   .msg-punto {
@@ -675,27 +712,14 @@
     flex: none;
   }
 
-  /* La ficha va RELLENA con el color de quien escribió: es lo primero que
-     el ojo encuentra al repasar el hilo (29/10/2026). */
-  .a-ia .msg-chip {
-    background: var(--bandeja-ia);
-    border-color: var(--bandeja-ia);
-    color: #fff;
-  }
-
-  .a-humano .msg-chip {
-    background: var(--bandeja-humano);
-    border-color: var(--bandeja-humano);
-    color: #fff;
-  }
-
   /* Sistema y "origen no registrado" quedan en gris a propósito: ninguno de
      los dos es alguien con quien se pueda hablar, y el segundo además es la
      admisión de que no sabemos. Un color propio le daría una identidad que
-     justamente no tiene; el filete punteado dice "esto no está confirmado". */
-  .a-sin-registro .msg-chip {
-    border-style: dashed;
-    border-color: var(--bandeja-borde-fuerte);
+     justamente no tiene. */
+  .a-sin-registro .msg-quien,
+  .a-sistema .msg-quien {
+    color: var(--bandeja-texto-2);
+    font-weight: 500;
   }
 
   /* ── la burbuja ─────────────────────────────────────────────────────────
@@ -707,13 +731,15 @@
         operador  #EFF6FF sobre #BFDBFE
 
      Tipografía: la referencia pide 12px (`text-xs leading-relaxed`); acá va 14, ver abajo.
-     padding 12 y radio 4. */
+     padding 12 y radio 8 (04/11/2026: con 4 el globo se leía como una ficha
+     de formulario, no como algo que alguien dijo). */
   .burbuja {
     padding: 12px;
-    border-radius: var(--bandeja-radio-sm);
+    border-radius: 8px;
     border: 1px solid var(--bandeja-borde);
     background: var(--bandeja-superficie);
     color: var(--bandeja-texto);
+    font-family: var(--bandeja-sans);
     /* 12px era el `text-xs` de la referencia, y es lo que se viene a LEER en
        esta pantalla: todo lo demás es contexto. 14 sobre 1.5 (29/10/2026). */
     font-size: 14px;
@@ -730,25 +756,27 @@
     overflow-wrap: anywhere;
   }
 
-  /* Que el cliente se vea igual que la superficie base no puede ser una
-     coincidencia de la cascada: se declara. */
+  /* EL CLIENTE EN GRIS SUAVE (04/11/2026). El centro pasó a blanco, y un
+     globo blanco sobre blanco solo se distinguía por el filete: lo que entra
+     necesita su propia superficie, neutra porque el cliente no es ni la IA ni
+     el equipo. */
   .a-cliente .burbuja {
-    background: var(--bandeja-superficie);
-    border-color: var(--bandeja-borde-fuerte);
+    background: var(--bandeja-superficie-suave);
+    border-color: var(--bandeja-borde);
   }
 
-  /* Fondos que se DISTINGUEN (29/10/2026). Los de la referencia --#F5F3FF y
-     #EFF6FF-- eran casi blancos los dos, y de reojo la IA y una persona del
-     equipo se veían iguales. Ahora un tinte que se ve, y el filete en el
-     color de cada uno. El texto sigue oscuro: el contraste no se toca. */
+  /* IA en violeta y persona en azul, con los fondos y filetes de la base
+     (04/11/2026). Antes eran mezclas hechas acá al 9% y 45%; ahora salen de
+     los mismos tokens que la cola y la línea de estado, para que el violeta
+     de un globo sea el mismo violeta de «La atiende la IA». */
   .a-ia .burbuja {
-    background: color-mix(in srgb, var(--bandeja-ia) 9%, #fff);
-    border-color: color-mix(in srgb, var(--bandeja-ia) 45%, #fff);
+    background: var(--bandeja-ia-fondo);
+    border-color: var(--bandeja-ia-borde);
   }
 
   .a-humano .burbuja {
-    background: color-mix(in srgb, var(--bandeja-humano) 9%, #fff);
-    border-color: color-mix(in srgb, var(--bandeja-humano) 45%, #fff);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
   }
 
   /* Una respuesta automática de una conversación en pausa SÍ salió al
@@ -775,6 +803,8 @@
   }
 
   /* ── el pie: qué pasó con el envío ──────────────────────────────────── */
+  /* Texto normal y no mono (04/11/2026): «No le llegó — WhatsApp lo rechazó»
+     es una frase, no un dato. La hora de adentro conserva su mono por clase. */
   .msg-pie {
     display: flex;
     align-items: center;
@@ -782,9 +812,36 @@
     gap: 8px;
     margin-top: 4px;
     padding: 0 4px;
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
+    font-family: var(--bandeja-sans);
+    font-size: 11px;
     color: var(--bandeja-texto-3);
+  }
+
+  .pie-entrenar {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+
+  .msg:hover .pie-entrenar,
+  .msg:focus-within .pie-entrenar {
+    opacity: 1;
+  }
+
+  /* En una pantalla táctil no hay «pasar el mouse»: escondido, no se
+     encontraría nunca. */
+  @media (hover: none) {
+    .pie-entrenar {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pie-entrenar {
+      transition: none;
+    }
   }
 
   /* ── las palomitas ─────────────────────────────────────────────────────
@@ -847,8 +904,10 @@
     align-self: stretch;
     max-width: 100%;
     padding: 12px;
-    border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-aviso-fondo);
+    border-radius: 8px;
+    /* El mismo fondo que el cuadro de texto en modo nota (04/11/2026): lo que
+       se escribe como nota se ve, ya guardado, igual que mientras se escribía. */
+    background: var(--bandeja-nota-fondo);
     border: 1px solid var(--bandeja-aviso-borde);
   }
 
@@ -860,15 +919,15 @@
     margin-bottom: 4px;
   }
 
+  /* Rótulo escrito normal (04/11/2026), como todos los de la Bandeja: el
+     candado y el color de nota ya lo distinguen sin la versalita en mono. */
   .nota-rotulo {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-family: var(--bandeja-titulo);
+    font-size: 13px;
+    font-weight: 600;
     color: var(--bandeja-nota);
   }
 

@@ -8,22 +8,20 @@
    * que saber de fetches y de rutas. Acá sólo llegan props y salen avisos.
    *
    * REFERENCIA: «Human Control State (Assigned to Me)»
-   * (`c427b43a84534a489891f111217439a4`). De ahí salen la ficha cuadrada de
-   * iniciales, el filete vertical y el bloque de control de dos renglones.
+   * (`c427b43a84534a489891f111217439a4`). De ahí sale la ficha cuadrada de
+   * iniciales. El bloque de control y el chip de estado de la referencia se
+   * fueron el 04/11/2026: el estado se dice una sola vez, en la línea de
+   * HandoffControls (lib/conversaciones/estado-unico.js).
    */
   import { ArrowLeft, Phone, User, PanelRight } from '@lucide/svelte';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
+  import { telefonoLegible } from '$lib/conversaciones/formato.js';
 
   let {
     conversacion,
-    /** Quién controla la conversación AHORA, ya resuelto por el motor
-        (`control_efectivo`, B3.3b) y derivado en la página. Llega como prop y
-        NO se recalcula acá: si este componente dedujera el control por su
-        cuenta, dos partes de la pantalla podrían decir cosas distintas. */
-    escalada = false,
-    /** El dueño durable de Dexter, o '' si no tiene. Nunca el del ticket del
-        CRM: eso es D28 y es otra cosa. */
-    asignadaA = '',
+    /* `escalada` y `asignadaA` se fueron el 04/11/2026: quién la lleva lo
+       dice la línea de estado de HandoffControls, una sola vez. La caja de
+       control que los usaba acá era la segunda voz del mismo dato. */
     /** Si la columna de contexto está abierta. La abre y la cierra la página:
         el mismo valor lo lee el `<aside>`, que no es hijo de este componente. */
     contextoAbierto = false,
@@ -56,10 +54,16 @@
   const esTelefono = (/** @type {string} */ v) => !!v && /^\+?\d[\d\s-]{5,}$/.test(v);
   const esUuid = (/** @type {string} */ v) =>
     !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+  /* Con indicativo, la forma de formato.js (04/11/2026): «+57 300 123 4567».
+     Antes salía pegado, «573001234567». Los 10 dígitos locales se quedan con
+     su regla: telefonoLegible les antepondría un «+» que no tienen. */
   function quien(/** @type {string} */ v) {
     if (!v) return 'Sin identificar';
-    const d = v.replace(/\D/g, '');
-    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    if (esTelefono(v)) {
+      const d = v.replace(/\D/g, '');
+      if (d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+      return telefonoLegible(d);
+    }
     return v;
   }
 
@@ -107,27 +111,27 @@
         <span class="centro-tel v2-num">{telefono}</span>
       {/if}
       <span class="cab-chip">{canalLabel(conversacion.canal)}</span>
-      <!-- «abierta» no se dice: es el caso normal, y competía con el estado
-           del relevo justo debajo. Solo se nombra lo que se sale de eso. -->
-      {#if conversacion.estado && conversacion.estado !== 'abierta'}
-        <span class="cab-chip">{conversacion.estado}</span>
-      {/if}
+      <!-- El chip «cerrada» se fue el 04/11/2026: la línea de estado de
+           abajo empieza por «Cerrada · la resolvió…», y dos voces para el
+           mismo dato eran justo lo que estado-unico.js vino a sacar. -->
     </div>
 
-    <!-- SEGUNDO RENGLÓN: los identificadores, en mono y separados por puntos,
-         igual que la línea `DNI · Account · Plan` de la referencia. Son datos
-         que se COMPARAN contra otro sistema, así que van en mono y con cifras
-         tabulares.
+    <!-- SEGUNDO RENGLÓN: los identificadores, separados por filetes, igual
+         que la línea `DNI · Account · Plan` de la referencia. Desde el
+         04/11/2026 el renglón va en texto normal y solo los NÚMEROS en mono
+         --son lo que se compara contra otro sistema--: «ISP» es una palabra.
 
          Sólo se dibuja lo que la conversación TRAE. La ficha del ISP llega
          incompleta a propósito --el motor filtra por una lista blanca-- y un
-         renglón con "—" no informa nada. -->
+         renglón con "—" no informa nada.
+
+         La cédula NO va acá (04/11/2026): vive en el panel Cliente. Repetir
+         un documento de identidad en la cabecera lo deja a la vista de quien
+         pase por detrás, en cada conversación, sin que nadie lo haya ido a
+         buscar. -->
     <div class="centro-ids">
       {#if conversacion.id_cliente}
-        <span class="centro-id">ISP <b>{conversacion.id_cliente}</b></span>
-      {/if}
-      {#if ficha?.cedula}
-        <span class="centro-id">CC <b>{ficha.cedula}</b></span>
+        <span class="centro-id">ISP <b class="centro-num">{conversacion.id_cliente}</b></span>
       {/if}
       {#if ficha?.plan_internet}
         <span class="centro-id centro-id-plan">{ficha.plan_internet}</span>
@@ -136,41 +140,26 @@
         <span class="centro-id">{ficha.estado}</span>
       {/if}
       {#if conversacion.ticket_operativo}
-        <span class="centro-id">Ticket <b>{conversacion.ticket_operativo}</b></span>
+        <span class="centro-id">Ticket <b class="centro-num">{conversacion.ticket_operativo}</b></span>
       {/if}
       {#if reincide}
+        <!-- «3 en 30 días» no decía de qué (04/11/2026): se lee la palabra, y
+             el `title` dice qué se cuenta. -->
         <span
           class="centro-id reincide"
-          title="Conversaciones de este número en los últimos {reincide.dias} días, contando esta"
+          title="Cuenta las conversaciones de este número en los últimos {reincide.dias} días, contando esta"
         >
-          <b>{reincide.total}</b> en {reincide.dias} días{#if casoQueSeRepite}
+          <b>{reincide.total}</b> conversaciones en {reincide.dias} días{#if casoQueSeRepite}
             · {rotuloDe(casoQueSeRepite.caso, rotulos)} ×{casoQueSeRepite.n}{/if}
         </span>
       {/if}
     </div>
   </div>
 
-  <span class="centro-sep" aria-hidden="true"></span>
-
-  <!-- QUIÉN LA LLEVA, con palabra y en un bloque propio. Antes era una píldora
-       de 9,5px apretada entre el canal y el estado, o sea el dato más
-       importante del encabezado con el mismo peso que "abierta". La referencia
-       le da una caja con filete, punto y dos renglones: qué control es, y de
-       quién. Es la misma pregunta que responde la cola, y conviene que la
-       respondan igual. -->
-  <div class="control {escalada ? 'control-humano' : 'control-ia'}">
-    <span class="control-punto" aria-hidden="true"></span>
-    <span class="control-textos">
-      <span class="control-rotulo">{escalada ? 'Control humano' : 'La atiende la IA'}</span>
-      <span class="control-detalle">
-        {#if escalada}
-          {asignadaA ? `Asignada a ${asignadaA}` : 'Sin asignar'}
-        {:else}
-          Dexter responde solo
-        {/if}
-      </span>
-    </span>
-  </div>
+  <!-- La caja «Control humano / La atiende la IA» y su filete se fueron el
+       04/11/2026: quién la lleva lo dice la línea de estado, justo debajo, con
+       las mismas palabras que la cola. Dos respuestas a la misma pregunta en
+       la misma pantalla son una invitación a que se contradigan. -->
 
   <!-- Solo aparece cuando la columna de contexto no cabe al lado. Ahí se
        abre como panel, no se pierde: el ticket y la documentación siguen a
@@ -241,14 +230,19 @@
     min-width: 0;
   }
 
+  /* EL NOMBRE NO SE CORTA (04/11/2026). Con 14px y puntos suspensivos,
+     «María Fernanda Rodríguez Ca…» obligaba a abrir el panel Cliente para
+     saber con quién se hablaba. Barlow a 22px, y si no entra envuelve a un
+     segundo renglón: es el dato más importante de la cabecera. */
   .centro-top h2 {
     margin: 0;
-    font-size: 14px;
-    font-weight: 640;
-    letter-spacing: -0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    font-family: var(--bandeja-titulo);
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
   }
 
   .centro-tel {
@@ -272,17 +266,19 @@
     white-space: nowrap;
   }
 
+  /* Texto normal, no mono (04/11/2026): «ISP», «Ticket» y el plan son
+     palabras. Solo los números van en mono (`.centro-num`), que es lo que se
+     compara contra otro sistema. */
   .centro-ids {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 4px 8px;
     min-width: 0;
-    margin-top: 2px;
-    font-family: var(--bandeja-mono);
-    font-size: 10.5px;
-    font-variant-numeric: tabular-nums;
-    color: var(--bandeja-texto-3);
+    margin-top: 4px;
+    font-family: var(--bandeja-sans);
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
   }
 
   .centro-id + .centro-id {
@@ -292,80 +288,20 @@
 
   .centro-id b {
     font-weight: 600;
-    color: var(--bandeja-texto-2);
+    color: var(--bandeja-texto);
+  }
+
+  .centro-num {
+    font-family: var(--bandeja-mono);
+    font-variant-numeric: tabular-nums;
   }
 
   /* El plan es lo único de la fila que no es un identificador: es lo que el
-     cliente contrató, y se lee más que se compara. */
+     cliente contrató, y se lee más que se compara. Sin mayúsculas forzadas:
+     se muestra como lo escribe el ISP. */
   .centro-id-plan {
-    color: var(--bandeja-texto-2);
-    font-weight: 600;
-  }
-
-  /* El filete vertical que la referencia pone entre la identidad y el estado
-     de control. Separa dos cosas distintas sin gastar un renglón. */
-  .centro-sep {
-    flex: none;
-    width: 1px;
-    height: 32px;
-    background: var(--bandeja-borde);
-  }
-
-  /* ── el bloque de control ───────────────────────────────────────────── */
-  .control {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    border: 1px solid;
-    border-radius: var(--bandeja-radio-sm);
-  }
-
-  .control-punto {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-    flex: none;
-  }
-
-  .control-textos {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-  }
-
-  .control-rotulo {
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    line-height: 1;
-    white-space: nowrap;
-  }
-
-  .control-detalle {
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .control-ia {
-    color: var(--bandeja-ia);
-    background: var(--bandeja-ia-fondo);
-    border-color: var(--bandeja-ia-borde);
-  }
-
-  .control-humano {
-    color: var(--bandeja-humano);
-    background: var(--bandeja-humano-fondo);
-    border-color: var(--bandeja-humano-borde);
+    color: var(--bandeja-texto);
+    text-transform: none;
   }
 
   /* Volver sólo tiene sentido cuando la lista no está al lado. */
@@ -394,12 +330,15 @@
   /* En un teléfono la línea de identificadores envuelve en cuatro renglones y
      la cabecera se come el hilo: medido a 390px, 153px sólo de encabezado.
      Se queda el primero y el resto se lee en la pestaña Cliente, que los
-     tiene todos y a un toque. El filete vertical y el segundo renglón del
-     bloque de control tampoco entran: el rótulo solo ya dice quién la lleva. */
+     tiene todos y a un toque. El nombre baja a 18px: a 22 un nombre de cuatro
+     palabras se llevaba tres renglones. */
   @media (max-width: 760px) {
     .centro-top {
       gap: 8px;
       padding: 10px 14px;
+    }
+    .centro-top h2 {
+      font-size: 18px;
     }
     .centro-ids .centro-id:not(:first-child) {
       display: none;
@@ -407,10 +346,6 @@
     .centro-id + .centro-id {
       padding-left: 0;
       border-left: 0;
-    }
-    .centro-sep,
-    .control-detalle {
-      display: none;
     }
   }
 

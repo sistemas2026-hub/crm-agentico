@@ -127,12 +127,14 @@
 
   /* Y por dónde sale, con el estado que de verdad tiene. La ventana de 24 h
      es una regla de WhatsApp: decir «en línea» cuando está cerrada sería
-     exactamente lo contrario de lo que pasa. */
+     exactamente lo contrario de lo que pasa.
+
+     Con la ventana CERRADA este pie no se dibuja (04/11/2026): «WhatsApp ·
+     ventana cerrada» era la cuarta vez que la pantalla lo decía --la banda,
+     el sello, el cuadro de texto y acá--, y el aviso único es la banda. */
   const estadoCanal = $derived(
     conversacion.canal === 'whatsapp'
-      ? bloqueadoPorVentana
-        ? 'WhatsApp · ventana cerrada'
-        : ventanaAbierta
+      ? ventanaAbierta
           ? // Cuánto queda, SIEMPRE (29/10/2026): el aviso grande sale recién
             // en la última hora, y hasta ahí «abierta» no decía si eran 23 h
             // o 2.
@@ -452,6 +454,11 @@
           {/if}
         </div>
         <span class="barra-sep" aria-hidden="true"></span>
+        <!-- CONTROL SEGMENTADO (04/11/2026): las dos opciones dentro de una
+             misma caja, con fondo en la activa. Eran dos botones sueltos con
+             filete, iguales a «Plantillas», y no se leía que fueran una
+             elección entre dos --que es lo que son: lo que escribís va a un
+             lado o al otro, nunca a los dos. -->
         <div class="modos" role="group" aria-label="Qué estás escribiendo">
           <button
             type="button"
@@ -465,6 +472,7 @@
             aria-pressed={modo === 'nota'}
             onclick={() => (modo = 'nota')}>Nota interna</button
           >
+        </div>
           <!-- Sólo con la conversación en manos de una persona: devolverla supone
                tenerla. Con la IA atendiendo, el motor responde 409 y el botón no
                tendría a qué. -->
@@ -494,7 +502,6 @@
               {devolviendoAIA ? 'Devolviendo…' : 'Devolver a la IA'}
             </button>
           {/if}
-        </div>
         <!-- PLANTILLAS SIEMPRE A LA VISTA, no sólo con la ventana cerrada.
              Una plantilla aprobada sirve igual con la ventana abierta, y
              tenerla escondida detrás de un estado hacía que nadie supiera que
@@ -580,7 +587,9 @@
         placeholder={bloqueadoPorIA
           ? 'La IA está atendiendo — dejá una nota interna para el equipo'
           : bloqueadoPorVentana
-          ? 'La ventana de WhatsApp está cerrada — usá una plantilla'
+          ? // Corto y sin repetir el porqué (04/11/2026): la banda de arriba ya
+            // lo dice. Acá solo queda qué hacer.
+            'Elegí una plantilla para escribirle'
           : modo === 'nota'
             ? 'Nota para el equipo — el cliente no la ve. Mencioná con @usuario (lo que va antes del @ del correo) para avisarle'
             : escalada
@@ -602,7 +611,12 @@
            como esperando algo -- que el cliente reinicie, que pase el técnico
            -- y la cola la muestra aparte. Responder sin marcarla la quita. Solo
            al responder como persona: en nota o devolviendo a la IA no aplica. -->
-      {#if escalada && modo === 'responder' && !bloqueadoPorVentana && !bloqueadoPorIA && onPedirBorrador}
+      <!-- UN SOLO RENGLÓN (04/11/2026): «Sugerir respuesta» y «Queda en espera»
+           iban cada uno en el suyo, y con el pie la caja de escribir medía
+           casi 300 px: en una pantalla de 920 el hilo se quedaba con 230. -->
+      {#if escalada && modo === 'responder' && !bloqueadoPorVentana && !bloqueadoPorIA}
+      <div class="compositor-extras">
+      {#if onPedirBorrador}
         <!-- La IA propone, la persona decide: el texto cae en el cuadro y no
              sale hasta que alguien aprieta Enviar. -->
         <div class="borrador">
@@ -620,7 +634,6 @@
           {#if errorBorrador}<span class="borrador-error">{errorBorrador}</span>{/if}
         </div>
       {/if}
-      {#if escalada && modo === 'responder' && !bloqueadoPorVentana && !bloqueadoPorIA}
         <div class="espera" class:espera-activa={quedaEnEspera}>
           <label class="espera-marca">
             <input type="checkbox" bind:checked={quedaEnEspera} />
@@ -645,6 +658,7 @@
             </select>
           {/if}
         </div>
+      </div>
       {/if}
       <!-- ── 4. EL PIE ─────────────────────────────────────────────────────
            La pista del teclado a la izquierda y el envío a la derecha, como
@@ -663,7 +677,9 @@
                no con un «Online» fijo. Vivía al final de la barra de arriba y
                la partía en dos renglones en una columna de ~520px: acá, al
                lado de la pista, no le quita lugar a nada (29/10/2026). -->
-          <span class="barra-canal">{estadoCanal}</span>
+          {#if !bloqueadoPorVentana}
+            <span class="barra-canal">{estadoCanal}</span>
+          {/if}
         </span>
 
         {#if modo === 'nota'}
@@ -747,22 +763,16 @@
   /* Advertencia, no error: el filete ámbar es la misma señal que usa el
      handoff sin dueño. Se puede seguir escribiendo con normalidad -- lo que
      cambia es que conviene hacerlo ahora. */
+  /* Filete de 1px en todo el contorno (04/11/2026): el borde lateral de 3px
+     era un acento, y el ámbar del fondo ya es la señal. */
   .ventana-avisa {
     color: var(--bandeja-texto);
     background: var(--bandeja-aviso-fondo);
-    border-left: 3px solid var(--bandeja-aviso);
+    border: 1px solid var(--bandeja-aviso-borde);
   }
 
-  /* Cerrada SÍ es un límite en vigor, y lleva el filete del mismo color que
-     su distintivo. No es rojo: no se rompió nada, hay otra forma de escribir. */
-  .ventana-cerrada {
-    border-left: 3px solid var(--bandeja-borde-fuerte);
-  }
-
-  .ventana-cerrada {
-    color: var(--bandeja-texto);
-    background: var(--bandeja-aviso-fondo);
-  }
+  /* `.ventana-cerrada` se fue el 04/11/2026: no la usaba ningún marcado
+     desde que la banda de estado se quedó con ese aviso (22/09/2026). */
 
   /* Empuja el botón al extremo: el aviso se lee de izquierda a derecha y la
      acción queda al final, no metida entre el texto. */
@@ -773,19 +783,21 @@
   /* El rótulo del canal, con la misma forma que los distintivos de la cola:
      mono, versalita y un filete. Dice DE QUÉ sistema viene el límite -- no es
      una decisión de Dexter, es la ventana de 24 h de WhatsApp. */
+  /* 04/11/2026: escritos normal. «12 disponibles» es una cuenta y «WhatsApp
+     · 24 h» un rótulo; ninguno de los dos es un dato que se compare. */
   .plantillas-cuenta {
-    font-family: var(--bandeja-mono);
-    font-size: 10.5px;
+    font-family: var(--bandeja-titulo);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--bandeja-texto-2);
   }
 
   .ventana-marca {
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-family: var(--bandeja-sans);
+    font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    padding: 1px 5px;
+    padding: 1px 6px;
     border: 1px solid var(--bandeja-borde-fuerte);
     border-radius: var(--bandeja-radio-sm);
     color: var(--bandeja-texto-2);
@@ -798,12 +810,23 @@
      escribir y no avisa hasta que alguien ya escribio. */
   /* Bloqueado no hace falta el piso: no se va a escribir dentro. */
   .texto-inerte {
-    background: var(--bandeja-canvas);
     cursor: not-allowed;
     /* Sin piso: bloqueado no se va a escribir adentro, y los 44px de
        `.compositor-texto` dejaban el cuadro igual de alto que con dos filas
        -- o sea que `rows=1` no ahorraba nada. */
     min-height: 0;
+  }
+
+  /* CLARAMENTE DESHABILITADO (04/11/2026). Con fondo blanco y el halo azul
+     del foco, el cuadro bloqueado se veía listo para escribir. Doble clase
+     a propósito: tiene que ganarle a `.compositor-texto` y a su `:focus`,
+     que están más abajo en este archivo. */
+  .compositor-texto.texto-inerte,
+  .compositor-texto.texto-inerte:focus {
+    background: var(--bandeja-superficie-suave);
+    border-color: var(--bandeja-borde);
+    box-shadow: none;
+    color: var(--bandeja-texto-3);
   }
 
 
@@ -923,28 +946,33 @@
      sobre el compositor: 30px de alto para tres palabras, en una pantalla
      donde el hilo pelea por cada píxel. Acá comparten renglón con los
      iconos, como en la referencia. */
+  /* EL CONTROL SEGMENTADO (04/11/2026): una caja gris con las dos opciones
+     adentro, y la activa con fondo blanco y filete. Siguen viéndose SIEMPRE
+     las dos -- un control que solo se ve cuando ya lo usaste no sirve para
+     descubrirlo (la regla de antes, que no cambia). */
   .modos {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
     min-width: 0;
+    padding: 2px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio);
+    background: var(--bandeja-superficie-suave);
   }
 
-  /* SE VEN SIEMPRE, no solo el elegido. Con el filete transparente parecian
-     texto suelto: no habia forma de saber que «Nota interna» era algo que se
-     podia apretar hasta que estaba apretado. Un control que solo se ve cuando
-     ya lo usaste no sirve para descubrirlo. */
   .modo {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border: 1px solid var(--bandeja-borde);
-    background: var(--bandeja-superficie);
+    border: 1px solid transparent;
+    background: transparent;
     font: inherit;
-    font-size: 11px;
+    font-family: var(--bandeja-sans);
+    font-size: 12px;
     color: var(--bandeja-texto-2);
-    padding: 3px 7px;
-    border-radius: 3px;
+    padding: 4px 10px;
+    border-radius: var(--bandeja-radio-sm);
     white-space: nowrap;
     cursor: pointer;
   }
@@ -955,9 +983,9 @@
 
   .modo[aria-pressed='true'] {
     color: var(--bandeja-texto);
-    font-weight: 650;
-    border-color: var(--bandeja-borde-fuerte);
-    background: var(--bandeja-superficie-suave);
+    font-weight: 600;
+    border-color: var(--bandeja-borde);
+    background: var(--bandeja-superficie);
   }
 
 
@@ -994,21 +1022,32 @@
 
   .modo-nota[aria-pressed='true'] {
     color: var(--bandeja-nota);
-    border-color: color-mix(in srgb, var(--bandeja-nota) 45%, transparent);
+    border-color: var(--bandeja-aviso-borde);
+    background: var(--bandeja-nota-fondo);
   }
 
 
   /* El compositor entero cambia, no una pestaña chiquita: lo que hay que
-     hacer imposible es escribir algo interno creyendo que es privado. */
+     hacer imposible es escribir algo interno creyendo que es privado.
+
+     04/11/2026: el color va en el CUADRO DE TEXTO, que es donde se mira al
+     escribir, con el mismo fondo que la nota ya guardada en el hilo. El
+     contorno punteado se queda alrededor; el tinte del contenedor se fue,
+     porque dos ámbares apilados se leían como uno solo y desvaído. */
   .compositor.es-nota {
-    background: color-mix(in srgb, var(--bandeja-nota) 9%, transparent);
-    border: 1px dashed color-mix(in srgb, var(--bandeja-nota) 45%, transparent);
-    border-radius: 9px;
+    border: 1px dashed var(--bandeja-aviso-borde);
+    border-radius: 8px;
     padding: 8px;
   }
 
   .compositor.es-nota .compositor-texto {
-    background: transparent;
+    background: var(--bandeja-nota-fondo);
+    border-color: var(--bandeja-aviso-borde);
+  }
+
+  .compositor.es-nota .compositor-texto:focus {
+    border-color: var(--bandeja-nota);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--bandeja-nota) 14%, transparent);
   }
 
   .nota-interna-aviso {
@@ -1297,11 +1336,23 @@
   /* Igual que los modos: "Enviar y devolver" y su "Enviando y devolviendo…"
      son mas anchos que "Enviar", y el pie tambien lleva la pista del canal a
      la izquierda. Que baje en vez de apretarse. */
+  /* Sugerir respuesta y Queda en espera, lado a lado. Con la espera marcada
+     su nota ocupa el resto del renglón, y si no entra pasa abajo entera. */
+  .compositor-extras {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    margin-top: 6px;
+  }
+  .compositor-extras .espera {
+    flex: 1 1 260px;
+    margin: 0;
+  }
   .borrador {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 4px;
     font-size: 11.5px;
   }
   .borrador-error {
@@ -1443,16 +1494,15 @@
     color: var(--bandeja-texto-2);
   }
 
-  /* El sello de la derecha: de dónde sale esto. Mono y versalita, como el
-     resto de lo que rotula en la Bandeja. */
+  /* El sello de la derecha: de dónde sale esto. Escrito normal desde el
+     04/11/2026, como todo rótulo de la Bandeja: la versalita en mono de 9px
+     era lo más difícil de leer de la banda. */
   .banda-canal {
     flex: none;
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
+    font-family: var(--bandeja-sans);
+    font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    opacity: 0.75;
+    opacity: 0.8;
   }
 
   .banda-humano {
@@ -1498,16 +1548,20 @@
     background: var(--bandeja-borde);
   }
 
+  /* Botón secundario: superficie blanca y filete, sin color. «Plantillas» y
+     «Devolver a la IA» son acciones, no estados; la primaria del compositor
+     es la de abajo a la derecha (04/11/2026). */
   .barra-boton {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 7px;
+    padding: 4px 10px;
     border: 1px solid var(--bandeja-borde);
-    border-radius: 3px;
+    border-radius: var(--bandeja-radio-sm);
     background: var(--bandeja-superficie);
     font: inherit;
-    font-size: 11px;
+    font-family: var(--bandeja-sans);
+    font-size: 12px;
     color: var(--bandeja-texto-2);
     white-space: nowrap;
     cursor: pointer;
@@ -1544,11 +1598,12 @@
     color: var(--bandeja-error);
   }
 
+  /* «WhatsApp · ventana: quedan 3 h» es una frase: texto normal (04/11/2026). */
   .barra-canal {
     margin-left: 8px;
     flex: none;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-family: var(--bandeja-sans);
+    font-size: 11px;
     color: var(--bandeja-texto-3);
     white-space: nowrap;
   }

@@ -57,7 +57,7 @@
        dato que dice de un vistazo si hubo mucho movimiento, y pegado al
        rótulo se lee como parte del nombre del panel. -->
   <div class="cabecera">
-    <span class="rotulo">Registro de relevo</span>
+    <span class="panel-titulo">Registro de relevo</span>
     <span class="conteo">
       {lineas.length}
       {lineas.length === 1 ? 'evento' : 'eventos'}
@@ -112,22 +112,15 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding-bottom: 10px;
-    margin-bottom: 14px;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
     border-bottom: 1px solid var(--bandeja-borde);
   }
-  .rotulo {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--bandeja-texto);
-  }
+  /* 04/11/2026: el título es `.panel-titulo`, el mismo de las otras cuatro
+     pestañas (tenía su propio `.rotulo` en versalita). El conteo es una
+     frase, «3 eventos»: rótulo gris escrito normal, no mono. */
   .conteo {
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: var(--bandeja-rotulo-tam);
     color: var(--bandeja-texto-3);
     white-space: nowrap;
   }
@@ -218,13 +211,13 @@
     flex: none;
   }
 
+  /* 04/11/2026: «Reasignada», escrita normal. `insigniaDe()` ya la manda con
+     mayúscula inicial; la versalita en mono a 9,5px la volvía un sello que
+     había que descifrar. */
   .insignia {
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-size: 11px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    padding: 1px 5px;
+    padding: 0 4px;
     border-radius: 3px;
     border: 1px solid var(--bandeja-borde);
     background: var(--bandeja-superficie-suave);
@@ -279,10 +272,11 @@
     color: var(--bandeja-texto);
   }
 
+  /* El detalle es el motivo que escribió una persona («cliente pide
+     factura»): texto, no dato. Estaba en mono (04/11/2026). */
   .detalle {
     margin: 2px 0 0;
-    font-family: var(--bandeja-mono);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.4;
     color: var(--bandeja-texto-3);
     overflow-wrap: anywhere;
@@ -292,8 +286,7 @@
     margin: 20px 0 0;
     padding-top: 10px;
     border-top: 1px solid var(--bandeja-borde);
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.4;
     text-align: center;
     color: var(--bandeja-texto-3);
