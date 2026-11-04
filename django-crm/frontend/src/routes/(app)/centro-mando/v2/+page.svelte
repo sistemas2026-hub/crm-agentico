@@ -155,7 +155,14 @@
    * Es temporal y se va con la decision de motor: lo dice el propio nombre
    * del parametro, que no es una preferencia del usuario ni se persiste.
    */
-  const composicion = $derived(page.url.searchParams.get('planta') ?? 'lineal');
+  //  LA SEDE ES LA VISTA, y `lineal` pasa a ser la que hay que pedir.
+  //
+  //  Nacio al reves —`lineal` por defecto y `?planta=sede` para probar— porque
+  //  la sede era un experimento. Dejo de serlo: es la composicion que se
+  //  decidio el 01/11/2026, la que tiene cerramientos, puertas, navegacion y
+  //  rotulos, y la unica que se reviso sala por sala. El parametro se queda
+  //  para poder comparar, que era su proposito.
+  const composicion = $derived(page.url.searchParams.get('planta') ?? 'sede');
 
   /**
    * LA SEDE EN UNA PLANTA, con `?planta=sede`.
