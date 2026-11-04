@@ -3491,3 +3491,58 @@ Tres, cada una con su mutacion probada:
 
 **`centro-mando`: 785 verdes, 0 rojas.**
 
+## P15 · El nombre del departamento, en su placa — 04/11/2026
+
+Era texto suelto de 11 px con un halo del 12%, acostado sobre el muro. A
+escala de plano no se leia, y de cerca competia con lo que tuviera detras: en
+Recepcion cae sobre el mural y parecia parte de lo que esa pantalla muestra.
+
+Ahora es lo que es en una oficina: una **placa**. Cuerpo oscuro del color del
+area, canto superior al color pleno, sombra proyectada abajo y el texto en un
+claro del mismo acento.
+
+### Y aqui el color SI funciona
+
+Es la leccion de P13 aplicada en la direccion correcta. Alli el acento fallaba
+en el marco de una puerta **porque un marco se ve de canto** y el color sale
+como una linea que rodea el vano. Una placa es una **superficie vista de
+frente**: el mismo acento, en la pieza adecuada, es exactamente lo que hacia
+falta.
+
+Las once salas quedan con su nombre legible a escala de plano, cada una en su
+color — que es tambien media respuesta a la observacion de P11 sobre la
+identidad de las areas.
+
+### Tres medidas que costaron tres intentos
+
+1. **El primero salio enorme y con el texto apagado.** Diagnostiqué que
+   `texto.width` venia en pixeles de textura por pedirla al doble, y dividi
+   por la resolucion. **Era falso**: medido en el navegador, «NOC Y REDES»
+   mide 102,4 de ancho y 15 de alto con cuerpo 12 — ya en pixeles logicos. Al
+   dividir, la placa quedo mas corta que su propio texto. Lo que estaba mal en
+   el primer intento era el CONTRASTE, no la medida.
+2. **La placa se salia por encima del muro.** Con una `z` fija de 3,63 y 0,92
+   de alto llegaba a 4,09, y el muro mide 4. Ahora **cuelga del remate**
+   —arriba a 3,86— en vez de flotar a una altura fija.
+3. **El friso no daba.** Entre el borde del mural (3,35) y el remate (3,88)
+   quedaban **0,43 unidades**, once pixeles, y la placa necesita 0,73. El
+   mural baja a 2,95: pierde un 21% de su alto y la sala gana un rotulo que se
+   lee. Es un intercambio, y se deja escrito como tal.
+
+### De paso: tres paneles que desbordaban
+
+`panelMuroFondo(g, gx, ANCHO, …)` toma un ancho, y tres llamadas le pasaban un
+«hasta»:
+
+- dos **mias**, de P10, en las franjas partidas por el vano. No se notaban
+  porque ninguna sala de la sede tiene vano en el muro del fondo, y entonces
+  el tramo empieza en 0, donde «hasta» y «ancho» coinciden. Latente.
+- una preexistente: el tramo de muro a la derecha del vano, dibujado con el
+  ancho entero del muro desde donde termina la puerta.
+
+El comentario que habia encima de la tercera afirmaba que la funcion «toma
+(desde, HASTA)», justo lo contrario de lo que hace — **y fue el que me hizo
+repetir el error**. Un comentario equivocado es peor que ninguno.
+
+**`centro-mando`: 785 verdes, 0 rojas.**
+

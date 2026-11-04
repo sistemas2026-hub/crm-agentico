@@ -911,10 +911,12 @@ function construirMuros(mundo: Mundo): Graphics {
   const vano = mundo.puerta;
   if (vano) {
     panelMuroFondo(g, 0, Math.max(0, vano[0]), 0, h, PALETA.muroFondo);
-    panelMuroFondo(g, Math.min(mundo.ancho, vano[1]), mundo.ancho, 0, h, PALETA.muroFondo);
+    const trasElVano = Math.min(mundo.ancho, vano[1]);
+    panelMuroFondo(g, trasElVano, mundo.ancho - trasElVano, 0, h, PALETA.muroFondo);
     //  Dintel: el muro sigue por encima de la puerta.
-    panelMuroFondo(g, vano[0], vano[1], 2.2, h, PALETA.muroFondo);
-    //  Y la puerta. `panelMuroFondo` toma (desde, HASTA) y no (desde, largo),
+    panelMuroFondo(g, vano[0], vano[1] - vano[0], 2.2, h, PALETA.muroFondo);
+    //  Y la puerta. `panelMuroFondo` toma (gx, ANCHO) —el comentario que había
+    //  acá decía lo contrario y por eso tres llamadas le pasaban un «hasta»—
     //  así que se adapta acá en vez de cambiar la primitiva, que usan otros.
     dibujarPuerta(
       g, vano, 2.2, mundo.privacidad,
@@ -972,10 +974,10 @@ function construirMuros(mundo: Mundo): Graphics {
   for (const [d, f] of tramos(mundo.puerta, mundo.ancho)) {
     // Sombra de contacto al pie: sin esto los muros flotan y el síntoma se
     // describe como «la escena se ve plana».
-    panelMuroFondo(g, d, f, 0, 0.45, PALETA.pisoProfundo, 0.75);
+    panelMuroFondo(g, d, f - d, 0, 0.45, PALETA.pisoProfundo, 0.75);
     // Banda de luz indirecta a media altura. Es el detalle más rentable de
     // toda la escena: la pared deja de ser un plano de color.
-    panelMuroFondo(g, d, f, 1.02, 1.1, PALETA.muroBanda, 0.9);
+    panelMuroFondo(g, d, f - d, 1.02, 1.1, PALETA.muroBanda, 0.9);
   }
   if (!caraIzquierdaDeVidrio) {
     for (const [d, f] of tramos(mundo.puertaLateral, mundo.fondo)) {
@@ -1031,7 +1033,11 @@ function construirMural(texturas: Texturas,
   const anim: ((t: number, dt: number) => void)[] = [];
 
   const z0 = 1.45;
-  const z1 = 3.35;
+  //  3,35 ANTES, y la resta es a cambio de algo: entre el borde del mural y
+  //  el remate del muro quedaban 0,43 unidades de friso —once pixeles— y el
+  //  nombre del departamento necesita 0,73 para caber con su placa. El mural
+  //  pierde un 21% de su alto y la sala gana un rotulo que se lee.
+  const z1 = 2.95;
 
   paneles.forEach((p, indice) => {
     const marco = new Graphics();
@@ -1506,6 +1512,26 @@ function construirMampara(gx: number, desde: number, hasta: number, vano: [numbe
  * paquete impide: la escena tiene que servir igual para el departamento
  * siguiente sin tocar una línea.
  */
+/**
+ * EL NOMBRE DEL DEPARTAMENTO, EN SU PLACA.
+ *
+ * Era texto suelto de 11 px con un halo del 12% sobre el muro. A escala de
+ * plano no se leía, y de cerca competía con lo que tuviera detrás: en
+ * Recepción cae sobre el mural y parecía parte de lo que esa pantalla muestra.
+ *
+ * Ahora es lo que es en una oficina de verdad: una **placa**. Fondo del color
+ * del área, texto claro encima, un filo oscuro abajo que le da espesor y un
+ * tope más claro arriba que la despega del muro.
+ *
+ * Y acá el color del área SÍ funciona, justo al revés que en el marco de una
+ * puerta: una placa es una SUPERFICIE que se ve de frente, no una jamba vista
+ * de canto. Es la lección de P13 aplicada en la dirección correcta — lo que
+ * falla no es el acento, es ponerlo en una pieza que se ve de perfil.
+ */
+/** Al doble, para que las letras de la placa no se vean pixeladas. NO afecta
+ *  a `texto.width`, que viene en píxeles lógicos: medido. */
+const RESOLUCION_DEL_CARTEL = 2;
+
 function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble {
   const nodo = new Container();
   nodo.zIndex = -890;
@@ -1514,19 +1540,53 @@ function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble
     text: rotulo.toUpperCase(),
     style: {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: '700',
-      fill: ACENTO_CLARO,
-      letterSpacing: 2.2
+      //  Un claro del propio acento, no blanco puro: a este tamaño el blanco
+      //  vibra contra el color y el gris no contrasta lo suficiente.
+      fill: tono(ACENTO, 0.88),
+      letterSpacing: 2.6
     },
-    resolution: 2
+    resolution: RESOLUCION_DEL_CARTEL
   });
   texto.anchor.set(0.5, 0.5);
   // En el friso, ENTRE el remate del muro y el borde superior del mural. A la
   // derecha del mural quedaba más espacio, y ahí el cartel se montaba encima
   // de la tercera pantalla: en la captura parecía parte de lo que esa pantalla
   // mostraba.
-  const centro = aPantalla(gx, 0, 3.63);
+  //  COLGADA DEL REMATE, no a una altura fija: asi nunca sobresale por encima
+  //  del muro -con la placa puesta, una z fija la sacaba fuera del edificio- y
+  //  queda siempre en el friso, sobre el mural y bajo el canto.
+  const ARRIBA = 3.86;
+
+  //  LA PLACA, en coordenadas del muro y no en píxeles: así se deforma con la
+  //  pared en vez de quedar pegada por delante. El ancho sale del texto ya
+  //  medido —32 px por celda en este eje— más un margen a cada lado.
+  //  `texto.width` YA viene en píxeles lógicos: pedir la textura al doble no
+  //  lo cambia. Se comprobó en el navegador —«NOC Y REDES» mide 102,4 de ancho
+  //  y 15 de alto con cuerpo 12— después de dividir por la resolución y ver la
+  //  placa quedarse más corta que su propio texto.
+  //
+  //  En este eje del muro una celda son 32 px, que es medio ancho de baldosa.
+  const margen = 0.32;
+  const anchoCeldas = texto.width / (BALDOSA.ancho / 2) + margen * 2;
+  const altoUnidades = (texto.height + 4) / ALTURA_UNIDAD;
+  const x0 = gx - anchoCeldas / 2;
+  const z1 = ARRIBA;
+  const z0 = z1 - altoUnidades;
+  const centro = aPantalla(gx, 0, (z0 + z1) / 2);
+
+  const g = new Graphics();
+  //  El canto superior, más claro: es lo que hace que la placa tenga espesor
+  //  y no parezca pintada sobre el muro.
+  panelMuroFondo(g, x0, anchoCeldas, z1 - 0.05, z1, ACENTO);
+  //  El cuerpo, un oscuro del color del área: a plena saturación la placa
+  //  grita más que el departamento y el texto claro encima pierde contraste.
+  panelMuroFondo(g, x0, anchoCeldas, z0 + 0.04, z1 - 0.05, tono(ACENTO, -0.42));
+  //  Y la sombra que proyecta sobre la pared, abajo.
+  panelMuroFondo(g, x0, anchoCeldas, z0, z0 + 0.04, tono(ACENTO, -0.68));
+  nodo.addChild(g);
+
   texto.position.set(centro.x, centro.y);
   // Acostado sobre el plano del muro: sin esta inclinación el cartel se ve
   // pegado por delante, como una etiqueta de la interfaz y no como algo que
@@ -1534,14 +1594,16 @@ function construirCartel(rotulo: string, gx: number, texturas: Texturas): Mueble
   texto.skew.y = Math.atan2(BALDOSA.alto / 2, BALDOSA.ancho / 2);
   nodo.addChild(texto);
 
+  //  El halo se queda, y más tenue: con la placa debajo ya no hace falta para
+  //  leer el nombre, sólo para que el color no corte en seco contra el muro.
   const halo = new Sprite(texturas.halo);
   halo.anchor.set(0.5);
   halo.position.set(centro.x, centro.y);
-  halo.width = texto.width * 2.2;
-  halo.height = 34;
+  halo.width = texto.width * 2.4;
+  halo.height = 38;
   halo.tint = ACENTO_CLARO;
   halo.blendMode = 'add';
-  halo.alpha = 0.12;
+  halo.alpha = 0.09;
   nodo.addChildAt(halo, 0);
 
   return { nodo };
