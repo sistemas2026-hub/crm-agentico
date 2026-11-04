@@ -394,3 +394,54 @@ describe('el vidrio es para la cara publica, y solo para esa', () => {
     expect(mal, mal.join(' | ')).toEqual([]);
   });
 });
+
+describe('el edificio cierra por sus cuatro lados', () => {
+  const ENVOLVENTE = SEDE.plantas.filter((p) => p.arquitectura);
+  const huella = SALAS.reduce((a, p) => ({
+    ancho: Math.max(a.ancho, p.origen.gx + p.mundo.ancho),
+    fondo: Math.max(a.fondo, p.origen.gy + p.mundo.fondo)
+  }), { ancho: 0, fondo: 0 });
+
+  it('hay una pieza en cada borde, y el de delante no se olvida', () => {
+    //  Tres de los cuatro estaban desde el principio. El DELANTERO quedaba
+    //  abierto a proposito -«el muro del frente estaria entre la camara y la
+    //  oficina entera»- y era cierto para un muro: el peto a 1,15 cierra el
+    //  volumen sin tapar a nadie, igual que el antepecho de sala a 1,2.
+    const bordes = {
+      fondo: ENVOLVENTE.some((p) => p.origen.gy < 0),
+      izquierdo: ENVOLVENTE.some((p) => p.origen.gx < 0),
+      derecho: ENVOLVENTE.some((p) => p.origen.gx >= huella.ancho),
+      delantero: ENVOLVENTE.some((p) => p.origen.gy >= huella.fondo)
+    };
+    const faltan = Object.entries(bordes).filter(([, v]) => !v).map(([k]) => k);
+    expect(faltan, 'bordes sin cerrar: ' + faltan.join(', ')).toEqual([]);
+  });
+
+  it('y lo que cierra el frente no tapa a nadie', () => {
+    //  LA AFIRMACION QUE IMPORTA. La tabla de oclusion de P7: a 1,2 no se
+    //  esconde a ninguna persona y a 2,2 ya se comen 2,4 celdas de
+    //  escritorio. Una envolvente delantera mas alta que el antepecho de una
+    //  sala estaria tapando mas que el propio muro de la sala.
+    const ALTURA_DE_ANTEPECHO = 1.2;
+    const delante = ENVOLVENTE.filter((p) => p.origen.gy >= huella.fondo);
+    for (const p of delante) {
+      const alto = p.arquitectura.altura ?? p.mundo.alto;
+      expect(alto, `la pieza delantera mide ${alto}`).toBeLessThanOrEqual(ALTURA_DE_ANTEPECHO);
+    }
+  });
+
+  it('y una pieza larga del borde se pinta POR DELANTE de lo que cruza', () => {
+    //  `profundidad = gx + gy`, asi que el extremo derecho -origen (35, 0)-
+    //  valia 35 mientras las salas que recorre llegan a 89: se dibujaba
+    //  detras de ellas. Una pieza de 54 celdas no tiene una sola
+    //  profundidad, y la que le sirve al pintor es la de su extremo cercano.
+    const maxSala = Math.max(...SALAS.map((p) => p.origen.gx + p.origen.gy));
+    const cruzan = ENVOLVENTE.filter(
+      (p) => p.origen.gx >= huella.ancho || p.origen.gy >= huella.fondo);
+    expect(cruzan.length).toBeGreaterThan(0);
+    for (const p of cruzan) {
+      expect(p.profundidad ?? (p.origen.gx + p.origen.gy),
+        `${p.arquitectura.tipo} se pintaria detras de las salas`).toBeGreaterThanOrEqual(maxSala);
+    }
+  });
+});

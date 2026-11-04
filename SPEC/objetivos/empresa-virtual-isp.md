@@ -3440,3 +3440,54 @@ que no da a circulacion—, nombrando las seis salas del bloque derecho:
 
 **`centro-mando`: 782 verdes, 0 rojas.**
 
+## P14 · La pared de concreto que faltaba — 04/11/2026
+
+*«La pared de concreto, ¿por que no la construyes?»*, con un recorte del
+borde donde el forjado termina al aire y empieza el vacio.
+
+### Habia una decision escrita, y era media verdad
+
+El compositor emitia tres piezas de envolvente —`fachada` al fondo y un
+`extremo` en cada costado— y dejaba el frente abierto **a proposito**, con el
+motivo en el propio codigo:
+
+> *«El frente queda ABIERTO, y no por falta de ganas: en esta isometria el
+> muro del frente estaria entre la camara y la oficina entera.»*
+
+Es cierto para un MURO. No para un PETO — y es la respuesta que este objetivo
+ya dio dos veces: el antepecho de sala va a **1,2** y el peto de terraza a
+**1,1** porque la tabla de oclusion de P7 dice que a esa altura no se tapa a
+nadie, y que a 2,2 ya se comen 2,4 celdas de escritorio.
+
+El frente se cierra con hormigon hasta **1,15**: cuerpo, albardilla mas clara,
+juntas verticales al paso de los machones de la fachada y sombra de contacto
+al pie. El edificio deja de terminar en el aire y no se pierde una silla.
+
+Que no tapa esta **doblemente garantizado**: las dos unicas salas que tocan
+ese borde —Sala de Reuniones y Recepcion— ya llevan su propio peto `frente` a
+1,2, asi que una pieza de 1,15 por delante esconde estrictamente menos que el
+muro que ya tenian.
+
+### Y el costado derecho se pintaba detras de las salas
+
+Buscando el borde que faltaba aparecio que uno de los que **si** existian no
+se veia. `profundidad = gx + gy`, y el `extremo` del borde derecho nace en
+(35, 0), que vale **35**; las salas que recorre llegan a **89**. Se dibujaba
+detras de ellas.
+
+Una pieza de 54 celdas de largo **no tiene una sola profundidad**, y la que le
+sirve al pintor es la de su extremo mas cercano. `Planta` gana un campo
+`profundidad` para que quien la coloca —que es el unico que lo sabe— lo diga.
+
+### Guardas
+
+Tres, cada una con su mutacion probada:
+
+| Afirmacion | Mutacion que la mata |
+|---|---|
+| hay una pieza en cada borde, y el de delante no se olvida | quitar el peto del frente |
+| lo que cierra el frente no tapa a nadie (≤ 1,2) | subir el peto a 3,2 |
+| una pieza larga se pinta POR DELANTE de lo que cruza | devolverle la profundidad de su origen |
+
+**`centro-mando`: 785 verdes, 0 rojas.**
+

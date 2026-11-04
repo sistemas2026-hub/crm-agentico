@@ -687,7 +687,8 @@ export function sedeDe(salas, agentes, opciones = {}) {
   //     El frente queda ABIERTO, y no por falta de ganas: en esta isometría el
   //     muro del frente estaría entre la cámara y la oficina entera. Es la
   //     misma razón por la que las salas no llevan techo.
-  const periferia = (pieza, origen) => plantas.unshift({
+  const periferia = (pieza, origen, profundidad) => plantas.unshift({
+    profundidad,
     mundo: { ancho: pieza.ancho ?? 0.6, fondo: pieza.fondo ?? 0.6, alto: ALTURA_DE_MURO },
     origen,
     nivel: null,
@@ -705,9 +706,31 @@ export function sedeDe(salas, agentes, opciones = {}) {
     { tipo: 'extremo', fondo: huella.fondo, altura: ALTURA_DE_MURO },
     { gx: -0.6, gy: 0, gz: 0 }
   );
+  //  EL EXTREMO DERECHO VA DELANTE DE LAS SALAS QUE CRUZA.
+  //
+  //  Su origen es (ancho, 0) y `profundidad = gx + gy` lo dejaba en 35,
+  //  mientras las salas que recorre llegan a 89: se pintaba detrás de ellas.
+  //  Una pieza de 54 celdas de largo no tiene una sola profundidad, y la que
+  //  le sirve al pintor es la de su extremo más cercano.
   periferia(
     { tipo: 'extremo', fondo: huella.fondo, altura: ALTURA_DE_MURO },
-    { gx: huella.ancho, gy: 0, gz: 0 }
+    { gx: huella.ancho, gy: 0, gz: 0 },
+    huella.ancho + huella.fondo
+  );
+
+  //  EL FRENTE, CERRADO CON UN PETO DE HORMIGÓN.
+  //
+  //  Aquí decía «el frente queda ABIERTO, y no por falta de ganas: en esta
+  //  isometría el muro del frente estaría entre la cámara y la oficina
+  //  entera». Es cierto para un MURO y no para un PETO: a 1,15 no tapa a
+  //  nadie —la misma tabla de oclusión que fijó el antepecho de sala en 1,2—
+  //  y el edificio deja de terminar en el aire.
+  //
+  //  Va a +1 del fondo de las salas para quedar por delante de todo.
+  periferia(
+    { tipo: 'peto', ancho: huella.ancho, altura: 1.15 },
+    { gx: 0, gy: huella.fondo + 0.6, gz: 0 },
+    huella.ancho + huella.fondo + 1
   );
 
   return {

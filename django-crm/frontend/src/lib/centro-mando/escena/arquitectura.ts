@@ -62,6 +62,7 @@ export type PiezaDeArquitectura =
       acento?: number;
     }
   | { tipo: 'extremo'; fondo: number; altura: number; acento?: number }
+  | { tipo: 'peto'; ancho: number; altura: number; acento?: number }
   | { tipo: 'cubierta'; ancho: number; fondo: number; acento?: number }
   | { tipo: 'remate'; ancho: number; fondo: number; alto: number; acento?: number };
 
@@ -308,6 +309,46 @@ function construirExtremo(p: Extract<PiezaDeArquitectura, { tipo: 'extremo' }>):
   caja(g, -0.55, p.fondo - 0.62, 0, 0.55, 0.62, p.altura, PALETA.hormigonClaro);
   //  El filo de acento del canto superior.
   panelEnX(g, 0, 0, p.fondo, p.altura - 0.16, p.altura, acento, 0.5);
+
+  nodo.addChild(g);
+  return nodo;
+}
+
+/**
+ * EL PETO DEL BORDE DELANTERO: lo que cierra el edificio por la cara que
+ * mira a la cámara.
+ *
+ * POR QUÉ NO ES UN MURO. El compositor dejaba este borde abierto a propósito,
+ * y el motivo estaba escrito: «el muro del frente estaría entre la cámara y
+ * la oficina entera». Cierto para un muro — y falso para un peto. Es la misma
+ * respuesta que este edificio ya da dos veces: el antepecho de sala va a 1,2
+ * y el peto de terraza a 1,1, y la tabla de oclusión dice que a esa altura no
+ * se tapa a nadie. A 2,2 ya se come 2,4 celdas de escritorio.
+ *
+ * Así que el frente se cierra con hormigón hasta 1,15 y nada más arriba. El
+ * edificio deja de terminar en el aire y no se pierde una sola silla.
+ */
+function construirPetoDeBorde(p: Extract<PiezaDeArquitectura, { tipo: 'peto' }>): Container {
+  const nodo = new Container();
+  const g = new Graphics();
+  const acento = p.acento ?? PALETA.azulTecno;
+  const h = p.altura;
+
+  //  El cuerpo de hormigón, visto desde fuera.
+  panelMuroFondo(g, 0, p.ancho, 0, h - 0.14, PALETA.hormigon);
+  //  La albardilla, más clara: es el canto que le da espesor y lo que lo
+  //  distingue de una mancha pintada en el suelo.
+  panelMuroFondo(g, 0, p.ancho, h - 0.14, h, PALETA.hormigonClaro);
+  //  El filo de acento, el mismo que llevan el extremo y la cubierta.
+  panelMuroFondo(g, 0, p.ancho, h - 0.04, h, acento, 0.45);
+  //  Las juntas verticales, al paso de los machones de la fachada: sin ellas
+  //  treinta y cinco celdas de hormigón son un rectángulo, no un muro.
+  for (let x = PASO_MACHON; x < p.ancho - 0.1; x += PASO_MACHON) {
+    panelMuroFondo(g, x - 0.05, 0.1, 0, h - 0.14, tono(PALETA.hormigon, -0.12));
+  }
+  //  Y la sombra de contacto al pie, por el mismo motivo que la llevan los
+  //  muros de sala: sin ella el peto flota sobre la losa.
+  panelMuroFondo(g, 0, p.ancho, 0, 0.26, PALETA.pisoProfundo, 0.5);
 
   nodo.addChild(g);
   return nodo;
@@ -563,6 +604,8 @@ export function construirPieza(pieza: PiezaDeArquitectura): Container | null {
       return construirFachada(pieza);
     case 'extremo':
       return construirExtremo(pieza);
+    case 'peto':
+      return construirPetoDeBorde(pieza);
     case 'cubierta':
       return construirCubierta(pieza);
     case 'remate':

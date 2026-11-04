@@ -249,7 +249,8 @@ export async function montarEscena(opciones: OpcionesDeEscena): Promise<Escena> 
     //  `gz` por 0,001— un nivel entero quedaría intercalado con el de abajo
     //  según su coordenada, y el resultado es un piso que asoma por dentro de
     //  otro. Se midió al construirlo.
-    caja.zIndex = o.gz * 1000 + profundidad(o.gx, o.gy);
+    //  Una pieza larga de la envolvente fija la suya: ver `Planta.profundidad`.
+    caja.zIndex = planta.profundidad ?? (o.gz * 1000 + profundidad(o.gx, o.gy));
     caja.addChild(oficina.raiz);
     mundo.addChild(caja);
     return { oficina, origen: o };

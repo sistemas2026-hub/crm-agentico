@@ -100,6 +100,20 @@ export interface Planta {
   /** Qué papel cumple: una sala, la circulación, el núcleo o la envolvente. */
   papel?: 'sala' | 'circulacion' | 'nucleo' | 'arquitectura';
   /**
+   * La profundidad de pintado, cuando la de su origen no sirve.
+   *
+   * El orden normal es `profundidad(gx, gy)` del origen, y alcanza para una
+   * sala porque una sala es compacta. Una pieza LARGA de la envolvente no
+   * tiene una sola profundidad: el extremo del borde derecho nace en (35, 0)
+   * —que vale 35— y recorre hasta (35, 54) —que vale 89—, cruzando por
+   * delante de salas que valen más que su origen. Medido: se dibujaba detrás
+   * de ellas y practicamente no se veía.
+   *
+   * Quien la coloca sabe cuál es su extremo más cercano, y ese es el número
+   * que le sirve al pintor.
+   */
+  profundidad?: number;
+  /**
    * Una pieza del edificio que NO es una sala: basamento, fachada, extremo,
    * cubierta o remate del núcleo.
    *
