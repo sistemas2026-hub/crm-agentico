@@ -1,21 +1,32 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- SUPERVISOR NOC IA  --  SHADOW MODE: observa, analiza, propone. No ejecuta.
+ SUPERVISOR NOC IA  --  observa, analiza, propone, y HACE SOLO lo que la
+                         empresa le delega
 ================================================================================
 
-EL CICLO, Y DONDE SE CORTA
---------------------------
+LO QUE ESTA CABECERA DECIA HASTA EL 04/11/2026, Y POR QUE YA NO
+---------------------------------------------------------------
+Decia "SHADOW MODE: observa, analiza, propone. No ejecuta." Dejo de ser cierto
+en octubre: desde entonces el ciclo (correr_ciclo, mas abajo) ejecuta las
+tareas que una persona le delego -- cerrar lo que el proveedor ya cerro, pasar
+a Despacho, armar la jornada, crear y publicar las ordenes, cargar el material,
+cerrar lo revisado -- cada una con sus puertas (operaciones/tareas_delegadas.py
+y la frontera del motor). Y el objetivo del producto es ese: reemplazar la mano
+de obra, con una persona solo en lo critico (PRD §1, §2, §8.18). Una empresa
+nueva nace con las tareas no criticas encendidas.
+
+LO QUE SIGUE SIENDO SOLO PROPUESTA
+----------------------------------
     SEÑAL -> NORMALIZACION -> CLASIFICACION -> ANALISIS -> PROPUESTA
           -> REGISTRO -> REVISION HUMANA
-                                    |
-                                    X  aqui se corta, en esta etapa
 
-Aceptar una propuesta significa "el Jefe de Operaciones esta de acuerdo", NO
-"se hizo". No existe ningun camino de ejecucion: 'ejecutar_propuesta' levanta
-siempre, y el estado 'ejecutada' ni siquiera esta entre los valores posibles
-del modelo. Las dos cosas juntas son lo que vuelve comprobable el Shadow Mode
-en vez de prometido.
+Una PROPUESTA (PropuestaSupervisor) no se ejecuta por aceptarla: aceptar
+significa "el Jefe de Operaciones esta de acuerdo", no "se hizo".
+'ejecutar_propuesta' levanta siempre, y el estado 'ejecutada' no esta entre los
+valores del modelo. Lo que el Supervisor hace solo no sale de una propuesta
+aceptada: sale de una TAREA delegada, que es otra cosa y tiene sus propias
+puertas.
 
 DE DONDE SALEN LAS SEÑALES
 --------------------------

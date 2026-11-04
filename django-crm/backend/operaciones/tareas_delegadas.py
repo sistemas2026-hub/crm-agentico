@@ -88,6 +88,7 @@ CATALOGO = {
         "que_no_hace": (
             "No toca WispHub, no reabre nada, y no cierra ningún caso cuyo "
             "equipo no haya podido diagnosticar."),
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -108,6 +109,7 @@ CATALOGO = {
             "red: esos los mira una persona siempre."),
         #  PROPIA, y no la del cierre: habilitar una cosa no puede habilitar la
         #  otra de rebote. Son dos efectos distintos y cada uno se pide aparte.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -127,6 +129,7 @@ CATALOGO = {
         #  PROPIA, como la del paso a Despacho: habilitar una no habilita la
         #  otra. Nivel 3 y no 4: armar una jornada no sale de la plataforma ni
         #  le promete nada a un cliente, y una persona la corrige con un clic.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -149,6 +152,7 @@ CATALOGO = {
         #  PROPIA, como las otras: habilitar armar la jornada no habilita
         #  crear ordenes. Nivel 3: la orden no sale de la plataforma ni le
         #  llega a nadie hasta que se publica, y una persona la cancela.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -176,6 +180,7 @@ CATALOGO = {
         #  el usuario el 17/10. Lo acota: una persona lo deshace moviendo la
         #  orden en Cuadrillas, desde la apertura nada publicado se mueve solo,
         #  y lo que un tecnico empezo o una persona asigno no se toca nunca.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -198,6 +203,7 @@ CATALOGO = {
         #  mire. Lo acota: una sola vez por dia y cuadrilla (el acta tiene clave
         #  fija), nunca mas de lo que la bodega tiene libre, y el tecnico
         #  confirma o marca la diferencia al recibir.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -220,6 +226,7 @@ CATALOGO = {
             "asigna técnicos, y no cambia el grupo que leyó el modelo."),
         #  PROPIA, y no la del paso: encender las correcciones es una decision
         #  aparte, que el usuario toma despues de ver en sombra que harian.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
         #  Y NO ANDA SOLA: suma reglas al paso, que es otra tarea. 'delegar_tarea'
@@ -243,6 +250,7 @@ CATALOGO = {
         #  PROPIA, como el armado y el paso: habilitar una no habilita la otra.
         #  Nivel 3: escribe una clasificacion interna que una persona corrige
         #  con un clic; no sale de la plataforma ni le promete nada a nadie.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -267,6 +275,7 @@ CATALOGO = {
         #  PROPIA, como las otras. Nivel 3 y no 4: lo que se cierra es lo que
         #  la revision dio por bueno en codigo, y el ticket pasa ademas por las
         #  compuertas del motor. Con el interruptor detenido no cierra nada.
+        "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
     },
@@ -288,12 +297,46 @@ CATALOGO = {
         #  no hay ninguna tarea de accion delegada, esto solo produce
         #  propuestas para que las lea una persona -- que es lo que el
         #  Supervisor ya hacia cuando alguien apretaba el boton.
+        "critica": False,
         "exige_nivel": 0,
         #  ES LA QUE PROVEE EL MIRAR, no una que lo necesite. Sin esta fila
         #  ninguna de las otras corre sola: ver 'algo_la_va_a_correr'.
         "necesita_que_mire": False,
     },
 }
+
+
+#  POR QUE LAS DIEZ SON NO CRITICAS  --  04/11/2026, PRD §2 y §8.18
+#  -----------------------------------------------------------------
+#  Critica = un error suyo puede danar a la empresa: mueve dinero, deja a un
+#  cliente sin servicio de forma que no vuelve sola, afecta a muchos clientes a
+#  la vez, borra o expone datos, o la compromete con un tercero. Ninguna de
+#  estas lo hace: pasan casos, arman y publican el trabajo del dia, mueven
+#  material entre custodias y cierran lo que ya quedo resuelto -- todo se
+#  revierte. Cada una lo DECLARA igual, para que una futura que si lo sea (un
+#  cobro, una suspension) nazca apagada sin depender de que alguien se acuerde.
+
+
+def encender_las_no_criticas(org, actor) -> list[str]:
+    """
+    Al dar de alta una empresa, deja delegadas las tareas NO criticas a nombre
+    de quien la creo (04/11/2026, PRD §1: reemplazar la mano de obra; una
+    persona solo en lo critico). Delegar exige una persona: aca es la que dio
+    el alta, y queda escrito.
+
+    Encendida NO es actuando: cada tarea sigue exigiendo su nivel, el
+    interruptor y la frontera del motor, que en una empresa nueva arrancan
+    cerrados. Solo para el ALTA: una empresa que ya opera no ve encenderse
+    nada por un despliegue.
+    """
+    encendidas = []
+    for clave, tarea in CATALOGO.items():
+        if tarea.get("critica", True):
+            continue
+        delegar(org, clave, actor=actor,
+                pedido_textual="Viene encendida al dar de alta la empresa (PRD §8.18)")
+        encendidas.append(clave)
+    return encendidas
 
 
 def catalogo_legible() -> list[dict]:

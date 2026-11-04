@@ -1,3 +1,4 @@
+import logging
 import secrets
 
 from django.conf import settings
@@ -19,6 +20,8 @@ from common.serializer import (
     ProfileSerializer,
     ShowOrganizationListSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OrgProfileCreateView(APIView):
@@ -66,6 +69,15 @@ class OrgProfileCreateView(APIView):
             # `is_organization_admin` is derived from `role` in `Profile.save`.
             profile_obj.role = "ADMIN"
             profile_obj.save()
+            #  LAS TAREAS NO CRITICAS DEL SUPERVISOR NACEN ENCENDIDAS
+            #  (04/11/2026, PRD §8.18), a nombre de quien dio el alta. Un fallo
+            #  aca no impide crear la empresa: queda en el log y se encienden
+            #  despues desde Ajustes del Supervisor.
+            try:
+                from operaciones import tareas_delegadas
+                tareas_delegadas.encender_las_no_criticas(org_obj, profile_obj)
+            except Exception:  # noqa: BLE001
+                logger.exception("alta de empresa: no se encendieron las tareas del Supervisor")
 
             return Response(
                 {
