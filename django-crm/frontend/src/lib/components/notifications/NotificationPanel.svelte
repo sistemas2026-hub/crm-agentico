@@ -27,6 +27,7 @@
   const VERB_ICONS = {
     'case.commented': MessageSquare,
     'case.mentioned': AtSign,
+    'conversacion.mencion': AtSign,
     'case.assigned': UserPlus,
     'case.sla_breached': AlertTriangle,
     'case.escalated': AlertTriangle,
@@ -42,6 +43,7 @@
   /** @param {any} n */
   function verbLabel(n) {
     if (n.verb === 'case.mentioned') return 'mentioned you';
+    if (n.verb === 'conversacion.mencion') return 'te mencionó en una conversación';
     if (n.verb === 'case.assigned') return 'assigned you';
     if (n.verb === 'case.commented') return 'commented';
     if (n.verb === 'case.sla_breached') return 'SLA breached';

@@ -83,3 +83,19 @@ describe('PRODUCED_VERBS', () => {
     expect(PRODUCED_VERBS).toContain('case.commented');
   });
 });
+
+describe('resolvedLink · una conversación de la Bandeja (menciones, 30/10/2026)', () => {
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  it('un uuid de conversación pasa, reconstruido', () => {
+    expect(resolvedLink(`/conversaciones/${id}`)).toBe(`/conversaciones/${id}`);
+    expect(resolvedLink(`/conversaciones/${id.toUpperCase()}/`)).toBe(`/conversaciones/${id}`);
+  });
+  it('cualquier otra cosa bajo /conversaciones no', () => {
+    expect(resolvedLink('/conversaciones/abc')).toBe('');
+    expect(resolvedLink(`/conversaciones/${id}?x=javascript:alert(1)`)).toBe('');
+    expect(resolvedLink(`/conversaciones/${id}/../../admin`)).toBe('');
+  });
+  it('y el verbo tiene texto propio', () => {
+    expect(PRODUCED_VERBS).toContain('conversacion.mencion');
+  });
+});

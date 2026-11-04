@@ -372,6 +372,37 @@
   let notaEspera = $state('');
   let esperaHasta = $state('');
 
+  /* BORRADOR DE LA IA (30/10/2026). A pedido; llena el cuadro y NO envía.
+     Lo que había escrito se guarda para «Deshacer»: pedir una sugerencia no
+     puede borrar lo que la persona ya escribió. */
+  let pidiendoBorrador = $state(false);
+  let errorBorrador = $state('');
+  let textoAntesDelBorrador = $state(/** @type {string|null} */ (null));
+  async function pedirBorrador() {
+    if (pidiendoBorrador) return;
+    pidiendoBorrador = true;
+    errorBorrador = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/borrador`, { method: 'POST' });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok || !datos.borrador) {
+        errorBorrador = datos.error || 'No hay sugerencia.';
+        return;
+      }
+      textoAntesDelBorrador = entrada;
+      entrada = datos.borrador;
+    } catch {
+      errorBorrador = 'No se pudo pedir la sugerencia.';
+    } finally {
+      pidiendoBorrador = false;
+    }
+  }
+  function deshacerBorrador() {
+    if (textoAntesDelBorrador === null) return;
+    entrada = textoAntesDelBorrador;
+    textoAntesDelBorrador = null;
+  }
+
   /* ESCALAR A UN ÁREA (T22, contrato v3.3, 30/10/2026). Cualquier operador
      con la conversación suya o sin dueño; el motor valida el área contra las
      de la empresa y deja la nota también como nota interna del hilo. */
@@ -1696,6 +1727,7 @@
           quedaEnEspera = false;
           notaEspera = '';
           esperaHasta = '';
+          textoAntesDelBorrador = null;
         }
         if (!resp.ok && chatCerrado && datos?.codigo === 'hay_conversacion_abierta') {
           // No se guardó ni se envió nada: la burbuja se va y el texto vuelve.
@@ -1899,6 +1931,8 @@
       {adjunto} {grabando} {grabPausada} {segundos} {limites}
       {ventanaAbierta} {ventanaRestante} {ventanaPorCerrarse}
       bind:quedaEnEspera bind:notaEspera bind:esperaHasta
+      {pidiendoBorrador} {errorBorrador} puedeDeshacerBorrador={textoAntesDelBorrador !== null}
+      onPedirBorrador={pedirBorrador} onDeshacerBorrador={deshacerBorrador}
       {plantillas} {cargandoPlantillas} {errorPlantillas}
       {enviandoPlantilla} {plantillaCompleta}
       {vistaPreviaPlantilla} {hayPlantillaDeServicio}

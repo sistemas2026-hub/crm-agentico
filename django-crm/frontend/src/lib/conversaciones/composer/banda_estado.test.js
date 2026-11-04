@@ -273,3 +273,25 @@ describe('«Queda en espera» solo al responder como persona', () => {
     expect(hay({ escalada: true, bloqueadoPorVentana: true })).toBe(false);
   });
 });
+
+describe('«Sugerir respuesta» (borrador de la IA, 30/10/2026)', () => {
+  /* A pedido y solo al responder como persona. Sin la acción conectada no se
+     dibuja: un botón que no hace nada es peor que no tenerlo. */
+  const html = (props) => render(MessageComposer, { props: { ...BASE, ...props } }).body;
+  const pedir = () => {};
+
+  it('escalada y respondiendo, con la acción: aparece', () => {
+    expect(html({ escalada: true, onPedirBorrador: pedir })).toMatch(/Sugerir respuesta/);
+  });
+  it('sin la acción conectada, no', () => {
+    expect(html({ escalada: true })).not.toMatch(/Sugerir respuesta/);
+  });
+  it('en nota o con la IA atendiendo, no', () => {
+    expect(html({ escalada: true, modo: 'nota', onPedirBorrador: pedir })).not.toMatch(/Sugerir respuesta/);
+    expect(html({ escalada: true, bloqueadoPorIA: true, onPedirBorrador: pedir })).not.toMatch(/Sugerir respuesta/);
+  });
+  it('«Deshacer» solo después de una sugerencia', () => {
+    expect(html({ escalada: true, onPedirBorrador: pedir })).not.toMatch(/Deshacer/);
+    expect(html({ escalada: true, onPedirBorrador: pedir, puedeDeshacerBorrador: true })).toMatch(/Deshacer/);
+  });
+});
