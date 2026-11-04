@@ -282,6 +282,12 @@
           // tilde en la cola de cada operador, y nadie se entera al crearla --
           // un caso nuevo de /manual nace así si no se escribió cómo se lee.
           href: '/settings/bandeja',
+          // DOS TARJETAS AL MISMO DESTINO. La lista se identifica por `href`,
+          // y con este repetido Svelte 5 lanza `each_key_duplicate` y la
+          // página entera queda en blanco: así estuvo Configuración del
+          // 29/10 al 04/11. La prueba del hub no lo veía porque `render` de
+          // servidor no valida claves; solo el navegador. Clave propia.
+          clave: 'rotulos-bandeja',
           title: 'Rótulos de la Bandeja',
           body: 'Cómo se leen en la cola los motivos de escalamiento, las etiquetas y los casos.',
           value:
@@ -431,7 +437,7 @@
     {#each groups as g (g.label)}
       <div class="v2-label" style="margin-bottom:10px">{g.label}</div>
       <div class="v2-card" style="overflow:hidden;margin-bottom:22px">
-        {#each g.items as s (s.href)}
+        {#each g.items as s (s.clave ?? s.href)}
           <a class="v2-setting" href={s.href}>
             <div class="v2-setting-body">
               <b>{s.title}</b>
