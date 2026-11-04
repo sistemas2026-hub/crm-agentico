@@ -156,6 +156,7 @@
     modo={modoDialogo}
     agente={agenteEnEdicion}
     catalogo={data.catalogo || []}
+    motivos={data.motivosEscalada || []}
     autonomia={data.autonomia}
   />
 {/if}

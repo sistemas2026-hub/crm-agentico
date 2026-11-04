@@ -41,10 +41,12 @@
    *   agente?: any,
    *   catalogo: any[],
    *   autonomia?: any,
+   *   motivos?: Array<{ clave: string, rotulo: string }>,
    *   onSaved?: () => void | Promise<void>
    * }}
    */
-  let { open = $bindable(false), onOpenChange, modo, agente, catalogo, autonomia = null, onSaved } = $props();
+  let { open = $bindable(false), onOpenChange, modo, agente, catalogo, autonomia = null,
+        motivos = [], onSaved } = $props();
 
   const PASOS = ['Quién es', 'Qué hace', 'Qué puede usar', 'Revisar'];
   let paso = $state(0);
@@ -59,6 +61,9 @@
   let conectar = $state(false);
   let exigeVerificacion = $state(true);
   let nuncaRevelar = $state('');
+  /** Los motivos por los que pasa a una persona. Ninguno = todos los de la empresa. */
+  /** @type {Set<string>} */
+  let motivosElegidos = $state(new Set());
   let busqueda = $state('');
   /** @type {Record<string, boolean>} */
   let seleccion = $state({});
@@ -83,6 +88,7 @@
     conectar = esEditar ? !!agente.en_el_router : true;
     exigeVerificacion = esEditar ? agente.exige_verificacion !== false : true;
     nuncaRevelar = esEditar ? (agente.nunca_revelar || []).join('\n') : '';
+    motivosElegidos = new Set(esEditar ? agente.motivos_escalada || [] : []);
     /** @type {Record<string, boolean>} */
     const nuevaSeleccion = {};
     /** @type {Record<string, Set<string>>} */
@@ -171,6 +177,8 @@
         orientado_a: orientadoA,
         herramientas,
         nunca_revelar: nuncaRevelar.split('\n').map((t) => t.trim()).filter(Boolean),
+        //  En el orden de la empresa. Vacio = puede pasar por cualquiera.
+        motivos_escalada: motivos.map((m) => m.clave).filter((c) => motivosElegidos.has(c)),
         //  Solo tienen sentido en un agente de clientes; para uno interno no
         //  viajan y el motor deja lo que habia.
         ...(deCliente
@@ -318,6 +326,30 @@
             </div>
           {/if}
 
+          {#if motivos.length}
+            <fieldset class="space-y-1.5 rounded-md border border-[var(--border-default)] p-3 text-sm">
+              <legend class="px-1 font-medium">Cuándo pasa a una persona</legend>
+              <p class="text-xs text-[var(--text-secondary)]">
+                {motivosElegidos.size
+                  ? `Solo por estos ${motivosElegidos.size} motivos.`
+                  : 'Sin ninguno marcado puede pasar por cualquiera de los motivos de la empresa.'}
+              </p>
+              <div class="grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                {#each motivos as m (m.clave)}
+                  <label class="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={motivosElegidos.has(m.clave)}
+                           onchange={() => {
+                             const s = new Set(motivosElegidos);
+                             if (s.has(m.clave)) s.delete(m.clave); else s.add(m.clave);
+                             motivosElegidos = s;
+                           }} />
+                    {m.rotulo}
+                  </label>
+                {/each}
+              </div>
+            </fieldset>
+          {/if}
+
           <label class="block space-y-1 text-sm">
             <span class="font-medium">Lo que nunca debe revelar</span>
             <span class="block text-xs text-[var(--text-secondary)]">Uno por línea. Opcional.</span>
@@ -413,6 +445,10 @@
               <dt class="text-[var(--text-secondary)]">Router</dt><dd>{conectar ? `Le pasa: ${atiende.trim() || '(sin temas)'}` : 'No le pasa conversaciones'}</dd>
               <dt class="text-[var(--text-secondary)]">Identidad</dt><dd>{exigeVerificacion ? 'La verifica antes de mostrar datos' : 'No la verifica'}</dd>
             {/if}
+            <dt class="text-[var(--text-secondary)]">Pasa a una persona</dt>
+            <dd>{motivosElegidos.size
+              ? motivos.filter((m) => motivosElegidos.has(m.clave)).map((m) => m.rotulo).join(', ')
+              : 'Por cualquier motivo de la empresa'}</dd>
             <dt class="text-[var(--text-secondary)]">Herramientas</dt>
             <dd>{elegidas.length ? elegidas.map((/** @type {any} */ h) => h.nombre).join(', ') : 'Ninguna'}</dd>
           </dl>

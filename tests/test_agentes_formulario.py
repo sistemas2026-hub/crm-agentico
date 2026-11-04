@@ -94,6 +94,20 @@ comprobar(agentes and all({"atiende", "exige_verificacion", "nunca_revelar", "en
 comprobar(any(x["en_el_router"] for x in de_cliente) or not de_cliente,
           "al menos un agente de clientes figura conectado al router")
 
+print("\nlos motivos de escalada, de la ruta al editor y del catalogo a la pantalla")
+http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": [],
+                                 "motivos_escalada": ["solicitud_explicita"]})
+comprobar(pedidos[-1]["extras"] == {"motivos_escalada": ["solicitud_explicita"]},
+          "PUT con motivos: llegan al editor", str(pedidos[-1]))
+cat = http.get("/agentes/catalogo?tenant=t").get_json() or {}
+motivos = cat.get("motivos_escalada") or []
+comprobar(motivos and [m["clave"] for m in motivos] == list(CONFIG.escalamiento.activar_si)
+          and all("rotulo" in m for m in motivos),
+          "el catalogo trae los motivos de la empresa, en su orden y con su rotulo", str(motivos[:2]))
+agentes = (http.get("/agentes?tenant=t").get_json() or {}).get("agentes", [])
+comprobar(all("motivos_escalada" in x for x in agentes if not x.get("automatico")),
+          "cada agente dice sus motivos (vacio = todos)")
+
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s)")
     sys.exit(1)

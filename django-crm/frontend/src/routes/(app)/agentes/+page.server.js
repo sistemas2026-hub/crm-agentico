@@ -86,6 +86,9 @@ export async function load({ locals, fetch, cookies }) {
     return {
       agentes: datosAgentes.agentes,
       catalogo: respCatalogo.ok ? datosCatalogo.herramientas : [],
+      //  Por que motivos puede pasar a una persona un agente, con su rotulo
+      //  (04/11/2026). Los elige el formulario, paso "Que hace".
+      motivosEscalada: respCatalogo.ok ? (datosCatalogo.motivos_escalada ?? []) : [],
       escalamiento: datosEscalamiento,
       huecosPorRol,
       // La respuesta del motor ENTERA y sin renombrar (CLAUDE.md §6).

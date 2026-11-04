@@ -492,6 +492,25 @@ def prueba_agente_completo_desde_la_pantalla() -> None:
               and "atencion_nueva" in next(h for h in config.herramientas if h.deriva_rol).areas_destino,
               "editar sin esos datos no borra lo que ya tenia")
 
+    #  LOS MOTIVOS POR LOS QUE PASA A UNA PERSONA (04/11/2026): un subconjunto
+    #  de los de la empresa; vacio = todos, como venia; uno que la empresa no
+    #  tiene, el esquema lo rechaza.
+    motivos = list(doc["escalamiento"]["activar_si"])[:2]
+    _mutar_editar(doc, "atencion_nueva", area="Atencion", cargo="Agente",
+                  descripcion="Atiende consultas de saldo y pagos.",
+                  orientado_a="cliente_final", herramientas=[],
+                  extras={"motivos_escalada": [motivos[0], motivos[1], motivos[0], " "]})
+    config = _validar(TENANT, doc)
+    comprobar(config.roles["atencion_nueva"].motivos_escalada == motivos,
+              "guarda los motivos de escalada del agente, sin repetir ni vacios")
+    doc_malo = documento_base()
+    _mutar_crear(doc_malo, "otro_nuevo", None, None, "x", "colaborador", [],
+                 extras={"motivos_escalada": ["un_motivo_que_no_existe"]})
+    try:
+        _validar(TENANT, doc_malo)
+        comprobar(False, "un motivo que la empresa no tiene se rechaza")
+    except ErrorEdicion:
+        comprobar(True, "un motivo que la empresa no tiene se rechaza")
     _mutar_editar(doc, "atencion_nueva", area="Atencion", cargo="Agente",
                   descripcion="Atiende consultas de saldo y pagos.",
                   orientado_a="cliente_final", herramientas=[],

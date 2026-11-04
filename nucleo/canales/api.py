@@ -747,6 +747,7 @@ def _agente_json(nombre: str, rol, config) -> dict:
         "atiende": rol.atiende,
         "exige_verificacion": rol.exige_verificacion,
         "nunca_revelar": list(rol.nunca_revelar),
+        "motivos_escalada": list(rol.motivos_escalada),
         "en_el_router": nombre in next(
             (h.areas_destino or [] for h in config.herramientas if h.deriva_rol), []),
         # El system prompt REAL, partido en piezas con su origen. Sin esto,
@@ -3288,6 +3289,11 @@ def agentes_catalogo():
 
     return jsonify({
         "herramientas": editor.catalogo_herramientas(config),
+        #  Por que motivos puede pasar a una persona un agente (04/11/2026),
+        #  con el rotulo con que se leen en la Bandeja.
+        "motivos_escalada": [
+            {"clave": m, "rotulo": config.conversaciones.rotulos.get(m) or m.replace("_", " ")}
+            for m in config.escalamiento.activar_si],
         "roles_existentes": sorted(config.roles),
         # Cuales de esos roles atienden a un CLIENTE FINAL. Lo usa /manual
         # para avisar antes de darle un documento a uno de ellos: el riesgo
@@ -3801,6 +3807,8 @@ def _extras_de_agente(cuerpo: dict) -> dict:
             extras[clave] = cuerpo[clave]
     if isinstance(cuerpo.get("nunca_revelar"), list):
         extras["nunca_revelar"] = [str(t)[:300] for t in cuerpo["nunca_revelar"]][:30]
+    if isinstance(cuerpo.get("motivos_escalada"), list):
+        extras["motivos_escalada"] = [str(t)[:80] for t in cuerpo["motivos_escalada"]][:50]
     return extras
 
 

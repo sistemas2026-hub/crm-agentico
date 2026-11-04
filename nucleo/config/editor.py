@@ -720,6 +720,10 @@ def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
                           que atiende al cliente puede recibir una derivacion
       exige_verificacion  si pide verificar la identidad del cliente
       nunca_revelar       lo que nunca dice, limpio y sin repetir
+      motivos_escalada    por que motivos pasa a una persona (04/11/2026): un
+                          subconjunto de 'escalamiento.activar_si'; vacio =
+                          todos. Uno que la empresa no tiene lo rechaza el
+                          esquema al validar
     """
     if not extras:
         return
@@ -729,6 +733,9 @@ def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
     if extras.get("nunca_revelar") is not None:
         rol["nunca_revelar"] = list(dict.fromkeys(
             t.strip() for t in extras["nunca_revelar"] if isinstance(t, str) and t.strip()))
+    if extras.get("motivos_escalada") is not None:
+        rol["motivos_escalada"] = list(dict.fromkeys(
+            t.strip() for t in extras["motivos_escalada"] if isinstance(t, str) and t.strip()))
     atiende = extras.get("atiende")
     if atiende is not None:
         rol["atiende"] = str(atiende).strip()
