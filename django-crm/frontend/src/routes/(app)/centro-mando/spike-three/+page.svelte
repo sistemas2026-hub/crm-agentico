@@ -1,6 +1,6 @@
 <script>
   /**
-   * EL PROTOTIPO DE THREE.JS, PARA COMPARAR. No reemplaza a `/centro-mando/v2`.
+   * EL PROTOTIPO DE THREE.JS, PARA COMPARAR. No reemplaza a `/centro-mando`.
    *
    * Existe porque el 01/11/2026 el diseño de PixiJS no se aprobó por una razón
    * concreta y medida —el edificio es una franja de 88 × 18 unidades, esbeltez
@@ -81,7 +81,7 @@
         {SALAS.filter((s) => s.tipo === 'departamento').length} departamentos ·
         {PISOS.length} piso(s) · huella {huella.ancho} × {huella.fondo} ·
         esbeltez {esbeltez}
-        <a href="/centro-mando/v2">ver el prototipo PixiJS</a>
+        <a href="/centro-mando">ver la oficina en PixiJS</a>
       </p>
     </div>
     <div class="mandos">

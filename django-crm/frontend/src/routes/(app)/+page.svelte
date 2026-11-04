@@ -18,7 +18,6 @@
     Users,
     TriangleAlert,
     ArrowRight,
-    Radar,
     Building2
   } from '@lucide/svelte';
 
@@ -95,13 +94,10 @@
             <span class="tile" class:tile-urg={data.dexter.fallosHoy > 0}><TriangleAlert /></span>
             <span><b class="v2-num" class:urg={data.dexter.fallosHoy > 0}>{data.dexter.fallosHoy}</b><small>fallos de herramientas hoy</small></span>
           </div>
-          <a class="franja-celda franja-enlace" href="/centro-mando"><Radar /> Centro de mando</a>
-          <!-- LA OFICINA VIRTUAL, ALCANZABLE. Estaba construida y sin puerta: la
-               ruta existia, cargaba dentro del CRM con la organizacion de la
-               sesion, y no la enlazaba nadie. El centro de mando de siempre se
-               queda donde esta -son dos lecturas distintas del mismo dato, no
-               una el reemplazo de la otra-. -->
-          <a class="franja-celda franja-enlace" href="/centro-mando/v2"><Building2 /> Oficina virtual</a>
+          <!-- UN SOLO ENLACE, Y LLEVA A LA OFICINA. `/centro-mando` ES ahora la
+               sede virtual; la pantalla anterior vive en `/centro-mando/clasico`
+               y no se enlaza: esto es un reemplazo, no una opcion mas. -->
+          <a class="franja-celda franja-enlace" href="/centro-mando"><Building2 /> Centro de mando</a>
         </div>
       {/if}
     </section>
