@@ -213,14 +213,40 @@ def test_reintento_del_put_no_duplica_evidencia(user_client, orden_sd):
         orden=orden_sd, tipo="evidencia_confirmada").count() == 1
 
 
-def test_en_produccion_la_ruta_no_existe(user_client, orden_sd, settings):  # noqa: F811
-    """Con ENV_TYPE de produccion la subida local no participa: 404, no 403.
-
-    Alli 'descriptor_subida' emitiria la URL prefirmada del proveedor. Quien no
-    deberia usar esta ruta tampoco tiene por que enterarse de que existe.
-    """
-    ev_id = _registrar(user_client, orden_sd).json()["evidencia_id"]
+def test_en_produccion_la_ruta_que_promete_el_registro_responde(
+        user_client, orden_sd, settings):  # noqa: F811
+    """30/10/2026. Hasta hoy, con ENV_TYPE de produccion esta ruta daba 404,
+    suponiendo un S3 que produccion no tiene: ninguna foto subia y ninguna
+    orden con foto se cerraba desde la app. La regla: la URL que entrega el
+    registro, en produccion, recibe el archivo y la foto queda confirmada."""
     settings.IS_DEV_ENV = False
-    r = user_client.put(f"/api/campo/evidencias/{ev_id}/subir/",
-                        BINARIO, content_type="image/jpeg")
+    reg = _registrar(user_client, orden_sd)
+    ev_id = reg.json()["evidencia_id"]
+
+    r = user_client.put(reg.json()["upload"]["url"], BINARIO, content_type="image/jpeg")
+    assert r.status_code == 200, r.content
+    conf = user_client.post(f"/api/campo/evidencias/{ev_id}/confirmar/", {}, format="json")
+    assert conf.status_code == 200, conf.content
+    assert EvidenciaTrabajo.objects.get(pk=ev_id).estado_archivo == EvidenciaTrabajo.RECIBIDO
+
+
+def test_un_tecnico_no_sube_la_foto_de_una_orden_ajena(user_client, orden_sd,
+                                                       org_a, django_user_model):
+    """La misma puerta que el registro: un tecnico de la MISMA empresa que no
+    tiene la orden no le escribe el archivo. 404, como una que no existe."""
+    from rest_framework.test import APIClient
+
+    from common.models import Profile
+    from common.serializer import OrgAwareRefreshToken
+
+    ev_id = _registrar(user_client, orden_sd).json()["evidencia_id"]
+    user = django_user_model.objects.create_user(email="ajeno.subida@test.com", password="x")
+    perfil = Profile.objects.create(user=user, org=org_a, role="USER", is_active=True)
+    ajeno = APIClient()
+    ajeno.credentials(HTTP_AUTHORIZATION=(
+        f"Bearer {OrgAwareRefreshToken.for_user_and_org(user, org_a, perfil).access_token}"))
+
+    r = ajeno.put(f"/api/campo/evidencias/{ev_id}/subir/", BINARIO, content_type="image/jpeg")
     assert r.status_code == 404
+    ev = EvidenciaTrabajo.objects.get(pk=ev_id)
+    assert not CampoStorage.verify_upload(ev.storage_key), "igual le escribio el archivo"

@@ -227,21 +227,21 @@ def intentar_avisar(movimiento) -> ResultadoAviso:
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
 
-    # NINGUNA EMPRESA CONCRETA VIVE EN EL CODIGO.
+    # NINGUNA EMPRESA CONCRETA VIVE EN EL CODIGO, NI EN EL SERVIDOR.
     #
-    # Esta linea decia `or "rapilink"`. Es un hardcode de cliente, y lo peligroso
-    # no es el estilo: este parametro decide A QUE EMPRESA se le escribe en el
-    # ISP. Si un dia se despliega una segunda instalacion y alguien olvida la
-    # variable, el aviso de un tecnico de otra empresa sale con el tenant de
-    # Rapilink y escribe sobre los clientes de Rapilink. Fail-closed: sin el dato
-    # no se avisa, y se dice que falta.
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    # Esta linea decia `or "rapilink"`, y despues leia una variable de entorno:
+    # una por instalacion. Lo peligroso no es el estilo: este parametro decide A
+    # QUE EMPRESA se le escribe en el ISP. Sale de la organizacion del
+    # MOVIMIENTO (31/10/2026). Fail-closed: sin el dato no se avisa, y se dice.
+    from operaciones import areas_del_tenant
+
+    tenant = areas_del_tenant.tenant_de(movimiento.org_id)
     if not tenant:
         return ResultadoAviso(
             ResultadoAviso.NO_CORRESPONDE,
-            "falta MOTOR_TENANT: sin saber de que empresa es este movimiento no "
-            "se le puede escribir al ISP, y suponerlo escribiria sobre los "
-            "clientes de otra.")
+            f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que empresa es este "
+            "movimiento no se le puede escribir al ISP, y suponerlo escribiria "
+            "sobre los clientes de otra.")
     herramienta = (os.environ.get(VARIABLE_HERRAMIENTA, "")
                    or HERRAMIENTA_POR_DEFECTO)
 

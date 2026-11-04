@@ -217,6 +217,9 @@ class SyncQueueService {
       // que bodega va a mirar para decidir si despacha tiene que ser el de
       // ahora, no el de antes de la instalacion que acaba de hacer.
       await _procesarPedidosDeMaterial(orgId, profileId);
+      // 5b-ter. Las novedades de la cuadrilla (30/10/2026): «se pinchó la
+      // llanta». Antes de leer avisos: lo que el técnico escribió sube primero.
+      await _procesarNovedades(orgId, profileId);
       // 5d. Lo que la plataforma le aviso. Va al final: es lectura, y lo que el
       // tecnico ESCRIBIO siempre tiene prioridad para subir.
       await _procesarNotificaciones(orgId, profileId);
@@ -462,6 +465,65 @@ class SyncQueueService {
   /// hora de reintentos: un corte de senal normal entra holgado. Lo que no
   /// entra es un fallo que va a dar el mismo resultado siempre.
   static const int _intentosDePedido = 10;
+
+  /// Sube las novedades y sus «Ya seguí» (30/10/2026). Mismo criterio que los
+  /// pedidos: la clave es el id de la fila; 400 y 404 son definitivos; otro
+  /// fallo, tras `_intentosDePedido`.
+  Future<void> _procesarNovedades(String orgId, String profileId) async {
+    final pendientes = await _localDb.novedadesPendientes(
+      orgId: orgId,
+      profileId: profileId,
+    );
+    for (final n in pendientes) {
+      final String id = n['id'] as String;
+      final int intentos = n['intentos'] as int? ?? 0;
+      try {
+        String? servidorId = n['servidor_id'] as String?;
+        if (n['estado'] == 'pendiente') {
+          final r = await _apiClient.post(
+            ApiEndpoints.novedades,
+            data: <String, dynamic>{
+              'tipo': n['tipo'],
+              'afecta': n['afecta'],
+              'texto': n['texto'] ?? '',
+              'avisada_en': n['avisada_en'],
+            },
+            options: Options(headers: <String, dynamic>{'Idempotency-Key': id}),
+          );
+          final dynamic datos = r.data;
+          servidorId = datos is Map ? datos['id']?.toString() : null;
+        }
+        bool resueltaSubida = false;
+        if ((n['resuelta'] as int? ?? 0) == 1 && servidorId != null) {
+          await _apiClient.post(ApiEndpoints.resolverNovedad(servidorId));
+          resueltaSubida = true;
+        }
+        await _localDb.marcarNovedadSubida(
+          id: id,
+          orgId: orgId,
+          profileId: profileId,
+          servidorId: servidorId,
+          resueltaSubida: resueltaSubida,
+        );
+      } catch (e) {
+        final int? codigo = e is DioException ? e.response?.statusCode : null;
+        final bool definitivo =
+            codigo == 400 || codigo == 404 || intentos + 1 >= _intentosDePedido;
+        await _localDb.registrarFalloNovedad(
+          id: id,
+          orgId: orgId,
+          profileId: profileId,
+          errorMensaje: sanearError(e),
+          intentos: intentos,
+          definitivo: definitivo,
+          nextAttemptAt: definitivo
+              ? null
+              : DateTime.now().millisecondsSinceEpoch +
+                    calcularBackoffMs(intentos, mutationId: id),
+        );
+      }
+    }
+  }
 
   Future<void> _procesarPedidosDeMaterial(
     String orgId,

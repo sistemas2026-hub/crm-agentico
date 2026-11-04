@@ -5,6 +5,7 @@ from django.urls import path
 
 from campo import (
     avisos_views,
+    configuracion_de_seguimiento_views,
     cuadrillas_views,
     despacho_pantalla_views,
     despacho_views,
@@ -14,8 +15,10 @@ from campo import (
     material_del_dia_views,
     materiales_views,
     niveles_views,
+    novedades_views,
     pedidos_views,
     plantillas_views,
+    ubicacion_views,
     recepcion_views,
     views,
 )
@@ -24,6 +27,11 @@ app_name = "campo"
 
 urlpatterns = [
     path("bootstrap/", views.BootstrapView.as_view(), name="bootstrap"),
+    path("mi-dia/", views.MiDiaView.as_view(), name="mi_dia"),
+    #  La novedad de la cuadrilla (30/10/2026): «se pincho la llanta».
+    path("novedades/", novedades_views.NovedadesView.as_view(), name="novedades"),
+    path("novedades/<uid:pk>/resolver/", novedades_views.ResolverNovedadView.as_view(),
+         name="novedad_resolver"),
     path("trabajos/", views.TrabajosListView.as_view(), name="trabajos_list"),
     # Materiales: la custodia del tecnico y lo que gasta en la calle.
     path("kit/", materiales_views.KitView.as_view(), name="kit"),
@@ -89,11 +97,21 @@ urlpatterns = [
     #  Lo que quedo publicado un dia, con quien lo asigno (28/10/2026): la
     #  pantalla de Programacion. Ver campo/dia_publicado.py.
     path("dia-publicado/", dia_publicado_views.DiaPublicadoView.as_view(), name="dia_publicado"),
+    #  La pestaña Cerradas de Programacion (30/10/2026).
+    path("cerradas/", dia_publicado_views.CerradasView.as_view(), name="ordenes_cerradas"),
     path("material-del-dia/", material_del_dia_views.MaterialDelDiaView.as_view(),
          name="material_del_dia"),
     path("material-del-dia/configuracion/",
          material_del_dia_views.ConfiguracionDeMaterialView.as_view(),
          name="material_del_dia_configuracion"),
+    #  Donde esta el telefono del tecnico (31/10/2026). El servidor rechaza
+    #  la de quien no sale hoy: ver `campo/ubicacion_de_cuadrilla.py`.
+    path("ubicacion/", ubicacion_views.UbicacionDelTecnicoView.as_view(),
+         name="ubicacion_del_tecnico"),
+    #  Lo que el Supervisor hace solo con el seguimiento (30/10/2026).
+    path("seguimiento/configuracion/",
+         configuracion_de_seguimiento_views.ConfiguracionDeSeguimientoView.as_view(),
+         name="seguimiento_configuracion"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),

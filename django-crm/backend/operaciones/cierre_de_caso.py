@@ -71,6 +71,14 @@ SIN_FECHA_DE_CIERRE = "SIN_FECHA_DE_CIERRE_DEL_PROVEEDOR"
 LECTURA_VIEJA = "LECTURA_EXTERNA_FUERA_DE_FRESCURA"
 LECTURA_CON_ERROR = "LA_ULTIMA_LECTURA_FALLO"
 RESPUESTA_POSTERIOR = "HAY_RESPUESTA_POSTERIOR_AL_CIERRE"
+#  Sin empresa no se pregunta (30/10/2026; desde el 31/10 la empresa es la de
+#  la organizacion del caso, no una variable). Distinto de MOTOR_NO_RESPONDIO:
+#  aca se SABE que no salio nada.
+SIN_EMPRESA = "SIN_EMPRESA_EN_EL_MOTOR"
+
+
+class SinEmpresa(RuntimeError):
+    """No se sabe de que empresa es el caso: no se le pidio nada al motor."""
 MOTOR_NO_RESPONDIO = "EL_MOTOR_NO_RESPONDIO"
 
 #  Lo que el motor contesta cuando no cerro por el interruptor. Se reconoce para
@@ -243,15 +251,20 @@ def trabajo_abierto(caso) -> dict:
     return {"actividades_abiertas": actividades, "ordenes_abiertas": ordenes}
 
 
-def _pedirle_al_motor(propuesta_id: str, id_caso: str) -> dict:
+def _pedirle_al_motor(propuesta_id: str, id_caso: str, *, org) -> dict:
     """
     Le pide al motor que ejecute el cierre. El motor pone el kill switch, la
     puerta humana y la idempotencia; este proceso no puede ninguna de las tres.
     """
     import requests
 
+    from operaciones import areas_del_tenant
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    tenant = areas_del_tenant.tenant_de(org)
+    if not tenant:
+        raise SinEmpresa(f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que "
+                         "empresa es el caso no se le pide al motor que lo cierre")
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
@@ -318,7 +331,12 @@ def cerrar(propuesta: PropuestaSupervisor, *, actor=None, ahora=None) -> dict:
 
     #  --- fuera de la transaccion: aca ocurre la llamada de red --------------
     try:
-        respuesta = _pedirle_al_motor(str(propuesta.id), str(caso.id))
+        respuesta = _pedirle_al_motor(str(propuesta.id), str(caso.id),
+                                      org=caso.org_id)
+    except SinEmpresa:
+        _anotar(propuesta, caso=caso, motivo=SIN_EMPRESA,
+                detalle="la organizacion no tiene empresa en el motor", actor=actor)
+        return {"cerrado": False, "motivo": SIN_EMPRESA, "detalle": "", "referencia": ""}
     except Exception as e:                                    # noqa: BLE001
         #  El motor no contesto. NO se sabe si el cierre salio o no: pudo llegar
         #  y perderse la respuesta. Reintentar es legitimo, y lo que garantiza

@@ -90,7 +90,7 @@ def test_parar_NO_exige_criterios_pero_SI_motivo(jefa, monkeypatch):
     org, _usuario, perfil = jefa
     movidas = []
 
-    def falso(*, detener, actor, motivo):
+    def falso(org, *, detener, actor, motivo):
         movidas.append({"detener": detener, "actor": actor, "motivo": motivo})
         return {"estado": "detenido" if detener else "activo"}
 
@@ -123,7 +123,7 @@ def test_mover_el_interruptor_NO_cambia_el_nivel(jefa, monkeypatch):
     org, _usuario, perfil = jefa
     monkeypatch.setattr(
         fuentes_adaptadores, "mover_interruptor_de_autonomia",
-        lambda **kw: {"estado": "detenido" if kw["detener"] else "activo"})
+        lambda org, **kw: {"estado": "detenido" if kw["detener"] else "activo"})
 
     autonomia.cambiar(org, P.NIVEL_COORDINAR, actor=perfil,
                       motivo="piloto", criterios="medido")
@@ -146,7 +146,7 @@ def test_si_el_motor_no_responde_el_freno_lo_dice_y_no_miente(jefa, monkeypatch)
 
     org, _usuario, perfil = jefa
 
-    def explota(**kw):
+    def explota(org, **kw):
         raise fuentes_adaptadores.MotorNoDisponible("no se pudo preguntar")
 
     monkeypatch.setattr(fuentes_adaptadores,
@@ -179,7 +179,7 @@ def test_el_interruptor_ilegible_impide_ejecutar_pero_no_observar(
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
 
-    def explota():
+    def explota(org):
         raise fuentes_adaptadores.MotorNoDisponible("no se pudo preguntar")
 
     monkeypatch.setattr(fuentes_adaptadores, "estado_de_autonomia", explota)

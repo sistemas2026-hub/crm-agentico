@@ -46,6 +46,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
+from nucleo.canales import en_vuelo
 from nucleo.canales import media, transcripcion, vision, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
@@ -73,6 +74,7 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguimiento import borrador
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguimiento import cierre_por_validacion
 from nucleo.seguridad import interruptor
@@ -85,9 +87,11 @@ from nucleo.persistencia import db as persistencia
 from nucleo.recuperacion.busqueda import recuperar
 from nucleo.recuperacion.prompt import piezas_del_system
 from nucleo.seguimiento import agendamiento
+from nucleo.seguimiento import avisos as avisos_proactivos
 from nucleo.seguimiento import estado_escalada
 from nucleo.seguimiento import operativo
 from nucleo.seguimiento import buscar_cliente, encuesta, ticket_desde_dexter
+from nucleo.seguimiento import importacion_io
 from nucleo.persistencia import encuestas as encuestas_db
 from nucleo.config.schema import MensajeAutomatico as _MensajeAutomatico
 
@@ -475,6 +479,12 @@ def _resolver_verificacion_pendiente(config, tenant: str, estado: dict) -> dict 
         intentos, int(pendiente["max_intentos"]))
     persistencia.resolver_verificacion(
         tenant, pendiente["id"], resultado, por_que, medicion_posterior, intentos)
+    if resultado in (verificacion_accion.NO_CONFIRMADA, verificacion_accion.NO_VERIFICABLE):
+        #  CONDICION 4 (PRD §2, Fase D): el efecto no aparecio, o no se pudo
+        #  medir -- sin verificacion posible, una persona. La herramienta
+        #  pierde la autonomia ganada en esta empresa, si la tenia.
+        _degradar_autonomia(tenant, pendiente["herramienta"], "una verificacion no confirmo el efecto",
+                            {"verificacion": str(pendiente["id"])})
     # El 'por que' queda en la fila (resolver_verificacion), no en el log: lo
     # arma la medicion de un equipo externo y puede traer sus datos.
     registrar("verificacion", "accion comprobada",
@@ -743,6 +753,13 @@ def _agente_json(nombre: str, rol, config) -> dict:
         "area": rol.area,
         "cargo": rol.cargo,
         "orientado_a": rol.orientado_a,
+        #  Lo que el formulario edita desde el 02/11/2026: para que al abrir la
+        #  edicion se vea lo que el agente ya tiene, no un default.
+        "atiende": rol.atiende,
+        "exige_verificacion": rol.exige_verificacion,
+        "nunca_revelar": list(rol.nunca_revelar),
+        "en_el_router": nombre in next(
+            (h.areas_destino or [] for h in config.herramientas if h.deriva_rol), []),
         # El system prompt REAL, partido en piezas con su origen. Sin esto,
         # para saber por que un agente contesto algo hay que reconstruirlo de
         # memoria cruzando cuatro secciones de la configuracion -- y el
@@ -2087,7 +2104,12 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
         # ejecucion que se abre y no se cierra se queda 'iniciada', y la
         # pantalla la leeria como alguien trabajando sin parar. Antes el hilo
         # solo arrancaba si habia traza que guardar.
-        threading.Thread(target=_guardar_traza, daemon=True).start()
+        #
+        # Y POR en_vuelo, como el turno: un despliegue espera a que la traza
+        # quede escrita en vez de cortarla a la mitad. 'esperar' la ve igual:
+        # vuelve a mirar hasta que no quede nadie (tests/test_turnos_en_vuelo.py,
+        # parte 1b). Los dos motivos son compatibles y los dos se quedan.
+        en_vuelo.lanzar(_guardar_traza, nombre="traza", ref=id_interno(conversation_id))
         # Mismo motivo que el bucle de arriba: un archivo generado por una
         # herramienta 'agregado' exportable (ver nucleo/herramientas/
         # informes.py) no se pudo guardar dentro de motor.responder() porque
@@ -2130,6 +2152,12 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
                     persistencia.vincular_accion_a_conversacion(
                         tenant, pendiente["accion_id"], conversation_id,
                         aprob.vigencia_minutos if aprob else None)
+                    #  AUTONOMIA GANADA (31/10/2026, PRD §2, Fase C). Recien
+                    #  ligada a su conversacion la accion se puede aprobar. Se
+                    #  ANOTA aca y se decide al final del turno, despues del
+                    #  escalamiento: un turno que escala no ejecuta solo.
+                    estado.setdefault("autonomas_por_ejecutar", []).append(
+                        (pendiente["accion_id"], herr))
                 except Exception as e:
                     # La accion existe y sigue sin conversacion: no se puede
                     # aprobar, que es el lado seguro. Se registra para que no
@@ -3059,6 +3087,8 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
     # reconstruido traia el corregido. Un solo punto al final, para todas.
     _sincronizar_respuesta_en_memoria(estado["historial"], inicio_turno, respuesta)
 
+    _lanzar_autonomas(config, tenant, canal, id_sesion, estado, cerrada)
+
     rol_cfg_final = config.roles.get(rol)
     return {"respuesta": respuesta, "verificado": estado["sesion"].verificado,
             "cerrada": cerrada, "conversacion_id": conversation_id,
@@ -3935,6 +3965,22 @@ def agentes_flujo_guardar():
     return jsonify(_flujo_de(config))
 
 
+def _extras_de_agente(cuerpo: dict) -> dict:
+    """Lo que el formulario de agentes manda ademas desde el 02/11/2026: que
+    temas atiende, si se conecta al router, si verifica identidad y que nunca
+    revela. Solo las claves que vinieron: una ausente no borra lo que habia
+    (ver editor._aplicar_extras)."""
+    extras = {}
+    if "atiende" in cuerpo:
+        extras["atiende"] = str(cuerpo.get("atiende") or "")[:400]
+    for clave in ("conectar_al_router", "exige_verificacion"):
+        if isinstance(cuerpo.get(clave), bool):
+            extras[clave] = cuerpo[clave]
+    if isinstance(cuerpo.get("nunca_revelar"), list):
+        extras["nunca_revelar"] = [str(t)[:300] for t in cuerpo["nunca_revelar"]][:30]
+    return extras
+
+
 @app.post("/agentes")
 def agentes_crear():
     cuerpo = request.get_json(force=True, silent=True) or {}
@@ -3950,6 +3996,7 @@ def agentes_crear():
             descripcion=cuerpo.get("descripcion", ""),
             orientado_a=cuerpo.get("orientado_a", "colaborador"),
             herramientas=cuerpo.get("herramientas", []),
+            extras=_extras_de_agente(cuerpo),
         )
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
@@ -3974,6 +4021,7 @@ def agentes_editar(nombre):
             descripcion=cuerpo.get("descripcion", ""),
             orientado_a=cuerpo.get("orientado_a", "colaborador"),
             herramientas=cuerpo.get("herramientas", []),
+            extras=_extras_de_agente(cuerpo),
         )
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
@@ -4033,6 +4081,203 @@ def reporte_escalamiento():
         return jsonify({"error": "No se pudo calcular el reporte."}), 500
 
     return jsonify({"dias": dias, **r})
+
+
+@app.get("/reportes/autonomia-ganada")
+def reporte_autonomia_ganada():
+    """
+    Que acciones que hoy pide una persona podrian ganar autonomia en esta
+    empresa, con su evidencia y lo que les falta (PRD §2, §8.17 Ola 3). Solo
+    LEE: no promueve nada ni cambia ningun permiso. Conteos, nunca casos. Ver
+    nucleo/seguridad/autonomia_ganada.py.
+    """
+    from nucleo.persistencia import autonomia_ganada as medicion
+    from nucleo.seguridad import autonomia_ganada
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        filas = autonomia_ganada.evaluar(
+            _config_de(tenant), tenant, datetime.now(timezone.utc),
+            medir=lambda t, h, d, hh: medicion.medir(t, h, d, hh, canales=canales.REALES),
+            leer_vigente=medicion.vigente)
+    except Exception as e:
+        registrar("reportes", "fallo al calcular la autonomia ganada", error=e)
+        return jsonify({"error": "No se pudo calcular la autonomia ganada."}), 500
+    return jsonify({"acciones": filas, "piso": autonomia_ganada.PISO}), 200
+
+
+@app.post("/autonomia-ganada/promover")
+def autonomia_ganada_promover():
+    """
+    Una PERSONA le da autonomia a una accion en su empresa (PRD §2, Fase B).
+    Cuerpo: {tenant, accion, autor, autor_usuario_id}. El autor lo arma el
+    proxy con la sesion autenticada. La evidencia se vuelve a medir aca: si
+    no alcanza AHORA, no se promueve (409 con lo que falta). Solo se escribe
+    la promocion; ejecutar sola sigue pasando por la frontera entera.
+    """
+    from nucleo.persistencia import autonomia_ganada as medicion
+    from nucleo.seguridad import autonomia_ganada
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, accion = cuerpo.get("tenant"), cuerpo.get("accion")
+    #  El agente, si se da solo a uno (02/11/2026). Sin 'rol': todos.
+    rol = str(cuerpo.get("rol") or "").strip() or None
+    if not tenant or not accion:
+        return jsonify({"error": "Faltan 'tenant' o 'accion'."}), 400
+    try:
+        autor, usuario, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido:
+        return jsonify({"error": "FALTA_QUIEN_PROMUEVE"}), 400
+    #  Solo un ADMIN. El rol lo arma el proxy con la sesion autenticada, como
+    #  'autor_rol' en el reinicio de la Bandeja; el CRM ya lo exige, y el motor
+    #  lo vuelve a exigir aca: es la primera palanca de autonomia expuesta por
+    #  HTTP (auditor de frontera, 31/10/2026).
+    if (cuerpo.get("autor_rol") or "").upper() != "ADMIN":
+        return jsonify({"error": "SOLO_ADMIN"}), 403
+    try:
+        fila = autonomia_ganada.promover(
+            _config_de(tenant), tenant, str(accion), f"{autor} · {usuario}",
+            datetime.now(timezone.utc),
+            medir=lambda t, h, d, hh, rol=None: medicion.medir(t, h, d, hh, canales=canales.REALES,
+                                                               rol=rol),
+            escribir=medicion.promover, leer_vigente=medicion.vigente, rol=rol)
+    except autonomia_ganada.NoPromovible as e:
+        return jsonify({"error": e.codigo, "faltan": e.faltan}), 409
+    except Exception as e:
+        return fallo(503, "autonomia_no_promovida", "No se pudo promover: no quedo registrada.",
+                     componente="autonomia_ganada", e=e)
+    registrar("autonomia_ganada", "accion promovida", tenant=tenant, accion=str(accion),
+              rol=rol or "*")
+    return jsonify({"estado": fila.get("estado"), "id": str(fila.get("id"))}), 201
+
+
+@app.post("/autonomia-ganada/retirar")
+def autonomia_ganada_retirar():
+    """Una PERSONA le quita la autonomia a una accion. Siempre se puede: bajar
+    es seguro. Cuerpo: {tenant, accion, autor, autor_usuario_id, motivo}."""
+    from nucleo.persistencia import autonomia_ganada as medicion
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, accion = cuerpo.get("tenant"), cuerpo.get("accion")
+    motivo = str(cuerpo.get("motivo") or "").strip()
+    if not tenant or not accion or not motivo:
+        return jsonify({"error": "Faltan 'tenant', 'accion' o 'motivo'."}), 400
+    #  BAJAR SIEMPRE SE PUEDE (auditoria M1): no se rechaza un agente que ya no
+    #  tiene la herramienta -- su fila propia activa quedaria dormida y
+    #  reviviria sola el dia que se la vuelvan a dar -- ni se consulta la config,
+    #  que puede venir de una copia vieja. Solo se valida que sea un nombre.
+    rol = str(cuerpo.get("rol") or "").strip() or None
+    if rol and not re.fullmatch(r"[a-z0-9_]{1,64}", rol):
+        return jsonify({"error": "AGENTE_INVALIDO"}), 400
+    try:
+        autor, usuario, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido:
+        return jsonify({"error": "FALTA_QUIEN_RETIRA"}), 400
+    try:
+        fila = medicion.retirar(tenant, str(accion), f"{autor} · {usuario}", motivo[:500],
+                                rol=rol)
+    except Exception as e:
+        return fallo(503, "autonomia_no_retirada", "No se pudo retirar: no quedo registrado.",
+                     componente="autonomia_ganada", e=e)
+    registrar("autonomia_ganada", "accion retirada", tenant=tenant, accion=str(accion),
+              rol=rol or "*")
+    return jsonify({"estado": fila.get("estado"), "id": str(fila.get("id"))}), 201
+
+
+@app.get("/reportes/capacidad")
+def reporte_capacidad():
+    """
+    El tablero de capacidad (PRD §2, §8.17 Ola 1): cuanto trabajo le resolvio
+    Dexter a la empresa en los ultimos 'dias' (default 7, tope 90), con sus
+    contrapesos. Solo agregados: ningun numero, nombre ni conversacion de un
+    cliente sale por aca.
+
+    Un periodo que empieza antes de que exista 'messages.origen' se recorta a
+    esa fecha y lo dice en 'aviso': antes de ahi no se sabe si una persona
+    escribio, y contar esas conversaciones como "sin persona" seria inventar.
+    """
+    from nucleo.observabilidad import capacidad as tablero
+    from nucleo.persistencia import capacidad as medicion
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        dias = int(request.args.get("dias", 7))
+    except ValueError:
+        return jsonify({"error": "'dias' debe ser un numero."}), 400
+    dias = max(1, min(dias, 90))
+
+    hasta = datetime.now(timezone.utc)
+    desde = hasta - timedelta(days=dias)
+    aviso = None
+    if desde < tablero.CORTE:
+        desde = tablero.CORTE
+        aviso = ("El periodo empieza antes del 16/09/2026, cuando los mensajes "
+                 "empezaron a registrar quien los escribio. Se cuenta desde esa fecha.")
+
+    try:
+        cap = _config_de(tenant).capacidad
+        m = medicion.medir(tenant, desde, hasta, canales=canales.REALES,
+                           acciones_que_evitan_visita=cap.acciones_que_evitan_visita,
+                           herramientas_de_visita=cap.herramientas_de_visita,
+                           ventana_recontacto_horas=cap.ventana_recontacto_horas,
+                           dias_sin_visita=cap.dias_sin_visita)
+    except Exception as e:
+        registrar("reportes", "fallo al calcular capacidad", error=e)
+        return jsonify({"error": "No se pudo calcular el tablero."}), 500
+
+    cuerpo = {"dias": dias, "desde": desde.isoformat(), "hasta": hasta.isoformat(),
+              "canales": sorted(canales.REALES),
+              # Lo que declaro la empresa, para que la pantalla lo muestre en el
+              # formulario sin una segunda ida y vuelta.
+              "declarado": {"minutos_por_conversacion": cap.minutos_por_conversacion,
+                            "minutos_por_visita": cap.minutos_por_visita,
+                            "personas_del_equipo": cap.personas_del_equipo},
+              **tablero.componer(m, cap.minutos_por_conversacion, cap.minutos_por_visita,
+                                cap.personas_del_equipo)}
+    if aviso:
+        cuerpo["aviso"] = aviso
+    return jsonify(cuerpo)
+
+
+@app.put("/configuracion/capacidad")
+def configuracion_capacidad_guardar():
+    """
+    Los tres numeros que declara la empresa para el tablero de capacidad:
+    minutos por conversacion, minutos por visita y personas del equipo (§3.3:
+    lo que varia por empresa se edita desde la interfaz).
+
+    LAS TRES CLAVES TIENEN QUE VENIR, aunque sea en null. 'No vino' y 'borralo'
+    no son lo mismo: un formulario que mande menos campos borraria lo
+    declarado sin pedirlo (misma razon que 'sin_gestion_horas' en la Bandeja).
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    valores = {}
+    for clave in editor.DECLARABLES_CAPACIDAD:
+        if clave not in cuerpo:
+            return jsonify({"error": f"Falta '{clave}'. Para borrarlo, mandalo en null."}), 400
+        crudo = cuerpo[clave]
+        if crudo in (None, ""):
+            valores[clave] = None
+            continue
+        try:
+            valores[clave] = int(crudo)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"'{clave}' tiene que ser un numero entero."}), 400
+    try:
+        editor.guardar_capacidad_declarada(tenant, valores)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"ok": True, "declarado": valores})
 
 
 @app.get("/centro-mando")
@@ -4506,11 +4751,35 @@ def configuracion_bandeja_guardar():
 
 
 def _rotulos_de(config) -> dict:
-    """Las claves que admiten rotulo y los rotulos guardados, para la pantalla."""
+    """Las claves que admiten rotulo, los rotulos guardados y las que faltan."""
     return {
         "claves": editor.claves_con_rotulo(config.model_dump()),
         "rotulos": dict(config.conversaciones.rotulos),
+        "sin_rotulo": editor.claves_sin_rotulo(config),
+        # Viaja con los rotulos porque se edita en la misma pantalla.
+        "reincidencia_dias": config.conversaciones.reincidencia_dias,
     }
+
+
+@app.put("/configuracion/bandeja/reincidencia")
+def configuracion_bandeja_reincidencia_guardar():
+    """Cuantos dias mira el aviso de reincidencia; 0 lo apaga (29/10/2026)."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        dias = int(cuerpo.get("dias"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "'dias' tiene que ser un numero entero."}), 400
+    try:
+        config = editor.guardar_reincidencia(tenant, dias)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"reincidencia_dias": config.conversaciones.reincidencia_dias})
 
 
 @app.get("/configuracion/bandeja/rotulos")
@@ -5144,6 +5413,238 @@ def interno_cerrar_ticket_de_orden(orden_id: str):
     else:
         codigo_http = 409
     return jsonify(resultado.como_dict()), codigo_http
+
+
+@app.post("/interno/orden/<orden_id>/cerrar-ticket-supervisor")
+def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
+    """
+    El Supervisor cierra SOLO el ticket de una orden que su revision dio por
+    buena (30/10/2026). Por la puerta AUTONOMA: interruptor, techo, Autonomia 2
+    con B-7 y la autorizacion de la herramienta. Ver
+    nucleo/seguimiento/cierre_por_validacion.py::cerrar_ticket_por_el_supervisor.
+
+    No acepta `actor`: quien cierra es el Supervisor, y eso no lo elige quien
+    llama. Una persona que valida usa la ruta de arriba.
+
+    `revision` ES OBLIGATORIA  --  auditoria de frontera, 31/10/2026 (H1)
+    --------------------------------------------------------------------
+    La premisa de la exencion que abre esta ruta es "el Supervisor reviso esta
+    orden punto por punto". Esa revision corre en el CRM, del otro lado de un
+    HTTP: aca NO se puede comprobar, y hasta el 31/10 tampoco se pedia nada que
+    la nombrara. El motor cerraba el ticket que le dijeran por la sola palabra
+    de quien llamaba.
+
+    Exigirla no PRUEBA la revision --nada de este lado puede-- y conviene
+    decirlo con todas las letras en vez de fingir lo contrario. Lo que si hace
+    es que la auditoria pueda contestar "que revision autorizo este cierre",
+    que antes no podia, y que un servicio que no tenga una no entre por
+    descuido. La garantia de verdad sigue siendo el token de servicio y que
+    este es el unico llamador.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"ticket", "texto", "revision"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({
+            "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
+                     f"{sobra}: quien cierra es el Supervisor y el estado lo fija "
+                     f"la herramienta."}), 400
+    revision = str(cuerpo.get("revision") or "").strip()
+    if not revision:
+        return jsonify({
+            "codigo": "SIN_REVISION", "cerrado": False, "referencia": "",
+            "motivo": "esta ruta cierra lo que el Supervisor reviso: hace falta "
+                      "'revision' (la orden, su vuelta y el veredicto). Sin eso "
+                      "no hay nada que la auditoria pueda mirar despues."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = cierre_por_validacion.cerrar_ticket_por_el_supervisor(
+        config, tenant, orden_id=orden_id,
+        ticket=str(cuerpo.get("ticket") or ""),
+        texto=str(cuerpo.get("texto") or ""),
+        revision=revision)
+    if resultado.cerrado:
+        codigo_http = 200
+    elif resultado.codigo == cierre_por_validacion.FALLO:
+        codigo_http = 502
+    else:
+        codigo_http = 409
+    return jsonify(resultado.como_dict()), codigo_http
+
+
+@app.get("/interno/vision/evidencias-habilitada")
+def interno_vision_evidencias_habilitada():
+    """Si esta empresa tiene habilitado que se miren sus fotos de evidencia.
+
+    EXISTE PARA QUE EL CONSENTIMIENTO SE PREGUNTE ANTES DE MOVER LOS BYTES
+    (revisor de PII, 31/10/2026). La ruta de abajo tambien lo comprueba --ahi
+    vive el control y sigue estando-- pero para cuando contesta, la foto ya
+    salio del servicio que es su dueño. El interruptor ES la capa de
+    consentimiento: tiene que poder consultarse sin mandar nada.
+
+    Si la config no se puede leer contesta 'false'. No poder comprobarlo no
+    es permiso, y quien llama falla cerrado del otro lado tambien.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    #  Sin 'proposito' vale el de campo: es el unico que existia cuando esta
+    #  ruta nacio y hay un llamador desplegado que no lo manda.
+    proposito = (request.args.get("proposito") or "evidencia_campo").strip()
+    bandera = vision.bandera_de(proposito)
+    if not bandera:
+        #  Un proposito que el codigo no declara no habilita nada. Falla
+        #  cerrado, como el resto de este camino.
+        return jsonify({"habilitada": False, "motivo": "proposito desconocido"}), 200
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        registrar("vision", "no se pudo leer la config para el interruptor",
+                  tenant=tenant, error=e)
+        return jsonify({"habilitada": False}), 200
+    return jsonify({"habilitada": bool(getattr(config, bandera, False))}), 200
+
+
+@app.post("/interno/vision/analizar-evidencia")
+def interno_analizar_evidencia():
+    """
+    Mira la foto que un tecnico subio como evidencia de una orden de campo.
+
+    POR QUE EL MOTOR Y NO EL CRM  --  31/10/2026
+    --------------------------------------------
+    Mismo reparto que '/interno/supervisor/chat': la credencial del proveedor
+    esta SOLO aca, igual que la de WispHub y la de SmartOLT, y copiarla al CRM
+    seria tener dos servicios con la misma clave. El CRM manda los bytes y
+    recibe texto; no sabe a quien se le pregunto.
+
+    LAS CUATRO GARANTIAS QUE REUSA, y por eso esto no es un atajo:
+      - el interruptor por empresa ('vision_evidencias_campo'), que es PROPIO
+        y no el de WhatsApp: no es el mismo consentimiento
+      - el tope de gasto del tenant, consultado ANTES de pagarle a nadie
+      - los topes de 'vision' (8 MB, JPEG/PNG, 30 s, 1200 caracteres) y la
+        redaccion del texto que vuelve
+      - el evento de consumo VISION, para que estas fotos aparezcan en
+        /consumo junto a las del chat y no en una factura que nadie mira
+
+    EL CUERPO: multipart con el archivo en 'imagen', y 'pie' opcional -- lo
+    que esa foto TENIA que mostrar, que sale de las instrucciones del
+    requisito en la plantilla del tenant. No se acepta ni el modelo ni la
+    instruccion: los fija este lado.
+
+    NUNCA 500 POR UNA FOTO: si el proveedor falla, vuelve 200 con
+    estado='error' y el motivo por tipo. Quien llama tiene que poder
+    distinguir "no se pudo mirar" de "la peticion estaba mal".
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    archivo = request.files.get("imagen")
+    if archivo is None:
+        return jsonify({"error": "Falta el archivo 'imagen' (multipart)."}), 400
+    contenido = archivo.read() or b""
+    pie = str(request.form.get("pie") or "")
+    #  QUE SE LE PIDE AL MODELO Y QUE INTERRUPTOR MANDA salen los dos del
+    #  proposito (02/11/2026, vision.PROPOSITOS). Antes estaban fijos en el
+    #  caso de campo; el asistente interno es otro consentimiento y otra
+    #  instruccion, y una ruta por cada uno habria sido tres copias de las
+    #  mismas cuatro garantias.
+    #
+    #  Sin 'proposito' vale el de campo: hay un llamador desplegado que no lo
+    #  manda, y cambiarle el default lo habria roto en silencio.
+    proposito = str(request.form.get("proposito") or "evidencia_campo").strip()
+    bandera = vision.bandera_de(proposito)
+    if not bandera:
+        return jsonify({"estado": "apagado", "texto": "", "error": "",
+                        "motivo": f"proposito desconocido: {proposito}"}), 200
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+
+    #  EL INTERRUPTOR DE ESTE PROPOSITO, y falla CERRADO.
+    if not getattr(config, bandera, False):
+        return jsonify({"estado": "apagado", "texto": "", "error": "",
+                        "motivo": "esta empresa no tiene habilitado que se "
+                                  "miren estas fotos"}), 200
+
+    #  EL TOPE DE GASTO, antes de pagar. El gate del turno (mas abajo, en el
+    #  webhook) no cubre esta ruta: si no se consultara aca, el tope del
+    #  tenant no incluiria las fotos de campo y la factura se dispararia por
+    #  un camino que nadie esta mirando (auditoria del arquitecto, 31/10/2026).
+    try:
+        frenar = consumo.estado_del_gasto(config, tenant)["accion"] == "frenar"
+    except Exception:                                         # noqa: BLE001
+        #  Si no se puede saber, se sigue: mismo criterio que el turno. No
+        #  dejar sin servicio por una consulta de estadisticas.
+        frenar = False
+    if frenar:
+        registrar("vision", "tope alcanzado: no se analiza la evidencia",
+                  tenant=tenant)
+        return jsonify({"estado": "apagado", "texto": "", "error": "",
+                        "motivo": "la empresa alcanzo su tope de gasto"}), 200
+
+    #  SE RECODIFICA ANTES DE MANDARLA, y no es solo para que pese menos
+    #  (revisor de PII, 31/10/2026, H3). El archivo de campo llega CRUDO del
+    #  disco: a diferencia de la foto de WhatsApp, que ya paso por
+    #  `media.preparar`, este nunca se recodifico, asi que puede llevar EXIF
+    #  --GPS de la vivienda, modelo del telefono, hora exacta-- adentro de los
+    #  bytes. `redactar()` mira el texto que vuelve, no la imagen que va.
+    #  `comprimir_imagen` abre con Pillow y vuelve a guardar sin `exif=`, que
+    #  es lo que lo tira.
+    #
+    #  NO ESTA MEDIDO que las fotos de hoy traigan GPS: la app recodifica en
+    #  el telefono y probablemente ya lo pierda. Se hace igual porque es una
+    #  linea, cuesta menos y la unica ruta de subida escribe lo que le manden.
+    try:
+        listo, _mime = media.preparar(contenido, "image", "image/jpeg")
+    except Exception:                                         # noqa: BLE001
+        #  Si no se pudo recodificar NO se manda el original: el EXIF es
+        #  justamente lo que esto viene a sacar.
+        registrar("vision", "no se pudo preparar la evidencia", tenant=tenant)
+        return jsonify({"estado": vision.ERROR, "texto": "",
+                        "error": "no se pudo preparar la imagen", "modelo": "",
+                        "segundos": 0, "tokens": 0, "motivo": ""}), 200
+
+    modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
+    r = vision.analizar(listo, modelo, pie,
+                        instruccion=vision.instruccion_de(proposito),
+                        rotulo_del_pie=vision.PIE_DE_LA_PLANTILLA)
+
+    #  TEXTO FIJO y conteos. Del contenido no va NADA al log -- ni que se vio
+    #  ni lo que decia-- y la orden no se nombra: esta ruta no la conoce.
+    registrar("vision", "evidencia de campo procesada", tenant=tenant,
+              estado=r.estado, segundos=round(r.segundos, 1), tokens=r.tokens,
+              caracteres=len(r.texto), error=r.error or None)
+
+    if r.tokens:
+        proveedor_v, modelo_v = consumo.partir_referencia(modelo)
+        costo_v, tarifa_v = consumo.costo_de(config, modelo, r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.VISION, proveedor_v, modelo_v,
+            entrada=r.tokens, costo_usd=costo_v, hay_tarifa=tarifa_v,
+            metadatos={"segundos": round(r.segundos, 1), "estado": r.estado,
+                       "origen": "evidencia_campo"})
+
+    return jsonify({"estado": r.estado, "texto": r.texto, "error": r.error,
+                    "modelo": r.modelo, "segundos": round(r.segundos, 1),
+                    "tokens": r.tokens, "motivo": "",
+                    #  Lo mismo, ya rotulado para entrar a un turno. Lo arma
+                    #  el motor y no quien llama: el rotulo le dice al modelo
+                    #  que esto lo escribio otra IA mirando pixeles, y si lo
+                    #  armara cada pantalla, una se lo olvidaria y el agente
+                    #  repetiria la descripcion como un hecho comprobado.
+                    "para_el_turno": vision.texto_para_el_agente(
+                        r, pie, proposito=proposito)}), 200
 
 
 @app.get("/autonomia")
@@ -5847,6 +6348,19 @@ def conversaciones():
         salida = proyeccion.agrupar_por_numero(salida, nacimientos)
     salida.sort(key=proyeccion.orden_de_cola)
 
+    # LA VENTANA DE 24 H TAMBIEN EN LA COLA (29/10/2026). Hasta hoy solo la
+    # calculaba la vista de UNA conversacion, y en la cola no se veia cual
+    # estaba por cerrarse. Mismo calculo que alla (whatsapp.estado_de_ventana)
+    # y del NUMERO, no de la fila: el ultimo mensaje del cliente puede estar
+    # en otra abierta del mismo chat (C19).
+    for fila in salida:
+        if fila.get("canal") != "whatsapp":
+            continue
+        entrantes = [x.get("ultimo_mensaje_cliente")
+                     for x in [fila, *(fila.get("abiertas") or [])]
+                     if x.get("ultimo_mensaje_cliente")]
+        fila["ventana_whatsapp"] = whatsapp.estado_de_ventana(max(entrantes) if entrantes else None)
+
     # El plazo de toma viaja con la cola y no por conversacion: es uno solo
     # para toda la empresa, y mandarlo repetido en cada fila seria el mismo
     # numero N veces. 0 = la empresa no definio objetivo, y entonces la
@@ -5857,12 +6371,14 @@ def conversaciones():
         # Como se lee cada motivo, etiqueta y caso: uno solo para la empresa,
         # igual que el plazo (Conversaciones.rotulos).
         rotulos = dict(cfg_cola.conversaciones.rotulos)
+        areas_cola = {a.nombre: a.etiqueta for a in cfg_cola.areas}
     except Exception:
         # No poder leer la config no puede tumbar la cola entera: sin plazo,
         # la Bandeja funciona igual, sólo que sin el reloj -- y sin rótulos,
         # con las claves como venían.
         sla = 0
         rotulos = {}
+        areas_cola = {}
 
     # La salud del canal viaja con la cola por lo mismo que el plazo: es una
     # sola para la empresa. Son los tres numeros crudos -- el veredicto lo
@@ -5873,6 +6389,9 @@ def conversaciones():
                     "agrupada": por_numero,
                     "sla_toma_minutos": sla,
                     "rotulos": rotulos,
+                    # Las areas de la empresa, para decir «Escalada a Soporte
+                    # Técnico» con la etiqueta y filtrar por area (T22).
+                    "areas": areas_cola,
                     "canal_whatsapp": canal_whatsapp})
 
 
@@ -6544,6 +7063,15 @@ def conversaciones_mensajes(id_conversacion):
             conv.get("ultimo_mensaje_cliente_numero") or conv.get("ultimo_mensaje_cliente"))
     # Quien controla HOY, ya calculado: la pantalla no reimplementa la regla.
     conv["control_efectivo"] = control_efectivo(conv)
+    # REINCIDENCIA (29/10/2026): cuantas veces escribio este numero en los
+    # ultimos N dias, y por que. La cuenta es del codigo; la pantalla solo la
+    # dice. No poder calcularla no puede tumbar la conversacion.
+    try:
+        dias = int(getattr(_config_de(tenant).conversaciones, "reincidencia_dias", 0) or 0)
+        conv["reincidencia"] = persistencia.reincidencia_de(tenant, id_conversacion, dias)
+    except Exception as e:
+        registrar("conversaciones", "no se pudo calcular la reincidencia", error=e)
+        conv["reincidencia"] = None
 
     # Los identificadores tecnicos del equipo del cliente, FILTRADOS por la
     # misma lista que decide que se persiste al verificar. 'datos_sesion'
@@ -7490,6 +8018,281 @@ def caso_enviar_encuesta(caso_id):
     return jsonify(resultado), 200
 
 
+@app.post("/avisos/evento")
+def aviso_proactivo():
+    """
+    Un aviso que Dexter le manda a un cliente por iniciativa propia (PRD
+    §8.17, Ola 2): lo pide quien detecto el hecho -- el CRM al publicar el dia,
+    o al atar un caso de "Nuevo ticket" a su ticket del ISP.
+
+    Cuerpo: {tenant, evento, clave, caso_id?, telefono?, servicio?, contexto?}.
+    'clave' identifica el HECHO (una orden en una fecha): con la misma clave el
+    aviso sale una sola vez, aunque el pedido llegue dos veces. 'telefono' es
+    el campo crudo del ISP; el motor lo normaliza. 'servicio' es para quien no
+    tiene el telefono: el motor lee la ficha del ISP, solo si le hace falta.
+    Decide nucleo/seguimiento/avisos.py; esta ruta solo valida y pasa.
+    """
+    from nucleo.config.mensajes_catalogo import PROACTIVOS
+    from nucleo.persistencia import mensajes_automaticos as registro_avisos
+    from nucleo.seguimiento import mensajes_automaticos
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, evento = cuerpo.get("tenant"), cuerpo.get("evento")
+    if not tenant or not evento:
+        return jsonify({"error": "Faltan 'tenant' o 'evento'."}), 400
+    contrato = PROACTIVOS.get(evento)
+    if contrato is None:
+        return jsonify({"error": f"'{evento}' no se pide por esta ruta."}), 400
+    #  Solo los datos que este evento acepta de quien lo pide (ver el contrato
+    #  en mensajes_catalogo.PROACTIVOS).
+    crudo = cuerpo.get("contexto") if isinstance(cuerpo.get("contexto"), dict) else {}
+    contexto = {k: v for k, v in crudo.items() if k in contrato["contexto"]}
+    caso_id, telefono, servicio, clave = cuerpo.get("caso_id"), cuerpo.get("telefono"), None, None
+    if contrato["destino"] == "ticket":
+        numero = cuerpo.get("ticket")
+        if not re.fullmatch(r"\d{1,20}", str(numero or "")):
+            return jsonify({"error": "'ticket' va solo con digitos."}), 400
+        #  Ni el chat de un caso ni un telefono suelto: el destino sale del
+        #  servicio del ticket, que el motor confirma en el ISP.
+        caso_id, telefono = None, None
+    else:
+        clave = cuerpo.get("clave")
+        if not clave:
+            return jsonify({"error": "Falta 'clave'."}), 400
+    try:
+        config = _config_de(tenant)
+        if contrato["destino"] == "ticket":
+            #  El horario ANTES de leer el ISP: fuera de hora no se le pregunta
+            #  nada a WispHub para contestar "todavia no" (auditor independiente).
+            espera = avisos_proactivos._segundos_hasta_el_horario(config, datetime.now(timezone.utc))
+            if espera:
+                return jsonify({"enviado": False, "motivo": "todavia_no", "reintentar_en": espera}), 200
+            hecho = avisos_proactivos.hecho_del_ticket(
+                config, str(numero),
+                leer=lambda n: importacion_io.ticket_para_aviso(config, tenant, n),
+                asuntos=lambda: {a["asunto"] for a in ticket_desde_dexter.asuntos(config, tenant)})
+            if "clave" not in hecho:
+                return jsonify(hecho), 200
+            clave, servicio, contexto = hecho["clave"], hecho["servicio"], hecho["contexto"]
+        resultado = avisos_proactivos.avisar(
+            config, tenant, evento, str(clave),
+            servicio=servicio,
+            ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
+            caso_id=caso_id, telefono_crudo=telefono,
+            contexto=contexto, ahora=datetime.now(timezone.utc),
+            conversacion_de=lambda caso: encuestas_db.destino_del_caso(tenant, caso),
+            ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
+            de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),
+            enviar=mensajes_automaticos.enviar)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        #  La base no contesto (la baja no se pudo comprobar, o no se pudo
+        #  reservar): no sale nada -- falla cerrado.
+        return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
+                     componente="avisos", e=e)
+    return jsonify(resultado), 200
+
+
+def _caida_no_lista(config, tenant, evento) -> str | None:
+    """Por que un aviso de caida no podria salir, ANTES de aprobar o de una
+    tanda: lo de mensajes_automaticos.listo, y ademas el indicativo del pais.
+    La caida le escribe a moviles del ISP (nunca a un chat): sin indicativo,
+    cada cliente volveria con 'sin_indicativo' y la aprobacion quedaria
+    gastada (auditor independiente, 31/10/2026)."""
+    from nucleo.seguimiento import mensajes_automaticos
+
+    motivo = mensajes_automaticos.listo(config, tenant, evento)
+    if motivo:
+        return motivo
+    if not getattr(getattr(config, "autenticacion", None), "indicativo_pais", None):
+        return "sin_indicativo"
+    return None
+
+
+def _puerto_de(cuerpo):
+    """(olt, board, port) si los tres son digitos; None si no."""
+    partes = tuple(str(cuerpo.get(c) or "") for c in ("olt", "board", "port"))
+    return partes if all(re.fullmatch(r"\d{1,6}", x) for x in partes) else None
+
+
+@app.post("/avisos/caida/afectados")
+def aviso_caida_afectados():
+    """
+    A quien se le avisaria una caida de un puerto (PRD §8.17, Ola 2). Solo
+    LEE: es lo que la persona mira antes de aprobar. Cuerpo: {tenant, olt,
+    board, port}. Conteos y servicios, nunca seriales. Ver
+    nucleo/seguimiento/aviso_de_caida.py.
+    """
+    from nucleo.seguimiento import aviso_de_caida
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, puerto = cuerpo.get("tenant"), _puerto_de(cuerpo)
+    if not tenant or puerto is None:
+        return jsonify({"error": "Faltan 'tenant' u 'olt', 'board', 'port' (digitos)."}), 400
+    try:
+        config = _config_de(tenant)
+        resultado = aviso_de_caida.afectados(config, tenant, *puerto)
+        #  Cuando cayo cada equipo es para armar la clave del lote: no sale.
+        resultado = {k: v for k, v in resultado.items() if k != "cayo"}
+        if not resultado.get("cargando"):
+            from nucleo.seguimiento import mensajes_automaticos
+
+            #  Cuantos por tanda (de la empresa), y si el aviso PUEDE salir:
+            #  apagado o sin plantilla aprobada se dice antes de aprobar, no
+            #  consumiendo la aprobacion cliente por cliente.
+            resultado = {**resultado, "lote": config.aviso_de_caida.lote,
+                         "no_listo": _caida_no_lista(config, tenant, aviso_de_caida.EVENTO),
+                         "modo_prueba": mensajes_automaticos.en_prueba(config, aviso_de_caida.EVENTO)}
+    except aviso_de_caida.CaidaNoAvisable as e:
+        return jsonify({"error": e.codigo}), e.http
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(resultado), (202 if resultado.get("cargando") else 200)
+
+
+@app.post("/avisos/caida/lote")
+def aviso_caida_lote():
+    """
+    Manda el aviso de caida a un lote que una PERSONA aprobo (PRD §8.17).
+
+    Cuerpo: {tenant, olt, board, port, situacion, autor, servicios[]}. La
+    lista NO se le cree a quien la manda: se cruza con los afectados que el
+    motor lee en este momento (aviso_de_caida.lote_confirmado). Cada aviso
+    sale por la puerta comun con una clave que arma el motor con lo que el
+    mismo midio -- el servicio y la hora en que cayo su equipo --, sin
+    contexto ni destino de afuera: cambiar 'situacion' no repite un aviso.
+    Si el aviso ya no puede salir (se apago a mitad), 409 y no se lee nada.
+    Contesta {enviados, motivos, pendientes, reintentar_en, descartados}.
+    """
+    from nucleo.persistencia import mensajes_automaticos as registro_avisos
+    from nucleo.seguimiento import aviso_de_caida, mensajes_automaticos
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, puerto = cuerpo.get("tenant"), _puerto_de(cuerpo)
+    situacion = str(cuerpo.get("situacion") or "")
+    autor = str(cuerpo.get("autor") or "").strip()
+    servicios = cuerpo.get("servicios")
+    if not tenant or puerto is None or not autor or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", situacion):
+        return jsonify({"error": "Faltan 'tenant', el puerto, 'situacion' o 'autor'."}), 400
+    if not isinstance(servicios, list) or not servicios or not all(
+            re.fullmatch(r"\d{1,20}", str(x)) for x in servicios):
+        return jsonify({"error": "'servicios' es una lista de numeros."}), 400
+    servicios = [str(x) for x in servicios]
+    try:
+        config = _config_de(tenant)
+        if len(servicios) > config.aviso_de_caida.lote:
+            #  La empresa bajo el lote despues de aprobar: se dice cuanto es,
+            #  y quien manda achica la tanda en vez de detenerse.
+            return jsonify({"error": "LOTE_GRANDE", "lote": config.aviso_de_caida.lote}), 400
+        no_listo = _caida_no_lista(config, tenant, aviso_de_caida.EVENTO)
+        if no_listo:
+            #  Se apago (o se desaprobo la plantilla) a mitad del envio: no se
+            #  lee SmartOLT ni una ficha para contestar 'apagado' 25 veces.
+            return jsonify({"error": f"AVISO_{no_listo.upper()}"}), 409
+        vigentes = aviso_de_caida.afectados(config, tenant, *puerto)
+        if vigentes.get("cargando"):
+            return jsonify({"enviados": 0, "motivos": {}, "pendientes": servicios,
+                            "reintentar_en": 60, "descartados": 0}), 200
+        lote, descartados = aviso_de_caida.lote_confirmado(servicios, vigentes)
+        cayo = vigentes.get("cayo") or {}
+        ahora = datetime.now(timezone.utc)
+
+        def avisar_uno(servicio):
+            return avisos_proactivos.avisar(
+                config, tenant, aviso_de_caida.EVENTO,
+                aviso_de_caida.clave(servicio, cayo.get(servicio, "")),
+                servicio=servicio,
+                ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
+                caso_id=None, telefono_crudo=None, contexto={}, ahora=ahora,
+                conversacion_de=lambda caso: None,
+                ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
+                de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),
+                enviar=mensajes_automaticos.enviar)
+
+        resultado = aviso_de_caida.avisar_lote(lote, avisar_uno)
+    except aviso_de_caida.CaidaNoAvisable as e:
+        return jsonify({"error": e.codigo}), e.http
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        #  La base no contesto (la baja o la reserva): no sale nada.
+        return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
+                     componente="avisos", e=e)
+    #  Quien aprobo viaja como 'profile:<id>' -- un id, no un nombre --, y
+    #  queda en el log de cada tanda junto a la situacion que la origino.
+    registrar("avisos", "lote de aviso de caida", tenant=tenant, situacion=situacion,
+              aprobo=autor[:64], enviados=resultado["enviados"],
+              descartados=descartados, pendientes=len(resultado["pendientes"]))
+    return jsonify({**resultado, "descartados": descartados}), 200
+
+
+@app.post("/avisos/caida/restablecida")
+def aviso_caida_restablecida():
+    """
+    "Ya quedo restablecido" a los clientes de una caida avisada (31/10/2026).
+    Cuerpo: {tenant, olt, board, port, situacion, autor, servicios[]} -- los
+    que la persona aprobo para el aviso de caida. El motor manda SOLO a los
+    que recibieron ese aviso y cuyo equipo ya no esta en LOS; los que siguen
+    caidos vuelven en 'siguen_caidos' para pedirlos despues.
+    """
+    from nucleo.persistencia import mensajes_automaticos as registro_avisos
+    from nucleo.seguimiento import aviso_de_caida, mensajes_automaticos
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, puerto = cuerpo.get("tenant"), _puerto_de(cuerpo)
+    situacion = str(cuerpo.get("situacion") or "")
+    autor = str(cuerpo.get("autor") or "").strip()
+    servicios = cuerpo.get("servicios")
+    if not tenant or puerto is None or not autor or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", situacion):
+        return jsonify({"error": "Faltan 'tenant', el puerto, 'situacion' o 'autor'."}), 400
+    if not isinstance(servicios, list) or not servicios or not all(
+            re.fullmatch(r"\d{1,20}", str(x)) for x in servicios):
+        return jsonify({"error": "'servicios' es una lista de numeros."}), 400
+    servicios = [str(x) for x in servicios]
+    try:
+        config = _config_de(tenant)
+        if len(servicios) > config.aviso_de_caida.lote:
+            return jsonify({"error": "LOTE_GRANDE", "lote": config.aviso_de_caida.lote}), 400
+        no_listo = _caida_no_lista(config, tenant, aviso_de_caida.EVENTO_RESTABLECIDO)
+        if no_listo:
+            return jsonify({"error": f"AVISO_{no_listo.upper()}"}), 409
+        r = aviso_de_caida.restablecidos(
+            config, tenant, *puerto, servicios,
+            avisadas=lambda s: registro_avisos.caidas_avisadas(tenant, s, dias=7))
+        if r.get("cargando"):
+            return jsonify({"enviados": 0, "motivos": {}, "pendientes": servicios,
+                            "reintentar_en": 60, "siguen_caidos": []}), 200
+        listos = r["listos"]
+        ahora = datetime.now(timezone.utc)
+
+        def avisar_uno(servicio):
+            return avisos_proactivos.avisar(
+                config, tenant, aviso_de_caida.EVENTO_RESTABLECIDO,
+                aviso_de_caida.clave_restablecida(servicio, listos[servicio]),
+                servicio=servicio,
+                ficha_de=lambda s: importacion_io.contacto_del_servicio(config, tenant, s),
+                caso_id=None, telefono_crudo=None, contexto={}, ahora=ahora,
+                conversacion_de=lambda caso: None,
+                ya_escribio=lambda numero: registro_avisos.ya_escribio(tenant, numero),
+                de_baja=lambda ident: persistencia.esta_de_baja(tenant, ident, "whatsapp"),
+                enviar=mensajes_automaticos.enviar)
+
+        resultado = aviso_de_caida.avisar_lote(sorted(listos), avisar_uno)
+    except aviso_de_caida.CaidaNoAvisable as e:
+        return jsonify({"error": e.codigo}), e.http
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        return fallo(503, "aviso_no_enviado", "No se pudo decidir si mandar el aviso.",
+                     componente="avisos", e=e)
+    registrar("avisos", "lote de aviso de caida restablecida", tenant=tenant, situacion=situacion,
+              aprobo=autor[:64], enviados=resultado["enviados"],
+              siguen_caidos=len(r["siguen_caidos"]), sin_aviso_previo=r["sin_aviso_previo"])
+    return jsonify({**resultado, "siguen_caidos": r["siguen_caidos"],
+                    "sin_aviso_previo": r["sin_aviso_previo"]}), 200
+
+
 @app.get("/encuestas/resumen")
 def encuestas_resumen():
     """
@@ -7697,6 +8500,21 @@ def conversaciones_responder_humano(id_conversacion, ticket_del_caso: str | None
                         "aceptacion_registrada": entrega["aceptacion_registrada"],
                         "devuelto_al_asistente": devuelto}), 200
     reintento = bool(destino.get("existente"))
+
+    # «QUEDA EN ESPERA» -- la opcion de T5 (29/10/2026). Con texto abre o
+    # renueva el pendiente interno; sin el, cierra el que habia ("sin la
+    # marca: cierra el pendiente interno previo", contrato §6). No va con
+    # "responder y devolver": esa deja la conversacion a la IA. Un fallo aca
+    # no tumba la respuesta, que ya esta guardada: queda en el log.
+    if not devolver:
+        try:
+            transiciones.marcar_pendiente_interno(
+                tenant, id_conversacion, nota=cuerpo.get("pendiente_interno"),
+                operador_id=autor_id, operador_nombre=autor,
+                hasta=_hora_iso(cuerpo.get("pendiente_interno_hasta")),
+                clave=f"pendiente:{clave}" if clave else None)
+        except Exception as e:
+            registrar("conversaciones", "no se pudo marcar el pendiente interno", error=e)
 
     # Lo que escribio la persona entra al HISTORIAL que ve el modelo, marcado
     # como suyo.
@@ -8364,6 +9182,8 @@ def conversaciones_reiniciar_equipo(id_conversacion):
     # ADMIN, conversacion abierta -- siguen siendo las de esta ruta; la cadena
     # se suma, no las reemplaza.
     quien = autor_nombre or autor_id
+    if _aprobador_reservado(quien):
+        return jsonify({"error": "Ese nombre de aprobador esta reservado."}), 400
     argumentos = {"sn_onu": serial}
     sesion_min = Sesion(identificador_canal=quien)
     sesion_min.sn_onu = serial
@@ -8600,7 +9420,8 @@ def manual_casos():
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
-    return jsonify({"casos": config.manual.casos})
+    return jsonify({"casos": config.manual.casos,
+                    "rotulos": dict(config.conversaciones.rotulos)})
 
 
 @app.put("/manual/casos")
@@ -8619,15 +9440,20 @@ def manual_casos_guardar():
     casos = cuerpo.get("casos")
     if not isinstance(casos, list):
         return jsonify({"error": "'casos' tiene que ser una lista."}), 400
+    # Como se lee cada caso nuevo (29/10/2026). Opcional: una pantalla vieja
+    # que no lo manda guarda los casos igual que antes.
+    rotulos = cuerpo.get("rotulos") or {}
 
     try:
-        config = editor.guardar_casos_manual(tenant, casos)
+        config = editor.guardar_casos_manual(tenant, casos, rotulos)
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
 
-    return jsonify({"casos": config.manual.casos})
+    olvidar_config(tenant)
+    return jsonify({"casos": config.manual.casos,
+                    "rotulos": dict(config.conversaciones.rotulos)})
 
 
 @app.get("/manual/ejemplos")
@@ -9284,15 +10110,31 @@ def acciones_propuesta_aprobar(id_accion):
         # comprueba que llegue.
         return jsonify({"error": "Falta 'revisado_por': una ejecucion aprobada "
                                  "sin responsable no se puede auditar."}), 400
+    if _aprobador_reservado(quien):
+        return jsonify({"error": "Ese nombre de aprobador esta reservado."}), 400
 
     return _aprobar_y_ejecutar(config, tenant, id_accion, quien)
 
 
 def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
+    """La respuesta Flask de _aprobar_y_ejecutar_datos: las dos entradas
+    humanas (la cola y el boton de la Bandeja) la usan tal cual."""
+    datos, codigo = _aprobar_y_ejecutar_datos(config, tenant, id_accion, quien)
+    return jsonify(datos), codigo
+
+
+def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *,
+                              al_bloquear: str = "vencer") -> tuple[dict, int]:
     """
     Los cuatro pasos de §9.3 sobre una accion ya propuesta: reservar (que es
     aprobar, y para una irreversible escribe el sello), revalidar, ejecutar,
-    resolver. Devuelve la respuesta Flask.
+    resolver. Devuelve (datos, codigo http).
+
+    TAMBIEN la usa la autonomia ganada (31/10/2026, PRD §2, Fase C): la misma
+    cadena, con 'autonomia_ganada:<promocion>' como quien. Para ella, una
+    guarda que frena la accion la devuelve a la cola de una persona
+    (al_bloquear='liberar') en vez de vencerla: al cliente se le dijo que
+    quedo pedido, y alguien tiene que verla.
 
     M06-F: vive aparte del endpoint porque hay DOS entradas humanas a la misma
     cadena -- aprobar una propuesta de la cola, y el boton de reinicio de la
@@ -9304,10 +10146,10 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         reserva = persistencia.reservar_accion(tenant, id_accion, quien)
     except Exception as e:
         registrar("acciones", "fallo al reservar la accion", error=e)
-        return jsonify({"error": "No se pudo tomar la accion."}), 500
+        return ({"error": "No se pudo tomar la accion."}), 500
 
     if not reserva["ok"]:
-        return jsonify(_NEGATIVAS.get(reserva["motivo"], {
+        return (_NEGATIVAS.get(reserva["motivo"], {
             "error": "No se pudo aprobar esta accion.",
             "codigo": reserva["motivo"]})), _CODIGO_HTTP.get(reserva["motivo"], 409)
 
@@ -9320,7 +10162,7 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         # se ejecuta, y vuelve a pendiente: puede que alguien este editando el
         # catalogo justo ahora.
         persistencia.liberar_accion(tenant, id_accion, "herramienta_fuera_de_catalogo")
-        return jsonify({"error": "La herramienta de esta accion ya no esta "
+        return ({"error": "La herramienta de esta accion ya no esta "
                                  "disponible para aprobacion.",
                         "codigo": "herramienta_fuera_de_catalogo"}), 409
 
@@ -9332,15 +10174,20 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         # vuelve a estar disponible: el operador reintenta cuando la API
         # responda.
         persistencia.liberar_accion(tenant, id_accion, veredicto.codigo)
-        return jsonify({"error": "No se pudo comprobar que esta accion siga "
+        return ({"error": "No se pudo comprobar que esta accion siga "
                                  "aplicando. No se ejecuto nada: se puede "
                                  "reintentar.",
                         "codigo": "revalidacion_indeterminada",
                         "detalle": veredicto.codigo, "estado": "pendiente"}), 503
 
+    if veredicto.desenlace == revalidacion.NO_CUMPLE and al_bloquear == "liberar":
+        #  La autonomia no decide que "ya no aplica": lo mira una persona.
+        persistencia.liberar_accion(tenant, id_accion, veredicto.codigo)
+        return ({"ok": False, "estado": "pendiente", "codigo": "revalidacion_fallida",
+                 "detalle": veredicto.codigo}), 409
     if veredicto.desenlace == revalidacion.NO_CUMPLE:
         persistencia.vencer_accion(tenant, id_accion, veredicto.codigo, conv)
-        return jsonify({"error": veredicto.detalle or "Esta accion ya no aplica.",
+        return ({"error": veredicto.detalle or "Esta accion ya no aplica.",
                         "codigo": "revalidacion_fallida",
                         "detalle": veredicto.codigo, "estado": "vencida"}), 409
 
@@ -9364,7 +10211,7 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         if not fila or fila.get("estado") != "ejecutando":
             # No se ejecuto nada: vuelve a estar disponible.
             persistencia.liberar_accion(tenant, id_accion, "relectura_fallida")
-            return jsonify({"error": "No se pudo releer la accion aprobada. No "
+            return ({"error": "No se pudo releer la accion aprobada. No "
                                      "se ejecuto nada: se puede reintentar.",
                             "codigo": "relectura_fallida", "estado": "pendiente"}), 503
         resultado, codigo_error, verificacion_pendiente =             motor.ejecutar_accion_irreversible(config, fila, tenant)
@@ -9376,9 +10223,20 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
     # no salio nada hacia el tercero. No es un fallo del sistema externo y no
     # queda como 'ejecutada_fallo'. Queda 'vencida' con el codigo del bloqueo:
     # la aprobacion era para ESE momento y no se reutiliza sola.
-    if codigo_error in motor.CODIGOS_DE_BLOQUEO:
+    #  Un bloqueo de la FRONTERA (interruptor, techo, autorizacion, aprobacion,
+    #  autonomia que dejo de estar vigente) no es una ejecucion fallida: no
+    #  salio nada. Para la autonoma se trata como cualquier guarda -- vuelve a
+    #  una persona -- y nunca degrada (auditor de frontera, 31/10/2026). El
+    #  camino humano queda como estaba.
+    de_frontera = bool((resultado or {}).get("bloqueo_de_frontera"))
+    if codigo_error in motor.CODIGOS_DE_BLOQUEO or (de_frontera and al_bloquear == "liberar"):
+        if al_bloquear == "liberar":
+            persistencia.liberar_accion(tenant, id_accion, codigo_error)
+            return ({"ok": False, "estado": "pendiente", "codigo": codigo_error,
+                     "error": "Una guarda del sistema freno la ejecucion autonoma: "
+                              "queda para que una persona la apruebe."}), 409
         persistencia.vencer_accion(tenant, id_accion, codigo_error, conv)
-        return jsonify({"ok": False, "estado": "vencida", "codigo": codigo_error,
+        return ({"ok": False, "estado": "vencida", "codigo": codigo_error,
                         "error": (resultado or {}).get("error")
                                  or "Una guarda del sistema freno esta accion.",
                         "resultado": resultado}), 409
@@ -9407,6 +10265,18 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         registrar("acciones", "la accion se ejecuto y no se pudo guardar el desenlace",
                   error=e)
 
+    if codigo_error and not de_frontera:
+        #  CONDICION 4 (PRD §2, Fase D): una ejecucion que fallo o quedo
+        #  incierta degrada la autonomia de esa herramienta en esta empresa,
+        #  la haya ejecutado una persona o la autonomia. No-op si no la tenia.
+        _degradar_autonomia(tenant, herramienta.nombre,
+                            "una ejecucion fallo o quedo incierta",
+                            {"accion": str(id_accion), "codigo": str(codigo_error)})
+    elif confirmado is False:
+        #  Se releyo y el efecto NO esta: lo mismo.
+        _degradar_autonomia(tenant, herramienta.nombre, "se releyo y el efecto no estaba",
+                            {"accion": str(id_accion)})
+
     if verificacion_pendiente and conv and not codigo_error:
         # El efecto salio EN ESTA pasada (reiniciar_ont): se comprueba despues,
         # contra la conversacion de la que salio la propuesta.
@@ -9416,17 +10286,169 @@ def _aprobar_y_ejecutar(config, tenant: str, id_accion: str, quien: str):
         except Exception as e:
             registrar("acciones", "no se pudo anotar la verificacion de la accion",
                       error=e)
+            #  Un efecto que nadie va a medir no puede sostener una autonomia.
+            _degradar_autonomia(tenant, herramienta.nombre,
+                                "no se pudo anotar la verificacion del efecto",
+                                {"accion": str(id_accion)})
 
     if incierto:
-        return jsonify({"ok": False, "estado": "desconocida",
+        return ({"ok": False, "estado": "desconocida",
                         "error_ejecucion": codigo_error,
                         "mensaje": "No se sabe si la accion llegó a hacerse. NO se "
                                    "reintenta: hay que comprobarlo a mano."}), 502
     if codigo_error:
-        return jsonify({"ok": False, "estado": "ejecutada_fallo",
+        return ({"ok": False, "estado": "ejecutada_fallo",
                         "error_ejecucion": codigo_error, "resultado": resultado}), 502
 
-    return jsonify(_salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion))
+    return _salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion), 200
+
+
+def _degradar_autonomia(tenant: str, herramienta: str, motivo: str, evidencia: dict) -> None:
+    """Condicion 4 (PRD §2): baja la autonomia ganada de la herramienta. Nunca
+    rompe a quien llama: si no se puede escribir, queda en el log (y la
+    proxima ejecucion autonoma igual exige que la promocion siga vigente)."""
+    try:
+        from nucleo.persistencia import autonomia_ganada as registro
+
+        fila = registro.degradar(tenant, herramienta, motivo, evidencia)
+        if fila:
+            registrar("autonomia_ganada", "autonomia degradada por el codigo",
+                      tenant=tenant, herramienta=herramienta)
+    except (Exception, SystemExit) as e:                        # noqa: BLE001
+        registrar("autonomia_ganada", "no se pudo degradar la autonomia",
+                  tenant=tenant, herramienta=herramienta, error=e)
+
+
+def _aprobador_reservado(quien: str) -> bool:
+    """Ninguna persona firma como la autonomia (aprobacion.PREFIJO_AUTONOMIA)."""
+    from nucleo.seguridad import aprobacion
+
+    return (quien or "").strip().lower().startswith(aprobacion.PREFIJO_AUTONOMIA)
+
+
+#: Cuanto espera la ejecucion autonoma despues de que el turno contesto: el
+#: cliente tiene que leer "quedo pedido" ANTES de que se le reinicie el equipo
+#: (si usa el wifi de esa misma ONT, despues no le llega nada).
+SEGUNDOS_ANTES_DE_LA_AUTONOMA = 8
+
+
+def _lanzar_autonomas(config, tenant: str, canal: str, id_sesion: str, estado: dict,
+                      cerrada: bool) -> None:
+    """
+    Las acciones autonomas que dejo el turno, en un hilo y un rato despues de
+    contestar (PRD §2, Fase C). No se lanza nada si el turno escalo o cerro, ni
+    fuera de un canal real (el simulador no reinicia equipos solo). Justo antes
+    de cada una se vuelve a preguntar si el turno sigue al mando (D25): si una
+    persona intervino en el medio, no sale.
+    """
+    pendientes = estado.pop("autonomas_por_ejecutar", None) or []
+    if not pendientes:
+        return
+    if canal not in canales.REALES or cerrada or estado.get("escalada_del_turno") \
+            or estado.get("escalada"):
+        registrar("autonomia_ganada", "no se ejecuta sola: el turno escalo, cerro o no es un canal real",
+                  tenant=tenant, acciones=len(pendientes))
+        return
+
+    def correr():
+        time.sleep(SEGUNDOS_ANTES_DE_LA_AUTONOMA)
+        for accion_id, herr in pendientes:
+            # CON EL PROCESO SALIENDO NO SE EMPIEZA UN EFECTO. Un despliegue
+            # espera a los turnos en vuelo (en_vuelo), asi que este hilo puede
+            # despertar con el SIGTERM ya recibido; empezar ahi un reinicio y
+            # que lo corte el tope es la peor combinacion. La propuesta queda
+            # para una persona, igual que cuando no se puede medir el volumen.
+            if en_vuelo.apagando():
+                registrar("autonomia_ganada", "el motor se esta apagando: queda para una persona",
+                          tenant=tenant)
+                continue
+            try:
+                if not _efecto_del_turno(tenant, canal, id_sesion, estado, "autonomia_ganada"):
+                    continue
+                _ejecutar_si_es_autonoma(config, tenant, accion_id, herr)
+            except Exception as e:                               # noqa: BLE001
+                registrar("autonomia_ganada", "la ejecucion autonoma fallo", tenant=tenant, error=e)
+
+    # Por en_vuelo: una ejecucion ya empezada termina antes de que el proceso
+    # salga, en vez de quedar cortada a mitad del efecto.
+    en_vuelo.lanzar(correr, nombre="autonomia-ganada")
+
+
+def _ejecutar_si_es_autonoma(config, tenant: str, accion_id: str, herramienta) -> dict | None:
+    """
+    Si la herramienta tiene autonomia ganada vigente en esta empresa, ejecuta
+    la propuesta recien ligada a su conversacion por la MISMA cadena que una
+    aprobacion humana, firmada por la promocion (PRD §2, Fase C). None si no
+    es autonoma. Nunca rompe el turno.
+
+    Solo irreversibles con aprobacion humana: son las unicas que pasan por
+    frontera.critica(), que es donde se vuelve a exigir -- en el instante de
+    ejecutar -- que la promocion siga vigente, ademas del interruptor y el
+    techo.
+    """
+    if herramienta is None or not getattr(herramienta, "aprobacion_humana", False) \
+            or not getattr(herramienta, "irreversible", False):
+        return None
+    from nucleo.seguridad import aprobacion, autonomia_ganada
+    from nucleo.persistencia import autonomia_ganada as registro
+
+    #  POR AGENTE (02/11/2026): la promocion que vale es la del agente que la
+    #  pidio. Si no se puede leer la propuesta, no se adivina: queda para una
+    #  persona.
+    try:
+        propuesta = persistencia.accion_propuesta_de(tenant, accion_id)
+    except (Exception, SystemExit) as e:                         # noqa: BLE001
+        registrar("autonomia_ganada", "no se pudo leer la propuesta: queda para una persona",
+                  tenant=tenant, herramienta=herramienta.nombre, error=e)
+        return None
+    if not propuesta:
+        #  Sin propuesta no hay agente que mirar: no se adivina lo general.
+        return None
+    rol_solicitante = propuesta.get("rol_solicitante") or None
+    vigente = autonomia_ganada.vigente(tenant, herramienta.nombre, leer=registro.vigente,
+                                       config_herramienta=herramienta, rol=rol_solicitante)
+    if vigente.get("estado") == autonomia_ganada.YA_ES_CRITICA:
+        _degradar_autonomia(tenant, herramienta.nombre,
+                            "se promovio sin evidencia por no critica y hoy la empresa "
+                            "la declara critica", {"promocion_id": vigente.get("promocion_id")})
+        return None
+    if not vigente.get("autonoma"):
+        return None
+    try:
+        sin_resolver = registro.verificaciones_sin_resolver(
+            tenant, herramienta.nombre, autonomia_ganada.HORAS_SIN_RESOLVER, vigente.get("desde"))
+        por_hora = registro.ejecuciones_autonomas(tenant, herramienta.nombre, horas=1)
+        fila = persistencia.accion_propuesta_de(tenant, accion_id) or {}
+        misma = registro.ejecuciones_autonomas(tenant, herramienta.nombre, horas=24,
+                                               hash_argumentos=fila.get("hash_argumentos"))
+    except (Exception, SystemExit) as e:                         # noqa: BLE001
+        registrar("autonomia_ganada", "no se pudo medir el volumen: queda para una persona",
+                  tenant=tenant, herramienta=herramienta.nombre, error=e)
+        return None
+    if sin_resolver >= autonomia_ganada.MAXIMO_SIN_RESOLVER:
+        #  Reinicios que nadie midio: no son evidencia, y la autonomia baja.
+        _degradar_autonomia(tenant, herramienta.nombre,
+                            "verificaciones sin resolver: el efecto no se esta midiendo",
+                            {"sin_resolver": sin_resolver})
+        return None
+    if por_hora >= autonomia_ganada.TOPE_POR_HORA or \
+            misma >= autonomia_ganada.TOPE_MISMA_ACCION_POR_DIA:
+        #  Tope de volumen: no degrada (no es una falla), queda para una persona.
+        registrar("autonomia_ganada", "tope de volumen: queda para una persona", tenant=tenant,
+                  herramienta=herramienta.nombre, por_hora=por_hora, misma_accion=misma)
+        return None
+    try:
+        datos, codigo = _aprobar_y_ejecutar_datos(
+            config, tenant, accion_id, f"{aprobacion.PREFIJO_AUTONOMIA}{vigente['promocion_id']}",
+            al_bloquear="liberar")
+    except Exception as e:                                       # noqa: BLE001
+        registrar("autonomia_ganada", "la ejecucion autonoma fallo", tenant=tenant,
+                  herramienta=herramienta.nombre, error=e)
+        return {"ok": False, "estado": "desconocido"}
+    registrar("autonomia_ganada", "accion ejecutada por autonomia ganada", tenant=tenant,
+              herramienta=herramienta.nombre, http=codigo, ok=bool(datos.get("ok")),
+              estado=datos.get("estado"))
+    return datos
 
 
 def _confirmar_efecto(config, tenant, herramienta, reservada, codigo_error):
@@ -10506,10 +11528,13 @@ def whatsapp_webhook(tenant):
                       tenant=tenant, wamid=ref_proveedor(wamid), error=e)
             continue
 
-        hilo = threading.Thread(
-            target=_procesar_mensaje_whatsapp,
-            args=(config, tenant, rol, entrante), daemon=True)
-        hilo.start()
+        # POR en_vuelo Y NO CON UN HILO SUELTO: Meta ya tiene su 200 y no va a
+        # reintentar, asi que si un despliegue corta este hilo el mensaje se
+        # pierde sin rastro. Medido el 31/10/2026 -- ver nucleo/canales/en_vuelo.py.
+        # El nombre lleva la huella del wamid: si hay que cortarlo, el log
+        # dice cual fue.
+        en_vuelo.lanzar(_procesar_mensaje_whatsapp, config, tenant, rol, entrante,
+                        nombre="turno-whatsapp", ref=ref_proveedor(wamid))
         atendidos += 1
 
     # Los acuses de entrega llegan por este mismo webhook y NO son
@@ -10902,8 +11927,8 @@ def conversaciones_devolver(id_conversacion):
     # convertiria "devolver" en una operacion lenta, y peor, un timeout del
     # navegador haria parecer que fallo algo que ya se aplico.
     if pendiente:
-        threading.Thread(target=_atender_pendiente_tras_devolver,
-                         args=(tenant, pendiente), daemon=True).start()
+        en_vuelo.lanzar(_atender_pendiente_tras_devolver, tenant, pendiente,
+                        nombre="turno-devuelto", ref=id_interno(id_conversacion))
 
     return jsonify({"devuelta": True, "relevo_version": r.version,
                     "reintento": r.motivo == "reintento",
@@ -11036,6 +12061,146 @@ def conversaciones_reasignar(id_conversacion):
         return conflicto
     return jsonify({"reasignada": True, "aplicada": r.aplicada, "relevo_version": r.version,
                     "asignada_a": (r.datos or {}).get("nuevo_nombre") if r.aplicada else None,
+                    "reintento": r.motivo == "reintento"})
+
+
+@app.post("/conversaciones/<id_conversacion>/borrador")
+def conversaciones_borrador(id_conversacion):
+    """
+    Un borrador de respuesta para quien atiende (30/10/2026). A PEDIDO: lo
+    pide un botón, nunca sale solo. NO envía nada ni escribe en la base:
+    devuelve texto que la persona edita y manda ella (nucleo/seguimiento/
+    borrador.py).
+
+    Solo con la conversación abierta y en manos de personas: con la IA
+    atendiendo, la que contesta es la IA.
+
+      200  {borrador}
+      404  no existe
+      409  cerrada, o la atiende la IA
+      422  no hay borrador para mostrar (sin nada del cliente, fuga, vacío)
+      502  el modelo no respondió
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        resultado = persistencia.mensajes_de(tenant, id_conversacion)
+    except RuntimeError:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    except Exception as e:
+        registrar("borrador", "no se pudo leer la conversacion", error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    conv = (resultado or {}).get("conversacion")
+    if not conv:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if conv.get("estado") != "abierta" or control_efectivo(conv) != "humano":
+        return jsonify({"error": "El borrador es para quien atiende: esta conversacion esta "
+                                 "cerrada o la atiende la IA.", "codigo": "no_es_de_personas"}), 409
+    try:
+        texto = borrador.redactar(_config_de(tenant), rol=conv.get("rol_efectivo"),
+                                  mensajes=resultado.get("mensajes") or [])
+    except borrador.BorradorNoDisponible as e:
+        # El texto es nuestro (borrador.py), no de una biblioteca: se puede mostrar.
+        codigo = 502 if "no respondió" in str(e) else 422
+        return jsonify({"error": f"No hay sugerencia: {e}.", "codigo": "sin_borrador"}), codigo
+    return jsonify({"borrador": texto})
+
+
+def _hora_iso(crudo):
+    """
+    Una hora ISO que manda la pantalla (la del «en espera hasta», C22), como
+    datetime con zona, o None. Sin zona no se adivina: se toma como UTC, que
+    es como la manda el navegador (toISOString). Lo que no se entiende es
+    None -- un pendiente sin hora, como antes --, nunca un error que tumbe la
+    respuesta ya guardada.
+    """
+    if not isinstance(crudo, str) or not crudo.strip():
+        return None
+    try:
+        hora = datetime.fromisoformat(crudo.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return hora if hora.tzinfo else hora.replace(tzinfo=timezone.utc)
+
+
+@app.post("/conversaciones/<id_conversacion>/escalar-area")
+def conversaciones_escalar_a_area(id_conversacion):
+    """
+    T22 (contrato v3.3, C21, 30/10/2026): quien la tiene -- o nadie -- la pasa a
+    un AREA de la empresa, con lo que valido y por que no la resolvio. Lo
+    puede hacer cualquier operador; pasarla a una persona concreta sigue
+    siendo /reasignar, de ADMIN.
+
+    Cuerpo: {tenant, autor, autor_usuario_id, area, motivo, nota,
+             clave_operacion?}
+
+    La nota queda ademas como NOTA INTERNA del hilo: quien la recibe la lee
+    en la conversacion, sin tener que buscarla en otro lado.
+
+      200  escalada (o reintento de la misma operacion)
+      400  area que no es de la empresa, o sin motivo o sin nota
+      404  no existe
+      409  de otra persona, bajo control de la IA, cerrada o de legado
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    area = (cuerpo.get("area") or "").strip()
+    motivo = " ".join((cuerpo.get("motivo") or "").split())
+    nota = (cuerpo.get("nota") or "").strip()
+    try:
+        areas = {a.nombre: a.etiqueta for a in _config_de(tenant).areas}
+    except Exception as e:
+        registrar("conversaciones", "sin config al escalar a un area", error=e)
+        return jsonify({"error": "No se pudo leer las areas de la empresa."}), 500
+    if area not in areas:
+        return jsonify({"error": "Esa area no es de esta empresa.", "codigo": "area_invalida"}), 400
+    if not motivo or not nota:
+        return jsonify({"error": "Para escalar hace falta el motivo y la nota de lo que se valido.",
+                        "codigo": "faltan_datos"}), 400
+    if len(motivo) > transiciones.MAX_MOTIVO_AREA or len(nota) > transiciones.MAX_NOTA_AREA:
+        return jsonify({"error": f"El motivo va hasta {transiciones.MAX_MOTIVO_AREA} caracteres "
+                                 f"y la nota hasta {transiciones.MAX_NOTA_AREA}.",
+                        "codigo": "demasiado_largo"}), 400
+    clave = (cuerpo.get("clave_operacion") or "").strip() or None
+    try:
+        r = transiciones.escalar_a_area(
+            tenant, id_conversacion, area=area, motivo=motivo, nota=nota,
+            areas_validas=areas, operador_id=autor_id, operador_nombre=autor, clave=clave)
+    except Exception as e:
+        registrar("conversaciones", "fallo al escalar a un area", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if r.motivo == "no_existe":
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if r.motivo == "legado":
+        return jsonify({"error": "Esta conversacion es anterior al relevo: no se puede escalar "
+                                 "hasta adoptarla.", "codigo": "legado_sin_relevo"}), 409
+    if r.motivo == "no_es_suya":
+        return jsonify({"error": "Esta conversacion la tiene otra persona: pasarla es Reasignar, "
+                                 "de un administrador.", "codigo": "no_es_suya",
+                        "asignada_a": (r.datos or {}).get("asignada_a_nombre")}), 409
+    conflicto = _conflicto_de_asignacion(r)
+    if conflicto:
+        return conflicto
+    # La nota en el hilo, solo la primera vez: un reintento no la repite. Si
+    # falla, la escalada ya quedo y la nota esta en su columna; queda en el log.
+    if r.aplicada:
+        try:
+            persistencia.agregar_nota_interna(
+                tenant, id_conversacion,
+                f"Escalada a {areas[area]} — {motivo}\n{nota}",
+                autor, autor_usuario_id=autor_id)
+        except Exception as e:
+            registrar("conversaciones", "no se pudo dejar la nota de la escalada", error=e)
+    return jsonify({"escalada": True, "aplicada": r.aplicada, "area": area,
+                    "area_etiqueta": areas[area], "relevo_version": r.version,
                     "reintento": r.motivo == "reintento"})
 
 

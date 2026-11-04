@@ -9,11 +9,16 @@ import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_empty_state.dart';
+import '../../core/widgets/lista_con_scroll_propio.dart';
 import '../materiales/estado_de_jornada.dart';
 import '../notificaciones/notificaciones_screen.dart';
 import '../trabajo/estado_trabajo.dart';
 import '../trabajo/seleccion_jornada.dart';
 import '../trabajo/trabajo_vista.dart';
+import 'labor_de_hoy.dart';
+import 'novedad_de_cuadrilla.dart';
+import '../../core/ubicacion/compartir_ubicacion.dart';
+import 'compartir_mi_ubicacion.dart';
 import 'resumen_de_inicio.dart';
 
 /// Inicio — la pantalla de decisión de la jornada.
@@ -46,8 +51,14 @@ class InicioScreen extends StatefulWidget {
     required this.ordenes,
     required this.abrirTrabajo,
     required this.nombreTecnico,
+    this.laborDeHoy,
+    this.novedades = const <NovedadLocal>[],
+    this.onAvisarNovedad,
+    this.onYaSegui,
     this.resumenSincronizacion,
+    this.ubicacion,
     this.onVerTodos,
+    this.onVerMateriales,
     this.jornada,
     this.ahora,
     this.abrirOrdenDeUnAviso,
@@ -58,8 +69,29 @@ class InicioScreen extends StatefulWidget {
   final Future<void> Function(BuildContext contexto, TrabajoVista trabajo)
   abrirTrabajo;
   final String nombreTecnico;
+
+  /// Con qué cuadrilla y qué labor sale hoy. Null si no se sabe; si es de otro
+  /// día, no se muestra.
+  final LaborDeHoy? laborDeHoy;
+
+  /// COMPARTIR LA UBICACIÓN (31/10/2026). Null = no se ofrece el interruptor.
+  final CompartirUbicacion? ubicacion;
+
+  /// Las novedades que avisó este técnico (30/10/2026): «se pinchó la llanta».
+  final List<NovedadLocal> novedades;
+
+  /// Avisar una: (tipo, afecta, texto). Null = no se ofrece.
+  final Future<void> Function(String tipo, String afecta, String texto)?
+      onAvisarNovedad;
+
+  /// «Ya seguí» de la vigente.
+  final Future<void> Function(String id)? onYaSegui;
   final SyncSummary? resumenSincronizacion;
   final VoidCallback? onVerTodos;
+
+  /// Qué pasa al tocar el inventario en móvil: ir a Materiales (29/10/2026,
+  /// el usuario: «que mande directo a revisar el material»).
+  final VoidCallback? onVerMateriales;
 
   /// La jornada ya leída. Se inyecta en las pruebas; en la aplicación se lee
   /// sola de la base y se vuelve a leer cuando el kit o la cola cambian.
@@ -152,9 +184,13 @@ class _InicioScreenState extends State<InicioScreen> {
       ahora: widget.ahora,
     );
 
+    // TODAS, no tres (29/10/2026): con el tope de tres, la quinta orden del
+    // día no aparecía en Inicio y el contador decía «3 pendientes». Ahora se
+    // ven tres y el resto en el recuadro con scroll (`_proximos`).
     final proximos = SeleccionJornada.proximos(
       trabajos,
       desde: widget.ahora ?? DateTime.now(),
+      cuantos: trabajos.length,
     ).where((TrabajoVista t) => t.id != resumen.siguiente?.id).toList();
     final sinFecha = SeleccionJornada.activosSinFecha(trabajos)
         .where((TrabajoVista t) => t.id != resumen.siguiente?.id)
@@ -181,6 +217,22 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ] else ...<Widget>[
               _saludo(sync),
+              // ARRANCAR LA JORNADA (02/11/2026): arriba, con el saludo,
+              // porque es lo primero del día. El botón abre la hoja que
+              // explica qué va a pasar y le muestra el material que lleva;
+              // recién si confirma, empieza a compartir la ubicación.
+              if (widget.ubicacion != null)
+                CompartirMiUbicacion(
+                  servicio: widget.ubicacion!,
+                  estadoDeJornada: _jornada,
+                  alArrancar: () {
+                    if (mounted) setState(() {});
+                  },
+                ),
+              // LA NOVEDAD DE LA CUADRILLA (30/10/2026): «se pinchó la llanta»
+              // sin escribir en ningún ticket. Arriba, junto al saludo: es lo
+              // que cambia el día.
+              ..._novedad(),
               // LOS AVISOS VAN PRIMERO, Y SOLO SI HAY ALGUNO
               // -------------------------------------------
               // Un trabajo devuelto es lo más urgente que puede haber en esta
@@ -188,10 +240,24 @@ class _InicioScreenState extends State<InicioScreen> {
               // Debajo del avance del día quedaría después de un scroll, que
               // es como no estar. El bloque se esconde solo cuando no hay
               // nada, así que no agrega ruido los días normales.
+              //
+              // LAS ALERTAS DE LA JORNADA VAN ADENTRO (29/10/2026, el usuario:
+              // «esa alerta operativa puede ir también en aviso»): primero,
+              // porque piden algo hoy. Y se ven dos; el resto, deslizando
+              // dentro del recuadro, para que la pantalla no crezca con cada
+              // aviso y lo que sigue —el trabajo— quede a la vista.
               NotificacionesScreen(
                 ocultarSiVacio: true,
                 alAbrirOrden: widget.abrirOrdenDeUnAviso,
                 margenSuperior: AppSpacing.lg,
+                visibles: 2,
+                primeros: <Widget>[
+                  for (final AvisoDeInicio aviso in resumen.avisos)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: _FilaDeAviso(aviso: aviso),
+                    ),
+                ],
               ),
               // Un solo ritmo entre bloques. Antes los tres primeros iban a
               // `md` y los de abajo a `lg`: la mitad superior se veia
@@ -214,14 +280,6 @@ class _InicioScreenState extends State<InicioScreen> {
               if (resumen.horasDelDia.isNotEmpty) ...<Widget>[
                 const SizedBox(height: AppSpacing.sm),
                 _horasDelDia(resumen),
-              ],
-              // Los avisos van arriba, pero **solo cuando existen**: cuando no
-              // hay ninguno el bloque no se dibuja, así el día no empieza en
-              // rojo por costumbre. Cuando aparece uno, aparece donde se ve,
-              // no al final de un scroll largo.
-              if (resumen.hayProblemas) ...<Widget>[
-                const SizedBox(height: AppSpacing.lg),
-                _alertas(resumen.avisos),
               ],
               const SizedBox(height: AppSpacing.lg),
               _proximoTrabajo(resumen, trabajos),
@@ -299,27 +357,20 @@ class _InicioScreenState extends State<InicioScreen> {
 
   // --- 1. Saludo -----------------------------------------------------------
 
-  /// El saludo.
+  /// EL SALUDO Y LA LABOR DEL DÍA (29/10/2026). El usuario: «cuando se abre
+  /// la aplicación, que salga hola, nombre del técnico, y tu labor para hoy
+  /// es…, que se actualiza según esté en la plataforma de Dexter».
   ///
-  /// Sin tarjeta ni avatar, y en tipografía grande, como en el diseño. La
-  /// versión anterior lo metía en una caja azul con un círculo de iniciales:
-  /// gastaba ochenta píxeles de alto para decir el nombre de quien ya sabe
-  /// cómo se llama, y empujaba hacia abajo lo único que importa a esa hora,
-  /// que es el trabajo que sigue. El avatar ya está arriba, en el encabezado.
-  /// El encabezado del técnico, con la forma del diseño: el rótulo gris, el
-  /// nombre en grande, y a la derecha la pastilla de estado.
-  ///
-  /// El saludo por hora baja a la tercera línea. La maqueta pone ahí la
-  /// cuadrilla y la especialidad, que este sistema todavía no tiene: en vez
-  /// de dejar el renglón vacío o inventar una cuadrilla, va lo que sí se
-  /// sabe.
+  /// La labor sale de la jornada que la oficina arma en Programación
+  /// (`/api/campo/mi-dia/`), con la cuadrilla y las zonas debajo. Antes este
+  /// renglón decía «Buenas tardes» porque el sistema no tenía cuadrilla; ahora
+  /// la tiene. Si no se sabe —sin señal y sin nada guardado de hoy, o un
+  /// servidor que todavía no lo dice— no se inventa: queda el saludo solo.
   Widget _saludo(SyncSummary? sync) {
-    final hora = (widget.ahora ?? DateTime.now()).hour;
-    final momento = hora < 12
-        ? 'Buenos días'
-        : hora < 19
-        ? 'Buenas tardes'
-        : 'Buenas noches';
+    final DateTime ahora = widget.ahora ?? DateTime.now();
+    final LaborDeHoy? labor =
+        widget.laborDeHoy?.esDe(ahora) == true ? widget.laborDeHoy : null;
+    final JornadaDeHoy? jornada = labor?.jornada;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -329,27 +380,68 @@ class _InicioScreenState extends State<InicioScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text(
-                'TÉCNICO ASIGNADO',
-                style: AppTypography.labelCaption
-                    .copyWith(color: AppColors.outline, letterSpacing: 0.8),
-              ),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  widget.nombreTecnico,
+                  'Hola, ${_primerNombre(widget.nombreTecnico)}',
+                  key: const ValueKey<String>('saludo'),
                   style: AppTypography.headlineLg
                       .copyWith(color: AppColors.primary),
                   maxLines: 1,
                 ),
               ),
-              Text(
-                '$momento, ${_primerNombre(widget.nombreTecnico)}',
-                style: AppTypography.cuerpoChico,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              if (jornada != null) ...<Widget>[
+                const SizedBox(height: 2),
+                Text.rich(
+                  TextSpan(
+                    children: <InlineSpan>[
+                      const TextSpan(text: 'Tu labor para hoy es '),
+                      TextSpan(
+                        text: jornada.labor,
+                        style: const TextStyle(
+                          color: AppColors.secondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      // La de apoyo (30/10/2026): con el cupo libre, órdenes
+                      // de esta otra.
+                      if (jornada.apoyo.isNotEmpty) ...<InlineSpan>[
+                        const TextSpan(text: ', y apoyás '),
+                        TextSpan(
+                          text: jornada.apoyo,
+                          style: const TextStyle(
+                            color: AppColors.secondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  key: const ValueKey<String>('labor-de-hoy'),
+                  style: AppTypography.cuerpo.copyWith(color: AppColors.onSurface),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (jornada.detalle.isNotEmpty)
+                  Text(
+                    jornada.detalle,
+                    style: AppTypography.cuerpoChico
+                        .copyWith(color: AppColors.onSurfaceVariant),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ] else if (labor != null) ...<Widget>[
+                const SizedBox(height: 2),
+                Text(
+                  'Hoy no te asignaron cuadrilla en Programación',
+                  key: const ValueKey<String>('sin-labor-de-hoy'),
+                  style: AppTypography.cuerpoChico
+                      .copyWith(color: AppColors.onSurfaceVariant),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ],
           ),
         ),
@@ -395,6 +487,53 @@ class _InicioScreenState extends State<InicioScreen> {
         ],
       ),
     );
+  }
+
+  /// La vigente, con «Ya seguí»; si no hay, el botón para avisar una.
+  List<Widget> _novedad() {
+    final DateTime ahora = widget.ahora ?? DateTime.now();
+    NovedadLocal? vigente;
+    for (final NovedadLocal n in widget.novedades) {
+      if (n.vigente(ahora)) {
+        vigente = n;
+        break;
+      }
+    }
+    if (vigente != null) {
+      final NovedadLocal v = vigente;
+      return <Widget>[
+        const SizedBox(height: AppSpacing.md),
+        FranjaDeNovedad(
+          novedad: v,
+          onYaSegui:
+              widget.onYaSegui == null ? null : () => widget.onYaSegui!(v.id),
+        ),
+      ];
+    }
+    if (widget.onAvisarNovedad == null) return const <Widget>[];
+    return <Widget>[
+      const SizedBox(height: AppSpacing.sm),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          key: const ValueKey<String>('avisar-una-novedad'),
+          onPressed: _abrirHojaDeNovedad,
+          icon: const Icon(Icons.campaign_outlined),
+          label: const Text('Avisar una novedad'),
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _abrirHojaDeNovedad() async {
+    final (String, String, String)? r =
+        await showModalBottomSheet<(String, String, String)>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const HojaDeNovedad(),
+    );
+    if (r == null || !mounted) return;
+    await widget.onAvisarNovedad!(r.$1, r.$2, r.$3);
   }
 
   // --- 2. En qué estado está la jornada ------------------------------------
@@ -561,29 +700,6 @@ class _InicioScreenState extends State<InicioScreen> {
 
   // --- 3. Lo que alguien tiene que mirar -----------------------------------
 
-  /// Los avisos, en el orden y con la gravedad que decidió la lógica.
-  ///
-  /// El rojo se reserva para lo que no se arregla solo. Una cola esperando
-  /// señal sube sola: pintarla de rojo enseña a ignorar los rojos, y el día
-  /// que aparezca uno de verdad nadie lo va a mirar.
-  Widget _alertas(List<AvisoDeInicio> avisos) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Text(
-          'Alertas operativas',
-          style: AppTypography.tituloChico,
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        for (final AvisoDeInicio aviso in avisos)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: _FilaDeAviso(aviso: aviso),
-          ),
-      ],
-    );
-  }
-
   // --- 4. Qué hago ahora ---------------------------------------------------
 
   Widget _proximoTrabajo(ResumenDeInicio resumen, List<TrabajoVista> trabajos) {
@@ -702,17 +818,26 @@ class _InicioScreenState extends State<InicioScreen> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        for (final TrabajoVista trabajo in proximos)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: _ItemProximo(
-              trabajo: trabajo,
-              onVer: () async {
-                await widget.abrirTrabajo(context, trabajo);
-                await widget.ordenes.recargar();
-              },
-            ),
-          ),
+        // Se ven tres; con más, el resto en un recuadro con su propio scroll
+        // (29/10/2026, el usuario: «cuando salgan más de 3 tickets se va a
+        // alargar»). La misma pieza que Avisos.
+        ListaConScrollPropio(
+          visibles: 3,
+          claveDelRecuadro: const ValueKey<String>('despues-con-scroll'),
+          filas: <Widget>[
+            for (final TrabajoVista trabajo in proximos)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: _ItemProximo(
+                  trabajo: trabajo,
+                  onVer: () async {
+                    await widget.abrirTrabajo(context, trabajo);
+                    await widget.ordenes.recargar();
+                  },
+                ),
+              ),
+          ],
+        ),
         if (sinFecha.isNotEmpty)
           InkWell(
             onTap: widget.onVerTodos,
@@ -770,6 +895,21 @@ class _InicioScreenState extends State<InicioScreen> {
   /// la clase de cosa que alguien mira de reojo antes de salir. En su lugar
   /// va lo que queda en mano, que es el dato con el que se decide.
   Widget _materiales(ResumenDeInicio resumen) {
+    // Se toca y lleva a Materiales (29/10/2026): el número solo dice que hay
+    // algo que mirar; el detalle está allá.
+    return Semantics(
+      button: widget.onVerMateriales != null,
+      label: 'Ver mis materiales',
+      child: GestureDetector(
+        key: const ValueKey<String>('inventario-en-movil'),
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onVerMateriales,
+        child: _tarjetaDeMateriales(resumen),
+      ),
+    );
+  }
+
+  Widget _tarjetaDeMateriales(ResumenDeInicio resumen) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -858,6 +998,11 @@ class _InicioScreenState extends State<InicioScreen> {
               ),
             ),
           ),
+          if (widget.onVerMateriales != null) ...<Widget>[
+            const SizedBox(width: AppSpacing.xs),
+            const Icon(Icons.chevron_right,
+                size: 22, color: AppColors.inversePrimary),
+          ],
         ],
       ),
     );
@@ -1168,24 +1313,29 @@ class _TarjetaDeTrabajo extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                // Qué hay que hacer, si la orden lo dice; si no, para quién.
+                // El problema, si el ticket lo dice; si no, para quién.
                 //
-                // `resumen` es un campo real del backend que hasta ahora no
-                // se dibujaba en ninguna pantalla. Es la línea que el diseño
-                // pone como título, y tiene sentido: a las siete de la mañana
-                // lo primero que decide el día es el problema, no el apellido
-                // de quien lo tiene.
+                // Es el ASUNTO del ticket, como en Programación (29/10/2026,
+                // el usuario: «debería salir así como está en Programación»).
+                // Hasta ese día iba `resumen` —lo que propuso el Supervisor—,
+                // y cortado a dos líneas («Según el Supervisor: El ticket es
+                // una solicitud de…») no se entendía. Va entero en el detalle.
+                // A las siete de la mañana lo primero que decide el día sigue
+                // siendo el problema, no el apellido de quien lo tiene.
                 Text(
-                  trabajo.resumen.isEmpty
+                  trabajo.asunto.isEmpty
                       ? trabajo.clienteNombre
-                      : trabajo.resumen,
+                      : trabajo.asunto,
+                  key: trabajo.asunto.isEmpty
+                      ? null
+                      : const ValueKey<String>('asunto-del-proximo'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: AppTypography.tituloChico.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (trabajo.resumen.isNotEmpty)
+                if (trabajo.asunto.isNotEmpty)
                   Text(
                     trabajo.clienteNombre,
                     maxLines: 1,
@@ -1307,7 +1457,7 @@ class _TarjetaDeTrabajo extends StatelessWidget {
   /// cuando el servidor no dijo ninguna de las dos.
   static String _ventana(TrabajoVista trabajo) {
     if (trabajo.ventanaTexto.isNotEmpty) return trabajo.ventanaTexto;
-    final DateTime? f = trabajo.compromiso;
+    final DateTime? f = trabajo.horaComprometida;
     if (f == null) return '';
     return '${f.hour.toString().padLeft(2, '0')}:'
         '${f.minute.toString().padLeft(2, '0')}';
@@ -1465,18 +1615,19 @@ class _ItemProximo extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (trabajo.compromiso != null) ...<Widget>[
+                    if (trabajo.horaComprometida != null) ...<Widget>[
                       const SizedBox(width: 6),
                       Text(
-                        '· ${_hora(trabajo.compromiso!)}',
+                        '· ${_hora(trabajo.horaComprometida!)}',
                         style: AppTypography.etiquetaChica,
                       ),
                     ],
                   ],
                 ),
                 const SizedBox(height: 2),
+                // El asunto, como en Programación; sin él, el tipo.
                 Text(
-                  trabajo.tipoNombre,
+                  trabajo.asunto.isNotEmpty ? trabajo.asunto : trabajo.tipoNombre,
                   style: AppTypography.cuerpoGrande.copyWith(
                     fontWeight: FontWeight.w600,
                   ),

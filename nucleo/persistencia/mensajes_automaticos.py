@@ -31,3 +31,38 @@ def marcar(tenant: str, reserva_id: str, estado: str, wamid: str | None = None) 
                       enviado_en = case when %s::text = 'enviado' then now() else enviado_en end
                 where organization_id = %s and id = %s and estado = 'reservado'""",
             (estado, wamid, estado, org, reserva_id))
+
+
+def ya_escribio(tenant: str, numero: str) -> bool:
+    """Si este numero tiene alguna conversacion de WhatsApp con la empresa.
+    Desempata a quien escribirle cuando el ISP guarda varios moviles."""
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select 1 from asistente.conversations
+                where organization_id = %s and canal = 'whatsapp' and usuario_externo = %s
+                limit 1""", (org, numero))
+        return cur.fetchone() is not None
+
+
+def caidas_avisadas(tenant: str, servicios: list[str], dias: int) -> dict[str, str]:
+    """
+    {servicio: hora en que cayo} de los servicios a los que el aviso de caida
+    SALIO de verdad (estado 'enviado') en los ultimos 'dias' -- la ultima
+    caida avisada de cada uno. Lo lee de la clave 'caida:<servicio>:<hora>'
+    (nucleo/seguimiento/aviso_de_caida.clave): el "ya volvio" se le manda a
+    quien recibio el "se cayo", no a una lista que alguien mande (30/10/2026).
+    """
+    if not servicios:
+        return {}
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select clave from asistente.mensajes_automaticos
+                where organization_id = %s and evento = 'caida_masiva' and estado = 'enviado'
+                  and creado_en >= now() - make_interval(days => %s::int)
+                  and split_part(clave, ':', 2) = any(%s::text[])
+                order by creado_en""", (org, int(dias), list(servicios)))
+        salida: dict[str, str] = {}
+        for fila in cur.fetchall():
+            _, servicio, cayo = str(fila["clave"]).split(":", 2)
+            salida[servicio] = cayo
+        return salida

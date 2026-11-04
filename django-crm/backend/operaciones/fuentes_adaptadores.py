@@ -65,6 +65,7 @@ import os
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from operaciones import areas_del_tenant
 from operaciones.fuentes import Lectura
 from operaciones.fuentes_modelos import EstadoLectura, Fuente
 
@@ -134,7 +135,7 @@ class MotorNoDisponible(Exception):
     """No se pudo preguntarle al motor. No es 'no hay datos'."""
 
 
-def mover_interruptor_de_autonomia(*, detener: bool, actor: str,
+def mover_interruptor_de_autonomia(org, *, detener: bool, actor: str,
                                    motivo: str) -> dict:
     """
     Tira o levanta el interruptor general, por el motor. Devuelve {estado}.
@@ -150,11 +151,11 @@ def mover_interruptor_de_autonomia(*, detener: bool, actor: str,
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    tenant = areas_del_tenant.tenant_de(org)
     if not tenant:
         raise MotorNoDisponible(
-            "falta MOTOR_TENANT: sin saber de que empresa es el interruptor no "
-            "se puede mover, y suponerlo tocaria el de otra")
+            f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que empresa es el "
+            "interruptor no se puede mover, y suponerlo tocaria el de otra")
 
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -183,7 +184,7 @@ def mover_interruptor_de_autonomia(*, detener: bool, actor: str,
     return {"estado": str(cuerpo.get("estado") or "")}
 
 
-def estado_de_autonomia() -> dict:
+def estado_de_autonomia(org) -> dict:
     """
     El interruptor general de autonomia, preguntado AL MOTOR por HTTP.
 
@@ -214,11 +215,11 @@ def estado_de_autonomia() -> dict:
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    tenant = areas_del_tenant.tenant_de(org)
     if not tenant:
         raise MotorNoDisponible(
-            "falta MOTOR_TENANT: sin saber de que empresa es el interruptor no "
-            "se puede consultar, y suponerlo leeria el de otra")
+            f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que empresa es el "
+            "interruptor no se puede consultar, y suponerlo leeria el de otra")
 
     cabeceras = {}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -254,7 +255,7 @@ def estado_de_autonomia() -> dict:
 #  EL CAMINO HACIA UN SISTEMA EXTERNO
 # =============================================================================
 
-def _pedirle_al_motor(herramienta: str, argumentos: dict, *,
+def _pedirle_al_motor(org, herramienta: str, argumentos: dict, *,
                       rol: str = "") -> dict:
     """
     Ejecuta una herramienta de SOLO LECTURA del catalogo, por el motor.
@@ -281,19 +282,20 @@ def _pedirle_al_motor(herramienta: str, argumentos: dict, *,
 
     FAIL-CLOSED CON EL TENANT, Y NO ES ESTILO
     -----------------------------------------
-    Sin 'MOTOR_TENANT' no se pregunta. Este parametro decide A QUE EMPRESA se le
+    Sin empresa no se pregunta. Este parametro decide A QUE EMPRESA se le
     consulta; suponerlo leeria los datos de otra. 'campo/services/lazo_isp.py'
     tenia aqui un `or "rapilink"` y se corrigio por exactamente eso -- no se
-    reintroduce.
+    reintroduce. Sale de 'org', la organizacion por la que se pregunta, y no de
+    una variable del servidor, que es una por instalacion (31/10/2026).
     """
     import requests
 
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    tenant = areas_del_tenant.tenant_de(org)
     if not tenant:
         raise MotorNoDisponible(
-            "falta MOTOR_TENANT: sin saber de que empresa es este sondeo no se "
-            "puede consultar, y suponerlo leeria los datos de otra")
+            f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que empresa es este "
+            "sondeo no se puede consultar, y suponerlo leeria los datos de otra")
 
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -404,7 +406,7 @@ def smartolt(org, estado_fuente, ahora) -> Lectura:
     dato_en = None
     for herramienta in herramientas:
         try:
-            crudo = _pedirle_al_motor(herramienta, {})
+            crudo = _pedirle_al_motor(org, herramienta, {})
         except _NoDeclarada as e:
             #  Este es el estado REAL hoy, y se dice con todas las letras en vez
             #  de contestar "sin caidas", que seria una afirmacion falsa sobre la
@@ -589,7 +591,7 @@ def wisphub(org, estado_fuente, ahora) -> Lectura:
 
     for etiqueta, codigo in sorted(WISPHUB_ESTADOS_ABIERTOS.items()):
         try:
-            crudo = _pedirle_al_motor(herramienta, {
+            crudo = _pedirle_al_motor(org, herramienta, {
                 "fecha_creacion_0": desde.date().isoformat(),
                 "fecha_creacion_1": ahora.date().isoformat(),
                 "estado": codigo,

@@ -118,19 +118,20 @@ def _pon(afectados, port="3/1/4", olt=3, ahora=None):
 
 
 def _con_herramienta(valor=HERRAMIENTA):
+    import contextlib
     import os
-    return mock.patch.dict(
-        os.environ,
-        {fuentes_adaptadores.VARIABLE_HERRAMIENTA_SMARTOLT: valor,
-         "MOTOR_TENANT": "rapilink"}, clear=False)
+    pila = contextlib.ExitStack()
+    pila.enter_context(mock.patch.dict(
+        os.environ, {fuentes_adaptadores.VARIABLE_HERRAMIENTA_SMARTOLT: valor},
+        clear=False))
+    #  La organizacion tiene empresa en el motor (31/10/2026: ya no es una
+    #  variable del servidor).
+    pila.enter_context(mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: "rapilink"))
+    return pila
 
 
 def _sin_herramienta():
-    import os
-    return mock.patch.dict(
-        os.environ,
-        {fuentes_adaptadores.VARIABLE_HERRAMIENTA_SMARTOLT: "",
-         "MOTOR_TENANT": "rapilink"}, clear=False)
+    return _con_herramienta("")
 
 
 def _motor(respuesta):
@@ -273,13 +274,12 @@ def test_A6_la_trazabilidad_queda_en_el_snapshot(org_a):
     assert snap.esquema == "smartolt_pon_v1"
 
 
-def test_A7_sin_MOTOR_TENANT_no_se_consulta(org_a):
+def test_A7_sin_empresa_no_se_consulta(org_a):
     """Fail-closed con el tenant: suponerlo leeria los datos de otra empresa."""
-    import os
-    with mock.patch.dict(os.environ, {"MOTOR_TENANT": ""}, clear=False):
+    with mock.patch("operaciones.areas_del_tenant.tenant_de_organizacion", new=lambda org_id: ""):
         with pytest.raises(fuentes_adaptadores.MotorNoDisponible) as e:
-            fuentes_adaptadores._pedirle_al_motor(HERRAMIENTA, {})
-    assert "MOTOR_TENANT" in str(e.value)
+            fuentes_adaptadores._pedirle_al_motor(org_a, HERRAMIENTA, {})
+    assert "sin empresa en el motor" in str(e.value)
 
 
 def test_A8_dos_empresas_no_comparten_la_lectura(org_a, org_b):

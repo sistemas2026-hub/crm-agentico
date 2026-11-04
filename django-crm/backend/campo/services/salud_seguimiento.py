@@ -64,6 +64,9 @@ AL_DIA = "al_dia"
 VENCIDO = "vencido"
 SIN_CONTACTO = "sin_contacto_reciente"
 PAUSADO_NOC = "pausado_noc"
+#: La cuadrilla aviso una novedad vigente (30/10/2026, novedad-de-cuadrilla.md):
+#: «se pincho la llanta». El reloj no corre: la oficina ya sabe.
+PAUSADO_NOVEDAD = "pausado_novedad"
 NO_APLICA = "no_aplica"
 
 #: Como se lee cada uno. El texto vive aca y no en la pantalla porque es parte del
@@ -75,6 +78,7 @@ ETIQUETAS = {
     VENCIDO: "Seguimiento vencido",
     SIN_CONTACTO: "Sin sincronización reciente",
     PAUSADO_NOC: "Pausado, esperando al NOC",
+    PAUSADO_NOVEDAD: "Pausado por una novedad de la cuadrilla",
     NO_APLICA: "No aplica",
 }
 
@@ -210,6 +214,25 @@ def calcular(orden, *, ahora=None, config=None) -> dict:
                 "minutos_detenido": minutos,
                 "necesita": bloqueo.necesita,
             },
+        }
+
+    # 2b. ¿La cuadrilla aviso una novedad que sigue vigente? (30/10/2026,
+    #     novedad-de-cuadrilla.md): «se pincho la llanta». El reloj no corre:
+    #     la oficina ya sabe, igual que con un bloqueo que espera al NOC.
+    from campo.novedades import pausa_de
+
+    novedad = pausa_de(orden.org, [a.profile_id for a in orden.asignaciones.all()],
+                       ahora=ahora)
+    if novedad is not None:
+        return {
+            **comun,
+            "tipo": PAUSADO_NOVEDAD,
+            "etiqueta": ETIQUETAS[PAUSADO_NOVEDAD],
+            "motivo": ("La cuadrilla avisó una novedad "
+                       f"({novedad.get_tipo_display().lower()}): mientras dure, "
+                       "el reloj de reporte no corre."),
+            "vence_en": None,
+            "minutos_vencido": None,
         }
 
     vence_en = referencia + timedelta(minutes=minutos_reporte) if referencia else None

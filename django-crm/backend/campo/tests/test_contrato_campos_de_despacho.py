@@ -179,3 +179,54 @@ def test_7_el_despacho_crea_la_orden_con_los_campos_que_le_mandan(
     assert orden.resumen == "Instalación nueva de fibra"
     assert orden.cliente_detalle_acceso == "Apto 402, timbre 402"
     assert orden.requisitos_seguridad == ["trabajo_en_altura"]
+
+
+def _del_ticket(org, user_profile, version, nombre_del_ticket):
+    from cases.models import Case
+
+    caso = Case.objects.create(org=org, name=nombre_del_ticket, status="New",
+                               priority="Normal", is_active=True)
+    orden = crear_orden(org=org, profile=user_profile, version=version,
+                        cliente={"nombre": "Talleres Unidos", "direccion": "Calle 1"},
+                        origen_sistema="crm", origen_tipo="case",
+                        origen_ref=str(caso.id))
+    AsignacionTrabajo.objects.create(orden=orden, profile=user_profile,
+                                     rol="tecnico", es_principal=True)
+    return orden
+
+
+def test_7_el_asunto_del_ticket_viaja_en_la_lista_y_en_el_detalle(
+    user_client, org_a, user_profile, version, orden_completa
+):
+    """
+    La tarjeta de la app, como la de Programación (29/10/2026, el usuario: «la
+    tarjeta quedó bien, ¿en la app debe salir así también?»): el asunto del
+    ticket es el título. Sin el cliente que el nombre del ticket trae pegado, y
+    vacío —no inventado— si la orden no nació de un ticket.
+    """
+    del_ticket = _del_ticket(org_a, user_profile, version,
+                             "No Tiene Internet - Talleres Unidos")
+
+    filas = {f["id"]: f for f in user_client.get("/api/campo/trabajos/").json()["results"]}
+    detalle = user_client.get(f"/api/campo/trabajos/{del_ticket.id}/").json()
+
+    assert filas[str(del_ticket.id)]["asunto"] == "No Tiene Internet"
+    assert detalle["asunto"] == "No Tiene Internet"
+    assert filas[str(orden_completa.id)]["asunto"] == "", "sin ticket no hay asunto"
+
+
+def test_8_la_lista_lee_los_asuntos_de_una_vez_y_no_uno_por_orden(
+    user_client, org_a, user_profile, version
+):
+    """Una página trae hasta 100 órdenes: una consulta por orden la frenaría."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    for n in range(3):
+        _del_ticket(org_a, user_profile, version, f"Cambio De Clave - Cliente {n}")
+
+    with CaptureQueriesContext(connection) as q:
+        filas = user_client.get("/api/campo/trabajos/").json()["results"]
+
+    assert [f["asunto"] for f in filas] == ["Cambio De Clave"] * 3
+    assert sum(1 for c in q.captured_queries if 'FROM "case"' in c["sql"]) == 1

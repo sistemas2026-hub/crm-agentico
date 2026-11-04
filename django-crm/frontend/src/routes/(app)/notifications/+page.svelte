@@ -49,7 +49,11 @@
   let unread = $derived(rows.filter((n) => n.read_at === null));
   let visible = $derived(filter === 'unread' ? unread : rows);
 
-  const ICON = { 'case.mentioned': AtSign, 'case.commented': MessageSquare };
+  const ICON = {
+    'case.mentioned': AtSign,
+    'case.commented': MessageSquare,
+    'conversacion.mencion': AtSign
+  };
 
   /**
    * "mentioned you" / "commented" for the verbs that exist; a readable
@@ -59,6 +63,7 @@
   function verbPhrase(n) {
     if (n.verb === 'case.mentioned') return 'te mencionó en';
     if (n.verb === 'case.commented') return 'comentó en';
+    if (n.verb === 'conversacion.mencion') return 'te mencionó en';
     return `${n.verb.replace(/^[^.]+\./, '').replace(/_/g, ' ')}, `;
   }
 

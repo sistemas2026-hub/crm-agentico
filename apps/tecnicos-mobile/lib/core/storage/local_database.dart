@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 24,
+      version: 26,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -203,6 +203,26 @@ class LocalDatabase {
         await db.execute(
           'ALTER TABLE local_ordenes ADD COLUMN orden_del_dia_fecha TEXT;',
         );
+      }
+    }
+
+    // v26: las novedades de la cuadrilla (30/10/2026): «se pinchó la llanta».
+    // Aditiva: una tabla nueva, vacía.
+    if (oldVersion < 26) {
+      await _crearColaDeNovedades(db);
+    }
+
+    // v25: el asunto del ticket del que nació la orden (29/10/2026), el título
+    // de la tarjeta como en Programación. Aditiva: llega en la próxima
+    // sincronización, y hasta entonces la tarjeta usa el tipo de trabajo.
+    if (oldVersion < 25) {
+      final List<Map<String, Object?>> info =
+          await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final Set<String> cols = <String>{
+        for (final Map<String, Object?> c in info) c['name'].toString(),
+      };
+      if (cols.isNotEmpty && !cols.contains('asunto')) {
+        await db.execute('ALTER TABLE local_ordenes ADD COLUMN asunto TEXT;');
       }
     }
 
@@ -780,6 +800,160 @@ class LocalDatabase {
   /// reenvío sin señal es el MISMO pedido. Una clave nueva por intento sería un
   /// identificador único, no una clave idempotente — y bodega creería que hacen
   /// falta cuarenta conectores cuando hacen falta veinte.
+  /// Las novedades que avisa el técnico (30/10/2026): «se pinchó la llanta».
+  ///
+  /// Como los pedidos: la clave de idempotencia es el `id`, generado al
+  /// encolarla, y la fila no se borra al subir — el técnico ve lo que avisó.
+  /// «Ya seguí» también se encola (`resolver`): sin señal se cierra igual en el
+  /// teléfono, y sube cuando haya.
+  static Future<void> _crearColaDeNovedades(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_novedades (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        afecta TEXT NOT NULL,
+        texto TEXT,
+        -- La hora del teléfono, ISO con zona: es cuando pasó.
+        avisada_en TEXT NOT NULL,
+        -- pendiente | enviada | fallida
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        -- El id que le dio el servidor: hace falta para «Ya seguí».
+        servidor_id TEXT,
+        -- «Ya seguí»: 1 si el técnico la cerró; `resuelta_subida` cuando el
+        -- servidor ya lo sabe.
+        resuelta INTEGER NOT NULL DEFAULT 0,
+        resuelta_subida INTEGER NOT NULL DEFAULT 0,
+        error_mensaje TEXT,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  /// Encola una novedad. Sube cuando haya señal.
+  Future<void> encolarNovedad({
+    required String orgId,
+    required String profileId,
+    required String id,
+    required String tipo,
+    required String afecta,
+    required String avisadaEn,
+    String texto = '',
+  }) async {
+    final db = await database;
+    await db.insert('cola_novedades', <String, Object?>{
+      'id': id,
+      'org_id': orgId,
+      'profile_id': profileId,
+      'tipo': tipo,
+      'afecta': afecta,
+      'texto': texto,
+      'avisada_en': avisadaEn,
+      'estado': 'pendiente',
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_novedades');
+  }
+
+  /// Las de esta persona, lo más nuevo primero.
+  Future<List<Map<String, dynamic>>> leerNovedades({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'cola_novedades',
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[orgId, profileId],
+      orderBy: 'created_at DESC',
+      limit: 20,
+    );
+  }
+
+  /// «Ya seguí», en el teléfono. Sube con la cola.
+  Future<void> resolverNovedad({
+    required String id,
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_novedades',
+      <String, Object?>{'resuelta': 1, 'next_attempt_at': 0},
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_novedades');
+  }
+
+  /// Lo que falta subir y ya le toca: la novedad, o su «Ya seguí».
+  Future<List<Map<String, dynamic>>> novedadesPendientes({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'cola_novedades',
+      where: "org_id = ? AND profile_id = ? AND next_attempt_at <= ? AND ("
+          "estado = 'pendiente' OR "
+          "(estado = 'enviada' AND resuelta = 1 AND resuelta_subida = 0))",
+      whereArgs: <Object?>[orgId, profileId, DateTime.now().millisecondsSinceEpoch],
+      orderBy: 'created_at ASC',
+      limit: 20,
+    );
+  }
+
+  /// Subió la novedad (y, si ya estaba cerrada, también su «Ya seguí»).
+  Future<void> marcarNovedadSubida({
+    required String id,
+    required String orgId,
+    required String profileId,
+    String? servidorId,
+    bool resueltaSubida = false,
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_novedades',
+      <String, Object?>{
+        'estado': 'enviada',
+        'error_mensaje': null,
+        'servidor_id': ?servidorId,
+        if (resueltaSubida) 'resuelta_subida': 1,
+      },
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_novedades');
+  }
+
+  /// No subió: se reintenta con retroceso, o queda fallida a la vista.
+  Future<void> registrarFalloNovedad({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String errorMensaje,
+    required int intentos,
+    bool definitivo = false,
+    int? nextAttemptAt,
+  }) async {
+    final db = await database;
+    await db.update(
+      'cola_novedades',
+      <String, Object?>{
+        if (definitivo) 'estado': 'fallida',
+        'error_mensaje': errorMensaje,
+        'intentos': intentos + 1,
+        'next_attempt_at': nextAttemptAt ?? 0,
+      },
+      where: 'id = ? AND org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[id, orgId, profileId],
+    );
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_novedades');
+  }
+
   static Future<void> _crearColaDePedidos(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS cola_pedidos_material (
@@ -896,6 +1070,7 @@ class LocalDatabase {
         prioridad TEXT,
         zona TEXT,
         resumen TEXT,
+        asunto TEXT,
         ventana_inicio TEXT,
         ventana_fin TEXT,
         sla_vence_en TEXT,
@@ -996,6 +1171,7 @@ class LocalDatabase {
     await _crearTablaDeNotificaciones(db);
     await _crearTablaDeHistorialDeServicio(db);
     await _crearColaDePedidos(db);
+    await _crearColaDeNovedades(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
 
@@ -1133,6 +1309,7 @@ class LocalDatabase {
         'prioridad',
         'zona',
         'resumen',
+        'asunto',
         'ventana_inicio',
         'ventana_fin',
         'sla_vence_en',
@@ -1237,6 +1414,8 @@ class LocalDatabase {
       'prioridad': conservando(ordenData, 'prioridad', 'prioridad')?.toString(),
       'zona': conservando(ordenData, 'zona', 'zona')?.toString(),
       'resumen': conservando(ordenData, 'resumen', 'resumen')?.toString(),
+      // El asunto del ticket, sin el cliente que trae pegado (29/10/2026).
+      'asunto': conservando(ordenData, 'asunto', 'asunto')?.toString(),
       'ventana_inicio': conservando(
         compromiso,
         'ventana_inicio',

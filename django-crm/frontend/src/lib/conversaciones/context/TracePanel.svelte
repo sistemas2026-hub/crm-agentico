@@ -213,19 +213,26 @@
   }
 
   /* ── la tira de contadores ─────────────────────────────────────────────
-     Un recuadro con los tres números en mono, como la referencia. El rótulo
-     va en minúscula y apagado: lo que se lee es la cifra. */
+     Un recuadro con los tres números, como la referencia. El rótulo va
+     apagado: lo que se lee es la cifra.
+     04/11/2026: ya no en mono. El rótulo es texto de la Bandeja y la cifra va
+     en Barlow tabular, como el resto de las cifras (`.b-cifra`). */
   .tira {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 5px 8px;
+    padding: 4px 8px;
     border: 1px solid var(--bandeja-borde);
-    border-radius: 3px;
+    border-radius: var(--bandeja-radio-sm);
     background: var(--bandeja-superficie-suave);
-    font-family: var(--bandeja-mono);
-    font-size: 11px;
+    font-size: var(--bandeja-rotulo-tam);
+  }
+  .tira b,
+  .tira-ir {
+    font-family: var(--bandeja-titulo);
+    font-size: 14px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
 
@@ -259,8 +266,7 @@
     padding: 0;
     border: 0;
     background: none;
-    font: inherit;
-    font-weight: 700;
+    line-height: inherit;
     color: inherit;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -293,9 +299,8 @@
     grid-template-columns: 14px 14px 1fr auto;
     align-items: center;
     gap: 2px 7px;
-    padding: 4px 5px;
+    padding: 4px;
     border-radius: 3px;
-    border-left: 2px solid transparent;
     font-size: 12px;
   }
 
@@ -335,10 +340,12 @@
      El bloqueo es el sistema haciendo su trabajo --ámbar, que en esta paleta
      es «pide atención»-- y el error es algo roto del otro lado. Pintarlos
      igual haría que quien mira concluya que el asistente se rompió cuando en
-     realidad se contuvo. */
+     realidad se contuvo.
+     04/11/2026: sin la raya izquierda de 2px. El fondo y el color del nombre
+     ya distinguen los dos casos; la raya lateral de color era un acento que
+     el sistema visual de la Bandeja no usa. */
   .proceso-item.bloqueada {
     background: var(--bandeja-aviso-fondo);
-    border-left-color: var(--bandeja-aviso-borde);
   }
   .proceso-item.bloqueada .proceso-nombre {
     font-weight: 600;
@@ -350,7 +357,6 @@
 
   .proceso-item.fallada {
     background: var(--bandeja-error-fondo);
-    border-left-color: var(--bandeja-error-borde);
   }
   .proceso-item.fallada .proceso-nombre {
     font-weight: 600;
@@ -372,16 +378,15 @@
     color: var(--bandeja-texto-2);
   }
 
-  /* Lo que se asoma con la tarjeta cerrada. */
+  /* Lo que se asoma con la tarjeta cerrada. 04/11/2026: «1 error» escrito
+     normal; en versalita mono a 9,5px era lo más chico de la cabecera siendo
+     lo más importante. */
   .diag-aviso {
-    padding: 1px 5px;
-    border-radius: 3px;
+    padding: 0 4px;
+    border-radius: var(--bandeja-radio-sm);
     border: 1px solid;
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
+    font-size: 11px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
     white-space: nowrap;
   }
   .diag-error {

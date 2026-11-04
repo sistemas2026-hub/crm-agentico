@@ -603,7 +603,7 @@ def _acotar_horas(horas) -> int:
 ROL_POLITICA = "supervisor_noc"
 
 
-def _del_motor(nombre: str, argumentos: dict | None = None) -> dict:
+def _del_motor(org, nombre: str, argumentos: dict | None = None) -> dict:
     """
     Llama una herramienta tecnica del catalogo del tenant, con politica aplicada.
 
@@ -617,7 +617,7 @@ def _del_motor(nombre: str, argumentos: dict | None = None) -> dict:
                                                  _pedirle_al_motor)
 
     try:
-        salida = _pedirle_al_motor(nombre, argumentos or {}, rol=ROL_POLITICA)
+        salida = _pedirle_al_motor(org, nombre, argumentos or {}, rol=ROL_POLITICA)
     except _NoDeclarada as e:
         #  No esta declarada para un servicio, o falta la politica. Es una
         #  respuesta legible, no una excepcion que tumbe el turno: el modelo
@@ -643,7 +643,7 @@ def consultar_ticket(org, *, limite=TOPE) -> dict:
     'filtros_verificados', asi que el motor ignora cualquier argumento que se le
     proponga (fail-closed). Devuelve la lista que WispHub recorta por su cuenta.
     """
-    return _del_motor("consultar_ticket")
+    return _del_motor(org, "consultar_ticket")
 
 
 def consultar_tickets_de_cliente(org) -> dict:
@@ -654,12 +654,12 @@ def consultar_tickets_de_cliente(org) -> dict:
     todos ignorados: ver la skill 'wisphub-api'), asi que esto no devuelve "los
     de un cliente": devuelve la lista, y cruzarla es trabajo de quien lee.
     """
-    return _del_motor("consultar_tickets_de_cliente")
+    return _del_motor(org, "consultar_tickets_de_cliente")
 
 
 def consultar_tecnicos(org) -> dict:
     """El personal de WispHub: id, usuario y nombre. Nada mas."""
-    return _del_motor("consultar_tecnicos")
+    return _del_motor(org, "consultar_tecnicos")
 
 
 def diagnosticar_servicio(org, *, id_servicio) -> dict:
@@ -700,7 +700,7 @@ def diagnosticar_servicio(org, *, id_servicio) -> dict:
     if not ident:
         return {"error": "FALTA_ID_SERVICIO",
                 "detalle": "hace falta el id del servicio"}
-    return _del_motor("diagnosticar_servicio", {"id_servicio": ident})
+    return _del_motor(org, "diagnosticar_servicio", {"id_servicio": ident})
 
 
 def consultar_cliente(org, *, id_servicio) -> dict:
@@ -717,7 +717,7 @@ def consultar_cliente(org, *, id_servicio) -> dict:
     if not ident:
         return {"error": "FALTA_ID_SERVICIO",
                 "detalle": "hace falta el id del servicio"}
-    return _del_motor("consultar_cliente", {"id_servicio": ident})
+    return _del_motor(org, "consultar_cliente", {"id_servicio": ident})
 
 
 # ===========================================================================

@@ -117,12 +117,14 @@ describe('el contenedor que se desplaza', () => {
 
   it('en supervisor-noc el modal queda fuera del contenedor', () => {
     // El modal es position:fixed y cubre la ventana. Dentro del contenedor
-    // desplazado se moveria con el contenido.
+    // desplazado se moveria con el contenido. Desde el 01/11/2026 el detalle
+    // es un panel lateral, igual de fijo: se busca el elemento que lleva el
+    // position:fixed, no un comentario que puede cambiar de nombre.
     const fuente = readFileSync(join(APP, 'supervisor-noc', '+page.svelte'), 'utf8');
     expect(enganchaScroll(fuente)).toBe(true);
 
     const scroll = fuente.search(/class=["'][^"']*v2-scroll/);
-    const modal = fuente.indexOf('MODAL DE DETALLE');
+    const modal = fuente.indexOf('class="snv-velo-detalle"');
     expect(modal).toBeGreaterThan(scroll);
 
     // Entre la apertura y el modal tiene que haber un cierre: si el modal

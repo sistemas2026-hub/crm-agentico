@@ -138,6 +138,12 @@ def segundos(texto: str) -> int | None:
 
 gracia = [segundos(m) for m in re.findall(r"stop_grace_period:\s*(\S+)", compose)]
 graceful = [int(m) for m in re.findall(r"--graceful-timeout\s+(\d+)", compose)]
+#  Desde el 31/10/2026 el del motor vive en su archivo de configuracion de
+#  gunicorn, junto a la espera de turnos que depende de el (ver
+#  nucleo/canales/gunicorn_conf.py); el compose lo carga con --config.
+if "--config python:nucleo.canales.gunicorn_conf" in compose:
+    from nucleo.canales import gunicorn_conf
+    graceful.append(gunicorn_conf.graceful_timeout)
 revisar(len(gracia) >= 2, f"los dos servicios declaran stop_grace_period ({len(gracia)})")
 revisar(graceful and all(g is not None for g in gracia) and min(gracia) > max(graceful),
         "Docker espera MAS de lo que gunicorn tarda en cerrar "

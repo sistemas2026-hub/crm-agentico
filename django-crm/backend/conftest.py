@@ -121,6 +121,22 @@ def _las_areas_por_organizacion_no_salen_a_la_red(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _ninguna_organizacion_tiene_empresa_sin_decirlo(monkeypatch):
+    """Sin red, y sin empresa: lo que pasaba antes sin 'MOTOR_TENANT'.
+
+    Desde el 31/10/2026 el backend le pregunta al motor de que empresa es cada
+    organizacion (`areas_del_tenant.tenant_de`), y en pruebas no hay motor:
+    cada intento tardaria ~3,75 s en fallar, igual que las areas de arriba.
+    Una prueba que necesita empresa la ata con `empresa_del_motor`; las que
+    prueban la pregunta de verdad toman la funcion real al importar
+    (cases/tests/test_tomar_de_su_area.py).
+    """
+    from operaciones import areas_del_tenant
+
+    monkeypatch.setattr(areas_del_tenant, "tenant_de_organizacion", lambda org_id: "")
+
+
+@pytest.fixture(autouse=True)
 def _restore_rls_context_after_each_request(db):
     """Put the ambient context back once a test client request has finished.
 
@@ -248,3 +264,27 @@ def org_b_client(user_b, org_b, profile_b):
 @pytest.fixture
 def unauthenticated_client():
     return APIClient()
+
+
+@pytest.fixture
+def empresa_del_motor(monkeypatch):
+    """Ata organizaciones a empresas del motor sin salir a la red.
+
+    El backend sabe de que empresa es algo preguntandole al motor por la
+    organizacion (`operaciones.areas_del_tenant.tenant_de`). Aca se sustituye
+    esa pregunta, y solo esa: ``empresa_del_motor(org, "slug")`` ata una, y
+    una organizacion que no se ato no tiene empresa -- igual que en
+    produccion, sin default. Devuelve la funcion para atar; el mapa queda en
+    su atributo ``atadas``.
+    """
+    from operaciones import areas_del_tenant
+
+    atadas = {}
+    monkeypatch.setattr(areas_del_tenant, "tenant_de_organizacion",
+                        lambda org_id: atadas.get(str(org_id or ""), ""))
+
+    def atar(org, slug):
+        atadas[str(getattr(org, "pk", org))] = slug
+
+    atar.atadas = atadas
+    return atar

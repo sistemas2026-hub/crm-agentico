@@ -112,4 +112,32 @@ class OrdenOperativo {
     }
     return null;
   }
+
+  /// La que se marca en la lista, como en Programación (29/10/2026): la
+  /// primera que no está terminada ni empezada, que es la que hace al terminar
+  /// lo que tiene entre manos. «Empieza por esta» si hoy todavía no arrancó
+  /// ninguna; «Sigue esta» si ya hay una en camino, en sitio o hecha hoy.
+  static ({String id, String texto})? laQueSigue(
+    List<TrabajoVista> trabajos, {
+    required DateTime ahora,
+  }) {
+    TrabajoVista? sigue;
+    for (final TrabajoVista t in ordenar(trabajos, ahora: ahora)) {
+      if (!terminado(t) && !t.estado.enMarcha) {
+        sigue = t;
+        break;
+      }
+    }
+    if (sigue == null) return null;
+    bool deHoy(DateTime? d) =>
+        d != null &&
+        d.toLocal().year == ahora.year &&
+        d.toLocal().month == ahora.month &&
+        d.toLocal().day == ahora.day;
+    final bool arranco = trabajos.any((TrabajoVista t) =>
+        t.estado.enMarcha ||
+        t.estado == EstadoTrabajo.completadaSinEnviar ||
+        (t.estado != EstadoTrabajo.cancelada && deHoy(t.completadaEn)));
+    return (id: sigue.id, texto: arranco ? 'Sigue esta' : 'Empieza por esta');
+  }
 }

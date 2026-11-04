@@ -132,13 +132,17 @@
   let activoChecked = $state(!!canal?.activo);
   let numeroVisible = $state(canal?.numero_visible ?? '');
 
-  // El dominio no se guarda en ningun lado: es solo para armar el texto que
-  // hay que copiar en Meta. Cada quien pone el suyo (ver DESPLIEGUE.md §4.c).
+  // La URL viene armada del servidor con el dominio de la INSTALACION
+  // (PRIVATE_WEBHOOK_BASE_URL): es el mismo para todas las empresas, y el
+  // administrador de un ISP no tiene como saberlo. Solo si la instalacion no
+  // lo declara se pide a mano -- y no se guarda en ningun lado (DESPLIEGUE.md §4.c).
+  let urlDeLaInstalacion = $derived(data.url_webhook ?? '');
   let dominio = $state('');
   let urlWebhook = $derived(
-    dominio.trim()
-      ? `https://${dominio.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')}/canales/whatsapp/${canal?.tenant_slug ?? ''}`
-      : ''
+    urlDeLaInstalacion ||
+      (dominio.trim()
+        ? `https://${dominio.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')}/canales/whatsapp/${canal?.tenant_slug ?? ''}`
+        : '')
   );
   let copiadoUrl = $state(false);
   let copiadoToken = $state(false);
@@ -399,8 +403,9 @@
       <!-- ── URL del webhook ─────────────────────────────────────────────── -->
       <div class="v2-label" style="margin:22px 0 10px">URL para pegar en Meta</div>
       <div class="v2-card" style="padding:16px">
+        {#if !urlDeLaInstalacion}
         <div class="v2-field" style="margin:0">
-          <label for="f-dominio" style="font-size:11.5px">Tu dominio</label>
+          <label for="f-dominio" style="font-size:11.5px">Dominio del servicio</label>
           <input
             id="f-dominio"
             class="v2-input"
@@ -409,10 +414,12 @@
             bind:value={dominio}
           />
           <p class="v2-hint">
-            No se guarda en ningún lado — es solo para armar el texto de abajo. Tiene que apuntar
-            por DNS al servidor antes de darlo de alta en Meta (ver DESPLIEGUE.md §4.c).
+            Esta instalación todavía no declara su dominio público. No se guarda en ningún lado — es
+            solo para armar el texto de abajo, y tiene que apuntar por DNS al servidor antes de darlo
+            de alta en Meta (ver DESPLIEGUE.md §4.c).
           </p>
         </div>
+        {/if}
 
         {#if urlWebhook}
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">

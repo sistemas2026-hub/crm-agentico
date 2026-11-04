@@ -122,7 +122,7 @@ class SolicitudCrearView(APIView):
                          "link": link_de(crudo)}, status=http.HTTP_201_CREATED)
 
 
-def _planes_de(localidad: str) -> list:
+def _planes_de(localidad: str, org) -> list:
     """Los planes que se ofrecen en esa localidad, segun el catalogo curado.
 
     Se le preguntan al motor (POST /interno/herramienta/consultar_planes_venta)
@@ -136,8 +136,14 @@ def _planes_de(localidad: str) -> list:
     """
     import requests
 
+    from operaciones import areas_del_tenant
+
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
-    tenant = os.environ.get("MOTOR_TENANT", "") or "rapilink"
+    #  El catalogo de la empresa de la SOLICITUD (31/10/2026). Sin empresa no
+    #  hay catalogo que mostrar: el de otra no se vende aca.
+    tenant = areas_del_tenant.tenant_de(org)
+    if not tenant:
+        return []
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
@@ -238,7 +244,7 @@ class SolicitudPublicaView(APIView):
             # Si el motor no responde, la lista viene vacia y el formulario
             # cae a un campo de texto libre con lo que ya venia. Una solicitud
             # que se puede enviar vale mas que una lista perfecta.
-            "planes_disponibles": _planes_de(solicitud.barrio),
+            "planes_disponibles": _planes_de(solicitud.barrio, solicitud.org_id),
             # Lo que la persona ya le dijo a Dexter. Volver a preguntarselo
             # seria la forma mas rapida de que abandone.
             "prellenado": {

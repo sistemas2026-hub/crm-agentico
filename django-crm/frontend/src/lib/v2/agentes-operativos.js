@@ -33,10 +33,15 @@ export const AGENTES_OPERATIVOS = [
     //  El rótulo dice las dos cosas que lo distinguen de los de al lado: que
     //  es operativo (no conversacional) y sobre qué trabaja.
     rotulo: 'Agente operativo · Supervisión técnica',
+    //  02/11/2026: decia "no ejecuta ninguna accion: cada propuesta queda
+    //  pendiente". Dejo de ser cierto en octubre -- hace solo las tareas que la
+    //  empresa le delega -- y contradecia el objetivo del producto (PRD §1:
+    //  reemplazar la mano de obra; una persona solo en lo critico).
     descripcion:
-      'Revisa la operación técnica —casos, órdenes, programación y plazos— y propone ' +
-      'qué hacer. No conversa con nadie y no ejecuta ninguna acción: cada propuesta ' +
-      'queda pendiente hasta que el Jefe de Operaciones la revisa.',
+      'Revisa la operación técnica —casos, órdenes, programación y plazos—, propone qué ' +
+      'hacer y hace solo las tareas que la empresa le delega: pasar casos a Despacho, armar ' +
+      'la jornada, crear y publicar órdenes, cerrar lo que revisó. No conversa con nadie, y ' +
+      'lo crítico sigue esperando a una persona.',
     href: '/supervisor-noc',
     enlace: 'Abrir su tablero'
   }

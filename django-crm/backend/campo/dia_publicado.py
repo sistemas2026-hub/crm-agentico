@@ -254,6 +254,46 @@ def jornadas_y_ordenes(org, fecha) -> tuple:
     return jornadas, reciben, receptores, ordenes
 
 
+def jornada_de_la_persona(org, profile, fecha):
+    """La `JornadaDeCuadrilla` con que `profile` sale en `fecha`, o None. La
+    regla de quien RECIBE sus ordenes (`cuadrillas.destinatarios`); la usan
+    `mi-dia/` y la novedad de la cuadrilla (30/10/2026)."""
+    from campo.cuadrillas import JornadaDeCuadrilla, destinatarios
+
+    for j in (JornadaDeCuadrilla.objects.filter(org=org, fecha=fecha)
+              .select_related("cuadrilla", "cuadrilla__lider", "lider")
+              .prefetch_related("zonas").order_by("cuadrilla__nombre", "id")):
+        if profile.id in {r["profile"].id for r in destinatarios(j)["reciben"]}:
+            return j
+    return None
+
+
+def de_la_persona(org, profile, fecha) -> dict | None:
+    """La jornada con que `profile` sale en `fecha`, como la muestra la app:
+    su cuadrilla, su labor y sus zonas. None si ese dia no sale con ninguna.
+
+    Pedido del usuario (29/10/2026): que Inicio salude con «tu labor para hoy
+    es …» y que cambie cuando cambia en Programacion. «Sale con esta
+    cuadrilla» es la regla de quien RECIBE sus ordenes
+    (`cuadrillas.destinatarios`): la misma que decide a quien le llega el
+    trabajo, para que el saludo no diga una cuadrilla y las ordenes otra.
+    """
+    from campo.labores import nombres_de_labor
+
+    j = jornada_de_la_persona(org, profile, fecha)
+    if j is None:
+        return None
+    nombres = nombres_de_labor(org)
+    return {"cuadrilla": j.cuadrilla.nombre,
+            "labor": j.labor,
+            "labor_nombre": nombres.get(j.labor, j.labor),
+            #  La de apoyo (30/10/2026): «y apoyás Instalación».
+            "apoyo": j.labor_de_apoyo,
+            "apoyo_nombre": (nombres.get(j.labor_de_apoyo, j.labor_de_apoyo)
+                             if j.labor_de_apoyo else ""),
+            "zonas": sorted(z.nombre for z in j.zonas.all())}
+
+
 def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
     """({jornada.id: [orden]}, [sin jornada]): cada orden va a la cuadrilla
     de alguien que la tiene asignada."""
@@ -265,63 +305,126 @@ def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
     return por, sin
 
 
-def _asuntos_de(org, ordenes) -> dict:
-    """{orden.id: asunto} de las ordenes que nacieron de un ticket (29/10/2026,
-    pedido del usuario: «también añade el asunto»). Cortado como lo cuentan los
-    niveles (`niveles.asunto_del_ticket`): «No Tiene Internet», sin el cliente
-    que el nombre del ticket trae pegado. Una sola consulta; si falla, vacio."""
-    from campo.niveles import asunto_del_ticket, asuntos_de_las_plantillas
-    from cases.models import Case
-
-    refs ={str(o.origen_ref) for o in ordenes if o.origen_tipo == "case" and o.origen_ref}
-    if not refs:
-        return {}
-    try:
-        nombre_de = {str(i): n for i, n in
-                     Case.objects.filter(org=org, id__in=list(refs)).values_list("id", "name")}
-        plantillas = asuntos_de_las_plantillas(org)
-    except Exception:                                            # noqa: BLE001
-        logger.warning("Programacion: no se pudo leer el asunto de las ordenes")
-        return {}
-    return {o.id: asunto_del_ticket(nombre_de[str(o.origen_ref)], plantillas)[1]
-            for o in ordenes if str(o.origen_ref) in nombre_de}
-
-
 def del_dia(org, fecha) -> dict:
     """Lo publicado para `fecha`. Ver el encabezado.
 
         {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, zonas, tope,
-                                  ordenes: [fila]}],
+                                  ordenes: [fila], posicion}],
          "con_alguien_que_no_sale": [fila], "esperan": [orden],
+         "por_revisar": [fila],
          "cuentas": {publicadas, por_el_supervisor, por_personas,
-                     sin_registro, avisadas, esperan}}
+                     sin_registro, avisadas, esperan, por_revisar,
+                     cuadrillas, en_camino, completadas, pendientes,
+                     cumplimiento, con_novedad}}
     """
     from django.db.models import Q
+    from django.utils import timezone
 
+    from campo import material_del_dia as MD
+    from campo import novedades as N
     from campo import orden_del_dia as OD
     from campo import reparto as R
+    from campo import tiempos_del_dia as TD
     from campo.avisos import AvisoEnviado, DispositivoDeTecnico
     from campo.cuadrillas import configuracion_de_reparto
     from campo.labores import nombres_de_labor
     from campo.models import EventoTrabajo, OrdenTrabajo
+    from campo.niveles import asuntos_de_las_ordenes
     from campo.services import avisos
+    from campo.services import salud_seguimiento as SS
     from common.models import Notification
 
     zona = R._zona_de(org)
     jornadas, reciben, receptores, ordenes = jornadas_y_ordenes(org, fecha)
-    asunto_de = _asuntos_de(org, ordenes)
+
+    #  POR REVISAR (31/10/2026): lo terminado en campo que nadie cerro, DE
+    #  CUALQUIER DIA. Las del dia salen en su cuadrilla; las de antes no salian
+    #  en ningun lado: en produccion la OT #4, terminada el 30 y sin aprobar, el
+    #  31 no estaba ni en Hoy ni en Cerradas (el usuario: «en la supervisor no
+    #  sale el ticket»). Quedan aca hasta que alguien la apruebe y la cierre.
+    del_dia_ids = {o.id for o in ordenes}
+    por_revisar = [
+        o for o in (OrdenTrabajo.objects
+                    .filter(org=org, estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO)
+                    .select_related("tipo_trabajo_version__work_type")
+                    .prefetch_related("asignaciones__profile__user")
+                    .order_by("completada_campo_en", "numero"))
+        if o.id not in del_dia_ids]
+    #  Los tiempos, el asunto, quien la asigno y el aviso se calculan para las
+    #  dos listas; las cuadrillas y las cuentas del dia siguen siendo del dia.
+    todas = [*ordenes, *por_revisar]
+    asunto_de = asuntos_de_las_ordenes(org, todas)
+
+    #  EL SEGUIMIENTO (30/10/2026): cuanto lleva cada orden y si dejo de
+    #  reportar. Lo que no se pudo calcular no tumba Programacion.
+    ahora = timezone.now()
+    try:
+        tiempos = TD.tiempos_de(todas, zona=zona, ahora=ahora, fecha=fecha)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudieron calcular los tiempos")
+        tiempos = {}
+    salud = {}
+    try:
+        config = SS.configuracion_de(org)
+        for o in ordenes:
+            if o.estado_operativo in SS.EN_EJECUCION:
+                s = SS.calcular(o, ahora=ahora, config=config)
+                salud[o.id] = {"tipo": s["tipo"], "etiqueta": s["etiqueta"],
+                               "minutos_desde_la_referencia": s.get("minutos_desde_la_referencia")}
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudo leer la regla de los 30 minutos")
+
+    pendientes = []
+
+    def revision_de(o):
+        """Lo que dice el Supervisor del cierre. No tumba Programacion."""
+        from campo import revision_del_cierre as RC
+
+        from campo.cierre_por_el_supervisor import EVENTO_BLOQUEADO
+
+        try:
+            if not RC.aplica(o):
+                return None
+            #  Las que esperan la medicion, UNA vez por pantalla y solo si hay
+            #  algo que revisar.
+            if not pendientes:
+                medir = RC.pendientes_de_medir(org, ahora)
+                #  Sin poder saberlo, la tarjeta no dice «Se puede cerrar» de
+                #  una que quiza espera la medicion.
+                pendientes.append(RC.NO_SE_SABE if medir is None else medir)
+            r = RC.revisar(o, pendientes=pendientes[0])
+            if r is not None:
+                #  Si el Supervisor la quiso cerrar solo y el motor no lo
+                #  dejo: cuando, y que compuerta (30/10/2026).
+                ev = (EventoTrabajo.objects
+                      .filter(org=org, orden=o, tipo=EVENTO_BLOQUEADO)
+                      .order_by("-created_at").first())
+                r["supervisor_no_pudo"] = ({
+                    "hora": ev.created_at.astimezone(zona).strftime("%H:%M"),
+                    "detalle": str((ev.datos or {}).get("detalle") or ""),
+                } if ev else None)
+            return r
+        except Exception as e:                                   # noqa: BLE001
+            #  Que se VEA: una revision que falla en silencio deja la tarjeta
+            #  sin botones y nadie sabe por que. El tipo, nunca el texto.
+            logger.warning("Programacion: no se pudo revisar un cierre (%s)", type(e).__name__)
+            return {"veredicto": "revisar", "texto": "No se pudo revisar el cierre",
+                    "puntos": [{"clave": "error", "ok": None,
+                                "texto": f"La revisión falló ({type(e).__name__}): miralo antes de cerrar."}],
+                    "evidencias": [], "sugeridas": [], "solucion": "",
+                    "supervisor_no_pudo": None}
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
     for ev in (EventoTrabajo.objects
-               .filter(org=org, orden_id__in=[o.id for o in ordenes],
+               .filter(org=org, orden_id__in=[o.id for o in todas],
                        tipo__in=EVENTOS_DE_ASIGNACION)
                .select_related("profile__user").order_by("created_at", "id")):
         ultimo[ev.orden_id] = ev
 
     #  EL AVISO: la notificacion de la asignacion, si salio al telefono, y si
     #  hay telefono. Ver el encabezado.
-    perfiles = {a.profile_id for o in ordenes for a in o.asignaciones.all()}
+    perfiles = {a.profile_id for o in todas for a in o.asignaciones.all()}
     con_telefono = set(
         DispositivoDeTecnico.objects.filter(org=org, activo=True,
                                             profile_id__in=perfiles)
@@ -359,6 +462,29 @@ def del_dia(org, fecha) -> dict:
             notificado.add((n["recipient_id"], numero))
             if salio:
                 al_telefono.add((n["recipient_id"], numero))
+
+    #  LOS RECORDATORIOS DE CADA ORDEN (31/10/2026). El log de la cuadrilla
+    #  solo muestra lo abierto, asi que al terminarse la orden el recordatorio
+    #  desaparecia de todos lados: el usuario probo la vibracion con la OT #4 y
+    #  no habia donde ver si el Supervisor se lo mando. Desde que se creo la
+    #  orden mas vieja de la pantalla; la clave la arma `services/avisos.py`:
+    #  `sin_reporte|<orden>|<referencia>`.
+    recordatorios = {}
+    if todas:
+        ids = {str(o.id) for o in todas}
+        for clave, canales, cuando in (
+                AvisoEnviado.objects
+                .filter(org=org, clave__startswith=f"{avisos.CLAVE_SIN_REPORTE}|",
+                        created_at__gte=min(o.created_at for o in todas))
+                .order_by("created_at").values_list("clave", "canales", "created_at")):
+            partes = clave.split("|")
+            if len(partes) > 2 and partes[1] in ids:
+                local = cuando.astimezone(zona)
+                recordatorios.setdefault(partes[1], []).append({
+                    "cuando": local.strftime("%H:%M" if local.date() == fecha
+                                             else "%d/%m %H:%M"),
+                    "llego": "push" in (canales or []),
+                })
 
     def fila(o) -> dict:
         quienes = sorted(o.asignaciones.all(),
@@ -403,9 +529,27 @@ def del_dia(org, fecha) -> dict:
             #  lugar en el orden del dia (el que sigue la app).
             "cliente": o.cliente_nombre or "",
             "asunto": asunto_de.get(o.id, ""),
+            #  30/10/2026: el cuadro del seguimiento dice A DONDE va la
+            #  cuadrilla (la orden en curso, o la que sigue).
+            "direccion": o.cliente_direccion or "",
             "vence_en": o.sla_vence_en.astimezone(zona).isoformat() if o.sla_vence_en else None,
             "orden_del_dia": (o.orden_del_dia if o.orden_del_dia_fecha == fecha else None),
             "siguiente": False,
+            #  30/10/2026: cuanto lleva, y la regla de los 30 minutos.
+            "tiempos": tiempos.get(o.id),
+            "seguimiento": salud.get(o.id),
+            "recordatorios": recordatorios.get(str(o.id), []),
+            #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
+            #  valido trae lo que dice el Supervisor. Indica, no decide.
+            "revision": revision_de(o),
+            #  30/10/2026: una completada sin revision tiene que decir por que
+            #  (aprobada y sin cerrar, sin presentar): en produccion la OT #3
+            #  quedo asi, sin revision y sin poder llegar a Cerradas.
+            "validacion": o.estado_validacion,
+            "validacion_texto": o.get_estado_validacion_display(),
+            #  La vuelta arma la clave de la decision: aprobar dos veces la
+            #  misma vuelta es una sola decision; otra vuelta, otra.
+            "vuelta": o.vuelta,
         }
 
     def en_orden(lista):
@@ -438,16 +582,98 @@ def del_dia(org, fecha) -> dict:
     filas = [fila(o) for o in ordenes]
     por_que = _por_que_espera(org, fecha, esperan, labores) if esperan else {}
     personas = _personas_de(org, jornadas, reciben, por_jornada, zona)
+
+    #  POR CUADRILLA (30/10/2026): sus novedades del dia, el material cargado,
+    #  la primera orden sin reporte, el resumen y el log.
+    novedades_de = {}
+    for n in (N.NovedadDeCuadrilla.objects.filter(org=org, fecha=fecha)
+              .select_related("jornada__cuadrilla", "profile__user", "org")):
+        if n.jornada_id:
+            novedades_de.setdefault(n.jornada_id, []).append(n)
+    try:
+        actas = {j.id: MD.acta_de(fecha, j.id) for j in jornadas}
+        cargado = MD.cargadas(org, actas.values())
+    except Exception:                                            # noqa: BLE001
+        actas, cargado = {}, {}
+
+    def sin_reporte_de(lista):
+        o = next((o for o in lista if (salud.get(o.id) or {}).get("tipo") == SS.VENCIDO), None)
+        return ({"numero": o.numero, "minutos": salud[o.id]["minutos_desde_la_referencia"]}
+                if o is not None else None)
+
+    #  DONDE ESTA CADA CUADRILLA (31/10/2026). Va en lo que Programacion ya
+    #  carga --y ya refresca cada 15 s-- en vez de en una ruta aparte: el mapa
+    #  se actualiza solo con el sondeo que existe, y no se abre una segunda
+    #  superficie de permisos sobre el dato mas sensible. Esta ruta ya exige
+    #  rol de gestion (`dia_publicado_views._exigir_gestion`).
+    try:
+        from campo import ubicacion_de_cuadrilla as UB
+        posiciones = UB.de_las_cuadrillas(org, fecha, ahora=ahora)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("Programacion: no se pudieron leer las posiciones")
+        posiciones = {}
+
+    def posicion_de(j):
+        """La posicion de la cuadrilla: la MAS RECIENTE de su gente.
+
+        Una cuadrilla es varias personas y un punto en el mapa. Se toma la mas
+        fresca y se dice de quien es: promediar coordenadas inventaria un lugar
+        donde no hay nadie, y mostrar la mas vieja seria decir que la cuadrilla
+        esta donde ya no esta."""
+        mejor = None
+        for r in reciben[j.id]:
+            p = posiciones.get(str(r["profile"].id))
+            if p is None:
+                continue
+            if mejor is None or p["minutos"] < mejor["minutos"]:
+                mejor = {**p, "de": _nombre(r["profile"])}
+        return mejor
+
+    def seguimiento_de(j):
+        lista = por_jornada[j.id]
+        try:
+            sin_reporte = sin_reporte_de(lista)
+            return {
+                "resumen_del_dia": TD.resumen_de_la_cuadrilla(
+                    lista, tiempos, asuntos=asunto_de, ahora=ahora, zona=zona,
+                    fecha=fecha),
+                "novedades": [N.a_json(n, ahora) for n in novedades_de.get(j.id, [])],
+                "sin_reporte": sin_reporte,
+                #  SOLO LO ABIERTO (30/10/2026, el usuario: «es el historial
+                #  del ticket anterior, no tiene que salir»). Lo de una orden
+                #  terminada vive en su tarjeta, en la pestaña Cerradas.
+                "log": TD.log_del_dia(
+                    [o for o in lista if o.estado_operativo not in
+                     (*TD.TERMINADAS, OrdenTrabajo.CANCELADA)],
+                    fecha=fecha, zona=zona, tiempos=tiempos,
+                    novedades=novedades_de.get(j.id, []),
+                    #  El material del dia no es seguimiento de una orden
+                    #  (30/10/2026): se ve en la tarjeta de la cuadrilla.
+                    material=None,
+                    sin_reporte=sin_reporte, ahora=ahora),
+            }
+        except Exception:                                        # noqa: BLE001
+            logger.warning("Programacion: no se pudo armar el seguimiento de una cuadrilla")
+            return {"resumen_del_dia": None, "novedades": [], "sin_reporte": None, "log": []}
+
     return {
         "fecha": fecha.isoformat(),
         "cuadrillas": [{
             "jornada": str(j.id),
             "cuadrilla": j.cuadrilla.nombre,
             "labor": labores.get(j.labor, j.labor),
+            #  La de apoyo (30/10/2026, labor-de-apoyo.md), con su nombre; vacia
+            #  si no tiene.
+            "apoyo": (labores.get(j.labor_de_apoyo, j.labor_de_apoyo)
+                      if j.labor_de_apoyo else ""),
             "zonas": [z.nombre for z in j.zonas.all()],
             "tope": j.cuadrilla.tope_diario or tope,
             "ordenes": filas_de(por_jornada[j.id]),
             "personas": personas[j.id],
+            #  None cuando nadie de la cuadrilla reporto: la pantalla dice
+            #  «sin señal», que NO es lo mismo que «no se movio».
+            "posicion": posicion_de(j),
+            **seguimiento_de(j),
         } for j in jornadas],
         "con_alguien_que_no_sale": [fila(o) for o in en_orden(sin_jornada)],
         "esperan": [{
@@ -460,12 +686,33 @@ def del_dia(org, fecha) -> dict:
             "por_que": por_que.get(str(o.id), ("", ""))[1],
         } for o in sorted(esperan, key=lambda o: (
             _RANGO_PRIORIDAD.get(o.prioridad or "", 3), o.numero))],
+        #  La mas vieja primero: es la que lleva mas tiempo esperando.
+        "por_revisar": [{**fila(o), "terminada_el": (
+            o.completada_campo_en.astimezone(zona).strftime("%d/%m %H:%M")
+            if o.completada_campo_en else "")} for o in por_revisar],
         "cuentas": {
             "publicadas": len(filas),
+            #  LA FRANJA DE INDICADORES (31/10/2026). El codigo calcula, la
+            #  pantalla muestra: una cuenta sumada en el navegador no se puede
+            #  probar y cada pantalla la sumaria distinto.
+            "cuadrillas": len(jornadas),
+            #  Cuadrillas EN CAMINO, no ordenes: la pregunta es cuantas
+            #  cuadrillas van en ruta.
+            "en_camino": sum(1 for j in jornadas
+                             if any(o.estado_operativo == OrdenTrabajo.EN_CAMINO
+                                    for o in por_jornada[j.id])),
+            "completadas": sum(1 for f in filas if f["estado"] in _terminadas()),
+            "pendientes": sum(1 for f in filas if f["estado"] in _activas()),
+            #  Entero, redondeado: el porcentaje se calcula UNA vez, aca.
+            "cumplimiento": (round(100 * sum(1 for f in filas
+                                             if f["estado"] in _terminadas()) / len(filas))
+                             if filas else 0),
+            "con_novedad": sum(1 for j in jornadas if novedades_de.get(j.id)),
             "por_el_supervisor": sum(1 for f in filas if f["asignada_por"] == SUPERVISOR),
             "por_personas": sum(1 for f in filas if f["asignada_por"] == PERSONA),
             "sin_registro": sum(1 for f in filas if not f["asignada_por"]),
             "avisadas": sum(1 for f in filas if f["aviso"] == AVISADO),
             "esperan": len(esperan),
+            "por_revisar": len(por_revisar),
         },
     }

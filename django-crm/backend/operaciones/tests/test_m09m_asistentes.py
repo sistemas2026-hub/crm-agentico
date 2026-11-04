@@ -659,7 +659,12 @@ def test_17_18_no_hay_segunda_cola_ni_task(org_a, actor):
                        #  informe 'informe_de_atascos'. No se revisa ni se
                        #  decide desde ahi; lo que pide una persona sigue
                        #  siendo 'PropuestaSupervisor'.
-                       "AtascoDelSupervisor"}
+                       "AtascoDelSupervisor",
+                       #  31/10/2026. 'AvisoDeCaida' no es una cola de casos ni
+                       #  de propuestas: es la APROBACION de una persona de
+                       #  avisarle una caida a sus clientes, con su avance por
+                       #  tandas. Una por situacion. Ver aviso_de_caida.py.
+                       "AvisoDeCaida"}
 
     #  Se miran los IDENTIFICADORES del código, no el texto del archivo: los
     #  docstrings nombran justamente lo que NO se creó, y un 'in fuente' los

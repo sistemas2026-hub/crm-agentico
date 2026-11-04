@@ -3,7 +3,8 @@ import {
   guardarAjustesBandeja,
   leerAjustesBandeja,
   guardarRotulosBandeja,
-  leerRotulosBandeja
+  leerRotulosBandeja,
+  guardarReincidencia
 } from '$lib/server/v2/bandeja-config.js';
 
 /** Prefijo de los campos del formulario de rótulos: `rotulo:<clave>`. */
@@ -134,5 +135,27 @@ export const actions = {
       });
     }
     return { rotulosGuardados: true };
+  },
+
+  /* Cuántos días mira el aviso de reincidencia (29/10/2026). 0 lo apaga. */
+  async reincidencia({ fetch, request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, {
+        reincidencia: { error: 'Solo un administrador puede cambiar este ajuste.' }
+      });
+    }
+    const form = await request.formData();
+    const dias = Number(form.get('reincidencia_dias')?.toString().trim() || '0');
+    if (!Number.isInteger(dias) || dias < 0 || dias > 365) {
+      return fail(400, {
+        reincidencia: { error: 'Los días tienen que ser un número entero entre 0 y 365. 0 apaga el aviso.' }
+      });
+    }
+    try {
+      await guardarReincidencia(locals, fetch, dias);
+    } catch (/** @type {any} */ err) {
+      return fail(400, { reincidencia: { error: err?.message || 'No se pudo guardar.' } });
+    }
+    return { reincidenciaGuardada: true };
   }
 };

@@ -265,8 +265,6 @@
     flex-direction: column;
   }
 
-  /* Las filas de una sección van juntas y apretadas: son una tabla, no una
-     lista de párrafos. */
   /* Las filas de una tarjeta van juntas y apretadas: son una tabla, no una
      lista de párrafos. La separación ENTRE tarjetas la pone `.panel-tarjeta`
      en bandeja.css, así que acá no va margen -- con los dos, las secciones
@@ -274,7 +272,7 @@
   .bloque {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 8px;
   }
 
 
@@ -287,11 +285,11 @@
     align-items: center;
     gap: 3px;
     flex: none;
-    padding: 2px 7px;
+    padding: 2px 8px;
     border: 1px solid var(--bandeja-borde);
     border-radius: var(--bandeja-radio-sm);
     background: var(--bandeja-superficie);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--bandeja-texto);
     text-decoration: none;
@@ -301,11 +299,12 @@
     border-color: var(--bandeja-texto-3);
   }
 
+  /* 04/11/2026: el valor ya no va al borde derecho (ver `.panel-fila` en
+     bandeja.css), así que el botón de copiar va pegado al id, a la izquierda. */
   .id-con-copia {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    justify-content: flex-end;
+    gap: 4px;
   }
 
   .copiar {
@@ -324,8 +323,15 @@
     border-color: var(--bandeja-texto-3);
   }
 
+  /* 04/11/2026: mayúscula SÓLO en la primera letra. `capitalize` la ponía en
+     cada palabra («Falla De Servicio»), que en español no se escribe así. El
+     rótulo del tenant ya viene bien escrito; esto cubre el que cae a la clave
+     cruda. `::first-letter` necesita una caja, por eso el inline-block. */
   .clasificacion {
-    text-transform: capitalize;
+    display: inline-block;
+  }
+  .clasificacion::first-letter {
+    text-transform: uppercase;
   }
 
   .sin-dato {

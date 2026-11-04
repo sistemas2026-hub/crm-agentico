@@ -535,6 +535,20 @@ void main() {
       expect(find.text('Te asignaron 8 visitas'), findsOneWidget);
     });
 
+    testWidgets('d7 · el recordatorio del Supervisor dice la orden y los '
+        'minutos (30/10/2026)', (tester) async {
+      await tester.runAsync(() => push.espejar(mensajeDeAsignacion(
+            id: 'notif-sin-reporte',
+            verbo: 'sin_reporte',
+            titulo: 'OT #9402 sin reporte',
+            datos: <String, dynamic>{'orden_numero': 9402, 'minutos': 38},
+          )));
+
+      await montar(tester, ocultarSiVacio: true);
+
+      expect(find.text('OT #9402: 38 min sin reportar'), findsOneWidget);
+    });
+
     testWidgets('d0 · la frase no repite la palabra del asunto', (tester) async {
       // Los dos caminos traen títulos distintos: la sincronización manda
       // `entity_name` («OT #9401») y el push manda el asunto («OT #9401
@@ -610,6 +624,20 @@ void main() {
       ))!;
       expect(sinLeer, 0);
       expect(find.text('NUEVO'), findsNothing);
+    });
+  });
+
+  group('el recordatorio del Supervisor vibra unos 30 s (30/10/2026)', () {
+    test('va por su propio canal; los demás avisos, por el de siempre', () {
+      expect(AvisosPush.canalPara('sin_reporte'), 'recordatorios_de_reporte');
+      expect(AvisosPush.canalPara('trabajo_asignado'), AvisosPush.canal);
+      expect(AvisosPush.canalPara(''), AvisosPush.canal);
+    });
+
+    test('el patrón dura 30 s, en pulsos y no continuo', () {
+      final List<int> p = AvisosPush.patronDeRecordatorio();
+      expect(p.fold<int>(0, (int a, int b) => a + b), 30000);
+      expect(p.skip(1).toSet(), <int>{1000, 500});
     });
   });
 }

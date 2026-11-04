@@ -47,6 +47,8 @@ LABORES_DE_FABRICA = (
     ("trabajos", "Trabajos"),
 )
 NOMBRE_DE_FABRICA = dict(LABORES_DE_FABRICA)
+#: Las de fabrica que NO se toman de apoyo: la obra de red.
+NO_SE_TOMAN_DE_APOYO = frozenset({"trabajos"})
 #: El orden en que se muestran: las de fabrica primero, en este orden.
 _ORDEN_DE_FABRICA = {c: i for i, (c, _) in enumerate(LABORES_DE_FABRICA)}
 
@@ -75,6 +77,12 @@ class Labor(BaseModel):
         blank=True,
         related_name="labores",
     )
+    #: SI UNA CUADRILLA CON CUPO LIBRE LA TOMA DE APOYO (30/10/2026,
+    #: SPEC/objetivos/labor-de-apoyo.md). Es de la empresa y se edita en
+    #: Programacion, con el kit. Una obra de red pide equipo de empalme que una
+    #: cuadrilla de soporte no lleva: «trabajos» arranca en no (la siembra y la
+    #: migracion 0043).
+    se_toma_de_apoyo = models.BooleanField(default=True)
 
     class Meta:
         db_table = "campo_labor"
@@ -208,6 +216,17 @@ def nombres_de_labor(org) -> dict:
     return {l["id"]: l["texto"] for l in labores_de(org, incluir_inactivas=True)}
 
 
+def labores_de_apoyo(org) -> set:
+    """Los codigos de las labores ACTIVAS que una cuadrilla con cupo libre
+    puede tomar de apoyo. Sin filas, las de fabrica menos la obra de red, sin
+    escribir (mismo criterio que `labores_de`)."""
+    filas = list(Labor.objects.filter(org=org)
+                 .values_list("codigo", "activa", "se_toma_de_apoyo"))
+    if not filas:
+        return {c for c, _ in LABORES_DE_FABRICA if c not in NO_SE_TOMAN_DE_APOYO}
+    return {c for c, activa, apoyo in filas if activa and apoyo}
+
+
 def sembrar_de_fabrica(org) -> None:
     """Que esta empresa tenga las tres de siempre.
 
@@ -226,6 +245,7 @@ def sembrar_de_fabrica(org) -> None:
                 Labor.objects.get_or_create(
                     org=org, codigo=codigo,
                     defaults={"de_fabrica": True,
+                              "se_toma_de_apoyo": codigo not in NO_SE_TOMAN_DE_APOYO,
                               "nombre": (str(viejos.get(codigo) or "").strip()
                                          or nombre)[:MAX_NOMBRE]})
         except IntegrityError:

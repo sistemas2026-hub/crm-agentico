@@ -220,9 +220,9 @@ def test_sin_tarea_delegada_NO_se_cierra_aunque_el_nivel_lo_permita(
 
     llamadas = []
     monkeypatch.setattr(fuentes_adaptadores, "estado_de_autonomia",
-                        lambda: {"permitido": True, "estado": "activo",
+                        lambda org: {"permitido": True, "estado": "activo",
                                  "motivo": ""})
-    def _motor(propuesta_id, caso_id):
+    def _motor(propuesta_id, caso_id, *, org=None):
         #  EL CASO LO CIERRA EL MOTOR, no este codigo: el doble escribe el
         #  estado porque eso es lo que pasa del otro lado de la frontera. Un
         #  doble que devolviera "cerrado" sin cerrar nada haria pasar una

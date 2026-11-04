@@ -7,6 +7,7 @@ import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_bloques.dart';
+import '../../core/widgets/lista_con_scroll_propio.dart';
 
 /// Lo que le avisaron al técnico mientras no estaba mirando.
 ///
@@ -33,7 +34,20 @@ class NotificacionesScreen extends StatefulWidget {
     this.alAbrirOrden,
     this.ocultarSiVacio = false,
     this.margenSuperior = 0,
+    this.primeros = const <Widget>[],
+    this.visibles,
   });
+
+  /// Lo que va antes de los avisos de la plataforma (29/10/2026): en Inicio,
+  /// las alertas de la jornada —«5 materiales no cuadran»—, que le piden algo
+  /// al técnico igual que un aviso. Antes eran otro bloque, más abajo.
+  final List<Widget> primeros;
+
+  /// Cuántos se ven sin deslizar (29/10/2026, el usuario: «que muestre dos, y
+  /// si quiere ver más, que arrastre un scroll independiente»). El resto queda
+  /// en un recuadro con su propio scroll, así la pantalla no se alarga con
+  /// cada aviso. Null los muestra todos: la pantalla suelta.
+  final int? visibles;
 
   /// Inyectable para las pruebas: sin esto habría que montar una base real solo
   /// para dibujar una lista.
@@ -141,7 +155,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   Widget build(BuildContext context) {
     // Mientras carga tampoco se dibuja: un bloque que aparece vacío y
     // desaparece medio segundo después empuja todo lo de abajo.
-    if (widget.ocultarSiVacio && (_cargando || _filas.isEmpty)) {
+    if (widget.ocultarSiVacio &&
+        widget.primeros.isEmpty &&
+        (_cargando || _filas.isEmpty)) {
       return const SizedBox.shrink();
     }
 
@@ -158,6 +174,22 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   }
 
   List<Widget> _cuerpo() {
+    final List<Widget> filas = <Widget>[
+      ...widget.primeros,
+      if (!_cargando)
+        for (final Map<String, dynamic> f in _filas) _unAviso(f),
+    ];
+    final int? visibles = widget.visibles;
+    if (visibles != null && filas.length > visibles) {
+      return <Widget>[
+        ListaConScrollPropio(
+          filas: filas,
+          visibles: visibles,
+          claveDelRecuadro: const ValueKey<String>('avisos-con-scroll'),
+        ),
+      ];
+    }
+    if (filas.isNotEmpty) return filas;
     if (_cargando) {
       return <Widget>[
         Text('Buscando…', style: AppTypography.cuerpoChico),
@@ -175,9 +207,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
       ];
     }
 
-    return <Widget>[
-      for (final Map<String, dynamic> f in _filas) _unAviso(f),
-    ];
+    return filas;
   }
 
   Widget _unAviso(Map<String, dynamic> fila) {
@@ -282,6 +312,15 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         }
         if (cantidad > 1) return 'Te asignaron $cantidad visitas';
         return titulo.isEmpty ? 'Te asignaron visitas' : 'Te asignaron $titulo';
+      // EL RECORDATORIO DEL SUPERVISOR (30/10/2026): la orden pasó la ventana
+      // sin reporte. Con el número y los minutos, por lo mismo que arriba.
+      case 'sin_reporte':
+        final Object? sinReporte = datos['orden_numero'];
+        final Object? minutos = datos['minutos'];
+        if (sinReporte != null && minutos != null) {
+          return 'OT #$sinReporte: $minutos min sin reportar';
+        }
+        return titulo.isEmpty ? 'Sin reporte' : titulo;
       default:
         return titulo.isEmpty ? 'Aviso' : titulo;
     }

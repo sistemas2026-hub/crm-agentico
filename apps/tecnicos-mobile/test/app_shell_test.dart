@@ -8,9 +8,11 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/core/widgets/dexter_app_header.dart';
 import 'package:campo/core/widgets/dexter_bottom_nav.dart';
 import 'package:campo/features/auth/login_screen.dart';
+import 'package:campo/features/inicio/inicio_screen.dart';
 import 'package:campo/features/materiales/materiales_screen.dart';
 import 'package:campo/features/materiales/recepcion_del_kit.dart';
 import 'package:campo/features/shell/app_shell.dart';
+import 'package:campo/features/trabajo/trabajo_screen.dart';
 import 'package:campo/features/trabajo/trabajo_vista.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -346,6 +348,34 @@ void main() {
       await banco.cerrar();
     });
 
+    testWidgets('5b. Lo pendiente sale solo: al volver la red, al volver a la '
+        'app y cada 2 minutos (30/10/2026)', (WidgetTester tester) async {
+      final banco = _Banco(resumenInicial: _resumen(pendientes: 5));
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+      final int alAbrir = banco.sincronizacionesPedidas;
+
+      // Vuelve la red: sin tocar nada, a los 3 segundos.
+      banco.conectividad.add(false);
+      await tester.pumpAndSettle();
+      banco.conectividad.add(true);
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      expect(banco.sincronizacionesPedidas, alAbrir + 1,
+          reason: 'volvió la red con 5 pendientes y no se envió solo');
+
+      // Vuelve a la app (estaba en WhatsApp).
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(seconds: 3));
+      expect(banco.sincronizacionesPedidas, alAbrir + 2);
+
+      // Con pendientes, cada 2 minutos.
+      await tester.pump(const Duration(minutes: 2));
+      expect(banco.sincronizacionesPedidas, alAbrir + 3);
+      await banco.cerrar();
+    });
+
     testWidgets('6. Con red pero sin llegar al servidor no dice CON RED',
         (WidgetTester tester) async {
       final banco = _Banco();
@@ -459,6 +489,22 @@ void main() {
       await tester.tap(_enBarra('Materiales'));
       await tester.pumpAndSettle();
       expect(find.byType(MaterialesScreen), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('10b2. La aplicacion abre en Inicio (29/10/2026)',
+        (WidgetTester tester) async {
+      // Sin decir la seccion, como la monta `main.dart` y el login.
+      final banco = _Banco();
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: AppShell(dependencias: banco.dependencias),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InicioScreen), findsOneWidget);
+      expect(find.byType(TrabajoScreen, skipOffstage: false), findsNothing,
+          reason: 'Órdenes no se construye hasta que el técnico la abre');
       await banco.cerrar();
     });
 

@@ -194,6 +194,11 @@ def _notificar(perfiles, verbo: str, *, entity, entity_name: str, link: str,
 VERBO_DEVUELTO = "trabajo_devuelto"
 VERBO_ASIGNADO = "trabajo_asignado"
 VERBO_JORNADA = "jornada_asignada"
+VERBO_SIN_REPORTE = "sin_reporte"
+
+#: El comienzo de la clave de un recordatorio. La lee el log del dia
+#: (`tiempos_del_dia.log_del_dia`) para decir que el Supervisor lo mando.
+CLAVE_SIN_REPORTE = "sin_reporte"
 
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado",
          "domingo")
@@ -288,6 +293,48 @@ def avisar_jornada_publicada(org, nuevas_por_perfil: dict, fecha) -> None:
         )
 
 
+def avisar_sin_reporte(orden, minutos, referencia: str) -> bool:
+    """El recordatorio al tecnico (30/10/2026, `campo/recordatorio_de_reporte.py`):
+    «⏱ OT #12: 38 min sin reportar». Devuelve si ESTA llamada lo mando.
+
+    UNO POR ATRASO. La clave lleva la referencia de la regla, y se reclama
+    ANTES de escribir la notificacion y en la misma transaccion: la tarea mira
+    cada 5 minutos, y sin el reclamo cada vuelta dejaria otra notificacion
+    igual en la campanita del tecnico. El push sale despues, fuera de la
+    transaccion, con la misma fila (`registro`).
+    """
+    perfiles = _asignados(orden)
+    if not perfiles:
+        return False
+    contenido = {"orden_numero": orden.numero, "minutos": minutos}
+    try:
+        with transaction.atomic():
+            registro = AvisoEnviado.objects.create(
+                org=orden.org,
+                clave=f"{CLAVE_SIN_REPORTE}|{orden.id}|{referencia}"[:200])
+            avisos_por_perfil = _notificar(
+                perfiles, VERBO_SIN_REPORTE, entity=orden,
+                entity_name=f"OT #{orden.numero}", link=f"/ot/{orden.id}",
+                contenido=contenido)
+    except IntegrityError:
+        return False
+    _enviar_ahora(
+        org=orden.org,
+        clave=registro.clave,
+        asunto=f"OT #{orden.numero} sin reporte",
+        texto=f"⏱ OT #{orden.numero}: {minutos} min sin reportar. Mandá un avance desde la app.",
+        enlace_a=orden.id,
+        perfiles=perfiles,
+        enlace_interno=f"/ot/{orden.id}",
+        avisos_por_perfil=avisos_por_perfil,
+        contenido=contenido,
+        verbo=VERBO_SIN_REPORTE,
+        solo_telefono=True,
+        registro=registro,
+    )
+    return True
+
+
 def _titulos_de(orden, requisitos: list[str]) -> list[str]:
     """«Fotografia de la medicion», no `foto_medicion`.
 
@@ -351,7 +398,7 @@ def _despachar(
 def _enviar_ahora(
     *, org, clave, asunto, texto, enlace_a, perfiles,
     enlace_interno="", avisos_por_perfil=None, contenido=None,
-    verbo=VERBO_DEVUELTO, solo_telefono=False,
+    verbo=VERBO_DEVUELTO, solo_telefono=False, registro=None,
 ):
     """El envio de verdad. Fuera de toda transaccion, y nunca lanza.
 
@@ -378,11 +425,14 @@ def _enviar_ahora(
 
         # IDEMPOTENCIA POR CLAVE PRIMARIA, no por un `select` previo: ahi vive la
         # carrera. Si la fila ya estaba, alguien mas ya aviso y esto no hace nada.
-        try:
-            with transaction.atomic():
-                registro = AvisoEnviado.objects.create(org=org, clave=clave)
-        except IntegrityError:
-            return
+        # Con `registro`, quien llama ya reclamo la clave (el recordatorio:
+        # tenia que reclamarla antes de escribir la notificacion).
+        if registro is None:
+            try:
+                with transaction.atomic():
+                    registro = AvisoEnviado.objects.create(org=org, clave=clave)
+            except IntegrityError:
+                return
 
         enlace = _enlace_de(org, enlace_a) if enlace_a else ""
         cuerpo = texto if not enlace else f"{texto}\n{enlace}"

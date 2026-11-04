@@ -73,6 +73,27 @@ def _herramienta_de_cierre(config):
                  if getattr(h, "cierra_ticket_operativo", False)), None)
 
 
+def _es_actor_del_sistema(actor: str) -> bool:
+    """Si `actor` es una identidad del sistema (`techo.ACTORES_DEL_SISTEMA`) y
+    no una persona: «supervisor», «Supervisor de Dexter», «servicio:...»."""
+    from nucleo.seguridad import techo as techos
+
+    nombre = (actor or "").strip().lower()
+    #  «Dexter» no es una persona. No va en `techo.ACTORES_DEL_SISTEMA` porque
+    #  esa lista gobierna tambien quien cambia el techo.
+    for sistema in (*techos.ACTORES_DEL_SISTEMA, "dexter"):
+        base = sistema.rstrip(":")
+        if not nombre.startswith(base):
+            continue
+        #  La identidad entera, o seguida de algo que no es una letra:
+        #  «supervisor», «Supervisor de Dexter», «supervisor_noc»,
+        #  «Supervisor-NOC», «servicio:x». No «Supervisora Ana».
+        resto = nombre[len(base):]
+        if not resto or not resto[0].isalpha():
+            return True
+    return False
+
+
 def cerrar_ticket_de_orden(config, tenant: str, *, orden_id: str, ticket: str,
                            texto: str, actor: str) -> ResultadoCierreTicket:
     """Cierra el ticket de una orden validada. A lo sumo una vez por orden.
@@ -93,6 +114,16 @@ def cerrar_ticket_de_orden(config, tenant: str, *, orden_id: str, ticket: str,
             NO_EJECUTADA,
             "hacen falta la orden, el ticket, quien valido y el texto: sin "
             "eso no hay evidencia, ni responsable, ni que dejar escrito")
+    #  UN ACTOR DEL SISTEMA NO ENTRA POR ACA (auditoria de frontera,
+    #  30/10/2026, H2). Esta puerta abre `frontera.humana()`, que no consulta la
+    #  etapa de Autonomia 2 ni la autorizacion de la herramienta: un «Supervisor»
+    #  por aca seria lo automatico disfrazado de humano. El suyo es
+    #  `cerrar_ticket_por_el_supervisor`, por la autonoma.
+    if _es_actor_del_sistema(actor):
+        return ResultadoCierreTicket(
+            NO_EJECUTADA,
+            "un actor del sistema no cierra por la puerta humana: el Supervisor "
+            "cierra por la autonoma")
 
     herr = _herramienta_de_cierre(config)
     if herr is None:
@@ -148,4 +179,171 @@ def cerrar_ticket_de_orden(config, tenant: str, *, orden_id: str, ticket: str,
         return ResultadoCierreTicket(
             NO_EJECUTADA, resultado.codigo or resultado.decision or "",
             referencia=origen)
+    return ResultadoCierreTicket(CERRADO, "", referencia=origen)
+
+
+# =============================================================================
+#  EL SUPERVISOR CIERRA SOLO  --  30/10/2026
+# =============================================================================
+#
+#  SPEC/objetivos/revision-del-cierre.md. El usuario: «¿de que manera hacemos
+#  para que el supervisor cierre solo?». Lo de arriba es la puerta HUMANA: una
+#  persona valido y su nombre es la evidencia. Esto es la OTRA puerta, la
+#  AUTONOMA: nadie lo pidio en el momento; el Supervisor reviso el cierre en
+#  codigo (`campo/revision_del_cierre.py`) y lo dio por bueno.
+#
+#  POR QUE NO SE REUSA LA FUNCION DE ARRIBA CON actor="supervisor": esa abre
+#  `frontera.humana()`, que no consulta la etapa de Autonomia 2 ni la
+#  autorizacion de la herramienta. Un Supervisor por esa puerta seria lo
+#  automatico disfrazado de humano: el agujero que `humana()` dice que existe
+#  para no tener.
+#
+#  `frontera.autonoma()` consulta, en orden: el interruptor, el techo, la etapa
+#  (AUTONOMIA_2_ACTIVA + el prerequisito B-7 medido contra la base) y la
+#  autorizacion granular de ESTA herramienta. Cualquiera cerrada -> no sale,
+#  y el resultado dice CUAL, para que la oficina sepa que falta.
+#
+#  LA MISMA CLAVE QUE LA PUERTA HUMANA (auditoria de frontera, 30/10/2026,
+#  H3). La primera version usaba una propia, y la unica exclusion entre las dos
+#  puertas era un `select` en el CRM (`_ya_cerrado`) que se escribe despues del
+#  200: una persona validando mientras el Supervisor cerraba publicaba dos
+#  veces (medido con una sonda: 2 POST al mismo ticket). Ahora las dos reclaman
+#  `orden_validada:<orden>|<herramienta>` por clave primaria: la segunda,
+#  quien sea, no publica. El `origen` sigue diciendo quien fue, para la
+#  bitacora.
+#
+#  LA QUINTA COMPUERTA (H1), Y SU EXENCION (31/10/2026). La herramienta de
+#  cierre declara `aprobacion_humana` (M06-E, 22/09/2026: no se midio si el ISP
+#  le avisa al cliente ni si el cierre se deshace). `frontera.exigir` la
+#  rechaza para un permiso autonomo, pero lo hace DENTRO de la ejecucion: el
+#  intento quedaba marcado como fallido y la orden ya no se podia reintentar.
+#  Se pregunta ANTES de reclamar la clave, y el motivo lo dice.
+#
+#  El 31/10/2026 el usuario decidio que el aviso al cliente no importa para
+#  esta ruta --es la misma decision que ya habia tomado el 13/10 para la puerta
+#  humana, que habia quedado sin extender a esta-- y se abrio la exencion
+#  `frontera.CIERRE_DE_ORDEN_REVISADA`. NO se le quito la marca a la
+#  herramienta: eso la habria habilitado tambien para la conversacion (el rol
+#  `soporte` la tiene) y para `/interno/herramienta`. La exencion vale solo por
+#  este camino, el tenant tiene que nombrarla en `aprobacion_humana_salvo`, y
+#  queda anotada en la bitacora de ejecucion autonoma.
+#
+#  INCIERTO NO ES «NO PUDO». En curso, fallida antes, o la clave usada con
+#  otro texto (la otra puerta ya publico): no se sabe si el ISP lo cerro, y se
+#  dice asi, para que alguien lo mire alla en vez de reintentar a ciegas.
+
+#: El actor de la puerta autonoma: no es una persona, y no se finge que lo sea.
+SUPERVISOR = "supervisor"
+
+#: Lo que firma el texto del ticket. El ISP firma con la API key; esto dice
+#: que lo cerro el Supervisor y no una persona de la oficina.
+FIRMA_DEL_SUPERVISOR = "Supervisor de Dexter"
+
+#: Una compuerta de la puerta autonoma lo freno. El motivo dice cual.
+NO_AUTORIZADA = "NO_AUTORIZADA_PARA_EL_SUPERVISOR"
+
+#: No se sabe si el ISP lo cerro: hay que mirarlo alla.
+INCIERTO = "ESTADO_INCIERTO"
+
+
+def cerrar_ticket_por_el_supervisor(config, tenant: str, *, orden_id: str,
+                                    ticket: str, texto: str,
+                                    revision: str = "") -> ResultadoCierreTicket:
+    """Cierra el ticket de una orden que el Supervisor reviso y dio por buena.
+    Por la puerta AUTONOMA. A lo sumo una vez por orden.
+
+    `revision` identifica QUE revision lo autoriza (orden, vuelta, veredicto).
+    Obligatoria desde el 31/10/2026 (H1): no se puede comprobar desde aca --la
+    revision corre en el CRM-- pero sin ella la bitacora no podia contestar
+    que autorizo cada cierre. Viaja al `origen`, que es lo que queda escrito.
+    """
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.seguimiento.operativo import _firmado
+    from nucleo.seguridad import frontera, idempotencia
+    from nucleo.seguridad import techo as techos
+
+    orden_id = str(orden_id or "").strip()
+    ticket = str(ticket or "").strip()
+    texto = str(texto or "").strip()
+    revision = str(revision or "").strip()
+    if not orden_id or not ticket or not texto or not revision:
+        return ResultadoCierreTicket(
+            NO_EJECUTADA,
+            "hacen falta la orden, el ticket, el texto y la revision que lo "
+            "autoriza: sin la ultima no hay nada que mirar despues")
+
+    herr = _herramienta_de_cierre(config)
+    if herr is None:
+        return ResultadoCierreTicket(
+            SIN_HERRAMIENTA,
+            "el tenant no declara ninguna herramienta con 'cierra_ticket_operativo'")
+
+    argumentos = dict(herr.argumentos_fijos or {})
+    argumentos.update({"id_ticket": ticket,
+                       "respuesta": _firmado(texto, FIRMA_DEL_SUPERVISOR)})
+    #  LA REVISION VIAJA EN EL ORIGEN, que es lo que queda en la bitacora de
+    #  ejecucion autonoma: ahi es donde despues se pregunta "¿que autorizo
+    #  este cierre?" (H1). La CLAVE idempotente NO la incluye, a proposito:
+    #  sigue siendo la orden, asi que dos revisiones de la misma orden no
+    #  publican dos veces.
+    origen = f"orden_cerrada_por_el_supervisor:{orden_id}|{revision}"
+    clave = f"orden_validada:{orden_id}|{herr.nombre}"
+
+    def _hacer():
+        return ejecutor_http.ejecutar(herr, argumentos, tenant,
+                                      variables_tenant=config.variables_tenant)
+
+    try:
+        #  El nivel y el efecto salen del CATALOGO, como en el motor: nadie que
+        #  llame puede bajarse la exigencia.
+        with frontera.autonoma(tenant, herr.nombre, origen=origen, actor=SUPERVISOR,
+                               nivel_requerido=techos.nivel_requerido_de(herr),
+                               efecto_externo=frontera.efecto_externo(herr),
+                               exencion=frontera.CIERRE_DE_ORDEN_REVISADA):
+            #  LA QUINTA COMPUERTA, PREGUNTADA ANTES DE RECLAMAR LA CLAVE
+            #  (H1, 30/10/2026). El ultimo metro la vuelve a comprobar --ahi
+            #  vive el control-- pero si se llegara hasta alla el rechazo
+            #  quemaria el intento como 'OPERACION_FALLIDA_PREVIA' y la orden
+            #  no se podria reintentar nunca.
+            #
+            #  La misma regla que el ultimo metro, no una copia a mano: si el
+            #  tenant no declaro la exencion en esta herramienta, no sale.
+            if (getattr(herr, "aprobacion_humana", False)
+                    and not frontera.exime_la_aprobacion(
+                        herr, frontera.CIERRE_DE_ORDEN_REVISADA)):
+                raise frontera.AccionExternaNoAutorizada(
+                    herr.nombre, frontera.APROBACION_REQUERIDA,
+                    f"'{herr.nombre}' declara aprobacion humana (M06-E) y el "
+                    f"tenant no la eximio para el cierre de una orden revisada: "
+                    f"agregar 'aprobacion_humana_salvo: "
+                    f"[{frontera.CIERRE_DE_ORDEN_REVISADA}]' a la herramienta")
+            resultado = idempotencia.ejecutar(
+                tenant, herr.nombre, argumentos, origen, _hacer, clave=clave)
+    except frontera.AccionExternaNoAutorizada as e:
+        return ResultadoCierreTicket(NO_AUTORIZADA, f"{e.codigo}: {e.motivo}",
+                                     referencia=origen)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("cierre_validacion", "el cierre del Supervisor fallo", error=e)
+        import requests
+
+        #  Un timeout o un corte DESPUES de mandar no dice que el ISP no lo
+        #  aplico: dice que no se sabe (auditoria de frontera, 30/10/2026).
+        if isinstance(e, (requests.exceptions.Timeout,
+                          requests.exceptions.ConnectionError)):
+            return ResultadoCierreTicket(
+                INCIERTO, f"{type(e).__name__}: no se sabe si el ISP lo cerro; "
+                          f"hay que mirarlo en su sistema", referencia=origen)
+        return ResultadoCierreTicket(FALLO, type(e).__name__, referencia=origen)
+
+    if resultado.decision == "repetida":
+        return ResultadoCierreTicket(CERRADO, "ya se habia cerrado antes",
+                                     referencia=origen)
+    if not resultado.ejecutada:
+        codigo = resultado.codigo or resultado.decision or ""
+        if codigo in (idempotencia.EN_CURSO, idempotencia.FALLIDA_PREVIA,
+                      idempotencia.CLAVE_REUTILIZADA):
+            return ResultadoCierreTicket(
+                INCIERTO, f"{codigo}: no se sabe si el ISP lo cerro; hay que "
+                          f"mirarlo en su sistema", referencia=origen)
+        return ResultadoCierreTicket(NO_EJECUTADA, codigo, referencia=origen)
     return ResultadoCierreTicket(CERRADO, "", referencia=origen)

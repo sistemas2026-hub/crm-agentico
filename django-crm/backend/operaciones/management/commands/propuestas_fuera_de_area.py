@@ -60,7 +60,7 @@ class Command(BaseCommand):
 
         set_rls_context(org.id)
 
-        criterio = areas.criterio_de_area()
+        criterio = areas.criterio_de_area(org=org)
         if not criterio.se_sabe:
             raise CommandError(
                 "No se pudo leer el mapa de áreas del motor: no se cuenta ni "

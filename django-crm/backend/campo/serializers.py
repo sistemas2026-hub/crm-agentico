@@ -81,6 +81,23 @@ def _compromiso(obj: OrdenTrabajo) -> dict:
     }
 
 
+def _asunto(serializer, obj: OrdenTrabajo) -> str:
+    """
+    El asunto del ticket del que nacio, como se ve: «No Tiene Internet».
+
+    Vacio si no nacio de un ticket. Va siempre, aunque este vacio: la app
+    distingue «no tiene asunto» de «el servidor viejo no lo manda». La lista lo
+    calcula de una vez para todas (`context["asuntos"]`); el detalle, para la
+    suya (29/10/2026: la tarjeta de la app, igual que la de Programacion).
+    """
+    from campo.niveles import asuntos_de_las_ordenes
+
+    asuntos = serializer.context.get("asuntos")
+    if asuntos is None:
+        asuntos = asuntos_de_las_ordenes(obj.org_id, [obj])
+    return asuntos.get(obj.id, "")
+
+
 def _cuadrilla(obj: OrdenTrabajo) -> list[dict]:
     """
     Quienes van al trabajo, con su rol.
@@ -134,6 +151,7 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
     tecnico_principal = serializers.SerializerMethodField()
     origen = serializers.SerializerMethodField()
     compromiso = serializers.SerializerMethodField()
+    asunto = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenTrabajo
@@ -149,6 +167,7 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
             "prioridad",
             "zona",
             "resumen",
+            "asunto",
             "compromiso",
             "estado_operativo",
             "estado_validacion",
@@ -162,6 +181,9 @@ class OrdenTrabajoListSerializer(serializers.ModelSerializer):
 
     def get_compromiso(self, obj: OrdenTrabajo) -> dict:
         return _compromiso(obj)
+
+    def get_asunto(self, obj: OrdenTrabajo) -> str:
+        return _asunto(self, obj)
 
     def get_tipo(self, obj: OrdenTrabajo) -> dict:
         v = obj.tipo_trabajo_version
@@ -206,6 +228,7 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
     cuadrilla = serializers.SerializerMethodField()
     correccion = serializers.SerializerMethodField()
     compromiso = serializers.SerializerMethodField()
+    asunto = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenTrabajo
@@ -222,6 +245,7 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             "prioridad",
             "zona",
             "resumen",
+            "asunto",
             "compromiso",
             "requisitos_seguridad",
             "contexto",
@@ -248,6 +272,9 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
 
     def get_compromiso(self, obj: OrdenTrabajo) -> dict:
         return _compromiso(obj)
+
+    def get_asunto(self, obj: OrdenTrabajo) -> str:
+        return _asunto(self, obj)
 
     def get_correccion(self, obj: OrdenTrabajo) -> dict | None:
         """

@@ -109,6 +109,181 @@ export function textoDeLaSiguiente(ordenes) {
 }
 
 /**
+ * Los tiempos de una orden (30/10/2026, «¿cuánto han demorado?»): «28 min en
+ * camino · 40 min en sitio», o «en sitio hace 35 min» si sigue ahí. Si llegó
+ * OTRO día y nadie la cerró, «en sitio desde el 15/10 18:43»: no «21159 min».
+ * Vacío si todavía no salió. Lo calcula el servidor (`campo/tiempos_del_dia.py`).
+ *
+ * @param {{ traslado_min?: number | null, en_sitio_min?: number | null, en_sitio_hace_min?: number | null, en_sitio_desde?: string | null } | null | undefined} t
+ */
+export function textoDeTiempos(t) {
+  if (!t) return '';
+  const partes = [];
+  if (t.traslado_min != null) partes.push(`${t.traslado_min} min en camino`);
+  if (t.en_sitio_min != null) partes.push(`${t.en_sitio_min} min en sitio`);
+  else if (t.en_sitio_hace_min != null) partes.push(`en sitio hace ${t.en_sitio_hace_min} min`);
+  else if (t.en_sitio_desde) partes.push(`en sitio desde el ${t.en_sitio_desde}`);
+  return partes.join(' · ');
+}
+
+/**
+ * El día de una cuadrilla en una línea (30/10/2026): «Salió 07:42 · 3 de 6
+ * hechas · en sitio en OT #12 desde 09:10», o «Todavía no sale · 0 de 6».
+ *
+ * @param {{ salio?: string | null, hechas: number, total: number, en_curso?: { numero: number, estado: string, desde?: string | null } | null } | null | undefined} r
+ */
+export function textoDelDiaDeLaCuadrilla(r) {
+  if (!r) return '';
+  const partes = [r.salio ? `Salió ${r.salio}` : 'Todavía no sale', `${r.hechas} de ${r.total} hechas`];
+  if (r.en_curso) {
+    const donde = r.en_curso.estado === 'en_sitio' ? 'en sitio en' : 'en camino a';
+    partes.push(`${donde} OT #${r.en_curso.numero}${r.en_curso.desde ? ` desde ${r.en_curso.desde}` : ''}`);
+  }
+  return partes.join(' · ');
+}
+
+/**
+ * La regla de los 30 minutos de una orden, como la calcula el servidor
+ * (`services/salud_seguimiento.py`): «Sin reporte hace 38 min» si venció, o
+ * por qué no corre. Vacío si está al día o no aplica.
+ *
+ * @param {{ tipo: string, minutos_desde_la_referencia?: number | null } | null | undefined} s
+ */
+export function textoDeSeguimiento(s) {
+  if (!s) return '';
+  if (s.tipo === 'vencido') return `Sin reporte hace ${s.minutos_desde_la_referencia ?? '?'} min`;
+  if (s.tipo === 'pausado_noc') return 'Pausado: espera al NOC';
+  if (s.tipo === 'pausado_novedad') return 'Pausado por la novedad de la cuadrilla';
+  return '';
+}
+
+/**
+ * Cuándo fue una novedad de la cuadrilla (30/10/2026, novedad-de-cuadrilla.md):
+ * «desde las 10:12 · hasta las 10:42», «desde las 10:12 · el resto del día», y
+ * si ya terminó, «de 10:12 a 10:40» (lo que llegue antes: «Ya seguí» o su
+ * hora). Las horas vienen en la de la empresa (`campo/novedades.py::a_json`).
+ *
+ * @param {{ avisada_en: string, hasta?: string | null, resuelta_en?: string | null, vigente?: boolean }} n
+ */
+export function textoDeNovedad(n) {
+  /** @param {string | null | undefined} iso */
+  const hm = (iso) => (iso ?? '').slice(11, 16);
+  const desde = hm(n.avisada_en);
+  if (n.vigente) {
+    return n.hasta ? `desde las ${desde} · hasta las ${hm(n.hasta)}` : `desde las ${desde} · el resto del día`;
+  }
+  const fin = n.resuelta_en && (!n.hasta || n.resuelta_en < n.hasta) ? n.resuelta_en : n.hasta;
+  return fin ? `de ${desde} a ${hm(fin)}` : `desde las ${desde}`;
+}
+
+/**
+ * Los pasos del progreso de una orden, como en la app (30/10/2026).
+ */
+export const PASOS = ['Asignada', 'En camino', 'En sitio', 'Completada', 'Cerrada'];
+
+/**
+ * En qué paso está una orden (0-4), o -1 si no tiene progreso (cancelada).
+ * Bloqueada y devuelta para corregir siguen «en sitio»: hay trabajo en la casa.
+ *
+ * @param {string} estado `estado_operativo` de la orden
+ */
+export function pasoDelProgreso(estado) {
+  switch (estado) {
+    case 'asignada':
+      return 0;
+    case 'en_camino':
+      return 1;
+    case 'en_sitio':
+    case 'bloqueada':
+    case 'correccion_requerida':
+      return 2;
+    case 'completada_campo':
+      return 3;
+    case 'cerrada':
+      return 4;
+    default:
+      return -1;
+  }
+}
+
+/**
+ * Las que esperan cuadrilla, agrupadas por el motivo que dio el servidor, de
+ * la más numerosa a la menos (30/10/2026: «que se puedan contraer»).
+ *
+ * @param {{ id: string, por_que?: string, motivo?: string }[]} esperan
+ * @returns {{ motivo: string, ordenes: any[] }[]}
+ */
+export function gruposQueEsperan(esperan) {
+  /** @type {Map<string, any[]>} */
+  const grupos = new Map();
+  for (const o of esperan ?? []) {
+    const motivo = (o.por_que || o.motivo || 'Sin motivo').trim();
+    if (!grupos.has(motivo)) grupos.set(motivo, []);
+    /** @type {any[]} */ (grupos.get(motivo)).push(o);
+  }
+  return [...grupos].map(([motivo, ordenes]) => ({ motivo, ordenes }))
+    .sort((a, b) => b.ordenes.length - a.ordenes.length);
+}
+
+/**
+ * Cómo quedó el ticket del ISP de una orden cerrada (30/10/2026).
+ *
+ * @param {{ estado: string, detalle?: string } | null | undefined} t
+ */
+export function textoDelTicket(t) {
+  switch (t?.estado) {
+    case 'cerrado':
+      return 'Cerrado en el sistema del ISP';
+    case 'no_cerrado':
+      return `No se pudo cerrar en el sistema del ISP${t.detalle ? `: ${t.detalle}` : ''}`;
+    case 'sin_ticket':
+      return 'La orden no tiene ticket del ISP';
+    default:
+      return 'Sin registro de cómo quedó el ticket';
+  }
+}
+
+/**
+ * Quién cerró una orden (30/10/2026).
+ *
+ * @param {{ de: string, nombre?: string } | null | undefined} q
+ */
+export function textoDeQuien(q) {
+  if (q?.de === 'persona') return `${q.nombre} la aprobó y la cerró`;
+  if (q?.de === 'supervisor') return 'El Supervisor la aprobó y la cerró';
+  return 'Se cerró sin una aprobación registrada';
+}
+
+/**
+ * Los días de la pestaña Cerradas: hoy, ayer o los últimos 7 (hoy incluido).
+ *
+ * @param {string} rango 'hoy' | 'ayer' | '7d'
+ * @param {string} hoy AAAA-MM-DD, el día de la empresa
+ */
+export function rangoDeCerradas(rango, hoy) {
+  /** @param {number} n */
+  const menos = (n) => new Date(Date.parse(`${hoy}T12:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
+  if (rango === 'ayer') return { desde: menos(1), hasta: menos(1) };
+  if (rango === '7d') return { desde: menos(6), hasta: hoy };
+  return { desde: hoy, hasta: hoy };
+}
+
+/**
+ * El porqué de una devolución, ya escrito (30/10/2026, revision-del-cierre.md):
+ * lo que el Supervisor encontró que no está bien o no se sabe, una línea por
+ * punto. Si todo estaba bien, vacío: quien devuelve igual tiene que decir por
+ * qué.
+ *
+ * @param {{ puntos?: { ok: boolean | null, texto: string }[] } | null | undefined} r
+ */
+export function motivosDeLaRevision(r) {
+  return (r?.puntos ?? [])
+    .filter((p) => p.ok !== true)
+    .map((p) => p.texto)
+    .join('\n');
+}
+
+/**
  * Cuándo vence el compromiso de la orden (29/10/2026), contra el día que se
  * mira: «Vence hoy», «Vence mañana», «Vence el 31/10», «Venció el 28/10». Sin
  * fecha, «Sin vencimiento»: no se inventa.
@@ -150,4 +325,124 @@ function vencimiento(iso, dia) {
   if (dias === 0) return { texto: 'Vence hoy', tono: 'hoy' };
   if (dias === 1) return { texto: 'Vence mañana', tono: 'proxima' };
   return { texto: `Vence el ${corta}`, tono: 'proxima' };
+}
+
+/**
+ * LAS ALERTAS DEL DÍA (31/10/2026). Lo que necesita que alguien actúe, junto y
+ * ordenado por gravedad. No pide nada nuevo al servidor: se arma con lo que la
+ * pantalla ya cargó (`del_dia` y el material), así que no puede decir algo que
+ * las tarjetas no digan.
+ *
+ * Cada alerta: `{ clave, tono, texto, donde }`. `tono` manda el orden —
+ * 'grave' antes que 'avisa' antes que 'dato'— y dentro de un tono se respeta
+ * el orden en que se descubrieron.
+ *
+ * @param {any} publicado lo que devuelve `campo/dia_publicado.py::del_dia`
+ * @param {any} material lo del material del día, o null si no se pudo leer
+ * @returns {{ clave: string, tono: 'grave'|'avisa'|'dato', texto: string, donde: string }[]}
+ */
+export function alertasDelDia(publicado, material) {
+  /** @type {{ clave: string, tono: 'grave'|'avisa'|'dato', texto: string, donde: string }[]} */
+  const salida = [];
+  for (const c of publicado?.cuadrillas ?? []) {
+    const donde = c.cuadrilla ?? '';
+    //  DEJÓ DE REPORTAR: lo más grave, porque nadie sabe qué pasa.
+    if (c.sin_reporte) {
+      salida.push({
+        clave: `sin_reporte|${c.jornada}`,
+        tono: 'grave',
+        texto: `OT #${c.sin_reporte.numero} sin reporte hace ${c.sin_reporte.minutos} min`,
+        donde
+      });
+    }
+    //  SIN APP: no recibe órdenes ni recordatorios. Se nombra a quién.
+    const sinApp = (c.personas ?? []).filter((p) => !p.telefono || !p.ultimo_contacto);
+    if (sinApp.length) {
+      salida.push({
+        clave: `sin_app|${c.jornada}`,
+        tono: 'grave',
+        texto: sinApp.length === 1
+          ? `${sinApp[0].nombre} no tiene la app: no le llegan las órdenes ni los avisos`
+          : `${sinApp.length} técnicos sin la app: no les llegan las órdenes ni los avisos`,
+        donde
+      });
+    }
+    //  SOBRECARGADA: más órdenes que su tope del día.
+    const cuantas = (c.ordenes ?? []).length;
+    if (c.tope && cuantas > c.tope) {
+      salida.push({
+        clave: `sobrecarga|${c.jornada}`,
+        tono: 'grave',
+        texto: `${cuantas} órdenes para un tope de ${c.tope}`,
+        donde
+      });
+    }
+    //  NOVEDAD VIGENTE: la cuadrilla avisó algo y el reloj no corre. Solo las
+    //  vigentes: una resuelta hace tres horas no es algo que atender.
+    for (const n of c.novedades ?? []) {
+      if (!n.vigente) continue;
+      salida.push({
+        clave: `novedad|${n.id ?? `${c.jornada}|${salida.length}`}`,
+        tono: 'avisa',
+        texto: [n.tipo_texto || 'Avisó una novedad', textoDeNovedad(n)].filter(Boolean).join(' · '),
+        donde
+      });
+    }
+  }
+  //  MATERIAL: una sola línea, no una por bodega.
+  const faltan = material?.cuentas?.con_faltantes ?? 0;
+  if (faltan) {
+    salida.push({
+      clave: 'material',
+      tono: 'avisa',
+      texto: faltan === 1 ? '1 cuadrilla sale con material faltante'
+        : `${faltan} cuadrillas salen con material faltante`,
+      donde: 'Material del día'
+    });
+  }
+  //  TERMINADAS SIN CERRAR: esperan que alguien las apruebe.
+  const porRevisar = (publicado?.por_revisar ?? []).length;
+  if (porRevisar) {
+    salida.push({
+      clave: 'por_revisar',
+      tono: 'avisa',
+      texto: porRevisar === 1 ? '1 orden terminada espera que la aprueben'
+        : `${porRevisar} órdenes terminadas esperan que las aprueben`,
+      donde: 'Por revisar'
+    });
+  }
+  //  ESPERAN CUADRILLA: no es una falla, es trabajo sin repartir.
+  const esperan = publicado?.cuentas?.esperan ?? 0;
+  if (esperan) {
+    salida.push({
+      clave: 'esperan',
+      tono: 'dato',
+      texto: `${esperan} ${esperan === 1 ? 'orden espera' : 'órdenes esperan'} cuadrilla`,
+      donde: 'Sin repartir'
+    });
+  }
+  const rango = { grave: 0, avisa: 1, dato: 2 };
+  return salida
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => rango[x.a.tono] - rango[y.a.tono] || x.i - y.i)
+    .map(({ a }) => a);
+}
+
+/**
+ * SI SE DIBUJA EL MAPA (01/11/2026): solo cuando lo que se mira es HOY.
+ *
+ * Una fecha pasada no tiene posiciones --no se guarda el recorrido-- y
+ * mostrar las de ahora bajo otra fecha sería mentir sobre dónde estuvo
+ * alguien. Sin saber cuál es el día de la empresa tampoco se dibuja: adivinar
+ * con el reloj del navegador fue justo el defecto que dejó el mapa invisible.
+ *
+ * Es una función y no una condición escrita en la plantilla porque una
+ * condición dentro de un `{#if}` no la mira ninguna prueba: la mutación que
+ * la borraba sobrevivía.
+ *
+ * @param {string | null | undefined} dia el día que se está mirando
+ * @param {string | null | undefined} hoy el día de la empresa, del servidor
+ */
+export function seDibujaElMapa(dia, hoy) {
+  return Boolean(hoy) && dia === hoy;
 }

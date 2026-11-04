@@ -428,7 +428,9 @@ def enviar_encuesta_whatsapp(case_id, org_id, cerrado_en=None, vuelta=0):
     if case is None or case.status != "Closed":
         logger.info("enviar_encuesta_whatsapp: case=%s ya no esta cerrado, no se pide", case_id)
         return None
-    url, tenant = _motor()
+    #  La empresa del caso (31/10/2026): con la variable de antes, la encuesta
+    #  de un cliente de la segunda empresa salia desde el WhatsApp de la primera.
+    url, tenant = _motor(org_id)
     if not url or not tenant:
         logger.info("enviar_encuesta_whatsapp: el asistente no esta configurado")
         return None
@@ -466,4 +468,55 @@ def enviar_encuesta_whatsapp(case_id, org_id, cerrado_en=None, vuelta=0):
             espera = 60
         enviar_encuesta_whatsapp.apply_async(
             args=[case_id, org_id, cerrado_en, vuelta + 1], countdown=espera)
+    return datos
+
+
+# =============================================================================
+#  EL CLIENTE SE ENTERA DE QUE LE ABRIERON UN TICKET  --  30/10/2026
+# =============================================================================
+#  PRD §8.17, Ola 2. Cuando una persona abre un ticket desde "Nuevo ticket", el
+#  cliente no esta en el chat y no sabe que su pedido quedo registrado. Lo pide
+#  la vista que ata el caso a su ticket del ISP (la unica via por la que nace un
+#  ticket desde Dexter: los importados no pasan por ahi). Decide el motor.
+#
+#  Solo viaja el numero de ticket: el motor confirma el hecho en el ISP.
+#  Un caso que ya termino no se avisa: al cerrar sale la encuesta.
+
+@shared_task
+def avisar_ticket_creado(case_id, org_id, vuelta=0):
+    """Le pide al motor el aviso `ticket_creado_cliente`. Devuelve lo que dijo."""
+    from common import avisos_al_cliente
+    from common.tasks import _motor
+    from operaciones import areas_del_tenant
+
+    url, _ = _motor(org_id)
+    if not url:
+        logger.info("avisar_ticket_creado: el asistente no esta configurado")
+        return None
+    #  La empresa del caso, no la del entorno (mismo criterio que la visita).
+    tenant = areas_del_tenant.tenant_de_organizacion(org_id)
+    if not tenant:
+        logger.info("avisar_ticket_creado: sin empresa para la org, no se pide (case=%s)", case_id)
+        return None
+    from common.tasks import clear_rls_context
+
+    set_rls_context(org_id)
+    try:
+        case = Case.objects.filter(id=case_id, org_id=org_id).first()
+        if case is None or not case.provider or not case.external_ticket_id:
+            return None
+        if case.status in TERMINAL_STATUSES:
+            logger.info("avisar_ticket_creado: case=%s ya termino, no se pide", case_id)
+            return {"enviado": False, "motivo": "ya_cerrado"}
+        #  SOLO el numero: el motor lo lee en el ISP y de ahi salen servicio,
+        #  asunto y clave (auditorias de frontera y PII, 30/10/2026). El asunto
+        #  del caso no viaja: se puede editar con texto libre antes de enviar.
+        cuerpo = {"tenant": tenant, "evento": "ticket_creado_cliente",
+                  "ticket": case.external_ticket_id}
+    finally:
+        clear_rls_context()
+    datos = avisos_al_cliente.pedir(url, cuerpo, f"ticket case={case_id}")
+    espera = avisos_al_cliente.reagendar_en(datos, vuelta)
+    if espera is not None:
+        avisar_ticket_creado.apply_async(args=[case_id, org_id, vuelta + 1], countdown=espera)
     return datos

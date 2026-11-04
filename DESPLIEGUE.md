@@ -182,12 +182,10 @@ BOTTLECRM_API_TOKEN=
 
 SECRETOS_CLAVE_MAESTRA=
 
-ASISTENTE_TENANT=rapilink
-
 DEFAULT_FROM_EMAIL=noreply@rapilinksas.co
 ```
 
-`ASISTENTE_TENANT` es el slug del `tenants/<slug>.config.yaml`, y es de quién habla el frontend cuando alguien abre `/agentes` o `/settings/asistente`. Se declara acá y no en el código porque es lo único que ata esa interfaz a una empresa concreta. La URL del motor no está en esta lista: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
+La empresa **no** está en esta lista (31/10/2026): hasta ese día `ASISTENTE_TENANT` ataba el frontend y el backend a una sola empresa por instalación. Hoy los dos la sacan de la organización de quien entra o del objeto que se trata, y se la preguntan al motor. La URL del motor tampoco: la fija el compose (`http://motor:5000`), que es quien conoce el nombre del servicio.
 
 `SECRETOS_CLAVE_MAESTRA` descifra las credenciales por empresa (`asistente.tenant_secrets`). Tiene que ser **la misma** que la del `.env` de desarrollo, o lo que se cargue desde una máquina no se descifra en la otra. Se genera una vez con:
 
@@ -210,6 +208,10 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 El patrón que más confunde: todas miran al **backend** excepto `CORS_ALLOWED_ORIGINS`, que mira al **frontend** — es la lista de quién tiene permiso de llamarlo. Y `ALLOWED_HOSTS` va sin `https://`; las demás con él.
+
+**`AUTONOMIA_2_ACTIVA` — opcional, y sin ella el sistema no actúa solo** (02/11/2026). Con `1`, el motor abre la etapa de autonomía; sin ella, `frontera` frena **toda** escritura autónoma y **toda** irreversible, también las que aprueba una persona (el reinicio de la ONU, el cierre del Supervisor, la autonomía ganada). Hasta el 02/11 no figuraba en `docker-compose.prod.yml`, así que no llegaba aunque se cargara aquí. No alcanza sola: además tienen que estar el interruptor reactivado y el techo (`cli/autonomia.py`), B-7: aplicar `supabase/operador/cerrar_b7_secreto_jwt.sql` como superusuario del Postgres de Supabase (no va por el ledger: lo trabaría si su rol no es dueño de la base) y reiniciar el pooler y el CRM. **Decidido el 02/11/2026: sin rotar el secreto todavía.** Leerlo exigía credenciales de la base, que ya dan acceso total sin él; PostgREST está cerrado en Kong; y el riesgo mayor son las contraseñas de la base que quedaron en transcripciones. La rotación de `JWT_SECRET` (con `ANON_KEY` y `SERVICE_ROLE_KEY`, que nada de Dexter usa) va junto con la de esas contraseñas, como una sola tarea de seguridad pendiente y la autorización de cada herramienta (`cli/autorizar_herramienta.py`). Ver PRD §8.18.
+
+**La autonomía por agente (`supabase/202611021200_autonomia_por_agente.sql`) — dos reglas de operación.** (1) **La migración va ANTES del push** del código que la usa: sin la columna `rol` el motor falla cerrado y nada sale solo. (2) **Antes de volver a código anterior a `cf0a64fe`, detener la autonomía**: `py -3.13 cli/autonomia.py <tenant> --detener --actor ... --motivo "vuelta atrás"`. El código viejo no mira el agente y tomaría la última fila de la herramienta —de cualquier agente— como si valiera para todos. Después de volver, retirar lo que corresponda y recién ahí reactivar.
 
 ### 4. Dominios
 
@@ -343,7 +345,7 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 **Pasos, en este orden** (saltarse el primero hace fallar el tercero):
 
 1. **DNS**: registro A de `motor.rapilinksas.co` → `86.48.18.185`. Comprobar con `dig +short motor.rapilinksas.co` antes de seguir; sin esto Traefik no puede emitir certificado.
-2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat`: `ASISTENTE_URL` y `ASISTENTE_TENANT`.
+2. **Variables** en Dokploy, servicio `motor`: `SECRETOS_CLAVE_MAESTRA` (obligatoria — sin ella no se descifra ninguna credencial) y `BOTTLECRM_API_TOKEN`. En `backend`, `celery-worker` y `celery-beat` no hace falta ninguna: la URL la pone el compose y la empresa sale de la organización (31/10/2026; antes se declaraba `ASISTENTE_TENANT`).
 3. **Dominio** en Dokploy sobre el servicio `motor`. La regla de arriba no se escribe a mano: Dokploy la arma con los campos del formulario.
 
 | Campo del formulario | Valor |
@@ -366,6 +368,36 @@ Meta necesita una URL pública HTTPS para entregar los mensajes, así que el mot
 La autenticación de esa ruta no es un token de sesión sino **la firma del cuerpo**: Meta firma cada entrega con el App Secret (`X-Hub-Signature-256`) y el motor rechaza con 401 lo que no valide. Falla cerrado — si no puede resolver el secreto (base caída incluida), tampoco procesa.
 
 En Meta, la URL de callback se registra como `https://motor.rapilinksas.co/canales/whatsapp/rapilink` (el último segmento es el slug del tenant, así que un segundo ISP entra por la misma infraestructura sin tocar nada).
+
+**La URL ya no se arma a mano (31/10/2026).** Con `WEBHOOK_BASE_URL` cargada en Dokploy (el dominio de arriba, con o sin `https://`), Ajustes → WhatsApp le muestra a cada empresa su URL entera, lista para copiar. Sin ella, la pantalla vuelve a pedir el dominio. Es un dato de la **instalación**, no de la empresa: todas llegan por el mismo dominio, cada una por su slug.
+
+### 4.d Mudarse al dominio de Dexter — sin cortar nada
+
+Los dominios de arriba llevan la marca del primer cliente (`rapilinksas.co`). El cambio al dominio de Dexter es **solo de operación**: ningún dominio de producción está escrito en el código (medido el 31/10/2026, `grep` sobre `nucleo/`, `django-crm/` y la app). Lo que sí hay es gente y aparatos que conocen el dominio viejo, así que **el viejo y el nuevo conviven** hasta que nadie use el viejo.
+
+**Orden, y por qué ese orden:**
+
+1. **DNS** de los tres nombres nuevos (frontend, backend y webhook del motor) → la IP del servidor. `dig +short <nombre>` antes de seguir: sin DNS, Traefik no emite certificado.
+2. **Dokploy: agregar** el dominio nuevo a cada servicio, **sin borrar el viejo** (Traefik acepta varios por servicio). En `motor`, con el mismo formulario de §4.c: Path `/canales/whatsapp`, Strip Path apagado. Redesplegar.
+3. **Variables** en Dokploy. Las que aceptan lista llevan **los dos** dominios mientras dure la transición:
+
+   | Variable | Valor durante la transición |
+   |---|---|
+   | `ALLOWED_HOSTS` | backend viejo **y** nuevo, sin `https://` |
+   | `CSRF_TRUSTED_ORIGINS` | los cuatro (front y back, viejos y nuevos), con `https://` |
+   | `CORS_ALLOWED_ORIGINS` | frontend viejo **y** nuevo |
+   | `FRONTEND_URL` | el nuevo (va en los enlaces de los correos) |
+   | `PUBLIC_DJANGO_API_URL` | el backend nuevo. Se lee al arrancar (`$env/dynamic/public`), no hace falta recompilar |
+   | `SESSION_COOKIE_DOMAIN` | solo si estaba puesta: el dominio nuevo |
+   | `WEBHOOK_BASE_URL` | el webhook nuevo |
+   | `DEFAULT_FROM_EMAIL` | el remitente de Dexter. Su valor por defecto en el compose todavía es `noreply@rapilinksas.co`. El dominio del remitente necesita SPF/DKIM, o los correos caen en spam |
+
+4. **Meta, empresa por empresa.** En la App de cada una → WhatsApp → Configuration → Callback URL: la URL nueva (copiarla de Ajustes → WhatsApp), con el **mismo** verify token → «Verify and save». Meta hace el handshake en ese momento, y desde ahí entrega al dominio nuevo. Cuál empresa ya cambió se ve en el registro de acceso del motor: por qué dominio entra su `POST /canales/whatsapp/<slug>`.
+5. **App de campo.** La dirección del servidor **se guarda en cada teléfono** al iniciar sesión, y el botón «restablecer» vuelve al servidor con el que se compiló esa copia (`--dart-define=BACKEND_URL=...`). Recompilar con el backend nuevo y distribuirla. Los teléfonos que no actualicen siguen yendo al viejo, y por eso el viejo no se apaga todavía.
+6. **El enlace de los avisos al técnico** (`url_base_app`, en Ajustes → Canales → Avisos de cada organización): si apuntaba al dominio viejo, cambiarlo.
+7. **Recién entonces, retirar el viejo**: cuando su registro de acceso lleve días sin una entrega de Meta ni una petición de la app. Quitarlo primero de las variables y después del dominio en Dokploy, y redesplegar.
+
+Saltarse el paso 2 antes del 4 deja a Meta validando contra un host sin ruta: el handshake falla con el mensaje engañoso de §4.c.
 
 **Cómo saber en qué paso se quedó**, sin adivinar. Medido el 12/08/2026 con el dominio creado a medias:
 
@@ -562,7 +594,7 @@ La configuración vive en `asistente.tenant_config` y se edita en dos lugares, a
 | Nombre, tono y largo del asistente | La interfaz (`/settings/asistente`) | Ídem |
 | Herramientas, prompts, RAG, filtros | El YAML, en git | `cli/cargar_config.py tenants/<slug>.config.yaml` |
 
-Lo que se edita desde la interfaz necesita `PRIVATE_ASISTENTE_URL=http://motor:5000` y `PRIVATE_ASISTENTE_TENANT=<slug>` en el servicio `frontend`. Sin esas dos, las pantallas cargan pero no encuentran al asistente — y el hub de configuración las lista igual, sin valor, en vez de caerse.
+Lo que se edita desde la interfaz necesita `PRIVATE_ASISTENTE_URL=http://motor:5000` en el servicio `frontend` (la pone el compose). La empresa sale de la sesión (`lib/server/v2/tenant.js`), no de `PRIVATE_ASISTENTE_TENANT`, que ya no se lee. Sin la URL, las pantallas cargan pero no encuentran al asistente — y el hub de configuración las lista igual, sin valor, en vez de caerse.
 
 ```
 py -3.13 cli/cargar_config.py --exportar rapilink   # base  -> archivo
@@ -649,6 +681,26 @@ La exportación conserva los comentarios del YAML — son notas de verificación
 ## Pendientes
 
 Cosas sabidas que faltan. Cada una dice por qué importa, que es lo que no se deduce del código.
+
+**ANTES del próximo deploy del backend: la empresa ya no es una variable, y el buzón de solicitudes lo carga cada empresa (30-31/10/2026, PRD §8.17 Ola 1).** El backend Django sacaba la empresa de `MOTOR_TENANT` (y la ingesta de documentos, de `ASISTENTE_TENANT`): una por instalación, así que con dos empresas a una le servía los datos de la otra. Ahora la saca de la **organización** de cada objeto, preguntándosela al motor (`/tenant-de-organizacion/<id>`, el mismo camino que el frontend usa desde octubre). Sin eso **no sale nada**, y el síntoma no señala la causa:
+
+| Qué | Si falta |
+|---|---|
+| Que la organización tenga empresa en el motor | Solicitudes no crea, completa ni cierra el ticket en WispHub; el ping y la medición de señal de la app dicen `sin_empresa`; Despacho no trae la ficha del cliente; el cierre de caso queda en `SIN_EMPRESA_EN_EL_MOTOR`; el Supervisor no razona ni consulta; un documento marcado para el asistente queda en error. **Comprobarlo apenas levante el backend** (abajo) |
+| El correo que recibe las solicitudes (**no es una variable**: `Org.correo_solicitudes`, migración `common/0046`) | El correo de cada solicitud nueva, con su PDF, no sale: queda en `fallo_integracion` de la solicitud. Hasta hoy Rapilink recibía en un buzón fijo en el código (`info.rapilinksas@gmail.com`). **Después** del deploy, el administrador lo carga en Ajustes → Organización → Editar; la pantalla de Organización muestra «Falta» mientras esté vacío. Cada empresa nueva hace lo mismo al darse de alta |
+
+Cómo comprobar la empresa de cada organización, sin leer secretos: `docker exec <backend> python manage.py shell -c "from common.models import Org; from operaciones.areas_del_tenant import tenant_de; print([(o.name, tenant_de(o)) for o in Org.objects.filter(is_active=True)])"`. Rapilink tiene que salir con `rapilink`; una organización de pruebas sin empresa sale con `''`, y eso es correcto. Para el correo, la fila «Correo que recibe las solicitudes de servicio» de Ajustes → Organización. **Nada de esto va en Dokploy**: `MOTOR_TENANT`, `ASISTENTE_TENANT` y `PRIVATE_ASISTENTE_TENANT` ya no los lee nadie y el compose no los declara; si quedan en el Environment del despliegue, no hacen nada.
+
+**La rama `producto/tesis-de-negocio` (30-31/10/2026, PRD §8.17 Olas 1 a 3) trae, además, cuatro cosas que no se aplican solas.** En este orden:
+
+| # | Qué | Cómo | Si se saltea |
+|---|---|---|---|
+| 1 | Migración del **ledger del motor** `202610310200_autonomia_ganada.sql` | `py -3.13 cli/migrar_asistente.py --estado` y `--aplicar`, con la credencial de la memoria `ledger_motor_credencial_dbuser` | Sin la tabla, `vigente()` falla cerrado: **ninguna** acción es autónoma y promover devuelve 503. No rompe nada más. Va ANTES del push (las migraciones primero, después el código que las consulta) |
+| 2 | Migración del **CRM** `operaciones/0029_aviso_de_caida` | La aplica el arranque del backend como las demás de Django | «Fallas de red» da error al listar y al aprobar |
+| 3 | Claves nuevas de la config de Rapilink | `py -3.13 cli/cargar_claves.py tenants/rapilink.config.yaml --clave capacidad --clave aviso_de_caida --clave autenticacion.indicativo_pais --clave "herramientas[reiniciar_ont].exige_previas" --clave "herramientas[reiniciar_ont].descripcion"` (primero sin `--aplicar` para ver el diff). **No** `cargar_config.py`: el YAML entero apaga la encuesta `solo_a`. `horario_avisos` y `autonomia_ganada` no hace falta cargarlas: sus valores por defecto (7 a 20 h; umbrales por defecto sobre el piso) son los que se quieren | Sin `estados_que_se_avisan` el aviso de caída no arma ninguna lista (`NO_CONFIGURADO`); sin `indicativo_pais` ningún aviso sale a un móvil del ISP (la vista previa de la caída lo dice antes de aprobar); sin la `descripcion` de `reiniciar_ont` el modelo no sabe que tiene que consultar la falla de barrio antes de proponer el reinicio, y la previa nueva lo rechaza. Fallan cerrado |
+| 4 | Plantillas en Meta: `visita_programada`, `ticket_creado`, `falla_en_la_red`, `falla_resuelta` (sugeridas en el catálogo) | Crearlas desde Ajustes → WhatsApp → Plantillas y esperar la aprobación | Los avisos quedan apagados o dicen `plantilla_no_aprobada`. Nacen apagados igual: se encienden en Mensajes automáticos, primero en modo prueba |
+
+Y una tarea periódica nueva del CRM, `retomar-avisos-de-caida` (cada 10 min, en `crm/celery.py`): la levanta el beat que ya corre, sin variable nueva. **Nada de esto da autonomía**: una acción solo se hace sola cuando un ADMIN la promueve desde `/capacidad` con la evidencia a la vista.
 
 **Decisión revertida a propósito: la descripción del ticket SÍ se copia, aunque pueda traer PII (10/09/2026).** El importador la excluía, y el motivo está escrito en `importacion_io.py`: *«ese campo es texto libre de un operador y ya se sabe que trae PII embebida (PRD §7.4); lo que se guarda es la referencia para ir a buscarla»*. Ese motivo **sigue siendo cierto**. Se acepta el riesgo igual.
 
@@ -806,7 +858,7 @@ Aislamientos, los cuatro medidos: una importación rota no impide reconciliar (e
 
 **Deuda anotada: `SystemExit` como error de configuración recuperable.** Los límites por tenant/tarea del reloj capturan `(Exception, SystemExit)`, y no por precaución genérica: hay **7 `raise SystemExit`** en su propia cadena de llamadas (5 en `importacion_io.py`, 2 en `conexion.py::dsn`). En un CLI eso está bien — el programa termina y lo explica. Dentro del reloj mataría el proceso, y un solo tenant mal configurado se llevaría puestos a los demás. La captura es correcta *ahí*; lo que está mal es el origen: infraestructura que señala configuración faltante debería levantar una excepción de dominio, no pedir la salida del proceso. No se refactoriza ahora para no ampliar el cambio. `KeyboardInterrupt` sigue propagándose: parar el proceso tiene que poder pararlo.
 
-**Qué tenants recorre, y cómo los descubre.** `tenants_conocidos()` lista los `tenants/*.config.yaml` de la imagen — hoy exactamente uno, `rapilink`, y `asistente.tenant_config` también tiene uno solo, así que coinciden. Es un acoplamiento a tener presente cuando entre el segundo ISP: un tenant creado solo en la base sería **invisible** para el reloj hasta que su semilla esté en la imagen.
+**Qué tenants recorre, y cómo los descubre.** Desde el 31/10/2026, las filas de `asistente.tenant_config` con `activo` y una config cargada (`db.tenants_activos`; la columna nace con `'{}'`, y una fila así es una empresa que nadie cargó todavía). Antes listaba los `tenants/*.config.yaml` de la imagen: una empresa dada de alta solo en la base era **invisible** para el reloj y el reconciliador hasta un commit y un redespliegue, y una dada de baja seguía recibiendo trabajos. **Sin base no atiende a nadie**: no cae al YAML, y lo dice en el log (`no se pudo listar las empresas`). Para comprobarlo después de un despliegue, dentro del contenedor `motor-reloj`: `RELOJ_HABILITADO=1 python -m nucleo.reloj --once --dry-run`, y la línea `ciclo inicio` tiene que nombrar a `rapilink`. Si sale vacía con la base arriba, el usuario del reloj no puede leer `tenant_config.activo`. Prueba: `tests/test_reloj_empresas_desde_la_base.py`. *Medido tras el despliegue del 31/10/2026 (comprobado el 01/11):* la línea nombró a `rapilink` y además a cuatro `prueba-b4-*` / `prueba-entrega-*`, que dejaron pruebas cortadas contra producción el 06/10 (organización, fila de config vacía, 26 conversaciones). El reloj las salteaba con un error por vuelta. Desde entonces el listado exige config cargada, y las 33 pruebas que siembran empresas se niegan a correr contra una base que no sea local (`tests/base_local.py`, guarda `tests/test_base_local.py`).
 
 ### Para activarlo en producción
 
@@ -850,7 +902,9 @@ Fue semánticamente neutro —ninguna herramienta lo tenía, ninguna quedó en `
 
 Qué evaluar cuando se retome: `model_dump(exclude_unset=True)` en el camino de escritura, o —probablemente lo correcto— aplicar la mutación como **patch sobre el documento original** y usar el modelo solo para *validar* el resultado, no para producir lo que se guarda. Con una prueba que edite una sola clave y exija exactamente una hoja distinta en el diff.
 
-**Dar de alta un segundo ISP: el motor está listo, el pegamento no.** El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
+**Dar de alta un segundo ISP** — *lo que sigue es historia del 24/09/2026; el pegamento ya está*: el frontend saca la empresa de la sesión desde el 06/10 y el backend de la organización desde el 31/10/2026 (PRD §8.17, Ola 1), y el compose no declara ninguna variable de empresa. **Lo que quedaba** era lo de abajo, y se resolvió el 31/10/2026: el reloj descubre las empresas en la base (§ del reloj), el dominio del webhook es un dato de la instalación con su mudanza escrita en §4.d, y `--workers 1` se queda, con su motivo (abajo).
+
+**El motor está listo, el pegamento no** (24/09/2026). El motor ya es multi-empresa de verdad —la URL del webhook lleva el tenant (`/canales/whatsapp/<slug>`), las credenciales van cifradas por empresa en `asistente.tenant_secrets`, y el aislamiento está medido: `app_backend` sin fijar empresa ve **0 filas**, no todas—. BottleCRM, por su lado, ya es multi-organización.
 
 Lo que no acompaña es lo que los une: **`PRIVATE_ASISTENTE_TENANT` es una variable de entorno usada en el frontend, y nunca se deriva de la organización del usuario logueado**.
 
@@ -865,8 +919,8 @@ Es una decisión de producto —¿se vende una instalación por ISP, o una plata
 
 Dos cosas que se deciden junto con eso:
 
-- **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano.
-- **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. Aguanta bien con hilos, pero es un techo real con varios ISPs, y se levanta el día que ese historial viva en `asistente.conversations` en vez de en memoria.
+- **El nombre del dominio del webhook.** `motor.rapilinksas.co` está bajo la marca del primer cliente; el segundo ISP estaría pegando el dominio de otra empresa en su configuración de Meta. Si el camino es "una plataforma", conviene un dominio neutro desde el principio: cambiarlo después obliga a que **cada** cliente reconfigure su webhook en Meta a mano. *Decidido el 31/10/2026: el dominio pasa a ser de Dexter al salir a producción; los pasos están en §4.d.*
+- **El motor corre con `--workers 1`** (ver el comentario en `docker-compose.prod.yml`). No es por memoria: `_sesiones` guarda el historial caliente en RAM del proceso. *Decidido el 31/10/2026 (PRD §8.17): se queda en un proceso.* Un turno pasa casi todo su tiempo esperando al modelo y a WispHub, y esa espera la absorben los hilos. Varios procesos no agregan capacidad y obligan a mover a la base el candado por conversación, el cupo por empresa y la coherencia del historial. Lo que sí se arregló es lo que ese proceso único perdía en cada despliegue: el SIGTERM mataba los turnos en vuelo y el mensaje se perdía sin rastro (medido). Ahora gunicorn los espera —hasta 35 s, o lo que quede hasta los 40 desde el SIGTERM— y nombra en el log al que tuvo que cortar (`nucleo/canales/en_vuelo.py`, `nucleo/canales/gunicorn_conf.py`). En el log del motor, al apagar: `apagado: esperando turnos en vuelo` y después `todos los turnos en vuelo terminaron` o `turnos cortados sin terminar` con sus huellas. Si aparece la primera sin ninguna de las otras dos, el proceso murió antes de escribir el resumen.
 
 **El 502 de `crm.rapilinksas.co` — ya no pasa (medido el 15/09/2026).** Ese dominio devolvía 502; hoy responde el Studio a través de Kong (`401` con basic-auth, ver §4.b). Lo que queda pendiente sobre ese dominio es otra cosa: que no publique más de lo necesario (§4.b.1).
 

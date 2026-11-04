@@ -70,6 +70,8 @@ def seccion(t: str) -> None:
     print(f"\n--- {t} ---")
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__, dsn=ADMIN)
 def admin(base: str = "crmdb"):
     return psycopg.connect(ADMIN.rsplit("/", 1)[0] + f"/{base}", autocommit=True)
 

@@ -2,8 +2,9 @@
   /**
    * Los agentes configurados y, para cada uno, que puede hacer y que puede
    * ver. Un ADMIN puede crear/editar/borrar desde aca (via AgenteFormDialog,
-   * que habla con /api/agentes); crear una herramienta nueva sigue siendo
-   * trabajo de codigo.
+   * que habla con /api/agentes, en cuatro pasos desde el 02/11/2026). Una
+   * herramienta nueva que llama a una API se crea en /configuracion-guiada,
+   * sin codigo; las de logica propia (agregados, internas) si son codigo.
    *
    * La tarjeta esta armada para responder una pregunta concreta: "¿que le
    * estoy dejando hacer a este agente?". Por eso las herramientas van
@@ -13,6 +14,7 @@
    * distinguia una consulta de algo que cambia el mundo real.
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
+  import { huecosDe as huecosDeAgente, textoDelHueco } from '$lib/components/manual/entrenar.js';
   import StatCard from '$lib/v2/components/StatCard.svelte';
   import AgenteFormDialog from '$lib/components/agentes/AgenteFormDialog.svelte';
   import { Button } from '$lib/components/ui/button/index.js';
@@ -20,9 +22,20 @@
   import { invalidateAll } from '$app/navigation';
   import { AlertTriangle, Bot, BotMessageSquare, ScanEye, Radar, ArrowRight } from '@lucide/svelte';
   import { AGENTES_OPERATIVOS } from '$lib/v2/agentes-operativos.js';
+  import AutonomiaDeAccion from '$lib/components/agentes/AutonomiaDeAccion.svelte';
 
   /** @type {{ data: any }} */
-  let { data } = $props();
+  let { data, form } = $props();
+
+  /*
+   * Lo que cada agente hace solo (02/11/2026). Una entrada por accion que
+   * pide aprobacion, con su estado en cada agente ('por_agente'). Las que no
+   * piden aprobacion no aparecen: ya salen solas, con la frontera de por medio.
+   */
+  /** @type {Record<string, any>} */
+  let autonomiaDe = $derived(
+    Object.fromEntries((data.autonomia?.acciones ?? []).map((/** @type {any} */ a) => [a.accion, a]))
+  );
 
   const esAdmin = $derived(data.role === 'ADMIN');
 
@@ -79,6 +92,10 @@
   function resumen(texto) {
     return (texto || '').trim().split(/\n\s*\n/)[0].replace(/\s*\n\s*/g, ' ');
   }
+
+  /** Los huecos de ESTE agente y su senal en palabras: la logica vive en
+      $lib para poder probarla -- el harness de vitest no compila .svelte. */
+  const huecosDe = (nombre) => huecosDeAgente(data.huecosPorRol, nombre);
 
   /**
    * Las herramientas por lo que HACEN, no por su tipo tecnico.
@@ -139,6 +156,7 @@
     modo={modoDialogo}
     agente={agenteEnEdicion}
     catalogo={data.catalogo || []}
+    autonomia={data.autonomia}
   />
 {/if}
 
@@ -204,6 +222,21 @@
         </div>
 
         <p class="descripcion">{operativo.descripcion}</p>
+
+        <!-- Lo que hace solo HOY, leido en vivo de sus Ajustes (02/11/2026): es
+             estado, no una metrica que envejece. Se cambia en Supervisor NOC ->
+             Ajustes, que tiene sus propios permisos. -->
+        {#if operativo.clave === 'supervisor-noc' && data.tareasSupervisor}
+          <p class="hace-solo">
+            {#if data.tareasSupervisor.delegadas.length}
+              Hace solo {data.tareasSupervisor.delegadas.length} de {data.tareasSupervisor.total} tareas:
+              {data.tareasSupervisor.delegadas.join(', ')}. Se cambian en sus Ajustes.
+            {:else}
+              No hace sola ninguna de sus {data.tareasSupervisor.total} tareas: todas esperan a una
+              persona. Se encienden en sus Ajustes.
+            {/if}
+          </p>
+        {/if}
 
         <!-- Sin metricas: las que importan cambian cada minuto y su tablero
              las muestra con su fuente. Un numero escrito aqui envejeceria. -->
@@ -288,6 +321,33 @@
           <p class="descripcion">{resumen(agente.descripcion)}</p>
 
           <!--
+            QUE LE FALTA A ESTE AGENTE, por rol y de los ultimos 14 dias
+            (02/11/2026). Hasta hoy la unica medicion de esta pantalla era la
+            tasa de escalada de TODA la empresa, arriba: al lado de la tarjeta
+            de un agente decia algo que no era de ese agente. Esto es el mismo
+            SQL determinista que alimenta /habilidades --no un segundo calculo
+            de lo mismo-- y es lo que deja ver si una correccion sirvio: el
+            numero antes y el numero despues.
+
+            Sin huecos NO se muestra nada. "0 huecos" en un agente que nadie
+            uso diria que anda bien, y lo que pasa es que no hay datos.
+          -->
+          {#if huecosDe(agente.nombre).length > 0}
+            <div class="huecos" role="note">
+              <p class="huecos-titulo">Le falta saber hacer ({huecosDe(agente.nombre).length})</p>
+              <ul>
+                {#each huecosDe(agente.nombre).slice(0, 3) as h (h.senal + h.motivo)}
+                  <li>
+                    <span class="huecos-n">{h.n_casos}</span>
+                    {textoDelHueco(h)}
+                  </li>
+                {/each}
+              </ul>
+              <a class="huecos-link" href="/habilidades">Enseñarle en Habilidades →</a>
+            </div>
+          {/if}
+
+          <!--
             Reemplaza al diagrama radial que estaba aca. Ese gastaba ~250px de
             alto para decir "tiene 8 herramientas" peor que una lista: la
             posicion de cada nodo no significaba nada (todas cuelgan del
@@ -319,6 +379,14 @@
                         ? ' · pide confirmación antes'
                         : ''}
                     </p>
+                    {#if autonomiaDe[h.nombre]}
+                      <AutonomiaDeAccion
+                        accion={autonomiaDe[h.nombre]}
+                        agente={agente.nombre}
+                        esAdmin={data.esAdmin}
+                        resultado={form?.autonomia ?? null}
+                      />
+                    {/if}
                   {/if}
                 {/each}
               </div>
@@ -515,6 +583,7 @@
     color: var(--v2-ink);
     border-color: color-mix(in oklab, var(--v2-ink) 22%, transparent);
   }
+  .hace-solo { font-size: 12px; color: var(--v2-slate); margin: 0 0 8px; }
   .enlace-tablero {
     display: inline-flex;
     align-items: center;
@@ -535,6 +604,36 @@
     color: var(--v2-ink);
     opacity: 0.78;
     margin: 0;
+  }
+  .huecos {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--v2-line);
+    background: color-mix(in srgb, var(--v2-amber, #8a5300) 6%, transparent);
+    font-size: 12px;
+  }
+  .huecos-titulo {
+    margin: 0 0 4px;
+    font-weight: 600;
+  }
+  .huecos ul {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    display: grid;
+    gap: 2px;
+  }
+  .huecos-n {
+    display: inline-block;
+    min-width: 1.4em;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .huecos-link {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 11px;
   }
   .herramientas {
     display: flex;

@@ -18,7 +18,10 @@ export async function POST({ request, params, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { mensaje, clave_idempotencia, devolver_al_asistente = false } = await request.json();
+  const {
+    mensaje, clave_idempotencia, devolver_al_asistente = false,
+    pendiente_interno = null, pendiente_interno_hasta = null
+  } = await request.json();
   if (!mensaje) {
     return json({ error: 'Falta el mensaje' }, { status: 400 });
   }
@@ -55,7 +58,21 @@ export async function POST({ request, params, locals, fetch }) {
         mensaje,
         ...autorDeSesion(locals),
         clave_idempotencia: claveIdempotencia(clave_idempotencia),
-        devolver_al_asistente: Boolean(devolver_al_asistente)
+        devolver_al_asistente: Boolean(devolver_al_asistente),
+        // «Queda en espera» (29/10/2026): texto = abre o renueva el pendiente
+        // interno; null = lo cierra (contrato T5). Si se cayera acá, cada
+        // respuesta cerraría la espera sin que nadie lo hubiera pedido.
+        pendiente_interno:
+          typeof pendiente_interno === 'string' && pendiente_interno.trim()
+            ? pendiente_interno.trim().slice(0, 200)
+            : null,
+        // Hasta cuándo se espera (C22). Solo una fecha válida: lo demás es
+        // «sin hora», que es como era antes.
+        pendiente_interno_hasta:
+          typeof pendiente_interno_hasta === 'string' &&
+          !Number.isNaN(Date.parse(pendiente_interno_hasta))
+            ? new Date(pendiente_interno_hasta).toISOString()
+            : null
       })
     });
     const datos = await resp.json();

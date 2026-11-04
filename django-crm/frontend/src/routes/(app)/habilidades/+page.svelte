@@ -203,6 +203,9 @@
     llegan enteros, o no llegan. Ninguno entra al prompt de nadie sin aprobarse acá.
   {/snippet}
 </PageHeader>
+<!-- Scroll propio: el contenedor de la app corta lo que se sale (.v2-main,
+     overflow hidden). Sin esto la pantalla no bajaba (02/11/2026). -->
+<div class="v2-scroll">
 
 {#if data.error}
   <p class="aviso-error">⚠️ {data.error}</p>
@@ -409,6 +412,7 @@
     {/if}
   </div>
 {/if}
+</div>
 
 <style>
   .aviso-error {

@@ -245,6 +245,18 @@
         <div class="v2-card" style="overflow:hidden">
           <div class="v2-setting">
             <div class="v2-setting-body">
+              <b>Correo que recibe las solicitudes de servicio</b>
+              <span class="v2-sub" style="font-size:11.5px">
+                {org.correo_solicitudes ||
+                  'Sin configurar: las solicitudes nuevas no se mandan por correo hasta que se cargue.'}
+              </span>
+            </div>
+            <Pill tone={org.correo_solicitudes ? 'moss' : 'slate'}>
+              {org.correo_solicitudes ? 'Configurado' : 'Falta'}
+            </Pill>
+          </div>
+          <div class="v2-setting">
+            <div class="v2-setting-body">
               <b>Encuestas de satisfacción</b>
               <!-- Org-level kill switch: the post-close signal short-circuits
                    before any email is sent. Off is silent, everywhere. -->

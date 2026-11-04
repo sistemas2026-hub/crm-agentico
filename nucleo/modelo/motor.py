@@ -1580,6 +1580,10 @@ def _ejecutar_propuesta(argumentos_modelo: dict, tenant: str, propuesto_por: str
 
     if not herramienta_dict.get("nombre") or not herramienta_dict.get("tipo"):
         return {"error": "El borrador necesita al menos 'nombre' y 'tipo'."}
+    #  Lo que arma el modelo en un chat NACE CRITICO, diga lo que diga el
+    #  borrador: declarar algo no critico promueve sin evidencia, y eso lo
+    #  decide la empresa en su catalogo, no una frase (auditoria, B1).
+    herramienta_dict["critica"] = True
 
     id_propuesta = persistencia.guardar_herramienta_propuesta(
         tenant, descripcion_pedido, sondeo_dict, herramienta_dict, propuesto_por)
@@ -1777,11 +1781,38 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
                     f"esperando aprobacion ({resumen}). No lo propongas otra "
                     f"vez ni digas que se hizo: decile a quien pregunta que ya "
                     f"quedo pedido y que todavia falta que alguien lo apruebe."}
+    if _tiene_autonomia_ganada(tenant, herramienta, rol):
+        #  PRD §2, Fase C: esta empresa le dio autonomia a la herramienta. Se
+        #  ejecuta apenas termina el turno, por la misma cadena que una
+        #  aprobacion, y si una guarda la frena vuelve a la cola de una
+        #  persona. Por eso se dice "quedo pedido", nunca "ya se hizo".
+        return {"accion_id": accion_id, "estado": "en_curso", "resumen": resumen,
+                "instruccion_interna": f"Esta accion se ejecuta automaticamente "
+                    f"apenas termines de responder, si las comprobaciones de "
+                    f"seguridad lo permiten ({resumen}). Decile que ya quedo "
+                    f"pedido y que en unos minutos se comprueba el resultado. NO "
+                    f"digas que ya se hizo ni que funciono: eso lo confirma la "
+                    f"verificacion."}
     return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
            "instruccion_interna": f"Decile a quien te pidio esto que la accion "
                f"quedo pendiente de aprobacion ({resumen}) -- todavia NO se "
                f"ejecuto, no confirmes que ya se hizo. Alguien tiene que "
                f"aprobarla desde la pantalla correspondiente."}
+
+
+def _tiene_autonomia_ganada(tenant: str, herramienta, rol: str | None = None) -> bool:
+    """Si la herramienta es autonoma en esta empresa AHORA (falla cerrado).
+    Solo para decir la verdad en la respuesta: quien decide si se ejecuta es
+    api._ejecutar_si_es_autonoma, y quien lo autoriza, frontera.critica."""
+    if not (getattr(herramienta, "irreversible", False) and getattr(herramienta, "aprobacion_humana", False)):
+        return False
+    from nucleo.persistencia import autonomia_ganada as registro
+    from nucleo.seguridad import autonomia_ganada
+
+    return bool(autonomia_ganada.vigente(tenant, herramienta.nombre,
+                                         leer=registro.vigente,
+                                         config_herramienta=herramienta,
+                                         rol=rol).get("autonoma"))
 
 
 def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
@@ -1997,10 +2028,27 @@ def ejecutar_accion_irreversible(config, accion: dict, tenant: str
                     config, herramienta.verificacion, sesion, tenant,
                     config.variables_tenant)
 
+            #  EL ULTIMO METRO DE LA AUTONOMIA (31/10/2026): las previas y la
+            #  medicion tardan segundos, y una degradacion en ese rato tiene
+            #  que frenar el efecto. Se vuelve a leer, sin cache.
+            if aprobacion is not None and str(getattr(aprobacion, "aprobador", "")).startswith(
+                    aprobaciones.PREFIJO_AUTONOMIA):
+                promocion = aprobacion.aprobador[len(aprobaciones.PREFIJO_AUTONOMIA):]
+                vigente = aprobaciones._autonomia_vigente(
+                    tenant, herramienta.nombre, getattr(aprobacion, "rol", "") or None)
+                if not vigente.get("autonoma") or vigente.get("promocion_id") != promocion:
+                    return ({"error": "La autonomia dejo de estar vigente antes del efecto. "
+                                      "No se ejecuto.", "bloqueo_de_frontera": True},
+                            aprobaciones.AUTONOMIA_NO_VIGENTE, None)
+
             r = idempotencia.ejecutar(tenant, herramienta.nombre, argumentos,
                                       origen, _llamar)
     except frontera.AccionExternaNoAutorizada as e:
-        return ({"error": f"Esta accion no se ejecuto: {e.motivo}"}, e.codigo, None)
+        #  'bloqueo_de_frontera': no salio nada. Quien llama lo distingue de una
+        #  ejecucion fallida (la autonomia la devuelve a una persona y no
+        #  degrada por esto).
+        return ({"error": f"Esta accion no se ejecuto: {e.motivo}", "bloqueo_de_frontera": True},
+                e.codigo, None)
     except Exception as e:                                       # noqa: BLE001
         return ({"error": "La API no acepto la accion."},
                 f"{type(e).__name__}: {e}"[:200], None)

@@ -148,6 +148,85 @@ INSTRUCCION = (
 )
 
 
+#: La instruccion para una foto que un COLABORADOR adjunta en el asistente
+#: interno (02/11/2026). Ni el cliente ni una evidencia de orden: alguien de
+#: la empresa que esta preguntando algo y acompana una foto.
+#:
+#: Se parece a la de evidencia --quien lee es la oficina, asi que puede decir
+#: lo que ve del trabajo-- y conserva las tres reglas que no dependen de
+#: quien mira: no afirmar que el servicio funciona, no inventar mediciones, y
+#: no leer datos personales. La diferencia es que aca la foto puede ser de
+#: cualquier cosa, asi que la regla de "si no es de esto, decilo en una
+#: linea" pesa mas.
+INSTRUCCION_ASISTENTE = (
+    "Alguien del equipo de un proveedor de internet te adjunto esta foto "
+    "mientras te preguntaba algo. Describi lo que se ve, para que puedas "
+    "contestarle.\n\n"
+    "Reglas:\n"
+    "1. Deci que se ve: equipos de telecomunicaciones (ONT, router, modem, "
+    "fuente, caja, roseta, conectores, cables), una pantalla, un documento "
+    "tecnico, un lugar. Solo lo que se ve.\n"
+    "2. Marca, modelo y numeros de serie SOLO si se leen en la imagen.\n"
+    "3. Si hay luces indicadoras, deci cuales, de que color y si estan "
+    "fijas o parpadeando. No digas que significan: cambia con cada "
+    "fabricante.\n"
+    "4. Si se ve una instalacion, deci como quedo --cableado, fijacion, "
+    "conectores-- como lo que se OBSERVA y no como un diagnostico.\n"
+    "5. NO digas si el servicio funciona, si hay senal, ni inventes "
+    "mediciones de potencia optica, velocidad o continuidad.\n"
+    "6. Si algo esta borroso, oscuro o tapado, decilo.\n"
+    "7. Si la foto no tiene que ver con equipos, instalaciones ni "
+    "servicio, deci en una linea que se ve y nada mas.\n"
+    "8. NO transcribas documentos, cedulas, telefonos ni datos "
+    "personales, aunque se lean. No describas a las personas que "
+    "aparezcan.\n"
+    "9. Se breve: un parrafo corto. Sin saludos."
+)
+
+#: Cada proposito, con su instruccion, su interruptor en la config del tenant
+#: y como se rotula la foto en el turno. UN SOLO LUGAR donde se declaran, para
+#: que agregar un camino nuevo sea una fila y no tres `if` repartidos.
+#:
+#: CADA UNO TIENE SU INTERRUPTOR, y no es burocracia: no es el mismo
+#: consentimiento la foto que un cliente DECIDE mandar, la que un tecnico toma
+#: DENTRO de su casa, y la que un colaborador adjunta en el chat interno. Una
+#: empresa puede autorizar una y no las otras, y con un solo campo no podria
+#: decirlo. Todos nacen apagados.
+PROPOSITOS = {
+    "whatsapp_cliente": {
+        "bandera": "vision_habilitada",
+        "rotulo": "[Foto que envio el cliente]",
+    },
+    "evidencia_campo": {
+        "bandera": "vision_evidencias_campo",
+        "rotulo": "[Foto de evidencia que subio el tecnico]",
+    },
+    "asistente_interno": {
+        "bandera": "vision_asistente_interno",
+        "rotulo": "[Foto que adjuntaste]",
+    },
+}
+
+
+def instruccion_de(proposito: str) -> str:
+    """La instruccion de ese proposito. Un nombre desconocido cae en la del
+    cliente, que es la MAS restrictiva: no afirma nada sobre instalaciones."""
+    if proposito == "evidencia_campo":
+        return INSTRUCCION_EVIDENCIA
+    if proposito == "asistente_interno":
+        return INSTRUCCION_ASISTENTE
+    return INSTRUCCION
+
+
+def bandera_de(proposito: str) -> str:
+    """El campo de la config que habilita ese proposito, o "" si no existe.
+
+    Falla CERRADO en quien llama: un proposito desconocido no tiene bandera,
+    y sin bandera no se habilita nada.
+    """
+    return (PROPOSITOS.get(proposito) or {}).get("bandera", "")
+
+
 @dataclass
 class Resultado:
     """
@@ -178,7 +257,68 @@ def _mime_de(contenido: bytes) -> str:
     return "image/png" if contenido[:8] == FIRMA_PNG else "image/jpeg"
 
 
-def mensaje_multimodal(contenido: bytes, pie: str = "") -> list[dict]:
+#: La instruccion para una foto de EVIDENCIA de una orden de campo
+#: (31/10/2026). Es otra cosa que la de arriba, y la diferencia es el punto:
+#: las reglas 3 y 4 de INSTRUCCION prohiben decir que algo esta mal instalado
+#: --correcto cuando quien mira es el cliente por WhatsApp-- y aca eso es
+#: justo lo que se pregunta. Quien lee esto es la oficina.
+#:
+#: LO QUE NO CAMBIA, y por eso se repite entero: sigue sin poder afirmar que
+#: el servicio funciona ni inventar una medicion. Una foto muestra un cable y
+#: una luz; la potencia optica no se ve.
+#:
+#: NO VA EN LA CONFIG DEL TENANT. Lo que varia por empresa es QUE tiene que
+#: mostrar cada foto, y eso ya vive en el esquema de la plantilla
+#: ('evidencias[].instrucciones', campo/plantillas.py:507) -- se pasa como
+#: 'pie'. Esto es como se mira una foto de instalacion, igual para cualquiera.
+INSTRUCCION_EVIDENCIA = (
+    "Sos un inspector de instalaciones de un proveedor de internet. Un "
+    "tecnico subio esta foto como evidencia de un trabajo. La lee la oficina, "
+    "no el cliente.\n\n"
+    "Reglas:\n"
+    "1. Deci que elementos de telecomunicaciones se ven: ONT, router, modem, "
+    "access point, fuente, caja de distribucion, roseta, conectores, patch "
+    "cord, cable UTP, fibra. Solo los que se ven.\n"
+    "2. Marca y modelo SOLO si se leen en la imagen. Si no, no los nombres.\n"
+    "3. Si hay luces indicadoras, deci cuales, de que color y si estan fijas "
+    "o parpadeando. No digas que significan: eso cambia con cada fabricante.\n"
+    "4. Deci lo que se ve del trabajo: como quedo el cableado, si los equipos "
+    "estan fijados, si hay cables sueltos o conectores que parecen no estar "
+    "puestos. Decilo como lo que es --lo que se OBSERVA-- y no como un "
+    "diagnostico. 'Se ve un cable suelto' esta bien; 'la instalacion esta "
+    "mal' no.\n"
+    "5. NO digas si el servicio funciona, si hay senal, ni inventes "
+    "mediciones de potencia optica, velocidad o continuidad. Nada de eso se "
+    "ve en una foto.\n"
+    "6. Si algo esta borroso, oscuro, tapado o fuera de cuadro, decilo, y "
+    "deci que no se puede determinar por eso.\n"
+    "7. Si te dicen que tenia que mostrar esta foto, contesta ademas si eso "
+    "se ve o no se ve, en una linea.\n"
+    "8. NO transcribas numeros de documento, cedulas, telefonos ni datos "
+    "personales que aparezcan en la imagen, aunque se lean. Tampoco "
+    "describas a las personas que aparezcan, ni leas direcciones, placas ni "
+    "papeles que esten en el encuadre.\n"
+    "9. Si la foto no muestra equipos ni una instalacion, deci en una linea "
+    "que no se ve lo que se pedia y nada mas. No describas el resto.\n"
+    "10. Se breve: un parrafo corto. Sin saludos."
+)
+
+
+#: Como se le presenta al modelo el texto que acompana a la imagen. El de
+#: WhatsApp es lo que escribio el cliente; el de campo es lo que la plantilla
+#: de la empresa declara que esa foto tenia que mostrar. Decirle al proveedor
+#: que lo segundo "lo escribio el cliente" es una afirmacion falsa sobre el
+#: origen del dato, y ademas mueve el analisis: el modelo no trata igual una
+#: frase del cliente que una instruccion de la oficina (revisor de PII,
+#: 31/10/2026, H5). Por eso el rotulo lo elige quien llama, igual que la
+#: instruccion.
+PIE_DEL_CLIENTE = "El cliente escribio junto a la foto"
+PIE_DE_LA_PLANTILLA = "Lo que esta foto tenia que mostrar, segun la empresa"
+
+
+def mensaje_multimodal(contenido: bytes, pie: str = "",
+                       instruccion: str = "",
+                       rotulo_del_pie: str = "") -> list[dict]:
     """
     Los dos mensajes que se le mandan al modelo.
 
@@ -199,22 +339,35 @@ def mensaje_multimodal(contenido: bytes, pie: str = "") -> list[dict]:
     if (pie or "").strip():
         partes.append({
             "type": "text",
-            "text": f"El cliente escribio junto a la foto: {pie.strip()}"})
+            "text": f"{rotulo_del_pie or PIE_DEL_CLIENTE}: {pie.strip()}"})
     partes.append({
         "type": "image_url",
         "image_url": {"url": f"data:{_mime_de(contenido)};base64,{datos}"}})
-    return [{"role": "system", "content": INSTRUCCION},
+    #  La instruccion es un PARAMETRO con el default de siempre (31/10/2026).
+    #  Antes era la constante del modulo, y para mirar una foto de evidencia
+    #  de campo --donde se pregunta justo lo que las reglas 3 y 4 de
+    #  INSTRUCCION prohiben-- la salida facil habria sido un segundo modulo
+    #  que vuelva a hablarle al proveedor. Eso es la historia del reloj
+    #  escrito dos veces (CLAUDE.md §6): hay UN solo sitio que manda imagenes,
+    #  con sus seis garantias --timeout, tope, formato, redaccion, evento de
+    #  costo e idempotencia-- y lo que cambia es que se le pide.
+    return [{"role": "system", "content": instruccion or INSTRUCCION},
             {"role": "user", "content": partes}]
 
 
 def analizar(contenido: bytes, modelo: str, pie: str = "",
-             temperatura: float = 0.1) -> Resultado:
+             temperatura: float = 0.1, instruccion: str = "",
+             rotulo_del_pie: str = "") -> Resultado:
     """
     Los bytes de una imagen -> que se ve, o el motivo de por que no se pudo.
 
     'modelo' es la referencia completa del tenant ('deepseek:deepseek-v4-flash'):
     sale de la config, no de una constante de este archivo, porque es un dato
     que varia por empresa (CLAUDE.md 3.3).
+
+    'instruccion' vacia = la de WhatsApp. Para una foto de evidencia de campo
+    se pasa INSTRUCCION_EVIDENCIA. Todo lo demas --los topes, el formato, el
+    recorte y la redaccion-- corre igual para las dos.
 
     NUNCA LEVANTA, por la misma razon que transcripcion.transcribir(): quien
     llama esta atendiendo a un cliente que espera respuesta, y una foto que no
@@ -249,7 +402,7 @@ def analizar(contenido: bytes, modelo: str, pie: str = "",
 
         r = cliente.chat(
             modelo,
-            mensaje_multimodal(contenido, pie),
+            mensaje_multimodal(contenido, pie, instruccion, rotulo_del_pie),
             temperatura=temperatura,
             timeout=TIMEOUT_SEGUNDOS)
 
@@ -288,7 +441,8 @@ def analizar(contenido: bytes, modelo: str, pie: str = "",
                          error=f"el modelo rechazo la imagen ({type(e).__name__})")
 
 
-def texto_para_el_agente(r: Resultado, pie: str = "") -> str:
+def texto_para_el_agente(r: Resultado, pie: str = "",
+                         proposito: str = "whatsapp_cliente") -> str:
     """
     El Resultado -> las lineas que lee el modelo conversacional.
 
@@ -310,7 +464,13 @@ def texto_para_el_agente(r: Resultado, pie: str = "") -> str:
     if not r.ok:
         return ""
 
-    lineas = ["[Foto que envio el cliente]"]
+    #  EL ROTULO DICE DE DONDE SALIO LA FOTO, y hasta el 02/11/2026 era
+    #  la constante "[Foto que envio el cliente]". Con el asistente
+    #  interno eso pasaba a ser falso: la adjunta un colaborador. El
+    #  modelo no trata igual una foto del cliente que una de la oficina,
+    #  asi que la etiqueta importa.
+    lineas = [(PROPOSITOS.get(proposito) or {}).get(
+        "rotulo", PROPOSITOS["whatsapp_cliente"]["rotulo"])]
 
     if (pie or "").strip():
         lineas.append("")

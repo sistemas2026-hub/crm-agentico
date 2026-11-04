@@ -72,6 +72,8 @@ def configuracion(org) -> dict:
         kit, motivo = kit_que_elige(lab.nombre, kits)
         return {"codigo": lab.codigo, "nombre": lab.nombre,
                 "kit": str(lab.plantilla_de_kit_id) if lab.plantilla_de_kit_id else None,
+                #  Si una cuadrilla con cupo libre la toma de apoyo (30/10/2026).
+                "de_apoyo": lab.se_toma_de_apoyo,
                 "elige_el_supervisor": kit.nombre if kit else "", "motivo": motivo}
 
     def cuadrilla(c):
@@ -96,7 +98,8 @@ def configuracion(org) -> dict:
 
 def guardar_configuracion(org, datos: dict) -> dict:
     """Cambia SOLO lo que viene: `kits` = {codigo de labor: id de kit | None},
-    `bodegas` = {id de cuadrilla: id de bodega | None}. Todo o nada."""
+    `bodegas` = {id de cuadrilla: id de bodega | None}, `apoyos` = {codigo de
+    labor: si se toma de apoyo} (30/10/2026). Todo o nada."""
     from django.core.exceptions import ValidationError
     from django.db import transaction
 
@@ -107,7 +110,8 @@ def guardar_configuracion(org, datos: dict) -> dict:
 
     kits = datos.get("kits") or {}
     bodegas = datos.get("bodegas") or {}
-    if not isinstance(kits, dict) or not isinstance(bodegas, dict):
+    apoyos = datos.get("apoyos") or {}
+    if not all(isinstance(x, dict) for x in (kits, bodegas, apoyos)):
         raise ConfiguracionInvalida("Formato inválido.")
 
     def una(modelo, ident, **filtro):
@@ -128,6 +132,14 @@ def guardar_configuracion(org, datos: dict) -> dict:
         if kit is False:
             raise ConfiguracionInvalida("Uno de los kits no existe o está dado de baja.")
         cambios_labor.append((labor, kit))
+    cambios_apoyo = []
+    for codigo, si in apoyos.items():
+        labor = Labor.objects.filter(org=org, codigo=codigo, activa=True).first()
+        if labor is None:
+            raise ConfiguracionInvalida(f"La labor «{codigo}» no existe.")
+        if not isinstance(si, bool):
+            raise ConfiguracionInvalida("«Se toma de apoyo» es sí o no.")
+        cambios_apoyo.append((labor, si))
     for cuadrilla_id, bodega_id in bodegas.items():
         cuadrilla = una(Cuadrilla, cuadrilla_id)
         if not cuadrilla:
@@ -141,6 +153,9 @@ def guardar_configuracion(org, datos: dict) -> dict:
         for labor, kit in cambios_labor:
             labor.plantilla_de_kit = kit
             labor.save(update_fields=["plantilla_de_kit", "updated_at"])
+        for labor, si in cambios_apoyo:
+            labor.se_toma_de_apoyo = si
+            labor.save(update_fields=["se_toma_de_apoyo", "updated_at"])
         for cuadrilla, bodega in cambios_cuadrilla:
             cuadrilla.bodega = bodega
             cuadrilla.save(update_fields=["bodega", "updated_at"])
@@ -384,6 +399,18 @@ def calcular(org, fecha) -> dict:
             kit_por = POR_UNA_PERSONA
         else:
             kit, kit_por = kit_que_elige(nombre_de_labor, kits)
+        #  EL KIT DE LA LABOR DE APOYO (30/10/2026, labor-de-apoyo.md): se
+        #  suma, para que no salga a instalar sin ONU. Con la misma regla:
+        #  lo que eligio una persona, o el que elige el Supervisor.
+        apoyo = j.labor_de_apoyo if j.labor_de_apoyo != j.labor else ""
+        nombre_de_apoyo = nombres.get(apoyo, apoyo) if apoyo else ""
+        kit_apoyo, kit_apoyo_por = None, ""
+        if apoyo:
+            kit_apoyo = kit_de.get(apoyo)
+            if kit_apoyo is not None:
+                kit_apoyo_por = POR_UNA_PERSONA
+            else:
+                kit_apoyo, kit_apoyo_por = kit_que_elige(nombre_de_apoyo, kits)
         bodega = j.cuadrilla.bodega
         if bodega is not None:
             bodega_por = POR_UNA_PERSONA
@@ -399,6 +426,8 @@ def calcular(org, fecha) -> dict:
                 "labor": nombre_de_labor,
                 "lider": inv.nombre_de(lider) if lider is not None else "",
                 "kit": kit.nombre if kit is not None else "", "kit_por": kit_por,
+                "apoyo": nombre_de_apoyo,
+                "kit_apoyo": kit_apoyo.nombre if kit_apoyo is not None else "",
                 "bodega": bodega.nombre if bodega is not None else "",
                 "bodega_por": bodega_por,
                 "peso": peso.get(str(j.id), 0), "lineas": [], "avisos": [],
@@ -420,13 +449,27 @@ def calcular(org, fecha) -> dict:
             fila["_sin"] = "lider"
             fila["avisos"].append("No tiene líder con cuenta activa: no hay a quién cargarle.")
             continue
+        if apoyo and kit_apoyo is None:
+            #  No frena la carga: sale con el de su labor, y se dice.
+            fila["avisos"].append(
+                f"La labor de apoyo «{nombre_de_apoyo}» no tiene kit: "
+                f"{kit_apoyo_por}. Sale solo con el de su labor.")
         custodia = inv.ubicacion_de_tecnico(lider, org, crear=False)
-        for linea in kit.lineas.select_related("material").order_by("material__nombre"):
-            m = linea.material
+        #  Las lineas de los dos kits, sumadas por material: el cable que piden
+        #  los dos es UN pedido, no dos.
+        cuanto_de = {}
+        #  El mismo kit en las dos labores cuenta una vez.
+        kits_del_dia = [kit] + ([kit_apoyo] if kit_apoyo is not None
+                                and kit_apoyo.id != kit.id else [])
+        for k in kits_del_dia:
+            for linea in k.lineas.select_related("material"):
+                m, antes = linea.material, cuanto_de.get(linea.material_id)
+                cuanto_de[m.id] = (m, (antes[1] if antes else CERO) + linea.cantidad)
+        for m, cantidad in sorted(cuanto_de.values(), key=lambda x: x[0].nombre):
             en_mano = inv.existencia(custodia, m) if custodia is not None else CERO
-            necesita = max(CERO, linea.cantidad - max(CERO, en_mano))
+            necesita = max(CERO, cantidad - max(CERO, en_mano))
             item = {"material": m.nombre, "unidad": m.unidad,
-                    "serializado": m.es_serializado, "kit": linea.cantidad,
+                    "serializado": m.es_serializado, "kit": cantidad,
                     "en_mano": en_mano, "necesita": necesita,
                     "asignado": CERO, "falta": CERO, "_material": m}
             fila["lineas"].append(item)

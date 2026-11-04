@@ -1982,6 +1982,9 @@ autenticacion:
   # de los casos. Medido sobre 600 clientes: extrayendo todos los moviles la
   # cobertura es 98.7%; leyendolo como valor unico, 43%.
   patron_extraccion: '(?<!\d)3\d{9}(?!\d)'
+  # Para los avisos proactivos: el movil del ISP + este indicativo = el numero
+  # de WhatsApp (nucleo/seguimiento/destino.py). Colombia.
+  indicativo_pais: "57"
   # Para cuando el numero no coincide (celular nuevo). Ninguno es publico:
   # la cedula NO sirve como reto porque esta en la factura y el contrato.
   retos_nivel_2:
@@ -3748,6 +3751,28 @@ herramientas:
     tipo: http
     multipart: true
     cierra_ticket_operativo: true
+    # 31/10/2026, DECISION DEL USUARIO: el aviso al cliente no importa para
+    # ESTE camino -- es la misma decision del 13/10 para la puerta humana
+    # ("se cierra aunque el ISP le avise, el aviso no dice quien lo cerro"),
+    # que habia quedado sin extender al Supervisor. Con esta linea el
+    # Supervisor cierra el ticket de una orden de campo que su revision dio
+    # por buena en codigo (checklist, reporte, servicio, medicion, material);
+    # sin ella, nada cambia.
+    #
+    # NO se le quito 'aprobacion_humana', que sigue abajo: quitarla la
+    # habilitaria tambien para la conversacion (el rol 'soporte' la tiene en
+    # 'roles_permitidos') y para cualquier servicio por /interno/herramienta.
+    # La exencion abre UN camino, nombrado. Ver nucleo/seguridad/frontera.py.
+    aprobacion_humana_salvo: [cierre_de_orden_revisada]
+    # EL TECHO TIENE QUE DECIR LO MISMO QUE LA DELEGACION (auditoria de
+    # frontera, 31/10/2026, H4). Sin esta linea, 'techo.nivel_requerido_de'
+    # cae en el default de escritura --2, "coordinar"-- y hasta hoy daba
+    # igual porque la quinta compuerta frenaba antes. Ahora que puede salir,
+    # el techo es una de las cuatro que quedan: una empresa en 2 ejecutaria
+    # sola una escritura sobre un tercero. El CRM ya exige 3 para delegar la
+    # tarea ('tareas_delegadas.CERRAR_LO_REVISADO.exige_nivel'); esto hace
+    # que la escala del motor diga lo mismo.
+    nivel_autonomia: 3
     descripcion: >
       Cierra el ticket de WispHub dejando escrito con que se cerro. NO la
       llames tu: la ejecuta el codigo cuando el caso termina.
@@ -6017,7 +6042,8 @@ herramientas:
     descripcion: >
       LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual del router, no escales) apenas
       consultar_senal_ont haya dado 'aceptable' Y ping_cliente haya
-      respondido bien, en un cliente que dice NO TENER SERVICIO -- sin internet,
+      respondido bien Y consultar_incidente_red haya dado que NO hay una caida
+      compartida en su zona, en un cliente que dice NO TENER SERVICIO -- sin internet,
       nada carga, ningun aparato anda. Ese es exactamente el caso para el que existe esta herramienta, y usar el
       reinicio manual en su lugar le hace perder tiempo al cliente para
       lograr lo mismo que esto hace en un paso. NUNCA la llames por una queja de LENTITUD o de
@@ -6030,16 +6056,18 @@ herramientas:
       una queja de lentitud tambien sale bien -- el equipo sano es una
       CONDICION, no el motivo. Reinicia la ONT del cliente.
       Llamarla NO reinicia el equipo en ese momento: deja el reinicio
-      PENDIENTE de aprobacion de un colaborador. Dile al cliente que el
-      reinicio remoto de su equipo quedo solicitado y que un colaborador lo
-      tiene que aprobar -- NUNCA le digas que ya se reinicio. Cuando se
-      apruebe, el equipo va a estar sin conexion **uno o dos minutos**
+      SOLICITADO, y el resultado de la herramienta te dice si sale solo
+      apenas termines de responder o si lo tiene que aprobar un colaborador.
+      Dile al cliente exactamente eso -- NUNCA le digas que ya se reinicio.
+      Cuando salga, el equipo va a estar sin conexion **uno o dos minutos**
       (medido en vivo, 14/08/2026: volvio a responder en ~73 segundos).
 
-      Ademas de la aprobacion, el codigo exige que ya hayas corrido
-      consultar_senal_ont y ping_cliente EN ESTA conversacion y que los dos
-      hayan dado resultado favorable (senal aceptable, ping exitoso) -- y los
-      vuelve a medir al aprobar. Si no se cumple, la herramienta se rechaza
+      Ademas, el codigo exige que ya hayas corrido
+      consultar_senal_ont, ping_cliente y consultar_incidente_red EN ESTA
+      conversacion y que los tres hayan dado resultado favorable (senal
+      aceptable, ping exitoso, sin caida compartida) -- y los vuelve a medir
+      al aprobar. Si hay una caida en su zona, reiniciar su equipo no arregla
+      nada: deciselo y no lo reinicies. Si no se cumple, la herramienta se rechaza
       sola con el motivo -- no lo intentes "igual", sigue el protocolo
       alternativo. Es exactamente la logica del equipo electronico que a
       veces necesita reinicio PERO solo tiene sentido si ya se descarto que
@@ -6052,7 +6080,8 @@ herramientas:
     solo_lectura: false
     requiere_confirmacion: true
     # ── LO QUE EL CLIENTE DIJO, VALIDADO EN CODIGO ────────────────────────
-    # 'exige_previas' (mas abajo) exige senal aceptable y ping respondiendo.
+    # 'exige_previas' (mas abajo) exige senal aceptable, ping respondiendo y
+    # ninguna caida compartida en el PON.
     # Eso NO distingue "no tengo internet" de "esta lento": en una queja de
     # lentitud las dos condiciones se cumplen, porque el equipo ESTA sano --
     # es exactamente lo que significa "lento".
@@ -6096,6 +6125,16 @@ herramientas:
     # y se anota la verificacion contra la conversacion de origen.
     aprobacion_humana: true
     irreversible: true
+    # NO CRITICA (PRD §2 y §8.18, 02/11/2026). El dueno del producto: "solo
+    # necesito humano o aprobacion en las tareas criticas que repercuten danos
+    # para la empresa". Un reinicio no mueve dinero ni afecta a otros clientes,
+    # y el equipo vuelve solo en uno o dos minutos. Con esto la empresa puede
+    # darle autonomia sin esperar evidencia de aprobaciones; todo lo de arriba y
+    # lo de abajo se sigue exigiendo en codigo -- sintoma declarado, previas que
+    # se vuelven a medir al ejecutar, uno por conversacion, uno por equipo por
+    # dia, verificacion de 'last_status_change' -- y si no confirma, la
+    # autonomia se degrada sola y vuelve a una persona.
+    critica: false
     plantilla_resumen: "Reiniciar la ONT {sn_onu}"
     roles_permitidos: [cliente_final, soporte]
     base_url_ref: SMARTOLT_SUBDOMINIO
@@ -6131,10 +6170,25 @@ herramientas:
     # es el que se queja. Lo que importa es que el equipo CONTESTE: si
     # contesta, el comando llega. '0 de 3' queda afuera a proposito -- ahi no
     # hay a quien mandarle nada.
+    #
+    # Y la red, antes que la casa (30/10/2026, PRD §8.17 Ola 1). La bateria de
+    # flujos media 0/10: con la ONU en linea y sin ping, el agente reiniciaba
+    # el equipo de UNA casa sin mirar si el PON entero estaba caido -- en una
+    # caida general, treinta reinicios por una falla que no esta en ninguna
+    # casa. Va aca y no en el prompt porque el motor vuelve a medir las previas
+    # al aprobar: la caida se comprueba al proponer Y al aprobar.
+    # LIMITE, escrito por la auditoria del mismo dia: la herramienta devuelve
+    # 'false' tambien cuando NO PUDO mirar (ONU sin ubicar en la OLT, los
+    # primeros 2-5 min de una caida que SmartOLT todavia no agrupo, un cuerpo
+    # inesperado). La previa acota, no autoriza: siguen la senal, el ping y la
+    # aprobacion humana, asi que lo peor es un reinicio inutil. Cerrarlo pide
+    # que la herramienta distinga "sin dato" de 'false' (PRD §8.17).
+    # Guarda: tests/test_reinicio_no_en_caida_de_barrio.py
     exige_previas:
       - {herramienta: consultar_senal_ont, campo: onu_signal_1490_veredicto, valor: aceptable}
       - {herramienta: ping_cliente, campo: "ping-exitoso",
          valores: ["1 de 3", "2 de 3", "3 de 3"]}
+      - {herramienta: consultar_incidente_red, campo: es_incidente_de_red, valor: false}
     limite_por_conversacion: 1
     # Que el comando se haya mandado no dice nada: el proveedor contesta
     # "Device reboot command sent" en medio segundo. Esto es lo que se mide
@@ -6186,8 +6240,9 @@ herramientas:
       LLAMA LA HERRAMIENTA reiniciar_ont AHORA, en este mismo paso. No
       anuncies que la vas a usar sin llamarla: si no la llamas, el reinicio
       ni siquiera queda solicitado. Primero llamala, y recien despues
-      cuentale al cliente que el reinicio remoto quedo SOLICITADO y que un
-      colaborador lo tiene que aprobar -- no le digas que ya se reinicio.
+      cuentale al cliente lo que diga el resultado: que el reinicio remoto
+      quedo SOLICITADO y si sale solo en unos instantes o lo tiene que
+      aprobar un colaborador -- no le digas que ya se reinicio.
 
       Unica excepcion: si el cliente ya te dijo en este intercambio que no
       quiere que la reinicies.
@@ -7506,3 +7561,21 @@ tickets_desde_dexter:
   - {asunto: Asesoria Para Pago En Linea, area: cartera, prioridad: "2"}
   - {asunto: Actualización De Datos, area: cartera, prioridad: "2"}
   - {asunto: Pqr, area: cartera, prioridad: "4"}
+
+# --- tablero de capacidad (30/10/2026, PRD §2 y §8.17 Ola 1) ----------------
+# Que cuenta como una visita evitada: un reinicio CONFIRMADO sin visita al
+# mismo cliente en los dias siguientes. Los minutos NO estan declarados a
+# proposito: cuanto le cuesta a Rapilink una conversacion o una visita lo dice
+# Rapilink, no esta sesion. Sin ellos, el tablero muestra los minutos en null
+# con el motivo. Se cargan desde la base cuando la empresa los de.
+capacidad:
+  acciones_que_evitan_visita: [reiniciar_ont]
+  herramientas_de_visita: [agendar_visita_tecnica, agendar_visita_internet]
+
+# A quien se le avisa una caida de red (30/10/2026, PRD §8.17, Ola 2). Lo
+# aprueba una persona desde Supervisor NOC -> Fallas de red, y sale por tandas.
+# 'Activo' es el estado de cliente que devuelve WispHub ('estado' en
+# /api/clientes/, el mismo texto que ya lee nucleo/facturacion/politicas.py):
+# un suspendido no tiene servicio que restablecer.
+aviso_de_caida:
+  estados_que_se_avisan: [Activo]

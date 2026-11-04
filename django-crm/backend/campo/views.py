@@ -50,6 +50,7 @@ from campo.services.transiciones import (
     ejecutar_accion_operativa,
 )
 from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
+from campo import tasks as tareas_de_campo
 
 
 def _debe_estar_asignado(request) -> bool:
@@ -118,6 +119,29 @@ class BootstrapView(APIView):
                 "validacion_visual": False,
             },
             "server_time": timezone.now().isoformat(),
+        })
+
+
+class MiDiaView(APIView):
+    """``GET /api/campo/mi-dia/`` — con que cuadrilla y que labor sale hoy
+    quien pregunta, segun lo armado en Programacion (29/10/2026: el saludo de
+    Inicio, «tu labor para hoy es …»).
+
+    `jornada` va siempre, aunque sea null: la app distingue «hoy no sale con
+    ninguna cuadrilla» de «el servidor viejo no lo manda». `fecha` es el dia de
+    la EMPRESA, no el de Greenwich: la app no muestra una jornada de otro dia.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        from campo import reparto as R
+        from campo.dia_publicado import de_la_persona
+
+        hoy = timezone.now().astimezone(R._zona_de(request.org)).date()
+        return Response({
+            "fecha": hoy.isoformat(),
+            "jornada": de_la_persona(request.org, request.profile, hoy),
         })
 
 
@@ -215,7 +239,12 @@ class TrabajosListView(APIView):
         hay_mas = len(filas) > limite
         filas = filas[:limite]
 
-        serializer = OrdenTrabajoListSerializer(filas, many=True)
+        #  El asunto de toda la pagina en una consulta, no una por orden.
+        from campo.niveles import asuntos_de_las_ordenes
+
+        serializer = OrdenTrabajoListSerializer(
+            filas, many=True,
+            context={"asuntos": asuntos_de_las_ordenes(org, filas)})
         return Response(
             {
                 "results": serializer.data,
@@ -411,6 +440,14 @@ class SeguimientoDeOrdenView(APIView):
                  "campos": e.errores},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
+
+        #  EL REPORTE DE CIERRE DESPIERTA AL SUPERVISOR (31/10/2026). Es la
+        #  mitad de la condicion --la otra es que la orden quede completada--
+        #  y cual llega ultima depende de la app y de si venia offline. Por
+        #  eso se dispara desde las DOS y la tarea decide: la que llegue
+        #  primero no va a encontrar nada que hacer y no escribe nada.
+        if evento.tipo == seguimiento.TIPOS[seguimiento.CIERRE]:
+            tareas_de_campo.pedir_revision_del_cierre(orden)
 
         return Response(
             {
@@ -1033,11 +1070,17 @@ class ConfirmarEvidenciaView(APIView):
             datos={"evidencia_id": str(evidencia.id), "requisito_id": evidencia.requisito_id},
         )
 
+        #  LA FOTO CONFIRMADA DESPIERTA SU ANALISIS (31/10/2026). Acá y no
+        #  antes: el archivo ya pasó `verify_upload`, así que hay algo que
+        #  mirar. Va por `on_commit` y nunca tumba esta petición -- si el
+        #  análisis no corre, el técnico igual subió su foto.
+        tareas_de_campo.pedir_analisis_de_la_foto(evidencia)
+
         return Response({"estado": "recibida", "evidencia_id": str(evidencia.id)})
 
 
 class SubirEvidenciaDirectoView(APIView):
-    """Recibe el binario de UNA evidencia. Solo backend local de desarrollo.
+    """Recibe el binario de UNA evidencia, en desarrollo Y en produccion.
 
     Cierra el circuito que quedaba cortado: 'descriptor_subida' prometia un PUT
     contra esta ruta y la ruta no existia, asi que la app registraba la
@@ -1049,18 +1092,27 @@ class SubirEvidenciaDirectoView(APIView):
     proponer, y el path traversal deja de ser un problema a resolver para pasar
     a ser imposible de plantear.
 
-    En produccion con S3/R2 esta vista no participa: 'descriptor_subida' emite
-    la URL prefirmada del proveedor y el cliente sube alli. De ahi que solo
-    exista en entorno de desarrollo -- con ENV_TYPE de produccion devuelve 404,
-    no 403: quien no deberia usarla tampoco tiene por que saber que existe.
+    30/10/2026: hasta hoy devolvia 404 fuera de desarrollo, suponiendo que
+    produccion tendria S3/R2 con URL prefirmada. Produccion guarda en disco
+    (`crm/server_settings.py`: «aqui no hay S3», volumen `media:/app/media`) y
+    `descriptor_subida` le da a la app ESTA ruta siempre: ninguna foto podia
+    subir, y como «completar» espera a que todas esten confirmadas, ninguna
+    orden con foto se cerraba desde la app. Visto en una OT real: el reporte de
+    cierre llegaba y la orden seguia en sitio con «5 cambios locales».
+
+    La regla que queda: si `descriptor_subida` promete esta ruta, esta ruta
+    responde. El dia que haya un proveedor con URL prefirmada, cambian los dos
+    juntos.
+
+    Y por eso mismo se acota como el registro (`_obtener_orden_o_404`): un
+    tecnico sube solo a las fotos de SUS ordenes; la gestion, a las de su
+    empresa. Antes alcanzaba con ser de la empresa, que en desarrollo daba
+    igual.
     """
 
     permission_classes = [IsCampoAuthenticated]
 
     def put(self, request, pk):
-        if not getattr(settings, "IS_DEV_ENV", False):
-            raise Http404
-
         org = getattr(request, "org", None)
         if not org:
             raise Http404
@@ -1071,6 +1123,9 @@ class SubirEvidenciaDirectoView(APIView):
         evidencia = EvidenciaTrabajo.objects.filter(pk=pk, org=org).first()
         if not evidencia:
             raise Http404
+        # La misma puerta que el registro: un tecnico, solo en SUS ordenes.
+        # Tambien 404: la foto de una orden ajena no existe para el.
+        _obtener_orden_o_404(request, evidencia.orden_trabajo_id)
 
         # Una evidencia que ya esta en el servidor no se reemplaza. Es el mismo
         # criterio que el registro: el sha256 identifica la fila, no garantiza
@@ -1252,6 +1307,11 @@ class CompletarTrabajoView(APIView):
                 {"error": "TRANSICION_INVALIDA", "detalle": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        #  LA OTRA MITAD (31/10/2026). Ver el comentario en SeguimientoView:
+        #  con la orden ya en 'completada_campo', si el reporte de cierre
+        #  llego antes, el Supervisor la revisa y decide en segundos.
+        tareas_de_campo.pedir_revision_del_cierre(orden)
 
         return Response({
             "ok": True,

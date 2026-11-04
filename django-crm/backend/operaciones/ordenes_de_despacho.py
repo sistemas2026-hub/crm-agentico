@@ -410,11 +410,10 @@ def decidir(org, ahora=None) -> dict:
 #      la tarea `crear_las_ordenes_de_despacho`, delegada por una persona
 #      el nivel 3 de la empresa (`autonomia.puede`, con su interruptor)
 #      la hora de corte (sin ella `decidir` no pone dia)
-#      `MOTOR_TENANT`: la ficha del cliente se le pide al tenant del motor, y
-#      sin saber cual no se pide (mismo criterio que `lazo_isp` y
-#      `cierre_en_isp`). Que una empresa del CRM este atada a ese tenant es la
-#      decision D5 de CLAUDE.md (una instalacion por ISP), y vale para todas
-#      las acciones del Supervisor, no solo para esta.
+#      la empresa de la organizacion (`areas_del_tenant.tenant_de`): la ficha
+#      del cliente se le pide al tenant del motor, y sin saber cual no se pide
+#      (mismo criterio que `lazo_isp` y `cierre_en_isp`). Hasta el 31/10/2026
+#      era una variable del servidor, una por instalacion (D5 de CLAUDE.md).
 #
 #  Sin alguna, la fase queda en SOMBRA: no escribe nada y dice en el log
 #  cuantas crearia. Lo que crearia se ve en «Ver qué crearía el Supervisor».
@@ -460,14 +459,12 @@ def _tarea():
 
 def _puertas(org) -> str:
     """Por que NO puede crear, o "" si puede. Texto fijo: va a un log."""
-    import os
-
-    from operaciones import autonomia
+    from operaciones import areas_del_tenant, autonomia
     from operaciones import tareas_delegadas as td
 
-    if not (os.environ.get("MOTOR_TENANT", "") or "").strip():
-        return ("falta MOTOR_TENANT: sin saber de qué empresa es la ficha del "
-                "cliente, no se pide")
+    if not areas_del_tenant.tenant_de(org):
+        return (f"{areas_del_tenant.SIN_EMPRESA}: sin saber de qué empresa es "
+                "la ficha del cliente, no se pide")
     try:
         if not td.esta_delegada(org, _tarea()):
             return ("nadie le delegó al Supervisor que cree las órdenes: se le "

@@ -34,6 +34,7 @@ CASES_URL = "/api/cases/"
 #  La funcion real, tomada al importar: el conftest raiz la reemplaza por un
 #  mapa vacio en cada prueba para que nadie salga a la red.
 _AREAS_DE_ORG = areas_del_tenant.area_por_persona_de_org
+_TENANT_DE_ORG = areas_del_tenant.tenant_de_organizacion
 
 
 def _cliente(org, rol, email):
@@ -224,6 +225,7 @@ class TestCadaOrganizacionLeeSuEmpresa:
         clave de cache unica para todas le serviria a la segunda el mapa de la
         primera."""
         cache.clear()
+        monkeypatch.setattr(areas_del_tenant, "tenant_de_organizacion", _TENANT_DE_ORG)
         monkeypatch.setenv("MOTOR_TENANT", "empresa_uno")
         tenants = {"org-1": "empresa_uno", "org-2": "empresa_dos"}
         mapas = {"empresa_uno": {"p1": "soporte_tecnico"},
@@ -245,10 +247,11 @@ class TestCadaOrganizacionLeeSuEmpresa:
 
     def test_si_el_motor_no_contesta_no_se_sabe(self, monkeypatch):
         cache.clear()
+        monkeypatch.setattr(areas_del_tenant, "tenant_de_organizacion", _TENANT_DE_ORG)
 
         def roto(*a, **kw):
             raise ConnectionError("motor caido")
 
         monkeypatch.setattr(areas_del_tenant.requests, "get", roto)
-        assert areas_del_tenant.tenant_de_organizacion("org-1") == ""
+        assert _TENANT_DE_ORG("org-1") == ""
         assert _AREAS_DE_ORG("org-1") == {}

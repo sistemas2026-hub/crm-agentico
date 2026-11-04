@@ -53,6 +53,7 @@ class TrabajoVista {
     this.prioridad = '',
     this.zona = '',
     this.resumen = '',
+    this.asunto = '',
     this.ventanaInicio,
     this.ventanaFin,
     this.slaVenceEn,
@@ -76,6 +77,21 @@ class TrabajoVista {
   final String tipoCodigo;
   final FamiliaTrabajo familia;
   final DateTime? compromiso;
+
+  /// La hora del compromiso, si de verdad tiene una (29/10/2026).
+  ///
+  /// El Supervisor crea la orden PARA UN DÍA y la guarda a las 00:00 de ese
+  /// día (`ordenes_de_despacho._a_las_cero`): no es una cita a medianoche. La
+  /// app la mostraba como «12:00 AM» y, en las horas del día, como un reloj
+  /// rojo «00:00» vencido desde la madrugada (el usuario: «tiene una hora,
+  /// dice 12:00 AM, ¿qué significa?»). A las 00:00 en punto la orden no tiene
+  /// hora; el día sigue valiendo en [compromiso].
+  DateTime? get horaComprometida {
+    final DateTime? c = compromiso;
+    if (c == null) return null;
+    final DateTime local = c.toLocal();
+    return local.hour == 0 && local.minute == 0 ? null : c;
+  }
 
   /// Version de la orden en el servidor. La transicion la manda como base para
   /// que el backend detecte si alguien la movio mientras tanto.
@@ -145,6 +161,11 @@ class TrabajoVista {
 
   /// Qué hay que hacer, en una línea.
   final String resumen;
+
+  /// El asunto del ticket del que nació («No Tiene Internet»), o vacío si no
+  /// nació de un ticket. Es el título de la tarjeta, como en Programación
+  /// (29/10/2026); el servidor ya le quitó el cliente que trae pegado.
+  final String asunto;
 
   /// La franja que se le prometió al cliente. No es lo mismo que [compromiso],
   /// que es la hora agendada.
@@ -225,6 +246,7 @@ class TrabajoVista {
       prioridad: orden['prioridad']?.toString() ?? '',
       zona: orden['zona']?.toString() ?? '',
       resumen: orden['resumen']?.toString() ?? '',
+      asunto: orden['asunto']?.toString() ?? '',
       ventanaInicio: _fecha(orden['ventana_inicio']),
       ventanaFin: _fecha(orden['ventana_fin']),
       slaVenceEn: _fecha(orden['sla_vence_en']),

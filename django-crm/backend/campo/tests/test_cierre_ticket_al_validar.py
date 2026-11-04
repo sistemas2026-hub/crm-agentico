@@ -48,7 +48,7 @@ class _Respuesta:
 
 @pytest.fixture(autouse=True)
 def _entorno(monkeypatch):
-    monkeypatch.setenv("MOTOR_TENANT", "tenant-de-prueba")
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "tenant-de-prueba")
     monkeypatch.delenv(cierre_en_isp.BANDERA, raising=False)
 
 

@@ -25,7 +25,7 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
  * @returns {Promise<string|null>}
  */
 export async function tenantDeLaSesion(locals, fetch) {
-  // Ya resuelto en este request: `hooks.server.js` lo deja acá.
+  // Ya resuelto en este request.
   if (locals?.tenant) return locals.tenant;
 
   const orgId = locals?.org?.id;
@@ -34,25 +34,56 @@ export async function tenantDeLaSesion(locals, fetch) {
   const base = env.PRIVATE_ASISTENTE_URL;
   if (!base) return null;
 
-  try {
-    const r = await fetch(
-      `${base}/tenant-de-organizacion/${encodeURIComponent(orgId)}`,
-      { headers: headersMotor() }
-    );
-    // 404 es una respuesta legítima: esa empresa no tiene asistente todavía.
-    // No es un error que haya que reintentar ni registrar como falla.
-    if (!r.ok) return null;
-    const datos = await r.json();
-    const slug = datos?.tenant;
-    if (!slug) return null;
-    if (locals) locals.tenant = slug;
-    return slug;
-  } catch {
-    // El motor caído no puede convertirse en «servile los datos de otra
-    // empresa». Sin respuesta no hay tenant.
-    return null;
-  }
+  // UNA SOLA PREGUNTA AL MOTOR POR REQUEST  --  04/11/2026
+  // ------------------------------------------------------
+  // El comentario de arriba decía que `hooks.server.js` dejaba el tenant en
+  // `locals`; no lo hace (medido: cero referencias). Y el hub de Configuración
+  // dispara nueve lecturas del motor EN PARALELO, cada una pasando por acá
+  // antes de que la primera haya escrito `locals.tenant`: nueve veces la misma
+  // pregunta, contra un motor de 8 hilos que además atiende los turnos de
+  // WhatsApp. "Configuración demora o no muestra nada" (reportado dos veces,
+  // 01/11 y 04/11). Las que llegan mientras la primera está en vuelo comparten
+  // su promesa, en vez de abrir otra.
+  if (locals && locals._tenantEnVuelo) return locals._tenantEnVuelo;
+
+  // Y CON PLAZO. Sin él, cada tarjeta del hub tenía 4 s para el motor pero la
+  // pregunta previa por el tenant no tenía ninguno: un motor ocupado dejaba
+  // todo detrás de esta llamada, y el plazo de la tarjeta nunca corría.
+  // Un AbortController propio y no `AbortSignal.timeout`: este obedece al
+  // reloj del proceso (lo que permite probarlo con temporizadores falsos) y se
+  // limpia al terminar, en vez de quedar un temporizador vivo por request.
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), PLAZO_TENANT_MS);
+  const pregunta = (async () => {
+    try {
+      const r = await fetch(
+        `${base}/tenant-de-organizacion/${encodeURIComponent(orgId)}`,
+        { headers: headersMotor(), signal: control.signal }
+      );
+      // 404 es una respuesta legítima: esa empresa no tiene asistente todavía.
+      // No es un error que haya que reintentar ni registrar como falla.
+      if (!r.ok) return null;
+      const datos = await r.json();
+      const slug = datos?.tenant;
+      if (!slug) return null;
+      if (locals) locals.tenant = slug;
+      return slug;
+    } catch {
+      // El motor caído o lento no puede convertirse en «servile los datos de
+      // otra empresa». Sin respuesta no hay tenant.
+      return null;
+    } finally {
+      clearTimeout(reloj);
+      if (locals) delete locals._tenantEnVuelo;
+    }
+  })();
+  if (locals) locals._tenantEnVuelo = pregunta;
+  return pregunta;
 }
+
+/** Cuánto se espera al motor por el tenant. Una tarjeta del hub tiene 4 s
+ *  (settings.js::PLAZO_MOTOR_MS): esto va DENTRO de ese presupuesto. */
+export const PLAZO_TENANT_MS = 3000;
 
 /**
  * A qué motor hablarle y de qué empresa son los datos, en una sola llamada.

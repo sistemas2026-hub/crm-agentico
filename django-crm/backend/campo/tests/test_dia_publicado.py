@@ -16,6 +16,13 @@ publicado un dia, para la pantalla de Programacion. Cada punto, con su prueba:
   D  el DIA: lo programado para otro dia no entra; lo terminado ese dia si,
      lo terminado otro dia no.
   P  solo quien gestiona, con fecha, y solo su empresa.
+  M  DONDE ESTA CADA CUADRILLA (31/10/2026): la posicion mas fresca de su
+     gente, o nada --que no es lo mismo que «no se movio»--.
+  I  LOS INDICADORES (31/10/2026): cuadrillas, en camino, completadas,
+     pendientes, el cumplimiento y las que tienen novedad, calculados aca.
+  R  POR REVISAR (31/10/2026): lo terminado en campo y sin cerrar de un dia
+     anterior sale aparte, hasta que alguien lo apruebe y lo cierre. Y cada
+     orden trae los recordatorios que el Supervisor le mando, terminada o no.
   B  el boton deja quien publico SIN congelar la orden para el reparto.
 
     pytest campo/tests/test_dia_publicado.py
@@ -565,7 +572,13 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     tickets asignados, salgan los nombres». Hasta entonces esto afirmaba que no
     salia NINGUN dato del cliente; ahora sale el NOMBRE, y solo en las ordenes
     de una cuadrilla. El telefono y la direccion, nunca: no hacen falta para
-    saber con cual empieza."""
+    saber con cual empieza.
+
+    CAMBIO DEL USUARIO, 30/10/2026: «donde dice todavia no sale deberia ir el
+    asunto del ticket y la direccion» (el cuadro del seguimiento de cada
+    cuadrilla). La DIRECCION sale, con el mismo alcance que el nombre: solo en
+    las ordenes de una cuadrilla, nunca en las que esperan. El telefono sigue
+    sin salir."""
     _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
     asignada = _orden(org_a, version, de=admin_profile)
     espera = _orden(org_a, version)
@@ -577,7 +590,207 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
     assert _filas(d)[asignada.numero]["cliente"] == CLIENTE
     texto = str(d)
     assert texto.count(CLIENTE) == 1, "solo en la orden asignada, no en las que esperan"
-    assert "3113683499" not in texto and "Calle 38" not in texto
+    assert _filas(d)[asignada.numero]["direccion"] == "Calle 38 # 78-33"
+    assert texto.count("Calle 38") == 1, "la direccion, solo en la orden asignada"
+    assert "3113683499" not in texto, "el telefono, nunca"
+
+
+# ---------------------------------------------------------------------------
+# M · donde esta cada cuadrilla
+# ---------------------------------------------------------------------------
+
+def _con_horario(org):
+    from business_hours.models import BusinessCalendar
+    from campo.cuadrillas import ConfiguracionDeReparto
+
+    cols = ("monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday")
+    cal = BusinessCalendar.objects.create(
+        org=org, name="Cuadrillas", timezone="America/Bogota",
+        **{f"{c}_open": dt.time(0, 1) for c in cols},
+        **{f"{c}_close": dt.time(23, 58) for c in cols})
+    fila, _ = ConfiguracionDeReparto.objects.get_or_create(org=org)
+    fila.calendario_de_cuadrillas = cal
+    fila.save(update_fields=["calendario_de_cuadrillas"])
+
+
+def test_m_la_cuadrilla_dice_donde_esta_con_la_posicion_mas_fresca(
+        org_a, version, norte, admin_profile, user_profile):
+    """Una cuadrilla es varias personas y UN punto. Se toma la mas reciente y
+    se dice de quien es: promediar coordenadas inventaria un lugar donde no
+    hay nadie, y la mas vieja diria que esta donde ya no esta."""
+    from campo import ubicacion_de_cuadrilla as UB
+
+    _con_horario(org_a)
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile, user_profile)
+    _orden(org_a, version, de=admin_profile)
+    ahora = timezone.make_aware(dt.datetime.combine(LUNES, dt.time(10, 0)))
+    UB.registrar(org_a, admin_profile, latitud=10.9, longitud=-74.7,
+                 medida_en=ahora - dt.timedelta(minutes=20), ahora=ahora)
+    UB.registrar(org_a, user_profile, latitud=10.95, longitud=-74.75,
+                 medida_en=ahora - dt.timedelta(minutes=3), ahora=ahora,
+                 bateria=64)
+
+    with mock.patch("django.utils.timezone.now", return_value=ahora):
+        c = D.del_dia(org_a, LUNES)["cuadrillas"][0]
+
+    assert c["posicion"]["latitud"] == 10.95, "la mas reciente, no la primera"
+    assert c["posicion"]["minutos"] == 3 and c["posicion"]["fresca"] is True
+    assert c["posicion"]["bateria"] == 64
+    assert c["posicion"]["de"], "dice de quien es el punto"
+
+
+def test_m2_sin_nadie_que_reporte_la_posicion_es_nada_no_un_punto(
+        org_a, version, norte, admin_profile):
+    """«Sin señal» NO es «no se movio»: no se dibuja un pin inventado."""
+    _con_horario(org_a)
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    _orden(org_a, version, de=admin_profile)
+
+    c = D.del_dia(org_a, LUNES)["cuadrillas"][0]
+
+    assert c["posicion"] is None
+
+
+# ---------------------------------------------------------------------------
+# I · la franja de indicadores
+# ---------------------------------------------------------------------------
+
+def test_i_la_franja_de_indicadores_la_calcula_el_servidor(
+        org_a, version, norte, admin_profile, user_profile):
+    """31/10/2026: la pantalla muestra, no suma. Una cuenta hecha en el
+    navegador no se puede probar y cada pantalla la sumaria distinto."""
+    from campo import novedades as N
+
+    j1 = _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    _jornada(org_a, [norte], "Cuadrilla #2", user_profile)
+    #  DOS en camino en la MISMA cuadrilla: asi «en_camino» cuenta cuadrillas
+    #  y no ordenes. Con una sola, las dos cuentas dan igual y la prueba no
+    #  distingue --sobrevivio a esa mutacion hasta que se midio (31/10/2026)--.
+    _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    _orden(org_a, version, de=admin_profile)                      # asignada
+    _orden(org_a, version, de=user_profile, estado=OrdenTrabajo.EN_SITIO)
+    hecha = _orden(org_a, version, de=user_profile,
+                   estado=OrdenTrabajo.COMPLETADA_CAMPO)
+    OrdenTrabajo.objects.filter(pk=hecha.pk).update(
+        completada_campo_en=timezone.make_aware(
+            dt.datetime.combine(LUNES, dt.time(14, 0))))
+    N.NovedadDeCuadrilla.objects.create(
+        org=org_a, profile=admin_profile, jornada=j1, tipo=N.LLANTA,
+        afecta=N.UNA_HORA, fecha=LUNES,
+        avisada_en=timezone.make_aware(dt.datetime.combine(LUNES, dt.time(9, 0))),
+        clave=f"nov|{j1.id}|1")
+
+    c = D.del_dia(org_a, LUNES)["cuentas"]
+
+    assert c["cuadrillas"] == 2
+    assert c["en_camino"] == 1, "UNA cuadrilla en ruta, aunque lleve DOS en camino"
+    assert c["completadas"] == 1
+    assert c["pendientes"] == 4, "dos en camino, una asignada y una en sitio"
+    assert c["cumplimiento"] == 20, "1 de 5, redondeado"
+    assert c["con_novedad"] == 1
+    assert c["publicadas"] == 5
+
+
+def test_i2_sin_ordenes_el_cumplimiento_es_cero_y_no_revienta(
+        org_a, version, norte, admin_profile):
+    """Dividir por cero es la forma mas facil de tumbar Programacion entera."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+
+    c = D.del_dia(org_a, LUNES)["cuentas"]
+
+    assert (c["publicadas"], c["cumplimiento"], c["completadas"]) == (0, 0, 0)
+    assert c["cuadrillas"] == 1 and c["en_camino"] == 0 and c["con_novedad"] == 0
+
+
+# ---------------------------------------------------------------------------
+# R · por revisar
+# ---------------------------------------------------------------------------
+
+def _terminada(org, version, de, dia, *, validacion=OrdenTrabajo.PENDIENTE,
+               estado=OrdenTrabajo.COMPLETADA_CAMPO):
+    o = _orden(org, version, de=de, estado=estado)
+    OrdenTrabajo.objects.filter(pk=o.pk).update(
+        estado_validacion=validacion,
+        completada_campo_en=timezone.make_aware(dt.datetime.combine(dia, dt.time(14, 0))))
+    return o
+
+
+def test_r_lo_terminado_sin_cerrar_de_otro_dia_sale_por_revisar(
+        org_a, org_b, version, norte, admin_profile):
+    """31/10/2026, en produccion: la OT #4 se termino el 30 y el 31 no salia ni
+    en Hoy ni en Cerradas. El usuario: «en la supervisor no sale el ticket»."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    domingo = LUNES - dt.timedelta(days=1)
+    pendiente = _terminada(org_a, version, admin_profile, domingo)
+    vieja = _terminada(org_a, version, admin_profile, LUNES - dt.timedelta(days=9))
+    aprobada = _terminada(org_a, version, admin_profile, domingo,
+                          validacion=OrdenTrabajo.APROBADO)
+    de_hoy = _terminada(org_a, version, admin_profile, LUNES)
+    cerrada = _terminada(org_a, version, admin_profile, domingo,
+                         validacion=OrdenTrabajo.APROBADO, estado=OrdenTrabajo.CERRADA)
+    wt = WorkType.objects.create(org=org_b, codigo="ftth", nombre="FTTH",
+                                 labor=JornadaDeCuadrilla.INSTALACION)
+    vb = WorkTypeVersion.objects.create(work_type=wt, version=1,
+                                        estado=WorkTypeVersion.PUBLICADA,
+                                        esquema={"campos": []})
+    ajena = _terminada(org_b, vb, admin_profile, domingo)
+
+    d = D.del_dia(org_a, LUNES)
+
+    por_revisar = {f["numero"]: f for f in d["por_revisar"]}
+    assert [f["numero"] for f in d["por_revisar"]] == [vieja.numero, pendiente.numero,
+                                                       aprobada.numero], \
+        "las de antes, la mas vieja primero; ni la de hoy, ni la cerrada, ni la ajena"
+    assert de_hoy.numero in _filas(d), "la de hoy sigue en su cuadrilla"
+    assert pendiente.numero not in _filas(d)
+    assert cerrada.numero not in por_revisar and ajena.numero not in por_revisar
+    assert por_revisar[pendiente.numero]["revision"] is not None, \
+        "trae lo que dice el Supervisor, para aprobar o devolver"
+    assert por_revisar[aprobada.numero]["validacion"] == OrdenTrabajo.APROBADO
+    assert por_revisar[pendiente.numero]["terminada_el"].startswith("04/10")
+    assert por_revisar[pendiente.numero]["tecnicos"]
+    assert d["cuentas"]["por_revisar"] == 3
+    assert d["cuentas"]["publicadas"] == 1, "las cuentas del dia siguen siendo del dia"
+
+
+def test_r2_cada_orden_trae_sus_recordatorios_aunque_este_terminada(
+        org_a, org_b, version, norte, admin_profile):
+    """31/10/2026: el usuario probo la vibracion con la OT #4, la termino, y no
+    habia donde ver si el Supervisor le mando el recordatorio: el log de la
+    cuadrilla solo muestra lo abierto."""
+    from campo.avisos import AvisoEnviado
+
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    domingo = LUNES - dt.timedelta(days=1)
+    terminada = _terminada(org_a, version, admin_profile, domingo)
+    en_curso = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    callada = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_CAMINO)
+    OrdenTrabajo.objects.filter(pk__in=[terminada.pk, en_curso.pk, callada.pk]).update(
+        created_at=timezone.make_aware(dt.datetime.combine(domingo, dt.time(7, 0))))
+
+    def recordo(orden, dia, hora, canales, org=org_a):
+        a = AvisoEnviado.objects.create(org=org, clave=f"sin_reporte|{orden.id}|{dia}T{hora}",
+                                        canales=canales)
+        AvisoEnviado.objects.filter(pk=a.pk).update(created_at=timezone.make_aware(
+            dt.datetime.combine(dia, dt.time(*map(int, hora.split(":"))))))
+
+    recordo(terminada, domingo, "10:15", ["push"])
+    recordo(en_curso, LUNES, "09:40", [])
+    recordo(callada, LUNES, "09:50", ["push"], org=org_b)
+    #  Otra clave de la misma orden no es un recordatorio.
+    AvisoEnviado.objects.create(org=org_a, clave=f"asignacion|{callada.id}|1", canales=["push"])
+
+    d = D.del_dia(org_a, LUNES)
+
+    por_revisar = {f["numero"]: f for f in d["por_revisar"]}
+    assert por_revisar[terminada.numero]["recordatorios"] == [
+        {"cuando": "04/10 10:15", "llego": True}], "de otro dia, con su fecha"
+    assert _filas(d)[en_curso.numero]["recordatorios"] == [
+        {"cuando": "09:40", "llego": False}], "si no llego al telefono, se dice"
+    assert _filas(d)[callada.numero]["recordatorios"] == [], \
+        "ni lo de otra empresa ni otra clave cuentan"
 
 
 # ---------------------------------------------------------------------------

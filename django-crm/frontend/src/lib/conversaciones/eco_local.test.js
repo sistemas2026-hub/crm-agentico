@@ -17,6 +17,7 @@ import { incorporarMensaje } from './eco_local.js';
 
 const AHORA = Date.parse('2026-10-29T18:43:30Z');
 
+/** @returns {any} */
 const local = (extra = {}) => ({
   rol: 'assistant',
   origen: 'humano',
@@ -27,6 +28,7 @@ const local = (extra = {}) => ({
   ...extra
 });
 
+/** @returns {any} */
 const remoto = (extra = {}) => ({
   id: 'm-9',
   rol: 'assistant',

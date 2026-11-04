@@ -45,12 +45,13 @@ def en_el_acto(monkeypatch):
 
 
 @pytest.fixture
-def motor(monkeypatch):
-    """El motor configurado, con requests.post espiado."""
+def motor(monkeypatch, org_a, empresa_del_motor):
+    """El motor configurado, con requests.post espiado. La empresa es la de
+    la organizacion del caso (31/10/2026), no una variable del servidor."""
     import requests
 
     monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000/")
-    monkeypatch.setenv("ASISTENTE_TENANT", "empresa")
+    empresa_del_motor(org_a, "empresa")
     monkeypatch.setenv("MOTOR_SERVICE_TOKEN", "tok-servicio")
     pedidos = []
 
@@ -114,7 +115,7 @@ class TestEncuestaAlCerrar:
         import requests
 
         monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000")
-        monkeypatch.setenv("ASISTENTE_TENANT", "empresa")
+        monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "empresa")
 
         def cae(*a, **k):
             raise requests.ConnectionError("motor caido")
@@ -142,7 +143,7 @@ class TestEncuestaAlCerrar:
         from cases.tasks import ENCUESTA_MAX_VUELTAS
 
         monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000")
-        monkeypatch.setenv("ASISTENTE_TENANT", "empresa")
+        monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "empresa")
         pedidos = []
 
         def post(url, json=None, headers=None, timeout=None):
@@ -162,7 +163,7 @@ class TestEncuestaAlCerrar:
         import requests
 
         monkeypatch.setenv("ASISTENTE_URL", "http://motor:5000")
-        monkeypatch.setenv("ASISTENTE_TENANT", "empresa")
+        monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "empresa")
         pedidos = []
 
         def post(url, json=None, headers=None, timeout=None):

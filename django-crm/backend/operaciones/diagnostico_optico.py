@@ -345,7 +345,7 @@ def enriquecer(org, senales, *, ahora=None, presupuesto_=None,
             #  bug real en agosto de 2026.
             try:
                 return telemetria.pinguear_servicio(
-                    id_servicio, paquetes=PINGS_POR_PRUEBA)
+                    id_servicio, org=org, paquetes=PINGS_POR_PRUEBA)
             except Exception as e:                           # noqa: BLE001
                 #  El tipo y no el texto: el texto de un error de red trae la
                 #  URL, y esa URL lleva el identificador del servicio.

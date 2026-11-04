@@ -50,7 +50,10 @@ export const EDITABLE_FIELDS = [
   'tax_id',
   'default_currency',
   'default_country',
-  'timezone'
+  'timezone',
+  //  A dónde llegan las solicitudes de servicio nuevas (31/10/2026). Es de la
+  //  empresa, no del servidor: lo edita su administrador acá.
+  'correo_solicitudes'
 ];
 
 /**

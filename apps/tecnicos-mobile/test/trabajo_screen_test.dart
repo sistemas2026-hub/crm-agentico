@@ -258,8 +258,14 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('INSTALACIÓN'), findsOneWidget);
+      // Desde el 29/10/2026 no salen juntas (el usuario: «que no salgan
+      // revueltos»): cada tarjeta dice su clase, cada una en su columna.
       expect(find.textContaining('INCIDENCIA'), findsOneWidget);
+      expect(find.textContaining('INSTALACIÓN'), findsNothing);
+      await tester.tap(find.textContaining('Instalaciones'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('INSTALACIÓN'), findsOneWidget);
+      expect(find.textContaining('INCIDENCIA'), findsNothing);
       await banco.cerrar();
     });
 
@@ -280,8 +286,9 @@ void main() {
       await tester.pumpWidget(banco.app());
       await tester.pumpAndSettle();
 
-      // El segmento de arriba dice de qué entidad se habla.
-      await tester.tap(find.textContaining('Tickets'));
+      // El segmento de arriba dice de qué entidad se habla. Desde el
+      // 29/10/2026 «Tickets» se llama «Soporte», y es el que abre.
+      await tester.tap(find.textContaining('Soporte'));
       await tester.pumpAndSettle();
 
       // La tarjeta de una incidencia titula el problema, no al cliente.
@@ -292,6 +299,75 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Instalacion Uno'), findsOneWidget);
       expect(find.text('Ticket de soporte'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('9b. Soporte e Instalaciones no salen revueltas; abre en '
+        'Soporte, sin columna «Órdenes» ni la frase del orden (29/10/2026)',
+        (WidgetTester tester) async {
+      // El usuario: «si asignan soporte e instalación, que no salgan
+      // revueltos: que salgan al presionar Instalación, y a los otros
+      // cámbiale el nombre de Ticket a Soporte». Un mantenimiento no es
+      // instalación: va con Soporte, no queda sin columna.
+      tester.view.physicalSize = const Size(1000, 3200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada', cliente: 'Instalacion Uno', compromiso: hoy),
+        _orden(
+          id: '2',
+          numero: 2,
+          estado: 'asignada',
+          cliente: 'Incidencia Dos',
+          tipoNombre: 'Ticket de soporte',
+          tipoCodigo: 'soporte_correctivo',
+          compromiso: hoy,
+        ),
+        _orden(
+          id: '3',
+          numero: 3,
+          estado: 'asignada',
+          cliente: 'Mantenimiento Tres',
+          tipoNombre: 'Mantenimiento preventivo',
+          tipoCodigo: 'mantenimiento',
+          compromiso: hoy,
+        ),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Órdenes'), findsNothing);
+      expect(find.textContaining('Tickets'), findsNothing);
+      expect(find.textContaining('Primero lo empezado'), findsNothing);
+      // Abre en Soporte: el ticket y el mantenimiento, no la instalación.
+      expect(find.text('Incidencia Dos'), findsOneWidget);
+      expect(find.text('Mantenimiento Tres'), findsOneWidget);
+      expect(find.text('Instalacion Uno'), findsNothing);
+
+      await tester.tap(find.textContaining('Instalaciones'));
+      await tester.pumpAndSettle();
+      expect(find.text('Instalacion Uno'), findsOneWidget);
+      expect(find.text('Incidencia Dos'), findsNothing);
+      expect(find.text('Mantenimiento Tres'), findsNothing);
+
+      // Buscando se busca en las dos: el que escribe no sabe en cuál está.
+      await tester.enterText(find.byType(TextField).first, 'Mantenimiento');
+      await tester.pumpAndSettle();
+      expect(find.text('Mantenimiento Tres'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('9c. Un instalador sin soporte abre en Instalaciones',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada', cliente: 'Instalacion Uno', compromiso: hoy),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Instalacion Uno'), findsOneWidget,
+          reason: 'no tiene por qué abrir cada día una lista vacía');
       await banco.cerrar();
     });
 
@@ -376,7 +452,7 @@ void main() {
       // lista.
       expect(find.textContaining('Arquitectura de Campo'), findsNothing);
 
-      await tester.tap(find.textContaining('Tickets'));
+      await tester.tap(find.textContaining('Soporte'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Ticket de soporte'), findsWidgets);
       expect(find.textContaining('Carlos Gomez'), findsNothing,

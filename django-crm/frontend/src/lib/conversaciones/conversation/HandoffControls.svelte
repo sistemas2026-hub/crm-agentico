@@ -18,8 +18,9 @@
    * porque está físicamente en este bloque; su lugar se reconsidera en la fase
    * visual, no ahora.
    */
-  import { TriangleAlert, CircleCheck, UserCheck } from '@lucide/svelte';
+  import { TriangleAlert, CircleCheck, UserCheck, Bot } from '@lucide/svelte';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
+  import { estadoDeLaConversacion, cierreDe } from '$lib/conversaciones/estado-unico.js';
 
   let {
     conversacion,
@@ -27,6 +28,12 @@
     operadores = [],
     // Verdad ya resuelta por el motor y por la pagina.
     iaEnPausa, escalada, atendida, esMia, asignadaA, esAdmin, gobernada,
+    /** LA LÍNEA DE ESTADO (04/11/2026), ya elegida por la página con
+        estado-unico.js. Si no viene --una prueba que dibuja el componente
+        suelto, o un montaje que no la pasa-- se calcula acá con las MISMAS
+        props, sin los eventos del relevo: sale igual salvo quién cerró y
+        cuándo, que solo la página conoce. */
+    estadoUnico = undefined,
     // Tomar / Soltar: una sola accion.
     marcandoAtendida = false, errorAtender = '', onAtender,
     // Cerrar la conversacion.
@@ -37,17 +44,54 @@
     motivoReasignar = $bindable(''),
     guardandoReasignar = false, errorReasignar = '', onReasignar,
     // Cómo se lee cada motivo en esta empresa (lib/conversaciones/rotulos.js).
-    rotulos = {}
+    rotulos = {},
+    // ESCALAR A UN ÁREA (T22): las áreas de la empresa {clave: etiqueta} y la
+    // acción, que vive en la página.
+    areas = {},
+    escalandoArea = false, errorEscalarArea = '', onEscalarArea = undefined
   } = $props();
+
+  /* Lo puede hacer cualquier operador con la conversación SUYA o SIN dueño;
+     la de otra persona se pasa con Reasignar, que es de administrador. */
+  const puedeEscalar = $derived(
+    escalada && gobernada && conversacion.estado !== 'cerrada' && (esMia || !asignadaA) &&
+      Object.keys(areas).length > 0
+  );
+  let escalando = $state(false);
+  let areaElegida = $state('');
+  let motivoArea = $state('');
+  let notaArea = $state('');
+  async function enviarEscalada() {
+    const ok = await onEscalarArea?.({ area: areaElegida, motivo: motivoArea, nota: notaArea });
+    if (ok) {
+      escalando = false;
+      areaElegida = '';
+      motivoArea = '';
+      notaArea = '';
+    }
+  }
 
   const motivoLabel = (/** @type {string} */ m) => rotuloDe(m, rotulos);
 
-  /* Rojo SOLO cuando nadie se hizo cargo. Antes el chip era rojo siempre, y
-     una conversación ya respondida mostraba a la vez «ESCALADA» en rojo y
-     «Atendida» en verde (29/10/2026): dos veredictos opuestos en la misma
-     línea. Con dueño o con respuesta, es trabajo en curso y va en el azul de
-     «humano». */
-  const sinDueno = $derived(escalada && !atendida && !esMia && !asignadaA);
+  /* UNA SOLA LÍNEA DE ESTADO (04/11/2026). El chip tenía sus propias tres
+     ramas de texto --«Respondida por el equipo · IA no responde», «Escalada ·
+     IA no responde», «Escalada · el asistente sigue respondiendo»-- y la
+     cabecera tenía otra caja que decía lo suyo. Ahora el texto, el detalle y
+     el tono salen de estado-unico.js, que explica por qué existe.
+
+     El tono sigue la regla de antes: rojo SOLO cuando nadie se hizo cargo
+     (29/10/2026: «ESCALADA» en rojo junto a «Atendida» en verde eran dos
+     veredictos opuestos en la misma línea). */
+  const estado = $derived(
+    estadoUnico ??
+      estadoDeLaConversacion({
+        estado: conversacion.estado, iaEnPausa, escalada, atendida, esMia, asignadaA,
+        cierre: cierreDe(null, conversacion)
+      })
+  );
+  /* Cerrada, la línea es lo único: quién la tomó, el motivo, el caso del CRM
+     y «Resuelta» en verde eran historia, y contaban una conversación viva. */
+  const cerrada = $derived(conversacion.estado === 'cerrada');
 </script>
 
   <!-- El icono dice QUÉ tipo de situación es, y no era así: el triángulo de
@@ -57,32 +101,29 @@
 
        Alerta sólo cuando falta alguien; cuando ya hay dueño, la señal es que
        está en manos de una persona. -->
-  <p class="aviso" class:aviso-sin-dueno={sinDueno}>
+  <p class="aviso">
     <!-- El icono va DENTRO del chip: fuera de él heredaba el rojo de la franja
          entera, y ese rojo se fue. -->
-    <span class="aviso-estado" class:aviso-estado-tomada={!sinDueno}>
-      {#if sinDueno}
-        <TriangleAlert size={12} />
+    <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
+         SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
+         depende que un "listo, gracias" del cliente cierre el caso solo.
+         Lo que dejo de hacer es contestar. Por eso estado-unico.js dice «la
+         IA no responde» y nunca «pausada». -->
+    <span class="aviso-estado aviso-estado-{estado.tono}" role="status">
+      {#if estado.tono === 'alerta' || estado.tono === 'aviso'}
+        <TriangleAlert size={13} aria-hidden="true" />
+      {:else if estado.tono === 'humano'}
+        <UserCheck size={13} aria-hidden="true" />
+      {:else if estado.tono === 'ia'}
+        <Bot size={13} aria-hidden="true" />
       {:else}
-        <UserCheck size={12} />
+        <CircleCheck size={13} aria-hidden="true" />
       {/if}
-      <!-- "IA pausada" seria falso y no es un matiz de redaccion: el asistente
-           SIGUE leyendo y procesando cada mensaje mientras espera -- de eso
-           depende que un "listo, gracias" del cliente cierre el caso solo.
-           Lo que dejo de hacer es contestar. -->
-      <strong>
-        {#if iaEnPausa && atendida}
-          Respondida por el equipo · IA no responde
-        {:else if iaEnPausa}
-          Escalada · IA no responde
-        {:else}
-          <!-- Escalo, pero no hay a quien esperar (quedo agendada, o el CRM no
-               tomo el caso): el asistente SIGUE contestando. Decir "IA no
-               responde" aca seria falso. -->
-          Escalada · el asistente sigue respondiendo
-        {/if}
-      </strong>
+      <span>
+        <strong>{estado.texto}</strong>{#if estado.detalle}<span class="aviso-detalle">{` · ${estado.detalle}`}</span>{/if}
+      </span>
     </span>
+    {#if !cerrada}
     {#if conversacion.motivo_escalamiento}
       <!-- El separador no es adorno: sin el, "IA no responde El cliente
            reporto una falla..." se lee como una sola frase rota. -->
@@ -97,14 +138,29 @@
     {#if caso?.id}
       <span class="aviso-caso">Caso abierto en CRM</span>
     {/if}
+    <!-- EN ESPERA (29/10/2026): qué se espera, para quien la abra después.
+         Se quita respondiendo sin marcar «Queda en espera». -->
+    {#if conversacion.pendiente_interno_desde && conversacion.estado !== 'cerrada'}
+      <span class="aviso-espera" title="Se quita al responder sin marcar «Queda en espera»">
+        En espera: {conversacion.pendiente_interno_nota || 'sin detalle'}{#if conversacion.pendiente_interno_hasta}
+          · hasta {new Date(conversacion.pendiente_interno_hasta).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}{/if}
+      </span>
+    {/if}
+    <!-- ESCALADA A UN ÁREA (T22): a cuál, y la nota de lo que se validó para
+         quien la recibe. -->
+    {#if conversacion.area_destino && conversacion.estado !== 'cerrada'}
+      <span class="aviso-area" title={conversacion.area_destino_nota || ''}>
+        Escalada a {areas[conversacion.area_destino] || conversacion.area_destino}
+      </span>
+    {/if}
     <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
          gesto en dos sentidos, y porque tener dos ("Atender" / "Soltar")
          obligaria a mirar cual esta activo para saber quien lo tiene. -->
+    <!-- Quién la tiene ya lo dice la línea de estado («Asignada a mí», «La
+         atiende Ana»): la ficha de dueño que iba acá lo repetía al lado
+         (04/11/2026). Quedan los gestos. -->
     {#if escalada && !atendida && conversacion.estado !== 'cerrada'}
       {#if esMia}
-        <span class="duenio duenio-mio">
-          <span class="duenio-punto"></span>Asignada a mí
-        </span>
         <button
           type="button"
           class="v2-btn v2-btn-sm aviso-atender"
@@ -117,10 +173,12 @@
         </button>
       {:else if asignadaA}
         <!-- De otra persona: no se ofrece soltar ni tomar. Pasarla es
-             reasignar, y eso es de un administrador. -->
-        <span class="duenio" title="La tiene {asignadaA}">
-          <span class="duenio-punto"></span>{asignadaA}
-        </span>
+             reasignar, y eso es de un administrador. El hueco empuja lo que
+             sigue a la derecha, salvo que venga «Reasignar», que ya empuja:
+             dos `auto` separarían el grupo en los dos extremos. -->
+        {#if !(esAdmin && gobernada && operadores.length)}
+          <span class="aviso-empuje" aria-hidden="true"></span>
+        {/if}
       {:else}
         <button
           type="button"
@@ -153,6 +211,21 @@
            al lado; sin él, este hueco hace lo mismo. -->
       <span class="aviso-empuje" aria-hidden="true"></span>
     {/if}
+    <!-- ESCALAR A UN ÁREA va FUERA del bloque de Tomar/Soltar a propósito:
+         el caso típico es el de alguien que ya respondió, validó y no pudo
+         resolver -- o sea una conversación «atendida», que ese bloque no
+         dibuja. -->
+    {#if puedeEscalar}
+      <button
+        type="button"
+        class="v2-btn v2-btn-sm v2-btn-quiet"
+        title="Pasarla a otra área con lo que validaste: queda sin dueño y marcada para esa área"
+        onclick={() => (escalando = !escalando)}
+        aria-expanded={escalando}
+      >
+        Escalar a un área
+      </button>
+    {/if}
     <!-- Cerrar el caso. Va junto a "Atender" porque es la otra mitad del
          mismo momento -- se toma un caso y despues se termina-- pero en
          tono secundario: "Atender" es lo que se hace al entrar, esto es lo
@@ -165,13 +238,18 @@
       <span class="con-ayuda">
         <button
           type="button"
-          class="v2-btn v2-btn-sm v2-btn-quiet aviso-resolver"
+          class="v2-btn v2-btn-sm aviso-resolver"
           onclick={() => onResolver?.()}
           disabled={resolviendo}
           aria-busy={resolviendo}
           aria-describedby="ayuda-resolver"
         >
-          {resolviendo ? 'Cerrando…' : 'Marcar como resuelta'}
+          <!-- «Resuelto» a secas (29/10/2026): «Marcar como resuelta» era el
+               rótulo más largo de la barra y el más apagado, para la acción
+               que cierra el caso. La ayuda de al lado sigue explicando qué
+               hace. -->
+          <CircleCheck size={13} aria-hidden="true" />
+          {resolviendo ? 'Cerrando…' : 'Resuelto'}
         </button>
         <span class="ayuda" id="ayuda-resolver" role="tooltip">
           Usá esto si el caso se resolvió por teléfono, presencialmente o por
@@ -179,9 +257,12 @@
           el próximo mensaje del cliente abre una nueva.
         </span>
       </span>
-    {:else}
-      <span class="aviso-atendida"><CircleCheck size={13} /> Resuelta</span>
     {/if}
+    {/if}
+    <!-- Cerrada: sin la marca verde «Resuelta» que iba acá (04/11/2026). La
+         línea de estado ya dice «Cerrada · la resolvió…», y el verde se
+         reserva para lo confirmado. -->
+
     <!-- Un 409 de asignación NO es un error de quien apretó: es la realidad
          -- otra persona la tomó primero, o la IA la controla. El mensaje ya
          dice QUIÉN quedó (conflictoDeAsignacion en la página), así que se
@@ -193,6 +274,40 @@
     {#if errorAtender}<span class="aviso-conflicto">{errorAtender}</span>{/if}
     {#if errorResolver}<span class="aviso-mal">{errorResolver}</span>{/if}
   </p>
+  {#if escalando && puedeEscalar}
+    <form class="reasignar" onsubmit={(e) => { e.preventDefault(); enviarEscalada(); }}>
+      <label>
+        <span>A qué área</span>
+        <select class="v2-input" bind:value={areaElegida} required>
+          <option value="">Elegí un área…</option>
+          {#each Object.entries(areas) as [clave, etiqueta] (clave)}
+            <option value={clave}>{etiqueta}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        <span>Por qué no la resolviste</span>
+        <input class="v2-input" bind:value={motivoArea} maxlength="200" required
+          placeholder="Ej: la ONT no levanta después de reiniciar" />
+      </label>
+      <label>
+        <span>Qué validaste y qué falta</span>
+        <textarea class="v2-input" bind:value={notaArea} maxlength="1000" rows="3" required
+          placeholder="Lo que quien la reciba necesita para no empezar de cero"></textarea>
+        <span class="ayuda-campo">Queda como nota interna en la conversación</span>
+      </label>
+      <div class="reasignar-acciones">
+        <button type="submit" class="v2-btn v2-btn-sm v2-btn-ink"
+          disabled={escalandoArea || !areaElegida || !motivoArea.trim() || !notaArea.trim()}>
+          {escalandoArea ? 'Escalando…' : 'Escalar'}
+        </button>
+        <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet" onclick={() => (escalando = false)}>
+          Cancelar
+        </button>
+        {#if errorEscalarArea}<span class="aviso-conflicto">{errorEscalarArea}</span>{/if}
+      </div>
+    </form>
+  {/if}
   {#if reasignando && esAdmin && gobernada}
     <form class="reasignar" onsubmit={(e) => { e.preventDefault(); onReasignar?.(); }}>
       <label>
@@ -256,42 +371,78 @@
     align-items: center;
     gap: 8px;
     margin: 0;
-    padding: 6px 16px;
+    /* 8/20: alineada con la cabecera de arriba (04/11/2026). */
+    padding: 8px 20px;
     font-size: 12px;
     color: var(--bandeja-texto);
     background: var(--bandeja-superficie);
     border-bottom: 1px solid var(--bandeja-borde);
   }
 
-  /* El chip. Misma forma que `.control` en el encabezado y que `.marca-banda`
-     en la cola: mono, versalita, filete y radio chico. Que las tres se lean
-     igual es deliberado -- las tres contestan "en qué estado está esto". */
+  /* LA LÍNEA DE ESTADO (04/11/2026). Era una etiqueta mono en versalita de
+     9,5px: se leía como un código, y la caja «Control humano» de la cabecera
+     tenía que completar lo que no decía. Ahora es la única que lo dice, así
+     que se escribe normal: el estado en negrita, el detalle al lado en peso
+     normal. Envuelve antes que recortar: «Cerrada · la resolvió…» con su
+     detalle es una frase larga, y cortada no informa.
+
+     El tono significa algo: gris = nada pendiente, rojo = nadie se hizo
+     cargo, azul = en manos de una persona, violeta = la lleva la IA. */
   .aviso-estado {
     display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    flex: none;
-    padding: 2px 8px;
-    border: 1px solid var(--bandeja-error-borde);
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 8px;
+    border: 1px solid;
     border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-error-fondo);
-    color: var(--bandeja-error);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
+    font-family: var(--bandeja-sans);
+    font-size: 12px;
+    line-height: 1.4;
   }
 
-  .aviso-estado-tomada {
+  .aviso-estado :global(svg) {
+    flex: none;
+    margin-top: 2px;
+  }
+
+  .aviso-estado strong {
+    font-weight: 600;
+  }
+
+  .aviso-detalle {
+    font-weight: 400;
+  }
+
+  .aviso-estado-neutro {
+    border-color: var(--bandeja-neutro-borde);
+    background: var(--bandeja-neutro-fondo);
+    color: var(--bandeja-neutro-texto);
+  }
+
+  .aviso-estado-alerta {
+    border-color: var(--bandeja-error-borde);
+    background: var(--bandeja-error-fondo);
+    color: var(--bandeja-error);
+  }
+
+  /* Escaló pero el asistente sigue contestando: en riesgo, no urgente. */
+  .aviso-estado-aviso {
+    border-color: var(--bandeja-aviso-borde);
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-aviso);
+  }
+
+  .aviso-estado-humano {
     border-color: var(--bandeja-humano-borde);
     background: var(--bandeja-humano-fondo);
     color: var(--bandeja-humano);
   }
 
-  .aviso-estado strong {
-    font-weight: inherit;
+  .aviso-estado-ia {
+    border-color: var(--bandeja-ia-borde);
+    background: var(--bandeja-ia-fondo);
+    color: var(--bandeja-ia);
   }
 
   .aviso-atender {
@@ -324,53 +475,10 @@
      de prueba eliminó su único consumidor -- así que la duplicación quedó
      cerrada y ésta es ahora la única. */
 
-  /* Sin dueño: lo único de los cuatro estados que pide que alguien haga algo.
-     Se marca con el filete, no tiñendo el texto -- el resto de la línea tiene
-     que seguir leyéndose igual de bien. */
-  /* QUIÉN LA TIENE. Los dos casos --mía y de otra persona-- comparten forma
-     porque son el mismo concepto: sólo cambia a quién nombran. Antes se veían
-     distintos y eso hacía pensar que eran estados de distinta naturaleza.
-
-     Es el mismo distintivo que usa el pie de la fila en la cola: la misma
-     pregunta, la misma respuesta visual. */
-  .duenio {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-family: var(--bandeja-mono);
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--bandeja-texto-2);
-    white-space: nowrap;
-    /* Un nombre largo se recorta en vez de empujar los botones fuera de la
-       franja. El `title` de la etiqueta sigue teniendo el nombre completo, así
-       que no se pierde: sólo deja de competir por el ancho.
-       `min-width: 0` es obligatorio -- sin él un hijo flex no achica por
-       debajo de su contenido y el ellipsis no llega a aplicarse. */
-    min-width: 0;
-    max-width: 22ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Cuando es mía va en azul: es la única de las dos sobre la que este
-     operador puede actuar. */
-  .duenio-mio {
-    color: var(--bandeja-humano);
-  }
-
-  .duenio-punto {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-    flex: none;
-  }
-
-  .aviso-sin-dueno {
-    border-left: 3px solid var(--bandeja-aviso);
-  }
+  /* La ficha de dueño (`.duenio`) y el filete ámbar de «sin dueño»
+     (`.aviso-sin-dueno`, un borde lateral de 3px) se fueron el 04/11/2026:
+     quién la tiene lo dice la línea de estado, y «sin dueño» lo dice su rojo.
+     Un acento de color al costado que repite lo que ya está escrito es ruido. */
 
   .aviso-mal {
     flex: none;
@@ -391,7 +499,9 @@
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
-    border-left: 3px solid var(--bandeja-humano);
+    /* Filete de 1px en todo el contorno (04/11/2026): el borde lateral de
+       3px era un acento decorativo, no una señal. */
+    border: 1px solid var(--bandeja-humano-borde);
     background: var(--bandeja-humano-fondo);
     border-radius: var(--bandeja-radio-sm);
     color: var(--bandeja-texto);
@@ -408,6 +518,30 @@
      el, en vez de que el motivo desaparezca para que quepan. */
   .aviso-motivo {
     color: var(--bandeja-texto-2);
+  }
+
+  .aviso-area {
+    padding: 1px 7px;
+    border: 1px solid var(--bandeja-humano-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-humano-fondo);
+    color: var(--bandeja-humano);
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .aviso-espera {
+    padding: 1px 7px;
+    border: 1px solid var(--bandeja-aviso-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-aviso-fondo);
+    color: var(--bandeja-aviso);
+    font-size: 11.5px;
+    font-weight: 600;
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
 
@@ -450,13 +584,18 @@
 
 
   /* El secundario de verdad: se lee, pero no compite con "Atender". */
+  /* Verde y con relleno suave: se ve sin gritar, y no se confunde con
+     «Tomar» (tinta), que es lo que se hace al ENTRAR; esto es al salir. */
   .aviso-resolver {
-    border-color: var(--bandeja-borde);
+    border-color: var(--bandeja-ok);
+    background: color-mix(in srgb, var(--bandeja-ok) 10%, #fff);
+    color: var(--bandeja-ok);
+    font-weight: 600;
   }
 
-  .aviso-resolver:hover {
-    border-color: var(--bandeja-texto-2);
-    background: var(--bandeja-superficie-suave);
+  .aviso-resolver:hover:not(:disabled) {
+    background: var(--bandeja-ok);
+    color: #fff;
   }
 
 

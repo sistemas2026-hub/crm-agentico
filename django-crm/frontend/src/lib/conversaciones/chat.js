@@ -16,7 +16,7 @@
  */
 
 /** Quién cerró, en palabras. Las claves son las de `cerrada_por_tipo`. */
-const QUIEN_CERRO = {
+export const QUIEN_CERRO = {
   operador: 'la cerró una persona',
   ia_cliente: 'el cliente confirmó con la IA',
   cliente: 'el cliente confirmó',

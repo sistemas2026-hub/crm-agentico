@@ -126,6 +126,13 @@ app.conf.beat_schedule = {
         "task": "campo.tasks.ciclo_de_la_madrugada",
         "schedule": crontab(minute=5),
     },
+    # El Supervisor le recuerda al tecnico la orden que paso la ventana sin
+    # reporte (campo/recordatorio_de_reporte.py). Uno por atraso: mirar cada 5
+    # minutos no manda un aviso cada 5 minutos.
+    "recordar-reportes-de-campo": {
+        "task": "campo.tasks.recordar_reportes",
+        "schedule": crontab(minute="*/5"),
+    },
     # Purge already-read in-app notifications older than 90 days - daily at 3 AM
     "purge-read-notifications": {
         "task": "common.tasks.purge_read_notifications",
@@ -170,5 +177,13 @@ app.conf.beat_schedule = {
     "ciclo-del-supervisor": {
         "task": "operaciones.tasks.ciclo_del_supervisor",
         "schedule": crontab(minute=7),
+    },
+    # Un aviso de caida en curso cuya vuelta se perdio en la cola (un reinicio
+    # de Redis, un broker caido al aprobar) se reagenda: sin esto quedaba "en
+    # curso" para siempre con la aprobacion gastada (auditor de frontera,
+    # 31/10/2026). Barato: lee los avisos en curso, que son casi siempre cero.
+    "retomar-avisos-de-caida": {
+        "task": "operaciones.tasks.retomar_avisos_de_caida",
+        "schedule": crontab(minute="*/10"),
     },
 }

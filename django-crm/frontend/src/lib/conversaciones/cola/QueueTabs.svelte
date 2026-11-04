@@ -1,150 +1,168 @@
 <script>
   /**
-   * Los cuatro estados de la cola, como bloques con su contador.
+   * La cabeza de la cola: una frase que dice cuánto trabajo hay, y debajo las
+   * pestañas que lo separan.
    *
    * NO DECIDE NADA. `irA()` se queda en el layout porque cambia tres cosas a
    * la vez -- la pestaña, el orden que le corresponde a esa pestaña y la
    * marca de "el orden lo eligió una persona" -- y ese acople es del dueño de
-   * la lista, no de una barra de botones.
+   * la lista, no de una barra de botones. La frase y los números llegan
+   * calculados (`cola/pestanas.js`).
    *
-   * POR QUÉ BLOQUES Y NO UNA FILA DE PESTAÑAS
-   * -----------------------------------------
-   * La referencia abre la columna con tres recuadros --NEEDS ATTN / IN
-   * PROGRESS / RESOLVED-- y el número grande adentro. Acá era una fila de
-   * cuatro pestañas con el número en chico al lado del texto: la misma
-   * información, pero el número --que es lo que se mira de reojo para saber
-   * cuánto trabajo hay-- pesaba menos que su propia etiqueta.
+   * POR QUÉ UNA FRASE Y NO CUATRO CUADROS  (04/11/2026)
+   * ---------------------------------------------------
+   * Eran cuatro cajas del mismo peso, y lo único que se mira de reojo al
+   * llegar es UNA cosa: cuánto espera y desde cuándo. Cuatro números iguales
+   * obligan a leer los cuatro para encontrarlo. La frase lo dice entero
+   * («20 por atender · la más antigua espera 2 h») y las pestañas pasan a ser
+   * lo que son: un selector, chico.
    *
-   * La referencia además DUPLICA el control: tiene los tres recuadros Y
-   * debajo las pestañas con los mismos cuatro filtros. Acá no se copia esa
-   * parte: dos controles para lo mismo, uno encima del otro, es algo que
-   * alguien tiene que mantener sincronizado para siempre. Los bloques SON el
-   * selector.
+   * Los cuadros además no sumaban (20 + 2 + 17 sobre 50): faltaba «Lleva la
+   * IA». Ahora está, y cuando igual no cierra -- un chat con dos abiertas en
+   * estados distintos cuenta en las dos -- se dice en una línea, en vez de
+   * dejar que parezca un error de cuenta.
    *
-   * Nunca ember en el bloque activo: "dónde estoy" no es una acción. El
-   * contador de "Por atender" sí lo lleva, porque ese número es trabajo sin
-   * tomar.
+   * El rojo es solo de la cifra, y solo si hay alguna crítica: el mismo
+   * criterio que la «Espera máx.» de la barra de consola, para que las dos no
+   * digan cosas distintas del mismo número.
    */
-  let { pestanas = [], filtro = '', onIr } = $props();
+  let {
+    pestanas = [],
+    filtro = '',
+    onIr,
+    /** {cifra, texto, espera} de `titularDeCola()`. */
+    titular = { cifra: null, texto: '', espera: null },
+    /** Hay al menos una que espera en el tramo crítico. */
+    critico = false,
+    /** Las cuatro primeras suman el total. */
+    cierra = true
+  } = $props();
 </script>
 
-<nav class="tabs" aria-label="Filtrar por estado">
-  {#each pestanas as t (t.id)}
-    <button
-      type="button"
-      class="tab"
-      aria-current={filtro === t.id ? 'true' : undefined}
-      title={t.titulo}
-      onclick={() => onIr(t.id)}
-    >
-      <span class="tab-rotulo">{t.label}</span>
-      <span class="tab-n v2-num" class:urge={t.urge && t.n > 0}>{t.n}</span>
-    </button>
-  {/each}
-</nav>
+<section class="cabeza-cola" aria-label="Estado de la cola">
+  <p class="titular">
+    {#if titular.cifra !== null}
+      <span class="b-cifra cifra" class:cifra-critica={critico}>{titular.cifra}</span>
+      {titular.texto}{#if titular.espera}<span class="sep" aria-hidden="true"> · </span
+        ><span class="titular-espera">{titular.espera}</span>{/if}
+    {:else}
+      {titular.texto}
+    {/if}
+  </p>
+
+  <nav class="tabs" aria-label="Filtrar por estado">
+    {#each pestanas as t (t.id)}
+      <button
+        type="button"
+        class="tab"
+        aria-current={filtro === t.id ? 'true' : undefined}
+        title={t.titulo}
+        onclick={() => onIr(t.id)}
+      >
+        {t.label}<span class="b-cifra tab-n">{t.n}</span>
+      </button>
+    {/each}
+  </nav>
+
+  {#if !cierra}
+    <p class="b-rotulo no-cierra">Un chat con dos conversaciones abiertas cuenta en dos pestañas.</p>
+  {/if}
+</section>
 
 <style>
-  /* MEDIDO el 07/09/2026: el contenido pedia 396px en 329 disponibles, y
-     "Todas" se dibujaba 66px POR ENCIMA de la columna del chat. Lo mismo a
-     1440, 1280 y 1100 -- no era un problema de pantalla chica: la barra no
-     era responsive en absoluto.
+  .cabeza-cola {
+    flex: none;
+    padding: 12px 12px 8px;
+  }
 
-     Se arregla en tres pasos, en este orden:
-       1. repartir el espacio (flex:1 con min-width:0 en cada bloque)
-       2. menos padding lateral
-       3. si aun asi no entra, desplazamiento horizontal DENTRO de la barra
+  /* La frase es lo más grande de la columna después de los nombres: es lo
+     que se lee al llegar al turno. */
+  .titular {
+    margin: 0 0 8px;
+    font-family: var(--bandeja-titulo);
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--bandeja-texto);
+  }
 
-     El tercero es la red: pase lo que pase con los numeros --169 puede ser
-     16.900-- la barra scrollea y NUNCA se sale de su columna. 'overflow-x'
-     necesita 'min-width: 0' en el contenedor flex o no recorta nada. */
+  .cifra-critica {
+    color: var(--bandeja-error);
+  }
+
+  /* La espera es la segunda mitad de la frase, no un título aparte: mismo
+     tamaño, un gris más abajo, para que la cifra mande. */
+  .titular-espera,
+  .sep {
+    color: var(--bandeja-texto-2);
+    font-weight: 500;
+  }
+
+  /* MEDIDO el 07/09/2026: la barra pedía 396px en 329 disponibles y «Todas»
+     se dibujaba POR ENCIMA de la columna del chat. Con cinco pestañas sigue
+     pudiendo pasar en una columna angosta, así que la red queda: si no
+     entra, se desplaza DENTRO de la barra y nunca se sale de su columna.
+     'overflow-x' necesita 'min-width: 0' en el contenedor flex o no recorta. */
   .tabs {
     display: flex;
-    align-items: stretch;
-    gap: 5px;
-    padding: 8px 8px;
-    border-bottom: 1px solid var(--bandeja-borde);
-    flex: none;
+    gap: 2px;
+    padding: 2px;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio);
+    background: var(--bandeja-superficie-suave);
   }
 
   .tabs::-webkit-scrollbar {
     display: none;
   }
 
-  /* El bloque: recuadro, rótulo arriba y número abajo. El número es lo que se
-     lee de reojo, así que es lo más grande de la caja. */
+  /* Un segmento: el rótulo escrito normal y la cifra DEBAJO, no al lado.
+     MEDIDO el 04/11/2026 con las fuentes cargadas, en la columna de 360px:
+     en una línea las cinco piden 421px contra 334 (y 386 aun en Barlow 13px
+     con 4px de aire) -- «Todos» y media «Resueltas» quedaban fuera de la
+     vista. Apiladas piden 323 y entran las cinco; cuesta 13px de alto, que
+     es menos que esconder una pestaña detrás de un desplazamiento. Toma lo
+     que su texto pide y el sobrante se reparte para llenar el ancho. */
   .tab {
-    display: flex;
+    flex: 1 0 auto;
+    display: inline-flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 1px;
-    /* `1 1 auto` y no `1 1 0`: con anchos iguales los cuatro miden 71px y
-       "POR ATENDER" pide 60 más 14 de padding -- se recortaba a "POR ATEN…".
-       Cada bloque toma lo que su rótulo necesita y el sobrante se reparte
-       (202px de texto + padding + huecos = 273 de 304). */
-    flex: 1 1 auto;
-    min-width: 0;
-    padding: 5px 7px 6px;
-    border: 1px solid var(--bandeja-borde);
+    align-items: center;
+    gap: 0;
+    padding: 4px;
+    line-height: 1.2;
+    border: 1px solid transparent;
     border-radius: var(--bandeja-radio-sm);
-    background: var(--bandeja-superficie);
+    background: none;
+    font-family: var(--bandeja-sans);
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
     cursor: pointer;
-    text-align: left;
   }
 
   .tab:hover {
-    border-color: var(--bandeja-texto-3);
-    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto);
   }
 
-  /* Activo = el azul de "acá estás vos", en el borde y en el fondo. */
+  /* Activo = blanco y borde, como un segmento elegido. Nunca rojo: "dónde
+     estoy" no es una alarma ni una acción. Sin cambiar el peso: la negrita
+     ensancha el rótulo y la tira entera saltaría al cambiar de pestaña. */
   .tab[aria-current='true'] {
-    border-color: var(--bandeja-humano-borde);
-    background: var(--bandeja-humano-fondo);
-  }
-
-  /* El rótulo es rótulo: mono en versalita, como en toda la Bandeja. A 8.5px
-     porque "En atención" tiene que entrar en un cuarto de 304px. */
-  .tab-rotulo {
-    font-family: var(--bandeja-mono);
-    font-size: 8.5px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  .tab[aria-current='true'] .tab-rotulo {
-    color: var(--bandeja-humano);
+    background: var(--bandeja-superficie);
+    border-color: var(--bandeja-borde);
+    color: var(--bandeja-texto);
   }
 
   .tab-n {
-    font-family: var(--bandeja-mono);
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.1;
+    font-size: 13px;
     color: var(--bandeja-texto);
-    font-variant-numeric: tabular-nums;
   }
 
-  .tab[aria-current='true'] .tab-n {
-    color: var(--bandeja-humano);
-  }
-
-  /* El unico numero con color propio, y NO es el azul del bloque activo:
-     trabajo que espera a alguien es una ALARMA, no algo que se pulsa ni el
-     lugar donde estás parado. */
-  .tab-n.urge {
-    color: var(--bandeja-error);
-  }
-
-  .tab[aria-current='true'] .tab-n.urge {
-    color: var(--bandeja-error);
+  .no-cierra {
+    margin: 4px 0 0;
   }
 </style>

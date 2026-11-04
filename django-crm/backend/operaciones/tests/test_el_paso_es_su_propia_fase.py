@@ -113,7 +113,7 @@ def _las_puertas_abiertas(monkeypatch):
                         lambda o, nivel: {"puede": True, "motivo": ""})
     #  Por si algun camino intentara hablar con el motor: que no salga nada.
     monkeypatch.setattr(cierre_de_caso, "_pedirle_al_motor",
-                        lambda propuesta_id, id_caso: {
+                        lambda propuesta_id, id_caso, org=None: {
                             "cerrado": True, "codigo": "CERRADO",
                             "motivo": "", "referencia": "propuesta:x"})
 

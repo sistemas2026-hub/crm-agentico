@@ -138,6 +138,8 @@ ARGS = {n: motor._resolver_argumentos(H[n], SESION, dict(MODELO[n]))
 LECTURAS_OK = {
     "reiniciar_ont": {"consultar_senal_ont": {"onu_signal_1490_veredicto": "aceptable"},
                       "ping_cliente": {"ping-exitoso": "3 de 3"},
+                      # Previa desde el 30/10/2026: sin caida compartida en el PON.
+                      "consultar_incidente_red": {"es_incidente_de_red": False},
                       "consultar_estado_ont": {"last_status_change": "2026-09-21 09:00:00"}},
     "cambiar_tipo_onu": {"consultar_estado_catv": {"catv": "Not supported by ONU-Type"}},
     "activar_catv": {"consultar_plan_tv": {"descripcion": "Internet 300 + TV"},
@@ -698,11 +700,15 @@ def conversacion():
     historial = [
         {"role": "assistant", "content": "", "tool_calls": [
             motor._tool_call_a_dict("consultar_senal_ont", {}, "call_0"),
-            motor._tool_call_a_dict("ping_cliente", {}, "call_1")]},
+            motor._tool_call_a_dict("ping_cliente", {}, "call_1"),
+            motor._tool_call_a_dict("consultar_incidente_red", {}, "call_2")]},
         {"role": "tool", "name": "consultar_senal_ont", "tool_call_id": "call_0",
          "content": '{"onu_signal_1490_veredicto": "aceptable"}'},
         {"role": "tool", "name": "ping_cliente", "tool_call_id": "call_1",
          "content": '{"ping-exitoso": "3 de 3"}'},
+        # Previa desde el 30/10/2026: la red, antes que la casa.
+        {"role": "tool", "name": "consultar_incidente_red", "tool_call_id": "call_2",
+         "content": '{"es_incidente_de_red": false}'},
     ]
     #  M06-F: origin exige declarar el sintoma (exige_declaracion): una queja
     #  de lentitud no reinicia. El modelo lo declara como en una conversacion

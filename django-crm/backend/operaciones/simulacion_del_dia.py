@@ -106,13 +106,16 @@ def simular(org, fecha=None, ahora=None) -> dict:
             continue
         jid = p.jornada.id if p.jornada is not None else f"nueva-{p.cuadrilla.id}"
         labor = p.labor or getattr(p.jornada, "labor", "") or ""
-        jornadas.append(SimpleNamespace(id=jid, labor=labor, cuadrilla=p.cuadrilla))
+        apoyo = p.labor_de_apoyo or ""
+        jornadas.append(SimpleNamespace(id=jid, labor=labor, labor_de_apoyo=apoyo,
+                                        cuadrilla=p.cuadrilla))
         zonas_de[jid] = [str(z.id) for z in p.zonas]
         topes[jid] = p.cuadrilla.tope_diario or tope
         lider, gente = _gente(p)
         gente_de[jid] = _perfiles(p.jornada if p.jornada is not None else p)
         ficha[jid] = {"cuadrilla": p.cuadrilla.nombre, "que_haria": que_haria,
                       "labor": nombres.get(labor, labor),
+                      "apoyo": nombres.get(apoyo, apoyo) if apoyo else "",
                       "zonas": [z.nombre for z in p.zonas],
                       "lider": lider, "gente": gente, "tope": topes[jid]}
 
@@ -126,7 +129,9 @@ def simular(org, fecha=None, ahora=None) -> dict:
               .exclude(cuadrilla_id__in=del_plan)
               .select_related("cuadrilla", "lider__user")
               .prefetch_related("zonas", "integrantes__persona")):
-        jornadas.append(SimpleNamespace(id=j.id, labor=j.labor, cuadrilla=j.cuadrilla))
+        jornadas.append(SimpleNamespace(id=j.id, labor=j.labor,
+                                        labor_de_apoyo=j.labor_de_apoyo,
+                                        cuadrilla=j.cuadrilla))
         zonas_de[j.id] = [str(z.id) for z in j.zonas.all()]
         topes[j.id] = j.cuadrilla.tope_diario or tope
         lider = getattr(j.lider, "user", None)

@@ -98,11 +98,36 @@
   --bandeja-esp: 4px;
 
   /* ── tipografía ──────────────────────────────────────────────────────── */
-  /* Geist y JetBrains Mono YA se cargan en app.html -- no hace falta ninguna
-     dependencia ni link nuevo. Mono queda para lo que se lee como dato:
-     números, ids, contadores. */
-  --bandeja-sans: Geist, Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* 04/11/2026: el mismo par que el Supervisor NOC. Atkinson Hyperlegible
+     para leer --la gente pasa horas en esta pantalla leyendo mensajes-- y
+     Barlow Semi Condensed para nombres, títulos de sección y cifras. Se cargan
+     en el <svelte:head> de conversaciones/+layout.svelte; Geist queda de
+     respaldo mientras llegan.
+
+     Mono queda SOLO para lo que se lee como dato: ids, seriales, horas,
+     cifras que se comparan contra otro sistema. Hasta hoy también vestía los
+     rótulos (en mayúscula, a 9,5 px) y competía con los datos: nada resaltaba.
+     Un rótulo ahora es texto chico en gris, escrito normal: `--bandeja-rotulo`. */
+  --bandeja-sans: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', Geist, Inter, system-ui,
+    -apple-system, 'Segoe UI', sans-serif;
+  --bandeja-titulo: 'Barlow Semi Condensed', 'Atkinson Hyperlegible Next', Geist, system-ui,
+    sans-serif;
   --bandeja-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --bandeja-rotulo-tam: 12px;
+
+  /* ── acción ──────────────────────────────────────────────────────────── */
+  /* El botón principal en azul marino: misma familia que `--bandeja-humano`
+     (una respuesta es una acción de una persona, ver abajo) pero sin el
+     eléctrico, que competía con las fichas de autor. Es el mismo marino que
+     las acciones del Supervisor NOC. */
+  --bandeja-accion: #1e3a8a;
+  --bandeja-accion-hover: #172554;
+
+  /* Un dato que no es alerta ni buena noticia («Resuelta», «Gratis»): gris
+     con palabra. El verde queda para «confirmado / en vivo». */
+  --bandeja-neutro-fondo: #f1f5f9;
+  --bandeja-neutro-borde: #e2e8f0;
+  --bandeja-neutro-texto: #475569;
 }
 
 /* Los neutros de v2, redefinidos para el subárbol de la Bandeja. Ver arriba
@@ -148,12 +173,14 @@ html:not(.dark) .bandeja {
    alguien los cruce más adelante. */
 .bandeja .panel-titulo {
   margin: 0;
-  font-family: var(--bandeja-mono);
-  font-size: 9.5px;
+  /* 04/11/2026: título de sección en Barlow, escrito normal. Era mono en
+     versalita a 9,5 px: se veía igual que un dato. */
+  font-family: var(--bandeja-titulo);
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--bandeja-texto-2);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--bandeja-texto);
 }
 
 .bandeja .panel-dato {
@@ -198,28 +225,38 @@ html:not(.dark) .bandeja {
    misma fila de cinco maneras.
 
    El valor puede envolver; el rótulo no (`white-space: nowrap`), porque un
-   rótulo partido en dos líneas rompe la alineación de toda la sección. */
+   rótulo partido en dos líneas rompe la alineación de toda la sección.
+
+   04/11/2026: SE MANTIENE UN RENGLÓN POR CAMPO --la medición de arriba sigue
+   valiendo-- pero el valor ya no se va al borde derecho. Con el panel a 370 px
+   quedaba a ~300 px de su rótulo y el ojo se perdía en el medio, sobre todo
+   con valores cortos («Pagadas», «0»). Ahora el rótulo ocupa una columna fija
+   y el valor arranca a su lado, alineado a la izquierda: la columna de
+   valores sigue escaneándose en vertical, porque todos arrancan en la misma
+   x. */
 .bandeja .panel-fila {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(96px, 38%) minmax(0, 1fr);
   align-items: baseline;
-  justify-content: space-between;
   gap: 10px;
   min-height: 19px;
 }
 
+/* El rótulo largo («Equipos detrás de la ONU») pasa de línea en vez de
+   cortarse con «…»: en la grilla la columna es fija, así que partirlo ya no
+   rompe la alineación de los valores, y un rótulo cortado no dice qué es. */
 .bandeja .panel-fila > .panel-etiqueta {
-  flex: none;
-  font-size: 11.5px;
+  font-size: var(--bandeja-rotulo-tam);
+  line-height: 1.3;
   color: var(--bandeja-texto-2);
-  white-space: nowrap;
 }
 
-/* El valor manda a la derecha y se le permite romper: un serial GPON o una
-   dirección no tienen largo garantizado. */
+/* El valor se permite romper: un serial GPON o una dirección no tienen largo
+   garantizado. */
 .bandeja .panel-fila > .panel-valor {
   min-width: 0;
-  text-align: right;
-  font-size: 12px;
+  text-align: left;
+  font-size: 13px;
   color: var(--bandeja-texto);
   overflow-wrap: anywhere;
 }
@@ -282,13 +319,14 @@ html:not(.dark) .bandeja {
    necesita atención. Un botón permanentemente ámbar al lado de un aviso
    ámbar le quita el sentido a los dos. */
 .bandeja .v2-btn-primary {
-  background: var(--bandeja-humano);
-  border-color: var(--bandeja-humano);
+  /* 04/11/2026: marino, no eléctrico. Ver `--bandeja-accion`. */
+  background: var(--bandeja-accion);
+  border-color: var(--bandeja-accion);
 }
 
 .bandeja .v2-btn-primary:hover:not(:disabled) {
-  background: var(--bandeja-navy);
-  border-color: var(--bandeja-navy);
+  background: var(--bandeja-accion-hover);
+  border-color: var(--bandeja-accion-hover);
 }
 
 /* ── LA TARJETA DE UNA SECCIÓN DE CONTEXTO ────────────────────────────────
@@ -329,11 +367,31 @@ html:not(.dark) .bandeja {
 .bandeja .panel-marca {
   flex: none;
   font-family: var(--bandeja-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--bandeja-texto-3);
+}
+
+/* ── EL RÓTULO ────────────────────────────────────────────────────────────
+   04/11/2026. El rótulo de un control o de un dato: texto chico, gris,
+   escrito normal. Reemplaza al mono en versalita que usaban la barra de
+   consola, los filtros, el pie y las fichas. Los componentes lo usan con
+   `class="b-rotulo"` o copiando estos tres valores en su propio estilo. */
+.bandeja .b-rotulo {
+  font-family: var(--bandeja-sans);
+  font-size: var(--bandeja-rotulo-tam);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--bandeja-texto-2);
+}
+
+/* Las cifras se alinean: en tiempos y montos una columna que baila se lee
+   mal. */
+.bandeja .b-cifra {
+  font-family: var(--bandeja-titulo);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Lo que no se sabe: el guion apagado. Se ve que la fila existe y que está

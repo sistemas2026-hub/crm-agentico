@@ -1074,6 +1074,20 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  sobre el efecto: lo que ve el ciclo ('esta_delegada')
                        #  y el chat ('tareas_activas') despues del clic.
                        "supervisor-ajustes",
+                       #  31/10/2026 (PRD §8.17, Ola 2). 'fallas-de-red' es un
+                       #  GET: las caidas de PON vivas, con su aviso. Y
+                       #  'fallas-de-red-aviso' PRODUCE UN EFECTO AFUERA, y por
+                       #  eso se declara entero: con 'aprobar', una PERSONA
+                       #  (EsJefeDeOperaciones) aprueba avisarle por WhatsApp a
+                       #  los clientes de esa caida, y el motor les escribe por
+                       #  tandas. No reinicia, no cierra, no crea tickets, no
+                       #  toca WispHub ni la programacion. Lo que no abre ella:
+                       #  el aviso encendido en Mensajes automaticos con su
+                       #  plantilla aprobada por Meta, la lista que arma el
+                       #  MOTOR en cada tanda (solo los que siguen caidos), y
+                       #  una sola aprobacion por situacion. Su suite:
+                       #  operaciones/tests/test_aviso_de_caida.py.
+                       "fallas-de-red", "fallas-de-red-aviso",
                        #  LOTE 1, paso P11 (05/10/2026). 'supervisor-turno' es
                        #  el relevo de turno, y es de las faciles de declarar:
                        #  es un **GET**.

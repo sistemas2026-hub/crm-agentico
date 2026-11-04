@@ -24,7 +24,10 @@ LAS TRES BUSQUEDAS
 
 EL PADRON
 ---------
-Servicio, nombre y estado de cada cliente -- nada mas --, recorriendo el
+Servicio, nombre y estado de cada cliente, y desde el 30/10/2026 el SERIAL de
+su equipo (para el aviso de caida: aviso_de_caida.py; no sale en ninguna
+busqueda). El aviso de caida lo arma aunque la empresa no busque por nombre.
+Se recorre el
 listado paginado del proveedor (26 paginas de 300, cerca de un minuto en
 Rapilink). Vive en la RAM del proceso y no se escribe a disco ni a la base.
 Se arma la primera vez que alguien busca por nombre, en un hilo aparte: esa
@@ -116,6 +119,11 @@ def _cargar(config, tenant: str) -> None:
                 f = _fila(x) if isinstance(x, dict) else None
                 if f:
                     f["_clave"] = _normal(f["nombre"])
+                    #  El serial del equipo, para saber de quien es cada ONU
+                    #  de una caida (aviso_de_caida.py, 30/10/2026). Es del
+                    #  equipo, no de la persona, y no sale en ninguna busqueda:
+                    #  'buscar' devuelve servicio, nombre y estado, nada mas.
+                    f["_sn"] = str(x.get("sn_onu") or "").strip().upper()
                     filas.append(f)
             desde += PAGINA
             if not pagina or (total is not None and desde >= total):
@@ -141,6 +149,30 @@ def _padron(config, tenant: str) -> list[dict] | None:
             threading.Thread(target=_cargar, args=(config, tenant),
                              name=f"padron-{tenant}", daemon=True).start()
     return p["filas"] if p else None
+
+
+def padron_por_serial(config, tenant: str) -> dict[str, dict] | None:
+    """{serial: fila del padron}, con cada serial en su forma guardada y en
+    hexadecimal (68 equipos de Rapilink solo existen en esa forma). None si el
+    padron todavia se esta armando. Lo usa aviso_de_caida.py."""
+    filas = _padron(config, tenant)
+    if filas is None:
+        return None
+    indice: dict[str, dict] = {}
+    for f in filas:
+        sn = f.get("_sn") or ""
+        if not sn:
+            continue
+        hexa = ejecutor_http._gpon_hex(sn)
+        for forma in {sn, str(hexa).upper()} if hexa else {sn}:
+            otra = indice.get(forma)
+            if otra is not None and otra.get("servicio") != f.get("servicio"):
+                #  El mismo equipo en dos fichas (una ONU reasignada sin
+                #  limpiar la anterior): no se elige una.
+                indice[forma] = {"_duplicado": True}
+            elif otra is None:
+                indice[forma] = f
+    return indice
 
 
 def _por_nombre(filas: list[dict], texto: str) -> list[dict]:

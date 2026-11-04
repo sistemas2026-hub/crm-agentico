@@ -784,6 +784,9 @@ def vista_previa(org, fecha) -> dict:
             "labor": nombres.get(p.labor, p.labor) if p.labor else "",
             "labor_antes": (nombres.get(p.labor_antes, p.labor_antes)
                             if p.labor_antes else ""),
+            #  La de apoyo (30/10/2026, labor-de-apoyo.md): vacia = sin apoyo.
+            "apoyo": (nombres.get(p.labor_de_apoyo, p.labor_de_apoyo)
+                      if p.labor_de_apoyo else ""),
             "zonas": [z.nombre for z in p.zonas],
             "lider": ((getattr(lider, "name", "") or getattr(lider, "email", ""))
                       if lider else ""),

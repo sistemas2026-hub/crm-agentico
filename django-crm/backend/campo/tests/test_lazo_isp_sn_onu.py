@@ -41,6 +41,14 @@ from campo.services import lazo_isp
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _la_empresa_de_la_orden(org_a, empresa_del_motor):
+    """La organizacion tiene empresa en el motor. Sin esto, desde el 30/10/2026
+    el aviso no sale, y cuatro pruebas de abajo quedaron en rojo midiendo la
+    falta de empresa en vez de lo que dicen medir."""
+    empresa_del_motor(org_a, "empresa-de-la-orden")
+
+
 @pytest.fixture
 def bodega(org_a):
     return UbicacionInventario.objects.create(
@@ -154,7 +162,7 @@ def test_un_valor_que_no_es_uno_exacto_deja_apagado(org_a, ont,
         post.assert_not_called()
 
 
-def test_sin_MOTOR_TENANT_no_sale_a_la_red(org_a, ont, orden_con_cliente,
+def test_sin_empresa_no_sale_a_la_red(org_a, ont, orden_con_cliente,
                                            monkeypatch):
     """Sin saber de qué empresa es el movimiento, no se le escribe al ISP.
 
@@ -170,7 +178,7 @@ def test_sin_MOTOR_TENANT_no_sale_a_la_red(org_a, ont, orden_con_cliente,
     fail-closed sería una intención, no una garantía.
     """
     monkeypatch.setenv(lazo_isp.BANDERA, "1")
-    monkeypatch.delenv("MOTOR_TENANT", raising=False)
+    monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "")
     mov = _consumo(org_a, ont, orden_con_cliente, serie="HWT-SIN-TENANT")
 
     with patch("requests.post") as post:
@@ -178,7 +186,7 @@ def test_sin_MOTOR_TENANT_no_sale_a_la_red(org_a, ont, orden_con_cliente,
 
     post.assert_not_called()
     assert r.estado == lazo_isp.ResultadoAviso.NO_CORRESPONDE
-    assert "MOTOR_TENANT" in r.detalle
+    assert "sin empresa en el motor" in r.detalle
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +208,8 @@ def test_un_consumo_aceptado_con_serie_y_cliente_se_avisa(
     assert "/interno/herramienta/actualizar_sn_onu" in llamada.args[0]
     assert llamada.kwargs["json"] == {"id_servicio": "5832",
                                       "sn_onu": "HWT-INST-1"}
+    #  A la empresa de la organizacion del movimiento, no a la del servidor.
+    assert llamada.kwargs["params"] == {"tenant": "empresa-de-la-orden"}
     # La clave idempotente viaja, y es estable.
     assert llamada.kwargs["headers"]["Idempotency-Key"] == \
         lazo_isp.clave_idempotente(mov)

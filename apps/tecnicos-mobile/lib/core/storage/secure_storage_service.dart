@@ -29,6 +29,14 @@ class SecureStorageService implements SecureStorageLectura {
   /// aparece con señal no sirve de nada.
   static const _keyTelefonoSoporte = 'dexter_telefono_soporte';
   static const _keyProfileId = 'dexter_profile_id';
+
+  /// La labor del día, para verla sin señal (29/10/2026). Se borra al cerrar
+  /// sesión: es de quien la tenía.
+  static const _keyLaborDeHoy = 'dexter_labor_de_hoy';
+  /// El DIA en que el tecnico arranco su jornada (02/11/2026), AAAA-MM-DD.
+  /// La ubicacion se comparte los dias que el arranco, no todos: manana esa
+  /// fecha ya no es hoy y deja de compartirse sola, sin apagar nada.
+  static const _keyUbicacion = 'dexter_jornada_iniciada';
   static const _keyUserEmail = 'dexter_user_email';
   static const _keyUserName = 'dexter_user_name';
   static const _keyBaseUrl = 'dexter_api_base_url';
@@ -42,6 +50,25 @@ class SecureStorageService implements SecureStorageLectura {
   /// sea contra el propio teléfono, y el error que se ve es "conexión
   /// rechazada" sin ninguna pista de por qué.
   static String get defaultBaseUrl => ApiEndpoints.defaultEnvironmentUrl;
+
+  /// El dia que arranco, o null. Null ante cualquier duda: no compartir es
+  /// el lado seguro de una lectura que fallo.
+  Future<String?> getJornadaIniciada() async {
+    try {
+      return await _storage.read(key: _keyUbicacion);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> setJornadaIniciada(String dia) async {
+    try {
+      await _storage.write(key: _keyUbicacion, value: dia);
+    } catch (_) {
+      //  Que no se pueda recordar no tumba nada: lo peor que pasa es que al
+      //  reabrir la aplicacion tenga que volver a tocar «Iniciar jornada».
+    }
+  }
 
   Future<void> saveTokens({
     required String accessToken,
@@ -87,6 +114,11 @@ class SecureStorageService implements SecureStorageLectura {
   Future<String?> getUserEmail() async => await _storage.read(key: _keyUserEmail);
   Future<String?> getUserName() async => await _storage.read(key: _keyUserName);
 
+  Future<String?> getLaborDeHoy() async =>
+      await _storage.read(key: _keyLaborDeHoy);
+  Future<void> setLaborDeHoy(String texto) async =>
+      await _storage.write(key: _keyLaborDeHoy, value: texto);
+
   Future<String> getBaseUrl() async {
     final url = await _storage.read(key: _keyBaseUrl);
     return url ?? defaultBaseUrl;
@@ -113,6 +145,7 @@ class SecureStorageService implements SecureStorageLectura {
     await _storage.delete(key: _keyProfileId);
     await _storage.delete(key: _keyUserEmail);
     await _storage.delete(key: _keyUserName);
+    await _storage.delete(key: _keyLaborDeHoy);
   }
 
   Future<bool> hasValidSession() async {

@@ -17,15 +17,25 @@
     textoDelAviso,
     textoDelVencimiento,
     textoDePrioridad,
+    textoDeSeguimiento,
+    textoDeTiempos,
     tonoDelVencimiento
   } from './dia-publicado.js';
+  import ProgresoDeLaOrden from './ProgresoDeLaOrden.svelte';
+  import RevisionDelCierre from './RevisionDelCierre.svelte';
 
   /** @type {{ orden: any, dia: string, marca?: string }} */
   let { orden, dia, marca = '' } = $props();
 
-  let terminada = $derived(['completada_campo', 'cerrada'].includes(orden.estado));
+  //  Lo terminado se atenúa, salvo que espere que alguien lo revise
+  //  (30/10/2026): eso es justo lo que hay que mirar.
+  let terminada = $derived(orden.estado === 'cerrada'
+    || (orden.estado === 'completada_campo' && !orden.revision && orden.validacion !== 'aprobado'));
   let tono = $derived(tonoDelVencimiento(orden.vence_en, dia));
   let aviso = $derived(textoDelAviso(orden.aviso));
+  //  El seguimiento (30/10/2026): cuánto lleva y si dejó de reportar.
+  let tiempos = $derived(textoDeTiempos(orden.tiempos));
+  let seguimiento = $derived(textoDeSeguimiento(orden.seguimiento));
 </script>
 
 <article
@@ -54,6 +64,41 @@
     <span class="od-cliente">{orden.cliente || 'Sin cliente'}</span>
     {#if orden.barrio}<span class="od-barrio">{orden.barrio}</span>{/if}
   </div>
+
+  <!-- EL PROGRESO, como en la app (30/10/2026): «debe salir para cada ticket». -->
+  <ProgresoDeLaOrden estado={orden.estado} />
+
+  {#if tiempos || seguimiento}
+    <p class="od-tiempos">
+      {tiempos}{#if seguimiento}<span class="od-seguimiento" class:od-seguimiento-vencido={orden.seguimiento?.tipo === 'vencido'}>{seguimiento}</span>{/if}
+    </p>
+  {/if}
+
+  <!-- LOS RECORDATORIOS (31/10/2026): se ven aunque la orden ya esté
+       terminada. Si «no llegó al teléfono», el aviso salió pero Google no lo
+       aceptó; si no hay ninguno, no se cumplió la regla de los 30 minutos. -->
+  {#each orden.recordatorios ?? [] as r, i (i)}
+    <p class="od-recordatorio" class:od-recordatorio-mal={!r.llego}>
+      El Supervisor le recordó reportar · {r.cuando}{r.llego ? '' : ' (no llegó al teléfono)'}
+    </p>
+  {/each}
+
+  <RevisionDelCierre {orden} />
+
+  <!-- COMPLETADA SIN REVISIÓN (30/10/2026): dice su validación, y si ya está
+       aprobada, solo falta cerrarla. -->
+  {#if orden.estado === 'completada_campo' && !orden.revision}
+    <div class="od-validacion">
+      <span>Validación: <strong>{orden.validacion_texto || orden.validacion || '—'}</strong></span>
+      {#if orden.validacion === 'aprobado'}
+        <form method="POST" action="?/cerrar">
+          <input type="hidden" name="orden" value={orden.id} />
+          <input type="hidden" name="vuelta" value={orden.vuelta ?? 1} />
+          <button type="submit" class="snoc-btn snoc-btn-primario">Cerrar</button>
+        </form>
+      {/if}
+    </div>
+  {/if}
 
   <footer class="od-pie">
     <span>
@@ -169,4 +214,29 @@
   .od-tecnicos { margin-left: 6px; }
   .od-aviso { margin-left: 6px; }
   .od-aviso-mal { color: var(--snoc-error); }
+
+  /* Los tiempos y la regla de los 30 minutos (30/10/2026). */
+  .od-tiempos {
+    margin: 0;
+    font-size: 12px;
+    color: var(--snoc-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  .od-seguimiento { font-weight: 600; }
+  .od-recordatorio { margin: 0; font-size: 12px; font-weight: 600; color: var(--snoc-primary); }
+  .od-recordatorio-mal { color: var(--snoc-error); }
+  .od-validacion {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--snoc-r-xl);
+    background: var(--snoc-surface-container);
+    font-size: 13px;
+  }
+  .od-seguimiento-vencido { color: var(--snoc-error); }
 </style>

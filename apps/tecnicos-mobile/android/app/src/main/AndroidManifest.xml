@@ -6,6 +6,8 @@
          este permiso el telefono acepta el registro en FCM y descarta cada
          aviso en silencio: no hay error, no hay log, simplemente no suena. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- El recordatorio del Supervisor vibra unos 30 s (30/10/2026). -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <!-- Donde se tomo cada evidencia. El backend espera `metadatos_captura`
          desde el principio y hasta ahora llegaba vacio: una foto sin lugar
          prueba que alguien subio una foto, no que estuvo ahi.

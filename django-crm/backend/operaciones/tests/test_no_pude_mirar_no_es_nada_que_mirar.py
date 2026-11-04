@@ -42,13 +42,13 @@ pytestmark = pytest.mark.django_db
 def _informe(org, monkeypatch, *, mapa):
     """Corre la lectura de tickets con el mapa de áreas que se le diga.
 
-    Se sustituye `area_por_persona`, que es la LECTURA que sale al motor, y no
+    Se sustituye `area_por_persona_de_org`, que es la LECTURA que sale al motor, y no
     `criterio_de_area`, que es la DECISIÓN: así el criterio real corre sobre el
     mapa que se le da, en vez de quedar sustituido él mismo.
     """
     from operaciones import areas_del_tenant, supervisor
 
-    monkeypatch.setattr(areas_del_tenant, "area_por_persona", lambda: mapa)
+    monkeypatch.setattr(areas_del_tenant, "area_por_persona_de_org", lambda org_id: mapa)
     return supervisor._leer_tickets_abiertos(org, timezone.now())
 
 

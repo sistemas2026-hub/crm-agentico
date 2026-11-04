@@ -12,6 +12,7 @@ import {
   traducirError
 } from '$lib/server/v2/supervisor-noc.js';
 import { leerCapacidad } from '$lib/server/v2/programacion-noc.js';
+import { leerAutonomiaGanada } from '$lib/server/v2/capacidad.js';
 import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 
 /**
@@ -121,6 +122,11 @@ export async function load({ cookies, locals, url, fetch }) {
                      motivo: `No se pudo consultar el motor: ${e?.message ?? e}` }));
   const capacidad = leerCapacidad({ cookies }, hoy)
     .catch((e) => ({ personas: [], error: { mensaje: String(e?.message ?? e) } }));
+  //  01/11/2026: la tarjeta «Autonomía ganada» de «Qué hace el Supervisor
+  //  solo». Es la MISMA lectura que la pantalla de Capacidad, que no lanza;
+  //  el '.catch' cubre lo que pase antes de llegar al motor.
+  const autonomiaGanada = leerAutonomiaGanada(locals, fetch)
+    .catch((e) => ({ autonomia: null, error: `No se pudo consultar el motor: ${e?.message ?? e}` }));
 
   return {
     puedeVer: true,
@@ -140,6 +146,7 @@ export async function load({ cookies, locals, url, fetch }) {
     autonomia,
     dia: hoy,
     capacidad,
+    autonomiaGanada,
     actividad
   };
 }

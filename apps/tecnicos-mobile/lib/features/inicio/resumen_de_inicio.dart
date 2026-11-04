@@ -311,7 +311,7 @@ class HoraDelDia {
 List<HoraDelDia> _horasDe(List<TrabajoVista> trabajos, DateTime ahora) {
   final List<(DateTime, HoraDelDia)> conHora = <(DateTime, HoraDelDia)>[];
   for (final TrabajoVista t in trabajos) {
-    final DateTime? cuando = t.ventanaInicio ?? t.compromiso;
+    final DateTime? cuando = t.ventanaInicio ?? t.horaComprometida;
     if (cuando == null) continue;
     final bool hecha = ResumenDeInicio._estaTerminado(t);
     conHora.add((

@@ -311,6 +311,12 @@ class Autenticacion(Base):
     # 55% de los casos ("3001234567, 3109876543"). Hay que extraerlos todos:
     # leerlo como valor unico baja la cobertura de 98.7% a 43%.
     patron_extraccion: str = r"(?<!\d)3\d{9}(?!\d)"
+    # Lo que se le antepone a cada movil extraido para llegar a la forma de
+    # WhatsApp (30/10/2026): los avisos proactivos le escriben a quien no esta
+    # chateando, y su numero sale del ISP sin indicativo. SIN DEFAULT: es del
+    # pais de la empresa, y sin el no se adivina -- el aviso no sale. Ver
+    # nucleo/seguimiento/destino.py.
+    indicativo_pais: Annotated[str, Field(pattern=r"^\d{1,4}$")] | None = None
     # Cuando el numero no coincide (celular nuevo). Ninguno debe ser publico.
     retos_nivel_2: list[str] = Field(default_factory=list)
     # Un numero que apunta a varios clientes no es fallo de autenticacion:
@@ -955,6 +961,39 @@ class Herramienta(Base):
     # todo lo existente -- no cambia el comportamiento de ninguna
     # herramienta que no la declare explicitamente.
     aprobacion_humana: bool = False
+    #  LOS CAMINOS AUTONOMOS QUE SI PUEDEN EJECUTARLA  --  31/10/2026
+    #  -------------------------------------------------------------
+    #  Nombres de 'nucleo.seguridad.frontera.EXENCIONES'. Cada uno identifica
+    #  UN camino de codigo que revisa la accion antes de pedirla, y que por eso
+    #  no necesita que una persona la apruebe en el momento.
+    #
+    #  Hoy hay uno: 'cierre_de_orden_revisada' -- el Supervisor cierra el
+    #  ticket de una orden de campo cuya revision (checklist, reporte,
+    #  servicio, medicion y material) dio por buena en codigo.
+    #
+    #  Lo declara el TENANT y no el codigo porque es una decision de cada
+    #  empresa hasta donde deja llegar a su Supervisor (CLAUDE.md §3.3). Sin la
+    #  linea nada cambia: la herramienta sigue frenada para todo camino
+    #  autonomo. Y no alcanza con ponerla -- el nombre tiene que existir
+    #  tambien en el codigo, o la config no carga (validacion mas abajo).
+    aprobacion_humana_salvo: list[str] = Field(default_factory=list)
+    #  SI ESTA ACCION ES CRITICA  --  PRD §2 y §8.18, 02/11/2026
+    #  ---------------------------------------------------------
+    #  Critica = un error suyo puede danar a la empresa: mueve dinero, deja a un
+    #  cliente sin servicio de forma que no vuelve sola o le da uno que no paga,
+    #  afecta a muchos clientes, borra o expone datos, o compromete a la empresa
+    #  con un tercero. Solo lo critico necesita a una persona.
+    #
+    #  Una accion con 'aprobacion_humana' que la empresa declara NO critica se
+    #  promueve a autonoma sin esperar evidencia de aprobaciones -- si cumple
+    #  las garantias en codigo (efecto verificable, previas), que siguen
+    #  exigidas (nucleo/seguridad/autonomia_ganada.py::promover). La cadena de
+    #  ejecucion no cambia: interruptor, techo, etapa, autorizacion,
+    #  idempotencia, verificacion y degradacion sola.
+    #
+    #  True por omision: lo que no se declara se trata como critico (falla
+    #  cerrado). Es de cada empresa porque cada una decide que le duele.
+    critica: bool = True
     # =========================================================================
     #  CAPACIDADES QUE EL RECONCILIADOR BUSCA POR BANDERA
     # =========================================================================
@@ -1862,6 +1901,49 @@ class Herramienta(Base):
                 f"'{self.nombre}': aprobacion_humana solo tiene sentido en una "
                 f"escritura -- una consulta de solo lectura no necesita cola de "
                 f"aprobacion.")
+
+        #  'critica: false' SOLO DONDE LA CADENA LA SOSTIENE  --  02/11/2026
+        #  (auditoria de frontera, B1). Declararla no critica promueve sin
+        #  evidencia; eso solo es seguro en una accion que pasa por la cadena
+        #  de aprobacion (aprobacion_humana + irreversible: frontera.critica,
+        #  firma de la promocion leida en el ultimo metro) y cuyo efecto el
+        #  codigo mide antes y despues. Fuera de eso, la marca no haria nada
+        #  o haria algo que nadie verifica: se rechaza al CARGAR.
+        if not self.critica:
+            faltan = [n for n, ok in (
+                ("aprobacion_humana", self.aprobacion_humana),
+                ("irreversible", self.irreversible),
+                ("verificacion con comprobaciones",
+                 bool(self.verificacion and self.verificacion.comprobaciones)),
+                ("exige_previas", bool(self.exige_previas))) if not ok]
+            if faltan:
+                raise ValueError(
+                    f"'{self.nombre}': 'critica: false' exige {faltan}. Una "
+                    f"accion no critica se hace sola sin evidencia previa, y "
+                    f"eso solo es seguro si el codigo comprueba sus previas, "
+                    f"mide su efecto y la ejecuta por la cadena de aprobacion.")
+
+        #  UNA EXENCION QUE EL CODIGO NO CONOCE NO EXIME NADA, Y CALLARLO
+        #  SERIA LO PEOR: el YAML diria que el Supervisor puede cerrar, la
+        #  frontera lo seguiria frenando, y el sintoma
+        #  --'APROBACION_HUMANA_REQUERIDA'-- no apuntaria al typo. Se rechaza
+        #  al CARGAR, como la contradiccion de 'efecto_externo' de mas abajo.
+        if self.aprobacion_humana_salvo:
+            from nucleo.seguridad.frontera import EXENCIONES
+
+            desconocidas = sorted(set(self.aprobacion_humana_salvo) - set(EXENCIONES))
+            if desconocidas:
+                raise ValueError(
+                    f"'{self.nombre}': 'aprobacion_humana_salvo' nombra "
+                    f"{desconocidas}, que no existen en "
+                    f"frontera.EXENCIONES ({sorted(EXENCIONES)}). Una exencion "
+                    f"que el codigo no declara no exime nada: el nombre tiene "
+                    f"que existir en los dos lados.")
+            if not self.aprobacion_humana:
+                raise ValueError(
+                    f"'{self.nombre}': declara 'aprobacion_humana_salvo' sin "
+                    f"'aprobacion_humana: true'. Eximir de una marca que no "
+                    f"esta puesta no hace nada, y deja escrito que si.")
 
         if self.aprobacion and not self.aprobacion_humana:
             raise ValueError(
@@ -3004,6 +3086,10 @@ class Conversaciones(Base):
     # un error sobre otra cosa. El editor las descarta al guardar
     # (editor.guardar_rotulos_bandeja).
     rotulos: dict[str, str] = Field(default_factory=dict)
+    # Cuantos dias mira el aviso de reincidencia (29/10/2026): "este numero
+    # tuvo N conversaciones en los ultimos X dias". Es un HECHO, no un
+    # veredicto, y por eso tiene un valor de partida. 0 = no se muestra.
+    reincidencia_dias: int = Field(default=30, ge=0, le=365)
     # Lo que se le pregunta al cliente ANTES de cerrar su conversacion.
     #
     # Ninguna conversacion se cierra por lo que el modelo interprete de un
@@ -3494,6 +3580,91 @@ class ImportacionTickets(Base):
 #  RAIZ
 # =============================================================================
 
+class HorarioAvisos(Base):
+    """
+    Entre que horas Dexter le escribe a un cliente por iniciativa propia
+    (30/10/2026). Un aviso que nace afuera --el dia se publica de madrugada--
+    espera a la apertura. Hora local de la empresa; 'hasta' no incluido.
+    """
+    desde: int = Field(default=7, ge=0, le=23)
+    hasta: int = Field(default=20, ge=1, le=24)
+
+    @model_validator(mode="after")
+    def _orden(self):
+        if self.desde >= self.hasta:
+            raise ValueError("horario_avisos: 'desde' tiene que ser antes que 'hasta'")
+        return self
+
+
+class AvisoDeCaida(Base):
+    """
+    A quien se le avisa una caida de red (30/10/2026, PRD §8.17, Ola 2). Ver
+    nucleo/seguimiento/aviso_de_caida.py. Lo aprueba una persona antes de mandar.
+    """
+    # El estado del cliente en el sistema del ISP, tal cual lo devuelve
+    # ('Activo' en WispHub). Un suspendido no tiene servicio que restablecer.
+    # SIN DEFAULT: el vocabulario es del ISP, y sin el no se arma ninguna lista.
+    estados_que_se_avisan: list[str] = Field(default_factory=list)
+    # Cuanto pueden separarse dos caidas para ser la MISMA falla. Mismo numero
+    # medido que incidentes.VENTANA_MISMA_FALLA_MINUTOS (21/08/2026: siete ONU
+    # en el mismo instante).
+    ventana_misma_falla_minutos: int = Field(default=20, ge=1, le=240)
+    # Desde cuantos equipos caidos juntos es una caida y no un cliente suelto.
+    minimo_equipos: int = Field(default=2, ge=2, le=1000)
+    # Cuantos avisos por tanda: la calidad del numero de la empresa en Meta
+    # baja si salen cientos de golpe.
+    lote: int = Field(default=25, ge=1, le=100)
+
+
+class UmbralesAutonomia(Base):
+    """
+    Cuanta evidencia pide ESTA empresa para que una accion gane autonomia
+    (31/10/2026, PRD §2). Nunca por debajo del piso del nucleo
+    (nucleo/seguridad/autonomia_ganada.PISO): ninguna empresa puede ganarla con
+    cinco casos revisados. Cero no confirmadas y cero fallidas no se eligen.
+    """
+    minimo_revisadas: int = Field(default=30, ge=20, le=10000)
+    ventana_dias: int = Field(default=30, ge=14, le=90)
+    tasa_minima_aprobacion: float = Field(default=0.95, ge=0.90, le=1.0)
+    # Aprobar no prueba el efecto: verificaciones CONFIRMADAS, y su tasa sobre
+    # las que se pudieron medir (31/10/2026, auditor de frontera).
+    minimo_confirmadas: int = Field(default=20, ge=10, le=10000)
+    tasa_minima_confirmacion: float = Field(default=0.95, ge=0.90, le=1.0)
+
+
+class AutonomiaGanada(Base):
+    """Los umbrales por accion. Una accion sin entrada usa los por defecto."""
+    acciones: dict[str, UmbralesAutonomia] = Field(default_factory=dict)
+
+
+class Capacidad(Base):
+    """
+    Lo que el tablero de capacidad necesita saber de ESTA empresa (30/10/2026,
+    PRD §2 y §8.17). El tablero cuenta en la base; esto le dice que contar y
+    como traducirlo a minutos.
+
+    Los minutos los declara la empresa porque solo ella sabe cuanto le cuesta
+    atender una conversacion o mandar una visita. Sin declararlos, el tablero
+    devuelve los minutos en null con el motivo: un default haria pasar una
+    suposicion por una medicion, y es el numero que se le muestra a quien compra.
+    """
+    minutos_por_conversacion: int | None = Field(default=None, ge=1, le=600)
+    minutos_por_visita: int | None = Field(default=None, ge=1, le=1440)
+    #: Cuantas personas atienden a los clientes (el divisor de la metrica
+    #: norte, PRD §2). Lo declara la empresa por la misma razon que los
+    #: minutos: contar a quien toco la bandeja deja afuera a quien no la toca.
+    personas_del_equipo: int | None = Field(default=None, ge=1, le=10000)
+    #: Acciones remotas que, confirmadas, pueden ahorrar una visita (p. ej. un
+    #: reinicio). Tienen que declarar 'verificacion': sin ella no hay
+    #: ACCION_CONFIRMADA que contar.
+    acciones_que_evitan_visita: list[str] = Field(default_factory=list)
+    #: Las herramientas que agendan una visita. Una accion confirmada seguida de
+    #: una de estas para el mismo cliente no evito nada.
+    herramientas_de_visita: list[str] = Field(default_factory=list)
+    ventana_recontacto_horas: int = Field(default=72, ge=1, le=720)
+    dias_sin_visita: int = Field(default=7, ge=1, le=60)
+
+
 class TenantConfig(Base):
     # Campos que NO son configuracion sino la SALIDA de un proceso: los
     # produce el sistema, no los escribe una persona, y se reemplazan enteros
@@ -3712,6 +3883,34 @@ class TenantConfig(Base):
     # foto se guarda, se muestra en la bandeja, y al modelo le llega el aviso
     # de siempre. No se descarga nada de mas ni se llama a ningun proveedor.
     vision_habilitada: bool = False
+    # SI LAS FOTOS QUE EL TECNICO SUBE COMO EVIDENCIA SE MIRAN  --  31/10/2026
+    #
+    # PERILLA PROPIA, Y NO LA DE ARRIBA. Las dos mandan una imagen al mismo
+    # proveedor, pero no las respalda el mismo consentimiento: una es la foto
+    # que un cliente DECIDE mandar por WhatsApp, y esta es la que un tecnico
+    # toma DENTRO de la casa de ese cliente. Una empresa puede autorizar la
+    # primera y no la segunda, o al reves, y con un solo campo no podria
+    # decirlo. Decidido asi el 31/10/2026, con la recomendacion escrita.
+    #
+    # Apagado por defecto, por el mismo motivo que el de arriba. Apagado, la
+    # evidencia se sube, se guarda y se ve igual que siempre: no se llama a
+    # ningun proveedor y la revision del cierre no gana ningun punto.
+    #
+    # NO gobierna si la tarea de analisis esta corriendo: eso es una decision
+    # de operacion, como RELOJ_HABILITADO (CLAUDE.md §8).
+    vision_evidencias_campo: bool = False
+    # SI SE MIRAN LAS FOTOS QUE UN COLABORADOR ADJUNTA EN EL ASISTENTE
+    # INTERNO  --  02/11/2026
+    #
+    # La TERCERA, y por el mismo motivo que la segunda: no es el mismo
+    # consentimiento la foto que un cliente DECIDE mandar por WhatsApp,
+    # la que un tecnico toma DENTRO de la casa de ese cliente, y la que
+    # alguien de la oficina adjunta en el chat interno. Una empresa puede
+    # autorizar unas y no otras, y con un campo solo no podria decirlo.
+    #
+    # Las tres nacen apagadas. Apagada, el asistente sigue funcionando
+    # igual: se puede escribir, no se puede adjuntar foto.
+    vision_asistente_interno: bool = False
     # El cierre de lo que atendio solo el asistente. Seccion propia y no un
     # campo mas de 'limites' porque tiene cuatro perillas que se mueven
     # juntas, y porque su interruptor tiene que poder apagarse sin tocar nada
@@ -3733,6 +3932,12 @@ class TenantConfig(Base):
     #: ofrecen en el ticket, la Bandeja ni Mensajes automaticos, y el motor no
     #: las manda aunque se las pidan. Meta no tiene un "apagado" propio.
     plantillas_desactivadas: list[str] = Field(default_factory=list)
+    #: Que mide el tablero de capacidad y como lo traduce a minutos (PRD §2).
+    capacidad: Capacidad = Field(default_factory=Capacidad)
+    #: Entre que horas salen los avisos proactivos (nucleo/seguimiento/avisos.py).
+    horario_avisos: HorarioAvisos = Field(default_factory=HorarioAvisos)
+    aviso_de_caida: AvisoDeCaida = Field(default_factory=AvisoDeCaida)
+    autonomia_ganada: AutonomiaGanada = Field(default_factory=AutonomiaGanada)
 
     @field_validator("mensajes_automaticos")
     @classmethod
@@ -3817,6 +4022,26 @@ class TenantConfig(Base):
             self.desenlaces.propios, self.desenlaces.ocultos)
         if fallos:
             raise ValueError("desenlaces: " + "; ".join(fallos))
+        return self
+
+    @model_validator(mode="after")
+    def _capacidad_coherente(self):
+        """Lo que el tablero cuenta tiene que existir en el catalogo: un nombre
+        mal escrito contaria cero en silencio, y cero es un numero creible."""
+        por_nombre = {h.nombre: h for h in self.herramientas}
+        for nombre in self.capacidad.acciones_que_evitan_visita:
+            h = por_nombre.get(nombre)
+            if h is None:
+                raise ValueError(f"capacidad.acciones_que_evitan_visita: '{nombre}' "
+                                 f"no es una herramienta del catalogo")
+            if h.verificacion is None:
+                raise ValueError(f"capacidad.acciones_que_evitan_visita: '{nombre}' "
+                                 f"no declara 'verificacion', asi que nunca queda "
+                                 f"confirmada y el tablero contaria cero")
+        for nombre in self.capacidad.herramientas_de_visita:
+            if nombre not in por_nombre:
+                raise ValueError(f"capacidad.herramientas_de_visita: '{nombre}' "
+                                 f"no es una herramienta del catalogo")
         return self
 
     @model_validator(mode="after")

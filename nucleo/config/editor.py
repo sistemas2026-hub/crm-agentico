@@ -627,9 +627,30 @@ def catalogo_herramientas(config: TenantConfig) -> list[dict]:
             "tipo": h.tipo,
             "verifica_identidad": h.verifica_identidad,
             "campos_conocidos": sorted(conocidos.get(h.nombre, set())),
+            #  QUE HACE, para que el formulario las agrupe y avise (02/11/2026).
+            #  Sale de propiedades del catalogo, nunca del texto de la
+            #  descripcion (que es prompt y cada empresa redacta a su manera).
+            "escribe": not h.solo_lectura,
+            "pide_aprobacion": bool(h.aprobacion_humana),
+            "critica": bool(getattr(h, "critica", True)),
+            "deriva": bool(h.deriva_rol),
+            "de_sistema": _es_de_sistema(h),
         }
         for h in config.herramientas
     ]
+
+
+#: Las banderas de capacidad que marcan una herramienta que dispara el CODIGO
+#: (el reconciliador, la Bandeja, un servicio), no el agente en una
+#: conversacion. Dartela a un agente no tiene sentido y puede hacer que la
+#: llame cuando no corresponde.
+_BANDERAS_DE_SISTEMA = ("invocable_por_servicio", "responde_ticket_operativo",
+                        "cierra_ticket_operativo", "cierra_ticket_estado",
+                        "adjunta_archivo_ticket")
+
+
+def _es_de_sistema(h) -> bool:
+    return any(bool(getattr(h, b, False)) for b in _BANDERAS_DE_SISTEMA)
 
 
 # =============================================================================
@@ -698,11 +719,78 @@ def _aplicar_herramientas(doc: dict, nombre_rol: str, herramientas: list[dict],
             campos_permitidos_out[h["nombre"]] = list(campos)
 
 
+def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
+    """
+    Lo que el formulario de agentes sumo el 02/11/2026, para que crear un
+    agente completo no exija el archivo ni una segunda pantalla.
+
+    Cada clave AUSENTE (o None) deja lo que habia: un formulario viejo, o una
+    edicion que no las manda, no borra nada.
+
+      atiende             que temas atiende, en palabras del cliente: con eso
+                          el router arma su tabla de derivacion
+      conectar_al_router  True = el router le puede pasar conversaciones
+                          (entra en 'areas_destino' de la herramienta que
+                          deriva); False = sale. Por _mutar_flujo_derivacion,
+                          la MISMA regla que /agentes/flujo: solo un agente
+                          que atiende al cliente puede recibir una derivacion
+      exige_verificacion  si pide verificar la identidad del cliente
+      nunca_revelar       lo que nunca dice, limpio y sin repetir
+    """
+    if not extras:
+        return
+    rol = doc["roles"][nombre]
+    if extras.get("exige_verificacion") is not None:
+        rol["exige_verificacion"] = bool(extras["exige_verificacion"])
+    if extras.get("nunca_revelar") is not None:
+        rol["nunca_revelar"] = list(dict.fromkeys(
+            t.strip() for t in extras["nunca_revelar"] if isinstance(t, str) and t.strip()))
+    atiende = extras.get("atiende")
+    if atiende is not None:
+        rol["atiende"] = str(atiende).strip()
+    conectar = extras.get("conectar_al_router")
+    if conectar is None:
+        return
+    deriva = next((h for h in doc.get("herramientas") or [] if h.get("deriva_rol")), None)
+    if deriva is None:
+        if conectar:
+            raise ErrorEdicion(
+                "esta empresa no tiene una herramienta de derivacion: no hay router al "
+                "que conectar el agente.")
+        return
+    destinos = [d for d in (deriva.get("areas_destino") or []) if d != nombre]
+    if conectar:
+        destinos.append(nombre)
+    _mutar_flujo_derivacion(doc, destinos, {})
+
+
+def _con_derivacion_si_atiende_clientes(doc: dict, orientado_a: str,
+                                        herramientas: list[dict]) -> list[dict]:
+    """
+    Un agente que atiende clientes SIEMPRE puede derivar (02/11/2026).
+
+    El esquema lo exige -- sin la herramienta de derivar, una conversacion que
+    cae en ese agente queda encerrada: cuando el cliente pide algo que no
+    resuelve, no hay forma de pasarlo a quien si -- y el formulario lo dejaba
+    en manos de quien crea el agente, que se enteraba por un error que nombra
+    'roles_permitidos'. Se agrega sola, sin campos (es interna: no devuelve
+    datos del cliente).
+    """
+    if orientado_a != "cliente_final":
+        return herramientas
+    deriva = next((h for h in doc.get("herramientas") or [] if h.get("deriva_rol")), None)
+    if deriva is None or any(h.get("nombre") == deriva["nombre"] for h in herramientas):
+        return herramientas
+    return [*herramientas, {"nombre": deriva["nombre"], "campos_permitidos": []}]
+
+
 def _mutar_crear(doc: dict, nombre: str, area: str | None, cargo: str | None,
-                 descripcion: str, orientado_a: str, herramientas: list[dict]) -> None:
+                 descripcion: str, orientado_a: str, herramientas: list[dict],
+                 extras: dict | None = None) -> None:
     if nombre in doc.get("roles", {}):
         raise ErrorEdicion(f"ya existe un rol llamado '{nombre}'")
 
+    herramientas = _con_derivacion_si_atiende_clientes(doc, orientado_a, herramientas)
     campos_permitidos: dict = {}
     _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos)
 
@@ -717,14 +805,17 @@ def _mutar_crear(doc: dict, nombre: str, area: str | None, cargo: str | None,
     if cargo:
         nuevo_rol["cargo"] = cargo
     doc.setdefault("roles", {})[nombre] = nuevo_rol
+    _aplicar_extras(doc, nombre, extras)
     _comprobar_nadie_se_queda_sin_roles(doc)
 
 
 def _mutar_editar(doc: dict, nombre: str, area: str | None, cargo: str | None,
-                  descripcion: str, orientado_a: str, herramientas: list[dict]) -> None:
+                  descripcion: str, orientado_a: str, herramientas: list[dict],
+                  extras: dict | None = None) -> None:
     if nombre not in doc.get("roles", {}):
         raise ErrorEdicion(f"el rol '{nombre}' no existe")
 
+    herramientas = _con_derivacion_si_atiende_clientes(doc, orientado_a, herramientas)
     anterior = set(doc["roles"][nombre].get("puede_consultar") or [])
     campos_permitidos: dict = {}
     _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos, anterior)
@@ -736,6 +827,7 @@ def _mutar_editar(doc: dict, nombre: str, area: str | None, cargo: str | None,
     rol["orientado_a"] = orientado_a
     rol["puede_consultar"] = [h["nombre"] for h in herramientas]
     rol["campos_permitidos"] = campos_permitidos
+    _aplicar_extras(doc, nombre, extras)
     _comprobar_nadie_se_queda_sin_roles(doc)
 
 
@@ -1110,17 +1202,17 @@ def _mutar_borrar(doc: dict, nombre: str) -> None:
 
 def crear_rol(tenant: str, nombre: str, area: str | None, cargo: str | None,
               descripcion: str, orientado_a: str,
-              herramientas: list[dict]) -> TenantConfig:
+              herramientas: list[dict], extras: dict | None = None) -> TenantConfig:
     _validar_nombre_rol(nombre)
     return _editar(tenant, lambda doc: _mutar_crear(
-        doc, nombre, area, cargo, descripcion, orientado_a, herramientas))
+        doc, nombre, area, cargo, descripcion, orientado_a, herramientas, extras))
 
 
 def editar_rol(tenant: str, nombre: str, area: str | None, cargo: str | None,
                descripcion: str, orientado_a: str,
-               herramientas: list[dict]) -> TenantConfig:
+               herramientas: list[dict], extras: dict | None = None) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_editar(
-        doc, nombre, area, cargo, descripcion, orientado_a, herramientas))
+        doc, nombre, area, cargo, descripcion, orientado_a, herramientas, extras))
 
 
 def borrar_rol(tenant: str, nombre: str) -> TenantConfig:
@@ -1252,8 +1344,52 @@ def guardar_flujo_derivacion(tenant: str, destinos: list[str],
     return _editar(tenant, lambda doc: _mutar_flujo_derivacion(doc, destinos, atiende))
 
 
-def guardar_casos_manual(tenant: str, casos: list[str]) -> TenantConfig:
-    return _editar(tenant, lambda doc: _mutar_casos_manual(doc, casos))
+def guardar_casos_manual(tenant: str, casos: list[str],
+                         rotulos: dict | None = None) -> TenantConfig:
+    """
+    'rotulos' (29/10/2026): como se LEE cada caso nuevo. En /manual la persona
+    escribe «Problema de TV» y la pantalla guarda la clave 'problema_de_tv';
+    lo que escribio es justamente el rotulo, y se guarda en la misma
+    operacion para que la clave no nazca sin el. Opcional: sin el, todo
+    queda como antes.
+    """
+    def mutar(doc: dict) -> None:
+        _mutar_casos_manual(doc, casos)
+        _fundir_rotulos_de_casos(doc, rotulos or {})
+    return _editar(tenant, mutar)
+
+
+def _fundir_rotulos_de_casos(doc: dict, rotulos: dict) -> None:
+    """
+    Agrega los rotulos de casos que vienen, sin tocar los demas, y saca los de
+    casos que ya no estan en ninguna lista: un caso borrado no deja su rotulo
+    colgado. Solo acepta claves que son casos: esta puerta edita casos, no
+    motivos ni etiquetas.
+    """
+    if not isinstance(rotulos, dict):
+        raise ErrorEdicion("los rótulos tienen que venir como un mapa clave → texto.")
+    casos = set((doc.get("manual") or {}).get("casos") or [])
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    actuales = dict(conv.get("rotulos") or {})
+    for clave, texto in rotulos.items():
+        clave = str(clave or "").strip()
+        texto = " ".join(str(texto or "").split())
+        if not clave or not texto:
+            continue
+        if clave not in casos:
+            raise ErrorEdicion(f"'{clave}' no es uno de los casos que se están guardando.")
+        if len(texto) > ROTULO_MAXIMO:
+            raise ErrorEdicion(
+                f"el rótulo de '{clave}' tiene {len(texto)} caracteres; el máximo es "
+                f"{ROTULO_MAXIMO}.")
+        actuales[clave] = texto
+    vivas = {c for lista in claves_con_rotulo(doc).values() for c in lista}
+    actuales = {k: v for k, v in actuales.items() if k in vivas}
+    if actuales:
+        conv["rotulos"] = actuales
+    else:
+        conv.pop("rotulos", None)
 
 
 ROTULO_MAXIMO = 60
@@ -1298,6 +1434,35 @@ def guardar_organizacion(tenant: str, organizacion: dict) -> TenantConfig:
                 f"'{clave}' no es parte de una organización: se esperan "
                 f"'pisos', 'departamentos' y 'espacios'.")
     return _editar(tenant, lambda doc: doc.__setitem__("organizacion", organizacion))
+
+
+def guardar_reincidencia(tenant: str, dias: int) -> TenantConfig:
+    """
+    Cuantos dias mira el aviso de reincidencia (29/10/2026). 0 lo apaga. El
+    rango lo valida el schema (0-365); aca se da el mensaje para la pantalla.
+    """
+    if not isinstance(dias, int) or isinstance(dias, bool) or not (0 <= dias <= 365):
+        raise ErrorEdicion("los días de reincidencia tienen que ser un entero entre 0 y 365.")
+
+    def mutar(doc: dict) -> None:
+        conv = doc.get("conversaciones") or {}
+        conv["reincidencia_dias"] = dias
+        doc["conversaciones"] = conv
+    return _editar(tenant, mutar)
+
+
+def claves_sin_rotulo(config) -> dict[str, list[str]]:
+    """
+    Las claves que la Bandeja muestra con su nombre crudo porque nadie les
+    escribio un rotulo, por familia. La usan dos avisos: el de
+    cli/cargar_config.py (para quien agrega un motivo en el YAML) y el de
+    Ajustes (para quien agrega un caso desde /manual y no lo vio). Ninguno
+    bloquea: una clave sin rotulo se sigue leyendo.
+    """
+    doc = config.model_dump() if hasattr(config, "model_dump") else config
+    rot = (doc.get("conversaciones") or {}).get("rotulos") or {}
+    return {familia: [c for c in claves if not str(rot.get(c) or "").strip()]
+            for familia, claves in claves_con_rotulo(doc).items()}
 
 
 def guardar_rotulos_bandeja(tenant: str, rotulos: dict) -> TenantConfig:
@@ -1389,6 +1554,32 @@ def _mutar_espera_encuesta(doc: dict, minutos: int) -> None:
     """La espera de la encuesta despues del cierre (29/10/2026). El rango
     (0 a 1440) lo valida EncuestaWhatsApp."""
     doc.setdefault("encuesta_whatsapp", {})["espera_minutos"] = int(minutos)
+
+
+#: Lo que la empresa declara para el tablero de capacidad (PRD §2). Las
+#: acciones que evitan una visita no van aca: nombran herramientas del
+#: catalogo y se cargan con la config (cli/cargar_claves.py).
+DECLARABLES_CAPACIDAD = ("minutos_por_conversacion", "minutos_por_visita", "personas_del_equipo")
+
+
+def _mutar_capacidad_declarada(doc: dict, valores: dict) -> None:
+    """None borra lo declarado (vuelve a 'sin declarar'); el resto de
+    'capacidad' queda como estaba. El rango lo valida TenantConfig."""
+    cap = dict(doc.get("capacidad") or {})
+    for clave in DECLARABLES_CAPACIDAD:
+        if valores[clave] is None:
+            cap.pop(clave, None)
+        else:
+            cap[clave] = valores[clave]
+    doc["capacidad"] = cap
+
+
+def guardar_capacidad_declarada(tenant: str, valores: dict) -> TenantConfig:
+    faltan = [c for c in DECLARABLES_CAPACIDAD if c not in valores]
+    if faltan:
+        raise ErrorEdicion("faltan " + ", ".join(faltan) + ": para borrar un valor se "
+                           "manda en null, no se omite.")
+    return _editar(tenant, lambda doc: _mutar_capacidad_declarada(doc, valores))
 
 
 def guardar_espera_encuesta(tenant: str, minutos: int) -> TenantConfig:

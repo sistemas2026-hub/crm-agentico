@@ -11,14 +11,17 @@
  *
  * People, API tokens and the reopen policy are admin-only: their endpoints 403
  * a member. `listTeam` / `listOrgTokens` already fold that into a `forbidden`
- * sentinel; the reopen fetch throws, so it is caught below. Either way the hub
- * still lists those destinations for a member. It just omits the value and any
- * warning it cannot compute, the same way the shell omits the team badge a
- * member cannot count. Every other destination is readable by any member, so a
- * throw from one of those is a real failure and is left to propagate.
+ * sentinel; the reopen fetch throws a 403. Either way the hub still lists
+ * those destinations for a member. It just omits the value and any warning it
+ * cannot compute, the same way the shell omits the team badge a member cannot
+ * count.
+ *
+ * Desde el 01/11/2026 NINGUNA lectura se espera ni se propaga: cada una viaja
+ * como promesa, con plazo, y la que falla deja su fila sin valor y una linea
+ * en el log. Ver getSettingsHub().
  */
 import { leerConfiguracionAsistente } from './asistente-config.js';
-import { leerAjustesBandeja } from './bandeja-config.js';
+import { leerAjustesBandeja, leerRotulosBandeja } from './bandeja-config.js';
 import { leerOrganizacion } from './organizacion-config.js';
 import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerCredenciales } from './credenciales.js';
@@ -88,7 +91,8 @@ function silentlyDropping(mailboxes, now) {
 
 /**
  * Reopen policy → its `policy`, or null when the caller is a member (the
- * endpoint is admin-only and throws 403). Any other error still propagates.
+ * endpoint is admin-only and throws 403). Any other error still propagates,
+ * to conPlazo, which is the one that logs it.
  * @param {Promise<any>} promise
  */
 async function reopenOrNull(promise) {
@@ -101,86 +105,84 @@ async function reopenOrNull(promise) {
 }
 
 /**
- * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {any} event
  */
 export async function getSettingsHub(event) {
   //  LO DEL MOTOR VIAJA APARTE  --  26/10/2026
   //  ------------------------------------------
-  //  Hasta hoy las 21 lecturas iban en un solo Promise.all y la pagina no se
-  //  dibujaba hasta que llegaba la ULTIMA. Ocho van al motor, que corre con un
-  //  proceso y 8 hilos (docker-compose.prod.yml) y los comparte con los turnos
-  //  de WhatsApp: con clientes escribiendo, esas ocho hacian fila detras de
-  //  turnos de 10-30 s, y siete no tenian plazo. "Ya abrio pero demora", dijo
-  //  el usuario.
+  //  Hasta ese dia las 21 lecturas iban en un solo Promise.all y la pagina no
+  //  se dibujaba hasta que llegaba la ULTIMA. Ocho van al motor, que corre con
+  //  un proceso y 8 hilos (docker-compose.prod.yml) y los comparte con los
+  //  turnos de WhatsApp: con clientes escribiendo, esas ocho hacian fila detras
+  //  de turnos de 10-30 s. Desde entonces salen como una promesa que SvelteKit
+  //  manda cuando llega, cada una con su plazo (conPlazo).
   //
-  //  Ahora lo del CRM se espera como antes, y lo del motor sale como una
-  //  promesa que SvelteKit manda cuando llega: la pagina se dibuja sin
-  //  esperarla, y cada tarjeta del asistente muestra su valor al llegar. Cada
-  //  lectura del motor tiene ademas su plazo (conPlazo): si no contesta, esa
-  //  tarjeta queda sin valor -- lo mismo que ya pasaba con el motor caido --,
-  //  y la promesa nunca rechaza, asi que no hay error que tumbe la pagina.
-  const motor = leerDelMotor(event);
-  const [
-    org,
-    calendar,
-    tokens,
-    team,
-    routing,
-    escalation,
-    mailbox,
-    reopenPolicy,
-    approval,
-    macro,
-    tag,
-    field,
-    avisosCampo
-  ] = await Promise.all([
-    getOrgSettings(event),
-    getBusinessHours(event),
-    listOrgTokens(event),
-    listTeam(event),
-    getRoutingRules(event),
-    getEscalationPolicies(event),
-    getMailboxes(event),
-    reopenOrNull(getReopenPolicy(event)),
-    getApprovalRules(event),
-    getMacros(event),
-    getTags(event),
-    getCustomFields(event),
-    // Cuantos canales de aviso tiene cargados esta empresa. Es del CRM, no del
-    // motor. `leerAvisos` ya atrapa su propio error y devuelve la lista vacia:
-    // el hub no se cae porque un destino no conteste.
-    leerAvisos(event)
-  ]);
+  //  Y LO DEL CRM TAMBIEN  --  01/11/2026
+  //  -------------------------------------
+  //  "La ventana configuracion demora para abrir o en ocasiones no abre." Las
+  //  trece del CRM se seguian esperando juntas, sin plazo, y un error en
+  //  CUALQUIERA tumbaba la pagina entera. Y son trece pedidos a la vez contra
+  //  un backend que atiende doce (3 procesos x 4 hilos, entrypoint.sh)
+  //  compartidos con la Bandeja de todos: con movimiento, hacian fila. Mientras
+  //  tanto el clic no mostraba nada, porque SvelteKit no cambia de pantalla
+  //  hasta que la carga termina.
+  //
+  //  Ahora la carga no espera NADA: cada lectura es una promesa propia en el
+  //  primer nivel de lo que se devuelve (SvelteKit solo manda aparte las de
+  //  ese nivel), la pagina se dibuja enseguida, y cada fila muestra su valor
+  //  cuando llega el suyo -- una lenta no frena a las demas. La que falla o
+  //  vence su plazo queda sin valor, como ya pasaba con lo que un miembro no
+  //  puede ver, y deja una linea en el log diciendo cual fue.
+  //  `resumir` corre DENTRO del plazo: si la respuesta no trae la forma
+  //  esperada, esa fila queda sin valor con su linea en el log, igual que un
+  //  error del backend -- nunca una promesa rechazada viajando al navegador.
+  /**
+   * @param {string} nombre @param {Promise<any>} lectura
+   * @param {(v: any) => any} [resumir]
+   */
+  const crm = (nombre, lectura, resumir = (v) => v) =>
+    conPlazo(
+      Promise.resolve(lectura).then((v) => (v == null ? null : resumir(v))),
+      PLAZO_CRM_MS,
+      nombre
+    );
+  // Una sola lectura alimenta dos claves: no se pide dos veces.
+  const aprobaciones = getApprovalRules(event);
 
-  const now = Date.now();
   return {
-    org: org.org,
-    calendar: calendar.calendar,
+    // El encabezado no espera: el nombre de la empresa viene en la sesion.
+    orgNombre: event.locals?.org?.name ?? '',
+    organizacion: crm('organizacion', getOrgSettings(event), (v) => v.org),
+    calendar: crm('horario', getBusinessHours(event), (v) => v.calendar),
     // Admin-only oversight: null for a member (endpoint 403'd), so the hub
     // shows the destination without a value it is not allowed to compute.
-    tokenTotals: tokens.forbidden ? null : tokens.totals,
-    peopleTotals: team.forbidden ? null : team.totals,
-    routingTotals: routing.totals,
-    escalationTotals: escalationRollup(escalation.policies),
-    mailboxTotals: {
-      ...mailbox.totals,
-      silently_dropping: silentlyDropping(mailbox.mailboxes, now)
-    },
-    reopen: reopenPolicy,
-    approvalRules: approval.rules,
-    approvalTotals: approval.totals,
-    macroTotals: macro.totals,
-    tagTotals: tag.totals,
-    fieldTotals: field.totals,
-    // Cuantos canales hay. CERO no es un error --ninguna empresa nace con esto
-    // configurado-- pero la tarjeta lo avisa, porque hoy esos avisos los
-    // escribe alguien a mano.
-    avisosCampo: { cuantos: avisosCampo.canales.length },
-    // Lo que sale del motor, sin esperar. Ver leerDelMotor().
-    motor
+    tokenTotals: crm('tokens', listOrgTokens(event), (v) => (v.forbidden ? null : v.totals)),
+    peopleTotals: crm('equipo', listTeam(event), (v) => (v.forbidden ? null : v.totals)),
+    routingTotals: crm('enrutamiento', getRoutingRules(event), (v) => v.totals),
+    escalationTotals: crm('escalamiento', getEscalationPolicies(event), (v) =>
+      escalationRollup(v.policies)
+    ),
+    mailboxTotals: crm('correo', getMailboxes(event), (v) => ({
+      ...v.totals,
+      silently_dropping: silentlyDropping(v.mailboxes, Date.now())
+    })),
+    reopen: crm('reapertura', reopenOrNull(getReopenPolicy(event))),
+    approvalRules: crm('aprobaciones', aprobaciones, (v) => v.rules),
+    approvalTotals: crm('aprobaciones', aprobaciones, (v) => v.totals),
+    macroTotals: crm('macros', getMacros(event), (v) => v.totals),
+    tagTotals: crm('etiquetas', getTags(event), (v) => v.totals),
+    fieldTotals: crm('campos', getCustomFields(event), (v) => v.totals),
+    // Cuantos canales de aviso hay. CERO no es un error --ninguna empresa nace
+    // con esto configurado-- pero la tarjeta lo avisa, porque hoy esos avisos
+    // los escribe alguien a mano. `leerAvisos` ya atrapa su propio error.
+    avisosCampo: crm('avisos', leerAvisos(event), (v) => ({ cuantos: v.canales.length })),
+    // Lo que sale del motor. Ver leerDelMotor().
+    motor: leerDelMotor(event)
   };
 }
+
+/** Cuanto se espera cada lectura del CRM antes de dejar su fila sin valor. */
+export const PLAZO_CRM_MS = 10000;
 
 /** Cuanto se espera cada lectura del motor antes de dibujar la tarjeta sin valor. */
 export const PLAZO_MOTOR_MS = 4000;
@@ -190,22 +192,36 @@ export const PLAZO_MOTOR_MS = 4000;
  *
  * El plazo corta la ESPERA de la pagina, no la llamada: el pedido sigue en
  * curso del otro lado hasta que conteste. Lo que se evita es que una tarjeta
- * deje a todas las demas mirando un motor ocupado.
+ * deje a todas las demas mirando un servicio ocupado.
+ *
+ * Con `nombre`, la fila que queda sin valor lo deja dicho en el log: cual
+ * lectura, y si fue el plazo o un error (su estado HTTP o su tipo). Texto
+ * fijo, nunca el mensaje del error: un null que no deja rastro se ve igual
+ * que una llamada mal escrita (ver settings-argumentos.test.js).
  *
  * @template T
  * @param {Promise<T>} promesa
  * @param {number} [ms]
+ * @param {string} [nombre]
  * @returns {Promise<T | null>}
  */
-export function conPlazo(promesa, ms = PLAZO_MOTOR_MS) {
+export function conPlazo(promesa, ms = PLAZO_MOTOR_MS, nombre) {
+  /** @param {string} motivo */
+  const avisar = (motivo) => {
+    if (nombre) console.warn(`[configuracion] ${nombre} sin valor: ${motivo}`);
+    return null;
+  };
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let reloj;
   const vencido = new Promise((resolver) => {
-    reloj = setTimeout(() => resolver(null), ms);
+    reloj = setTimeout(() => resolver(avisar(`plazo de ${ms} ms`)), ms);
   });
-  return Promise.race([Promise.resolve(promesa).catch(() => null), vencido]).finally(
-    () => clearTimeout(reloj)
-  );
+  return Promise.race([
+    Promise.resolve(promesa).catch((/** @type {any} */ err) =>
+      avisar(`error ${err?.status ?? err?.name ?? 'desconocido'}`)
+    ),
+    vencido
+  ]).finally(() => clearTimeout(reloj));
 }
 
 /**
@@ -222,25 +238,28 @@ export function conPlazo(promesa, ms = PLAZO_MOTOR_MS) {
  */
 async function leerDelMotor(event) {
   const [asistente, canalWhatsapp, smartolt, planesVenta, oferta, guiasTv, credenciales,
-    ajustesBandeja, organizacion] = await Promise.all([
-    conPlazo(leerConfiguracionAsistente(event.locals, event.fetch)),
-    conPlazo(leerCanalWhatsapp(event.locals, event.fetch)),
-    conPlazo(leerSmartOlt(event.locals, event.fetch)),
+    ajustesBandeja, rotulosBandeja, organizacion] = await Promise.all([
+    conPlazo(leerConfiguracionAsistente(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerConfiguracionAsistente'),
+    conPlazo(leerCanalWhatsapp(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerCanalWhatsapp'),
+    conPlazo(leerSmartOlt(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerSmartOlt'),
     // Solo el conteo -- no pega contra WispHub (ver contarPlanesVenta()).
-    conPlazo(contarPlanesVenta(event.locals, event.fetch)),
+    conPlazo(contarPlanesVenta(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor contarPlanesVenta'),
     // Las dos listas salen de la config del tenant, que el motor ya tiene.
-    conPlazo(leerOferta(event.locals, event.fetch)),
-    conPlazo(leerGuiasTV(event.locals, event.fetch)),
+    conPlazo(leerOferta(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerOferta'),
+    conPlazo(leerGuiasTV(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerGuiasTV'),
     // La lista de credenciales que hacen falta, y de las cargadas solo nombre
     // y pista. Nunca un valor.
-    conPlazo(leerCredenciales(event.locals, event.fetch)),
+    conPlazo(leerCredenciales(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerCredenciales'),
     // Dos enteros de la config del tenant. Sin definir NO lleva warn: es el
     // default deliberado, no una falta.
-    conPlazo(leerAjustesBandeja(event.locals, event.fetch)),
+    conPlazo(leerAjustesBandeja(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerAjustesBandeja'),
+    // Cuantas claves (motivos, etiquetas, casos) se muestran sin rotulo. Esta
+    // SI avisa: es una palabra sin tilde en la cola de cada operador.
+    conPlazo(leerRotulosBandeja(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerRotulosBandeja'),
     // La estructura de la empresa. Al hub le interesa UNA cosa: si esta
     // empresa ya declaro la suya o esta viendo la generica del producto. Las
     // dos se dibujan igual, asi que sin decirlo nadie lo sabria.
-    conPlazo(leerOrganizacion(event.locals, event.fetch))
+    conPlazo(leerOrganizacion(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerOrganizacion')
   ]);
   return {
     // null = no hay asistente, o no contesto a tiempo. El hub lista igual sus
@@ -250,6 +269,11 @@ async function leerDelMotor(event) {
     smartolt,
     ajustesBandeja,
     organizacion,
+    // null = no se pudo leer; un numero = cuantas claves faltan rotular.
+    sinRotulo: rotulosBandeja?.sin_rotulo
+      ? Object.values(rotulosBandeja.sin_rotulo).reduce(
+          (/** @type {number} */ n, /** @type {any} */ l) => n + (l?.length ?? 0), 0)
+      : null,
     // Cuantas pide el catalogo y cuantas estan cargadas. La fila del hub avisa
     // cuando falta alguna: eso es una herramienta que va a fallar al usarse.
     credencialesTotales: credenciales?.disponible

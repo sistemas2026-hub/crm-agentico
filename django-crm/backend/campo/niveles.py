@@ -336,6 +336,29 @@ def asunto_del_ticket(texto, plantillas: dict) -> tuple[str, str]:
     return clave, visto
 
 
+def asuntos_de_las_ordenes(org, ordenes) -> dict:
+    """{orden.id: asunto} de las ordenes que nacieron de un ticket, como se ve
+    («No Tiene Internet», sin el cliente que el nombre del ticket trae pegado).
+    Lo piden Programacion y la app (29/10/2026, el usuario: «también añade el
+    asunto»; y la tarjeta de la app «debe salir así también»). Una consulta
+    para todas; si falla, vacio: el asunto adorna, no decide nada."""
+    from cases.models import Case
+
+    refs = {str(o.origen_ref) for o in ordenes
+            if o.origen_tipo == "case" and o.origen_ref}
+    if not refs:
+        return {}
+    try:
+        nombre_de = {str(i): n for i, n in Case.objects.filter(
+            org=org, id__in=list(refs)).values_list("id", "name")}
+        plantillas = asuntos_de_las_plantillas(org)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("niveles: no se pudo leer el asunto de las ordenes")
+        return {}
+    return {o.id: asunto_del_ticket(nombre_de[str(o.origen_ref)], plantillas)[1]
+            for o in ordenes if str(o.origen_ref) in nombre_de}
+
+
 # =============================================================================
 #  EL NIVEL DE CADA ASUNTO
 # =============================================================================

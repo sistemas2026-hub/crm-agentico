@@ -96,6 +96,7 @@ Pooling uses psycopg 3's `psycopg_pool` through Django's PostgreSQL backend. It 
 | --- | --- | --- | --- |
 | `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Yes, before anyone but you can reach the instance | Redis URL Celery uses as its message broker. |
 | `CELERY_RESULT_BACKEND` | `redis://localhost:6379/0` | Yes, alongside `CELERY_BROKER_URL` | Redis URL Celery uses to store task results. |
+| `CACHE_URL` | `CELERY_BROKER_URL` with its database number replaced by `1` | No | Redis URL for Django's cache (`CACHES["default"]`). The default reuses the broker's Redis on database 1, so the cache never mixes with the task queue on database 0. Set it only to put the cache on a different Redis. If Redis is unreachable, the code that reads the cache falls back to computing the value: slower, never empty. |
 
 ### CORS and CSRF
 
@@ -118,6 +119,12 @@ Pooling uses psycopg 3's `psycopg_pool` through Django's PostgreSQL backend. It 
 | --- | --- | --- | --- |
 | `GOOGLE_CLIENT_ID` | *(empty)* | No, leaving it blank disables Google sign-in | OAuth client ID sent to Google's token endpoint and used as the expected audience when verifying a mobile ID token. See [Google OAuth](../self-hosting/google-oauth.md#backend-configuration). |
 | `GOOGLE_CLIENT_SECRET` | *(empty)* | No, leaving it blank disables Google sign-in | OAuth client secret, alongside `GOOGLE_CLIENT_ID` above. |
+
+### Sign-up
+
+| Variable | Default | Required | Purpose |
+| --- | --- | --- | --- |
+| `PERMITIR_AUTORREGISTRO` | `False` | No. Leave it off | Whether a sign-in (Google, magic link, code) may **create** an account, and whether any account may create an organization. `"true"` (case-insensitive) turns it on; anything else leaves it off. Off since 23/10/2026: upstream BottleCRM shipped it open, so any email address got an account and, with it, an organization of its own as ADMIN. In Dexter, accounts are created by an administrator from Team, and onboarding an ISP is a platform task. Turn it on only if ISPs ever sign themselves up. |
 
 ### Docker bootstrap (not read by `crm/settings.py`)
 

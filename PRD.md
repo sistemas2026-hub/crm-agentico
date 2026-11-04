@@ -1,66 +1,96 @@
-# PRD — Plataforma Interna de IA con SLM
+# PRD — Dexter: la operación de un ISP con IA
 
 > **Documento de Requisitos de Producto (Product Requirements Document)**
-> Versión 1.0 · Asistente interno multi-área basado en un modelo de lenguaje pequeño (SLM)
+> Plataforma SaaS multi-empresa para proveedores de internet. Reescrito en sus §1–§3 el 30/10/2026 (ver §8.17): la versión anterior describía un asistente interno con un modelo local, que dejó de ser el producto en agosto. **El objetivo y el principio de autonomía (§1, §2) los fijó el dueño del producto el 02/11/2026 (§8.18)**: mandan sobre cualquier otra línea de este documento que diga lo contrario.
 
 ---
 
 ## 1. Resumen ejecutivo
 
-Plataforma interna de inteligencia artificial que permite a los colaboradores de la empresa —según su área— realizar consultas en lenguaje natural y generar informes, conectándose a los sistemas internos de la empresa (empezando por WispHub). El motor es un **modelo de lenguaje pequeño (SLM)** que corre localmente, sin depender de proveedores externos de nube, lo que protege los datos de clientes y reduce costos.
+Dexter es una plataforma para ISPs que **atiende a sus clientes por WhatsApp, responde a sus colaboradores por web y coordina su operación de campo** (Supervisor, Despacho, app de técnicos), consultando y actuando sobre los sistemas de la empresa: WispHub, SmartOLT y el CRM. Es multi-empresa: dar de alta un ISP es configuración, no código (ARQUITECTURA.md).
 
-El sistema **no entrena** un modelo: usa un SLM pre-entrenado (Qwen3) y lo integra mediante *tool calling* a las APIs internas, con capas de validación, filtrado de datos sensibles y control de acceso por área.
+**El objetivo es reemplazar la mano de obra humana de un ISP en el mayor porcentaje posible.** Los agentes hacen el trabajo; una persona interviene solo para aprobar las acciones **críticas** —las que pueden causar daño a la empresa (§2)— y en lo que el sistema todavía no sabe resolver, que es una lista a achicar, no un estado deseado. Primer despliegue: Rapilink (~7.272 clientes activos). El modelo de lenguaje es DeepSeek vía API, amparado en la autorización de tratamiento que firma el cliente (RNF-01); la historia del modelo local está en §7.1.
 
-**Estado actual:** el módulo de **Soporte** está construido y validado de punta a punta contra la API de WispHub en producción.
+El sistema **no entrena** un modelo: lo integra mediante *tool calling* a las APIs de la empresa, con validación, filtrado de datos sensibles y una frontera de autorización en código antes de cualquier efecto.
 
 ---
 
-## 2. Problema y objetivo
+## 2. Problema, tesis y principio
 
 ### Problema
-Los colaboradores necesitan consultar información dispersa en sistemas internos (clientes, facturas, tickets, datos de red) y generar informes. Hoy esto requiere navegar manualmente por las plataformas, conocer dónde está cada dato, y armar reportes a mano.
 
-### Objetivo
-Ofrecer un asistente conversacional interno que:
-- Responda consultas en lenguaje natural sobre los datos de la empresa.
-- Genere informes bajo demanda.
-- Se comporte y muestre información **según el área/rol** del colaborador.
-- Mantenga los datos de clientes seguros y dentro de la infraestructura de la empresa.
+Un ISP crece en clientes más rápido que en personas. Cada cliente nuevo trae mensajes, tickets, visitas y cobranza, y hoy cada uno pasa por alguien que busca el dato en tres sistemas, decide y lo vuelve a escribir en otro. El costo de atender crece con la base de clientes; el margen no.
 
-### Norte — el cerebro de la empresa
+### Tesis de negocio (30/10/2026)
 
-El destino de esta plataforma no es un buscador con buenos modales: es la **capa única de acceso al conocimiento operativo de la empresa**. Que cualquier colaborador pregunte en su idioma y obtenga la respuesta, sin importar en qué sistema viva el dato ni si la respuesta exige cruzar tres fuentes.
+> **Los agentes hacen el trabajo de la operación; las personas aprueban lo crítico.**
 
-Ese norte se persigue creciendo en **un solo eje**, y explícitamente **no** en el otro:
+Dexter toma el trabajo completo, no solo el volumen: el primer contacto, el diagnóstico, la clasificación, la resolución, el reparto, el seguimiento, el cierre y el aviso. Cada tarea que hoy hace una persona y que no es crítica es una tarea que Dexter debería hacer sola. El resultado para el ISP es operar con mucha menos gente, no solo crecer sin contratar.
 
-| Eje | Dirección | Por qué |
+*Hasta el 02/11/2026 este párrafo decía "se vende como capacidad y no como reemplazo de personal". El dueño del producto lo corrigió: el objetivo es reemplazar la mano de obra humana lo más posible (§8.18). Lo que sí se conserva de aquel párrafo es que el cliente final puede pedir una persona y llegar a ella (§10): eso es un derecho del cliente, no un paso del trabajo.*
+
+### Métrica norte y sus contrapesos
+
+**Norte: casos resueltos por persona del equipo, por mes**, por empresa. Se calcula, no se declara (§12.5: el código calcula).
+
+| Métrica | Qué mide | Por qué está |
 |---|---|---|
-| **Alcance** — cuántos sistemas ve, cuántas preguntas puede responder | **Crecer sin techo** | Aquí vive el valor. Un cerebro es la suma de lo que sabe consultar. |
-| **Autonomía** — cuánto decide o afirma el modelo por sí solo | **No crecer** | Aquí vive el riesgo. Ver la lección de `gemma3` en §7.1. |
+| **Resolución sin persona** | % de conversaciones de clientes, en canal real, que se cierran sin que una persona escriba, tome el caso ni apruebe una acción | Es la palanca directa de la tesis |
+| **Recontacto a 72 h** | Mismo cliente que vuelve a escribir dentro de 72 h del cierre | Contrapeso: una resolución falsa sube la métrica de arriba y baja esta |
+| **Satisfacción** | Encuesta de cierre por WhatsApp | Contrapeso: cerrar rápido no es resolver |
+| **Visitas evitadas** | Reinicio remoto con `ACCION_CONFIRMADA` y sin visita agendada en los 7 días siguientes | La visita es el costo más alto de un ISP |
+| **Minutos humanos ahorrados** | Conversaciones resueltas sin persona × minutos por conversación, más visitas evitadas × minutos por visita; los dos los declara cada empresa | Traduce la métrica al idioma de quien compra |
+| **Tiempo hasta resolución** | Del primer mensaje al cierre | Calidad percibida |
 
-> **Principio central:** *la inteligencia del sistema no está en el modelo, está en el catálogo de herramientas.* El modelo es la interfaz —traduce lenguaje a llamadas y datos a frases—; el conocimiento vive en los sistemas de la empresa y las garantías viven en el código. Hacer al sistema más inteligente significa **darle más alcance**, nunca darle más confianza.
+**Regla:** un cambio que sube *resolución sin persona* mientras sube el *recontacto* o baja la *satisfacción* es una regresión, aunque el número principal mejore.
 
-**Qué falta para merecer el nombre** (ninguno de estos puntos se resuelve con un modelo mejor):
+### Principio: autónomo por defecto, una persona solo en lo crítico (02/11/2026)
 
-1. **Consultas agregadas.** Hoy toda herramienta responde sobre *un* cliente. Un cerebro responde "cuántos morosos hay en la zona norte" o "cómo viene la cartera contra el mes pasado". Requiere herramientas nuevas, no un modelo nuevo.
-2. **Más fuentes.** WispHub es la primera, no la única.
-3. **Identidad y área** (Fase 2). Sin saber quién pregunta no se puede ampliar el acceso a los datos sin ampliar el riesgo. Es el prerrequisito de todo lo demás.
-4. **Memoria y auditoría.** Hoy la conversación muere al cerrar la consola.
-5. **Informes** como salida, no solo frases en pantalla.
+| Eje | Dirección |
+|---|---|
+| **Alcance** — cuántos sistemas ve, cuántas preguntas responde, cuántas tareas toma | **Crece sin techo.** Aquí vive el valor |
+| **Autonomía** — qué ejecuta sin que una persona lo apruebe | **Todo, salvo lo crítico.** Por defecto el agente ejecuta solo; una persona aprueba únicamente las acciones críticas |
 
-**Consecuencia técnica del norte:** un modelo de 4B es buen enrutador (medido: elige correctamente la herramienta), pero no es analista. Razonar sobre datos agregados y redactar un informe gerencial exige más capacidad — el salto a 8–14B en servidor (§9) deja de ser opcional el día que se persiga este norte en serio.
+**Qué es crítico — la definición, completa.** Una acción es crítica si un error suyo puede dañar a la empresa, y eso pasa solo cuando:
 
-### Métricas de éxito
-- Tiempo de consulta reducido frente al proceso manual.
-- Adopción por parte de los colaboradores de cada área.
+1. **mueve dinero o cambia lo que se le cobra a un cliente**: registrar un pago, una promesa de pago, reactivar a un suspendido, un descuento, anular una factura;
+2. **deja a un cliente sin servicio de una forma que no se recupera sola, o le da un servicio que no paga**: cambiar el tipo de ONU, suspender, cancelar, encender la televisión;
+3. **afecta a muchos clientes a la vez**: un aviso masivo, un cambio sobre un nodo o una OLT entera;
+4. **borra datos o expone datos personales** fuera de lo que autoriza el cliente (Ley 1581);
+5. **compromete a la empresa con un tercero**: un contrato, una compra, cancelar una venta.
+
+Lo que no encaja en ninguna de las cinco **no es crítico, aunque hoy pida aprobación**, y lo hace el agente sin pedir permiso: responder, diagnosticar, clasificar, crear, actualizar y cerrar tickets, reiniciar un equipo, pasar un caso a Despacho, armar la jornada, crear y repartir órdenes, cargar el material, recordarle al técnico, avisarle a un cliente. Que una acción no crítica siga pidiendo aprobación es un pendiente de producto, no una precaución.
+
+**La persona sale; la garantía no.** Lo que antes revisaba una persona lo revisa el código: antes del efecto (la frontera, las precondiciones `exige_previas`, la idempotencia, la auditoría) y después, cuando hay cómo comprobarlo. Quitar la aprobación humana **nunca** quita la validación en código (CLAUDE.md §4: "seguridad en código, nunca solo en el prompt"). El interruptor de autonomía sigue apagando todo de un paso y falla cerrado (CLAUDE.md §8). Y los contrapesos de arriba —recontacto y satisfacción— son los que dicen si el reemplazo es real o solo un número.
+
+**Cómo se declara.** Cada herramienta del catálogo de una empresa lleva `critica` (verdadero por omisión: lo que no se declara se trata como crítico). Una acción que pasa por la cadena de aprobación y que la empresa declara `critica: false` se promueve a autónoma **sin esperar evidencia de aprobaciones**, siempre que cumpla las garantías en código —efecto verificable y previas comprobadas— y con la misma cadena de ejecución, topes y degradación sola (`nucleo/seguridad/autonomia_ganada.py`). La primera, el 02/11/2026: `reiniciar_ont` en Rapilink.
+
+**Por agente, y dónde se controla.** La autonomía se decide **por agente**: la misma acción puede salir sola con el agente que atiende clientes y pedir aprobación con otro. Se ve y se cambia en **`/agentes`**, debajo de cada acción de cada agente («Lo hace solo» / «Pide aprobación»); `/capacidad` queda solo para medir. Qué agentes usan una herramienta lo dice `puede_consultar` de cada agente —no `Herramienta.roles_permitidos`, que nada del runtime consulta—. El permiso **no** vive en la configuración del agente (`tenant_config` falla abierto: caché y YAML de respaldo) sino en `asistente.autonomia_ganada`, que falla cerrado, con el agente como columna `rol` (nulo = todos). La fila propia de un agente manda sobre la general; una falla técnica (un efecto que no se confirma) baja **todo** lo activo de esa herramienta, porque dice que la acción no anda, no que un agente la usó mal. Las tareas del **Supervisor NOC** se ven en su tarjeta de `/agentes` y se cambian en **Supervisor NOC → Ajustes**, que tiene permisos propios (también el Jefe de Operaciones, no solo ADMIN).
+
+**Lo crítico también puede soltarse, con evidencia.** Una acción crítica pasa a salir sola **solo** por el camino de la autonomía ganada (Ola 3, §8.17), que exige las cuatro condiciones de abajo. Ese camino ya no es la puerta de todo lo que se ejecuta: es la puerta de lo crítico.
+
+*Historia de esta fila: hasta el 30/10/2026 decía "no crecer"; del 30/10 al 02/11 decía "crece acción por acción, solo con evidencia", lo que dejaba toda acción pidiendo aprobación hasta medirla. El dueño la fijó como está (§8.18). El riesgo que motivó "no crecer" —la lección de `gemma3`, §7.1— se cubre con validación en código, no con personas.*
+
+Una acción **crítica** pasa de "una persona aprueba" a "la IA ejecuta" **solo si cumple las cuatro**:
+
+1. **Su efecto se verifica en código después** — p. ej. `last_status_change` para un reinicio (§12, decisiones congeladas de CLAUDE.md). Sin verificación posible, siempre una persona (CLAUDE.md §10).
+2. **Sus precondiciones se comprueban en código antes** (`exige_previas`), sobre datos medidos y no sobre el relato del modelo.
+3. **Hay evidencia en esa empresa**: un mínimo de propuestas revisadas por personas en una ventana, con una tasa de aprobación sin cambios por encima de un umbral, y cero verificaciones fallidas atribuibles a la acción. Mínimo, ventana y umbral son configuración por empresa, con un piso fijo del núcleo que ninguna empresa puede bajar.
+4. **Se degrada sola**: si las verificaciones fallidas o el recontacto de esa acción superan su umbral, vuelve a "una persona aprueba" sin intervención.
+
+**Subir lo decide una persona viendo la evidencia; bajar lo hace el código.** El interruptor y el techo de autonomía (CLAUDE.md §8, PRD §8.6) siguen por encima de todo. Por este camino, hoy, **no** salen solas: `registrar_pago`, las cancelaciones, ni ninguna acción crítica cuyo efecto no se pueda medir.
+
+> **Principio central:** *la inteligencia del sistema no está en el modelo, está en el catálogo de herramientas.* El modelo es la interfaz —traduce lenguaje a llamadas y datos a frases—; el conocimiento vive en los sistemas de la empresa y las garantías viven en el código.
+
+### Requisitos permanentes de seguridad
 - Cero exposición de datos sensibles innecesarios (IP, MAC, credenciales) al modelo.
-- Cero acciones sensibles (pagos) ejecutadas sin confirmación humana.
+- Cero acciones **críticas** sin aprobación humana, salvo las que ganaron autonomía por las cuatro condiciones de arriba. Las no críticas no piden aprobación: piden validación en código antes del efecto.
 
 ---
 
 ## 3. Usuarios y áreas
 
-La plataforma es de **uso interno**. Quien la usa es siempre un **colaborador**, nunca el cliente final. El comportamiento y los permisos cambian por área:
+Dexter tiene **tres tipos de usuario**: el **cliente final** del ISP (por WhatsApp, atendido por los agentes `cliente_final`, `soporte_tecnico_cliente`, `facturacion_cliente` y `ventas`), el **colaborador** (por web, según su área) y la **cuadrilla de campo** (app móvil). *Hasta el 30/10/2026 esta sección decía "uso interno, nunca el cliente final", que dejó de ser cierto en agosto.* Para los colaboradores, el comportamiento y los permisos cambian por área:
 
 | Área | Qué consulta / hace | Datos que SÍ necesita | Datos que NO debe ver |
 |------|--------------------|----------------------|----------------------|
@@ -73,35 +103,44 @@ La plataforma es de **uso interno**. Quien la usa es siempre un **colaborador**,
 
 ---
 
-## 4. Alcance
+## 4. Qué hay hoy y hacia dónde va
 
-### 4.1 MVP — Módulo de Soporte (CONSTRUIDO ✅)
+### 4.1 Lo que hay (medido el 30/10/2026)
 
-Ya implementado y funcionando:
-- Asistente conversacional en consola.
-- Consulta de cliente **por ID de servicio** y **por cédula** (`consultar_cliente_por_cedula`).
-- Consulta de facturas y de tickets.
-- Comportamiento de "asesor" (habla del cliente en tercera persona, no lo saluda).
-- Filtro de PII: la IP, MAC y credenciales nunca llegan al modelo. Cubre las tres formas
-  de respuesta de WispHub (objeto suelto, lista y paginado `{count, results}`) y es
-  **fail-closed**: una herramienta sin lista blanca no deja pasar ningún dato.
-- Toda la configuración (clave, modo real/simulado, URL base, modelo) vive en `.env`;
-  el código no trae credenciales ni interruptores quemados. Por defecto arranca en **modo simulado**.
-- Acción sensible (`registrar_pago`) con confirmación humana obligatoria.
+| Superficie | Para quién | Qué hace | Dónde vive |
+|---|---|---|---|
+| **Atención por WhatsApp** | Cliente final | Un router deriva a especialistas: **soporte técnico** (diagnóstico de "no tengo internet" en 11 ramas con WispHub y SmartOLT, reinicio remoto, agendamiento de visita), **facturación** (estado de cuenta, comprobante de pago), **ventas** (cobertura, planes curados, solicitud). Cada especialista verifica identidad; las notas de voz se transcriben; una guardia revisa el texto antes de enviarlo; el escalamiento a persona tiene 10 motivos y el pedido explícito lo detecta el código | `nucleo/` (§8.8–§8.10c) |
+| **Asistente web** | Colaborador | Soporte, facturación, administración (consultas agregadas, informes Excel/PDF), configuración guiada de sistemas nuevos | `/asistente`, `/configuracion-guiada` |
+| **Bandeja** | Operador | El relevo IA ↔ persona: control, asignación, tomar y devolver, aprobar acciones, ventana de 24 h, plantillas, rótulos, reincidencia, carga del equipo | `/conversaciones` (§8.11, §8.16) |
+| **Tickets y casos** | Operador | CRM con importación y conciliación horaria con WispHub, área por departamento, alta de tickets en WispHub, calidad (encuesta de cierre por WhatsApp) | `/tickets` (§8.14, §8.15) |
+| **Supervisor y Despacho** | Coordinador / NOC | Detecta situaciones de red, clasifica la labor de cada ticket, arma de madrugada la jornada de cada cuadrilla por zona y labor, propone material del día por bodega y kit, revisa el cierre de cada orden y le recuerda al técnico lo vencido | `/supervisor-noc` |
+| **App de campo** | Técnico | Órdenes del día en el orden del Supervisor, trabajo sin señal, novedades de un toque, cierre con fotos, material recibido y escaneo de equipos | `apps/tecnicos-mobile` (Flutter) |
+| **Inventario** | Bodega | Bodegas, custodia por técnico, material apartado por orden, devoluciones | `/inventario` |
+| **Mensajes automáticos** | Empresa | Catálogo de 12 avisos por WhatsApp (ticket creado y cerrado, visita programada, recordatorio de pago, suspensión, confirmación y rechazo de pago, promesa, bienvenida, encuesta…), cada uno con su plantilla, su interruptor y su modo prueba. **Tienen disparador la encuesta y, desde el 30/10/2026 (sin desplegar), la visita programada**: los demás se configuran y no salen. Todo aviso proactivo pasa por `POST /avisos/evento` (`nucleo/seguimiento/avisos.py`), que aplica el horario de la empresa y busca el número | `nucleo/config/mensajes_catalogo.py` |
+| **Centro de mando** | Dirección | Estado en vivo de cada agente | `/centro-mando` |
+| **Gobierno** | Plataforma | Frontera de autorización de 8 pasos, interruptor, techo de autonomía, aprobación atada, idempotencia, listas blancas, redacción de texto libre, guardia de salida, auditoría sin datos | `nucleo/seguridad/` (§7.4, §8.6) |
+| **Consumo** | Plataforma | Tokens y costo por empresa | `/consumo` |
+| **Capacidad** | Dirección | Las seis métricas de §2 por período: resueltas sin persona con sus contrapesos (recontacto, satisfacción), visitas evitadas, minutos ahorrados, tiempo hasta resolver y casos por persona. *En código el 30/10/2026, sin desplegar* | `/capacidad`, `GET /reportes/capacidad` |
 
-### 4.2 Visión completa — Plataforma multi-área (POR CONSTRUIR)
+**Lo que todavía no hay**, y es lo que la tesis necesita (§2): una medición del trabajo que Dexter le ahorra a cada empresa; avisos que salgan solos; una forma de que una acción gane autonomía con evidencia; y un alta de empresa que no pida un desarrollador.
 
-- **Identidad y rol:** login que identifica al colaborador y su área.
-- **Catálogo de herramientas por área:** cada área accede solo a sus herramientas.
-- **Filtros de campo por área:** la misma consulta devuelve distintos campos según el rol.
-- **Generación de informes:** consultas que agregan datos y producen un documento (texto, Excel o PDF).
-- **Interfaz:** pasar de consola a una interfaz web interna.
-- **Registro y auditoría:** log de quién consultó qué (sin registrar datos sensibles en texto plano).
+### 4.2 Hacia dónde va
+
+El orden y el porqué están en §8.17. En una línea cada ola:
+
+| Ola | Qué entrega | Cómo se sabe que sirvió |
+|---|---|---|
+| **1** | Tablero de capacidad · la falla de barrio se consulta antes de reiniciar · el backend falla cerrado sin empresa — **en código el 30/10/2026, sin desplegar** | Las seis métricas de §2 visibles por empresa; la batería pasa de 0/10 en falla de barrio |
+| **2** | Los avisos del catálogo salen solos, más caída masiva y visita confirmada | Baja el volumen entrante en una caída; sube la satisfacción |
+| **3** | Autonomía ganada, empezando por el reinicio remoto | Sube *resolución sin persona* sin que suba el recontacto |
+| **4** | Alta de un ISP con WispHub + SmartOLT en un día y sin código; más de un proceso del motor | Una segunda empresa en producción |
 
 ### 4.3 Fuera de alcance (por ahora)
 - Fine-tuning / entrenamiento del modelo.
-- Atención directa al cliente final (la plataforma es interna).
-- Integraciones con sistemas distintos a WispHub (fase posterior).
+- Una abstracción de "proveedor ISP" en código antes de que exista un cliente que no use WispHub (§8.17, decisión 6).
+- Canal telefónico de voz (§8.17, "Qué no se hace").
+
+*Esta lista decía "atención directa al cliente final" e "integraciones distintas a WispHub": las dos dejaron de estar fuera en agosto (WhatsApp, SmartOLT, BottleCRM).*
 
 ---
 
@@ -117,15 +156,24 @@ Ya implementado y funcionando:
 - **RF-06:** Responder en español, en tercera persona sobre el cliente.
 - **RF-07:** No inventar datos; si no existe, indicarlo explícitamente.
 
-### Plataforma multi-área (por construir)
-- **RF-08:** Autenticar al colaborador e identificar su área.
-- **RF-09:** Exponer al modelo solo las herramientas permitidas para el área.
-- **RF-10:** Filtrar los campos devueltos según el área.
-- **RF-11:** Generar informes bajo demanda a partir de consultas en lenguaje natural.
-- **RF-12:** Exportar informes a formato descargable (Excel/PDF).
-- **RF-13:** Registrar auditoría de consultas por usuario.
-- **RF-14:** Responder consultas **agregadas** (conteos, totales, comparaciones por periodo o zona) mediante herramientas parametrizadas que el modelo compone y el código calcula (ver decisión §12.5).
-- **RF-15:** Toda respuesta agregada debe declarar los filtros y el periodo con que se calculó, para que el colaborador pueda detectar una interpretación errónea de su pregunta.
+### Plataforma multi-área (hecho)
+- **RF-08:** Autenticar al colaborador e identificar su área. ✅ JWT de BottleCRM (§8.1)
+- **RF-09:** Exponer al modelo solo las herramientas permitidas para el área. ✅
+- **RF-10:** Filtrar los campos devueltos según el área. ✅
+- **RF-11:** Generar informes bajo demanda a partir de consultas en lenguaje natural. ✅
+- **RF-12:** Exportar informes a formato descargable (Excel/PDF). ✅ (§8.4)
+- **RF-13:** Registrar auditoría de consultas por usuario. ✅ (§8.2)
+- **RF-14:** Responder consultas **agregadas** (conteos, totales, comparaciones por periodo o zona) mediante herramientas parametrizadas que el modelo compone y el código calcula (ver decisión §12.5). ✅
+- **RF-15:** Toda respuesta agregada debe declarar los filtros y el periodo con que se calculó, para que el colaborador pueda detectar una interpretación errónea de su pregunta. ✅
+
+### Hacia dónde va (§8.17)
+- **RF-16:** Cada empresa ve, por período, las seis métricas de §2, calculadas por el código sobre conversaciones de canales reales. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
+- **RF-17:** Ninguna lectura del backend sirve datos sin una empresa resuelta: sin empresa, nada. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
+- **RF-18:** Un reinicio remoto solo se propone después de comprobar en código que no hay una caída compartida. *(Ola 1)* ✅ en código, sin desplegar (§8.17)
+- **RF-19:** Cada aviso del catálogo de mensajes automáticos sale solo cuando ocurre su evento, si la empresa lo encendió; se agregan caída masiva y visita confirmada. *(Ola 2)* — *visita programada, ticket creado y caída masiva (con aprobación humana, pestaña Fallas de red) en código el 30-31/10/2026, sin desplegar*
+- **RF-20:** Una acción **crítica** gana o pierde autonomía por empresa según las cuatro condiciones de §2, y la evidencia que la sostiene se puede ver. Las no críticas son autónomas sin pasar por acá (§2, §8.18). *(Ola 3)*
+- **RF-21:** Un ISP con WispHub + SmartOLT se da de alta sin cambios de código ni deploy. *(Ola 4)* — *el reloj ya la descubre en la base y el webhook ya no depende de un dominio de empresa (31/10/2026, sin desplegar); falta el paquete base de agentes*
+- **RF-22:** Un despliegue no se come el mensaje que el motor estaba atendiendo. Correr más de un proceso se decide cuando se mida CPU saturada o haga falta una segunda réplica, no antes (§8.17, Ola 4). *(Ola 4)* ✅ en código, sin desplegar
 
 ---
 
@@ -134,6 +182,7 @@ Ya implementado y funcionando:
 - **RNF-01 · Privacidad:** cumplimiento con la Ley 1581 de 2012 (protección de datos personales, Colombia).
   - **Ya no hay modelo local** (agosto 2026). El diseño original dejaba Ollama on-premise como resguardo: un rol sin enrutar, o un `override` mal escrito, se quedaba en casa. Ese resguardo **dejó de existir** cuando se sacó Ollama del VPS al pasar los embeddings a la API de OpenAI — era su único consumidor y el servidor no tenía memoria de sobra. Hoy `modelo_por_defecto` es DeepSeek, así que **todo** sale a una API externa, amparado en la misma autorización de tratamiento de abajo. Un nombre de modelo mal escrito ya no se queda en casa: falla el turno (`cliente.py::resolver` lo interpreta como local y no hay local que responda).
   - **Excepción aprobada (agosto 2026): DeepSeek (`deepseek-v4-flash`) para todos los roles**, incluidos los que llevan PII (`soporte`, `facturacion`, `cliente_final`). Base legal: la autorización de tratamiento que firma el cliente al contratar **cubre transferencia internacional de datos** (Ley 1581, art. 26 — la transferencia a países sin nivel adecuado de protección es lícita con autorización expresa e inequívoca del titular). Confirmado sobre el texto vigente de Rapilink; los ~7.272 clientes activos ya lo firmaron.
+  - **Transcripción de voz con OpenAI (`gpt-4o-transcribe`, activa desde el 30/09/2026)**: el audio del cliente sale a OpenAI. **Decidido por el usuario el 30/10/2026**: la autorización de tratamiento que el cliente firma al contratar cubre este uso, con la misma base que DeepSeek. Queda una comprobación de texto, no de decisión: que la autorización hable de proveedores tecnológicos en general y no nombre solo a uno. Para cada empresa nueva, su propia autorización tiene que cubrir a los dos proveedores antes de encender la transcripción.
   - Motivación medida, no solo de costo: el modelo local tarda 42.6 s por turno (~180 s si estaba descargado de memoria); DeepSeek, 4.7-12 s — hasta 17× más rápido en la misma tarea real (`cli/prueba_velocidad.py`). A ~$0.24 por cada 1.000 consultas, resuelve directamente la tensión de RNF-04 con el técnico en campo.
   - **La persistencia se reparte** (decisión de agosto 2026, al adoptar Supabase hospedado para la arquitectura multi-tenant). El criterio es uno solo: *sale a la nube lo que no identifica a una persona*.
 
@@ -153,9 +202,10 @@ Ya implementado y funcionando:
   - ⚠️ **La región del proyecto Supabase se define una sola vez y no se puede cambiar sin migrar.** Elegirla es un paso previo a crear el proyecto, no posterior.
   - ⚠️ **Validación legal ahora obligatoria antes de producción**, no opcional: la adopción de infraestructura hospedada cambia el análisis que motivó este requisito.
 - **RNF-02 · Seguridad en capas:** las reglas duras (filtrado de PII, confirmación de acciones sensibles) se aplican en **código**, no solo en el prompt. El prompt guía el comportamiento; el código garantiza los límites no negociables.
-- **RNF-03 · Costo:** volumen bajo (~300 consultas/día). El modelo local no tiene costo por token; el `override` a DeepSeek (agosto 2026) agrega ~$0.24 por cada 1.000 consultas — a este volumen, unos pocos dólares al mes.
-- **RNF-04 · Rendimiento:** originalmente se priorizó calidad sobre latencia, aceptando los 42.6 s/turno de `qwen3:30b-a3b`. La tensión con el técnico en campo (§14 del diseño multi-tenant) queda **resuelta por DeepSeek** (RNF-01): 4.7-12 s por turno con calidad de texto equivalente, medido sobre la misma tarea de producción. Desde agosto 2026 DeepSeek es el **default**, no un `override`: ya no hay modelo local al que caer.
-- **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts parametrizados por área, para replicar el patrón sin reescribir el motor.
+- **RNF-03 · Costo:** DeepSeek cuesta ~$0.24 por cada 1.000 consultas (agosto 2026); el consumo real por empresa se ve en `/consumo`. El costo que importa para la tesis no es el del modelo sino el de cada caso que termina en una persona o en una visita: por eso la métrica norte (§2) es de capacidad, no de tokens.
+- **RNF-04 · Rendimiento:** 4.7–12 s por turno con DeepSeek (RNF-01), medido sobre la tarea real. El techo de concurrencia hoy es de un proceso con 8 hilos para todas las empresas juntas, y se queda así a propósito: un turno es casi todo espera de red (§8.17, Ola 4); un segundo proveedor de respaldo ante una caída de DeepSeek espera a que su autorización de tratamiento esté resuelta.
+- **RNF-05 · Mantenibilidad:** herramientas, filtros y prompts son configuración por empresa (`tenants/` como semilla, `asistente.tenant_config` como fuente de verdad); el núcleo no conoce a ninguna empresa y una guarda lo comprueba (ARQUITECTURA.md).
+- **RNF-06 · Multi-empresa, fallando cerrado:** sin una empresa resuelta no se sirve ningún dato, en el motor (medido: 0 filas) y en el backend (Ola 1 de §8.17).
 
 ---
 
@@ -163,14 +213,20 @@ Ya implementado y funcionando:
 
 ### 7.1 Stack
 
-| Componente | Tecnología |
-|-----------|-----------|
-| Modelo (motor) | **DeepSeek** (`deepseek-v4-flash`) vía API. Hasta agosto 2026 fue **Qwen3 30B-A3B** (MoE, Q4_K_M) vía **Ollama** local — ver RNF-01 |
-| Lenguaje | Python 3.13 |
-| Cliente del modelo | librería `openai` (contrato compatible; también `anthropic`). `ollama` queda solo para `cli/banco_pruebas.py` y `cli/prueba_velocidad.py`, que comparan modelos contra el Ollama de la máquina de quien los corre |
-| Llamadas HTTP | `requests` |
-| Configuración y credenciales | `python-dotenv` (archivo `.env`) |
-| API de datos | WispHub REST API (JSON, auth por API Key) |
+| Capa | Tecnología |
+|---|---|
+| Modelo de lenguaje | **DeepSeek** (`deepseek-v4-flash`) vía API, para todos los roles (RNF-01). Cliente: librería `openai`, contrato compatible |
+| Embeddings y transcripción | OpenAI (`text-embedding-3-large`, `gpt-4o-transcribe`) |
+| Motor | Python 3.13 · Flask + gunicorn (`nucleo/`) |
+| Plataforma | BottleCRM vendorizado: Django + DRF + Celery (`django-crm/backend`) y SvelteKit (`django-crm/frontend`) |
+| App de campo | Flutter, con operación sin señal (`apps/tecnicos-mobile`) |
+| Base | PostgreSQL 17 (Supabase autoalojado, solo Postgres), migraciones por ledger propio (`supabase/`) |
+| Sistemas del ISP | WispHub (gestión, tickets, facturas), SmartOLT (red de fibra), WhatsApp Cloud API (Meta) |
+| Despliegue | Un VPS con Dokploy, autodeploy al pushear la rama de despliegue (§9, DESPLIEGUE.md) |
+
+#### Historia — el modelo local (julio–agosto 2026)
+
+Hasta agosto el motor corría un modelo local con Ollama. Se retiró por velocidad (42.6 s por turno contra 4.7–12 s, RNF-01) y por memoria del servidor. Lo que sigue queda porque sus lecciones aplican a **cualquier** cambio de modelo.
 
 **Motor elegido: `qwen3:30b-a3b-q4_K_M`.** Es un modelo **MoE** (mezcla de expertos): 30B de parámetros totales pero solo **~3B activos por token**. Esa es la razón de la elección y no el tamaño: ocupa memoria como un 30B pero **calcula como un 3B**, que es lo único que lo hace viable sin GPU dedicada. Un denso equivalente daría ~2-3 tok/s en el equipo actual — inservible.
 
@@ -197,7 +253,7 @@ Configurable por `.env`: `MODELO_SLM` (decide) y `MODELO_REDACCION` (redacta).
 
 *(Nota: la cifra histórica de ~25 s por turno se midió antes; las 51.8 s de agosto salen de una corrida con el modelo de 18 GB cargado en memoria. Las comparaciones entre modelos son válidas —misma corrida, mismas condiciones— pero el absoluto conviene remedirlo en frío.)*
 
-### 7.1.1 Equipo de desarrollo y por qué MoE
+### 7.1.1 Historia — el equipo de desarrollo y por qué MoE
 
 | | |
 |---|---|
@@ -215,42 +271,45 @@ La VRAM es el límite: el panel de Windows reporta "20 GB totales", pero son 4 G
 
 Este equipo sirve para **construir y evaluar**, no para producción: es un portátil (hace throttling en cargas sostenidas como el informe de materiales) y no aguanta clientes concurrentes. La máquina de producción se decide **con los datos de `banco_pruebas.py`**, no con estimaciones.
 
-### 7.2 Componentes y flujo
+### 7.2 Componentes y flujo de un turno
 
 ```
-Colaborador (lenguaje natural)
+Cliente (WhatsApp, /canales/whatsapp/<empresa>)   ·   Colaborador (web, sesión del CRM)
         │
         ▼
-[ 1. Identidad y área ]  ──► define herramientas y filtros permitidos
+[ 1. Canal ]  ──► empresa por la URL o por la sesión; nota de voz → texto; guardar el mensaje primero
         │
         ▼
-[ 2. Motor SLM (Qwen3 + Ollama) ]  ──► decide qué herramienta llamar y con qué argumentos
+[ 2. Turno ]  ──► ¿la conversación la tiene una persona? entonces la IA no responde (relevo, §8.11)
         │
         ▼
-[ 3. Capa de validación ]  ──► valida los argumentos (el modelo propone, el código dispone)
+[ 3. Rol ]  ──► router → especialista; cada rol trae su prompt, su catálogo y sus listas blancas
         │
         ▼
-[ 4. Confirmación humana ]  ──► solo para acciones sensibles (pagos)
+[ 4. Bucle de herramientas ]  ──► el modelo propone llamada y argumentos, con tope de vueltas
         │
         ▼
-[ 5. Ejecución de herramienta ]  ──► llama a la API de WispHub (o simulado)
+[ 5. Frontera ]  ──► empresa → interruptor → techo → autorización → aprobación atada →
+        │            auditoría → permiso → idempotencia → último metro (CLAUDE.md §5)
+        ▼
+[ 6. Herramienta ]  ──► WispHub / SmartOLT / CRM; veredictos calculados en código
         │
         ▼
-[ 6. Filtro de PII ]  ──► descarta campos sensibles según el área
+[ 7. Listas blancas + redacción ]  ──► qué campos llegan al modelo, y sin PII en el texto libre
         │
         ▼
-[ 7. Motor SLM redacta ]  ──► respuesta final en español, tercera persona
+[ 8. Redacción y guardia de salida ]  ──► el modelo redacta; el código revisa el texto
         │
         ▼
-Colaborador (respuesta / informe)
+[ 9. Escalamiento y seguimiento ]  ──► ¿hace falta una persona? ¿una visita? ¿una verificación?
+        │
+        ▼
+Respuesta entregada (aceptado ≠ entregado ≠ leído)
 ```
 
-### 7.3 Patrón de tool calling (dos llamadas al modelo)
+### 7.3 Patrón de tool calling
 
-1. **Primera llamada:** se envía el mensaje del usuario + la lista de herramientas. El modelo responde con `tool_calls` (qué herramienta y qué argumentos) o con texto directo.
-2. El código **valida**, **confirma** (si es sensible), **ejecuta** contra la API y **filtra** el resultado.
-3. El resultado filtrado se agrega al historial con rol `tool`.
-4. **Segunda llamada:** el modelo redacta la respuesta final usando el dato ya en mano.
+El modelo propone; el código valida, ejecuta y filtra; el resultado vuelve al historial con rol `tool`, y el bucle sigue hasta que el modelo responde con texto o llega al tope de vueltas. *Esta sección describía dos llamadas fijas, del prototipo de consola; el bucle reemplazó ese diseño (§12.3, punto 2).*
 
 ### 7.4 Seguridad en dos capas (crítico)
 
@@ -279,31 +338,9 @@ Se decidió **mantener `descripcion`**: es el contenido del ticket y Soporte no 
 
 Configurado hoy en `consultar_ticket` (roles `soporte` y `administracion`). Al agregar un campo nuevo a una lista blanca, preguntarse si es texto libre — si lo es, agregarlo también a `campos_texto_libre` de esa herramienta. Guarda: `tests/test_redaccion.py`.
 
-### 7.5 Parametrización por área (guía para extender)
+### 7.5 Extender: una herramienta, un rol, una empresa
 
-El patrón para escalar de un área a varias:
-
-```python
-# El SYSTEM se construye según el área del colaborador
-def construir_system(area): ...
-
-# Cada área ve solo sus herramientas
-HERRAMIENTAS_POR_AREA = {
-    "soporte":     [consultar_cliente, consultar_cliente_por_cedula, consultar_ticket],
-    "facturacion": [consultar_facturas, registrar_pago],
-    "tecnica":     [consultar_datos_red],
-    # ...
-}
-
-# Cada área tiene su propia lista blanca de campos
-CAMPOS_POR_AREA = {
-    "soporte":  ["id_servicio", "usuario_rb", "estado", "plan_internet"],
-    "tecnica":  ["id_servicio", "ip", "mac_cpe", "router", "zona"],  # técnica SÍ ve red
-    # ...
-}
-```
-
-El motor (validación, tool calling, filtrado, confirmación) **no cambia**: solo recibe distintas herramientas y filtros según el área. Lo construido para Soporte es la plantilla.
+Todo se extiende por configuración del tenant, no por código: una herramienta se declara en el catálogo (`herramientas`, con sus filtros verificados y su lista blanca por rol), un rol en `roles` (prompt, catálogo, campos permitidos), y una empresa es una fila más en `asistente.tenant_config`. Lo que el núcleo interpreta vive en `nucleo/config/schema.py`. *Esta sección mostraba los diccionarios de Python del prototipo (`HERRAMIENTAS_POR_AREA`, `CAMPOS_POR_AREA`); ese patrón se convirtió en la configuración de hoy.* El procedimiento y sus guardas están en CLAUDE.md §3 y §6.
 
 ### 7.6 Notas de integración con WispHub
 
@@ -359,7 +396,9 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 
 ---
 
-## 8. Roadmap por fases
+## 8. Roadmap y decisiones
+
+**Las fases 0–6 del plan original están cumplidas** (tabla de abajo, que queda como historia). **Lo que sigue son las cuatro olas de §8.17**, resumidas en §4.2. Las subsecciones §8.1–§8.17 registran, en orden de fecha, cada pieza construida y cada decisión con su evidencia.
 
 | Fase | Entregable | Estado |
 |------|-----------|--------|
@@ -369,7 +408,7 @@ SmartOLT es donde el ISP administra las ONUs autorizadas en la OLT de fibra — 
 | **3** | Replicar patrón a Facturación y Técnica | ✅ Catálogo definido y verificado — Técnica ahora incluye SmartOLT (lectura de red + reinicio de ONT, ver §7.7), no solo WispHub |
 | **4** | Generación de informes + exportación (Excel/PDF) | ✅ Excel y PDF (ver §8.4) |
 | **5** | Interfaz web interna (reemplaza la consola) | ✅ En gran parte hecho — ver §8.1 |
-| **6** | Auditoría/logs y despliegue en servidor on-premise | Auditoría ✅ (§8.2) · despliegue: pasos manuales pendientes en DESPLIEGUE.md → `## Pendientes` |
+| **6** | Auditoría/logs y despliegue | ✅ Auditoría (§8.2) · en producción desde agosto 2026 en un VPS con Dokploy (§9), no on-premise |
 
 ---
 
@@ -537,7 +576,7 @@ Verificado con datos de ejemplo en memoria (sin tocar el archivo versionado, mie
 
 ---
 
-### 8.9 TR-069 — integrado y funcionando, pero PENDIENTE de habilitación masiva (agosto 2026)
+### 8.10b TR-069 — integrado y funcionando, pero PENDIENTE de habilitación masiva (agosto 2026)
 
 SmartOLT expone `GET /api/onu/get_onu_router_hosts/{sn}`, que devuelve los equipos conectados al router del cliente: nombre (`HostName`), si están conectados ahora (`Active`), y si entraron por WiFi (`802.11`) o por cable (`Ethernet`). Responde en 2-3 segundos, no es el endpoint pesado. Es lo único que deja ver **del lado de adentro de la casa** — hasta ahí el diagnóstico llega a la ONT y después hay que preguntar.
 
@@ -555,7 +594,7 @@ Cuando la habilitación masiva esté hecha, lo que falta es solo **volver a apoy
 
 ---
 
-### 8.10 `no_internet` — cerrado en código, con una rama que solo se confirma en una caída real (agosto 2026)
+### 8.10c `no_internet` — cerrado en código, con una rama que solo se confirma en una caída real (agosto 2026)
 
 El caso quedó con **once ramas** y cada una sabe dónde termina. Cuatro se resuelven sin humano y sin visita (suspensión por mora → facturación; falla en un solo aparato; solo WiFi; equipo sano en todos los aparatos → reinicio remoto). Tres agendan visita solas (fibra cortada confirmada; sin energía con corriente confirmada y sin recuperarse; ping sin respuesta con la ONU en línea, reinicio hecho y sin MAC). Cuatro terminan en una persona a propósito, porque mandar un técnico no las resolvería.
 
@@ -617,7 +656,7 @@ Tres defectos salieron de esa corrida, ninguno visible en lo que el asistente co
 | 7 | **Desenlace + cierre + sincronización del ticket** | Cierre operacional verdadero y dato para aprender |
 | 8 | **Paginación y búsqueda en servidor** | Deuda de escala; va después de los problemas de corrección |
 | 9 | **Ficha de handoff con fuente y frescura** | Entender el caso en segundos (extiende la ficha que ya arma el código) |
-| 10 | **Transcripción de audio** | Hoy la IA recibe `"[El cliente envio un audio]"`; es entrada de negocio en WhatsApp |
+| 10 | **Transcripción de audio** | ✅ Hecha: las notas de voz se transcriben antes del turno (`nucleo/canales/transcripcion.py`, `gpt-4o-transcribe`); el texto fijo `"[El cliente envio un audio]"` queda solo si la transcripción falla (verificado el 30/10/2026) |
 | 11 | **Borrador asistido** | Depende de 9 |
 | 12 | **Comodidades** (citar, borradores, @menciones, macros, atajos) | Las de equipos grandes, diseñadas para no estorbar a quien trabaja solo |
 
@@ -714,10 +753,12 @@ fijar el contexto como cualquier otra lectura.
 - **El dominio del webhook.** `motor.rapilinksas.co` lleva la marca del primer
   cliente. Con esta decisión tomada, conviene mudarlo a un dominio neutro
   **antes** del segundo ISP: después obliga a que *cada* cliente reconfigure su
-  webhook en Meta a mano.
+  webhook en Meta a mano. *(Resuelto el 31/10/2026: pasa a un dominio de Dexter
+  al salir a producción; ver §8.17, Ola 4.)*
 - **`--workers 1`.** El historial caliente de las conversaciones vive en la RAM
   del proceso. Aguanta con hilos, pero es un techo real con varias empresas, y
   se levanta el día que ese historial viva en `asistente.conversations`.
+  *(Decidido el 31/10/2026: se queda en un proceso; ver §8.17, Ola 4.)*
 
 **Y una advertencia medida:** esta deuda **crece sola**. Cuando se anotó por
 primera vez eran 23 lugares; hoy son 80. Cada pantalla nueva del asistente suma
@@ -828,13 +869,165 @@ separado en la cola (sería un ajuste de la bandeja, no un cambio del relevo), o
 que T18 empiece a registrar quién cerró y cuándo — entonces la marca de cierre
 lo diría sin cambiar nada más.
 
+### 8.17 DECISIÓN — la reestructura por la tesis de capacidad (30/10/2026)
+
+**El error que la originó.** El usuario preguntó si el proyecto iba por buen camino para su negocio —venderles a los ISPs que con menos personal rinden más— y delegó en esta sesión decidir qué reestructurar. La revisión encontró que **el PRD no decía cuál era el negocio** (su §1 describía un asistente interno con un modelo local; sus métricas eran "tiempo de consulta" y "adopción") y que su principio **congelaba la autonomía** justo donde vive el ahorro. Se revisó el código en cinco frentes en paralelo (medición, autonomía, alta de un ISP, proactividad, escala) y se verificó a mano lo que decide.
+
+**Lo medido ese día** (VERIFICADO salvo donde dice otra cosa):
+
+| Hallazgo | Evidencia |
+|---|---|
+| La única cifra de resultado en una pantalla es la tasa de escalada, y no filtra por canal: mezcla pruebas con clientes | `persistencia.tasa_escalamiento` (`db.py`), `/agentes`; `canales.REALES` no se aplica |
+| Lo resuelto sin persona, el recontacto, las visitas evitadas y las aprobaciones **se pueden calcular con datos que ya se guardan**; nadie los junta | `conversations.control`/`cerrada_por_tipo`, `relevo_eventos`, `messages.origen` (desde 16/09), `verificaciones_accion`, `acciones_propuestas.estado` |
+| `reiniciar_ont` exige aprobación humana en **cada** caso | `irreversible: true`, `aprobacion_humana: true` en `tenants/rapilink.config.yaml` (M06-A, 21/09) |
+| Ninguna herramienta declara `nivel_autonomia`; nada conecta la tasa de aprobación con el nivel | `techo.py`; `indicadores.py` calcula `tasa_aceptacion` sin consumidor |
+| Dexter casi no le escribe primero a ningún cliente: hay un **catálogo de 11 avisos** configurables con su plantilla e interruptor, pero **solo la encuesta tiene disparador** | `nucleo/config/mensajes_catalogo.py::EVENTOS`; `mensajes_automaticos.enviar` solo lo llama `encuesta.py`; `POST /avisos/whatsapp/<tenant>` sin llamador fuera de tests |
+| La falla de barrio se diagnostica como una casa: 0/10 | Con la ONU en línea, el prompt reinicia sin consultar `consultar_incidente_red` (`SPEC/DEXTER_ESTADO_ACTUAL.md`, validación de producción) |
+| El frontend ya es multi-empresa; **el backend Django no**: 9 lecturas de `MOTOR_TENANT` con respaldo `or "rapilink"` (fallan ABIERTO) y un correo de Rapilink fijo | `solicitudes/entrega.py:120,215,291` · `gestion.py:65` · `views.py:140` · `campo/services/despacho.py:453,510` · `telemetria.py:47` · `operaciones/cierre_de_caso.py:254` · `entrega.py:32` |
+| El reloj descubre las empresas leyendo `tenants/*.config.yaml`: dar de alta una exige commit y deploy | `nucleo/reloj.py` |
+| La config de Rapilink tiene 7.299 líneas; ~60-70 % es contenido propio de la empresa (prompts, escalamiento, catálogos) | INFERIDO por secciones; los conectores compartidos ya existen (`conectores/wisphub.yaml`, `smartolt.yaml`) |
+| Un solo proceso con el historial en memoria; un solo proveedor de modelo sin respaldo | `--workers 1 --threads 8` (`docker-compose.prod.yml`), `api.py::_sesiones`; `cliente.py::chat()` |
+| La transcripción de voz manda el audio del cliente a OpenAI y no había registro de que la autorización de tratamiento lo cubriera | `nucleo/canales/transcripcion.py` (30/09/2026). **Resuelto por el usuario el 30/10/2026** (RNF-01) |
+
+**Lo que se decidió**, en el orden en que se construye. Cada ola se mide con la métrica de §2 antes de pasar a la siguiente.
+
+**Ola 1 — medir, y cerrar lo que falla abierto**
+
+1. **Tablero de capacidad.** Las métricas de §2, por empresa, calculadas en el motor (`db.py` → endpoint → pantalla), filtradas a `canales.REALES` y con fecha de corte desde que existe `messages.origen`. Los minutos por conversación y por visita son configuración de cada empresa (`TenantConfig.capacidad`). La tasa de escalada actual se corrige para que filtre por canal. Contrato: `SPEC/objetivos/tablero-de-capacidad.md`. *Va primero porque sin él ninguna de las demás olas puede probar que acerca la tesis, y la Ola 3 lo necesita como insumo.*
+2. **La falla de barrio se consulta antes de tocar una casa.** `reiniciar_ont` agrega `consultar_incidente_red` a sus `exige_previas`, con la condición de que no haya caída compartida: la garantía queda en código y no depende del orden del prompt (§7.4). El prompt se alinea después. Se mide con `cli/bateria_flujos.py` (hoy 0/10). *En una caída general es cuando más personas hacen falta: es el peor momento para que la IA mande a reiniciar treinta casas.*
+3. **El backend Django falla cerrado.** Se quitan los 9 respaldos `or "rapilink"` y el correo fijo: sin tenant no se sirve nada. Es un defecto de seguridad de la misma familia que `app_backend` sin tenant (ARQUITECTURA.md), no una mejora de multi-empresa.
+
+**Ola 1 hecha en código el 30/10/2026 (rama `producto/tesis-de-negocio`, sin desplegar).** Lo medido:
+
+- *Tablero*: `nucleo/persistencia/capacidad.py` (conteos en SQL) + `nucleo/observabilidad/capacidad.py` (tasas y minutos) + `GET /reportes/capacidad` + pantalla `/capacidad` (solo ADMIN). `tests/test_tablero_capacidad_base.py` contra PostgreSQL real afirma el número exacto de cada métrica, y caza tres mutaciones (sin filtro de canal real, ignorar las acciones aprobadas, la tasa de escalada vieja sin filtro). La cadena hasta la pantalla la cubre `capacidad-servidor.test.js`. Decisiones de esta sesión: "fin" de una conversación es su **último mensaje que no es una nota**, no el evento `cerrada` (los cierres de legado y T18 no lo dejan); cualquier acción propuesta cuenta como "con persona"; los minutos son **dos** parámetros (por conversación y por visita) y las personas del equipo un tercero, no "por tipo de caso", porque una conversación no tiene un tipo confiable; **Rapilink no tiene minutos declarados** y el tablero los muestra en null hasta que la empresa los dé.
+- *Falla de barrio*: `reiniciar_ont` exige `consultar_incidente_red` con `es_incidente_de_red: false` (`tests/test_reinicio_no_en_caida_de_barrio.py`). El motor la vuelve a medir al aprobar. **Lo que falta medir:** la batería de flujos (`cli/bateria_flujos.py`), que pasa por el turno y necesita la red de producción; el humo de `cli/evaluar.py` dio 8/9, igual a su línea base, pero no tiene caso de reinicio. El prompt no se tocó: el motor le dice al modelo qué previa falta.
+- *Backend*: los 9 respaldos y el buzón fijo, con su guarda de arquitectura (`common/tests/test_motor_tenant_falla_cerrado.py`). El buzón que recibe las solicitudes es de cada empresa: `Org.correo_solicitudes`, que el administrador carga en Ajustes → Organización (31/10/2026; primero fue una variable de entorno, y una variable es una instalación por empresa). Sin cargarlo, la solicitud queda en `fallo_integracion` y no se pierde.
+- *El backend deja de ser una instalación por empresa (31/10/2026).* Fallar cerrado no alcanzaba: `MOTOR_TENANT` seguía siendo **una** variable por proceso, así que con dos empresas en la misma instalación la solicitud de la segunda creaba el ticket en el WispHub de la primera, su Supervisor razonaba con el modelo de la primera y leía sus áreas. Ahora cada pedido al motor lleva la empresa de la **organización del objeto que se trata** —la orden, la solicitud, el caso, la propuesta— y se la pregunta al motor (`operaciones/areas_del_tenant.py::tenant_de`, que reusa `/tenant-de-organizacion/<id>`, el mismo camino del frontend y de los permisos de la Bandeja desde el 24/10). Sin empresa no sale nada (`sin empresa en el motor`). Son 16 lectores en `campo/`, `operaciones/` y `solicitudes/`; la ingesta de documentos al asistente leía igual `ASISTENTE_TENANT` —un documento de una empresa terminaba en el corpus de otra— y pasó a lo mismo, y la purga de retención recorre todas las empresas. El cerebro del Supervisor recibe la empresa de `razonar(org, …)` por contexto, porque su puerta al modelo la sustituyen decenas de pruebas con la firma `(mensajes, tools)`. Guarda: `common/tests/test_motor_tenant_falla_cerrado.py` falla si algo vuelve a leer la empresa del entorno, y afirma con dos organizaciones que lo de B sale con el tenant de B aunque la variable apunte a A. `docker-compose` ya no declara ninguna variable de empresa: ni `MOTOR_TENANT`, ni `ASISTENTE_TENANT`, ni `PRIVATE_ASISTENTE_TENANT` (el frontend ya no la leía).
+
+**Lo que cambió la auditoría del mismo día** (`revisor-de-pii`, `auditor-de-frontera`, `auditor-independiente` sobre `20687706`). Dos hallazgos inflaban el tablero **a favor de Dexter**, que es justo el número que se le muestra a quien compra:
+
+| Hallazgo | Qué se hizo |
+|---|---|
+| La visita que agenda el código no pasa por `tool_calls` (queda en `conversations.ticket_operativo`), así que un reinicio seguido de visita automática contaba como visita evitada. La prueba lo escondía: fabricaba el evento en `tool_calls` | Un `ticket_operativo` del mismo cliente en la ventana también desmiente la visita evitada; la prueba siembra ese caso por la columna real |
+| Ventanas incompletas contaban como resultado: un reinicio de ayer como visita evitada, una conversación cerrada hace una hora como "sin recontacto" | Solo se evalúan reinicios con sus días ya cumplidos y conversaciones con sus 72 h ya cumplidas; los que siguen en ventana se informan aparte |
+| Una conversación que abre un operador (T21) contaba como recontacto | Recontacto = un mensaje **del cliente** en otra conversación |
+| Una nota interna corría el fin y volvía "con persona" a la conversación | Las notas (`rol = 'nota'`) no cuentan para ninguna de las dos cosas |
+| Visita automática y cierre por inactividad contaban como "resueltas sin persona" | Un ticket operativo es "con persona"; las cerradas por inactividad van aparte (`por_inactividad`), porque un cliente que dejó de contestar no confirma que esté resuelto |
+| El divisor de la métrica norte eran los operadores que tocaron la bandeja | Pasa a `capacidad.personas_del_equipo`, declarado por la empresa como los minutos; lo medido queda como dato informativo |
+| La guarda M06-A del reinicio quedó con 6 fallos nuevos (el doble de prueba no preparaba la previa nueva) | Corregido: vuelve a sus 2 fallos preexistentes. **Error de método propio**: comparé las suites por archivo y M06-A ya estaba en rojo, así que el aumento no se vio. Desde acá se comparan por comprobación |
+| Lo nuevo de la config solo vivía en el YAML, y el YAML de Rapilink no se puede cargar entero (pisaría la encuesta en modo prueba) | `cli/cargar_claves.py`: sube **solo** las claves nombradas, por el mismo camino validado del editor. Y los tres números que declara la empresa se editan desde `/capacidad` (§3.3), `PUT /configuracion/capacidad` |
+| Un cierre de caso sin empresa quedaba rotulado "el motor no respondió" | Motivo propio, `SIN_EMPRESA_EN_EL_MOTOR` (se llamó `FALTA_MOTOR_TENANT` hasta que la empresa dejó de ser una variable): se sabe que no salió nada |
+
+**Límites que quedan escritos, no resueltos:**
+
+- *"No sé" pasa como "no hay caída".* `consultar_incidente_red` devuelve `es_incidente_de_red: false` también cuando no pudo ubicar la ONU, en los primeros minutos de una caída (SmartOLT agrupa con 2–5 min de demora) y ante un cuerpo inesperado. La previa acota y no autoriza —siguen la señal, el ping y la aprobación humana—, así que lo peor es un reinicio inútil. Cerrarlo exige que la herramienta distinga "sin dato" de `false`, y eso cambia lo que ve el modelo: queda para cuando se mida.
+- *Una visita cargada a mano en el sistema del ISP no se ve* desde Dexter: la visita evitada sigue siendo una estimación, y la pantalla lo dice.
+- *Lo que todavía es de una instalación* (31/10/2026): el backend y el frontend ya sacan la empresa de la organización; el reloj, desde el mismo día, la descubre en la base, y el dominio del webhook pasó a ser un dato de la instalación (Ola 4, abajo). Lo que queda es el paquete base de agentes.
+- *La empresa de cada organización la resuelve el motor por HTTP*, con 15 minutos de caché (60 s si no contestó). Con el motor caído no sale nada, que ya pasaba: todos esos pedidos iban al motor de todos modos.
+
+**Para desplegar, en este orden** (lo decide una persona; push = deploy):
+
+1. Push, y que el motor y el backend levanten (el backend aplica la migración `common/0046`). **Comprobar en seguida que la organización de Rapilink tiene empresa en el motor**, porque desde el 31/10 sin eso no sale nada del backend —ni tickets de solicitudes, ni ping, ni cierres, ni el Supervisor—: `docker exec <backend> python manage.py shell -c "from common.models import Org; from operaciones.areas_del_tenant import tenant_de; print([(o.name, tenant_de(o)) for o in Org.objects.filter(is_active=True)])"` tiene que mostrar `rapilink` al lado de Rapilink. Es el mismo camino que ya usa el frontend en producción, así que se espera que esté; si no está, revertir el deploy antes de seguir.
+2. El administrador de Rapilink carga en Ajustes → Organización el correo que recibe las solicitudes (hasta hoy `info.rapilinksas@gmail.com`, fijo en el código). Hasta que lo cargue, las solicitudes nuevas quedan en `fallo_integracion`.
+3. `py -3.13 cli/cargar_claves.py tenants/rapilink.config.yaml --clave capacidad --clave "herramientas[reiniciar_ont].exige_previas" --clave "herramientas[reiniciar_ont].descripcion"`: primero sin `--aplicar`, mirar, y después con `--aplicar`.
+4. `py -3.13 cli/diferencias_config.py rapilink` y `py -3.13 cli/evaluar.py rapilink --humo --base` (CLAUDE.md §6).
+5. Que la empresa declare en `/capacidad` sus minutos y sus personas.
+6. **El reloj ve a Rapilink en la base** (desde el 31/10 no mira la carpeta `tenants/`): dentro de `motor-reloj`, `RELOJ_HABILITADO=1 python -m nucleo.reloj --once --dry-run`, y la línea `ciclo inicio` tiene que nombrar a `rapilink`. Si sale vacía con la base arriba, el usuario del reloj no puede leer `tenant_config.activo`: el reloj no hace nada (falla cerrado) hasta que se le dé.
+7. Opcional, cuando exista el dominio de Dexter: `WEBHOOK_BASE_URL` en Dokploy (DESPLIEGUE.md §4.d).
+
+**Ola 2 — que la IA inicie, no solo responda**
+
+4. **Avisos proactivos por WhatsApp.** El catálogo, las plantillas y los interruptores ya existen (28/10/2026): lo que falta es **conectar el disparador** de cada aviso a su evento, y sumar dos eventos al catálogo. En este orden: (a) **caída masiva** a los clientes del PON afectado —evento nuevo; la detección ya existe en `operaciones/deteccion.py` y `correlacion.py`—; (b) **ticket cerrado** como seguimiento ("¿quedó funcionando?"), que además alimenta el recontacto; (c) **visita confirmada** —evento nuevo— y **ticket creado**; (d) **recordatorio de pago** y **suspensión**, que son de disparo diario contra WispHub. Todo respeta la baja (Ley 1581) y el modo prueba por números que ya tiene el catálogo. *Un aviso de caída evita cientos de mensajes entrantes; es la reducción de volumen más grande disponible.* **Bloqueo operativo:** plantillas UTILITY aprobadas por Meta para cada empresa (se crean desde Dexter desde octubre; la aprobación la da Meta y tarda días).
+
+   **Avance del 30/10/2026 (sin desplegar)** — ficha `SPEC/objetivos/avisos-proactivos.md`:
+   - *La puerta común*: `POST /avisos/evento` → `nucleo/seguimiento/avisos.py`. Decide **cuándo** (`horario_avisos`, 7 a 20 h por defecto: el día se publica de madrugada y un WhatsApp a las 3 a. m. espera a la mañana; contesta `todavia_no` con los segundos y el CRM reagenda), **a quién** (el chat del caso si es de canal real; si no, el teléfono del ISP normalizado con `autenticacion.indicativo_pais`, sin default) y **si sale** (`mensajes_automaticos.enviar`: interruptor, prueba, baja, plantilla, una vez por clave). El número sale en la forma de `usuario_externo`, que es lo que compara la baja: un `+57 300…` la saltaría.
+   - *Visita programada*: evento nuevo `visita_programada`. Al publicar el día (Supervisor o madrugada), el CRM pide un aviso por orden con clave `visita:<orden>:<fecha>` —reprogramar a otro día avisa de nuevo, republicar el mismo no—, con la franja prometida en la hora de la empresa. Pruebas: `test_destino_de_aviso.py`, `test_avisos_proactivos.py`, `test_avisos_endpoint.py` (motor) y `campo/tests/test_aviso_de_visita.py` (CRM).
+   - *Auditoría del mismo día* (`auditor-de-frontera`, `revisor-de-pii`), resuelta antes del commit: un identificador de WhatsApp sin teléfono (BSUID) se convertía en un número inventado al quitarle las letras y salteaba la baja —ahora no se usa como número y, si pidió la baja, no se le escribe tampoco al móvil del ISP—; el aviso salía con la empresa de la variable de entorno —ahora la de la organización de la orden, `tenant_de_organizacion`, sin default—; una visita cancelada, movida o vencida entre la publicación y el envío se avisaba igual —la tarea repite las reglas de `publicar`—; la ruta aceptaba cualquier aviso de cliente con contexto libre —ahora una lista cerrada, `PROACTIVOS`—; y la dirección viajaba sin que la plantilla la usara —ya no—. **Queda escrito, no resuelto**: con varios móviles en el ISP y ninguno conocido, el aviso va al primero, que puede ser de un familiar (el mismo riesgo que ya acepta la verificación de identidad); medirlo en datos reales antes de encender el aviso.
+   - *Ticket creado* (`ticket_creado_cliente`): cuando una persona abre un ticket desde "Nuevo ticket", el cliente no está en el chat y vuelve a escribir para preguntar si quedó registrado. Lo pide el CRM al **atar el caso a su ticket del ISP** (`/importacion/casos/{id}/vincular/`, después del commit): es la única vía por la que nace un ticket desde Dexter, así que los importados de WispHub quedan afuera solos. **El CRM manda solo el número de ticket; el motor confirma el hecho contra el ISP** (`avisos.hecho_del_ticket`): lee el ticket (`importacion_io.ticket_para_aviso`, que exige que el ISP devuelva ESE ticket) y de ahí salen el servicio, el asunto y la clave `ticket:<proveedor>:<número>`, que arma el motor. Con el servicio, el motor lee nombre y móvil de la ficha (`contacto_del_servicio`, solo con una herramienta de lectura y solo si la fila es la del servicio pedido) — en memoria, solo si le falta el destino o el nombre, y después del horario. El asunto viaja **solo si es del catálogo del ISP**: en WispHub es texto libre y 126 de 3.418 tickets traen ahí nombre y barrio de un prospecto. Un ticket sobre el cliente ficticio de instalaciones no se avisa (`servicio_sin_titular`): su ficha tiene un teléfono que no es el del prospecto. Si el ISP no contesta, `isp_no_contesta` con `reintentar_en`, y el CRM reagenda igual que fuera de horario (ayudante común `common/avisos_al_cliente.py`). Un caso terminado (cerrado, rechazado, duplicado) no se avisa: al cerrar sale la encuesta. **Cada aviso proactivo tiene un contrato** (`mensajes_catalogo.PROACTIVOS`): qué datos del contexto acepta de quien pide —nunca `empresa` ni `fecha`— y de dónde sale el destino. *Por qué así (auditorías de frontera y PII del mismo día)*: en la primera versión el motor le creía al CRM servicio, asunto y clave; con el token de servicio se podía recorrer el padrón entero y mandarle cualquier texto a cualquier cliente con una plantilla aprobada de la empresa, y el asunto se releía al enviar —editable con texto libre durante la noche que el aviso esperaba—. Pruebas: `test_avisos_proactivos.py` y `test_avisos_endpoint.py` (motor, 14 mutaciones cazadas), `cases/tests/test_aviso_ticket_creado.py` (CRM). **Por verificar antes de encender** (`verificador-de-api`): que el detalle `GET /api/tickets/{id}/` traiga `servicio.id_servicio` como el listado — si no lo trae, el aviso no sale (falla cerrado, no a otra persona). **Anotado, no resuelto**: la ruta `/avisos/evento` queda abierta si `MOTOR_SERVICE_TOKEN` no está cargado (es la regla de todas las rutas internas del motor), y un aviso con `telefono` (la visita) sigue aceptando claves distintas de quien tiene el token.
+   - *Caída masiva* (`caida_masiva`, 31/10/2026): pestaña nueva **Supervisor NOC → Fallas de red** — hasta hoy ninguna pantalla mostraba las situaciones de red; solo el Supervisor las veía por chat. Lista las caídas de PON vivas y, por cada una, dos pasos: **«Preparar el aviso»** muestra a cuántos clientes y quiénes quedan afuera (equipos sin cliente, clientes no activos) y si el aviso puede salir (apagado, plantilla sin aprobar, modo prueba); **«Avisar a N clientes»** lo aprueba una persona —queda escrito quién y cuándo en `AvisoDeCaida` y en la línea de tiempo de la situación, una sola vez por situación— y sale por tandas (`aviso_de_caida.lote`, 25 por defecto, un minuto entre tandas). **A quién** lo calcula el motor (`nucleo/seguimiento/aviso_de_caida.py`): las ONU del puerto en LOS desde SmartOLT pidiendo solo serial, estado y hora (`fields=`, verificado el 19/10/2026: ningún dato de cliente viaja); de esas, **solo el grupo que se cayó junto** —un puerto acumula equipos muertos hace meses, 10 de 17 el 21/08/2026, y decirle a un ex cliente «estamos arreglando su servicio» es mentirle—, con la misma ventana de 20 minutos que `incidentes.py`; serial → servicio por el padrón del ISP (que ahora guarda el serial, en sus dos formas, sin exponerlo en ninguna búsqueda); y solo clientes en un estado que la empresa declara (`aviso_de_caida.estados_que_se_avisan`, sin default: sin declaración no se arma nada). **Qué caídas**: solo alertas de fibra (`los`, `partial_los`); un corte de energía no es una falla del ISP. **La lista no se le cree al CRM**: en cada tanda el motor vuelve a leer quiénes siguen en la falla y descarta al resto —quien recuperó el servicio entre la aprobación y su tanda no recibe un aviso viejo—; si la situación se resuelve, el envío se **detiene**. **La clave la arma el motor con lo que midió**: `caida:<servicio>:<hora en que cayó SU equipo>` — estable mientras ese cliente sigue caído (aprobar dos situaciones de la misma falla, o reintentar una tanda, no avisa dos veces) y nueva solo si su equipo volvió y se cayó otra vez. *Lo que cambió la auditoría de frontera y PII del 31/10/2026* (sin hallazgos altos; 5 medios y 7 bajos, todos resueltos salvo los anotados): la clave dependía de la `situacion` del pedido y se podía repetir; el grupo elegido era el **más grande** y un corte viejo con más equipos muertos le ganaba a la falla de hoy —ahora es **el más reciente** que junta el mínimo—; el envío podía quedar «en curso» para siempre si la cola perdía una vuelta —ahora cada vuelta lleva una **ficha de turno** (una copia reentregada por Redis no hace nada), las esperas largas se parten por debajo del `visibility_timeout`, y una tarea periódica retoma lo perdido cada 10 minutos—; un corte breve del motor detenía el envío —ahora se reintenta—; un aviso apagado a mitad seguía leyendo fichas —ahora 409 y se detiene, con el motivo en pantalla—; Meta caído hacía perder el aviso a ese cliente —ahora queda pendiente—; quedan fuera el cliente ficticio de instalaciones y un serial que el padrón tiene en dos fichas. **Anotado, no resuelto**: el padrón puede tener hasta `padron_vigencia_horas` (una ONU reasignada en esas horas cae en la ficha vieja); y las plantillas de Meta se leen una vez por cliente dentro de cada tanda. Si el aviso está apagado o sin plantilla aprobada, se dice en la vista previa y la aprobación se niega (`mensajes_automaticos.listo`), en vez de consumir la aprobación con «apagado» cliente por cliente. Pruebas: `test_aviso_de_caida.py` y `test_aviso_de_caida_rutas.py` (motor, 12 mutaciones cazadas), `operaciones/tests/test_aviso_de_caida.py` (CRM, 18), `fallas.test.js` y `fallas/page-server.test.js` (pantalla). **Antes de encender**: crear y aprobar en Meta la plantilla `falla_en_la_red` (sugerida en el catálogo), cargar `aviso_de_caida` a la base y probar en modo prueba con un número propio.
+   - *«Ya quedó restablecido»* (`caida_restablecida`, 31/10/2026): cierra el aviso de caída. Cuando la situación deja de estar activa, el mismo envío pasa a una segunda fase y le pide al motor por los aprobados; el motor manda **solo a quien recibió de verdad el aviso de la falla** (lo lee de sus propias reservas, `mensajes_automaticos.caidas_avisadas`, no de una lista que le manden) **y cuyo equipo ya no está en LOS ahora** (se mide, no se supone porque la situación se cerró). Los que siguen caídos se vuelven a mirar cada 30 minutos, hasta 6 horas; si la falla vuelve antes, se detiene sin decirle a nadie que volvió. Clave `restablecida:<servicio>:<hora de la caída>`: una vuelta por falla. La persona lo ve dicho en la vista previa al aprobar la caída. Pruebas: `test_aviso_de_caida.py`, `test_aviso_de_caida_rutas.py`, `test_aviso_de_caida_base.py` (Postgres) y `operaciones/tests/test_aviso_de_caida.py` (sección G).
+   - *Lo que falta de la Ola 2*: confirmación de pago, promesa, recordatorio de pago y suspensión. Necesitan leer la factura en WispHub para saber de quién es (`registrar_pago` lo pide un colaborador, no el cliente), y ese lector no está verificado en vivo: va con `verificador-de-api` antes de construirlo. La asignación a mano desde Despacho también avisa desde el 31/10/2026 (a una cuadrilla con la fecha de la jornada; a un técnico, solo si la orden tiene fecha programada).
+
+
+**Ola 3 — la autonomía ganada (§2)**
+
+5. **El mecanismo de las cuatro condiciones**, genérico en el núcleo: el código calcula por empresa y por acción si es elegible (evidencia de `acciones_propuestas` + `verificaciones_accion`), lo muestra, una persona lo promueve, y el código lo degrada solo. **Primera candidata: `reiniciar_ont`**, que ya cumple 1 y 2 (`last_status_change`, `exige_previas`). *Esto no revierte M06-A: M06-A sigue vigente para cada acción hasta que su evidencia la promueva. Es la medición nueva que exige CLAUDE.md §10 para mover una decisión cerrada.*
+
+   **Avance del 31/10/2026 (sin desplegar)** — ficha `SPEC/objetivos/autonomia-ganada.md`. *Fase A, solo medición*: `nucleo/seguridad/autonomia_ganada.py` decide por empresa y acción si es **candidata** (1 y 2, mirando su config: `verificacion` con comprobaciones y `exige_previas` — sin nombres; con la config de Rapilink, de las 15 que piden aprobación, solo `reiniciar_ont`) y si es **elegible** (3: en la ventana de la empresa, un mínimo de propuestas revisadas por una persona, una tasa de aprobación sin cambios, **cero** verificaciones no confirmadas y **cero** ejecuciones fallidas o inciertas). Los umbrales son configuración (`autonomia_ganada.acciones`), con un **piso del núcleo** que el schema exige y que una config vieja no puede bajar: 20 revisadas, 14 días, 90 %. Revisada es lo que una persona decidió; vencida y cancelada no cuentan. La ventana se mide por cuándo se decidió. Se muestra en `/capacidad` → «Autonomía ganada», con lo que le falta a cada acción. **No cambia nada de lo que se ejecuta**: ejecutar por `frontera.critica()` (C) y degradar sola (D) son las fases siguientes, y pasan por `auditor-de-frontera`. *Fase B, promover* (mismo día): una persona ADMIN, desde `/capacidad`, con una casilla de confirmación obligatoria, le da autonomía a una acción elegible; el motor **vuelve a medir la evidencia en ese momento** y no promueve si no alcanza. Vive en `asistente.autonomia_ganada` (migración `202610310200`), fuera de `tenant_config` y con el criterio del interruptor: solo agregar, la escribe `autonomia_operador`, el runtime solo lee y puede **degradar** por una función cuyo estado está fijo en el cuerpo; sin fila, sin tabla o sin base, ninguna acción es autónoma. Retirarla siempre se puede, con motivo. *Fases C y D, ejecutar y degradar* (mismo día): una propuesta irreversible de una herramienta con autonomía vigente se ejecuta **por la misma cadena que una aprobación humana** (reserva con sello, revalidación, `frontera.critica` con interruptor y techo, idempotencia, confirmación, verificación pendiente), firmada `autonomia_ganada:<promoción>`. La aprobación vinculante acepta esa firma solo si **en el instante de ejecutar** la promoción vigente es exactamente esa, y se vuelve a leer en el último metro, justo antes del efecto. Ninguna persona puede firmar con ese prefijo. Corre en un hilo **unos segundos después de contestar** —el cliente lee «quedó pedido» antes de que se le reinicie el equipo—, solo en canales reales, nunca si el turno escaló o cerró, y solo si el turno sigue al mando (D25). Si una guarda de la frontera la frena, **vuelve a la cola de una persona** y no degrada. **Se degrada sola** (condición 4) cuando una ejecución falla o queda incierta, se relee y el efecto no está, una verificación no confirma o no se puede verificar, T20 deja una ejecución huérfana, no se pudo anotar la verificación, o hay **3 verificaciones sin resolver** con más de una hora (una verificación se resuelve cuando el cliente vuelve a escribir: un reinicio que nadie mide no es evidencia). **Topes en la base**: 10 ejecuciones autónomas por hora por empresa y una por equipo por día; pasado el tope, queda para una persona. *Lo que cambió la auditoría de frontera del 31/10* (sin caminos para ejecutar sin promoción vigente; 2 altos, 5 medios, 3 bajos, resueltos): la evidencia contaba los reinicios de la Bandeja (100 % aprobados por construcción), el simulador y las ejecuciones de la propia autonomía —ahora no—; la elegibilidad pide además **verificaciones confirmadas** (mínimo y tasa, con piso: 10 y 90 %; una no verificable cuenta en contra); promover exige ADMIN también del lado del motor y rechaza una segunda promoción activa; solo las irreversibles se pueden promover. **Anotado, no resuelto**: el recontacto por acción (la otra mitad de la condición 4) no se mide todavía; las verificaciones pendientes no se resuelven desde el reloj, solo frenan; y si una acción autónoma vuelve a la cola, el cliente no recibe un aviso aparte (la ve una persona). *Lo que cambió la auditoría independiente del 31/10* (2 altos, 4 medios, 7 bajos): **promover no habría funcionado en producción** —el motor corre como `motor_user`, que no puede asumir `autonomia_operador`, y la prueba pasaba porque corría como superusuario—; ahora promover y retirar son funciones de la base (`SECURITY DEFINER`, estado fijo en el cuerpo, solo la empresa de la sesión, una sola promoción activa, autoverificadas), y la prueba las ejecuta con el rol del runtime. **Decisión a revisar, escrita con su costo**: con eso el proceso del motor puede pedir una promoción a la base; lo que la acota es la ruta (ADMIN y evidencia medida en el momento) y, sobre todo, que el **interruptor y el techo** siguen siendo palancas solo de operador y `frontera.critica` los exige antes de cada ejecución autónoma. Si se prefiere promover solo por línea de comandos, alcanza con revocar `execute` de `autonomia_ganada_promover` a `app_backend`. Además: una autonomía que falló sola **no vuelve a ser elegible** hasta que la ventana deje atrás esa degradación (antes lo autónomo no contaba ni en contra); la evidencia exige que al menos el **80 % de los efectos se haya podido medir** (si el cliente no vuelve a escribir, la verificación queda pendiente y la tasa de confirmación no dice nada); y las verificaciones sin resolver se cuentan **desde la promoción**, no todo el historial (antes la autonomía se degradaba en su primer intento por pendientes de la época humana).
+
+**Ola 4 — vender a la segunda empresa sin una sesión de código**
+
+6. **Alta en un día para un ISP con WispHub + SmartOLT.** La config se parte en tres capas: conectores compartidos (ya existen), un **paquete base de agentes** con prompts genéricos parametrizados por variables de la empresa (el mecanismo `{CLAVE}` de §8.8 ya existe), y lo propio de cada empresa. El reloj descubre las empresas desde la base, no desde archivos. El webhook pasa a un dominio neutro (§8.13). **No se construye una abstracción de "proveedor ISP"** hasta que exista un cliente que no use WispHub: diseñarla con un solo proveedor a la vista produce la abstracción equivocada. Mientras tanto, ningún código nuevo fuera de `conectores/` asume un campo de WispHub que no venga ya asumido.
+7. **El techo de escala.** El historial caliente pasa a `asistente.conversations` para poder correr más de un proceso (D4). Un segundo proveedor de modelo como respaldo (D6) **solo después** de resolver la autorización de tratamiento para ese proveedor (CLAUDE.md §5).
+
+   **Avance del 31/10/2026 (sin desplegar)** — tres decisiones que el usuario delegó ese día («te lo dejo a ti», «decide tú»):
+   - *El reloj descubre las empresas en la base.* `reloj.tenants_conocidos` lee las filas activas **y con config cargada** de `asistente.tenant_config` (`db.tenants_activos`), y el reconciliador usa el mismo listado. *Lo de "con config cargada" vino del despliegue* (01/11/2026): el reloj de producción listó, además de `rapilink`, cuatro empresas `prueba-*` que dejaron el 06/10 pruebas cortadas antes de limpiar —fila con la config vacía por defecto, organización activa en el CRM, 26 conversaciones—; las salteaba con un error por vuelta. Ahora el listado pide lo mismo que `fuente.desde_base` (config distinta de `'{}'`), y las 33 pruebas que siembran empresas se niegan contra una base que no sea local (`tests/base_local.py`). Antes listaba `tenants/*.config.yaml` de la imagen: una empresa dada de alta desde la plataforma no recibía ningún trabajo del reloj hasta un commit y un redespliegue, y una dada de baja los seguía recibiendo. **Sin base no atiende a nadie**: el listado no cae al YAML. Si cayera, `fuente.cargar` serviría después la config del archivo, que nadie puede editar, para trabajos autónomos. (Si la base se cae *entre* el listado y la carga, `fuente.cargar` sí degrada al YAML como siempre; lo frena el interruptor de autonomía, que falla cerrado.) `activo = false` frena al reloj, no a los turnos: el turno no filtra por esa columna. Prueba: `tests/test_reloj_empresas_desde_la_base.py`, contra Postgres real, con 3 mutaciones cazadas. De paso, `test_reloj.py` estaba en rojo desde el 27/10 (`vincular_caso_externo` declara la credencial de importación, pero la usa el turno, no el reloj), y quedó en verde nombrando esa excepción.
+   - *El dominio del webhook es de la instalación.* El usuario decidió que al salir a producción pasa a ser un dominio de Dexter. Ningún dominio de producción está escrito en el código (medido con `grep`), así que el cambio es de operación, con sus pasos en DESPLIEGUE.md §4.d: los dos dominios conviven hasta que Meta y los teléfonos de campo dejan de usar el viejo. Lo único que estaba atado a la empresa era la pantalla de WhatsApp, que le pedía «Tu dominio» al administrador del ISP para armar la URL de Meta. Con el dominio de Dexter, ese administrador no tiene cómo saberlo: ahora sale de `WEBHOOK_BASE_URL` (frontend `PRIVATE_WEBHOOK_BASE_URL`), y la pantalla muestra la URL entera. Pruebas: `canal-whatsapp-webhook.test.js` y `webhook-servidor.test.js` (la carga real de la página, con una mutación cazada).
+   - *El motor se queda en un proceso.* Un turno pasa casi todo su tiempo esperando al modelo (4,7-12 s) y a los sistemas del ISP, y esa espera la absorben los hilos. Varios procesos no agregan capacidad: obligan a mover a la base el candado por conversación (`pg_advisory_lock`), el cupo por empresa y la coherencia del historial, en el archivo más grande del repositorio. **Se reabre** cuando se mida CPU saturada en el motor, o cuando haga falta una segunda réplica por disponibilidad. **Lo que sí se arregló es lo que ese proceso perdía**: el webhook le contesta 200 a Meta antes de atender, y Meta no reintenta. Medido con el mismo gunicorn de producción: el SIGTERM de un despliegue hacía salir al worker en el acto, y el hilo del turno moría a mitad, sin respuesta al cliente y sin una línea en el log. Ahora el turno, la devolución a la IA, la traza y la autonomía ganada se lanzan por `nucleo/canales/en_vuelo.py`, y gunicorn los espera al salir (`nucleo/canales/gunicorn_conf.py`, con `graceful_timeout` 40 y `stop_grace_period` 55): hasta 35 s, o lo que quede hasta los 40 desde el SIGTERM si gunicorn ya gastó tiempo esperando peticiones HTTP — un solo reloj, para que el resumen llegue al log antes del SIGKILL. La espera vuelve a mirar hasta que no quede nadie, así que también alcanza a la traza que un turno lanza al terminar. El que no alcanza a terminar queda **nombrado** en el log por la huella de su mensaje o el id de su conversación. La autonomía ganada **no empieza** un efecto con el proceso saliendo: la propuesta queda para una persona. gunicorn queda fijado en 26.0.0 porque la espera depende de su orden de apagado. Prueba: `tests/test_turnos_en_vuelo.py`, con dos corridas contra gunicorn real en la imagen del motor: el turno termina (el apagado espera 5,2 s), y con una petición lenta de 20 s y un turno de 60 s, el corte queda escrito y el proceso sale a los 37,2 s, antes del SIGKILL. *Lo que corrigió la auditoría independiente del mismo día* (la primera versión): miraba una sola foto de los hilos y dejaba afuera la traza; contaba sus 35 s aparte de los que gunicorn ya había gastado, y un `/chat` lento la hacía morir sin escribir el resumen; el nombre del hilo iba como texto y la redacción lo tapaba cuando la huella traía siete dígitos (~11 %); la autonomía dormida podía despertar con el SIGTERM ya recibido y empezar un reinicio que el tope cortaba; y dos guardas (`test_registro_sin_pii`, `test_identidad_de_conexion`) quedaban en rojo. **No resuelve**: un turno más largo que lo que queda de los 40 s, ni un proceso que muere sin SIGTERM (memoria agotada, SIGKILL). Para eso habría que guardar el mensaje **antes** de contestarle a Meta, y eso es persistir el texto del cliente antes del turno: decisión aparte, con revisión de PII.
+
+**En paralelo, sin ola:** el CI corre las pruebas con Postgres y el deploy deja de publicar con una guarda en rojo (D1, D2). Cuantas más acciones salgan solas, más cara es una regresión que nadie vio.
+
+**Qué no se hace, con su motivo:**
+
+- **Canal telefónico de voz.** Duplicaría el motor de atención por un canal que WhatsApp ya absorbe en estos clientes, y exige un tercero nuevo con su análisis legal. Reabrir si una empresa demuestra que la mayoría de su volumen entra por teléfono.
+- **Autonomía para `registrar_pago`** por el camino de §2: su efecto contable no lo verifica ningún endpoint de forma independiente. Reabrir con un cruce contra el extracto bancario.
+- **Bajar los contrapesos** (recontacto, satisfacción) para mostrar un número principal más alto.
+
+**Riesgos que esta decisión deja escritos:**
+
+- **Transcripción con OpenAI.** El usuario decidió el 30/10/2026 que la autorización que firma el cliente la cubre (RNF-01). Para cada empresa nueva, su autorización tiene que cubrir a los proveedores de modelo y de transcripción antes de encenderlos.
+- **El régimen de protección de usuarios de telecomunicaciones** probablemente exige que el usuario pueda llegar a una persona (INFERIDO, no verificado contra la norma). El diseño ya lo cumple —`frases_pide_humano` lo detecta en código— y la tesis no lo toca.
+
+**Lo que la reabre:** que el tablero de la Ola 1 muestre que la resolución sin persona no sube con las olas 2 y 3 (la tesis sería falsa para este producto), o que una empresa cliente pida explícitamente lo contrario de la autonomía ganada. **Reabierta el 02/11/2026 por el dueño del producto (§8.18)**: el objetivo y el principio de autonomía de esta sección quedan reemplazados por los de §1 y §2; las olas y su código siguen.
+
+### 8.18 DECISIÓN — reemplazar la mano de obra humana; una persona solo en lo crítico (02/11/2026)
+
+**Quién la tomó.** El dueño del producto, de forma explícita: *"este software yo lo que quiero es reemplazar la mano de obra humana lo más posible"*, y *"solo necesito humano o aprobación en las tareas críticas que repercuten daños para la empresa"*. Pidió además que quede escrito para que ninguna sesión vuelva a razonar al revés.
+
+**El error que la originó.** El 01/11/2026, preguntado si el Supervisor trabaja como una persona frente al computador, una sesión respondió que "a propósito no actúa con libertad" y que "la autonomía se gana con evidencia". El dueño ya había corregido ese criterio el 30/10 (§8.17), y la corrección había quedado a medias por tres caminos, medidos ese día:
+
+| Dónde seguía el criterio viejo | Qué decía |
+|---|---|
+| Este PRD, §2 | "Se vende como capacidad y no como **reemplazo de personal**" — lo opuesto del objetivo |
+| Este PRD, §2, el principio | Toda acción empezaba en "una persona aprueba" y solo se soltaba tras medir aprobaciones empresa por empresa: lo crítico y lo trivial con la misma vara |
+| La copia principal del repositorio (`C:\wisphub\dexter`), en otra rama y **172 commits atrás** de producción | Su CLAUDE.md, lo primero que lee una sesión que arranca ahí, seguía diciendo "crecer en alcance, **no en autonomía**… más cosas que el modelo decide solo: no" |
+
+**La decisión.**
+
+1. **Objetivo** (§1): reemplazar la mano de obra humana de un ISP en el mayor porcentaje posible.
+2. **Principio** (§2): autónomo por defecto; una persona aprueba solo lo crítico, con la definición cerrada de cinco casos de §2.
+3. **La garantía pasa de la persona al código**, no desaparece: frontera, precondiciones, idempotencia, auditoría, verificación posterior, interruptor que falla cerrado, y los contrapesos de recontacto y satisfacción.
+4. **La autonomía ganada (Ola 3) queda como la puerta de lo crítico**, no de todo.
+
+**Lo que no cambia.** Las reglas de seguridad de CLAUDE.md §4–§5 (listas blancas, redacción, guardia de salida, frontera de ocho pasos), el derecho del cliente final a pedir una persona (§10), y "el modelo compone, el código calcula".
+
+**Lo primero, encontrado el mismo día: en producción no sale nada solo.** Tres llaves cerradas a la vez, cada una suficiente para frenar toda escritura autónoma **y** toda irreversible aprobada por una persona (`frontera.critica` también exige la etapa): `AUTONOMIA_2_ACTIVA` no llegaba al motor (no estaba en `docker-compose.prod.yml`), B-7 sigue abierto (el secreto de firma de JWT en un GUC de la base) y no hay autorizaciones por herramienta. Lo dejó escrito la ficha de `revision-del-cierre` el 31/10 («en producción hoy no cierra nada»), y la Ola 3 se construyó encima sin que eso se moviera. Abrirlas es la fase 0 de `SPEC/objetivos/reemplazo-de-mano-de-obra.md`; sin eso, quitar aprobaciones no cambia nada en producción.
+
+**Lo que hay que revisar contra este principio.** El dueño delegó estas decisiones el mismo día («de aquí adelante te lo dejo a tu decisión»); el orden y el estado viven en la ficha del objetivo:
+
+- **Qué herramientas piden aprobación.** El catálogo de Rapilink pide aprobación humana en 15. Contra la definición de §2: son críticas `registrar_pago`, `agregar_promesa_pago`, `registrar_promesa_y_reactivar` (dinero), `cambiar_tipo_onu`, `activar_catv` (servicio que no se recupera solo / que no se paga) y `cancelar_solicitud_servicio` (una venta). **No** lo son `reiniciar_ont` (el equipo vuelve solo; ya tiene precondiciones en código y tope de uno por equipo por día) ni las ocho de tickets de WispHub (crear, responder, actualizar, completar, adjuntar, cerrar: un ticket se reabre).
+- **Las tareas del Supervisor.** Hoy cada una de las diez nace apagada y una persona la enciende. *(Pendiente: sigue igual al 02/11/2026.)* Las que no son críticas —pasar a Despacho, armar la jornada, crear y publicar las órdenes, cargar el material, ubicar los asuntos, revisar solo cada hora, cerrar lo que el proveedor ya cerró con diagnóstico— deberían nacer encendidas en una empresa nueva, con la persona pudiendo apagarlas.
+- **La cabecera de `operaciones/supervisor.py`** dice "SHADOW MODE: observa, analiza, propone. No ejecuta", y el mismo archivo ya ejecuta las tareas delegadas: describe un Supervisor que ya no existe y le enseña lo contrario a quien lo lea.
+- **Que el Supervisor mire lo que no tiene programado.** Hoy solo ve las ~20 situaciones que tiene escritas; lo demás no existe para él. Una persona frente al computador nota lo raro aunque nadie se lo haya dicho.
+
+**Hecho el mismo día, y lo que se encontró al hacerlo** (estado y orden en `SPEC/objetivos/reemplazo-de-mano-de-obra.md`):
+
+- **La autonomía estaba apagada en producción desde el 22/09**, y no solo para lo nuevo: con la etapa de Autonomía 2 sin llegar al motor, B-7 abierto y cero autorizaciones, ninguna escritura hacia afuera salía sola —ni siquiera un reinicio aprobado por una persona—. Medido en la bitácora de la frontera: 63 pedidos de WiFi, 15 cierres del Supervisor, 11 tickets de caso y 6 comprobantes frenados en 45 días. El 02/11 quedaron abiertas las tres llaves (B-7 sin rotar el secreto todavía: va junto con las contraseñas de base que quedaron en transcripciones) y autorizado el primer grupo.
+- **`reiniciar_ont` se declara no crítica** (`critica: false`) y puede salir sola sin evidencia previa, con su cadena intacta.
+- **La autonomía pasa a decidirse por agente y a controlarse en `/agentes`** (pedido del dueño al ver `/capacidad`: «eso no debería ir en cada agente… con un agente sí pueda reiniciar y otro no»). Migración `202611021200_autonomia_por_agente.sql`; el último metro compara la promoción del agente que pidió la acción.
+- **`Herramienta.roles_permitidos` no lo consulta nada del runtime**: quién usa una herramienta lo decide `puede_consultar` de cada agente. Encontrado al construir lo anterior (la primera versión validaba contra `roles_permitidos` y habría rechazado justo al agente que reinicia). Queda como deuda: o se elimina el campo, o se exige coherencia con `puede_consultar` al cargar.
+- **Crear un agente deja de pedir un desarrollador**: el formulario de `/agentes` en cuatro pasos, con qué temas atiende y la conexión al router, la verificación de identidad y lo que nunca revela, y las herramientas por lo que hacen. Un agente de clientes recibe sola la herramienta de derivar.
+- **La tarjeta del Supervisor NOC decía «no ejecuta ninguna acción»** —falso desde octubre, y una prueba lo exigía—. Corregida, con lo que hace solo leído en vivo.
+
+**Lo que la reabre:** que el dueño del producto decida otra cosa. Ninguna sesión la reabre por su cuenta; una medición que muestre daño (recontacto o satisfacción que empeoran con una acción autónoma) se corrige devolviendo **esa acción** a aprobación, no reinstalando la persona en todo.
+
 ---
 
 ## 9. Despliegue
 
-- **Desarrollo:** laptop actual (RTX 3050, 4 GB VRAM, 32 GB RAM). Suficiente para desarrollar y probar con modelos de 3–4B.
-- **Producción:** servidor dedicado / on-premise (por privacidad de datos de clientes y disponibilidad para varios colaboradores). La laptop **no** es el entorno de producción.
-- **Recomendación de modelo en servidor:** GPU de 16–24 GB para correr con holgura un modelo principal de 8–14B si alguna área lo requiere, manteniendo 4B para tareas ligeras.
+Un VPS gestionado con **Dokploy**: el motor, el CRM (backend, Celery, frontend) y un Supabase autoalojado del que se usa solo Postgres. **Pushear la rama de despliegue publica a producción** (autodeploy). El procedimiento, las variables, el webhook de WhatsApp y el diagnóstico de fallos viven en [DESPLIEGUE.md](DESPLIEGUE.md); las reglas de quién despliega y cómo se verifica, en CLAUDE.md §6–§8.
+
+*Esta sección recomendaba un servidor on-premise con GPU para un modelo local. Dejó de aplicar en agosto, cuando el modelo pasó a DeepSeek (RNF-01).*
 
 ---
 
@@ -842,33 +1035,38 @@ lo diría sin cambiar nada más.
 
 | Riesgo | Mitigación |
 |--------|-----------|
-| Fuga de datos de clientes | SLM local + filtro de PII en código + `.env` fuera de la nube |
-| Pago ejecutado por error del modelo | Confirmación humana obligatoria en código |
-| El modelo inventa datos | Prompt "no inventar" + siempre consultar herramienta; validación |
-| Modelo inducido a desviarse del prompt | Límites duros en código, no solo en prompt |
-| Incumplimiento normativo (Ley 1581) | Validación con área legal antes de escalar; auditoría |
-| Crecer a todas las áreas a la vez | Escalar por fases: consolidar un área antes de replicar |
+| Fuga de datos de clientes hacia el modelo | Listas blancas fail-closed + redacción del texto libre + guardia de salida, en código (§7.4) |
+| Una empresa ve datos de otra | `app_backend` + empresa fijada en cada transacción: sin empresa, 0 filas. El backend Django todavía no falla cerrado (Ola 1, §8.17) |
+| Una acción irreversible sale por error del modelo | Frontera de 8 pasos; las irreversibles solo por `frontera.critica()` con aprobación atada (§8.6) |
+| **Una acción autónoma hace daño** | Lo crítico (cinco casos de §2) siempre pasa por una persona o por las cuatro condiciones de la autonomía ganada. Lo no crítico, por validación en código antes del efecto, verificación después, el interruptor que falla cerrado y los contrapesos de recontacto y satisfacción, que devuelven **esa** acción a aprobación si empeoran |
+| **Se sube la resolución sin persona cerrando casos sin resolverlos** | Contrapesos obligatorios en el tablero: recontacto a 72 h y satisfacción (§2) |
+| El modelo inventa datos | Siempre consultar herramienta; veredictos calculados en código; casos dorados sobre la traza |
 | El modelo calcula mal un dato agregado | No calcula: compone la consulta y Python hace la cuenta (§12.5) |
 | El modelo interpreta mal la pregunta y da un número exacto sobre el filtro equivocado | La respuesta declara siempre filtros y periodo usados (RF-15) |
-| Consulta agregada que desborda el contexto del modelo | Tope duro de filas; se envía resumen + top-N, nunca el dataset (§12.5) |
+| Incumplimiento normativo (Ley 1581) | Autorización de tratamiento que firma el cliente, que cubre a los proveedores de modelo y transcripción (RNF-01); baja respetada en todo aviso proactivo |
+| El cliente no puede llegar a una persona | El pedido explícito lo detecta el código (`frases_pide_humano`), no el modelo |
+| Caída de DeepSeek | Hoy sin respaldo (D6). Un segundo proveedor espera su autorización de tratamiento (RNF-04) |
+| Un deploy publica con una guarda en rojo | CI sin Postgres y sin puerta del lado del servidor (D1, D2); va en paralelo a las olas (§8.17) |
 
 ---
 
 ## 11. Notas para el asistente de código (IDE)
 
-- El proyecto **no entrena** modelos; integra un SLM pre-entrenado vía tool calling. No sugerir fine-tuning salvo que se identifique una necesidad concreta que el prompting/RAG no resuelva.
-- Respetar la **arquitectura de dos capas de seguridad**: nunca mover el filtrado de PII ni la confirmación de acciones sensibles a solo el prompt.
-- Al agregar herramientas nuevas, replicar el patrón completo: definición → validación → ejecución (simulada + real) → filtro de campos. **Obligatorio** registrar su entrada en `CAMPOS_PERMITIDOS`: sin ella el filtro descarta el resultado completo (fail-closed) y la herramienta no devolverá nada.
-- Mantener la ruta simulada y la real devolviendo la **misma forma** de dato; si divergen, lo que funciona en pruebas falla en producción.
-- Mantener credenciales y conmutadores de entorno solo en `.env`, nunca en el código.
-- **Nunca pedirle al modelo que calcule.** Conteos, sumas, promedios y comparaciones se resuelven en Python; el modelo solo compone los parámetros de la consulta y redacta el resultado (§12.5). Si una implementación propuesta depende de que el modelo sume, está mal planteada.
-- El código base de referencia es el módulo de Soporte (`soporte_wisphub.py`).
+Las reglas de trabajo viven en **CLAUDE.md**, que manda sobre este documento. Las tres que más se olvidan:
+
+- **Nunca pedirle al modelo que calcule.** Conteos, sumas, promedios y comparaciones se resuelven en Python; el modelo compone los parámetros y redacta (§12.5).
+- **Toda herramienta nueva necesita su lista blanca por rol**: sin ella devuelve nada (fail-closed). Si un campo es texto libre, va también a `campos_texto_libre`.
+- **El objetivo es reemplazar la mano de obra humana lo más posible (§1, §8.18).** Una acción no crítica que pide aprobación es un pendiente, no una precaución. Quitarle la aprobación a una acción **crítica** (los cinco casos de §2) exige las cuatro condiciones, con su evidencia medida; nunca "porque el modelo ya lo hace bien". Y en ningún caso se quita la validación en código.
+
+*Esta sección hablaba del prototipo `soporte_wisphub.py`, de `CAMPOS_PERMITIDOS` y de una ruta simulada: son de julio de 2026 y ya no describen el motor.*
 
 ---
 
-## 12. Del asistente al cerebro — impacto sobre lo construido
+## 12. Del asistente al cerebro — historia (julio 2026) y la decisión que sigue vigente
 
-Análisis del código actual (`soporte_wisphub.py`) frente al norte de §2. **Nada hay que tirar.** El motor sobrevive; lo que cambia son firmas y dos supuestos estructurales.
+*§12.1–§12.4 son el análisis de julio de 2026 sobre el prototipo `soporte_wisphub.py`, y quedan como historia: los cambios que pedían ya están hechos (áreas, bucle de herramientas, sesión por usuario, aprobación en dos pasos, registro sin PII). **§12.5 sigue vigente** y es una regla del motor.*
+
+Análisis del código de entonces (`soporte_wisphub.py`) frente al norte de aquel momento. **Nada hay que tirar.** El motor sobrevive; lo que cambia son firmas y dos supuestos estructurales.
 
 ### 12.1 Sobrevive sin tocar
 

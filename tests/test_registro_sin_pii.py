@@ -375,7 +375,9 @@ def parches(*trios):
 class HiloEnLinea:
     """El webhook atiende en un hilo; aca corre en linea para capturar su log."""
 
-    def __init__(self, target, args=(), daemon=None):
+    #  name= y el resto: desde el 31/10/2026 el webhook lanza por
+    #  nucleo/canales/en_vuelo.py, que nombra al hilo.
+    def __init__(self, target, args=(), daemon=None, **_kw):
         self.target, self.args = target, args
 
     def start(self):

@@ -538,14 +538,24 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
     # puede recibir instalaciones -- hasta el 08/10/2026 el reparto ignoraba
     # ese campo y se las daba igual.
     por_zona: dict = {}
+    #  Y CON QUE LABOR DE APOYO (30/10/2026, SPEC/objetivos/labor-de-apoyo.md):
+    #  la segunda pasada, abajo. `getattr` porque las jornadas que la
+    #  simulacion arma de un plan pueden no traerla.
+    de_apoyo: dict = {}
     for j in jornadas:
+        apoyo = getattr(j, "labor_de_apoyo", "") or ""
         for z in zonas_de.get(j.id, ()):
             por_zona.setdefault((str(z), j.labor), []).append(j)
+            if apoyo and apoyo != j.labor:
+                de_apoyo.setdefault((str(z), apoyo), []).append(j)
 
     carga = {j.id: (carga_inicial or {}).get(j.id, 0) for j in jornadas}
     asignadas: dict = {j.id: [] for j in jornadas}
     sin_zona, sin_cuadrilla, sobrantes, sin_clasificar = [], [], [], []
     otro_dia = []
+    #  Lo que la primera pasada no ubico, con la lista donde quedo: la segunda
+    #  pasada lo saca de ahi si una cuadrilla de apoyo lo toma.
+    sin_lugar = []
 
     for orden in ordenadas:
         #  LO QUE ES PARA OTRO DIA, ESE DIA. Va primero: no importa si tiene
@@ -576,6 +586,7 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
             # se arreglan igual --poniendo una cuadrilla-- y por eso van
             # juntas.
             sin_cuadrilla.append(orden)
+            sin_lugar.append((orden, zona_id, labor, sin_cuadrilla))
             continue
 
         # La menos cargada de las que cubren esa zona, con desempate estable
@@ -583,10 +594,25 @@ def repartir(ordenadas, jornadas, *, zonas_de: dict, topes: dict,
         con_lugar = [j for j in candidatas if carga[j.id] < topes[j.id]]
         if not con_lugar:
             sobrantes.append(orden)
+            sin_lugar.append((orden, zona_id, labor, sobrantes))
             continue
         elegida = min(con_lugar, key=lambda j: (carga[j.id], j.cuadrilla.nombre))
         asignadas[elegida.id].append(orden)
         carga[elegida.id] += 1
+
+    #  SEGUNDA PASADA: LA LABOR DE APOYO. Lo que quedo sin cuadrilla o sin
+    #  lugar, en el mismo orden, va a una cuadrilla con esa labor de apoyo en
+    #  esa zona y cupo libre. Despues de la primera pasada ENTERA: el apoyo
+    #  nunca le quita lugar a la labor principal de nadie.
+    for orden, zona_id, labor, quedo_en in sin_lugar:
+        apoyan = [j for j in de_apoyo.get((zona_id, labor)) or []
+                  if carga[j.id] < topes[j.id]]
+        if not apoyan:
+            continue
+        elegida = min(apoyan, key=lambda j: (carga[j.id], j.cuadrilla.nombre))
+        asignadas[elegida.id].append(orden)
+        carga[elegida.id] += 1
+        quedo_en.remove(orden)
 
     return {"asignadas": asignadas, "sin_zona": sin_zona,
             "sin_cuadrilla": sin_cuadrilla, "sobrantes": sobrantes,
@@ -654,6 +680,7 @@ def publicar(org, asignaciones, *, mover: bool = True,
     #  {fecha: {Profile: [OrdenTrabajo]}}: lo que cada persona recibe por
     #  primera vez en esta publicacion, para avisarle una sola vez.
     nuevas: dict = {}
+    para_el_cliente: dict = {}   # fecha -> [orden_id]: el aviso de visita al cliente
     #  Se acumula FUERA del ciclo: una variable por cuadrilla solo
     #  guardaria la ultima, y con dos cuadrillas el numero mentiria.
     auxiliares = 0
@@ -794,6 +821,12 @@ def publicar(org, asignaciones, *, mover: bool = True,
                         datos={"cuadrilla": jornada.cuadrilla.nombre,
                                "jornada": str(jornada.id)})
                 publicadas += 1
+                para_el_cliente.setdefault(jornada.fecha, []).append(orden.id)
+
+        #  EL AVISO AL CLIENTE (30/10/2026, PRD §8.17 Ola 2): se pide despues
+        #  del commit, por orden y fecha. El motor decide si sale y cuando.
+        from campo.services.aviso_de_visita import pedir_despues_del_commit
+        pedir_despues_del_commit(org, para_el_cliente)
 
         #  EL AVISO AL TELEFONO (3.1): dentro de la transaccion se escribe la
         #  notificacion --es parte del hecho--, y el envio sale despues del
@@ -876,7 +909,9 @@ def cobertura(org, barrio: str, fecha, labor: str = "") -> dict:
             "jornada": str(j.id),
             "cuadrilla": j.cuadrilla.nombre,
             "labor": j.labor,
-            "coincide_labor": (not labor) or j.labor == labor,
+            "coincide_labor": ((not labor) or j.labor == labor
+                               or (j.labor_de_apoyo or "") == labor),
+            "labor_de_apoyo": j.labor_de_apoyo or "",
             #  QUIEN LA RECIBE en un telefono: el lider del dia primero, aunque
             #  no este anotado entre los integrantes (`cuadrillas.destinatarios`,
             #  la misma regla del despacho y del reparto). Los demas van con

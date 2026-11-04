@@ -36,6 +36,8 @@ state a person decided.
 
 from __future__ import annotations
 
+import logging
+
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status as http
@@ -47,6 +49,8 @@ from cases.models import (EXTERNAL_AUTHOR_DEXTER, EXTERNAL_AUTHOR_TYPE, Case)
 from common.models import Activity, Profile
 from common.permissions import HasOrgContext, IsOrgAdmin
 from common.utils import PRIORITY_CHOICE
+
+logger = logging.getLogger(__name__)
 
 #  QUIEN ENTRA: SOLO ADMINISTRACION  --  26/10/2026
 #  -----------------------------------------------
@@ -805,6 +809,15 @@ CAMPOS_VINCULO = frozenset({
 })
 
 
+def _pedir_aviso_ticket(caso_id, org_id):
+    try:
+        from cases.tasks import avisar_ticket_creado
+
+        avisar_ticket_creado.delay(caso_id, org_id)
+    except Exception:  # noqa: BLE001 -- un broker caido no deshace el vinculo
+        logger.exception("No se pudo pedir el aviso de ticket creado del caso %s", caso_id)
+
+
 class VincularCaseView(APIView):
     """POST /api/importacion/casos/<uuid:pk>/vincular/"""
 
@@ -855,4 +868,9 @@ class VincularCaseView(APIView):
                 # el guardado: decide el UNIQUE de la base, y es el mismo 409.
                 return _error("ese ticket ya tiene un caso", "TICKET_YA_TIENE_CASO",
                               http.HTTP_409_CONFLICT)
+            #  El cliente no esta en el chat cuando una persona le abre el
+            #  ticket: se le avisa (PRD §8.17). Solo si el vinculo quedo
+            #  escrito; decide el motor. Ver cases.tasks.avisar_ticket_creado.
+            caso_id, org_id = str(caso.id), str(request.org.id)
+            transaction.on_commit(lambda: _pedir_aviso_ticket(caso_id, org_id))
         return Response({"vinculado": True, "ya_estaba": False})

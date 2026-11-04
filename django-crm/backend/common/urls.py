@@ -18,6 +18,7 @@ from common.views.custom_field_views import (
 )
 from common.views.dashboard_views import ActivityListView, ApiHomeView, ApiTodayView
 from common.views.document_views import DocumentDetailView, DocumentListView
+from common.views.mencion_views import MencionConversacionView
 from common.views.notification_views import (
     NotificationDetailView,
     NotificationListView,
@@ -166,6 +167,12 @@ urlpatterns = [
     ),
     # In-app notifications (per-recipient feed)
     path("notifications/", NotificationListView.as_view(), name="notifications_list"),
+    # Menciones (@usuario) en una nota interna de la Bandeja (30/10/2026).
+    path(
+        "notifications/mencion-conversacion/",
+        MencionConversacionView.as_view(),
+        name="notifications_mencion_conversacion",
+    ),
     path(
         "notifications/read-all/",
         NotificationReadAllView.as_view(),

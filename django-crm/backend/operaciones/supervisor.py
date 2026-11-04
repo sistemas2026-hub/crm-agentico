@@ -282,7 +282,7 @@ def _casos_abiertos_antiguos(org, ahora) -> list[Senal]:
         Case.objects.filter(
             org=org, resolved_at__isnull=True, created_at__lt=corte
         ).exclude(id__in=pad.casos_despachados_desde(org, corte).values("id")),
-        areas.criterio_de_area(),
+        areas.criterio_de_area(org=org),
     ).only("id", "name", "created_at", "status", "priority",
            "external_status", "external_fetched_at", "provider")
     salida = []
@@ -425,7 +425,7 @@ def _casos_que_necesitan_visita(org, ahora) -> list[Senal]:
             .exclude(status="Closed")
             .exclude(external_service_id="")
             .exclude(external_service_id__isnull=True),
-            areas.criterio_de_area(),
+            areas.criterio_de_area(org=org),
         )
         .order_by("-created_at")[:TOPE_CASOS_A_DIAGNOSTICAR]
     )
@@ -649,7 +649,7 @@ def _tickets_abiertos_con_tecnico(org, ahora) -> list[Senal]:
 
     from operaciones import areas_del_tenant as areas
 
-    criterio = areas.criterio_de_area()
+    criterio = areas.criterio_de_area(org=org)
     if not criterio.se_sabe:
         #  SIN EL MAPA NO SE LEE NADA. Un mapa vacio es ambiguo --nadie tiene
         #  area, o el motor no contesto-- y se trata como "no se pudo": leer
@@ -2808,6 +2808,12 @@ def correr_ciclo(org, ahora=None, *, desatendido: bool = False) -> dict:
         #  gasta primero en lo que si decide.
         ("medicion despues del arreglo",
          lambda: _verificar_los_arreglos(org, desatendido=desatendido)),
+        #  EL CIERRE DE LO REVISADO  --  30/10/2026, SPEC/objetivos/revision-
+        #  del-cierre.md: DESPUES de la medicion, que es una de las cosas que
+        #  la revision mira. Sin la tarea delegada solo dice cuantas cerraria
+        #  (la sombra).
+        ("cierre de lo revisado",
+         lambda: _cerrar_lo_revisado(org)),
     ):
         try:
             resumen.update(fase())
@@ -2864,6 +2870,14 @@ def _publicar_el_reparto(org, ahora) -> dict:
     la del armado y la de las ordenes."""
     from operaciones import publicacion_del_reparto
     return publicacion_del_reparto.publicar_el_reparto(org, ahora)
+
+
+def _cerrar_lo_revisado(org) -> dict:
+    """La fase de `campo.cierre_por_el_supervisor`, importada recien al correr,
+    como las otras. Con la hora de AHORA y no la del arranque del ciclo: las
+    fases de antes pueden tardar minutos (auditoria de frontera, 30/10/2026)."""
+    from campo import cierre_por_el_supervisor
+    return cierre_por_el_supervisor.cerrar_lo_revisado(org)
 
 
 def _cargar_el_material(org, ahora) -> dict:
@@ -2992,12 +3006,12 @@ def _leer_tickets_abiertos(org, ahora, *,
     #  dos lecturas incompatibles y un numero solo no las distingue»--. Esto es
     #  ese mismo patron para la deteccion.
     #
-    #  La consulta es barata: 'area_por_persona' cachea 15 minutos
+    #  La consulta es barata: 'area_por_persona_de_org' cachea 15 minutos
     #  ('areas_del_tenant.SEGUNDOS_DE_CACHE'), asi que esta llamada reusa la
     #  que el detector acaba de hacer en la misma vuelta.
     from operaciones import areas_del_tenant as _areas
 
-    if not _areas.criterio_de_area().se_sabe:
+    if not _areas.criterio_de_area(org=org).se_sabe:
         #  Se NOMBRA y no se calla. El valor no es un booleano suelto: dice
         #  QUE no se pudo mirar, que es lo que alguien necesita para saber
         #  donde buscar.
@@ -3874,7 +3888,7 @@ def retirar_propuestas_fuera_de_area(org, ahora=None) -> int:
     """
     from operaciones import areas_del_tenant as areas
 
-    criterio = areas.criterio_de_area()
+    criterio = areas.criterio_de_area(org=org)
     if not criterio.se_sabe:
         logger.info("Supervisor: sin mapa de areas, no se retira ninguna "
                     "propuesta esta vuelta")

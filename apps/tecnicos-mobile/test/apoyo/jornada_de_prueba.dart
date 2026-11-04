@@ -86,6 +86,7 @@ class JornadaDePrueba {
       'cola_incidencias',
       'cola_evidencias',
       'cola_pedidos_material',
+      'cola_novedades',
     ]) {
       try {
         await base.delete(t);

@@ -614,6 +614,12 @@ export const actions = {
         cuadrilla: f.get('cuadrilla'),
         fecha: f.get('fecha'),
         labor: f.get('labor'),
+        // La de apoyo (30/10/2026): vacía la quita. Si quedó igual a la
+        // principal —se cambió la principal después de elegirla— no es apoyo.
+        labor_de_apoyo:
+          String(f.get('labor_de_apoyo') ?? '') === String(f.get('labor') ?? '')
+            ? ''
+            : String(f.get('labor_de_apoyo') ?? ''),
         zonas: f.getAll('zona').map((x) => String(x)).filter(Boolean),
         lider: f.get('lider') || null,
         integrantes,

@@ -48,8 +48,8 @@ def tecnico(org_a, monkeypatch):
     u = User.objects.create(email=f"t{uuid.uuid4().hex[:6]}@x.test",
                             name="Rigoberto Tecnicatura")
     t = Profile.objects.create(org=org_a, user=u, role="USER", is_active=True)
-    monkeypatch.setattr(areas, "area_por_persona",
-                        lambda: {str(t.id): "soporte_tecnico"})
+    monkeypatch.setattr(areas, "area_por_persona_de_org",
+                        lambda org_id: {str(t.id): "soporte_tecnico"})
     return t
 
 

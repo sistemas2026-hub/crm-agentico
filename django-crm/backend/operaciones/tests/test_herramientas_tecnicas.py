@@ -239,7 +239,7 @@ def test_12_un_argumento_inventado_no_llega_al_motor(org_a):
                     {"id_servicio": "5832", "cedula": "1234567890",
                      "campos": "todos"})
 
-    enviados = caller.call_args.args[1]
+    enviados = caller.call_args.args[2]
     assert enviados == {"id_servicio": "5832"}
     assert "cedula" not in enviados
 
@@ -252,7 +252,7 @@ def test_13_las_que_no_aceptan_argumentos_no_los_reenvian(org_a):
     for nombre in ("consultar_tecnicos", "consultar_tickets_de_cliente"):
         with mock.patch(RUTA_CALLER, return_value={"ok": True}) as caller:
             ch.ejecutar(org_a, nombre, {"id_servicio": "9", "limite": 5})
-        assert caller.call_args.args[1] == {}, nombre
+        assert caller.call_args.args[2] == {}, nombre
 
 
 # =============================================================================
@@ -281,17 +281,19 @@ def test_14_ninguna_tecnica_escribe_una_fila(org_a):
 
 def test_15_el_tenant_del_motor_no_lo_elige_el_modelo(org_a, org_b):
     """
-    La empresa a la que se le consulta sale de 'MOTOR_TENANT', del entorno del
-    servicio -- no de un argumento. Se afirma sobre lo que se le manda al
-    caller: ni el org ni nada parecido viaja ahi.
+    La empresa a la que se le consulta es la de la organizacion que conversa
+    -- la que recibe 'ejecutar' --, nunca un argumento. Desde el 31/10/2026 esa
+    organizacion viaja hasta la llamada al motor (antes la empresa salia de
+    una variable del servidor), y un argumento que diga otra no la cambia.
     """
     with mock.patch(RUTA_CALLER, return_value={"ok": True}) as caller:
-        ch.ejecutar(org_b, "consultar_tecnicos", {})
+        ch.ejecutar(org_b, "consultar_tecnicos",
+                    {"org": str(org_a.id), "tenant": "otra", "organizacion": "x"})
 
-    assert caller.call_args.args[0] == "consultar_tecnicos"
-    assert caller.call_args.args[1] == {}
-    texto = str(caller.call_args)
-    assert str(org_a.id) not in texto and str(org_b.id) not in texto
+    assert caller.call_args.args[0] == org_b
+    assert caller.call_args.args[1] == "consultar_tecnicos"
+    assert caller.call_args.args[2] == {}
+    assert str(org_a.id) not in str(caller.call_args)
 
 
 def test_16_una_desconocida_sigue_rechazandose(org_a):

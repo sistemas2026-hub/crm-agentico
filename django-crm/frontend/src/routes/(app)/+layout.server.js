@@ -7,6 +7,28 @@ import { countAwaitingApprovals } from '$lib/server/v2/approvals.js';
 import { countUnread } from '$lib/server/v2/notifications.js';
 import { getOrgShell } from '$lib/server/v2/organization.js';
 
+/** Cuanto espera la navegacion a cada conteo del menu antes de seguir sin su
+ *  insignia. Corto a proposito: es lo que separa el clic de la pantalla. */
+const PLAZO_CONTEO_MS = 2000;
+
+/**
+ * `promesa`, o `null` si falla o tarda mas de `ms`. Nunca rechaza. El plazo
+ * corta la ESPERA, no el pedido, que sigue del otro lado hasta contestar.
+ * Mismo criterio que settings.js::conPlazo, copiado aca y no importado: este
+ * archivo no puede depender del hub de Configuracion.
+ * @template T @param {Promise<T>} promesa @param {number} ms @returns {Promise<T|null>}
+ */
+function conPlazo(promesa, ms) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let reloj;
+  const vencido = new Promise((resolver) => {
+    reloj = setTimeout(() => resolver(null), ms);
+  });
+  return Promise.race([Promise.resolve(promesa).catch(() => null), vencido]).finally(() =>
+    clearTimeout(reloj)
+  );
+}
+
 /**
  * Counts for migrated modules, fetched for real and merged over the fixtures.
  *
@@ -153,19 +175,35 @@ export async function load(event) {
   // terminology lookup is not a second round trip, it rides the wave that was
   // already here for the badges. `results` is indexed by position: the count
   // keys first (in `countKeys` order), lo de la organizacion al final.
+  //  Y CON PLAZO  --  04/11/2026
+  //  ----------------------------
+  //  "Configuracion demora o no muestra nada al abrir." Lo del hub ya viajaba
+  //  como promesas sueltas (01/11), pero al NAVEGAR dentro de la app SvelteKit
+  //  no cambia de pantalla hasta que termina ESTE load, y este load esperaba
+  //  siete conteos contra un backend de doce hilos que ademas atiende la
+  //  Bandeja de todos. Con movimiento, el clic no mostraba nada hasta que
+  //  contestaba el mas lento -- y la pagina de destino ni habia empezado.
+  //
+  //  Cada conteo tiene ahora PLAZO_CONTEO_MS. El que no llega se queda sin
+  //  insignia, que es el mismo contrato que ya tenia un conteo que falla
+  //  ("missing, not stale or broken"). Lo de la organizacion tambien: el
+  //  nombre sale de la sesion, y la terminologia y el logo tienen respaldo.
   const countKeys = Object.keys(LIVE_COUNTS);
   const results = await Promise.allSettled([
-    ...countKeys.map((key) => LIVE_COUNTS[/** @type {keyof typeof LIVE_COUNTS} */ (key)](event)),
-    getOrgShell(event)
+    ...countKeys.map((key) =>
+      conPlazo(LIVE_COUNTS[/** @type {keyof typeof LIVE_COUNTS} */ (key)](event), PLAZO_CONTEO_MS)
+    ),
+    conPlazo(getOrgShell(event), PLAZO_CONTEO_MS)
   ]);
 
   countKeys.forEach((key, index) => {
     const result = results[index];
-    if (result.status === 'fulfilled') shell.counts[key] = result.value;
+    // `null` es "vencio el plazo": sin insignia, igual que un fallo.
+    if (result.status === 'fulfilled' && result.value != null) shell.counts[key] = result.value;
   });
 
   const orgResult = results[countKeys.length];
-  if (orgResult.status === 'fulfilled') {
+  if (orgResult.status === 'fulfilled' && orgResult.value) {
     shell.org.terminology = orgResult.value.terminology;
     // Queda `undefined` cuando la organizacion no cargo ninguno, que es el
     // caso corriente. Quien lo dibuje tiene que tener un respaldo: la marca

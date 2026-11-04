@@ -200,6 +200,13 @@ class JornadaDeCuadrilla(BaseModel):
     #  Sin `choices` desde el 20/10/2026: ver `campo.labores`.
     labor = models.CharField(max_length=20, default=INSTALACION)
 
+    #: LA LABOR DE APOYO  --  30/10/2026, SPEC/objetivos/labor-de-apoyo.md.
+    #: Con el cupo que su labor deja libre, la cuadrilla recibe ordenes de esta
+    #: otra en sus mismas zonas. Nunca le quita lugar a la suya: el reparto
+    #: llena primero las labores principales de todas y recien despues reparte
+    #: lo que quedo sin cuadrilla (`reparto.repartir`). Vacio = sin apoyo.
+    labor_de_apoyo = models.CharField(max_length=20, blank=True, default="")
+
     #: QUE ZONAS CUBRE ESE DIA, y por eso vive en la jornada y no en la
     #: cuadrilla: igual que la labor, hay dias que una cuadrilla se sale de su
     #: territorio de siempre, y el martes nadie podria decir donde estuvo el

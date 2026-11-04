@@ -11,7 +11,15 @@
            ChevronDown, ChevronRight } from '@lucide/svelte';
   import { resumenRecogido } from '$lib/conversaciones/barra-lateral.svelte.js';
 
-  let { resumenEscalada, hizoLaIA } = $props();
+  let {
+    resumenEscalada,
+    hizoLaIA,
+    /** Si la conversación espera a una persona y nadie se hizo cargo. Lo
+        decide la página con estado-unico.js; acá solo pinta el rótulo en rojo
+        (04/11/2026). Antes iba en rojo siempre --también cerrada, también
+        con dueño--, y una alarma que suena siempre deja de serlo. */
+    urgente = false
+  } = $props();
 
   /* SE PUEDE RECOGER, y el estado dura entre conversaciones.
      Estos cuatro renglones ocupan un tercio de la altura util del hilo, y no
@@ -39,11 +47,18 @@
      Se toma el renglon de menor `orden` que tenga texto --que es «que quiere»
      cuando el modelo lo escribio-- y NO se inventa nada si esta vacio: ahi el
      renglon queda con el rotulo solo, igual que antes. */
-  const motivo = $derived(
+  const primera = $derived(
     resumenEscalada
       .filter((f) => f.texto)
-      .sort((a, b) => (a.orden ?? 99) - (b.orden ?? 99))[0]?.texto ?? ''
+      .sort((a, b) => (a.orden ?? 99) - (b.orden ?? 99))[0] ?? null
   );
+  const motivo = $derived(primera?.texto ?? '');
+  /* UNA CITA NO ES UN MOTIVO (04/11/2026). Sin resumen del modelo, «qué
+     quiere» cae en el primer mensaje del cliente, y la franja mostraba
+     «Por qué llegó acá · Hola»: un saludo presentado como la razón de la
+     escalada. La página marca esa fila con `cita`, y entonces se dice lo que
+     es. */
+  const motivoEsCita = $derived(!!primera?.cita);
 </script>
 
   <button
@@ -54,12 +69,14 @@
     title={recogido ? 'Mostrar el resumen de la escalada' : 'Recoger el resumen'}
   >
     {#if recogido}<ChevronRight size={13} />{:else}<ChevronDown size={13} />{/if}
-    <span class="brief-rotulo">Por qué llegó acá</span>
+    <span class="brief-rotulo" class:brief-rotulo-urgente={urgente}>
+      {recogido && motivo && motivoEsCita ? 'Primer mensaje del cliente' : 'Por qué llegó acá'}
+    </span>
     <!-- Solo con el panel RECOGIDO. Abierto, el mismo texto esta tres
          renglones mas abajo con su rotulo: repetirlo no agrega nada y hace
          que la franja compita con la primera fila del detalle. -->
     {#if recogido && motivo}
-      <span class="brief-motivo">{motivo}</span>
+      <span class="brief-motivo">{motivoEsCita ? `«${motivo}»` : motivo}</span>
     {/if}
     <span class="brief-cuenta">{conDato} de {resumenEscalada.length}</span>
   </button>
@@ -146,20 +163,24 @@
     flex: none;
     color: var(--bandeja-texto-3);
   }
-  /* El rotulo va en ficha roja: es lo que dice DE QUE trata la franja, y en
-     la referencia es lo unico coloreado de la fila. */
+  /* EL RÓTULO, ESCRITO NORMAL Y EN GRIS (04/11/2026). Iba en ficha roja
+     siempre, en mono y versalita: también con la conversación cerrada o ya
+     tomada, donde no hay nada que alarmar. El rojo queda para cuando espera a
+     una persona y nadie se hizo cargo, que es lo que `urgente` dice. */
   .brief-rotulo {
     flex: none;
-    padding: 1px 7px;
+    padding: 1px 0;
+    font-family: var(--bandeja-sans);
+    font-size: var(--bandeja-rotulo-tam);
+    font-weight: 600;
+    color: var(--bandeja-texto-2);
+  }
+  .brief-rotulo-urgente {
+    padding: 1px 8px;
     border: 1px solid var(--bandeja-error-borde);
-    border-radius: 3px;
+    border-radius: var(--bandeja-radio-sm);
     background: var(--bandeja-error-fondo);
     color: var(--bandeja-error);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
   }
   /* El motivo en un renglon. Se recorta y no envuelve: la franja tiene que
      medir lo mismo con un motivo de seis palabras que con uno de sesenta --
@@ -173,11 +194,13 @@
     white-space: nowrap;
   }
   /* A la derecha y en cifras: es el dato que dice si vale la pena abrirlo. */
+  /* Una cifra, no un dato a comparar: Barlow tabular (04/11/2026). */
   .brief-cuenta {
     margin-left: auto;
     flex: none;
-    font-family: var(--bandeja-mono);
-    font-size: 10px;
+    font-family: var(--bandeja-titulo);
+    font-size: 12px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
     color: var(--bandeja-texto-3);
   }
@@ -229,13 +252,14 @@
      de 9,5-10px en versalita para todo lo que rotula, y es la misma forma que
      ya tienen `.panel-titulo` en la columna de contexto y `.autor` en el hilo.
      Acá era el único rótulo de la Bandeja que no la usaba. */
+  /* 04/11/2026: la diferencia de peso con la respuesta se sostiene con el
+     gris y el tamaño, escrito normal; la versalita en mono que decía este
+     comentario se fue de todos los rótulos de la Bandeja. */
   .brief dt {
     color: var(--bandeja-texto-2);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-family: var(--bandeja-sans);
+    font-size: var(--bandeja-rotulo-tam);
+    font-weight: 400;
   }
   .brief dd {
     margin: 0;

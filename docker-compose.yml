@@ -60,7 +60,6 @@ services:
       # ticket no se crea. Ver el mismo bloque en docker-compose.prod.yml.
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
-      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       # Ver docker-compose.prod.yml: la cuenta de servicio de Firebase para
       # el aviso push. Sin ella el aviso llega igual a la bandeja de la app
       # y a los canales de la empresa; solo falta el golpecito en el hombro.
@@ -86,8 +85,8 @@ services:
       # Para la ingesta de documentos al corpus: la vista encola la tarea y el
       # worker le manda el archivo al motor. Sin estas dos, un documento
       # marcado "usar en el asistente" queda en estado de error diciendolo.
+      # La empresa sale de la organizacion del documento, no de aca.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
     volumes:
       - ./django-crm/backend:/app
       - ./django-crm/docker/backend/entrypoint.sh:/entrypoint.sh:ro
@@ -122,7 +121,6 @@ services:
       # El worker es quien de verdad manda el archivo al motor: tiene los
       # bytes (comparte /app/media con el backend) y el motor no.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
-      ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
       # Y TAMBIEN LAS DEL MOTOR, que estaban solo en 'backend'  --  15/10/2026
       # ----------------------------------------------------------------------
       # El ciclo del Supervisor corre ACA, no en el backend: lo despierta
@@ -135,7 +133,6 @@ services:
       # sola llamada al modelo. El sintoma en la pantalla era el de siempre,
       # "ejecute el ciclo y no se movio nada", y el log no nombraba la causa.
       MOTOR_URL: ${MOTOR_URL:-http://motor:5000}
-      MOTOR_TENANT: ${ASISTENTE_TENANT:-rapilink}
       MOTOR_SERVICE_TOKEN: ${MOTOR_SERVICE_TOKEN:-}
       #  EL AVISO AL TELEFONO TAMBIEN SALE DE ACA (27/10/2026): el ciclo del
       #  Supervisor corre en este contenedor y publica el reparto. Misma
@@ -194,7 +191,6 @@ services:
       # levanta el stack entero y el tenant es el unico que hay. Ver el mismo
       # bloque en docker-compose.prod.yml para por que van aca y no en un .env.
       PRIVATE_ASISTENTE_URL: http://motor:5000
-      PRIVATE_ASISTENTE_TENANT: ${ASISTENTE_TENANT:-rapilink}
       # El header que nucleo/canales/api.py exige cuando el motor tiene
       # MOTOR_SERVICE_TOKEN puesto (ver ese mismo nombre en el .env de la
       # raiz -- 'motor:' abajo lo hereda solo via env_file, este servicio

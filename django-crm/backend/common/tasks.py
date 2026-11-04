@@ -422,11 +422,21 @@ def flush_expired_refresh_tokens():
 #  funcionando el dia que el almacenamiento sea S3 en vez de disco local.
 
 
-def _motor():
-    """(url, tenant) del motor, o (None, None) si no esta configurado."""
+def _motor(org_id):
+    """(url, tenant) del motor para la empresa de esa organizacion; cualquiera
+    de los dos vacio si no se sabe.
+
+    LA EMPRESA ES LA DEL DOCUMENTO (31/10/2026). Hasta ese dia salia de
+    'ASISTENTE_TENANT', una variable por instalacion: con dos empresas, el
+    documento de la segunda terminaba en el corpus de la primera y lo leia su
+    asistente. Se le pregunta al motor de que empresa es la organizacion,
+    igual que el resto del backend ('areas_del_tenant.tenant_de'), sin default.
+    """
     import os
 
-    return os.environ.get("ASISTENTE_URL"), os.environ.get("ASISTENTE_TENANT")
+    from operaciones import areas_del_tenant
+
+    return os.environ.get("ASISTENTE_URL"), areas_del_tenant.tenant_de(org_id)
 
 
 @shared_task
@@ -450,14 +460,15 @@ def ingerir_documento_en_asistente(document_id, org_id):
         logger.warning("Ingesta: el documento %s ya no existe", document_id)
         return
 
-    url, tenant = _motor()
+    url, tenant = _motor(org_id)
     if not url or not tenant:
         # Configuracion faltante, no un fallo del documento: se dice tal cual
         # en vez de dejarlo en "procesando" para siempre.
         doc.estado_ingesta = "error"
         doc.ingesta_detalle = (
-            "El asistente no esta configurado: faltan ASISTENTE_URL / "
-            "ASISTENTE_TENANT en el entorno del backend."
+            "El asistente no esta configurado: falta ASISTENTE_URL en el "
+            "entorno del backend, o la organizacion no tiene empresa en el "
+            "motor."
         )
         doc.ingesta_actualizada_en = timezone.now()
         doc.save(update_fields=["estado_ingesta", "ingesta_detalle",
@@ -539,7 +550,7 @@ def retirar_documento_del_asistente(corpus_document_id, org_id, document_id=None
 
     set_rls_context(org_id)
 
-    url, tenant = _motor()
+    url, tenant = _motor(org_id)
     if not url or not tenant:
         logger.warning("Retiro: el asistente no esta configurado")
         return
@@ -584,27 +595,49 @@ def purgar_retencion_asistente():
 
     Cadencia sugerida: diaria, de madrugada. No es urgente ni caro -- son dos
     DELETE por empresa.
+
+    TODAS LAS EMPRESAS (31/10/2026). Hasta ese dia purgaba solo la de
+    'ASISTENTE_TENANT', una variable por instalacion: la retencion de una
+    segunda empresa no se habria aplicado nunca. Recorre las organizaciones
+    activas y purga cada empresa una vez, aunque varias organizaciones
+    compartan la misma. Una que falla no frena a las demas.
     """
+    import os
+
     import requests
 
-    url, tenant = _motor()
-    if not url or not tenant:
+    from common.models import Org
+    from operaciones import areas_del_tenant
+
+    url = os.environ.get("ASISTENTE_URL")
+    if not url:
         logger.warning("Purga: el asistente no esta configurado")
         return
 
-    try:
-        r = requests.post(
-            f"{url.rstrip('/')}/mantenimiento/{tenant}/purgar", timeout=120)
-        r.raise_for_status()
-        datos = r.json()
-    except Exception:
-        logger.exception("Purga: fallo la purga de retencion del asistente")
+    empresas = []
+    for org_id in Org.objects.filter(is_active=True).values_list("id", flat=True):
+        tenant = areas_del_tenant.tenant_de(org_id)
+        if tenant and tenant not in empresas:
+            empresas.append(tenant)
+    if not empresas:
+        logger.warning("Purga: ninguna organizacion tiene empresa en el motor")
         return
 
-    # Se registra SIEMPRE, tambien cuando no borro nada. Una purga silenciosa
-    # es indistinguible de una purga rota -- que es exactamente como el fallo
-    # de las notificaciones paso meses sin que nadie lo viera.
-    logger.info(
-        "Purga del asistente: %s archivos (>%s dias), %s conversaciones (>%s dias)",
-        datos.get("media_borrada"), datos.get("retencion_multimedia_dias"),
-        datos.get("conversaciones_borradas"), datos.get("retencion_conversaciones_dias"))
+    for tenant in empresas:
+        try:
+            r = requests.post(
+                f"{url.rstrip('/')}/mantenimiento/{tenant}/purgar", timeout=120)
+            r.raise_for_status()
+            datos = r.json()
+        except Exception as e:                               # noqa: BLE001
+            logger.warning("Purga: fallo la purga de retencion de una empresa (%s)",
+                           type(e).__name__)
+            continue
+
+        # Se registra SIEMPRE, tambien cuando no borro nada. Una purga
+        # silenciosa es indistinguible de una purga rota -- que es exactamente
+        # como el fallo de las notificaciones paso meses sin que nadie lo viera.
+        logger.info(
+            "Purga del asistente: %s archivos (>%s dias), %s conversaciones (>%s dias)",
+            datos.get("media_borrada"), datos.get("retencion_multimedia_dias"),
+            datos.get("conversaciones_borradas"), datos.get("retencion_conversaciones_dias"))

@@ -101,6 +101,32 @@ class AvisosPush {
   /// leyendo código.
   static const String canal = 'avisos_de_campo';
 
+  /// EL RECORDATORIO VIBRA ~30 S (30/10/2026). El usuario: «que la app haga
+  /// vibrar durante unos 30 segundos para que sea notable», en vez de una
+  /// llamada. Un canal propio, porque la vibración de un canal se fija al
+  /// crearlo y no se cambia después. El servidor lo elige
+  /// (`push_fcm.CANAL_RECORDATORIO`): tiene que ser el mismo id.
+  static const String canalRecordatorio = 'recordatorios_de_reporte';
+
+  /// Los avisos que van por ese canal: el recordatorio de reportar.
+  static const Set<String> verbosQueVibran = <String>{'sin_reporte'};
+
+  /// Pulsos de 1 s con 0,5 s de pausa durante 30 s: se nota en el bolsillo y
+  /// no es un zumbido continuo.
+  static Int64List patronDeRecordatorio() {
+    final List<int> patron = <int>[0];
+    for (int i = 0; i < 20; i++) {
+      patron
+        ..add(1000)
+        ..add(500);
+    }
+    return Int64List.fromList(patron);
+  }
+
+  /// El canal de un aviso según su verbo.
+  static String canalPara(String verbo) =>
+      verbosQueVibran.contains(verbo) ? canalRecordatorio : canal;
+
   /// Qué hacer cuando el técnico toca el aviso. Se completa desde el shell.
   static void Function(String ordenId)? alAbrirOrden;
 
@@ -194,6 +220,17 @@ class AvisosPush {
         importance: Importance.high,
       ),
     );
+    await android?.createNotificationChannel(
+      AndroidNotificationChannel(
+        canalRecordatorio,
+        'Recordatorios del Supervisor',
+        description:
+            'Cuando una orden pasa la ventana sin reporte. Vibra unos 30 segundos.',
+        importance: Importance.max,
+        enableVibration: true,
+        vibrationPattern: patronDeRecordatorio(),
+      ),
+    );
   }
 
   void _escuchar(FirebaseMessaging mensajeria) {
@@ -231,17 +268,28 @@ class AvisosPush {
     try {
       final FlutterLocalNotificationsPlugin locales =
           _localesInyectadas ?? FlutterLocalNotificationsPlugin();
+      final String verbo = (mensaje.data['verbo'] ?? '').toString();
+      final bool vibra = verbosQueVibran.contains(verbo);
       await locales.show(
         id: mensaje.hashCode,
         title: n.title,
         body: n.body,
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            canal,
-            'Avisos de trabajo',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
+        notificationDetails: NotificationDetails(
+          android: vibra
+              ? AndroidNotificationDetails(
+                  canalRecordatorio,
+                  'Recordatorios del Supervisor',
+                  importance: Importance.max,
+                  priority: Priority.max,
+                  enableVibration: true,
+                  vibrationPattern: patronDeRecordatorio(),
+                )
+              : const AndroidNotificationDetails(
+                  canal,
+                  'Avisos de trabajo',
+                  importance: Importance.high,
+                  priority: Priority.high,
+                ),
         ),
         payload: (mensaje.data['enlace'] ?? '').toString(),
       );

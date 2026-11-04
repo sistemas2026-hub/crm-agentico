@@ -34,6 +34,8 @@
     // Helpers que se quedan en el layout porque los usa alguien más.
     tramoEspera,
     motivoLabel,
+    ventanaDe = () => null,
+    areas = {},
     /** El plazo de toma del tenant, en minutos. Se propaga tal cual: la
         lista no lo interpreta. */
     slaToma = 0
@@ -49,7 +51,7 @@
     <QueueEmptyState variante="sin-coincidencias" {busqueda} />
   {:else}
     {#each visibles as c (c.id)}
-      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {slaToma} />
+      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {areas} {slaToma} />
     {/each}
   {/if}
 </div>
@@ -58,11 +60,16 @@
   /* Sin padding lateral y sin aire entre filas: las filas ocupan todo el
      ancho y se separan con una línea, como en el diseño congelado. Así entra
      más cola en la misma altura y el conjunto se lee como una lista en vez de
-     como una pila de tarjetas. */
+     como una pila de tarjetas.
+     El fondo es el de la columna (04/11/2026): apenas gris, para que el
+     centro blanco sea lo que se lee. De las tres líneas que había entre la
+     cabeza de la columna y la lista (pestañas, controles, motivos) queda UNA,
+     acá: la que marca dónde empieza lo que se desplaza. */
   .lista {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    background: var(--bandeja-superficie);
+    background: var(--bandeja-canvas);
+    border-top: 1px solid var(--bandeja-borde);
   }
 </style>

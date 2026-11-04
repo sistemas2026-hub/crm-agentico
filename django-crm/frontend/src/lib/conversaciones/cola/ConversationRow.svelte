@@ -42,12 +42,29 @@
    *
    * El punto pasó a llamarse `.latido`. No es cosmética: mientras compartan
    * nombre, cualquier regla que se agregue a uno se le aplica al otro.
+   *
+   * TRES RENGLONES Y NO OCHO  (04/11/2026)
+   * La fila tenía hasta ocho renglones -- banda, nombre, por qué, resumen,
+   * motivo, latido, «volvió a escribir» y pie -- y medía ~140px: entraban
+   * cuatro en la columna. Para elegir a quién atender hay que ver la cola, no
+   * cuatro tarjetas. Ahora:
+   *
+   *   1  quién · cuánto           lo que decide si es la próxima
+   *   2  de qué se trata · estado lo que se lee para decidir
+   *   3  las marcas               solo si hay alguna (plazo, área, ventana,
+   *                               insiste, activa, dueño, canal)
+   *
+   * Nada de lo que se sacó era un dato sin otro lugar: la banda es el estado
+   * del renglón 2; `motivo_cola` («Cliente respondió — espera a Ana») es su
+   * `title`, porque la banda ya dice lo primero y el dueño del renglón 3 lo
+   * segundo; y el motivo de escalada y el caso abren el renglón 2.
    */
-  import Pill from '$lib/v2/components/Pill.svelte';
   import { Phone, User } from '@lucide/svelte';
   import { shortAge } from '$lib/v2/format.js';
+  import { telefonoLegible } from '$lib/conversaciones/formato.js';
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
   import { plazoDeToma, textoDePlazo } from '$lib/conversaciones/sla.js';
+  import { ventanaUrge, comoRestante } from '$lib/conversaciones/ventana.js';
 
   let {
     // La conversación, entera y tal como la manda el motor.
@@ -61,20 +78,24 @@
     // motivoLabel también lo usa QueueFilters.
     tramoEspera,
     motivoLabel,
+    /** Segundos que le quedan a la ventana de 24 h de esta fila, o null. Lo
+        calcula el layout con la hora en que leyó la cola (ventana.js). */
+    ventanaDe = () => null,
+    /** Las áreas de la empresa {clave: etiqueta}, para decir a cuál se
+        escaló (T22). */
+    areas = {},
     /** El plazo de toma del tenant, en minutos. 0 = la empresa no definió
         objetivo y no se dibuja cuenta regresiva. */
     slaToma = 0
   } = $props();
 
+  /* EL CANAL SE NOMBRA SOLO CUANDO NO ES WHATSAPP (04/11/2026). La vista que
+     abre la Bandeja es «Operativo», y hoy el único canal operativo es
+     WhatsApp: «WhatsApp» al pie de cada fila era la misma palabra cuarenta
+     veces sin informar nada. Lo que sí hay que ver es la excepción -- una
+     fila del simulador mezclada en «Todos» --, y esa sigue apareciendo. */
   const CANAL_LABEL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
   const canalLabel = (/** @type {string} */ c) => CANAL_LABEL[c] ?? c;
-  // Un color por etiqueta, no toda la taxonomia hardcodeada -- si el tenant
-  // agrega una categoria nueva en conversaciones.etiquetas, cae en 'ink' en
-  // vez de romper.
-  // ETIQUETA_TONE / etiquetaTone se fueron con la pildora de etiqueta: la
-  // fila mostraba hasta tres pildoras y el pedido era justo lo contrario --
-  // cliente, tiempo esperando, motivo, y la excepcion. El tema de la
-  // conversacion sigue estando en 'caso_manual', que es mas especifico.
   // Los casos se rotulan igual que los motivos: con la palabra de la empresa
   // (lib/conversaciones/rotulos.js), que viene en el mismo `motivoLabel`.
   const etiquetaLabel = (/** @type {string} */ e) => motivoLabel(e);
@@ -88,19 +109,17 @@
    * uno: esta pantalla no clasifica nada, sólo le pone palabras y color a lo
    * que ya vino decidido. Si mañana el motor agrega una banda, acá cae en
    * `undefined` y no se dibuja distintivo -- que es mejor que inventarle uno.
-   *
-   * El texto va en español porque la aplicación está en español; el diseño
-   * congelado está en inglés y eso es una diferencia deliberada, igual que el
-   * resto de la Bandeja.
    */
   const BANDAS = {
     cliente_espera: { texto: 'Cliente respondió', clase: 'b-cliente' },
+    // C22: la espera que se fijó ya pasó. Misma banda, mismo tono.
+    espera_vencida: { texto: 'La espera venció', clase: 'b-cliente' },
     sin_asignar: { texto: 'Sin asignar', clase: 'b-sin-asignar' },
     revisar_evaluacion: { texto: 'Falta revisar', clase: 'b-revisar' },
     // No dice "el cliente abandono": no se sabe por que no volvio. Dice lo que
     // si se sabe: nadie registro una accion de resolucion.
     sin_gestion: { texto: 'Sin resolución registrada', clase: 'b-sin-gestion' },
-    interno_pendiente: { texto: 'Pendiente interno', clase: 'b-interno' },
+    interno_pendiente: { texto: 'En espera', clase: 'b-interno' },
     en_curso: { texto: 'En atención', clase: 'b-en-curso' },
     legado: { texto: 'Legado · revisar', clase: 'b-legado' }
   };
@@ -114,6 +133,18 @@
       : c.necesita_accion_de === 'ia'
         ? LA_LLEVA_LA_IA
         : null;
+
+  /* El estado del renglón 2: la banda si la hay; si no, lo que antes era una
+     píldora. «Resuelta» va en gris y SIN punto: es un archivo, no algo que
+     pida nada, y el verde queda para lo confirmado en vivo. */
+  const estadoDe = (/** @type {any} */ c) => {
+    const d = distintivo(c);
+    if (d) return d;
+    if (c.escalada_a_humano && !resuelta(c)) return { texto: 'En curso', clase: 'b-en-curso' };
+    if (resuelta(c)) return { texto: 'Resuelta', clase: 'b-resuelta' };
+    return null;
+  };
+
   // Quien escribe por WhatsApp se identifica con un telefono, y quien prueba
   // desde el CRM con un uuid. Ninguno de los dos tiene iniciales: initials()
   // devuelve '3' o 'B', un circulo con una letra que no significa nada. Un
@@ -122,12 +153,15 @@
   const esUuid = (/** @type {string} */ v) =>
     !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
-  /** '3007778899' -> '300 777 8899'. Diez digitos seguidos no se leen. */
+  /** '573023608750' -> '+57 302 360 8750' (formato.js); '3007778899' ->
+      '300 777 8899'. Diez dígitos sin indicativo los deja como estaban:
+      `telefonoLegible` les pondría un «+» que no es de nadie. */
   function quien(/** @type {string} */ v) {
     if (!v) return 'Sin identificar';
+    if (!esTelefono(v)) return v;
     const d = v.replace(/\D/g, '');
-    if (esTelefono(v) && d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
-    return v;
+    if (d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+    return telefonoLegible(v);
   }
 
   /** Se movio en los ultimos minutos. Cinco y no uno: con uno el punto
@@ -146,244 +180,204 @@
      CUALQUIERA de sus conversaciones -- un enlace viejo a una anterior del
      mismo número abre este mismo chat. */
   const esDeEsteChat = $derived((c.ids || [c.id]).includes(abierta));
+
+  const tramo = $derived(tramoEspera(c));
+  const pide = $derived(pendiente(c) && tramo !== 'legado');
+
+  /* UN SOLO TIEMPO EN EL RENGLÓN 1 (04/11/2026). Había dos: «Espera: 3h»
+     arriba y la última actividad al lado del nombre. Si la fila espera, el
+     número es la espera de la NECESIDAD actual (esperando_desde, B3.5): el
+     mismo dato con el que el motor ordena, así la lista no dice un número y
+     ordena por otro. Si no espera, es la última actividad. El `title` dice
+     cuál de los dos es. */
+  const esperaIso = $derived(c.esperando_desde || (pendiente(c) && c.escalada_en) || null);
+  /* Rojo solo si el plazo de toma venció -- o, si la empresa no definió
+     plazo, si lleva una semana (el tramo «crítico»): es el mismo criterio
+     que pone en rojo la «Espera máx.» de la barra de consola. */
+  const tarde = $derived(!!esperaIso && (!!plazo?.vencido || tramo === 'critico'));
+
+  /* El punto antes del nombre: solo en las que esperan a una persona, y su
+     color dice cuánto. Rojo vencido, ámbar por vencer o viejo, azul «espera a
+     una persona» sin apuro todavía. Nunca solo: el tiempo está al lado. */
+  const urgencia = $derived(
+    !pide
+      ? null
+      : plazo?.vencido || tramo === 'critico'
+        ? 'urg-error'
+        : plazo?.porVencer || tramo === 'viejo'
+          ? 'urg-aviso'
+          : 'urg-humano'
+  );
+
+  const estado = $derived(estadoDe(c));
+
+  /* De qué se trata, en UN renglón: el tema corto primero (el motivo de la
+     escalada si espera, o el caso) y después el resumen que redacta el
+     modelo al escalar. Si no hay ninguno de los dos, el último mensaje, que
+     casi nunca dice de qué iba («ok», «gracias») pero es mejor que un hueco. */
+  const tema = $derived(
+    pendiente(c) && c.motivo_escalamiento
+      ? motivoLabel(c.motivo_escalamiento)
+      : c.caso_manual
+        ? etiquetaLabel(c.caso_manual)
+        : ''
+  );
+  const resumen = $derived((c.resumen ?? '').trim());
+
+  const insiste = $derived(pendiente(c) && c.mensajes_tras_escalar > 0);
+  const urgeVentana = $derived(ventanaUrge(c, ventanaDe(c)));
+  /* «Sin dueño en Dexter» solo en las abiertas: en una resuelta no le sirve a
+     nadie -- no hay nada que tomar. */
+  const sinDuenioDexter = $derived(!c.asignada_a && c.es_legado && !resuelta(c));
+  const canalAparte = $derived(!!c.canal && c.canal !== 'whatsapp');
+  const hayMarcas = $derived(
+    !!plazo || !!c.area_destino || urgeVentana || insiste || estaActiva(c) ||
+      !!c.asignada_a || sinDuenioDexter || canalAparte
+  );
 </script>
 
 <a
   class="fila"
-  class:pide={pendiente(c) && tramoEspera(c) !== 'legado'}
+  class:pide
   class:activa={esDeEsteChat}
   href="/conversaciones/{c.id}"
   aria-current={esDeEsteChat ? 'page' : undefined}
 >
   <div class="cuerpo">
-    <!-- Primer renglón: POR QUÉ está en la cola, y desde cuándo espera. El
-         diseño pone estas dos cosas arriba de todo y tiene razón: son las que
-         deciden si esta fila es la próxima. -->
-    <div class="tope">
-      {#if distintivo(c)}
-        {@const d = distintivo(c)}
-        <span class="marca-banda {d.clase}"><span class="punto"></span>{d.texto}</span>
+    <div class="renglon">
+      {#if urgencia}
+        <span class="urgencia {urgencia}" aria-hidden="true"></span>
       {/if}
-      <!-- La espera que se muestra es la de la NECESIDAD actual
-           (esperando_desde, B3.5): si el cliente volvio a escribir,
-           es desde ese mensaje y no desde la escalada. Es el mismo
-           dato con el que el motor ordena, asi que la lista no dice
-           un numero y ordena por otro. -->
-      <!-- EL PLAZO VA ANTES QUE LA ESPERA. La espera dice cuánto lleva; el
-           plazo dice si eso está bien o mal, que es lo que decide si esta
-           fila es la próxima. Sólo aparece si la empresa definió objetivo y
-           si la conversación es de las que el plazo mide (escalada y sin
-           dueño) -- ver lib/conversaciones/sla.js. -->
-      {#if plazo}
-        <span
-          class="plazo"
-          class:plazo-vencido={plazo.vencido}
-          class:plazo-cerca={plazo.porVencer}
-          title={plazo.vencido
-            ? `Venció hace ${textoDePlazo(plazo).replace('+', '')} (objetivo: ${plazo.objetivoMinutos} min para tomarla)`
-            : `Quedan ${textoDePlazo(plazo)} del objetivo de ${plazo.objetivoMinutos} min para tomarla`}
-        >
-          {plazo.vencido ? 'Vencido' : 'Quedan'}
-          <b class="v2-num">{textoDePlazo(plazo)}</b>
-        </span>
-      {/if}
-      {#if c.esperando_desde}
-        <span
-          class="cuando v2-num espera-{tramoEspera(c)}"
-          title="Esperando desde hace {shortAge(c.esperando_desde)}"
-        >
-          Espera: {shortAge(c.esperando_desde)}
-        </span>
-      {:else if pendiente(c) && c.escalada_en}
-        <span
-          class="cuando v2-num espera-{tramoEspera(c)}"
-          title="Esperando desde hace {shortAge(c.escalada_en)}"
-        >
-          Espera: {shortAge(c.escalada_en)}
-        </span>
-      {/if}
-    </div>
-
-    <div class="alta">
       <span class="quien">
         <!-- Quien escribe por WhatsApp se identifica con un telefono y quien
-             prueba desde el CRM con un uuid. El icono se queda -- mas chico y
-             pegado al nombre en vez de una columna propia -- porque distinguir
-             un cliente real de una prueba de un vistazo sigue haciendo falta. -->
+             prueba desde el CRM con un uuid. El icono se queda porque
+             distinguir un cliente real de una prueba de un vistazo sigue
+             haciendo falta. -->
         {#if !c.nombre_cliente && esTelefono(c.usuario_externo)}
-          <span class="ident" aria-hidden="true"><Phone size={11} /></span>
+          <span class="ident" aria-hidden="true"><Phone size={12} /></span>
         {:else if !c.nombre_cliente && (!c.usuario_externo || esUuid(c.usuario_externo))}
-          <span class="ident" aria-hidden="true"><User size={11} /></span>
+          <span class="ident" aria-hidden="true"><User size={12} /></span>
         {/if}
         {c.nombre_cliente || quien(c.usuario_externo)}
       </span>
-      <span class="cuando v2-num">{shortAge(c.actualizado_en)}</span>
+      <span
+        class="b-cifra hace"
+        class:hace-tarde={tarde}
+        title={esperaIso
+          ? `Esperando desde hace ${shortAge(esperaIso)}`
+          : `Última actividad hace ${shortAge(c.actualizado_en)}`}
+      >{shortAge(esperaIso || c.actualizado_en)}</span>
     </div>
 
-    <!-- POR QUE esta fila esta donde esta, en palabras. No un
-         numero de prioridad: quien atiende tiene que poder leer
-         "Cliente respondio - espera a Ana" y decidir. Lo redacta el
-         motor (proyeccion.motivo_cola), no esta pantalla. -->
-    {#if c.motivo_cola && typeof c.banda === 'number'}
-      <span class="por-que" class:por-que-legado={c.es_legado}>{c.motivo_cola}</span>
-    {/if}
-
-    <!-- De que se trata, en una linea. El ultimo mensaje casi nunca
-         lo dice ("ok", "gracias", "listo"): quien atiende tiene que
-         abrir la conversacion solo para enterarse. El resumen lo
-         redacta el modelo al escalar, sin una llamada extra. Solo
-         existe en las escaladas DESPUES del 06/09/2026; en el
-         resto se cae al ultimo mensaje, como antes. -->
-    {#if c.resumen}
-      <p class="avance resumen">{c.resumen}</p>
-    {:else}
-      <!-- El RESUMEN si lo hay, y solo si no, el ultimo mensaje.
-           "Asistente: Entiendo, eso necesita revision..." vuelve a
-           contar la ultima respuesta del bot, que casi nunca dice de
-           que trataba el caso. El resumen lo escribe el modelo al
-           escalar y dice justo eso.
-
-           Todavia no lo tienen todas: son 2 de 51 escaladas, porque
-           el campo existe desde el 06/09/2026. Por eso el respaldo
-           sigue siendo el ultimo mensaje y no un hueco. -->
-      <!-- Que TRABAJO hay delante, no que dijo el bot.
-           Tres fuentes, en orden de cuanto dicen:
-
-             resumen      lo escribe el modelo al escalar y dice de
-                          que trata el caso. Es el bueno.
-             caso_manual  de que es la conversacion, asignado en
-                          cada turno. Existe tambien donde el bot
-                          resolvio solo.
-             ultimo msj   el respaldo. "Asistente: Entiendo, eso
-                          necesita revision..." vuelve a contar la
-                          ultima respuesta, que casi nunca dice de
-                          que iba el caso -- pero es mejor que un
-                          hueco.
-
-           Hoy 'resumen' lo tienen 2 de 51 escaladas (el campo es
-           del 06/09/2026), asi que el respaldo se usa mucho
-           todavia. Va a ir desapareciendo solo. -->
-      {#if (c.resumen ?? '').trim()}
-        <p class="avance avance-resumen">{c.resumen}</p>
-      {:else if c.caso_manual}
-        <p class="avance avance-resumen">{etiquetaLabel(c.caso_manual)}</p>
-      {:else}
-        <p class="avance">
+    <div class="renglon renglon-2">
+      <span class="de-que">
+        {#if tema}<span class="tema">{tema}</span>{#if resumen}<span aria-hidden="true">{' · '}</span>{resumen}{/if}
+        {:else if resumen}{resumen}
+        {:else}
           {#if c.ultimo_rol && c.ultimo_rol !== 'user'}
-            <span class="avance-quien">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
+            <span class="de-que-autor">{AUTOR[c.ultimo_rol] ?? c.ultimo_rol}:</span>
           {/if}
           {c.ultimo_mensaje || 'Sin mensajes todavía'}
-        </p>
-      {/if}
-    {/if}
-
-    <!-- Solo se dibuja si hay algo que decir. "El bot la está
-         llevando" es el caso normal: ponerle una píldora a cada fila
-         agrega una línea y un rectángulo por conversación para no
-         informar nada. -->
-    {#if c.escalada_a_humano || c.caso_manual || resuelta(c)}
-      <div class="baja">
-        {#if pendiente(c)}
-          <!-- El motivo va en TEXTO y no en pildora: es lo mas
-               parecido a un subtitulo del caso, y una pildora mas
-               en una fila que ya tiene tres compite con la unica
-               que pide una accion. La pildora "Sin atender" se fue:
-               dentro de la pestaña "Por atender" repetia el nombre
-               de la pestaña en cada fila. -->
-          {#if c.motivo_escalamiento}
-            <span class="motivo-fila">{motivoLabel(c.motivo_escalamiento)}</span>
-          {/if}
-          <!-- SOLO SI LA BANDA NO LO DIJO YA. `distintivo(c)` dibuja arriba
-               "En atención", "Sin asignar", "Cliente respondió"… y abajo
-               aparecía además una píldora "En curso" diciendo lo mismo con
-               otras palabras: dos rótulos de estado en una fila que ya tiene
-               banda, espera, nombre, motivo y dueño. La referencia pone UN
-               distintivo por fila. No se pierde nada -- cuando no hay banda
-               (una resuelta, por ejemplo) la píldora sigue estando. -->
-        {:else if c.escalada_a_humano && !resuelta(c) && !distintivo(c)}
-          <Pill tone="clay" dot>En curso</Pill>
-        {:else if resuelta(c) && !distintivo(c)}
-          <Pill tone="moss">Resuelta</Pill>
         {/if}
+      </span>
+      {#if estado}
+        <!-- POR QUÉ está donde está va en el `title`: lo redacta el motor
+             (proyeccion.motivo_cola) y dice lo mismo que la banda más el
+             dueño, que ya están a la vista. -->
+        <span
+          class="estado-fila {estado.clase}"
+          class:estado-legado={c.es_legado}
+          title={c.motivo_cola && typeof c.banda === 'number' ? c.motivo_cola : estado.texto}
+        >{estado.texto}</span>
+      {/if}
+    </div>
 
-        <!-- De qué es la conversación, no si escaló: lo asigna el
-             asistente en cada turno y existe también en las que
-             resolvió solo (ver supabase/202608180923_caso_conversacion.sql).
-             Solo cuando NO hay motivo -- si hay, ese dice mas y los
-             dos juntos son ruido. -->
-        <!-- Solo si 'caso_manual' NO se uso ya como la linea de
-             arriba: decir lo mismo dos veces en la misma fila es
-             justo el ruido que se estaba sacando. -->
-        {#if c.caso_manual && (c.resumen ?? '').trim() && !(pendiente(c) && c.motivo_escalamiento)}
-          <Pill tone="ink">{etiquetaLabel(c.caso_manual)}</Pill>
+    <!-- Solo se dibuja si hay algo que decir. "El bot la está llevando" es el
+         caso normal: un renglón por fila para no informar nada es lo que hacía
+         que entraran cuatro. -->
+    {#if hayMarcas}
+      <div class="renglon marcas">
+        <!-- EL PLAZO VA PRIMERO. La espera dice cuánto lleva; el plazo dice si
+             eso está bien o mal. Sólo aparece si la empresa definió objetivo y
+             si la conversación es de las que el plazo mide (escalada y sin
+             dueño) -- ver lib/conversaciones/sla.js. -->
+        {#if plazo}
+          <span
+            class="chip"
+            class:chip-error={plazo.vencido}
+            class:chip-aviso={plazo.porVencer}
+            title={plazo.vencido
+              ? `Venció hace ${textoDePlazo(plazo).replace('+', '')} (objetivo: ${plazo.objetivoMinutos} min para tomarla)`
+              : `Quedan ${textoDePlazo(plazo)} del objetivo de ${plazo.objetivoMinutos} min para tomarla`}
+          >
+            {plazo.vencido ? 'Vencido' : 'Quedan'} <b class="b-cifra">{textoDePlazo(plazo)}</b>
+          </span>
+        {/if}
+        {#if c.area_destino}
+          <span class="chip chip-humano" title="Escalada a un área: la puede tomar alguien de ahí">
+            → {areas[c.area_destino] || c.area_destino}
+          </span>
+        {/if}
+        <!-- LA VENTANA DE 24 H, solo cuando queda poco y le toca a una persona
+             (29/10/2026). Pasada, ya no se le puede escribir texto libre: hay
+             que usar una plantilla, y eso tiene que verse antes de abrirla. -->
+        {#if urgeVentana}
+          <span
+            class="chip chip-aviso"
+            title="La ventana de WhatsApp cierra en {comoRestante(ventanaDe(c) ?? 0)}: después solo se le puede escribir con una plantilla"
+          >
+            Ventana <b class="b-cifra">{comoRestante(ventanaDe(c) ?? 0)}</b>
+          </span>
+        {/if}
+        <!-- El cliente escribió de nuevo después de que le dijéramos que un
+             compañero lo iba a atender: lo más parecido a alguien golpeando
+             la puerta. Sin el «hace …»: ese tiempo ya es el del renglón 1,
+             que cuenta desde su último mensaje. -->
+        {#if insiste}
+          <span class="insiste" title="Escribió de nuevo hace {shortAge(c.actualizado_en)}">
+            Volvió a escribir{c.mensajes_tras_escalar > 1 ? ` ×${c.mensajes_tras_escalar}` : ''}
+          </span>
+        {/if}
+        <!-- Actividad viva. Un punto y una palabra: se enciende con cualquier
+             mensaje de los ultimos minutos y se apaga solo. -->
+        {#if estaActiva(c)}
+          <span class="latido">Activa</span>
+        {/if}
+        <!-- `asignada_a` es la ASIGNACIÓN DURABLE DE DEXTER (proyeccion.py).
+             NO es el dueño del ticket del CRM -- D28.
+
+             La rama «Sin asignar» que vivía acá (banda 2) se fue: banda 2 ES
+             `sin_asignar`, así que el estado del renglón 2 ya lo dice con la
+             misma palabra. Eran dos «Sin asignar» en la misma fila. -->
+        {#if c.asignada_a}
+          <span class="duenio"><span class="punto"></span>{c.asignada_a}</span>
+        {:else if sinDuenioDexter}
+          <!-- Una legada NO tiene dueño en Dexter porque nunca entró al relevo
+               (relevo_version = 0). Verlo escrito es parte de G8 -- que quede
+               claro que abrirla no le asigna a nadie. La condición es
+               explícita (`sinDuenioDexter` exige `!c.asignada_a`): una legada
+               que SÍ tiene dueño no puede decir "sin dueño". -->
+          <span class="duenio duenio-sin-dexter">Sin dueño en Dexter</span>
+        {/if}
+        {#if canalAparte}
+          <span class="canal">{canalLabel(c.canal)}</span>
         {/if}
       </div>
     {/if}
-
-    <!-- Actividad viva. Un punto y una palabra, no una pildora mas:
-         se enciende con cualquier mensaje de los ultimos minutos
-         --cliente, asistente o colaborador-- y se apaga solo. La
-         conversacion CONSERVA su posicion segun la hora de esa
-         actividad; el punto solo dice "esto se movio recien". -->
-    {#if estaActiva(c)}
-      <span class="latido">Activa</span>
-    {/if}
-
-    <!-- La excepcion va sola, en su propio renglon y al final: el
-         cliente escribio de nuevo despues de que le dijeramos que
-         un companero lo iba a atender. Es lo mas parecido a alguien
-         golpeando la puerta. Metida entre las pildoras se perdia. -->
-    {#if pendiente(c) && c.mensajes_tras_escalar > 0}
-      <span class="insiste">
-        Volvió a escribir{c.mensajes_tras_escalar > 1
-          ? ` ×${c.mensajes_tras_escalar}`
-          : ''} · hace {shortAge(c.actualizado_en)}
-      </span>
-    {/if}
-
-    <!-- El pie: quién la tiene, y por dónde entró.
-         `asignada_a` es la ASIGNACIÓN DURABLE DE DEXTER (proyeccion.py, sale
-         de asignada_a_nombre). NO es el dueño del ticket del CRM, que es otra
-         cosa y vive en CasePanel -- D28, y sigue reservado para B4. La cola
-         nunca mostró dueño hasta acá: el dato estaba proyectado y sin usar. -->
-    <div class="pie">
-      {#if c.asignada_a}
-        <span class="duenio"><span class="punto"></span>{c.asignada_a}</span>
-      {:else if c.es_legado}
-        <!-- Lo dice con todas las letras en vez de dejar el hueco: una legada
-             NO tiene dueño en Dexter porque nunca entró al relevo
-             (relevo_version = 0). Verlo escrito es parte de G8 -- que quede
-             claro que abrirla no le asigna a nadie.
-
-             OJO: esta rama es el `else` de `c.asignada_a`, así que la
-             condición real es `!c.asignada_a && c.es_legado`. Si alguien
-             reordena las ramas, una legada QUE SÍ tiene dueño diría "sin
-             dueño", que es una afirmación falsa. Mantener este bloque
-             después del de `asignada_a`, o volver la condición explícita. -->
-        <span class="duenio duenio-sin-dexter">Sin dueño en Dexter</span>
-      {:else if c.banda === 2}
-        <span class="duenio duenio-vacante"><span class="punto"></span>Sin asignar</span>
-      {:else}
-        <span></span>
-      {/if}
-      <span class="canal">{canalLabel(c.canal)}</span>
-    </div>
   </div>
 </a>
 
 <style>
-
   /* Las filas se separan con una línea, no con aire y esquinas redondeadas:
      así entra más cola en la misma altura y la lista se lee como una lista.
-     La separación la dibuja ConversationList entre hermanas. */
+     Sin raya de color a la izquierda (04/11/2026): lo que esa raya decía --
+     «esta pide algo» -- lo dice ahora el punto antes del nombre, con un color
+     por urgencia en vez de un rojo igual para todas. */
   .fila {
     display: block;
-    /* 10 -> 8: densidad. La referencia mete la misma fila en 112px y ésta
-       pedía 132. Se saca aire, no renglones. */
     padding: 8px 12px;
     color: inherit;
     text-decoration: none;
-    border-left: 3px solid transparent;
     /* La línea que separa de la fila anterior. Va acá y no en la lista con un
        `:global(a + a)`: el `<a>` es el elemento raíz de este componente, así
        que `:first-child` se evalúa contra sus hermanas REALES del DOM y la
@@ -399,21 +393,67 @@
     background: var(--bandeja-superficie-suave);
   }
 
-  /* La abierta se marca con el filete azul y un fondo apenas teñido: es la
-     única fila con la que se está trabajando ahora mismo. */
+  /* La abierta: fondo teñido y un borde de 1px alrededor -- con `outline` y
+     desplazamiento negativo para que no empuje el contenido ni cambie el alto
+     de la fila al seleccionarla. */
   .fila.activa {
     background: var(--bandeja-humano-fondo);
-    border-left-color: var(--bandeja-humano);
+    outline: 1px solid var(--bandeja-humano-borde);
+    outline-offset: -1px;
   }
 
-  /* Lo que pide una persona lleva el filete rojo. Es el mismo lenguaje: el
-     borde izquierdo dice de quién es la fila. */
-  .fila.pide {
-    border-left-color: var(--bandeja-error);
+  .fila:focus-visible {
+    outline: 2px solid var(--bandeja-accion);
+    outline-offset: -2px;
   }
 
-  .fila.pide:hover {
-    background: var(--bandeja-error-fondo);
+  .cuerpo {
+    min-width: 0;
+  }
+
+  /* Cada renglón es una línea y nunca dos: lo que no entra se corta con
+     puntos suspensivos. Es lo que mantiene el alto de la fila fijo. */
+  .renglon {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .renglon-2 {
+    margin-top: 2px;
+  }
+
+  /* ── renglón 1: quién y cuánto ───────────────────────────────────────── */
+  .urgencia {
+    flex: none;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    margin-right: -4px;
+    border-radius: 50%;
+  }
+  .urg-error {
+    background: var(--bandeja-error);
+  }
+  .urg-aviso {
+    background: var(--bandeja-aviso);
+  }
+  .urg-humano {
+    background: var(--bandeja-humano);
+  }
+
+  .quien {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--bandeja-titulo);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 20px;
+    color: var(--bandeja-texto);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Un teléfono o un uuid no dan iniciales, así que va un icono chico pegado
@@ -421,150 +461,201 @@
   .ident {
     display: inline-flex;
     vertical-align: -1px;
-    margin-right: 3px;
+    margin-right: 4px;
     color: var(--bandeja-texto-3);
   }
 
-  /* ── el distintivo de banda ──────────────────────────────────────────── */
-  /* Lo que el motor decidió, en palabras y con color. Nunca un puntaje. */
-  .marca-banda {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 5px;
-    border: 1px solid;
-    border-radius: var(--bandeja-radio-sm);
-    font-family: var(--bandeja-mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+  .hace {
+    flex: none;
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+  }
+
+  .hace-tarde {
+    color: var(--bandeja-error);
+  }
+
+  /* ── renglón 2: de qué se trata, y el estado ─────────────────────────── */
+  .de-que {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--bandeja-texto-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .marca-banda .punto {
-    width: 5px;
-    height: 5px;
+  /* El tema es lo que se lee de reojo; el resumen lo completa. */
+  .tema {
+    color: var(--bandeja-texto);
+  }
+
+  .de-que-autor {
+    font-weight: 700;
+  }
+
+  /* El estado: texto chico con un punto de su color. No cede ancho: medido el
+     04/11/2026, con `flex-shrink` el resumen largo lo aplastaba a «Sin asig…»
+     y «La atiende l…», que es justo la palabra que se busca de reojo. Lo que
+     se corta es el resumen; el tope de 50% es la red para el estado más
+     largo («Sin resolución registrada», ~150px de 336). */
+  .estado-fila {
+    flex: none;
+    max-width: 50%;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .estado-fila::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .b-cliente {
+    color: var(--bandeja-error);
+  }
+  .b-sin-asignar,
+  .b-interno,
+  .b-sin-gestion {
+    color: var(--bandeja-aviso);
+  }
+  .b-revisar,
+  .b-legado {
+    color: var(--bandeja-texto-2);
+  }
+  .b-en-curso {
+    color: var(--bandeja-humano);
+  }
+  /* El violeta de la IA. Va con su palabra al lado, nunca solo: el color no
+     alcanza para decir quién está atendiendo. */
+  .b-ia {
+    color: var(--bandeja-ia);
+  }
+  /* Resuelta: gris neutro y sin punto. No es una alerta ni una buena noticia
+     que celebrar en cada fila: es un archivo. */
+  .b-resuelta {
+    color: var(--bandeja-neutro-texto);
+  }
+  .b-resuelta::before {
+    display: none;
+  }
+
+  /* Legado: apagado y en cursiva. Una legada sin adoptar no es algo
+     accionable desde acá (G8). */
+  .estado-legado {
+    font-style: italic;
+  }
+
+  /* ── renglón 3: las marcas ───────────────────────────────────────────── */
+  .marcas {
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  /* Plazo, área y ventana: un dato con su palabra, en un recuadro de 1px.
+     En reposo es apenas un dato más; cerca del vencimiento se enciende;
+     vencido es lo único de la fila que grita. Nunca sólo color. */
+  .chip {
+    flex: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    padding: 0 4px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-superficie);
+    color: var(--bandeja-texto-2);
+    white-space: nowrap;
+  }
+
+  .chip b {
+    font-weight: 600;
+  }
+
+  .chip-humano {
+    color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    border-color: var(--bandeja-humano-borde);
+  }
+
+  .chip-aviso {
+    color: var(--bandeja-aviso);
+    background: var(--bandeja-aviso-fondo);
+    border-color: var(--bandeja-aviso-borde);
+  }
+
+  .chip-error {
+    color: var(--bandeja-error);
+    background: var(--bandeja-error-fondo);
+    border-color: var(--bandeja-error-borde);
+  }
+
+  /* Punto y palabra, sin recuadro: «volvió a escribir» pide mirar y «activa»
+     solo informa, pero los dos son hechos de la conversación, no datos de
+     plazo. */
+  .insiste,
+  .latido {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .insiste::before,
+  .latido::before {
+    content: '';
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: currentColor;
     flex: none;
   }
 
-  .b-cliente {
-    background: var(--bandeja-error-fondo);
+  .insiste {
     color: var(--bandeja-error);
-    border-color: var(--bandeja-error-borde);
-  }
-  .b-sin-asignar,
-  .b-interno,
-  .b-sin-gestion {
-    background: var(--bandeja-aviso-fondo);
-    color: var(--bandeja-aviso);
-    border-color: var(--bandeja-aviso-borde);
-  }
-  .b-revisar,
-  .b-legado {
-    background: var(--bandeja-superficie-suave);
-    color: var(--bandeja-texto-2);
-    border-color: var(--bandeja-borde-fuerte);
-  }
-  .b-en-curso {
-    background: var(--bandeja-humano-fondo);
-    color: var(--bandeja-humano);
-    border-color: var(--bandeja-humano-borde);
-  }
-  /* El violeta de la IA. Va con su palabra al lado, nunca solo: el color no
-     alcanza para decir quién está atendiendo. */
-  .b-ia {
-    background: var(--bandeja-ia-fondo);
-    color: var(--bandeja-ia);
-    border-color: var(--bandeja-ia-borde);
-  }
-
-  /* ── el plazo de toma ──────────────────────────────────────────────────
-     Tres estados y tres pesos. En reposo es apenas un dato más; cerca del
-     vencimiento se enciende; vencido es lo único de la fila que grita.
-     Nunca sólo color: siempre lleva la palabra ("Quedan" / "Vencido"). */
-  .plazo {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 4px;
-    flex: none;
-    padding: 1px 5px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio-sm);
-    font-family: var(--bandeja-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--bandeja-texto-2);
-    white-space: nowrap;
-  }
-
-  .plazo b {
-    font-size: 10.5px;
     font-weight: 700;
-    font-variant-numeric: tabular-nums;
   }
 
-  .plazo-cerca {
-    color: var(--bandeja-aviso);
-    background: var(--bandeja-aviso-fondo);
-    border-color: var(--bandeja-aviso-borde);
-  }
-
-  .plazo-vencido {
-    color: var(--bandeja-error);
-    background: var(--bandeja-error-fondo);
-    border-color: var(--bandeja-error-borde);
-  }
-
-  .tope {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 2px;
-    min-height: 14px;
-  }
-
-  /* ── el pie: quién la tiene ──────────────────────────────────────────── */
-  .pie {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 4px;
-    padding-top: 3px;
-    border-top: 1px solid var(--bandeja-borde);
+  /* Actividad viva: el verde de «en vivo», el único uso que tiene acá. */
+  .latido {
+    color: var(--bandeja-ok);
   }
 
   .duenio {
+    flex: 0 1 auto;
+    min-width: 0;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-family: var(--bandeja-mono);
-    font-size: 10.5px;
-    font-weight: 500;
     color: var(--bandeja-humano);
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .duenio .punto {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: currentColor;
     flex: none;
-  }
-
-  /* Vacante: el hueco se ve, pero no compite con una fila que sí tiene dueño. */
-  .duenio-vacante {
-    color: var(--bandeja-aviso);
   }
 
   /* Legada: apagado. No es un hueco que alguien deba llenar desde acá. */
@@ -572,193 +663,10 @@
     color: var(--bandeja-texto-3);
   }
 
-  .cuerpo {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .alta {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-
-  .quien {
-    font-weight: 620;
-    font-size: 13px;
-    letter-spacing: -0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .cuando {
-    margin-left: auto;
-    flex: none;
-    font-size: 10.5px;
-    color: var(--v2-slate);
-  }
-
-  /* El tiempo de espera no es un dato de contexto como "hace 3h": es el
-     numero por el que esta fila esta donde esta.
-
-     Tres tramos, y la diferencia entre ellos es de PESO, no solo de color:
-     23 dias esperando no puede tener la misma presencia que el nombre del
-     canal. Quien mira la lista de reojo tiene que ver el numero grande antes
-     de leer nada. */
-  .cuando.espera-fresco {
-    color: var(--v2-slate);
-    font-weight: 600;
-  }
-
-  .cuando.espera-viejo {
-    color: var(--v2-clay);
-    font-weight: 650;
-  }
-
-  .cuando.espera-critico {
-    color: var(--v2-rust);
-    font-weight: 750;
-    font-size: 11.5px;
-    letter-spacing: -0.01em;
-  }
-
-  /* El legado espera, pero no pide nada nuevo: se revisa aparte (banda 6).
-     Gris, sin el filete rojo de la fila, para que no tape a lo de hoy. */
-  .cuando.espera-legado {
-    color: var(--bandeja-texto-3);
-    font-weight: 500;
-  }
-
-
-  /* El resumen del caso pesa mas que el eco del ultimo mensaje: es lo que
-     responde "de que iba esto" sin abrir la conversacion. */
-  .avance-resumen {
-    color: var(--v2-ink);
-  }
-
-
-  /* El motivo, como subtitulo del caso. Texto y no pildora a proposito. */
-  .motivo-fila {
-    font-size: 11.2px;
-    color: var(--v2-slate);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-
-  /* El resumen se lee, a diferencia del ultimo mensaje, que solo orienta --
-     por eso no lleva el gris apagado de .avance. Misma linea, mismo lugar. */
-  .avance.resumen {
-    color: var(--v2-ink);
-  }
-
-
-  /* El cliente volvio a escribir mientras espera. Va al lado de "Sin
-     atender" y no la reemplaza: son dos hechos distintos. */
-  /* Actividad viva: verde y discreto. No pide nada -- dice que algo se movio
-     recien, que es informacion, no trabajo. Por eso no compite con el rojo de
-     "volvio a escribir" ni con el tiempo de espera. */
-  .latido {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--v2-moss);
-  }
-
-  .latido::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--v2-moss);
-    flex: none;
-  }
-
-
-  /* Renglon propio. Lleva punto rojo porque es la unica excepcion de la fila
-     que pide mirar: no se apoya SOLO en el color -- tambien lo dice el
-     texto-- pero el punto es lo que hace que se encuentre de reojo. */
-  .insiste {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    font-weight: 650;
-    color: var(--v2-rust);
-    white-space: nowrap;
-  }
-
-  .insiste::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--v2-rust);
-    flex: none;
-  }
-
-  /* POR QUÉ ESTÁ ACÁ: texto, no píldora.
-     Era una píldora gris redondeada (radio 999) con `var(--v2-hueso, #f1efe9)`
-     y `var(--v2-tinta-suave, #5c5850)` -- dos variables que NO existen, así
-     que se pintaba con los colores de respaldo, fuera del sistema congelado,
-     igual que pasaba con las burbujas del hilo.
-     Además competía: en la referencia la fila tiene UN distintivo arriba
-     --la banda-- y todo lo demás es texto de distinto peso. Una segunda forma
-     redondeada al lado del badge hace que el ojo no sepa cuál de las dos
-     contesta "¿es esta la próxima?".
-     Una sola línea: el motivo orienta, no se lee entero. */
-  .por-que {
-    display: block;
-    margin: 1px 0 0;
-    color: var(--bandeja-texto-2);
-    font-size: 11px;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  /* Legado: apagado y en cursiva, sin caja. El borde punteado lo marcaba como
-     algo accionable, y una legada sin adoptar es justo lo contrario (G8). */
-  .por-que-legado {
-    font-style: italic;
-    color: var(--bandeja-texto-3);
-  }
-
-
-  .avance {
-    margin: 1px 0 0;
-    font-size: 12px;
-    color: var(--v2-slate);
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .avance-quien {
-    font-weight: 600;
-    color: var(--v2-ink);
-    opacity: 0.6;
-  }
-
-  .baja {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-  }
-
   .canal {
-    display: block;
-    margin-top: 4px;
-    font-size: 10.5px;
-    color: var(--v2-slate);
+    flex: none;
+    margin-left: auto;
+    color: var(--bandeja-texto-3);
+    white-space: nowrap;
   }
 </style>

@@ -114,6 +114,8 @@ def crear_intento(con, rid, org, n=1):
     return aid
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 con = psycopg.connect(dsn())
 try:
     # limpieza de corridas anteriores

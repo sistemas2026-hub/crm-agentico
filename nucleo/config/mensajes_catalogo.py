@@ -35,6 +35,7 @@ CAMPOS: dict[str, tuple[str, str]] = {
     "tecnico_nombre": ("Nombre del técnico", "Luis"),
     "fecha": ("Fecha de hoy", "28/10/2026"),
     "fecha_visita": ("Fecha de la visita", "30/10/2026"),
+    "franja": ("Franja horaria de la visita", "8:00 a 12:00"),
     "factura_numero": ("Número de factura", "F-10234"),
     "total": ("Total a pagar", "$ 85.000"),
     "fecha_corte": ("Fecha de corte", "05/11/2026"),
@@ -70,6 +71,16 @@ EVENTOS: dict[str, dict] = {
         "campos": ["tecnico_nombre", "cliente_nombre", "cliente_apellidos", "cliente_nombre_completo",
                    "cliente_direccion", "servicio", "ticket_numero", "ticket_asunto",
                    "fecha_visita", "empresa", "fecha"]},
+    # 30/10/2026 (PRD §8.17, Ola 2): "a que hora viene el tecnico" es de lo que
+    # mas pregunta un cliente. Lo dispara el CRM al publicar el dia (Supervisor
+    # o madrugada), una vez por orden y fecha, dentro del horario de avisos.
+    "visita_programada": {
+        "grupo": "Tickets", "etiqueta": "Visita programada",
+        "descripcion": "Al cliente, cuando su visita queda programada para un dia, con la franja.",
+        "destinatario": "cliente", "disparo": "dexter",
+        #  Sin la direccion: junto con la hora diria donde y cuando hay alguien
+        #  esperando a un tecnico (revisor de PII, 30/10/2026).
+        "campos": _CLIENTE + ["ticket_numero", "ticket_asunto", "fecha_visita", "franja"]},
     "seguimiento_ticket": {
         "grupo": "Tickets", "etiqueta": "Seguimiento desde el ticket",
         "descripcion": "La que se manda a mano desde un ticket cuando pasaron más de 24 h.",
@@ -105,6 +116,22 @@ EVENTOS: dict[str, dict] = {
         "descripcion": "Al cliente, cuando su servicio pasa a suspendido.",
         "destinatario": "cliente", "disparo": "diario",
         "campos": _CLIENTE + ["servicio", "total", "fecha_corte"]},
+    # 30/10/2026 (PRD §8.17, Ola 2): cuando se cae un PON, sus clientes
+    # escriben todos a la vez. Lo APRUEBA una persona desde "Fallas de red" y
+    # sale por lotes; ver nucleo/seguimiento/aviso_de_caida.py. Solo el
+    # nombre: ni la zona ni la causa (la causa es una hipotesis, no un hecho).
+    "caida_masiva": {
+        "grupo": "Servicio", "etiqueta": "Falla en la red",
+        "descripcion": "A los clientes afectados por una caída de red, cuando una persona aprueba el aviso desde Fallas de red.",
+        "destinatario": "cliente", "disparo": "dexter",
+        "campos": list(_CLIENTE)},
+    # 31/10/2026: cierra el aviso de caida. Sale solo a quien recibio el de
+    # la falla y cuyo equipo ya no esta en LOS (aviso_de_caida.restablecidos).
+    "caida_restablecida": {
+        "grupo": "Servicio", "etiqueta": "Falla de red resuelta",
+        "descripcion": "A los clientes que recibieron el aviso de una caída, cuando su equipo volvió.",
+        "destinatario": "cliente", "disparo": "dexter",
+        "campos": list(_CLIENTE)},
     "bienvenida": {
         "grupo": "Servicio", "etiqueta": "Bienvenida",
         "descripcion": "Al cliente, cuando queda activo su servicio nuevo.",
@@ -119,6 +146,12 @@ EVENTOS: dict[str, dict] = {
 #: en "usted". Se pueden cambiar antes de mandarlas a Meta; Meta revisa igual.
 #: Cada una pasa por armar_plantilla_nueva en tests/test_plantillas_whatsapp.py.
 SUGERENCIAS: dict[str, dict] = {
+    "visita_programada": {
+        "nombre": "visita_programada", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, su visita técnica quedó programada para el {{2}}, "
+                  "en este horario: {{3}}. Si no va a estar, responda este mensaje "
+                  "y la reprogramamos.",
+        "datos": ["cliente_nombre", "fecha_visita", "franja"]},
     "ticket_creado_cliente": {
         "nombre": "ticket_creado", "categoria": "UTILITY",
         "cuerpo": "Hola {{1}}, registramos su solicitud con el número {{2}}: {{3}}. "
@@ -173,6 +206,18 @@ SUGERENCIAS: dict[str, dict] = {
         "cuerpo": "Hola {{1}}, su servicio {{2}} fue suspendido por un saldo pendiente de {{3}}. "
                   "Si ya pagó, responda este mensaje con el comprobante y lo revisamos.",
         "datos": ["cliente_nombre", "servicio", "total"]},
+    "caida_masiva": {
+        "nombre": "falla_en_la_red", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, detectamos una falla en la red que afecta su servicio de internet. "
+                  "Nuestro equipo técnico ya está trabajando para solucionarla: no hace falta que "
+                  "nos reporte el daño. Si después de restablecido sigue sin servicio, responda este mensaje.",
+        "datos": ["cliente_nombre"]},
+    "caida_restablecida": {
+        "nombre": "falla_resuelta", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, la falla en la red que afectaba su servicio de internet ya quedó "
+                  "resuelta. Si todavía no tiene servicio, apague y encienda su equipo; si sigue "
+                  "igual, responda este mensaje.",
+        "datos": ["cliente_nombre"]},
     "bienvenida": {
         "nombre": "bienvenida_servicio", "categoria": "UTILITY",
         "cuerpo": "Hola {{1}}, bienvenido a {{2}}. Su servicio {{3}} con el plan {{4}} ya está activo. "
@@ -195,10 +240,35 @@ def sugerencia(evento: str) -> dict | None:
 #: Los momentos cuyo DISPARADOR ya esta construido. Los demas se pueden dejar
 #: configurados desde la pantalla, que dice que todavia no se mandan: un aviso
 #: encendido que nunca sale es peor que uno que dice "todavia no".
-LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre"})
+LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada",
+                                   "ticket_creado_cliente", "caida_masiva", "caida_restablecida"})
+
+#: Los avisos que se piden desde afuera por POST /avisos/evento (30/10/2026).
+#: Lista CERRADA: esa ruta recibe contexto libre, y abrirla a cualquier aviso
+#: de cliente dejaria mandar una "confirmacion de pago" con un monto
+#: inventado a cualquier numero (auditor de frontera). Se suma uno cuando su
+#: disparador existe y se audito.
+#:
+#: CONTRATO POR EVENTO (30/10/2026, auditorias de frontera y PII del ticket
+#: creado). Quien pide no decide nada que no deba:
+#:   contexto  los datos que se le aceptan; el resto se descarta. Nunca
+#:             'empresa' ni 'fecha' (los pone el motor), y nunca un dato de
+#:             otro momento.
+#:   destino   'telefono': el CRM sabe el movil (la orden lo trae) y el caso;
+#:             'ticket':   solo el NUMERO de ticket -- el motor lo lee en el ISP
+#:             y de ahi salen servicio, asunto y clave (avisos.hecho_del_ticket).
+PROACTIVOS: dict[str, dict] = {
+    "visita_programada": {
+        "contexto": frozenset({"cliente_nombre", "cliente_apellidos", "cliente_nombre_completo",
+                               "ticket_numero", "ticket_asunto", "fecha_visita", "franja"}),
+        "destino": "telefono"},
+    "ticket_creado_cliente": {"contexto": frozenset(), "destino": "ticket"},
+}
 
 RESPALDOS_POR_DEFECTO: dict[str, str] = {
     "cliente_nombre": "cliente",
     "cliente_nombre_completo": "cliente",
     "tecnico_nombre": "técnico",
+    #  Una orden sin franja prometida: no se inventa una hora.
+    "franja": "durante el día",
 }

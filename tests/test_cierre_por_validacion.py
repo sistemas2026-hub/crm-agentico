@@ -199,9 +199,313 @@ with escenario(registro, proveedor):
 afirmar(r.codigo == cierre.SIN_HERRAMIENTA, f"lo dice (codigo={r.codigo})")
 afirmar(proveedor.llamadas == [], "y no le llega nada al proveedor")
 
+# =============================================================================
+#  EL SUPERVISOR CIERRA SOLO  --  30/10/2026, por la puerta AUTONOMA
+# =============================================================================
+#  6  con las cuatro compuertas abiertas, sale UNA vez, con permiso AUTONOMO,
+#     firmado por el Supervisor y con su propia clave
+#  7  cada compuerta cerrada lo frena, dice cual, y no le llega nada al
+#     proveedor: el interruptor, la etapa (B-7) y la autorizacion
+#  8  la puerta humana NO se abre para el Supervisor
+
+
+class HerramientaQueEscribe(Herramienta):
+    solo_lectura = False
+
+
+class Compuertas:
+    """Las cuatro compuertas de `frontera.autonoma`, sustituidas."""
+
+    def __init__(self, interruptor=True, etapa=True, granular=True):
+        self.cfg = dict(interruptor=interruptor, etapa=etapa, granular=granular)
+
+    def __enter__(self):
+        class V:
+            def __init__(self, ok, codigo):
+                self.permitido, self.codigo, self.estado = ok, codigo, codigo
+                self.motivo, self.nivel_efectivo, self.autorizacion_id = "x", 2, ""
+                self.techo, self.requerido = 2, 2
+
+        c = self.cfg
+        self._orig = (frontera.interruptor.veredicto, frontera.techos.veredicto,
+                      frontera.autonomia2.veredicto, frontera.autorizacion.veredicto,
+                      frontera._bitacora, frontera._anotar)
+        frontera.interruptor.veredicto = lambda t: V(c["interruptor"], "detenido")
+        frontera.techos.veredicto = lambda t, n: V(True, "ok")
+        frontera.autonomia2.veredicto = lambda *a, **k: V(c["etapa"], "B7_REQUERIDO")
+        frontera.autorizacion.veredicto = lambda t, h, **k: V(
+            c["granular"], "HERRAMIENTA_SIN_AUTORIZACION")
+        frontera._bitacora = lambda *a, **k: None
+        frontera._anotar = lambda *a, **k: None
+        return self
+
+    def __exit__(self, *e):
+        (frontera.interruptor.veredicto, frontera.techos.veredicto,
+         frontera.autonomia2.veredicto, frontera.autorizacion.veredicto,
+         frontera._bitacora, frontera._anotar) = self._orig
+        return False
+
+
+def cierra_el_supervisor(**compuertas):
+    registro, proveedor = Registro(), Proveedor()
+    with escenario(registro, proveedor), Compuertas(**compuertas):
+        r = cierre.cerrar_ticket_por_el_supervisor(
+            Config([HerramientaQueEscribe()]), TENANT, orden_id=ORDEN, ticket=TICKET,
+            texto="Trabajo de campo OT #7001 validado en Dexter.",
+            revision="orden:7001|vuelta:1|se_puede_cerrar")
+    return r, registro, proveedor
+
+
+seccion("6. el Supervisor: sale UNA vez, por la puerta AUTONOMA")
+r, registro, proveedor = cierra_el_supervisor()
+afirmar(r.cerrado, f"el ticket queda cerrado (codigo={r.codigo}, motivo={r.motivo})")
+afirmar(len(proveedor.llamadas) == 1, "le llego UNA mutacion al proveedor")
+if proveedor.llamadas:
+    p = proveedor.permisos[0]
+    afirmar(p is not None and p.clase == "autonoma",
+            "y el permiso es AUTONOMO, no humano: nadie valido en el momento")
+    afirmar(p is not None and p.actor == cierre.SUPERVISOR, "el permiso dice que fue el Supervisor")
+    afirmar(cierre.FIRMA_DEL_SUPERVISOR in proveedor.llamadas[0].get("respuesta", ""),
+            "el texto del ticket dice que lo cerro el Supervisor")
+    afirmar(proveedor.llamadas[0].get("ticket-estado") == "4",
+            "con el estado de cierre de la HERRAMIENTA")
+afirmar(list(registro.filas) == [f"orden_validada:{ORDEN}|cerrar_ticket_operativo"],
+        "con la MISMA clave que la validacion humana: las dos puertas se excluyen "
+        "por clave primaria (auditoria de frontera, 30/10/2026, H3)")
+
+seccion("7. cada compuerta cerrada lo frena, y dice cual")
+for etiqueta, kw, codigo in (
+        ("el interruptor", {"interruptor": False}, "AUTONOMIA"),
+        ("la etapa con B-7", {"etapa": False}, "B7_REQUERIDO"),
+        ("la autorizacion de la herramienta", {"granular": False},
+         "HERRAMIENTA_SIN_AUTORIZACION")):
+    r, _, proveedor = cierra_el_supervisor(**kw)
+    afirmar(r.codigo == cierre.NO_AUTORIZADA and proveedor.llamadas == [],
+            f"{etiqueta}: no sale (codigo={r.codigo})")
+    afirmar(codigo in r.motivo or etiqueta == "el interruptor",
+            f"{etiqueta}: el motivo dice cual ({r.motivo[:60]})")
+
+seccion("8. la puerta humana no se abre para el Supervisor")
+_orig_humana = frontera.humana
+_abiertas = []
+frontera.humana = lambda *a, **k: _abiertas.append(k) or _orig_humana(*a, **k)
+try:
+    cierra_el_supervisor()
+finally:
+    frontera.humana = _orig_humana
+afirmar(_abiertas == [], "frontera.humana() no se llamo")
+
+# =============================================================================
+#  9-11  CON EL CATALOGO REAL Y EL EJECUTOR REAL  --  auditoria, 30/10/2026
+# =============================================================================
+#  Las secciones de arriba sustituyen `ejecutor_http.ejecutar`, que es donde
+#  corre el ultimo metro (`frontera.exigir`): con el catalogo real, la
+#  herramienta declara `aprobacion_humana` y eso las secciones de arriba no lo
+#  podian ver (H1). Aca solo se sustituye la RED (`requests.request`).
+import yaml                                                       # noqa: E402
+
+import nucleo.herramientas.http as ejecutor_real                  # noqa: E402
+from nucleo.config.schema import TenantConfig                     # noqa: E402
+
+_crudo = yaml.safe_load((RAIZ / "tenants/rapilink.config.yaml").read_text(encoding="utf-8"))
+CATALOGO_REAL = TenantConfig(**_crudo)
+HERR_REAL = next(h for h in CATALOGO_REAL.herramientas if h.cierra_ticket_operativo)
+
+
+class RegistroComoLaBase(Registro):
+    """Como `persistencia.reclamar_operacion_externa`: la huella se compara
+    ANTES que el estado; la misma clave con otros argumentos es «rechazada»
+    (nucleo/persistencia/db.py)."""
+
+    def reclamar(self, tenant, clave, herramienta, argumentos_hash, origen,
+                 segundos_vencida, reintentar_fallida=False):
+        fila = self.filas.get(clave)
+        if fila is not None and fila.get("hash") != argumentos_hash:
+            return {"decision": "rechazada", "fila": fila,
+                    "motivo": "la misma clave ya se uso con otros argumentos"}
+        r = super().reclamar(tenant, clave, herramienta, argumentos_hash, origen,
+                             segundos_vencida, reintentar_fallida)
+        self.filas[clave].setdefault("hash", argumentos_hash)
+        return r
+
+
+class _Red:
+    def __init__(self):
+        self.pedidos = []
+
+    def __call__(self, metodo, url, **k):
+        self.pedidos.append(url)
+
+        class _R:
+            ok, status_code = True, 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"ok": True}
+        return _R()
+
+
+@contextlib.contextmanager
+def red_falsa(registro, red):
+    originales = (persistencia.reclamar_operacion_externa,
+                  persistencia.finalizar_operacion_externa,
+                  getattr(persistencia, "registrar_ejecucion_autonoma", None),
+                  ejecutor_real.headers_de, ejecutor_real.requests.request)
+    persistencia.reclamar_operacion_externa = registro.reclamar
+    persistencia.finalizar_operacion_externa = registro.finalizar
+    persistencia.registrar_ejecucion_autonoma = lambda *a, **k: None
+    ejecutor_real.headers_de = lambda h, t: {}
+    ejecutor_real.requests.request = red
+    try:
+        with Compuertas():
+            yield
+    finally:
+        (persistencia.reclamar_operacion_externa,
+         persistencia.finalizar_operacion_externa,
+         persistencia.registrar_ejecucion_autonoma,
+         ejecutor_real.headers_de, ejecutor_real.requests.request) = originales
+
+
+class _ConfigDe:
+    def __init__(self, herr):
+        self.herramientas = [herr]
+        self.variables_tenant = CATALOGO_REAL.variables_tenant
+
+
+seccion("9. catalogo REAL: la marca sigue puesta, y la exencion del tenant deja cerrar")
+#  CAMBIO DEL 31/10/2026. Hasta hoy esta seccion afirmaba lo contrario --que el
+#  Supervisor NO cerraba-- y era correcta: la decision del 13/10 ("se cierra
+#  aunque el ISP le avise al cliente, el aviso no dice quien lo cerro") se
+#  habia aplicado solo a la puerta humana. El usuario la extendio a esta.
+#
+#  LO QUE NO CAMBIO, y por eso se sigue afirmando: la marca de la herramienta
+#  SIGUE PUESTA. Lo que abre la puerta es la exencion nombrada por el tenant,
+#  no haberla apagado -- apagarla habria habilitado tambien la conversacion.
+afirmar(HERR_REAL.aprobacion_humana is True,
+        "el catalogo real SIGUE declarando aprobacion_humana (M06-E)")
+afirmar(frontera.CIERRE_DE_ORDEN_REVISADA in (HERR_REAL.aprobacion_humana_salvo or []),
+        "y el tenant la eximio para el cierre de una orden revisada")
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    r1 = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision=f"orden:{ORDEN}|vuelta:1|se_puede_cerrar")
+afirmar(r1.cerrado,
+        f"el Supervisor cierra el ticket (codigo={r1.codigo}, {r1.motivo[:60]})")
+afirmar(len(red.pedidos) == 1,
+        f"y al ISP le llega UNA publicacion ({len(red.pedidos)})")
+
+seccion("9b. con la marca y SIN la exencion sigue frenada, y no se quema el intento")
+#  La garantia de H1 (30/10/2026) no se toca: el rechazo ocurre ANTES de
+#  reclamar la clave, asi que la orden se puede reintentar. Si se perdiera, la
+#  empresa que no declare la exencion tendria sus ordenes quemadas para siempre.
+sin_exencion = HERR_REAL.model_copy(update={"aprobacion_humana_salvo": []})
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    r1 = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(sin_exencion), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision="orden:x|vuelta:1|se_puede_cerrar")
+    r2 = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(sin_exencion), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision="orden:x|vuelta:1|se_puede_cerrar")
+afirmar(r1.codigo == cierre.NO_AUTORIZADA and "APROBACION_HUMANA_REQUERIDA" in r1.motivo,
+        f"no sale, y dice POR QUE (codigo={r1.codigo}, motivo={r1.motivo[:50]})")
+afirmar(red.pedidos == [], "no le llega nada al ISP")
+afirmar(registro.filas == {}, "y no quema el intento: la clave no se reclamo")
+afirmar(r2.codigo == cierre.NO_AUTORIZADA,
+        f"la vuelta siguiente dice lo mismo, no 'fallida previa' (codigo={r2.codigo})")
+
+seccion("10. sin esa marca: una sola publicacion aunque las dos puertas cierren la misma orden")
+sin_marca = HERR_REAL.model_copy(update={"aprobacion_humana": False})
+for primero in ("supervisor", "persona"):
+    registro, red = RegistroComoLaBase(), _Red()
+    with red_falsa(registro, red):
+        sup = lambda: cierre.cerrar_ticket_por_el_supervisor(          # noqa: E731
+            _ConfigDe(sin_marca), TENANT, orden_id=ORDEN, ticket=TICKET,
+            texto="Trabajo de campo OT #7001 validado en Dexter.",
+            revision="orden:7001|vuelta:1|se_puede_cerrar")
+        per = lambda: cierre.cerrar_ticket_de_orden(                   # noqa: E731
+            _ConfigDe(sin_marca), TENANT, orden_id=ORDEN, ticket=TICKET,
+            texto="Trabajo de campo OT #7001 validado en Dexter.", actor="Laura Gomez")
+        a, b = (sup(), per()) if primero == "supervisor" else (per(), sup())
+    afirmar(len(red.pedidos) == 1,
+            f"primero {primero}: el ISP recibe UNA publicacion ({len(red.pedidos)})")
+    afirmar(a.cerrado and not b.cerrado,
+            f"primero {primero}: la segunda puerta no publica (codigo={b.codigo})")
+    if primero == "persona":
+        afirmar(b.codigo == cierre.INCIERTO,
+                f"y el Supervisor lo dice como INCIERTO, no como 'no pudo' ({b.codigo})")
+
+seccion("11. la puerta humana rechaza al Supervisor")
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    for actor in ("Supervisor", "supervisor", cierre.FIRMA_DEL_SUPERVISOR, "servicio:x",
+                  "supervisor_noc", "Supervisor-NOC", "Dexter"):
+        r = cierre.cerrar_ticket_de_orden(
+            _ConfigDe(sin_marca), TENANT, orden_id=ORDEN, ticket=TICKET,
+            texto="T", actor=actor)
+        afirmar(r.codigo == cierre.NO_EJECUTADA, f"actor {actor!r}: no entra (codigo={r.codigo})")
+afirmar(red.pedidos == [], "y no le llega nada al ISP")
+with red_falsa(registro, red):
+    r = cierre.cerrar_ticket_de_orden(
+        _ConfigDe(sin_marca), TENANT, orden_id="otra-orden", ticket=TICKET, texto="T",
+        actor="Supervisora Ana")
+afirmar(r.cerrado, f"una persona cuyo nombre se parece SI entra (codigo={r.codigo})")
+
+seccion("12. un timeout despues de mandar es INCIERTO, no un fallo")
+import requests                                                   # noqa: E402
+
+
+class _RedQueSeCorta(_Red):
+    def __call__(self, metodo, url, **k):
+        self.pedidos.append(url)
+        raise requests.exceptions.ReadTimeout("se corto")
+
+
+registro, red = RegistroComoLaBase(), _RedQueSeCorta()
+with red_falsa(registro, red):
+    r = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(sin_marca), TENANT, orden_id="orden-timeout", ticket=TICKET, texto="T",
+        revision="orden:7001|vuelta:1|se_puede_cerrar")
+afirmar(len(red.pedidos) == 1 and r.codigo == cierre.INCIERTO,
+        f"salio el pedido y se corto: no se sabe (codigo={r.codigo})")
+
+
+seccion("9c. sin la revision que lo autoriza, el Supervisor no cierra  (H1, 31/10/2026)")
+#  La premisa de la exencion es "el Supervisor lo reviso punto por punto", y esa
+#  revision corre en el CRM: desde aca NO se puede comprobar, y hasta el
+#  31/10 tampoco se pedia nada que la nombrara -- se cerraba el ticket que le
+#  dijeran. Exigirla no la prueba; hace que la auditoria pueda contestar QUE
+#  revision autorizo cada cierre, y que un servicio sin una no entre por
+#  descuido.
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    for revision in ("", "   ", None):
+        r = cierre.cerrar_ticket_por_el_supervisor(
+            _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+            revision=revision)
+        afirmar(r.codigo == cierre.NO_EJECUTADA,
+                f"revision {revision!r}: no cierra (codigo={r.codigo})")
+afirmar(red.pedidos == [], "y no le llega nada al ISP")
+afirmar(registro.filas == {}, "ni se reclama la clave")
+
+registro, red = RegistroComoLaBase(), _Red()
+with red_falsa(registro, red):
+    r = cierre.cerrar_ticket_por_el_supervisor(
+        _ConfigDe(HERR_REAL), TENANT, orden_id=ORDEN, ticket=TICKET, texto="T",
+        revision="orden:7001|vuelta:1|se_puede_cerrar")
+afirmar(r.cerrado, f"con la revision si cierra (codigo={r.codigo})")
+afirmar("se_puede_cerrar" in r.referencia,
+        f"y la referencia que queda auditada la nombra ({r.referencia})")
+
+
 print()
 if _fallos:
     print(f"[FALLA] {len(_fallos)} afirmaciones no se cumplen.")
     sys.exit(1)
 print("[OK] Validada la orden, el ticket del ISP se cierra una vez, por la "
-      "puerta humana y con el kill switch consultado.")
+      "puerta humana y con el kill switch consultado; y el Supervisor, por la "
+      "autonoma con sus cinco compuertas, sin quemar el intento y sin publicar "
+      "dos veces.")

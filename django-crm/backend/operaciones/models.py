@@ -1231,3 +1231,10 @@ from operaciones.tareas_modelos import TareaDelegada             # noqa: E402,F4
 #  dia, con su tipo: la medicion que se pidio antes de decidir si un agente de
 #  IA lo resuelve (29/10/2026). Ver 'operaciones/atascos.py'.
 from operaciones.atascos_modelos import AtascoDelSupervisor     # noqa: E402,F401
+
+# =============================================================================
+#  AVISO DE CAIDA  --  vive en 'aviso_de_caida_modelos.py'
+# =============================================================================
+#  La aprobacion de avisarle una caida de red a sus clientes, y su avance por
+#  lotes (30/10/2026, PRD §8.17). Ver 'operaciones/aviso_de_caida.py'.
+from operaciones.aviso_de_caida_modelos import AvisoDeCaida           # noqa: E402,F401

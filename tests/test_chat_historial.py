@@ -63,6 +63,8 @@ def comprobar(etiqueta: str, condicion: bool, detalle: str = "") -> None:
         fallos.append(etiqueta)
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 def crudo():
     return psycopg.connect(db.dsn(), row_factory=dict_row)
 

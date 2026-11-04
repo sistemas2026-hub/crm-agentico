@@ -117,7 +117,36 @@ def cerrar_ticket_al_validar(orden, profile) -> dict:
         return {"estado": "no_cerrado", "detalle": type(e).__name__}
 
 
-def _cerrar(orden, profile) -> dict:
+def cerrar_ticket_por_el_supervisor(orden, revision=None) -> dict:
+    """El Supervisor cierra el ticket SOLO (30/10/2026,
+    `campo/cierre_por_el_supervisor.py`). Por la ruta AUTONOMA del motor, que
+    consulta el interruptor, el techo, Autonomia 2 con B-7 y la autorizacion de
+    la herramienta. NUNCA lanza. Mismo contrato que `cerrar_ticket_al_validar`.
+
+    `revision` es la que autoriza el cierre. Viaja al motor porque alla no se
+    puede recalcular, y sin ella la ruta ahora RECHAZA (auditoria de frontera,
+    31/10/2026, H1): la bitacora de ejecucion autonoma tiene que poder decir
+    que revision autorizo cada cierre.
+    """
+    try:
+        return _cerrar(orden, None, ruta="cerrar-ticket-supervisor",
+                       revision=_referencia_de(orden, revision))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("cierre del Supervisor: fallo inesperado (%s)", type(e).__name__)
+        return {"estado": "no_cerrado", "detalle": type(e).__name__}
+
+
+def _referencia_de(orden, revision) -> str:
+    """Como se nombra la revision en la auditoria: orden, vuelta y veredicto.
+
+    Nada del cliente ni texto libre: esto queda escrito en la bitacora del
+    motor, que no lleva datos de persona (CLAUDE.md §5).
+    """
+    veredicto = (revision or {}).get("veredicto") or "sin_veredicto"
+    return f"orden:{orden.id}|vuelta:{orden.vuelta}|{veredicto}"
+
+
+def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "") -> dict:
     if not _habilitado():
         return {"estado": "apagado", "detalle": f"{BANDERA}=0"}
     ticket = str((orden.contexto or {}).get("ticket") or "").strip()
@@ -128,11 +157,21 @@ def _cerrar(orden, profile) -> dict:
     if _ya_cerrado(orden):
         return {"estado": "ya_cerrado", "detalle": f"ticket {ticket}"}
 
-    tenant = (os.environ.get("MOTOR_TENANT", "") or "").strip()
+    #  LA RUTA HUMANA EXIGE UNA PERSONA (auditoria de frontera, 30/10/2026,
+    #  H2). Sin perfil no se inventa un «Oficina de operaciones»: el Supervisor
+    #  tiene su ruta, la autonoma.
+    if ruta == "cerrar-ticket" and profile is None:
+        return {"estado": "no_cerrado",
+                "detalle": "sin una persona que valide no se pide por la ruta humana"}
+
+    from operaciones import areas_del_tenant
+
+    #  La empresa de la ORDEN, no la de una variable del servidor (31/10/2026).
+    tenant = areas_del_tenant.tenant_de(orden.org_id)
     if not tenant:
         return {"estado": "no_cerrado",
-                "detalle": "falta MOTOR_TENANT: sin saber de que empresa es la "
-                           "orden no se le escribe al ISP"}
+                "detalle": f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que "
+                           "empresa es la orden no se le escribe al ISP"}
 
     import requests
 
@@ -140,6 +179,13 @@ def _cerrar(orden, profile) -> dict:
     #  nombre, y ese correo terminaria escrito en el ticket del cliente.
     user = getattr(profile, "user", None)
     quien = (getattr(user, "name", "") or "").strip() or "Oficina de operaciones"
+    #  La ruta del Supervisor no acepta `actor`: quien cierra no lo elige el CRM.
+    cuerpo_pedido = {"ticket": ticket, "texto": resumen_de(orden, quien)}
+    if ruta == "cerrar-ticket":
+        cuerpo_pedido["actor"] = quien
+    else:
+        #  La ruta del Supervisor la exige: ver `_referencia_de` y H1.
+        cuerpo_pedido["revision"] = revision
     base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
     cabeceras = {"Content-Type": "application/json"}
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
@@ -147,10 +193,9 @@ def _cerrar(orden, profile) -> dict:
         cabeceras["X-Servicio-Token"] = token
     try:
         r = requests.post(
-            f"{base}/interno/orden/{orden.id}/cerrar-ticket",
+            f"{base}/interno/orden/{orden.id}/{ruta}",
             params={"tenant": tenant},
-            json={"ticket": ticket, "texto": resumen_de(orden, quien),
-                  "actor": quien},
+            json=cuerpo_pedido,
             headers=cabeceras, timeout=45)
         cuerpo = r.json() if r.content else {}
         if not isinstance(cuerpo, dict):
@@ -170,4 +215,7 @@ def _cerrar(orden, profile) -> dict:
     codigo = cuerpo.get("codigo") or f"HTTP {r.status_code}"
     logger.warning("cierre en el ISP: el motor no cerro (%s)", codigo)
     _anotar(orden, profile, EVENTO_NO_CERRADO, {"ticket": ticket, "codigo": codigo})
-    return {"estado": "no_cerrado", "detalle": codigo}
+    #  El motivo (que compuerta lo freno) viaja: «B7_REQUERIDO: ...» le dice a
+    #  la oficina que falta, «NO_AUTORIZADA» solo no.
+    detalle = f"{codigo}: {cuerpo['motivo']}" if cuerpo.get("motivo") else codigo
+    return {"estado": "no_cerrado", "detalle": detalle[:300]}

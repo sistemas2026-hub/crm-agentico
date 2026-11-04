@@ -9,6 +9,8 @@
  */
 export const PESTANAS_NOC = [
   { id: 'pendientes', href: '/supervisor-noc', texto: 'Pendientes por revisión' },
+  //  30/10/2026: las caídas de PON activas y el aviso a sus clientes.
+  { id: 'fallas', href: '/supervisor-noc/fallas', texto: 'Fallas de red' },
   { id: 'cuadrillas', href: '/supervisor-noc/cuadrillas', texto: 'Cuadrillas' },
   { id: 'despacho', href: '/supervisor-noc/despacho', texto: 'Despacho' },
   { id: 'programacion', href: '/supervisor-noc/programacion', texto: 'Programación' },

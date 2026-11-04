@@ -326,7 +326,7 @@ def test_del_TEXTO_del_reclamo_a_la_cuadrilla(
     # --- 2 - el Supervisor lo detecta --------------------------------------
     #  EL MAPA DE AREAS VIVE EN EL MOTOR, y sin el no se lee NADA.
     #
-    #  `criterio_de_area()` pide `area_por_persona()`, que sale por HTTP al
+    #  `criterio_de_area()` pide `area_por_persona_de_org()`, que sale por HTTP al
     #  motor. En una prueba no hay motor, el mapa vuelve vacio, y
     #  `_tickets_abiertos_con_tecnico` devuelve `[]` ANTES de mirar un solo
     #  caso: «un mapa vacio es ambiguo --nadie tiene area, o el motor no
@@ -338,8 +338,8 @@ def test_del_TEXTO_del_reclamo_a_la_cuadrilla(
     #  motor conteste -- que es una dependencia del circuito y no un detalle
     #  del laboratorio.
     from operaciones import areas_del_tenant
-    monkeypatch.setattr(areas_del_tenant, "area_por_persona",
-                        lambda: {str(admin_profile.id): "soporte_tecnico"})
+    monkeypatch.setattr(areas_del_tenant, "area_por_persona_de_org",
+                        lambda org_id: {str(admin_profile.id): "soporte_tecnico"})
 
     senales = supervisor._tickets_abiertos_con_tecnico(org_a, ahora)
     assert [s.origen_id for s in senales] == [str(caso.id)], (

@@ -182,6 +182,40 @@ def tenant_de_organizacion(organization_id: str) -> str | None:
         con.close()
 
 
+def tenants_activos() -> list[str]:
+    """
+    Los slugs de las empresas que este despliegue atiende: las filas de
+    asistente.tenant_config con 'activo' y una config cargada.
+
+    "Cargada" es lo mismo que exige 'fuente.desde_base': la columna nace con
+    '{}' y una fila asi es una empresa que nadie cargo todavia. Medido el
+    01/11/2026: cuatro filas que dejaron pruebas cortadas contra produccion
+    (prueba-b4-*, prueba-entrega-*) aparecian en cada vuelta del reloj, que
+    intentaba leer su YAML, no lo encontraba y lo dejaba como error en el log.
+
+    La usa el reloj para saber a quien darle trabajos (ver
+    nucleo/reloj.py::tenants_conocidos). Antes salia de 'tenants/*.config.yaml'
+    de la imagen, asi que dar de alta una empresa desde la plataforma no le
+    daba reloj hasta un commit y un redespliegue, y darla de baja no se lo
+    quitaba.
+
+    Mismo patron que `tenant_de_organizacion`: conexion propia y el usuario que
+    conecta, porque es la consulta que dice QUE tenants hay, asi que no puede
+    depender de que uno ya este fijado. Si la base no contesta, LEVANTA: quien
+    llama decide, y el reloj decide no atender a nadie.
+    """
+    con = psycopg.connect(dsn(), connect_timeout=SEGUNDOS_CONEXION,
+                          row_factory=dict_row)
+    try:
+        with con.cursor() as cur:
+            cur.execute("""select slug from asistente.tenant_config
+                            where activo and config <> '{}'::jsonb
+                            order by slug""")
+            return [str(f["slug"]) for f in cur.fetchall()]
+    finally:
+        con.close()
+
+
 # El timeout de conexion de casi todo: una consulta de conversacion, una
 # escritura de traza, un barrido del reloj. No se toca.
 SEGUNDOS_CONEXION = 30
@@ -698,6 +732,10 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                   c.relevo_version, c.control, c.control_motivo,
                   c.asignada_a_usuario_id, c.asignada_a_nombre, c.asignada_en,
                   c.pendiente_interno_desde, c.estado_escalada,
+                  -- Contrato v3.3 (30/10/2026): la hora de la espera (C22) y
+                  -- el area a la que se escalo (T22). Sin la nota: la cola no
+                  -- la muestra.
+                  c.pendiente_interno_hasta, c.area_destino, c.area_destino_en,
                   -- La ultima vez que le respondio UNA PERSONA. Con esto se
                   -- sabe si el mensaje del cliente es posterior, que es la
                   -- diferencia entre "alguien espera respuesta" y "ya le
@@ -830,6 +868,38 @@ _SQL_MENSAJES = """select m.id, m.rol, m.contenido, m.creado_en, e.caso as caso_
                order by m.creado_en asc"""
 
 
+def reincidencia_de(tenant: str, conversation_id: str, dias: int) -> dict | None:
+    """
+    Cuantas conversaciones tuvo el MISMO numero en los ultimos 'dias', y por
+    que caso (29/10/2026). "Escribio 3 veces en 15 dias por internet lento"
+    cambia la conversacion: deja de ser reiniciar el equipo y pasa a ser una
+    visita. Lo cuenta el codigo, no el modelo (CLAUDE.md §4).
+
+    Solo metadatos: canal y numero para agrupar, y el caso. Ningun texto.
+    'dias' 0 = apagado. None si la conversacion no existe.
+    """
+    if not dias or dias <= 0:
+        return None
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select coalesce(nullif(c.caso_manual, ''), nullif(c.etiqueta, '')) as caso,
+                      count(*) as n
+               from asistente.conversations c
+               join asistente.conversations x
+                 on x.organization_id = c.organization_id
+                and x.canal = c.canal and x.usuario_externo = c.usuario_externo
+               where c.organization_id = %s and x.id = %s
+                 and c.creado_en >= now() - make_interval(days => %s)
+               group by 1""",
+            (org, conversation_id, int(dias)))
+        filas = cur.fetchall()
+    if not filas:
+        return None
+    por_caso = sorted(({"caso": f["caso"], "n": int(f["n"])} for f in filas if f["caso"]),
+                      key=lambda x: -x["n"])
+    return {"dias": int(dias), "total": sum(int(f["n"]) for f in filas), "por_caso": por_caso}
+
+
 def mensajes_de(tenant: str, conversation_id: str) -> dict:
     """
     El encabezado de una conversacion puntual (para el detalle de la
@@ -849,6 +919,14 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       -- control EFECTIVO ya calculado (api.py), no la regla.
                       relevo_version, control, control_motivo,
                       asignada_a_usuario_id, asignada_a_nombre, aviso_relevo,
+                      -- «En espera» (29/10/2026): para que la pantalla diga
+                      -- que se espera y desde cuando. La nota es de quien
+                      -- atiende, no del cliente.
+                      pendiente_interno_desde, pendiente_interno_nota,
+                      pendiente_interno_hasta,
+                      -- T22: a que area se escalo y con que nota, para quien
+                      -- la recibe.
+                      area_destino, area_destino_nota, area_destino_en,
                       -- Lo que el modelo ya habia escrito al escalar y hasta
                       -- ahora solo viajaba a la descripcion del ticket. Es lo
                       -- que arma el resumen de arriba en el detalle: que
@@ -1075,7 +1153,14 @@ def tasa_escalamiento(tenant: str, dias: int) -> dict:
     nucleo/canales/api.py::atender_turno, que ya restringe la evaluacion a
     'orientado_a == cliente_final'), asi que toda fila que llega con
     'escalada_a_humano' es de un cliente.
+
+    Solo canales reales (30/10/2026): hasta ese dia el 'total' sumaba el
+    simulador y el asistente interno, que no son clientes, y la tasa salia
+    diluida por conversaciones de prueba. Misma regla que el tablero de
+    capacidad (nucleo/persistencia/capacidad.py).
     """
+    from nucleo.canales.canal import REALES
+
     with sesion(tenant) as (cur, org):
         cur.execute(
             """select escalada_a_humano, motivo_escalamiento,
@@ -1084,10 +1169,11 @@ def tasa_escalamiento(tenant: str, dias: int) -> dict:
                       count(*) as n
                  from asistente.conversations
                 where organization_id = %s
+                  and canal = any(%s::text[])
                   and creado_en >= now() - (%s || ' days')::interval
                 group by escalada_a_humano, motivo_escalamiento,
                          con_siguiente_paso""",
-            (org, dias))
+            (org, sorted(REALES), dias))
         filas = [dict(f) for f in cur.fetchall()]
 
     total = sum(f["n"] for f in filas)
@@ -4386,7 +4472,7 @@ def barrer_acciones_ejecutando(tenant: str, minutos: int, limite: int = 50) -> l
                   order by revisado_en
                   limit %s
                   for update skip locked)
-               returning id, conversation_id""",
+               returning id, conversation_id, herramienta""",
             (org, minutos, limite))
         barridas = [dict(f) for f in cur.fetchall()]
         for fila in barridas:
@@ -4397,7 +4483,20 @@ def barrer_acciones_ejecutando(tenant: str, minutos: int, limite: int = 50) -> l
                        f"efecto llego a ocurrir",
                 actor_tipo="sistema",
                 conversation_id=str(fila["conversation_id"]) if fila["conversation_id"] else None)
-        return barridas
+    #  CONDICION 4 de la autonomia ganada (PRD §2): no se sabe si el efecto
+    #  ocurrio. La herramienta pierde la autonomia, si la tenia. Despues del
+    #  commit de arriba, y sin romper el barrido si no se puede escribir.
+    for herramienta in sorted({str(f.get("herramienta") or "") for f in barridas} - {""}):
+        try:
+            from nucleo.persistencia import autonomia_ganada as registro_autonomia
+
+            registro_autonomia.degradar(tenant, herramienta,
+                                        "una ejecucion quedo huerfana: no se sabe si ocurrio",
+                                        {"barridas": len(barridas)})
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            registrar("autonomia_ganada", "no se pudo degradar la autonomia",
+                      tenant=tenant, herramienta=herramienta, error=e)
+    return barridas
 
 
 def barrer_acciones_vencidas(tenant: str, limite: int = 50) -> list[dict]:

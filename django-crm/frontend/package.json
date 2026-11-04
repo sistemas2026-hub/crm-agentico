@@ -48,6 +48,7 @@
     "@sentry/sveltekit": "^10.69.0",
     "axios": "^1.19.0",
     "clsx": "^2.1.1",
+    "leaflet": "1.9.4",
     "libphonenumber-js": "^1.13.10",
     "pixi.js": "8.22.0",
     "svelte-dnd-action": "^0.9.77",

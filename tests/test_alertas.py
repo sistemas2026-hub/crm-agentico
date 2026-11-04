@@ -242,6 +242,8 @@ print(" B. EL ESTADO  (PostgreSQL real)")
 print("=" * 70)
 
 
+from base_local import exigir_base_local                           # noqa: E402
+exigir_base_local(__file__)
 def crudo():
     return psycopg.connect(db.dsn(), row_factory=dict_row)
 

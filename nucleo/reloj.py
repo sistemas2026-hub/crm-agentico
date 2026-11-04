@@ -237,9 +237,32 @@ def credenciales_resueltas(config, tenant: str) -> dict[str, bool]:
 
 
 def tenants_conocidos() -> list[str]:
-    """Los tenants que este despliegue sirve, por su archivo semilla."""
-    return sorted(p.stem.replace(".config", "")
-                  for p in (RAIZ / "tenants").glob("*.config.yaml"))
+    """
+    Las empresas que este despliegue atiende, segun la BASE.
+
+    Hasta el 31/10/2026 salian de 'tenants/*.config.yaml' de la imagen. Dar de
+    alta un ISP es una fila en 'asistente.tenant_config', no un archivo
+    (CLAUDE.md 3.1): con el listado por carpeta, una empresa nueva no recibia
+    ningun trabajo del reloj hasta un commit y un redespliegue, y una dada de
+    baja los seguia recibiendo mientras su archivo siguiera en el repositorio.
+
+    SIN BASE, NADIE. No cae al YAML: el resto del ciclo cargaria la config del
+    archivo (fuente.cargar degrada asi), y servir para trabajos AUTONOMOS una
+    configuracion que nadie puede editar es justo lo que no se quiere cuando
+    la base no contesta. El interruptor de autonomia tambien falla cerrado sin
+    base; esto llega antes y lo dice.
+
+    Se atrapa 'SystemExit' por lo mismo que en 'una_pasada':
+    conexion.dsn levanta eso cuando faltan los datos de conexion.
+    """
+    from nucleo.persistencia import db
+
+    try:
+        return db.tenants_activos()
+    except (Exception, SystemExit) as e:                         # noqa: BLE001
+        registrar("reloj", "no se pudo listar las empresas: este ciclo no atiende a "
+                           "ninguna", error=e)
+        return []
 
 
 def _vencimientos(config, tenant: str, seco: bool) -> dict:
