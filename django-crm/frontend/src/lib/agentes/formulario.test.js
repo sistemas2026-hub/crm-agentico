@@ -21,7 +21,8 @@ const CATALOGO = [
   { nombre: 'reiniciar_ont', descripcion: 'LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual) apenas la senal de aceptable y el ping responda.',
     escribe: true, pide_aprobacion: true, critica: false, deriva: false, de_sistema: false, campos_conocidos: ['response'] },
   { nombre: 'derivar_a_area', descripcion: 'Pasa la conversacion al area que corresponde.',
-    escribe: false, pide_aprobacion: false, critica: true, deriva: true, de_sistema: false, campos_conocidos: [] },
+    escribe: false, pide_aprobacion: false, critica: true, deriva: true, de_sistema: false, campos_conocidos: [],
+    segura_sin_verificar: true },
   { nombre: 'cerrar_ticket_operativo', descripcion: 'Cierra el ticket. NO la llames tu.',
     escribe: true, pide_aprobacion: true, critica: true, deriva: false, de_sistema: true, campos_conocidos: [] }
 ];
@@ -87,6 +88,22 @@ describe('los avisos antes de guardar', () => {
     expect(avisos({ seleccion: { consultar_saldo: true }, campos: {} })).toContain('sin_campos:consultar_saldo');
     expect(avisos({ seleccion: { consultar_saldo: true }, campos: { consultar_saldo: ['saldo'] } }))
       .not.toContain('sin_campos:consultar_saldo');
+  });
+  it('un agente de clientes SIN verificar con una que devuelve datos: aviso que bloquea (04/11/2026)', () => {
+    const sinVerificar = { orientadoA: 'cliente_final', conectar: true, atiende: 'saldo',
+                           exigeVerificacion: false, seleccion: { consultar_saldo: true },
+                           campos: { consultar_saldo: ['saldo'] } };
+    const lista = avisosDelAgente({ ...base, ...sinVerificar });
+    const aviso = lista.find((a) => a.clave === 'expuesta:consultar_saldo');
+    expect(aviso?.bloquea).toBe(true);
+    expect(avisos({ ...sinVerificar, exigeVerificacion: true })).not.toContain('expuesta:consultar_saldo');
+    expect(avisos({ ...sinVerificar, orientadoA: 'colaborador' })).not.toContain('expuesta:consultar_saldo');
+    // la que es segura sin verificar (deriva, catalogo) no avisa
+    expect(avisos({ ...sinVerificar, seleccion: { derivar_a_area: true } }))
+      .not.toContain('expuesta:derivar_a_area');
+    // la que el agente YA tenia sin verificar se respeta, como en el motor
+    expect(avisos({ ...sinVerificar, previasSinVerificar: new Set(['consultar_saldo']) }))
+      .not.toContain('expuesta:consultar_saldo');
   });
   it('una del sistema elegida: se avisa que la dispara el codigo', () => {
     expect(avisos({ seleccion: { cerrar_ticket_operativo: true } })).toContain('de_sistema:cerrar_ticket_operativo');

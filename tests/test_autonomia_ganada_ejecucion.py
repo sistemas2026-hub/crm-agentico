@@ -339,19 +339,32 @@ motor.aprobaciones.desde_fila = lambda fila, tenant: SimpleNamespace(aprobador=f
 HERR_M = SimpleNamespace(nombre="reiniciar_ont", irreversible=True, tipo="http", asincrona=False,
                          inyectar_sesion={}, exige_previas=[], verificacion=None)
 CONF_M = SimpleNamespace(herramientas=[HERR_M], variables_tenant={})
-motor.aprobaciones._autonomia_vigente = lambda t, h, r=None: {"autonoma": False, "estado": "degradada"}
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None, **_: {"autonoma": False, "estado": "degradada"}
 res, codigo, _ = motor.ejecutar_accion_irreversible(
     CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
              "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
 comprobar(efectos == [] and codigo == aprobacion.AUTONOMIA_NO_VIGENTE and res.get("bloqueo_de_frontera"),
           "degradada en el ultimo metro: el efecto NO sale, y se marca como bloqueo", f"{codigo} {efectos}")
-motor.aprobaciones._autonomia_vigente = lambda t, h, r=None: {"autonoma": True, "estado": "activa", "promocion_id": "p1"}
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None, **_: {"autonoma": True, "estado": "activa", "promocion_id": "p1"}
 res, codigo, _ = motor.ejecutar_accion_irreversible(
     CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
              "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
 comprobar(len(efectos) == 1 and codigo is None, "vigente en el ultimo metro: sale", f"{codigo} {efectos}")
 efectos.clear()
-motor.aprobaciones._autonomia_vigente = lambda t, h, r=None: (_ for _ in ()).throw(AssertionError("no consultar"))
+#  AUDITORIA M1 (04/11/2026): el ultimo metro del motor le pasa la herramienta,
+#  asi una promocion sin evidencia de una accion que HOY es critica no sale
+#  aunque la primera consulta la haya visto vigente.
+from nucleo.seguridad import autonomia_ganada as seg_ag  # noqa: E402
+fila_sin_evidencia = {"id": "p1", "estado": "activa", "evidencia": {"no_critica": True}}
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None, config_herramienta=None: seg_ag.vigente(
+    t, h, leer=lambda *a: fila_sin_evidencia, config_herramienta=config_herramienta, rol=r)
+res, codigo, _ = motor.ejecutar_accion_irreversible(
+    CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
+             "revisado_por": "autonomia_ganada:p1", "contexto": {}}, "rapilink")
+comprobar(efectos == [] and codigo == aprobacion.AUTONOMIA_NO_VIGENTE,
+          "sin evidencia y hoy critica: el ultimo metro la frena", f"{codigo} {efectos}")
+efectos.clear()
+motor.aprobaciones._autonomia_vigente = lambda t, h, r=None, **_: (_ for _ in ()).throw(AssertionError("no consultar"))
 res, codigo, _ = motor.ejecutar_accion_irreversible(
     CONF_M, {"id": "a1", "herramienta": "reiniciar_ont", "argumentos": ARGS,
              "revisado_por": "Ana Perez", "contexto": {}}, "rapilink")

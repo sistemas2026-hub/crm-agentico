@@ -164,6 +164,19 @@ comprobar(pedidos == [("rapilink", "reiniciar_ont", AHORA - timedelta(days=30), 
 pago = next(f for f in filas if f["accion"] == "registrar_pago")
 comprobar(not pago["candidata"] and not pago["elegible"] and "evidencia" not in pago,
           "una no candidata no se mide ni puede ser elegible", str(pago))
+#  B4 y M2 de la auditoria (04/11/2026): la pantalla ofrece "Marcarla no
+#  critica" solo donde el motor lo aceptaria -- irreversible, con sus
+#  garantias, y no escrita por el modelo en un chat.
+comprobar(reinicio.get("puede_ser_no_critica") is True and pago.get("puede_ser_no_critica") is False,
+          "puede ser no critica: el reinicio si, el pago no", f"{reinicio.get('puede_ser_no_critica')} "
+          f"{pago.get('puede_ser_no_critica')}")
+DE_PROPUESTA = RAPILINK_CRITICO.model_copy(update={"herramientas": [
+    h.model_copy(update={"nacio_de_propuesta": True}) if h.nombre == "reiniciar_ont" else h
+    for h in RAPILINK_CRITICO.herramientas]})
+comprobar(next(f for f in ag.evaluar(DE_PROPUESTA, "rapilink", AHORA, medir=medir)
+               if f["accion"] == "reiniciar_ont").get("puede_ser_no_critica") is False,
+          "la que escribio el modelo en un chat, no")
+pedidos.clear()
 
 print("\nel estado vigente falla cerrado")
 
@@ -373,7 +386,7 @@ apr = modulo_aprobacion.desde_fila(fila_aprob, "rapilink")
 comprobar(apr.rol == "cliente_final", "la aprobacion lleva el agente de la propuesta", str(apr.rol))
 pedidos_um: list = []
 original_um = modulo_aprobacion._autonomia_vigente
-modulo_aprobacion._autonomia_vigente = lambda t, h, r=None: pedidos_um.append(r) or {
+modulo_aprobacion._autonomia_vigente = lambda t, h, r=None, **_: pedidos_um.append(r) or {
     "autonoma": True, "promocion_id": "p5"}
 apr_sellada = modulo_aprobacion.Aprobacion(**{**apr.__dict__, "sello": modulo_aprobacion.sello_de(
     tenant="rapilink", organization_id="org", herramienta="reiniciar_ont", origen="o",

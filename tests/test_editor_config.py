@@ -38,7 +38,7 @@ sys.path.insert(0, str(RAIZ))
 
 from nucleo.config import cargar_config                              # noqa: E402
 from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa: E402
-                                  _mutar_criticidad,
+                                  _mutar_criticidad, _mutar_agregar_herramienta,
                                   _mutar_borrar,
                                   _mutar_crear, _mutar_editar,
                                   _mutar_marcas_precio,
@@ -448,6 +448,83 @@ def prueba_catalogo_dice_lo_que_hace_cada_una() -> None:
                   "la que invoca un servicio es del sistema")
 
 
+def _segura_sin_verificar(h: dict) -> bool:
+    return bool(h.get("verifica_identidad") or h.get("confirma_identidad") or h.get("deriva_rol")
+                or h.get("carga_habilidad") or h.get("consulta_documentacion")
+                or h.get("inyectados_obligatorios") or h.get("apta_sin_verificar")
+                or h.get("consulta_planes_venta") or h.get("consulta_servicios_ofrecidos")
+                or h.get("consulta_parrilla"))
+
+
+def prueba_agente_de_clientes_sin_verificar() -> None:
+    #  04/11/2026, auditoria: con el formulario, un agente de clientes se podia
+    #  crear SIN verificar identidad y con una herramienta que devuelve datos
+    #  de un cliente. Sin verificacion el motor baja el nivel exigido a 0
+    #  (motor.py, '_cliente_final_verificable'): cualquier numero pedia la
+    #  cedula de otra persona y recibia su nombre y su telefono.
+    print("\nun agente de clientes sin verificar solo usa lo seguro sin verificar")
+    doc = documento_base()
+    expuesta = next((h for h in doc["herramientas"] if h["tipo"] == "http" and h.get("solo_lectura")
+                     and not _segura_sin_verificar(h)), None)
+    if expuesta is None:
+        print("  (sin una herramienta que devuelva datos sin proteccion: se saltea)")
+        return
+    con_campos = [{"nombre": expuesta["nombre"], "campos_permitidos": ["id_servicio"]}]
+    lanza("sin verificar y con una herramienta que devuelve datos de un cliente, no se crea",
+          lambda: _mutar_crear(documento_base(), "sin_verificar", None, None, "x", "cliente_final",
+                               con_campos, extras={"exige_verificacion": False}))
+    doc = documento_base()
+    _mutar_crear(doc, "con_verificacion", None, None, "x", "cliente_final", con_campos,
+                 extras={"exige_verificacion": True})
+    comprobar(_validar(TENANT, doc).roles["con_verificacion"].exige_verificacion is True,
+              "la misma herramienta, verificando identidad, si")
+    lanza("y despues no se le puede apagar la verificacion",
+          lambda: _mutar_editar(doc, "con_verificacion", None, None, "x", "cliente_final", con_campos,
+                                extras={"exige_verificacion": False}))
+    doc_c = documento_base()
+    _mutar_crear(doc_c, "colab", None, None, "x", "colaborador", con_campos,
+                 extras={"exige_verificacion": False})
+    comprobar("colab" in _validar(TENANT, doc_c).roles,
+              "un agente de colaboradores no se toca: quien trabaja ahi ya esta autorizado")
+    lanza("ni pasar ese agente a atender clientes con esa herramienta",
+          lambda: _mutar_editar(doc_c, "colab", None, None, "x", "cliente_final", con_campos))
+
+    doc = documento_base()
+    for h in doc["herramientas"]:
+        if h["nombre"] == expuesta["nombre"]:
+            h["apta_sin_verificar"] = True
+    _mutar_crear(doc, "catalogo", None, None, "x", "cliente_final", con_campos,
+                 extras={"exige_verificacion": False})
+    comprobar("catalogo" in _validar(TENANT, doc).roles,
+              "una herramienta declarada apta sin verificar (un catalogo publico) si")
+
+    #  LO QUE YA TENIA SE RESPETA: un agente que ya atendia sin verificar con
+    #  herramientas pensadas para eso (una pista del nombre, un nombre
+    #  confirmado y una persona que aprueba) se sigue pudiendo editar. Lo que
+    #  no puede es sumar una nueva.
+    doc = documento_base()
+    viejo = next((n for n, r in doc["roles"].items()
+                  if r.get("orientado_a") == "cliente_final" and r.get("exige_verificacion") is False
+                  and any(not _segura_sin_verificar(h) for h in doc["herramientas"]
+                          if h["nombre"] in (r.get("puede_consultar") or []))), None)
+    if viejo is None:
+        print("  (sin un agente sin verificar con herramientas previas: se saltea esa parte)")
+        return
+    r = doc["roles"][viejo]
+    actuales = [{"nombre": t, "campos_permitidos": (r.get("campos_permitidos") or {}).get(t, [])}
+                for t in r["puede_consultar"]]
+    _mutar_editar(doc, viejo, r.get("area"), r.get("cargo"), r.get("descripcion") or "x",
+                  "cliente_final", actuales)
+    comprobar(viejo in _validar(TENANT, doc).roles, "editar un agente sin verificar respeta lo que ya tenia")
+    nueva = next((h for h in doc["herramientas"] if h["tipo"] == "http" and h.get("solo_lectura")
+                  and not _segura_sin_verificar(h) and h["nombre"] not in r["puede_consultar"]), None)
+    if nueva is not None:
+        lanza("pero no le suma una herramienta nueva que devuelve datos sin verificar",
+              lambda: _mutar_editar(doc, viejo, r.get("area"), r.get("cargo"), "x", "cliente_final",
+                                    [*actuales, {"nombre": nueva["nombre"],
+                                                 "campos_permitidos": ["id_servicio"]}]))
+
+
 def prueba_criticidad_desde_la_pantalla() -> None:
     #  04/11/2026: si una accion es critica es un dato de cada empresa
     #  (CLAUDE.md §3.3) y solo se cambiaba en el archivo.
@@ -478,6 +555,23 @@ def prueba_criticidad_desde_la_pantalla() -> None:
         comprobar(True, "no critica sin las garantias en codigo se rechaza")
     lanza("una herramienta que no existe se rechaza",
           lambda: _mutar_criticidad(documento_base(), "no_existe_esta", False))
+
+    #  AUDITORIA M2 (04/11/2026): un borrador que escribio el modelo en un
+    #  chat trae sus propias comprobaciones y previas, y nadie las reviso.
+    #  Nace critico (motor.py) y la pantalla no lo puede declarar no critico:
+    #  eso pide que alguien que conoce el codigo lo revise en el archivo.
+    doc = documento_base()
+    borrador = copy.deepcopy(candidata)
+    borrador["nombre"] = "accion_que_escribio_el_modelo"
+    borrador["critica"] = False
+    _mutar_agregar_herramienta(doc, borrador)
+    nueva = next(h for h in _validar(TENANT, doc).herramientas if h.nombre == borrador["nombre"])
+    comprobar(nueva.critica is True and nueva.nacio_de_propuesta is True,
+              "lo que viene de una propuesta entra critico y marcado de donde vino")
+    lanza("y la pantalla no lo declara no critico",
+          lambda: _mutar_criticidad(doc, borrador["nombre"], False))
+    _mutar_criticidad(doc, borrador["nombre"], True)
+    comprobar(True, "declararlo critico (otra vez) si se puede")
 
 
 def prueba_agente_completo_desde_la_pantalla() -> None:
@@ -898,6 +992,7 @@ if __name__ == "__main__":
     prueba_catalogo_dice_lo_que_hace_cada_una()
     prueba_agente_completo_desde_la_pantalla()
     prueba_criticidad_desde_la_pantalla()
+    prueba_agente_de_clientes_sin_verificar()
     prueba_banda_sin_gestion()
     prueba_origen_de_la_config()
     prueba_umbral_efectivo_de_la_banda()

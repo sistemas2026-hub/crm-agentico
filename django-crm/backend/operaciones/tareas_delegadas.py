@@ -225,7 +225,11 @@ CATALOGO = {
             "casos a Despacho, y el nivel de la empresa. No crea órdenes ni "
             "asigna técnicos, y no cambia el grupo que leyó el modelo."),
         #  PROPIA, y no la del paso: encender las correcciones es una decision
-        #  aparte, que el usuario toma despues de ver en sombra que harian.
+        #  aparte. Desde el 04/11/2026 nace encendida en una empresa NUEVA
+        #  (encender_las_no_criticas, PRD §8.18): pasar un caso a Despacho no
+        #  es ninguno de los cinco criticos (PRD §2). Lo que la frena es el
+        #  nivel 3 de la empresa; y mientras no actua, el Supervisor sigue
+        #  contando en sombra cuales pasarian.
         "critica": False,
         "exige_nivel": 3,
         "necesita_que_mire": True,
@@ -324,10 +328,14 @@ def encender_las_no_criticas(org, actor) -> list[str]:
     persona solo en lo critico). Delegar exige una persona: aca es la que dio
     el alta, y queda escrito.
 
-    Encendida NO es actuando: cada tarea sigue exigiendo su nivel, el
-    interruptor y la frontera del motor, que en una empresa nueva arrancan
-    cerrados. Solo para el ALTA: una empresa que ya opera no ve encenderse
-    nada por un despliegue.
+    Encendida NO es actuando: cada tarea sigue exigiendo su nivel
+    (operaciones/autonomia.puede) y el interruptor de autonomia de la empresa,
+    que ese nivel ya incorpora. Una empresa nueva arranca en nivel 0 (solo
+    observar) y todas estas exigen 3: nada actua hasta que una persona sube el
+    nivel. Estas tareas son del CRM y NO pasan por la frontera del motor
+    (nucleo/seguridad/frontera.py): no decirlo seria prometer una garantia que
+    no corre (auditoria M3, 04/11/2026). Solo para el ALTA: una empresa que ya
+    opera no ve encenderse nada por un despliegue.
     """
     encendidas = []
     for clave, tarea in CATALOGO.items():

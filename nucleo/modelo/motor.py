@@ -2035,7 +2035,8 @@ def ejecutar_accion_irreversible(config, accion: dict, tenant: str
                     aprobaciones.PREFIJO_AUTONOMIA):
                 promocion = aprobacion.aprobador[len(aprobaciones.PREFIJO_AUTONOMIA):]
                 vigente = aprobaciones._autonomia_vigente(
-                    tenant, herramienta.nombre, getattr(aprobacion, "rol", "") or None)
+                    tenant, herramienta.nombre, getattr(aprobacion, "rol", "") or None,
+                    config_herramienta=herramienta)
                 if not vigente.get("autonoma") or vigente.get("promocion_id") != promocion:
                     return ({"error": "La autonomia dejo de estar vigente antes del efecto. "
                                       "No se ejecuto.", "bloqueo_de_frontera": True},

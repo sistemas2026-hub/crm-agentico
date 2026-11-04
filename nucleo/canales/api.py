@@ -3833,7 +3833,7 @@ def agentes_herramienta_critica(nombre):
     if (cuerpo.get("autor_rol") or "").upper() != "ADMIN":
         return jsonify({"error": "SOLO_ADMIN"}), 403
     try:
-        editor.guardar_criticidad(tenant, nombre, critica)
+        config_nueva = editor.guardar_criticidad(tenant, nombre, critica)
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
@@ -3841,7 +3841,44 @@ def agentes_herramienta_critica(nombre):
     olvidar_config(tenant)
     registrar("agentes", "criticidad de una accion cambiada", tenant=tenant, herramienta=nombre,
               critica=critica, autor_usuario_id=usuario)
-    return jsonify({"herramienta": nombre, "critica": critica}), 200
+    salida = {"herramienta": nombre, "critica": critica}
+    if critica:
+        #  VOLVERLA CRITICA APAGA EN LA BASE lo que se dio sin evidencia
+        #  (auditoria M1, 04/11/2026): queda escrito para todos los procesos,
+        #  no solo para el que lea la config nueva. Si la base no contesta, la
+        #  config ya dice critica y cada consulta con la herramienta la ve
+        #  YA_ES_CRITICA: falla cerrado igual, y la respuesta lo dice.
+        from nucleo.persistencia import autonomia_ganada as registro
+        from nucleo.seguridad import autonomia_ganada
+
+        try:
+            ids = autonomia_ganada.sin_evidencia_activas(config_nueva, tenant, nombre,
+                                                         leer=registro.vigente)
+            salida["autonomia_apagada"] = bool(ids) and _degradar_autonomia(
+                tenant, nombre, "la empresa la declaro critica: la autonomia dada sin "
+                "evidencia se apaga", {"promociones": ids, "autor_usuario_id": usuario})
+        except (Exception, SystemExit) as e:                    # noqa: BLE001
+            registrar("autonomia_ganada", "no se pudo apagar la autonomia sin evidencia",
+                      tenant=tenant, herramienta=nombre, error=e)
+            salida["autonomia_apagada"] = None
+    return jsonify(salida), 200
+
+
+def _admin_que_edita_agentes(cuerpo: dict):
+    """
+    (usuario, None) si quien crea o edita el agente es un ADMIN con autor de
+    sesion, o (None, (respuesta, codigo)). Auditoria B1 (04/11/2026): un
+    agente decide que datos ve y si verifica identidad; el CRM ya lo restringe
+    a ADMIN y el motor lo vuelve a exigir, como al promover o al cambiar la
+    criticidad. El proxy arma autor y rol con la SESION, nunca el navegador.
+    """
+    try:
+        _, usuario, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido:
+        return None, (jsonify({"error": "FALTA_QUIEN_LO_DECIDE"}), 400)
+    if (cuerpo.get("autor_rol") or "").upper() != "ADMIN":
+        return None, (jsonify({"error": "SOLO_ADMIN"}), 403)
+    return usuario, None
 
 
 @app.post("/agentes")
@@ -3851,6 +3888,9 @@ def agentes_crear():
     nombre = cuerpo.get("nombre")
     if not tenant or not nombre:
         return jsonify({"error": "Faltan campos: tenant, nombre"}), 400
+    usuario, rechazo = _admin_que_edita_agentes(cuerpo)
+    if rechazo:
+        return rechazo
 
     try:
         config = editor.crear_rol(
@@ -3867,6 +3907,9 @@ def agentes_crear():
         return _error_al_guardar(e)
 
     olvidar_config(tenant)
+    #  B2: quien lo creo, y si verifica identidad, quedan en el log.
+    registrar("agentes", "agente creado", tenant=tenant, agente=nombre,
+              exige_verificacion=config.roles[nombre].exige_verificacion, autor_usuario_id=usuario)
     return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)}), 201
 
 
@@ -3876,6 +3919,9 @@ def agentes_editar(nombre):
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    usuario, rechazo = _admin_que_edita_agentes(cuerpo)
+    if rechazo:
+        return rechazo
 
     try:
         config = editor.editar_rol(
@@ -3892,6 +3938,8 @@ def agentes_editar(nombre):
         return _error_al_guardar(e)
 
     olvidar_config(tenant)
+    registrar("agentes", "agente editado", tenant=tenant, agente=nombre,
+              exige_verificacion=config.roles[nombre].exige_verificacion, autor_usuario_id=usuario)
     return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)})
 
 
@@ -10093,10 +10141,11 @@ def _aprobar_y_ejecutar_datos(config, tenant: str, id_accion: str, quien: str, *
     return _salida_ejecutada_ok(resultado, confirmado, detalle_confirmacion), 200
 
 
-def _degradar_autonomia(tenant: str, herramienta: str, motivo: str, evidencia: dict) -> None:
+def _degradar_autonomia(tenant: str, herramienta: str, motivo: str, evidencia: dict) -> bool:
     """Condicion 4 (PRD §2): baja la autonomia ganada de la herramienta. Nunca
     rompe a quien llama: si no se puede escribir, queda en el log (y la
-    proxima ejecucion autonoma igual exige que la promocion siga vigente)."""
+    proxima ejecucion autonoma igual exige que la promocion siga vigente).
+    True si quedo escrita la degradacion."""
     try:
         from nucleo.persistencia import autonomia_ganada as registro
 
@@ -10104,9 +10153,11 @@ def _degradar_autonomia(tenant: str, herramienta: str, motivo: str, evidencia: d
         if fila:
             registrar("autonomia_ganada", "autonomia degradada por el codigo",
                       tenant=tenant, herramienta=herramienta)
+        return bool(fila)
     except (Exception, SystemExit) as e:                        # noqa: BLE001
         registrar("autonomia_ganada", "no se pudo degradar la autonomia",
                   tenant=tenant, herramienta=herramienta, error=e)
+        return False
 
 
 def _aprobador_reservado(quien: str) -> bool:

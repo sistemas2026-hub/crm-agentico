@@ -82,10 +82,12 @@
     {/if}
   {/if}
 
-  {#if accion?.candidata && esAdmin}
-    <!-- SI ES CRITICA, decidido por la empresa (04/11/2026). Solo para las que
-         tienen las garantias en codigo: el esquema no deja declarar no critica
-         otra. Vale para la accion en TODOS los agentes que la usan. -->
+  {#if esAdmin && (accion?.no_critica || accion?.puede_ser_no_critica)}
+    <!-- SI ES CRITICA, decidido por la empresa (04/11/2026). "No critica" solo
+         donde el motor la aceptaria (puede_ser_no_critica: irreversible, con
+         sus garantias en codigo y no escrita por el modelo -- auditoria B4 y
+         M2); volverla critica, siempre. Vale para la accion en TODOS los
+         agentes que la usan. -->
     <form method="POST" action="?/criticidad" class="form">
       <input type="hidden" name="accion" value={accion.accion} />
       {#if accion.no_critica}

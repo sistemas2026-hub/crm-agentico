@@ -123,13 +123,21 @@
   const autonomiaDe = $derived(
     Object.fromEntries((autonomia?.acciones ?? []).map((/** @type {any} */ a) => [a.accion, a]))
   );
+  // Las que el agente YA tenia atendiendo clientes sin verificar: el motor
+  // las respeta (editor.py::_comprobar_sin_verificar), y el aviso tambien.
+  const previasSinVerificar = $derived(
+    modo === 'editar' && agente?.orientado_a === 'cliente_final' && agente?.exige_verificacion === false
+      ? new Set((agente.herramientas ?? []).map((/** @type {any} */ h) => h.nombre))
+      : new Set()
+  );
   const avisos = $derived(
     avisosDelAgente({ orientadoA, descripcion, atiende, conectar, seleccion,
-                      campos: camposElegidos, catalogo })
+                      campos: camposElegidos, catalogo, exigeVerificacion, previasSinVerificar })
   );
+  const bloqueado = $derived(avisos.some((a) => a.bloquea));
 
   const nombreValido = $derived(/^[a-z][a-z0-9_]{1,29}$/.test(nombre));
-  const puedeGuardar = $derived(nombreValido && descripcion.trim().length > 0 && !submitting);
+  const puedeGuardar = $derived(nombreValido && descripcion.trim().length > 0 && !submitting && !bloqueado);
 
   function toggleHerramienta(/** @type {string} */ n) {
     if (deCliente && derivacion?.nombre === n) return;

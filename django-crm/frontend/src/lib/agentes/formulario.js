@@ -83,10 +83,10 @@ export function sugerirIdentificador(texto) {
  * tiene una clave estable (para probarlo) y el texto para la persona.
  * @param {{ orientadoA: string, descripcion: string, atiende: string, conectar: boolean,
  *   seleccion: Record<string, boolean>, campos: Record<string, string[] | Set<string>>,
- *   catalogo: any[] }} f
+ *   catalogo: any[], exigeVerificacion?: boolean, previasSinVerificar?: Set<string> }} f
  */
 export function avisosDelAgente(f) {
-  /** @type {{ clave: string, texto: string }[]} */
+  /** @type {{ clave: string, texto: string, bloquea?: boolean }[]} */
   const avisos = [];
   if (!(f.descripcion || '').trim()) {
     avisos.push({ clave: 'sin_instrucciones', texto: 'No tiene instrucciones: el modelo no sabe qué hacer ni qué evitar.' });
@@ -106,6 +106,14 @@ export function avisosDelAgente(f) {
     if (h.de_sistema) {
       avisos.push({ clave: `de_sistema:${nombre}`, texto: `«${nombre}» la dispara el sistema, no el agente: dársela puede hacer que la llame cuando no corresponde.` });
       continue;
+    }
+    // SIN VERIFICAR, SOLO LO SEGURO (04/11/2026): la misma regla que el
+    // motor aplica al guardar (editor.py::_comprobar_sin_verificar). Se avisa
+    // antes para que no se entere por un rechazo.
+    if (f.orientadoA === 'cliente_final' && f.exigeVerificacion === false &&
+        !h.segura_sin_verificar && !f.previasSinVerificar?.has(nombre)) {
+      avisos.push({ clave: `expuesta:${nombre}`, bloquea: true,
+        texto: `«${nombre}» devuelve datos de un cliente y este agente no verifica la identidad: cualquiera que escriba los podría ver. Activá la verificación o sacá la herramienta.` });
     }
     const campos = f.campos?.[nombre];
     const cuantos = campos instanceof Set ? campos.size : (campos ?? []).length;

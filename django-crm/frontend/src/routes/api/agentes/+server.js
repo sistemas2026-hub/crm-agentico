@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+import { autorDeSesion } from '$lib/server/v2/autor.js';
 
 /**
  * Proxy hacia el motor del asistente para listar el catalogo de herramientas
@@ -65,7 +66,10 @@ export async function POST({ request, locals, fetch }) {
     const resp = await fetch(`${cfg.baseUrl}/agentes`, {
       method: 'POST',
       headers: headersMotor({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ ...cuerpo, tenant: cfg.tenant })
+      // Quien lo crea sale de la SESION, despues del cuerpo: el navegador no
+      // lo puede pisar. El motor lo vuelve a exigir (auditoria B1, 04/11/2026).
+      body: JSON.stringify({ ...cuerpo, tenant: cfg.tenant, ...autorDeSesion(locals),
+                             autor_rol: locals.profile?.role ?? '' })
     });
     const datos = await resp.json();
     if (!resp.ok) {
