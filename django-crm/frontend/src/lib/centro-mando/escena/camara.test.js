@@ -3,7 +3,6 @@ import {
   Camara,
   GESTO,
   LIMITES,
-  Camara,
   conSueloQueDejaVerTodo,
   acotarCentro,
   acotarEscala,

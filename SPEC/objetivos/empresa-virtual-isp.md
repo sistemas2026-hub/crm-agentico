@@ -2967,3 +2967,100 @@ Dos guardas nuevas en `cerramientos.test.js`, y las dos matan su mutación:
 | el compositor no aparta nada | **cazada** por «ninguna puerta queda tapada por la mitad o más» |
 | en vez de mover, borra | **cazada** por «aparta lo que puede, no lo borra» |
 
+## P8 · «Estas oficinas, ¿dónde está la puerta?» — 04/11/2026
+
+La pregunta llegó mirando el plano de P7, con la pared de cristal ya puesta y
+las once puertas construidas, medidas y navegables. Y era una pregunta justa:
+**las puertas estaban bien y no se encontraban.**
+
+### Dónde está cada una
+
+Las once dan a una franja de circulación, por uno de dos muros:
+
+| Dónde abre | Cómo se dibuja | Salas |
+|---|---|---|
+| **Muro trasero izquierdo** (`puertaLateral`, gx = 0) | obra, hoja de madera, bisagras, umbral | Operaciones de Campo, Atención al Cliente, Finanzas y Cartera, Recursos Humanos, Dirección, Recepción |
+| **Cerramiento delantero derecho** (`puertaDerecha`, gx = ancho) | cristal, hoja translúcida, tirador vertical | NOC y Redes, Comercial y Marketing, Administración, Auditoría y Cumplimiento, Sala de Reuniones |
+
+### Por qué no se encontraban
+
+Medido sobre la sede a escala de plano, comparando el color medio del vano
+contra el del muro 2,6 celdas más allá:
+
+| Puerta | Contraste con su muro |
+|---|---|
+| de obra | 33 – 174 |
+| de cristal, NOC | **8,3** |
+| de cristal, Auditoría | **10,8** |
+
+Una hoja translúcida dentro de una pared translúcida no tiene de qué
+destacar. Es el mismo patrón que P7 ya había encontrado una vez —el dato
+correcto y el dibujo ilegible— y por eso vale anotarlo otra vez: **que una
+cosa esté construida, medida y navegable no dice nada sobre si se ve.**
+
+### La corrección: el marco y el umbral llevan el acento del área
+
+`acento` ya existía y ya se usaba exactamente para esto: el letrero de cada
+sala se tiñe con él porque *«de lejos el nombre no se lee y el color sí»*.
+Aplicarlo al marco y al umbral de la puerta hace que **encontrar la entrada e
+identificar de quién es sean el mismo gesto**, sin agregar un elemento nuevo a
+la escena ni un dato nuevo al modelo.
+
+Se descartó la alternativa obvia —anclar el nombre de la sala en su puerta—
+porque choca con una decisión ya medida: `anclaDelNombre` existe porque el
+nombre caía encima de la placa de un puesto en 6 de las 11 salas, y tiene tres
+guardas que lo sostienen.
+
+Medición A/B, misma ventana y mismo encuadre (escala 0,75 en las dos
+capturas), contando píxeles de color —los que se apartan del gris más de 55—
+en un cuadrado de 1,6 celdas de radio centrado en cada vano:
+
+| Sala | Antes | Después |
+|---|---|---|
+| NOC y Redes | 75 | **699** |
+| Administración | 268 | **871** |
+| Auditoría y Cumplimiento | 269 | **764** |
+| Comercial y Marketing | 288 | **744** |
+| Sala de Reuniones | 257 | **670** |
+| Atención al Cliente | 80 | **605** |
+| Recepción | 76 | **549** |
+| Operaciones de Campo | 118 | **493** |
+| Finanzas y Cartera | 85 | **472** |
+| Recursos Humanos | 71 | **247** |
+| **Dirección** | 199 | **196** |
+
+**Diez de once.** Dirección no se mueve y no es un fallo del dibujo: su acento
+es `#64748b`, un gris azulado. Un color que no es un color no puede marcar
+nada, y eso es una decisión de la paleta de áreas, no de la puerta.
+
+Dos notas de método sobre esta medición, porque los dos primeros intentos
+midieron mal:
+
+- **Contar píxeles del acento exacto da cero** aunque la jamba se vea de
+  color: el panel del muro la sombrea. El color que se dibuja no es el color
+  que se pide.
+- **El croma máximo de la ventana tampoco sirve**: una maceta verde dentro del
+  cuadrado lo deja clavado aunque la puerta entera cambie. Lo que mide el
+  efecto es el *área* de color, no su pico.
+- Y la escala tiene que ser la misma en las dos capturas. La rueda del ratón
+  no la fija —tiene suavizado, y la misma secuencia terminó en 0,37 y en 0,76—
+  así que las dos se toman en el auto-encuadre inicial, que sí se repite.
+
+Sin guarda en CI, por lo mismo que el cristal de P7: el arnés no monta PixiJS.
+Verificado con capturas y con la medición A/B de arriba.
+
+### De paso: un archivo de guardas que no corría
+
+Al pasar las pruebas de `centro-mando` apareció que
+`escena/camara.test.js` **importa `Camara` dos veces**, lo que es un error de
+sintaxis de ESM. El archivo no carga en ningún runner —entró así en
+`894f0402`— y sus **22 guardas de la cámara llevaban desde entonces sin
+ejecutarse**: encuadre inicial, zoom anclado al puntero, arrastre medido en
+pantalla y el suelo del zoom. Quitado el duplicado, las 22 pasan.
+
+Es otra vez *código construido no es código que corre*, y en su forma más
+barata de evitar: nada avisó porque un archivo que no carga no falla, falta.
+
+**`centro-mando`: 776 verdes, 0 rojas.** Siguen sin cargar `eventos.test.js` y
+`flujo.test.js`, que ya estaban así y son limitación del arnés, no del código.
+
