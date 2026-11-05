@@ -78,11 +78,14 @@
    */
   const CAPAS = {
     mapa: {
-      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      //  ESRI Y NO CARTO (05/11/2026). CARTO pasó a pedir clave y empezó a
+      //  servir las imágenes con «API KEY REQUIRED» encima: el mapa quedó
+      //  ilegible. Esri World Street Map no pide clave --es el mismo
+      //  proveedor del satélite, que ya andaba-- y se ve igual de moderno.
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
       opciones: {
-        maxZoom: 20,
-        subdomains: 'abcd',
-        attribution: '&copy; OpenStreetMap &copy; CARTO'
+        maxZoom: 19,
+        attribution: 'Mapa &copy; Esri'
       }
     },
     satelite: {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 
 import MapaDeCuadrillas from './MapaDeCuadrillas.svelte';
 import { seDibujaElMapa } from './dia-publicado.js';
-import { motoConTrailer, opcionesDelIcono } from './icono-de-cuadrilla.js';
+import { opcionesDelIcono, tecnicoDePie } from './icono-de-cuadrilla.js';
 
 /**
  * EL MAPA DE CUADRILLAS (31/10/2026).
@@ -49,6 +50,23 @@ describe('el mapa de cuadrillas', () => {
 
   it('con todas reportando no dice que falte ninguna', () => {
     expect(html([cuadrilla()])).not.toContain('Sin señal:');
+  });
+
+  it('ninguna capa pide clave: CARTO sirve las imágenes tachadas', () => {
+    //  EL DEFECTO DEL 05/11/2026: CARTO pasó a exigir clave y empezó a
+    //  servir cada tile con «API KEY REQUIRED» encima. El mapa quedó
+    //  ilegible y ninguna prueba lo vio, porque ninguna miraba de dónde
+    //  salen las imágenes. Esri no pide clave --es el proveedor del
+    //  satélite, que ya andaba--.
+    const fuente = readFileSync(
+      'src/lib/supervisor/MapaDeCuadrillas.svelte', 'utf8');
+    const urls = fuente.match(/url: '([^']+)'/g) ?? [];
+
+    expect(urls.length).toBe(2);
+    for (const u of urls) {
+      expect(u).not.toMatch(/cartocdn|mapbox|api[_-]?key|apikey|access_?token/i);
+      expect(u).toContain('arcgisonline.com');
+    }
   });
 
   it('ofrece Mapa y Satélite, y arranca en Mapa', () => {
@@ -122,32 +140,36 @@ describe('cuándo se dibuja el mapa', () => {
 });
 
 
-describe('el vehículo de la cuadrilla', () => {
+describe('el técnico en el mapa', () => {
   it('el color dice lo mismo que decía el punto: lleno es de ahora', () => {
-    const fresca = motoConTrailer('#1f7a3d', true);
-    const vieja = motoConTrailer('#6b7280', false);
+    const fresca = tecnicoDePie('#1f7a3d', true);
+    const vieja = tecnicoDePie('#6b7280', false);
 
-    //  TIÑE EL VEHÍCULO ENTERO, no una franja suelta: el cuerpo, su lado y
-    //  su techo. Con un solo `toContain` sobrevivía despintar la carrocería.
-    expect(fresca.match(/#1f7a3d/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    //  TIÑE EL CHALECO ENTERO, su frente y su costado, no una franja suelta.
+    expect(fresca.match(/#1f7a3d/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(fresca).toContain('opacity:1');
     //  Lo viejo se ve viejo: es dónde estuvo, no dónde está.
     expect(vieja).toContain('opacity:0.5');
   });
 
   it('es un dibujo, no una imagen: nítido en cualquier zoom', () => {
-    const svg = motoConTrailer('#1f7a3d', true);
+    const svg = tecnicoDePie('#1f7a3d', true);
     expect(svg.startsWith('<svg')).toBe(true);
-    expect(svg).toContain('viewBox="0 0 46 34"');
+    expect(svg).toContain('viewBox="0 0 34 46"');
     expect(svg).not.toContain('<img');
+    //  LO QUE LO HACE VISIBLE sobre el satélite, que es el motivo del
+    //  cambio: el halo blanco que lo recorta y el casco, que no aparece en
+    //  una foto aérea de un barrio.
+    expect(svg).toContain('stroke="#fff"');
+    expect(svg).toContain('#f2b705');
   });
 
-  it('el punto cae en la rueda de atrás, no en el centro del dibujo', () => {
+  it('el punto cae en los pies, no en el centro del dibujo', () => {
     //  Si se ancla al medio, el vehículo queda corrido respecto de la calle
     //  y el supervisor lo lee como que está en otro lado.
     const o = opcionesDelIcono('#1f7a3d', true);
-    expect(o.iconAnchor).toEqual([12, 29]);
-    expect(o.iconSize).toEqual([46, 34]);
+    expect(o.iconAnchor).toEqual([17, 42]);
+    expect(o.iconSize).toEqual([34, 46]);
     expect(o.className).toBe('mp-vehiculo');
   });
 });
