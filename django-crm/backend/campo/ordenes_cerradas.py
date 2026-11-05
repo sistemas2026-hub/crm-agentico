@@ -130,7 +130,12 @@ def _quien(evs) -> dict:
 
 
 def _ticket(o, evs) -> dict:
-    if not str((o.contexto or {}).get("ticket") or "").strip():
+    #  Por la MISMA funcion que usa el cierre, y no con `str(...)`: el
+    #  contexto guarda un DICT. Leerlo mal hacia que esta pestaña creyera
+    #  que toda orden tiene ticket. Ver `numero_de_ticket`.
+    from campo.services.cierre_en_isp import numero_de_ticket
+
+    if not numero_de_ticket(o.contexto):
         return {"estado": "sin_ticket", "detalle": ""}
     ultimo = next((ev for ev in reversed(evs)
                    if ev.tipo in (TICKET_CERRADO, TICKET_NO_CERRADO)), None)

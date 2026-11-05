@@ -866,3 +866,81 @@ def test_a6_un_id_mal_escrito_dice_que_hacer_en_vez_de_una_traza(abierto):
             assert False, f"{malo!r} tendría que haber fallado"
         except CommandError as e:
             assert "UUID" in str(e), str(e)
+
+
+# ---------------------------------------------------------------------------
+# T · EL TICKET DEL ISP SE LEE COMO LO ESCRIBE QUIEN LO GUARDA  --  05/11/2026
+# ---------------------------------------------------------------------------
+#  EL DEFECTO, medido en producción: «en Programación dice cerrado, en la
+#  lista de tickets sigue abierto, y tampoco cierra en el proveedor».
+#
+#  `contexto["ticket"]` NO es un número: es el dict que arma
+#  `despacho._ticket_del_proveedor` ({numero, proveedor, estado, ...}).
+#  Se leía con `str(...)`, así que al motor viajaba el repr del diccionario,
+#  el endpoint quedaba con llaves sin resolver y el ejecutor reventaba ANTES
+#  de llamar a WispHub → FALLO_AL_CERRAR. Y en la ruta del Supervisor un
+#  fallo del ISP corta antes de `cerrar_orden`, así que tampoco se cerraba
+#  la orden ni su caso.
+#
+#  POR QUÉ NINGUNA PRUEBA LO VIO, y es lo que estas arreglan: las dos suites
+#  del cierre construían la orden con `contexto={"ticket": "94721"}`, un
+#  string. Nunca con la forma que el productor escribe. Era deriva entre
+#  quien guarda el dato y quien lo lee, y ninguna prueba cruzaba los dos.
+
+def test_t1_el_numero_sale_del_dict_que_guarda_despacho():
+    """Se construye con la MISMA función que llena el contexto en producción,
+    no con un literal: un literal vuelve a quedarse viejo en cuanto el
+    productor cambie de forma."""
+    from campo.services.cierre_en_isp import numero_de_ticket
+    from campo.services.despacho import _ticket_del_proveedor
+
+    class _Caso:
+        external_ticket_id = "94721"
+        provider = "wisphub"
+        external_status = "Nuevo"
+        external_created_by = "Mario"
+
+    contexto = {"ticket": _ticket_del_proveedor(_Caso())}
+    assert isinstance(contexto["ticket"], dict), "si esto cambia, revisar los lectores"
+    assert numero_de_ticket(contexto) == "94721"
+
+
+def test_t2_tambien_lee_las_ordenes_viejas_con_el_ticket_suelto():
+    """Hay órdenes ya guardadas de las dos formas. Rechazar una dejaría
+    órdenes sin poder cerrarse por cómo quedó escrito su contexto."""
+    from campo.services.cierre_en_isp import numero_de_ticket
+
+    assert numero_de_ticket({"ticket": "94721"}) == "94721"
+
+
+def test_t3_sin_ticket_devuelve_vacio_y_no_el_texto_de_un_dict():
+    from campo.services.cierre_en_isp import numero_de_ticket
+
+    for contexto in ({}, None, {"ticket": None}, {"ticket": {}},
+                     {"ticket": {"proveedor": "wisphub"}}):
+        assert numero_de_ticket(contexto) == "", contexto
+
+
+def test_t4_con_el_contexto_REAL_el_cierre_le_llega_a_wisphub(abierto, orden):
+    """La prueba de punta a punta del defecto: la orden lleva el dict, como
+    en producción, y el motor tiene que recibir el NÚMERO."""
+    from campo.services.despacho import _ticket_del_proveedor
+
+    class _Caso:
+        external_ticket_id = "94721"
+        provider = "wisphub"
+        external_status = "Nuevo"
+        external_created_by = "Mario"
+
+    orden.contexto = {"ticket": _ticket_del_proveedor(_Caso())}
+    orden.save(update_fields=["contexto"])
+
+    with mock.patch("requests.post", return_value=_Respuesta()) as post:
+        r = _fase(abierto)
+
+    assert (r["cerradas"], r["bloqueadas"]) == (1, 0), r
+    #  Lo que de verdad importa: el número, no el repr de un diccionario.
+    assert post.call_args.kwargs["json"]["ticket"] == "94721", \
+        post.call_args.kwargs["json"]["ticket"]
+    orden.refresh_from_db()
+    assert orden.estado_operativo == OrdenTrabajo.CERRADA

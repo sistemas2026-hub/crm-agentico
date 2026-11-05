@@ -89,6 +89,40 @@ def resumen_de(orden, nombre_de_quien_valida: str) -> str:
     return "\n".join(lineas)
 
 
+def numero_de_ticket(contexto) -> str:
+    """El numero del ticket del ISP que guarda la ficha de la orden, o "".
+
+    POR QUE ESTA FUNCION EXISTE  --  05/11/2026
+    -------------------------------------------
+    `contexto["ticket"]` NO es un numero: es el dict que arma
+    `campo/services/despacho.py::_ticket_del_proveedor`, con `numero`,
+    `proveedor`, `estado` y `abierto_por`. Hasta hoy se leia con `str(...)`,
+    asi que lo que viajaba al motor era el `repr` del diccionario:
+
+        "{'numero': '94721', 'proveedor': 'wisphub', 'estado': 'Nuevo'}"
+
+    Ese texto trae llaves, asi que el ejecutor HTTP sustituia `{id_ticket}` y
+    despues veia que el endpoint SEGUIA con llaves sin resolver, y levantaba
+    `ErrorHerramientaHttp` ANTES de llamar a WispHub. Resultado medido en
+    produccion: `FALLO_AL_CERRAR`, ningun ticket cerrado del otro lado, y
+    --en el camino del Supervisor-- la orden sin cerrarse tampoco, porque un
+    fallo del ISP corta antes de `cerrar_orden`.
+
+    POR QUE NINGUNA PRUEBA LO VIO: las dos suites del cierre construyen la
+    orden con `contexto={"ticket": "94721"}`, un string. Nunca con la forma
+    que el productor de verdad escribe. Era deriva entre quien guarda el dato
+    y quien lo lee, y ninguna prueba cruzaba los dos.
+
+    ACEPTA LAS DOS FORMAS a proposito: hay ordenes ya guardadas con el dict y
+    puede haber alguna vieja con un string suelto. Rechazar una de las dos
+    dejaria ordenes sin poder cerrarse por como quedo escrito su contexto.
+    """
+    valor = (contexto or {}).get("ticket")
+    if isinstance(valor, dict):
+        valor = valor.get("numero")
+    return str(valor or "").strip()
+
+
 def _ya_cerrado(orden) -> bool:
     from campo.models import EventoTrabajo
 
@@ -149,7 +183,7 @@ def _referencia_de(orden, revision) -> str:
 def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "") -> dict:
     if not _habilitado():
         return {"estado": "apagado", "detalle": f"{BANDERA}=0"}
-    ticket = str((orden.contexto or {}).get("ticket") or "").strip()
+    ticket = numero_de_ticket(orden.contexto)
     if not ticket:
         #  Una orden sin ticket del ISP (manual, o de un caso nacido en el chat)
         #  no tiene nada que cerrar alla. No es un fallo, y no se anota.
