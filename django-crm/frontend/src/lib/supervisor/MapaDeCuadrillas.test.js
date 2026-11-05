@@ -85,11 +85,26 @@ describe('el mapa de cuadrillas', () => {
     expect(h).not.toMatch(/class="[^"]*\bon"[^>]*>Satélite</);
   });
 
-  it('dice siempre qué significa un punto y qué significa lo atenuado', () => {
+  it('lo que significa un punto queda a un clic, y la línea lo anuncia', () => {
+    //  05/11/2026: estaba siempre a la vista y el usuario lo leyó como
+    //  ruido encima del seguimiento. Ahora va plegado — pero la línea que
+    //  se ve lo nombra, así que nadie tiene que adivinar que está ahí.
     const h = html([cuadrilla()]);
 
+    const resumen = h.match(/<summary[^>]*>([^<]*)</)?.[1] ?? '';
+    expect(resumen).toContain('qué significa un punto');
+    //  Y el texto completo sigue estando, a un clic.
     expect(h).toContain('no que la persona esté ahí');
     expect(h).toContain('es dónde estuvo, no dónde está');
+  });
+
+  it('la línea plegada cuenta lo que falta, sin obligar a abrirla', () => {
+    const h = html([
+      cuadrilla(),
+      cuadrilla({ jornada: 'j-2', cuadrilla: 'Cuadrilla #3', posicion: null })
+    ]);
+
+    expect(h.match(/<summary[^>]*>([^<]*)</)?.[1] ?? '').toContain('1 sin señal');
   });
 
   it('sin ninguna cuadrilla DICE que no hay a quién ubicar, y dibuja la caja', () => {

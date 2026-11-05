@@ -99,6 +99,32 @@ describe('qué dibujar de una cuadrilla', () => {
 });
 
 describe('cuál orden manda en el mapa', () => {
+  it('la que va EN CAMINO gana sobre la que sigue', () => {
+    //  EL DEFECTO DEL 05/11/2026: el servidor marca `siguiente` en la
+    //  primera que TODAVÍA NO EMPEZÓ. Con la cuadrilla en camino a la #101,
+    //  el mapa tomaba la #102 y decía «sin ubicación» mientras el técnico
+    //  iba a otra parte.
+    const c = cuadrilla({
+      ordenes: [
+        orden({ numero: 101, estado: 'en_camino', siguiente: false }),
+        orden({ numero: 102, estado: 'asignada', siguiente: true })
+      ]
+    });
+
+    expect(ordenDelFoco(c).numero).toBe(101);
+  });
+
+  it('la que ya está EN SITIO gana sobre la que va en camino', () => {
+    const c = cuadrilla({
+      ordenes: [
+        orden({ numero: 7, estado: 'en_camino', siguiente: false }),
+        orden({ numero: 8, estado: 'en_sitio', siguiente: false })
+      ]
+    });
+
+    expect(ordenDelFoco(c).numero).toBe(8);
+  });
+
   it('la que la cuadrilla hace ahora, no la primera de la lista', () => {
     const c = cuadrilla({
       ordenes: [

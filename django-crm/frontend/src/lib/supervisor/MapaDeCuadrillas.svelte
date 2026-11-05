@@ -46,6 +46,15 @@
       .map(({ c, q }) => `${c.cuadrilla}: ${q.falta}`)
   );
 
+  /** La línea plegada: las cuentas, sin obligar a leer el detalle. */
+  let resumenDeAbajo = $derived(
+    [
+      sinSenal.length ? `${sinSenal.length} sin señal` : '',
+      faltantes.length ? `${faltantes.length} sin ubicación` : '',
+      'qué significa un punto'
+    ].filter(Boolean).join(' · ')
+  );
+
   /** @type {HTMLDivElement | undefined} */
   let caja = $state();
   /** @type {any} */
@@ -255,24 +264,30 @@
     </p>
   {/if}
 
-  <p class="mp-nota snoc-secundario">
-    Un punto dice que el teléfono de esa persona reportó esa coordenada, no que la persona esté ahí.
-    Lo atenuado pasó los 30 minutos: es dónde estuvo, no dónde está.
-  </p>
-
-  {#if faltantes.length}
-    <!-- LO QUE FALTA, DICHO (05/11/2026): una orden sin coordenadas no se
-         rellena con un punto adivinado; se nombra para poder corregirla. -->
-    <ul class="mp-faltan">
-      {#each faltantes as f (f)}<li>{f}</li>{/each}
-    </ul>
-  {/if}
-
-  {#if sinSenal.length}
-    <p class="mp-sin snoc-secundario">
-      Sin señal: {sinSenal.map((c) => c.cuadrilla).join(' · ')}
+  <!-- LO DE ABAJO, PLEGADO (05/11/2026). El usuario: «aparece información
+       irrelevante debajo del mapa». No es irrelevante --qué significa un
+       punto, y qué orden hay que corregir-- pero no se lee todos los días y
+       ocupaba tres párrafos encima del seguimiento. Queda una línea con las
+       cuentas, y el detalle a un clic. -->
+  <details class="mp-detalle">
+    <summary class="snoc-secundario">{resumenDeAbajo}</summary>
+    <p class="mp-nota snoc-secundario">
+      Un punto dice que el teléfono de esa persona reportó esa coordenada, no que la persona esté ahí.
+      Lo atenuado pasó los 30 minutos: es dónde estuvo, no dónde está.
     </p>
-  {/if}
+    {#if faltantes.length}
+      <!-- Una orden sin coordenadas no se rellena con un punto adivinado: se
+           nombra para poder corregirla. -->
+      <ul class="mp-faltan">
+        {#each faltantes as f (f)}<li>{f}</li>{/each}
+      </ul>
+    {/if}
+    {#if sinSenal.length}
+      <p class="mp-sin snoc-secundario">
+        Sin señal: {sinSenal.map((c) => c.cuadrilla).join(' · ')}
+      </p>
+    {/if}
+  </details>
 </section>
 
 <style>
@@ -281,13 +296,17 @@
   .mp-cuenta { font-size: 12px; }
   .mp-caja {
     position: relative;
-    height: 360px;
+    /*  MAS BAJO (05/11/2026): con 360 px el mapa se comia la pantalla y el
+        seguimiento quedaba debajo del pliegue. */
+    height: 260px;
     border-radius: var(--snoc-r-xl);
     border: 1px solid var(--snoc-outline-variant);
     background: var(--snoc-surface-container);
     overflow: hidden;
   }
   .mp-nota, .mp-sin, .mp-vacio { margin: 0; font-size: 12px; }
+  .mp-detalle summary { font-size: 12px; cursor: pointer; }
+  .mp-detalle > :not(summary) { margin-top: var(--snoc-xs); }
   .mp-faltan {
     margin: 0;
     padding-left: 18px;

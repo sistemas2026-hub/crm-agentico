@@ -37,10 +37,28 @@
  * @property {string} falta lo que hay que decir en palabras, o ''
  */
 
-/** La orden que manda en el mapa: la que la cuadrilla hace ahora, o la que sigue. */
+/**
+ * La orden que manda en el mapa: la que la cuadrilla ESTÁ HACIENDO, y recién
+ * si no hay ninguna, la que sigue.
+ *
+ * EL ORDEN IMPORTA, Y SE PAGÓ POR SABERLO (05/11/2026). Antes miraba solo
+ * `siguiente`, que el servidor pone en la primera que **todavía no empezó**.
+ * Con la cuadrilla en camino a la OT #101, el mapa tomaba como foco la #102
+ * --la de después-- y mostraba «OT #102 sin ubicación» mientras el técnico
+ * iba a otra parte. El usuario lo vio en pantalla: puso una en camino y no
+ * aparecía ni el destino ni la ruta.
+ *
+ * En sitio antes que en camino: si ya llegó, ahí está el trabajo.
+ */
 export function ordenDelFoco(cuadrilla) {
   const ordenes = cuadrilla?.ordenes ?? [];
-  return ordenes.find((/** @type {any} */ o) => o.siguiente) ?? ordenes[0] ?? null;
+  const con = (/** @type {string} */ e) =>
+    ordenes.find((/** @type {any} */ o) => o.estado === e);
+  return con('en_sitio')
+    ?? con('en_camino')
+    ?? ordenes.find((/** @type {any} */ o) => o.siguiente)
+    ?? ordenes[0]
+    ?? null;
 }
 
 /**

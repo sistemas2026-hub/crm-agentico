@@ -208,11 +208,25 @@
                cada 15 s lo mueve solo. Solo el día de hoy: una fecha pasada
                no tiene posiciones, y mostrar las de ahora bajo otra fecha
                sería mentir. -->
-          {#if seDibujaElMapa(data.dia, data.hoy)}
-            <section class="snoc-panel" style="gap:var(--snoc-sm);">
-              <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} />
-            </section>
-          {/if}
+          <!-- EL MAPA Y EL SEGUIMIENTO, JUNTOS (05/11/2026). El usuario:
+               «el seguimiento de cuadrilla aparece abajo de eso, ponelo
+               debajo del mapa, y organizá que el mapa no ocupe toda la
+               interfaz». Son la misma pregunta --dónde está cada cuadrilla y
+               en qué anda-- y estaban separadas por dos paneles. Lado a lado
+               en pantalla ancha; apilados en una angosta. -->
+          <div class="pg-donde">
+            {#if seDibujaElMapa(data.dia, data.hoy)}
+              <section class="snoc-panel" style="gap:var(--snoc-sm);">
+                <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} />
+              </section>
+            {/if}
+            {#if publicado?.cuadrillas?.length}
+              <section class="snoc-panel" style="gap:var(--snoc-sm);">
+                <span class="snoc-label">Seguimiento de las cuadrillas</span>
+                <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
+              </section>
+            {/if}
+          </div>
 
           <!-- LO QUE NECESITA QUE ALGUIEN HAGA ALGO, junto; y cuánto se lleva
                del día. Los dos salen de lo que la página ya cargó. -->
@@ -232,8 +246,6 @@
 
         {#if publicado?.cuadrillas?.length}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
-            <span class="snoc-label">Seguimiento de las cuadrillas</span>
-            <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
             {#if data.seguimiento}
               <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Que cierre solo
                    NO se enciende acá: se le delega desde su chat, con el nivel
@@ -425,3 +437,17 @@
     </div>
   </div>
 </div>
+
+<style>
+  /*  EL MAPA NO SE COME LA PANTALLA (05/11/2026): al lado del seguimiento
+      cuando hay ancho, apilados cuando no. */
+  .pg-donde {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--snoc-sm);
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .pg-donde { grid-template-columns: 1fr; }
+  }
+</style>
