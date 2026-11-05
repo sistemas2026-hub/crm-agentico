@@ -532,6 +532,18 @@ def del_dia(org, fecha) -> dict:
             #  30/10/2026: el cuadro del seguimiento dice A DONDE va la
             #  cuadrilla (la orden en curso, o la que sigue).
             "direccion": o.cliente_direccion or "",
+            #  DONDE QUEDA EL CLIENTE (05/11/2026). El usuario empezo a
+            #  cargarle coordenadas a sus clientes y no las veia: la orden las
+            #  guardaba desde siempre y no llegaban a ninguna pantalla.
+            #
+            #  `null` cuando la orden no las tiene, y eso NO se rellena con
+            #  nada: no se geocodifica la direccion ni se usa la del barrio.
+            #  Un punto inventado en el mapa se lee como un hecho, y mandar a
+            #  un tecnico a una coordenada adivinada es peor que no mostrarle
+            #  ninguna. La pantalla dice «sin ubicacion» y se puede corregir.
+            "destino": ({"latitud": o.gps_lat, "longitud": o.gps_lng}
+                        if o.gps_lat is not None and o.gps_lng is not None
+                        else None),
             "vence_en": o.sla_vence_en.astimezone(zona).isoformat() if o.sla_vence_en else None,
             "orden_del_dia": (o.orden_del_dia if o.orden_del_dia_fecha == fecha else None),
             "siguiente": False,

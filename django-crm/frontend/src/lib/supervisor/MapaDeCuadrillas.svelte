@@ -24,6 +24,7 @@
   import { onMount } from 'svelte';
 
   import { opcionesDelIcono } from './icono-de-cuadrilla.js';
+  import { opcionesDelDestino, ordenDelFoco, queDibujar } from './destino-de-la-orden.js';
 
   /** @type {{ cuadrillas: any[] }} */
   let { cuadrillas } = $props();
@@ -31,6 +32,19 @@
   /** Las que tienen algo que dibujar. */
   let conPosicion = $derived((cuadrillas ?? []).filter((c) => c.posicion));
   let sinSenal = $derived((cuadrillas ?? []).filter((c) => !c.posicion));
+
+  /**
+   * LOS CUATRO ESCENARIOS (05/11/2026), uno por cuadrilla. Ver
+   * `destino-de-la-orden.js`: una cuadrilla sin señal pero con destino
+   * conocido SÍ se dibuja --se ve a dónde va-- y una orden sin coordenadas
+   * se nombra en vez de inventarle un punto.
+   */
+  let planos = $derived((cuadrillas ?? []).map((c) => ({ c, q: queDibujar(c) })));
+  /** Lo que hay que decir en palabras: una línea por cuadrilla a la que le falta algo. */
+  let faltantes = $derived(
+    planos.filter(({ q }) => q.falta && q.escenario !== 'C')
+      .map(({ c, q }) => `${c.cuadrilla}: ${q.falta}`)
+  );
 
   /** @type {HTMLDivElement | undefined} */
   let caja = $state();
@@ -131,7 +145,29 @@
     if (!mapa || !capa || !L) return;
     capa.clearLayers();
     const puntos = [];
-    for (const c of conPosicion) {
+    for (const { c, q } of planos) {
+      //  EL DESTINO DEL CLIENTE, cuando la orden lo tiene. Un pin distinto
+      //  --una casa-- para que no se confunda con el vehículo.
+      if (q.destino) {
+        const foco = ordenDelFoco(c);
+        L.marker([q.destino.latitud, q.destino.longitud], {
+          icon: L.divIcon(opcionesDelDestino()),
+          title: foco ? `OT #${foco.numero}` : ''
+        })
+          .bindPopup(textoDelDestino(c, foco))
+          .addTo(capa);
+        puntos.push([q.destino.latitud, q.destino.longitud]);
+      }
+      //  LA LÍNEA entre los dos, solo cuando se saben las DOS puntas. Con
+      //  una sola sería una ruta inventada hacia un punto que nadie midió.
+      if (q.une && q.vehiculo && q.destino) {
+        L.polyline(
+          [[q.vehiculo.latitud, q.vehiculo.longitud],
+           [q.destino.latitud, q.destino.longitud]],
+          { color: '#8a5300', weight: 2, opacity: 0.45, dashArray: '6 6' }
+        ).addTo(capa);
+      }
+      if (!c.posicion) continue;
       const p = c.posicion;
       const color = p.fresca ? '#1f7a3d' : '#6b7280';
       //  LA MOTO CON TRÁILER (02/11/2026), en vez de un punto. El color
@@ -154,6 +190,18 @@
     }
     if (puntos.length === 1) mapa.setView(puntos[0], 15);
     else if (puntos.length > 1) mapa.fitBounds(puntos, { padding: [40, 40] });
+  }
+
+  /** @param {any} c @param {any} foco */
+  function textoDelDestino(c, foco) {
+    const filas = ['<strong>A dónde va</strong>'];
+    if (foco) {
+      filas.push(`OT #${esc(String(foco.numero))} · ${esc(foco.asunto || foco.tipo || '')}`);
+      if (foco.cliente) filas.push(esc(foco.cliente));
+      if (foco.direccion) filas.push(esc(foco.direccion));
+    }
+    filas.push(esc(c.cuadrilla ?? ''));
+    return filas.join('<br>');
   }
 
   /** @param {any} c */
@@ -209,6 +257,14 @@
     Lo atenuado pasó los 30 minutos: es dónde estuvo, no dónde está.
   </p>
 
+  {#if faltantes.length}
+    <!-- LO QUE FALTA, DICHO (05/11/2026): una orden sin coordenadas no se
+         rellena con un punto adivinado; se nombra para poder corregirla. -->
+    <ul class="mp-faltan">
+      {#each faltantes as f (f)}<li>{f}</li>{/each}
+    </ul>
+  {/if}
+
   {#if sinSenal.length}
     <p class="mp-sin snoc-secundario">
       Sin señal: {sinSenal.map((c) => c.cuadrilla).join(' · ')}
@@ -229,6 +285,14 @@
     overflow: hidden;
   }
   .mp-nota, .mp-sin, .mp-vacio { margin: 0; font-size: 12px; }
+  .mp-faltan {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12px;
+    color: #8a5300;
+  }
+  /* El pin del destino: sin fondo ni borde propios de Leaflet. */
+  :global(.mp-destino) { background: none; border: none; }
   .mp-vacio { font-weight: 600; }
   .mp-sin { font-weight: 600; }
   .mp-capas {

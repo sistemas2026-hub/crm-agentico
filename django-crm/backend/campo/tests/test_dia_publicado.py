@@ -596,8 +596,37 @@ def test_p3_del_cliente_solo_el_nombre_y_solo_en_lo_asignado(org_a, version, nor
 
 
 # ---------------------------------------------------------------------------
-# M · donde esta cada cuadrilla
+# M · donde esta cada cuadrilla, y a donde va
 # ---------------------------------------------------------------------------
+
+def test_m0_la_orden_lleva_el_destino_del_cliente_cuando_lo_tiene(
+        org_a, version, norte, admin_profile):
+    """05/11/2026: el usuario le cargo coordenadas a sus clientes y no las
+    veia. La orden las guardaba desde siempre y no llegaban a la pantalla."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    con = _orden(org_a, version, de=admin_profile)
+    sin = _orden(org_a, version, de=admin_profile)
+    OrdenTrabajo.objects.filter(pk=con.pk).update(gps_lat=10.9185, gps_lng=-74.7668)
+
+    filas = _filas(D.del_dia(org_a, LUNES))
+
+    assert filas[con.numero]["destino"] == {"latitud": 10.9185, "longitud": -74.7668}
+    #  Y SIN COORDENADAS ES None, no un punto inventado: ni geocodificar la
+    #  direccion ni usar el centro del barrio. Un punto en un mapa se lee
+    #  como un hecho.
+    assert filas[sin.numero]["destino"] is None
+
+
+def test_m0b_una_coordenada_a_medias_no_es_un_destino(
+        org_a, version, norte, admin_profile):
+    """Media coordenada ubica en el meridiano cero, no donde vive el cliente."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, version, de=admin_profile)
+    OrdenTrabajo.objects.filter(pk=o.pk).update(gps_lat=10.9185, gps_lng=None)
+
+    assert _filas(D.del_dia(org_a, LUNES))[o.numero]["destino"] is None
+
+
 
 def _con_horario(org):
     from business_hours.models import BusinessCalendar
