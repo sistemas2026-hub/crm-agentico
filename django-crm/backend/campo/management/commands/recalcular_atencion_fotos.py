@@ -41,6 +41,7 @@ del modelo --el `texto` no se toca-- sino un campo que escribió el CÓDIGO y
 que el código calculaba mal. El par que el dataset necesita queda intacto.
 """
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
 from common.models import Org
@@ -61,8 +62,18 @@ class Command(BaseCommand):
 
         try:
             org = Org.objects.get(pk=options["org"])
-        except (Org.DoesNotExist, ValueError, TypeError):
-            raise CommandError(f"No existe la organización {options['org']!r}.")
+        except (Org.DoesNotExist, ValidationError, ValueError, TypeError):
+            #  ValidationError TAMBIEN: Django la lanza ANTES de consultar
+            #  cuando el texto no es un UUID, y sin atraparla el comando
+            #  escupia 40 lineas de traza en vez de decir que el id estaba
+            #  mal. Visto en produccion el 05/11/2026, con un id de
+            #  ejemplo pegado tal cual.
+            raise CommandError(
+                f"{options['org']!r} no es una organizacion valida. El id "
+                f"es un UUID. Para verlos:\n"
+                f"  python manage.py shell -c "
+                f"\"from common.models import Org; "
+                f"[print(o.id, o.name) for o in Org.objects.all()]\"")
 
         aplicar = options["aplicar"]
         try:

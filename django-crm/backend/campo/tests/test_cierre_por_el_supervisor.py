@@ -848,3 +848,21 @@ def test_a5_el_comando_no_toca_lo_que_corrigio_una_persona(abierto, orden):
 
     humano.refresh_from_db()
     assert humano.pide_atencion is True
+
+
+def test_a6_un_id_mal_escrito_dice_que_hacer_en_vez_de_una_traza(abierto):
+    """Visto en producción el 05/11/2026: pegaron un id de ejemplo y el
+    comando escupió 40 líneas de traza de Django. `ValidationError` la lanza
+    Django ANTES de consultar, así que no la atrapaba el `except`."""
+    from io import StringIO
+
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+
+    for malo in ("1234abcd-...", "", "no-soy-un-uuid", "<tu-org-id>"):
+        try:
+            call_command("recalcular_atencion_fotos", "--org", malo,
+                         stdout=StringIO())
+            assert False, f"{malo!r} tendría que haber fallado"
+        except CommandError as e:
+            assert "UUID" in str(e), str(e)
