@@ -125,6 +125,88 @@ describe('el mapa de cuadrillas', () => {
   });
 });
 
+describe('el panel de abajo: cuándo se miró y quién reportó', () => {
+  it('dice la HORA de la última verificación, no solo que hubo una', () => {
+    //  Pedido del usuario: «ver el log de cuándo verificó las ubicaciones,
+    //  con su fecha y hora». Una hora sin segundos no sirve acá: la pantalla
+    //  pregunta cada 15 s y cuatro verificaciones seguidas mostrarían la
+    //  misma cifra, que es indistinguible de una pantalla congelada.
+    const h = render(MapaDeCuadrillas, {
+      props: {
+        cuadrillas: [cuadrilla()],
+        verificadoEn: Date.parse('2026-10-31T16:42:07-05:00')
+      }
+    }).body;
+
+    expect(h).toContain('Ubicaciones verificadas');
+    expect(h).toContain('16:42:07');
+  });
+
+  it('sin haber verificado todavía NO inventa una hora', () => {
+    //  Lo peligroso sería poner la hora de ahora: diría «verificado 16:42»
+    //  cuando la primera consulta ni salió, y una pantalla que nunca
+    //  respondió se vería al día.
+    const h = html([cuadrilla()]);
+
+    expect(h).toContain('Verificando ubicaciones');
+    expect(h).not.toContain('Ubicaciones verificadas');
+  });
+
+  it('cada cuadrilla trae SU hora: son dos relojes distintos', () => {
+    //  EL PUNTO DE TODO EL PANEL. Si se congela el de arriba, el problema es
+    //  esta pantalla; si se congela el de una fila, es ese teléfono. Con un
+    //  solo número los dos fallos se ven iguales y se llama a la persona
+    //  equivocada.
+    const h = render(MapaDeCuadrillas, {
+      props: {
+        cuadrillas: [cuadrilla()],
+        verificadoEn: Date.parse('2026-10-31T16:42:07-05:00')
+      }
+    }).body;
+
+    //  El de la pantalla.
+    expect(h).toContain('16:42:07');
+    //  Y el del teléfono, que es otro instante: 11:20, de `posicion()`.
+    expect(h).toContain('11:20');
+  });
+
+  it('la que no reportó SALE en la lista, y su botón no promete nada', () => {
+    //  Sin pin en el mapa y sin fila acá, una cuadrilla sin señal
+    //  desaparecería de la pantalla: nadie echa de menos lo que no ve.
+    const h = html([
+      cuadrilla(),
+      cuadrilla({ jornada: 'j-2', cuadrilla: 'Cuadrilla #3', posicion: null })
+    ]);
+
+    expect(h).toContain('Cuadrilla #3');
+    //  Su botón va deshabilitado: uno que no responde al clic, sin
+    //  explicación, se lee como pantalla rota.
+    const suBoton = h.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?Cuadrilla #3[\s\S]*?<\/button>/)?.[0] ?? '';
+    expect(suBoton).not.toBe('');
+    expect(suBoton).toContain('disabled');
+    expect(suBoton).toContain('sin señal');
+  });
+
+  it('la que sí reportó tiene su botón HABILITADO para acercar', () => {
+    //  El otro borde: si todo saliera deshabilitado, el test de arriba
+    //  pasaría igual y el botón no serviría para nada.
+    const h = html([cuadrilla()]);
+
+    const suBoton = h.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?Cuadrilla #5[\s\S]*?<\/button>/)?.[0] ?? '';
+    expect(suBoton).not.toBe('');
+    expect(suBoton).not.toContain('disabled');
+    //  Y dice a qué sirve, para quien no adivine que la fila es un botón.
+    expect(suBoton).toContain('Acercar el mapa a Cuadrilla #5');
+  });
+
+  it('sin cuadrillas no dibuja un panel vacío', () => {
+    const h = html([]);
+
+    expect(h).not.toContain('Verificando ubicaciones');
+    expect(h).not.toContain('Ubicaciones verificadas');
+  });
+});
+
 describe('cuándo se dibuja el mapa', () => {
   it('solo si lo que se mira es hoy', () => {
     expect(seDibujaElMapa('2026-11-01', '2026-11-01')).toBe(true);

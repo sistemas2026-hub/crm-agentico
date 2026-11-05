@@ -234,6 +234,52 @@ def test_l_lo_viejo_se_lee_como_viejo_y_no_como_ahora(org_a, admin_profile, hoy)
     assert leido["fresca"] is False, "45 min no es donde esta: es donde estuvo"
 
 
+def test_l1b_veinte_minutos_ya_no_es_donde_esta(org_a, admin_profile, hoy):
+    """EL UMBRAL, EN SU BORDE NUEVO (05/11/2026).
+
+    Antes `MINUTOS_QUE_SIRVEN` era 30 y esto pasaba como fresco. Se bajo a 10
+    al MEDIR la cadencia de la app: manda cada 90 s, asi que 20 minutos son
+    trece envios perdidos. Un telefono apagado se veia igual que uno
+    reportando bien.
+
+    Esta prueba existe para que bajar el umbral no se deshaga en silencio: la
+    de 45 minutos pasaba con 30 Y con 10, asi que no media el cambio.
+    """
+    _horario(org_a)
+    _jornada(org_a, admin_profile, hoy)
+    ahora = _en_horario(hoy)
+    U.registrar(org_a, admin_profile, latitud=LAT, longitud=LON,
+                medida_en=ahora - dt.timedelta(minutes=20), ahora=ahora)
+
+    leido = U.de_las_cuadrillas(org_a, hoy, ahora=ahora)[str(admin_profile.id)]
+
+    assert leido["minutos"] == 20
+    assert leido["fresca"] is False, (
+        "con la app mandando cada 90 s, 20 minutos son trece envios perdidos")
+    #  Y SIGUE ESTANDO: lo viejo se atenua, no se oculta. Si se borrara, la
+    #  cuadrilla desapareceria del mapa y eso se lee como "no hay nadie".
+    assert leido["latitud"] == LAT and leido["longitud"] == LON
+
+
+def test_l1c_el_umbral_deja_pasar_lo_que_es_de_ahora(org_a, admin_profile, hoy):
+    """El borde por el otro lado: sin esto, bajar el umbral a 1 pasaria igual.
+
+    Una guarda que solo prueba que algo se RECHAZA se satisface poniendo el
+    umbral en cero, que romperia la pantalla entera pintando todo gris.
+    """
+    _horario(org_a)
+    _jornada(org_a, admin_profile, hoy)
+    ahora = _en_horario(hoy)
+    U.registrar(org_a, admin_profile, latitud=LAT, longitud=LON,
+                medida_en=ahora - dt.timedelta(minutes=9), ahora=ahora)
+
+    leido = U.de_las_cuadrillas(org_a, hoy, ahora=ahora)[str(admin_profile.id)]
+
+    assert leido["fresca"] is True, (
+        "nueve minutos son seis envios: una racha mala de senal, no un "
+        "telefono apagado")
+
+
 def test_l2_lo_reciente_es_fresco_y_dice_si_la_precision_es_pobre(
         org_a, admin_profile, hoy):
     _horario(org_a)

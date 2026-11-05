@@ -43,6 +43,9 @@
   //  log abierto sigue abierto. Sin respuesta, queda lo último que se vio.
   let vivo = $state(/** @type {any} */ (null));
   let vivoDe = $state('');
+  //  Cuando la pantalla verifico las ubicaciones por ultima vez, con exito.
+  //  Lo lee el mapa para decirlo abajo. Ver el comentario en 'refrescar'.
+  let verificadoEn = $state(/** @type {number | null} */ (null));
   const publicado = $derived(vivo && vivoDe === data.dia ? vivo : data.publicado);
   const cuentas = $derived(publicado?.cuentas ?? {});
 
@@ -66,11 +69,19 @@
         if (!parado && d?.publicado) {
           vivo = d.publicado;
           vivoDe = dia;
+          //  CUANDO SE VERIFICO DE VERDAD (05/11/2026). Se anota aca --con la
+          //  respuesta ya en la mano-- y no al disparar la consulta: un
+          //  `fetch` que falla o devuelve 500 no verifico nada, y marcarlo
+          //  como verificado haria que una pantalla ciega se vea al dia.
+          verificadoEn = Date.now();
         }
       } catch {
         //  Sin red: queda lo último que se vio.
       }
     }
+    //  CADA 15 s, y solo con la pestana visible (ver la guarda de arriba).
+    //  La app del tecnico manda su posicion cada 90 s: preguntar mas seguido
+    //  que eso no trae un dato nuevo, solo trafico.
     const intervalo = setInterval(refrescar, 15000);
     document.addEventListener('visibilitychange', refrescar);
     window.addEventListener('focus', refrescar);
@@ -217,7 +228,7 @@
           <div class="pg-donde">
             {#if seDibujaElMapa(data.dia, data.hoy)}
               <section class="snoc-panel" style="gap:var(--snoc-sm);">
-                <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} />
+                <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} {verificadoEn} />
               </section>
             {/if}
             {#if publicado?.cuadrillas?.length}

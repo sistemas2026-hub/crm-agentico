@@ -54,7 +54,17 @@ class CompartirUbicacion {
     required this.guardarDiaIniciado,
     String Function()? hoyTexto,
 
-    this.cada = const Duration(minutes: 3),
+    //  CADA 90 s (05/11/2026), antes 3 minutos. El usuario: «el supervisor
+    //  debe consultar las ubicaciones en un tiempo no tan largo». La pantalla
+    //  ya preguntaba cada 15 s --el eslabon lento era este-- y con 3 minutos
+    //  el punto podia estar tres minutos atrasado por mas que se refrescara.
+    //
+    //  90 s Y NO MENOS: cada envio enciende el GPS, y el costo es la bateria
+    //  del telefono de alguien que trabaja ocho horas en la calle. 90 s es la
+    //  mitad del atraso anterior sin duplicar otra vez el gasto; el umbral de
+    //  frescura del servidor (10 min) esta calibrado contra ESTE numero, asi
+    //  que cambiarlo obliga a revisar `MINUTOS_QUE_SIRVEN`.
+    this.cada = const Duration(seconds: 90),
     this.plazoDeLectura = const Duration(seconds: 20),
   }) : hoyTexto = hoyTexto ?? _hoyDelSistema;
 

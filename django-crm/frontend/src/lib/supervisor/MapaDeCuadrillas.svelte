@@ -25,9 +25,17 @@
 
   import { opcionesDelIcono } from './icono-de-cuadrilla.js';
   import { opcionesDelDestino, ordenDelFoco, queDibujar } from './destino-de-la-orden.js';
+  import { desdeHace, filasDeSeguimiento, horaCorta } from './relojes-del-mapa.js';
 
-  /** @type {{ cuadrillas: any[] }} */
-  let { cuadrillas } = $props();
+  /**
+   * `verificadoEn`: cuándo la PANTALLA preguntó por última vez (ms epoch).
+   * Lo pone quien sondea --la página, cada 15 s-- y no este componente: acá
+   * no se sabe si la respuesta llegó o falló. Ausente, la línea no miente:
+   * no inventa una hora.
+   *
+   * @type {{ cuadrillas: any[], verificadoEn?: number | null }}
+   */
+  let { cuadrillas, verificadoEn = null } = $props();
 
   /** Las que tienen algo que dibujar. */
   let conPosicion = $derived((cuadrillas ?? []).filter((c) => c.posicion));
@@ -68,6 +76,49 @@
 
   /** Qué capa se está viendo. Sobrevive al redibujo de los pines. */
   let vista = $state('mapa');
+
+  /**
+   * AHORA, LATIENDO CADA SEGUNDO. Sin esto, «hace 8 s» se quedaría escrito
+   * hasta el siguiente sondeo y una pantalla congelada se vería idéntica a
+   * una viva --que es exactamente lo que el usuario pidió poder distinguir--.
+   * Es un contador, no una consulta: no le pide nada al servidor.
+   */
+  let ahora = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => { ahora = Date.now(); }, 1000);
+    return () => clearInterval(t);
+  });
+
+  /** Las filas de abajo. Ver `relojes-del-mapa.js`. */
+  let filas = $derived(filasDeSeguimiento(cuadrillas));
+
+  /** Hace cuánto preguntó la pantalla. '' mientras no haya preguntado. */
+  let haceDeLaConsulta = $derived(
+    verificadoEn ? desdeHace((ahora - verificadoEn) / 1000) : ''
+  );
+  let horaDeLaConsulta = $derived(verificadoEn ? horaCorta(verificadoEn, true) : '');
+
+  /** Los marcadores vivos, para abrir el globo del que se centra. */
+  /** @type {{jornada: string, marca: any}[]} */
+  let marcas = [];
+
+  /**
+   * ACERCAR EL MAPA A UNA CUADRILLA. Pedido del usuario: «un botón que yo le
+   * dé clic y me acerque el mapa al técnico».
+   *
+   * Abre además su globo: acercarse sin decir a quién deja al supervisor
+   * mirando una calle, sin saber cuál de los cinco puntos quedó en el centro.
+   *
+   * @param {string} jornada
+   */
+  function acercarA(jornada) {
+    const c = (cuadrillas ?? []).find((/** @type {any} */ x) => x.jornada === jornada);
+    if (!mapa || !c?.posicion) return;
+    mapa.setView([c.posicion.latitud, c.posicion.longitud], 17, { animate: true });
+    for (const m of marcas) {
+      if (m.jornada === jornada) { m.marca.openPopup(); break; }
+    }
+  }
 
   /**
    * LAS DOS CAPAS (02/11/2026). El usuario: «el mapa se ve viejo, ¿no se
@@ -156,6 +207,7 @@
   function dibujar() {
     if (!mapa || !capa || !L) return;
     capa.clearLayers();
+    marcas = [];
     const puntos = [];
     for (const { c, q } of planos) {
       //  EL DESTINO DEL CLIENTE, cuando la orden lo tiene. Un pin distinto
@@ -191,6 +243,7 @@
       });
       marca.bindPopup(textoDelPopup(c));
       marca.addTo(capa);
+      marcas.push({ jornada: c.jornada, marca });
       puntos.push([p.latitud, p.longitud]);
       //  La precisión, cuando es pobre, como un círculo: así el supervisor ve
       //  que es el barrio y no la casa, en vez de creerle al punto.
@@ -219,7 +272,10 @@
   /** @param {any} c */
   function textoDelPopup(c) {
     const p = c.posicion;
-    const foco = (c.ordenes ?? []).find((/** @type {any} */ o) => o.siguiente) ?? (c.ordenes ?? [])[0];
+    //  EL MISMO CRITERIO QUE EL MAPA (05/11/2026): este globo tenía su
+    //  propia regla --`siguiente`-- y mostraba una OT distinta de la del pin
+    //  del destino, en la misma pantalla. Ver `ordenDelFoco`.
+    const foco = ordenDelFoco(c);
     const filas = [
       `<strong>${esc(c.cuadrilla)}</strong>`,
       `Reportó: ${esc(p.de ?? '—')}`,
@@ -264,6 +320,45 @@
     </p>
   {/if}
 
+  <!-- CUÁNDO SE MIRÓ Y QUIÉN REPORTÓ (05/11/2026). Pedido del usuario: «ver
+       el log de cuándo verificó las ubicaciones, con su fecha y hora» y «un
+       botón que me acerque el mapa al técnico».
+
+       NO ES UN HISTORIAL DE LAS CONSULTAS, y es a propósito: la pantalla
+       pregunta cada 15 s, así que en una hora serían 240 renglones iguales.
+       Informa la ÚLTIMA --con su hora y un contador que corre, que es lo que
+       distingue una pantalla viva de una congelada-- y, debajo, la hora de
+       cada teléfono, que es el dato que sí cambia.
+
+       SON DOS RELOJES DISTINTOS A PROPÓSITO: si se congela el de arriba, el
+       problema es esta pantalla; si se congela el de una fila, es ese
+       teléfono. Con un solo número los dos fallos se ven iguales. -->
+  {#if (cuadrillas ?? []).length}
+    <div class="mp-reloj snoc-secundario">
+      {#if horaDeLaConsulta}
+        Ubicaciones verificadas {horaDeLaConsulta} · {haceDeLaConsulta}
+      {:else}
+        Verificando ubicaciones…
+      {/if}
+    </div>
+
+    <ul class="mp-filas">
+      {#each filas as f (f.jornada)}
+        <li>
+          <button type="button" class="mp-fila" disabled={!f.centrable}
+                  onclick={() => acercarA(f.jornada)}
+                  title={f.centrable
+                    ? `Acercar el mapa a ${f.cuadrilla}`
+                    : `${f.cuadrilla} no reportó: no hay a dónde acercarse`}>
+            <span class="mp-punto" class:viejo={!f.fresca} class:mudo={!f.centrable}></span>
+            <span class="mp-quien">{f.cuadrilla}</span>
+            <span class="mp-cuando" class:alerta={!f.centrable}>{f.dice}</span>
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
   <!-- LO DE ABAJO, PLEGADO (05/11/2026). El usuario: «aparece información
        irrelevante debajo del mapa». No es irrelevante --qué significa un
        punto, y qué orden hay que corregir-- pero no se lee todos los días y
@@ -305,6 +400,33 @@
     overflow: hidden;
   }
   .mp-nota, .mp-sin, .mp-vacio { margin: 0; font-size: 12px; }
+  .mp-reloj { font-size: 12px; font-variant-numeric: tabular-nums; }
+  .mp-filas { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .mp-fila {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--snoc-xs);
+    width: 100%;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .mp-fila:hover:not(:disabled) { background: rgba(0, 0, 0, 0.05); }
+  .mp-fila:disabled { cursor: default; opacity: 0.75; }
+  .mp-punto { width: 8px; height: 8px; border-radius: 50%; background: #1f7a3d; }
+  .mp-punto.viejo { background: #6b7280; }
+  /*  Sin señal no es un punto apagado: es NINGUN punto. Un circulo hueco no
+      se confunde con una posicion vieja, que si es un dato. */
+  .mp-punto.mudo { background: transparent; border: 1px solid #b91c1c; }
+  .mp-quien { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mp-cuando { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mp-cuando.alerta { color: #b91c1c; }
   .mp-detalle summary { font-size: 12px; cursor: pointer; }
   .mp-detalle > :not(summary) { margin-top: var(--snoc-xs); }
   .mp-faltan {

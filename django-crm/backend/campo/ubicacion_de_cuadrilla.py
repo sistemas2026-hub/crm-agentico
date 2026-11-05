@@ -77,9 +77,23 @@ from common.models import BaseModel, Org, Profile
 
 logger = logging.getLogger(__name__)
 
-#: Mas vieja que esto, una posicion ya no se muestra en el mapa: a media hora
-#: de distancia no dice donde esta la cuadrilla, dice donde estuvo.
-MINUTOS_QUE_SIRVEN = 30
+#: Mas vieja que esto, una posicion deja de pintarse como "de ahora": no
+#: dice donde esta la cuadrilla, dice donde estuvo.
+#:
+#: BAJA DE 30 A 10 EL 05/11/2026, Y ES UNA CORRECCION DE CALIBRACION. El 30
+#: se eligio cuando nadie habia medido cada cuanto manda la app. Mide: la app
+#: manda cada 90 s (`compartir_ubicacion.dart`, constante `cada`). Con esa
+#: cadencia, 30 minutos son VEINTE envios perdidos, y la pantalla seguia
+#: pintando ese punto lleno, igual que uno de hace noventa segundos. Un
+#: telefono apagado, sin datos o con la app cerrada se veia identico a uno
+#: reportando bien durante media hora.
+#:
+#: 10 minutos son ~6 envios perdidos: ya no es una falla de un envio suelto
+#: --un tunel, un ascensor, un cambio de celda-- y todavia no es tan corto
+#: como para teñir de gris a media cuadrilla cada rato. El dato NO se oculta
+#: ni se borra: se sigue mostrando con su hora, atenuado, que es la regla que
+#: no cambia.
+MINUTOS_QUE_SIRVEN = 10
 
 #: Precision peor que esto es el barrio, no la casa. Se guarda igual --saber
 #: que esta en la zona sirve-- pero quien dibuja puede decirlo.
