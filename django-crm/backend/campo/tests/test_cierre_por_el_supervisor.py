@@ -788,3 +788,63 @@ def test_a3_sin_texto_no_se_marca():
     assert _pide_atencion("") is False
     assert _pide_atencion("   ") is False
     assert _pide_atencion(None) is False
+
+
+def test_a4_el_comando_pone_al_dia_lo_que_el_detector_viejo_marco(abierto, orden):
+    """El comando que limpia las marcas viejas.
+
+    RECALCULA, no borra: una foto cuyo análisis sí nombra un defecto sigue
+    marcada. Poner todo en `False` habría tapado las de verdad junto con el
+    ruido, que es la forma fácil y equivocada de arreglar esto.
+    """
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    from campo.models import AnalisisDeEvidencia
+
+    #  Tres filas como las que dejó el detector viejo: las tres marcadas,
+    #  pero solo una nombra un defecto de verdad.
+    ruido1 = _analisis(orden, abierto, pide_atencion=True,
+                       texto="La foto está borrosa y no se puede determinar el serial.")
+    ruido2 = _analisis(orden, abierto, pide_atencion=True,
+                       texto="No hay cables sueltos. Se ve la ONT con luz verde.")
+    real = _analisis(orden, abierto, pide_atencion=True,
+                     texto="El equipo está sin fijar a la pared.")
+
+    salida = StringIO()
+    call_command("recalcular_atencion_fotos", "--org", str(abierto.id), stdout=salida)
+    #  SIN --aplicar NO ESCRIBE.
+    assert "SIMULACRO" in salida.getvalue()
+    for f in (ruido1, ruido2, real):
+        f.refresh_from_db()
+        assert f.pide_atencion is True
+
+    call_command("recalcular_atencion_fotos", "--org", str(abierto.id),
+                 "--aplicar", stdout=StringIO())
+    for f in (ruido1, ruido2):
+        f.refresh_from_db()
+        assert f.pide_atencion is False, f.texto
+    real.refresh_from_db()
+    assert real.pide_atencion is True, "un defecto de verdad no se puede perder"
+
+
+def test_a5_el_comando_no_toca_lo_que_corrigio_una_persona(abierto, orden):
+    """Su `pide_atencion` es un juicio humano, no un cálculo del código."""
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+
+    ev = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    humano = AnalisisDeEvidencia.objects.create(
+        org=abierto, evidencia=ev, vuelta=orden.vuelta,
+        origen=AnalisisDeEvidencia.PERSONA, pide_atencion=True,
+        texto="La foto está borrosa.")
+
+    call_command("recalcular_atencion_fotos", "--org", str(abierto.id),
+                 "--aplicar", stdout=StringIO())
+
+    humano.refresh_from_db()
+    assert humano.pide_atencion is True
