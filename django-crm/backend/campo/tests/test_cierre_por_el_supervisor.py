@@ -732,3 +732,59 @@ def test_v8_un_formato_que_el_analizador_no_mira_se_dice_antes_de_pagar(orden):
     assert IV.se_puede_mirar(bytes([0xFF, 0xD8, 0xFF]) + b"\x00" * 32) == ""
     grande = bytes([0xFF, 0xD8, 0xFF]) + b"\x00" * (IV.MAX_BYTES + 1)
     assert "acepta hasta" in IV.se_puede_mirar(grande)
+
+
+# ---------------------------------------------------------------------------
+# A · CUÁNDO UNA FOTO PIDE QUE ALGUIEN LA MIRE  --  05/11/2026
+# ---------------------------------------------------------------------------
+#  EL DEFECTO QUE ESTO CIERRA, medido en producción (OT 100): **4 de 4 fotos
+#  pedían una mirada**, y así iba a ser en todas las órdenes. El detector
+#  buscaba «borroso», «no se ve», «no se puede»… y la instrucción le PIDE al
+#  modelo que diga exactamente eso. Se le pedían las frases y después se
+#  usaban como alarma.
+#
+#  El costo no fue el ruido: el veredicto quedaba en REVISAR, el cierre
+#  autónomo exige CERRAR, y ninguna orden con fotos se cerraba sola.
+#
+#  Hay una guarda estática del contrato en `tests/test_vision_propositos.py`.
+#  Ésta prueba la CONDUCTA: aquélla no veía que la marca dejara de leerse.
+
+def test_a1_la_marca_del_modelo_manda_sobre_las_palabras():
+    """Si el modelo dijo que no hace falta mirar, una palabra suelta en su
+    descripción no lo contradice."""
+    from campo.tasks import _pide_atencion
+
+    assert _pide_atencion("Se ve una ONT con tres luces verdes. ATENCION: no") is False
+    assert _pide_atencion("Se ve un cable suelto junto a la caja. ATENCION: si") is True
+    #  Lo que fallaba antes: la foto borrosa ya no alarma por sí sola.
+    assert _pide_atencion(
+        "La foto está borrosa y no se puede determinar el serial. ATENCION: no") is False
+
+
+def test_a2_sin_marca_cae_al_respaldo_y_el_respaldo_no_se_dispara_solo():
+    """El modelo puede no escribir la marca: es guía, no garantía (PRD 7.4).
+    Entonces manda la lista -- que ya no tiene las palabras que la propia
+    instrucción exige."""
+    from campo.tasks import _pide_atencion
+
+    assert _pide_atencion("Se ve una ONT, todo normal.") is False
+    #  LAS CUATRO QUE FALLABAN. Cada una venía de una regla de la instrucción.
+    assert _pide_atencion("La foto está borrosa.") is False
+    assert _pide_atencion("No se puede determinar el serial.") is False
+    assert _pide_atencion("No se ve la etiqueta.") is False
+    assert _pide_atencion("El equipo está tapado y fuera de cuadro.") is False
+    #  Y «no hay cables sueltos» tampoco, que es por lo que «suelto» salió
+    #  del respaldo: la regla 4 le pide decirlo también cuando no los hay.
+    assert _pide_atencion("No hay cables sueltos ni conectores a la vista.") is False
+    #  Lo que sí queda: defectos que la instrucción nunca le pide nombrar.
+    assert _pide_atencion("El equipo está sin fijar a la pared.") is True
+    assert _pide_atencion("Se ve material deteriorado.") is True
+
+
+def test_a3_sin_texto_no_se_marca():
+    """Un análisis que no se pudo hacer lo cuenta `motivo`, no esto."""
+    from campo.tasks import _pide_atencion
+
+    assert _pide_atencion("") is False
+    assert _pide_atencion("   ") is False
+    assert _pide_atencion(None) is False

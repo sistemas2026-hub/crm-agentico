@@ -257,6 +257,29 @@ def _mime_de(contenido: bytes) -> str:
     return "image/png" if contenido[:8] == FIRMA_PNG else "image/jpeg"
 
 
+#: LA MARCA QUE CIERRA EL ANALISIS DE UNA EVIDENCIA  --  05/11/2026
+#:
+#: El modelo termina con "ATENCION: si" o "ATENCION: no", y eso es lo que el
+#: CRM lee para decidir si una persona tiene que mirar la foto
+#: (`campo/tasks.py::_pide_atencion`).
+#:
+#: POR QUE UNA MARCA Y NO BUSCAR PALABRAS. La primera version buscaba
+#: "borroso", "no se ve", "no se puede"... en el texto. Medido en produccion
+#: el 04/11/2026: 4 de 4 fotos pedian una mirada, en todas las ordenes. El
+#: motivo estaba a la vista y era de esta misma instruccion: sus reglas le
+#: PIDEN al modelo que diga "si algo esta borroso... deci que no se puede
+#: determinar" y "contesta si eso se ve o no se ve". O sea, se le pedian las
+#: frases y despues se usaban como alarma.
+#:
+#: El costo no fue el ruido: el veredicto quedaba en REVISAR y el cierre
+#: autonomo del Supervisor exige CERRAR, asi que ninguna orden con fotos se
+#: cerraba sola. Y un aviso que aparece siempre deja de avisar.
+#:
+#: ES GUIA, NO GARANTIA (PRD 7.4): nada impide que el modelo no la escriba.
+#: Por eso el CRM cae a una lista de palabras --ya limpia de las que esta
+#: instruccion exige-- cuando la marca no esta.
+MARCA_ATENCION = "ATENCION"
+
 #: La instruccion para una foto de EVIDENCIA de una orden de campo
 #: (31/10/2026). Es otra cosa que la de arriba, y la diferencia es el punto:
 #: las reglas 3 y 4 de INSTRUCCION prohiben decir que algo esta mal instalado
@@ -300,7 +323,15 @@ INSTRUCCION_EVIDENCIA = (
     "papeles que esten en el encuadre.\n"
     "9. Si la foto no muestra equipos ni una instalacion, deci en una linea "
     "que no se ve lo que se pedia y nada mas. No describas el resto.\n"
-    "10. Se breve: un parrafo corto. Sin saludos."
+    "10. Se breve: un parrafo corto. Sin saludos.\n"
+    "11. Terminá con una ultima linea, sola, que diga exactamente "
+    "'ATENCION: si' o 'ATENCION: no'. Poné 'si' SOLO si viste algo que "
+    "sugiere que el trabajo quedo mal --un cable suelto, un conector que "
+    "parece no estar puesto, un equipo sin fijar, material deteriorado-- "
+    "o si la foto no sirve como evidencia de lo que se pedia. Si lo unico "
+    "que hiciste fue describir lo que hay, poné 'ATENCION: no'. Que algo "
+    "este borroso o fuera de cuadro NO alcanza por si solo: decilo en el "
+    "parrafo y poné 'si' unicamente si por eso la foto no sirve."
 )
 
 

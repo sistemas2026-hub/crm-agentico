@@ -384,27 +384,71 @@ def analizar_evidencia(org_id: str, evidencia_id: str) -> dict:
         clear_rls_context()
 
 
-#: Lo que hace que una foto se marque para mirar. Son palabras que el propio
-#: analizador usa cuando algo no cuadra o no se puede determinar. Es un
-#: criterio GRUESO y esta bien que lo sea: su unica consecuencia es que la
-#: tarjeta diga "revisá las fotos", NUNCA que una orden no se cierre.
+#: LO QUE EL MODELO ESCRIBE AL FINAL  --  05/11/2026
+#:
+#: La instruccion de evidencia (`nucleo/canales/vision.py::MARCA_ATENCION`) le
+#: pide terminar con "ATENCION: si" o "ATENCION: no". Eso es lo que se lee.
+#:
+#: ES UN CONTRATO ENTRE DOS SERVICIOS y la cadena esta escrita en los dos
+#: lados --el motor no importa de Django ni al reves--. Una prueba las ata:
+#: `tests/test_vision_propositos.py`.
+MARCA_ATENCION = "atencion:"
+
+#: EL RESPALDO, para cuando el modelo no escribe la marca. Es GUIA, no
+#: garantia (PRD 7.4), asi que no se puede depender de que siempre este.
+#:
+#: LO QUE SE SACO DE ESTA LISTA, Y POR QUE  --  medido el 04/11/2026
+#: -----------------------------------------------------------------
+#: Tenia tambien "no se ve", "no se puede", "borros", "oscur", "tapad" y
+#: "fuera de cuadro". Y la instruccion de evidencia PIDE esas frases: sus
+#: reglas dicen "si algo esta borroso, oscuro, tapado o fuera de cuadro,
+#: decilo, y deci que no se puede determinar por eso" y "contesta si eso se
+#: ve o no se ve". O sea: se le pedian las palabras y despues se usaban como
+#: alarma.
+#:
+#: Resultado en produccion, OT 100: **4 de 4 fotos pedian una mirada**, y asi
+#: iba a ser en todas. El costo no fue el ruido: el veredicto quedaba en
+#: REVISAR y el cierre autonomo del Supervisor exige CERRAR, de modo que
+#: ninguna orden con fotos se cerraba sola. Y un aviso que aparece siempre
+#: deja de avisar: en una semana se aprueba sin leerlo, y el dia que una foto
+#: este de verdad mal, pasa igual.
+#:
+#: Lo que queda son defectos del TRABAJO, no de la foto. Ninguno de estos
+#: aparece en la instruccion, y una prueba lo comprueba.
+#: Y POR QUE NO ESTAN "suelto" NI "sueltos", que son el defecto mas comun:
+#: la regla 4 de la instruccion le PIDE al modelo decir «si hay cables
+#: sueltos o conectores que parecen no estar puestos», asi que escribe la
+#: palabra tambien cuando NO los hay --«no hay cables sueltos»-- y el
+#: respaldo se equivocaria. Lo caza una prueba, que es como aparecio.
+#:
+#: Eso deja el respaldo mas flaco, y es la decision correcta: un cable suelto
+#: lo reporta la MARCA, que es el juicio del modelo sobre lo que acaba de
+#: mirar. El respaldo solo cubre palabras que la instruccion no le pide
+#: nunca, y existe para el caso en que el modelo no escriba la marca.
 PALABRAS_QUE_PIDEN_MIRAR = (
-    "suelto", "sueltos", "desconectad", "no se ve", "no se puede",
-    "borros", "oscur", "tapad", "fuera de cuadro", "no se alcanza",
-    "parece no", "sin fijar", "deteriorad", "dañad", "danad",
+    "desconectad", "sin fijar", "deteriorad",
+    "dañad", "danad", "mal instalad", "no sirve",
 )
 
 
 def _pide_atencion(texto: str) -> bool:
-    """Si este analisis amerita que una persona lo lea. Falla hacia MIRAR.
+    """Si este analisis amerita que una persona lo lea.
 
-    Sin texto no se marca --eso ya lo cuenta 'motivo' por separado-- y con
-    texto, cualquier palabra de la lista alcanza. Preferir el falso positivo
-    es lo correcto aca: el costo de marcar de mas es que alguien lea un
-    parrafo; el de marcar de menos es que una foto mala pase sin que nadie la
-    mire. Y marcar de mas no puede frenar nada.
+    Primero LA MARCA, que es el juicio del modelo sobre lo que acaba de
+    describir. Si no la escribio, se cae a las palabras --que ya no incluyen
+    las que la propia instruccion exige--.
+
+    Sin texto no se marca: eso ya lo cuenta `motivo` por separado.
     """
     bajo = (texto or "").lower()
+    if not bajo.strip():
+        return False
+    #  La marca gana sobre todo lo demas: si el modelo dijo que no hace falta
+    #  mirar, una palabra suelta en su descripcion no lo contradice.
+    pos = bajo.rfind(MARCA_ATENCION)
+    if pos != -1:
+        resto = bajo[pos + len(MARCA_ATENCION):].strip()
+        return resto.startswith(("si", "sí"))
     return any(p in bajo for p in PALABRAS_QUE_PIDEN_MIRAR)
 
 

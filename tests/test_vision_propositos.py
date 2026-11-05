@@ -167,6 +167,105 @@ limpio = TenantConfig.model_validate(crudo)
 for p, bandera in banderas.items():
     comprobar(f"E2. '{bandera}' nace apagada", getattr(limpio, bandera) is False)
 
+# =============================================================================
+print("\n-- F: el detector del CRM y la instruccion no se contradicen --")
+# =============================================================================
+#  EL DEFECTO QUE ESTO CIERRA, medido en produccion el 04/11/2026 (OT 100):
+#  **4 de 4 fotos pedian una mirada**, y asi iba a ser en todas las ordenes.
+#  El detector buscaba "borros", "no se ve", "no se puede", "tapad", "fuera
+#  de cuadro"... y la instruccion le PIDE al modelo que diga exactamente eso:
+#  «si algo esta borroso, oscuro, tapado o fuera de cuadro, decilo, y deci
+#  que no se puede determinar por eso». Se le pedian las frases y despues se
+#  usaban como alarma.
+#
+#  El costo no fue el ruido: el veredicto quedaba en REVISAR, el cierre
+#  autonomo exige CERRAR, y ninguna orden con fotos se cerraba sola. Y un
+#  aviso que aparece siempre deja de avisar.
+#
+#  Es un contrato entre DOS SERVICIOS --el motor no importa de Django ni al
+#  reves-- asi que se lee el archivo del otro lado. Una guarda estatica es lo
+#  unico posible aca, y es mucho mas que nada.
+TAREAS = (RAIZ / "django-crm" / "backend" / "campo" / "tasks.py").read_text(
+    encoding="utf-8")
+
+#  Se lee con `ast` y no partiendo texto: cortar por comas y comillas
+#  devolvia pedazos pegados --'suelto", "sueltos", ...'-- y la prueba
+#  afirmaba sobre basura. Leer mal el archivo del otro servicio es
+#  exactamente como una guarda de contrato se vuelve decorativa.
+import ast as _ast                                               # noqa: E402
+
+_arbol = _ast.parse(TAREAS)
+PALABRAS = next(
+    [e.value for e in n.value.elts]
+    for n in _ast.walk(_arbol)
+    if isinstance(n, _ast.Assign)
+    and any(getattr(t, "id", "") == "PALABRAS_QUE_PIDEN_MIRAR" for t in n.targets)
+)
+
+comprobar("F1. el CRM declara palabras de respaldo", len(PALABRAS) >= 5,
+          str(PALABRAS))
+
+#  LA AFIRMACION QUE IMPORTA, y su alcance exacto: ninguna palabra del
+#  respaldo puede estar en la parte de la instruccion que le pide al modelo
+#  que DESCRIBA, porque entonces la escribe siempre y el respaldo se dispara
+#  siempre. Eso es lo que paso.
+#
+#  La ultima regla --la que define la marca-- queda FUERA de la comprobacion
+#  a proposito, y conviene decir por que en vez de ampliar la lista hasta que
+#  pase: esa regla nombra defectos ("un cable suelto", "un equipo sin fijar")
+#  como EJEMPLOS de cuando poner "ATENCION: si", no como algo que el modelo
+#  tenga que escribir en su parrafo. Y cuando esa regla se cumple, el
+#  respaldo ni corre: manda la marca.
+#
+#  Riesgo que queda, y se escribe en vez de taparse: si el modelo IGNORA la
+#  regla de la marca y ademas repite sus ejemplos ("no veo ningun cable
+#  suelto"), el respaldo se equivoca. Es menos probable que lo anterior --que
+#  fallaba SIEMPRE-- y el costo sigue siendo una mirada de mas, nunca un
+#  cierre frenado por el codigo.
+#  SE BUSCA LA REGLA, Y SI NO ESTA LA PRUEBA FALLA EN VEZ DE REVENTAR.
+#  La primera version cortaba con `.index("11. termin")`: al cambiar la
+#  redaccion de esa regla, la prueba lanzaba ValueError en vez de decir que
+#  la regla se habia perdido. Mata la mutacion igual, pero quien lee el rojo
+#  no entiende por que -- medido el 05/11/2026 mutandola.
+_bajo = vision.INSTRUCCION_EVIDENCIA.lower()
+_corte = _bajo.find("11. ")
+comprobar("F2a. la regla de la marca esta donde se la espera", _corte != -1,
+          "no hay regla 11: ¿se renombro o se perdio?")
+_descriptivas = _bajo[:_corte] if _corte != -1 else _bajo
+chocan = [p for p in PALABRAS if p in _descriptivas]
+comprobar("F2. ninguna palabra del respaldo la pide la parte descriptiva",
+          not chocan, str(chocan))
+
+#  Y las que se sacaron no pueden volver.
+for vieja in ("no se ve", "no se puede", "borros", "oscur", "tapad",
+              "fuera de cuadro"):
+    comprobar(f"F3. '{vieja}' ya no esta en el detector", vieja not in PALABRAS)
+
+#  El contrato de la marca: la cadena esta escrita en los dos lados.
+comprobar("F4. la instruccion pide la marca",
+          "ATENCION: si" in vision.INSTRUCCION_EVIDENCIA
+          and "ATENCION: no" in vision.INSTRUCCION_EVIDENCIA)
+#  Y la PIDE, no la sugiere. Volverla opcional ("podés terminar con...")
+#  dejaba el respaldo gobernando en silencio, y la guarda pasaba igual:
+#  medido mutandola el 05/11/2026.
+#  LA PIDE, no la sugiere. Volverla opcional dejaba el respaldo gobernando
+#  en silencio y la guarda pasaba igual: medido mutandola el 05/11/2026.
+comprobar("F4b. y la pide, no la sugiere",
+          "Terminá con una ultima linea" in vision.INSTRUCCION_EVIDENCIA,
+          vision.INSTRUCCION_EVIDENCIA[_corte:_corte + 70] if _corte != -1 else "")
+comprobar("F4c. y no la deja a eleccion del modelo",
+          not any(p in _bajo for p in ("opcional", "si querés", "si queres",
+                                       "podés terminar", "podes terminar")))
+comprobar("F5. y el CRM lee esa misma marca",
+          'MARCA_ATENCION = "' + vision.MARCA_ATENCION.lower() + ':"' in TAREAS,
+          vision.MARCA_ATENCION)
+
+#  Solo la de evidencia la pide: las otras dos no tienen quien la lea.
+comprobar("F6. la del cliente no pide la marca",
+          vision.MARCA_ATENCION not in vision.INSTRUCCION)
+comprobar("F7. la del asistente tampoco",
+          vision.MARCA_ATENCION not in vision.INSTRUCCION_ASISTENTE)
+
 print("\n" + "=" * 72)
 if fallos:
     print(f" {len(fallos)} FALLAS:")
