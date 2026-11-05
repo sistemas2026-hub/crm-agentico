@@ -30,6 +30,22 @@ funcione como dice.** El propio archivo trae un error verificado — su bloque
 `servers:` apunta a `api.wisphub.net`, y la produccion real es `api.wisphub.io`.
 Ni el dominio del spec se da por bueno sin comprobar.
 
+**`api-main.yaml` NO trae los campos.** Medido el 05/11/2026: ese archivo son
+411 lineas de PUNTEROS --cada ruta y cada esquema es un `$ref` a otro archivo
+del mismo directorio estatico-- y un `grep coordenadas` sobre el da 0
+coincidencias. Para ver los campos de una entidad hay que bajar su componente
+aparte:
+
+```
+https://wisphub.net/static/yaml/api/Clientes/components/Clientes.yaml          (la LISTA)
+https://wisphub.net/static/yaml/api/Clientes/components/ServicesRetrieve.yaml  (/clientes/{id}/)
+https://wisphub.net/static/yaml/api/Clientes/components/ClientesRetrieve.yaml  (/clientes/{id}/perfil/)
+https://wisphub.net/static/yaml/api/Clientes/paths/<operacion>.yaml            (parametros y respuestas)
+```
+
+Quien lea solo `api-main.yaml` concluye que el spec no documenta los campos, y
+no es asi: estan, en otro archivo.
+
 ## La regla, antes que nada
 
 > **La documentacion de la API es una HIPOTESIS, no una fuente de verdad.
@@ -572,6 +588,109 @@ Leerlo como valor unico da 43% de cobertura; extrayendo todos los moviles
 `password_ssid_router_wifi`) y las **coordenadas GPS** del domicilio. Por eso la
 lista de campos es BLANCA por rol y no negra: con lista negra, un campo nuevo
 del proveedor queda expuesto por defecto.
+
+### `coordenadas` del cliente: SIN MEDIR todavia (05/11/2026)
+
+**No se pudo medir, y por eso no entra a ningun parseo hasta que se mida.** Ese
+dia se intento confirmar el formato real de `coordenadas` en `/api/clientes/`
+--el campo que `consultar_cliente` ya trae-- para copiarlo a dos columnas
+`FloatField` (`gps_lat`, `gps_lng`) de la orden de trabajo. La medicion no
+pudo correr: en la maquina de desarrollo **no existe `WISPHUB_API_KEY`**
+(`py -3.13 cli/sondear_api.py` -> `Falta WISPHUB_API_KEY en el .env`). Lo que
+si se comprobo es que el bloqueo es la credencial y no la red:
+`curl https://api.wisphub.io/api/clientes/?limit=1` sin clave -> **403**.
+
+Lo unico confirmado ese dia es DOCUMENTACION, no medicion:
+
+| Esquema oficial | Que dice de `coordenadas` |
+|---|---|
+| `Clientes/components/Clientes.yaml` (la LISTA, que es la que usa `consultar_cliente` via `?id_servicio=`) | `coordenadas: {title: Coordenadas, type: string}` -- **un solo campo de texto**, sin `format`, sin `example`, sin `maxLength`, sin `nullable` |
+| `Clientes/components/ServicesRetrieve.yaml` (`/api/clientes/{id}/`) | el mismo campo, identica definicion |
+| `Clientes/components/ClientesRetrieve.yaml` (`/api/clientes/{id}/perfil/`) | **no lo tiene**: ese serializer es de facturacion |
+
+En ninguno de los tres hay `latitud`/`longitud`/`gps` por separado: si son dos
+numeros, viajan **dentro de esa unica cadena**.
+
+Lo que SIGUE SIN MEDIR, y hace falta antes de parsear: el separador (coma,
+punto y coma, espacio), si lleva espacios, **el orden (`lat,lng` o `lng,lat`)**,
+cuantos decimales, si trae basura alrededor (parentesis, comillas, un enlace de
+Google Maps), que devuelve cuando el cliente no lo tiene cargado (`""`, `null`,
+el string `"None"`, `"0,0"`, o la clave ausente) y **cuantos clientes lo tienen
+cargado sobre el total**, partido por `estado`.
+
+Dos cosas que ya se pueden decidir sin la medicion, porque no dependen de ella:
+
+- **`"0,0"` se rechaza aparte del vacio.** Es una coordenada valida --en el
+  Golfo de Guinea-- asi que una guarda que solo pregunte "esta vacio?" la deja
+  pasar y manda al tecnico al Atlantico. Mismo criterio que el de
+  `ping-exitoso`: el valor y el tipo reales, no el que sugiere el nombre.
+- **Un punto que no se pudo parsear se guarda como `null`, nunca aproximado.**
+  Ya es la decision escrita en `campo/dia_publicado.py` (05/11/2026): sin
+  coordenadas la pantalla dice «sin ubicacion» y no se geocodifica la
+  direccion. Un punto inventado se lee como un hecho.
+
+Como medirlo cuando haya clave (SOLO LECTURA): paginar `GET /api/clientes/`
+con `limit`/`offset` propios sobre HTTPS --nunca el `next`, que viene en
+`http://`-- y clasificar por fila la FORMA del campo (digitos a `D`) mas los
+conteos por `estado`. Se imprime la forma y el conteo, **nunca el valor**:
+una coordenada es el domicilio de una persona. Mismo criterio y mismo motivo
+que `cli/medir_serial_onu.py`, que ya hace esto para `sn_onu`.
+
+Y el orden **no se asume**: Barranquilla es ~10.9 N / -74.8 W, asi que el signo
+lo delata (el componente negativo es la longitud). Se comprueba sobre clientes
+de una ciudad conocida, no sobre uno cualquiera.
+
+### Escribir `coordenadas`: se puede, y la trampa es que NO HAY `PATCH`
+
+Leido del spec el 05/11/2026 (DOCUMENTADO, no medido). El campo es escribible
+por dos operaciones, y por ninguna otra:
+
+| Operacion | Ruta | `coordenadas` | Respuesta que declara el spec |
+|---|---|---|---|
+| Crear | `POST /api/clientes/agregar-cliente/{id_zona}/` | opcional, `type: string`. El `required` del body es solo `usuario_rb`, `ip`, `plan_internet` | **`202` + `task_id`** (uuid) + `messages`. No declara 200 ni 201 |
+| Editar | `PUT /api/clientes/{id_servicio}/` | opcional a nivel de campo; el `requestBody` entero es `required: true` | **`200`** con el cliente, **o `202`** con `task_id`. El spec NO dice cuando devuelve cada una |
+
+**No existe `PATCH` de cliente, y no hay endpoint de ubicacion sola.** Buscado
+en `api-main.yaml`: ningun path contiene `ubicacion`, `coordenadas`, `latitud`,
+`longitud`, `gps` ni `mapa`. Las unicas escrituras de cliente son las dos de
+arriba mas `DELETE`, `activar`, `desactivar` y `eliminar-clientes`.
+
+**LA TRAMPA, Y ES LA RAZON DE ESTA SECCION.** Sin `PATCH`, actualizar una sola
+coordenada obliga a un `PUT`, y un `PUT` significa "reemplaza el recurso". El
+spec **no dice** si WispHub lo trata como reemplazo total --borrando los campos
+que no se mandan-- o como parcial. Mandar `{"coordenadas": "..."}` a secas y
+que la ficha pierda plan, IP y telefono es un modo de falla que no avisa: la
+respuesta seria `200`. **Antes de escribir una sola coordenada hay que medir
+esto contra el cliente de prueba** (servicio 5832, Mario Sabanagrande): leer la
+ficha entera, hacer el `PUT` minimo, volver a leer y comparar campo por campo.
+Hasta que eso este medido, escribir coordenadas no entra al catalogo.
+
+El spec tampoco declara el formato en escritura: la unica `description` es
+`"Coordenadas."` y el ejemplo cURL es `"coordenadas": "String"` --un marcador
+de posicion, no un dato--. O sea que **la doc confirma que no documenta el
+formato**, ni para leer ni para escribir: la unica fuente sigue siendo medir.
+
+**El descuido de `mac_cpe`, ahora confirmado tambien en escritura.** En
+`create_clientes.yaml` el campo `mac_cpe` tiene `description: Coordenadas.`,
+el mismo texto que el campo `coordenadas`. Es el error ya anotado arriba, y
+ahora se sabe que esta en el esquema que alguien usaria para ESCRIBIR: quien
+se guie por la descripcion puede mandar la coordenada al campo de la MAC.
+
+Donde viven estos archivos:
+
+```
+https://wisphub.net/static/yaml/api/Clientes/paths/create_clientes.yaml    (POST)
+https://wisphub.net/static/yaml/api/Clientes/paths/retrieve_servicio.yaml  (GET/PUT/DELETE)
+https://wisphub.net/static/yaml/api/Clientes/parameters/list_parameters.yaml
+```
+
+**No hay filtro por coordenadas.** `list_parameters.yaml` declara filtros por
+servicio, usuario, nombre, apellido, telefono, rfc, cedula, ip, email,
+direccion, localidad, ciudad, usuario_cpe, mac_cpe, usuario_router_wifi,
+ssid_router_wifi, sn_onu, comentarios, estado, forma_contratacion, tecnico,
+asesor, sectorial, plan_internet, router, `limit` y `offset`. **Ninguno** por
+coordenadas, ni de existencia ("los que tienen cargado"), ni geografico. Para
+medir cobertura hay que paginar todo y contar del lado de aca.
 
 **Un endpoint puede existir y estar vacio.** `/api/gastos/` responde 200 con 0
 registros. "Existe" no significa "tiene datos".
