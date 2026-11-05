@@ -234,8 +234,17 @@
     padding: 0 12px 8px;
     min-width: 0;
     overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--bandeja-borde-fuerte) transparent;
+  }
+
+  /* La regla estándar SOLO donde no hay pseudo-elementos: Chrome, al ver
+     `scrollbar-width`, ignora los ::-webkit-scrollbar de abajo y en Windows
+     dibujaba la barra «fina» con sus dos flechas (visto en producción el
+     04/11/2026). Firefox no tiene los pseudo-elementos y usa esta. */
+  @supports not selector(::-webkit-scrollbar) {
+    .motivos {
+      scrollbar-width: thin;
+      scrollbar-color: var(--bandeja-borde-fuerte) transparent;
+    }
   }
 
   .motivos::-webkit-scrollbar {
