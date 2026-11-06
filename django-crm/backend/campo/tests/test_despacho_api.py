@@ -197,6 +197,50 @@ def test_la_orden_nace_con_la_ficha_congelada(supervisor, version_a, sin_motor):
     assert orden.eventos.filter(tipo="orden_creada").exists()
 
 
+def test_despachar_con_el_punto_del_cliente_en_la_ficha(
+        supervisor, version_a, monkeypatch):
+    """EL CAMINO REAL DESDE EL 05/11/2026, y que ninguna prueba recorria.
+
+    `depurar_contexto` ahora deja `gps_lat`/`gps_lng` en el contexto cuando el
+    ISP tiene las coordenadas cargadas, y `cliente_para_la_orden` los lee de
+    ahi. El `sin_motor` de este archivo devuelve un contexto SIN esas claves,
+    asi que las diez pruebas de la vista pasaban sin tocar el camino nuevo:
+    verde, y midiendo otra cosa.
+
+    Esto despacha con el contexto que de verdad llega hoy, y afirma sobre la
+    FILA: que la orden nazca con el punto, y que la respuesta salga 201 y no
+    un 500 al serializar.
+    """
+    monkeypatch.setattr(despacho_views, "contexto_del_caso", lambda case_id: {
+        "contexto_disponible": True,
+        "capturado_en": "2026-11-06T14:00:00+00:00",
+        "fuente": "motor/contexto_tecnico",
+        "servicio": "5832",
+        "cliente": {"nombre": "Cliente Real", "plan": "PLAN HOGAR",
+                    "direccion": "Calle 38 # 78-33", "localidad": "CACARAMOA"},
+        "equipo": {"onu_status": "Online"},
+        #  Lo que agrega `depurar_contexto`: el par ya parseado.
+        "gps_lat": 10.9108,
+        "gps_lng": -74.8186,
+    })
+
+    cli_sup, _ = supervisor
+    r = cli_sup.post("/api/campo/trabajos/crear/", {
+        "work_type_version_id": str(version_a.id),
+        "case_id": "11111111-1111-1111-1111-111111111111",
+    }, format="json", HTTP_IDEMPOTENCY_KEY="despacho-con-gps")
+
+    assert r.status_code == 201, (
+        f"el despacho con coordenadas en la ficha devolvio {r.status_code}: "
+        f"{getattr(r, 'data', '')}")
+
+    orden = OrdenTrabajo.objects.get(pk=r.data["orden"]["id"])
+    assert (orden.gps_lat, orden.gps_lng) == (10.9108, -74.8186)
+    #  Y la respuesta lo lleva: la app lo usa para el boton «Ruta GPS».
+    assert r.data["orden"]["cliente"]["lat"] == 10.9108
+    assert r.data["orden"]["cliente"]["lng"] == -74.8186
+
+
 def test_la_ficha_no_rompe_la_creacion(supervisor, version_a, monkeypatch):
     """Un supervisor que no puede despachar porque una API de terceros está
     lenta es peor que un técnico sin ficha."""

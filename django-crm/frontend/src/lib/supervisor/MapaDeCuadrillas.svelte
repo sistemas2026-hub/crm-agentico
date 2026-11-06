@@ -225,11 +225,26 @@
       //  LA LÍNEA entre los dos, solo cuando se saben las DOS puntas. Con
       //  una sola sería una ruta inventada hacia un punto que nadie midió.
       if (q.une && q.vehiculo && q.destino) {
-        L.polyline(
-          [[q.vehiculo.latitud, q.vehiculo.longitud],
-           [q.destino.latitud, q.destino.longitud]],
-          { color: '#8a5300', weight: 2, opacity: 0.45, dashArray: '6 6' }
-        ).addTo(capa);
+        //  DOS TRAZOS, Y EL DE ABAJO ES EL QUE LA HACE VISIBLE (06/11/2026).
+        //  Era una sola línea marrón al 45% de opacidad: sobre el mapa claro
+        //  se leía, y sobre el satélite --una foto aérea de un barrio-- se
+        //  perdía del todo. El usuario tenía las dos puntas dibujadas y no
+        //  veía la ruta entre ellas.
+        //
+        //  Mismo recurso que el ícono del técnico: un halo blanco debajo que
+        //  la recorta contra CUALQUIER fondo. El trazo de arriba va opaco,
+        //  porque una ruta a medio tono se lee como «aproximada» y esta no lo
+        //  es: une dos puntos medidos.
+        const extremos = [
+          [q.vehiculo.latitud, q.vehiculo.longitud],
+          [q.destino.latitud, q.destino.longitud]
+        ];
+        L.polyline(extremos, {
+          color: '#fff', weight: 6, opacity: 0.85, dashArray: '8 7'
+        }).addTo(capa);
+        L.polyline(extremos, {
+          color: '#b45309', weight: 3, opacity: 1, dashArray: '8 7'
+        }).addTo(capa);
       }
       if (!c.posicion) continue;
       const p = c.posicion;
