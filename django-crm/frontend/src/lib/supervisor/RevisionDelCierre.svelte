@@ -58,6 +58,60 @@
       {/each}
     </ul>
 
+    <!-- LO QUE SE PIDIO, Y LO QUE LLEGO (06/11/2026). El usuario: «el
+         supervisor debe revisar si las fotos coinciden con lo pedido; si
+         piden foto del router y manda el TV no debe pasar, y si pide la
+         potencia y no manda la potencia no debería pasar».
+
+         El hueco era de INFORMACIÓN, no de poder: «Devolver al técnico» ya
+         existía, pero acá solo se veía «El checklist está completo: datos y
+         fotos» -- que es contar fotos, no mirarlas-- y los títulos aparecían
+         recién dentro del formulario de devolver, sin la imagen y sin lo que
+         cada una tenía que mostrar.
+
+         LAS QUE FALTAN TAMBIÉN SALEN, y es la mitad del valor: una foto que
+         no llegó es justo la que hay que mirar. Si desapareciera de la lista
+         se verían menos filas sin notar cuál falta. -->
+    {#if (r.evidencias ?? []).some((e) => e.instrucciones || e.evidencia_id || e.analisis)}
+      <details class="rc-fotos" open>
+        <summary class="snoc-label">Las fotos que se pidieron</summary>
+        <ul>
+          {#each r.evidencias as e (e.id)}
+            <li class="rc-foto" class:rc-falta={!e.evidencia_id}>
+              {#if e.evidencia_id}
+                <a href={`/api/supervisor-noc/evidencias/${e.evidencia_id}/archivo`}
+                   target="_blank" rel="noopener" title="Abrir la foto">
+                  <img src={`/api/supervisor-noc/evidencias/${e.evidencia_id}/archivo`}
+                       alt={e.titulo} loading="lazy" />
+                </a>
+              {:else}
+                <span class="rc-sin-foto" aria-hidden="true">—</span>
+              {/if}
+              <div class="rc-foto-dice">
+                <strong>{e.titulo}</strong>{#if e.obligatoria}<span class="rc-obl"> · obligatoria</span>{/if}
+                <!-- QUÉ TENÍA QUE MOSTRAR: la mitad de la comparación. Sin
+                     esto se compara contra un título de tres palabras. -->
+                {#if e.instrucciones}
+                  <span class="rc-pedia">Tenía que mostrar: {e.instrucciones}</span>
+                {/if}
+                {#if !e.evidencia_id}
+                  <span class="rc-no-llego">No llegó.</span>
+                {/if}
+                <!-- LO QUE LA IA VIO, como dato y nunca como veredicto: puede
+                     pedir atención, nunca negar un cierre. Quien decide sigue
+                     siendo quien mira. -->
+                {#if e.analisis}
+                  <span class="rc-ia" class:rc-ia-ojo={e.pide_atencion}>
+                    {e.pide_atencion ? '⚠' : '·'} {e.analisis}
+                  </span>
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
+
     <div class="rc-acciones">
       <form method="POST" action="?/aprobar">
         <input type="hidden" name="orden" value={orden.id} />
@@ -109,6 +163,28 @@
   .rc-solucion { font-style: italic; color: var(--snoc-on-surface-variant); }
   .rc-no-pudo { margin: 0; font-size: 12px; color: #8a5300; overflow-wrap: anywhere; }
   .rc-puntos { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+  .rc-fotos summary { cursor: pointer; }
+  .rc-fotos ul { list-style: none; margin: var(--snoc-xs) 0 0; padding: 0; display: grid; gap: var(--snoc-xs); }
+  .rc-foto {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: var(--snoc-sm);
+    align-items: start;
+    padding: 6px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.02);
+  }
+  /*  La que falta se ve distinta SIN depender solo del color: el borde y el
+      guion la separan aunque alguien no distinga el rojo. */
+  .rc-foto.rc-falta { background: rgba(185, 28, 28, 0.06); border: 1px dashed #b91c1c; }
+  .rc-foto img { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; display: block; }
+  .rc-sin-foto { display: grid; place-items: center; width: 72px; height: 72px; color: #b91c1c; font-size: 20px; }
+  .rc-foto-dice { display: grid; gap: 2px; font-size: 12px; min-width: 0; }
+  .rc-obl { color: var(--snoc-on-surface-variant, #666); font-weight: 400; }
+  .rc-pedia { color: var(--snoc-on-surface-variant, #666); }
+  .rc-no-llego { color: #b91c1c; font-weight: 600; }
+  .rc-ia { color: var(--snoc-on-surface-variant, #666); }
+  .rc-ia-ojo { color: #8a5300; }
   .rc-punto-false { color: var(--snoc-error); font-weight: 600; }
   .rc-punto-null { color: #8a5300; }
   .rc-acciones { display: flex; flex-wrap: wrap; gap: 8px; }

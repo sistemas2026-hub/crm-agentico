@@ -19,6 +19,7 @@ SPEC/objetivos/revision-del-cierre.md. Ver `campo/revision_del_cierre.py`.
     pytest campo/tests/test_revision_del_cierre.py
 ================================================================================
 """
+import datetime as dt
 from decimal import Decimal
 
 import pytest
@@ -103,6 +104,185 @@ def _claves(r):
     return {p["clave"]: p["ok"] for p in r["puntos"]}
 
 
+# ---------------------------------------------------------------------------
+# Las fotos, para que el supervisor pueda COMPARAR  --  06/11/2026
+#
+# El usuario: «el supervisor debe revisar si las fotos coinciden con lo
+# pedido; si piden foto del router y manda el TV no debe pasar, y si pide la
+# potencia y no manda la potencia no deberia pasar».
+#
+# El hueco era de INFORMACION, no de poder: el boton «Devolver al tecnico» ya
+# existia, pero la revision mandaba solo `{id, titulo}` de cada evidencia --
+# sin las instrucciones y sin la imagen--, asi que no habia con que comparar.
+# Decir «el checklist esta completo» es contar fotos, no mirarlas.
+# ---------------------------------------------------------------------------
+
+def _con_instrucciones(orden, instrucciones="Pantalla del medidor con la lectura legible."):
+    """La orden pasa a una version NUEVA que declara que tenia que mostrar.
+
+    NO SE EDITA EL ESQUEMA PUBLICADO, y el primer intento de esta prueba lo
+    hacia: `WorkTypeVersion.objects.filter(...).update(esquema=...)` fallo con
+    «No se permite modificar el esquema de versiones PUBLICADAS». La guarda
+    (`models.py:95-117`) hizo exactamente su trabajo, y vale dejarlo escrito:
+    lo que se le pidio a una orden no puede cambiar despues, y por eso la
+    respuesta a «que se le pidio» se lee de una fila que nadie pudo tocar.
+
+    Asi que se crea otra version con su esquema propio y la orden apunta ahi,
+    que es lo que pasaria en la realidad: la empresa publica v2 y las ordenes
+    nuevas salen con esa.
+    """
+    v = orden.tipo_trabajo_version
+    esquema = dict(v.esquema)
+    esquema["evidencias"] = [
+        {**e, "instrucciones": instrucciones} for e in esquema["evidencias"]]
+    nueva = WorkTypeVersion.objects.create(
+        work_type=v.work_type, version=v.version + 1,
+        estado=WorkTypeVersion.PUBLICADA, esquema=esquema)
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(tipo_trabajo_version=nueva)
+    orden.refresh_from_db()
+    return orden
+
+
+def _lo_que_vio_la_ia(evidencia, texto, pide_atencion=False):
+    from campo.models import AnalisisDeEvidencia
+
+    return AnalisisDeEvidencia.objects.create(
+        org=evidencia.org, evidencia=evidencia, vuelta=evidencia.vuelta,
+        origen=AnalisisDeEvidencia.IA, texto=texto, pide_atencion=pide_atencion)
+
+
+def _ev(r, requisito="foto_ont"):
+    return next(e for e in r["evidencias"] if e["id"] == requisito)
+
+
+def test_f1_cada_foto_dice_QUE_TENIA_QUE_MOSTRAR(orden, user_profile):
+    #  La mitad de la comparacion que faltaba. Sin esto el supervisor compara
+    #  contra un titulo de tres palabras.
+    _con_instrucciones(orden)
+    _foto(orden)
+    _cierre(orden)
+
+    e = _ev(RC.revisar(orden))
+
+    assert e["instrucciones"] == "Pantalla del medidor con la lectura legible."
+    assert e["titulo"] == "Foto de la ONT"
+
+
+def test_f2_y_con_que_VER_la_que_llego(orden, user_profile):
+    #  La otra mitad: el id con el que se pide la imagen. No se manda la
+    #  imagen: una respuesta de revision no carga megabytes de fotos.
+    foto = _foto(orden)
+    _cierre(orden)
+
+    e = _ev(RC.revisar(orden))
+
+    assert e["evidencia_id"] == str(foto.id)
+
+
+def test_f3_LA_QUE_FALTA_tambien_sale_y_se_distingue(orden, user_profile):
+    #  EL SEGUNDO CASO DEL USUARIO: «si pide la potencia y no manda la
+    #  potencia». Si desapareciera de la lista, el supervisor veria menos
+    #  filas sin notar cual falta -- que es justo la que hay que mirar.
+    _cierre(orden)                              # sin foto
+
+    e = _ev(RC.revisar(orden))
+
+    assert e["evidencia_id"] is None
+    assert e["titulo"] == "Foto de la ONT"
+    assert e["obligatoria"] is True
+
+
+def test_f4_lo_que_la_IA_VIO_viaja_como_texto(orden, user_profile):
+    #  EL PRIMER CASO DEL USUARIO: «si piden foto del router y manda el TV».
+    #  La IA lo describe; QUIEN DECIDE ES EL SUPERVISOR, que para eso tiene
+    #  «Devolver al tecnico». Ver el encabezado de `inspeccion_visual.py`:
+    #  la IA puede pedir atencion, nunca negar un cierre (31/10/2026).
+    _con_instrucciones(orden, "El router, con sus luces visibles.")
+    foto = _foto(orden)
+    _lo_que_vio_la_ia(foto, "Se ve un televisor encendido, no un router.",
+                      pide_atencion=True)
+    _cierre(orden)
+
+    e = _ev(RC.revisar(orden))
+
+    assert "televisor" in e["analisis"]
+    assert e["pide_atencion"] is True
+    #  Y lo pedido sigue al lado, que es lo que permite ver que no coincide.
+    assert "router" in e["instrucciones"]
+
+
+def test_f5_la_IA_NO_convierte_su_opinion_en_un_NO(orden, user_profile):
+    #  LA GARANTIA QUE NO SE TOCA. Una foto que la IA marca sigue dejando el
+    #  veredicto en manos de los OTROS puntos: aca el cierre no se puede dar
+    #  por bueno solo (hay cosas sin verificar), pero la razon no es la IA.
+    _con_instrucciones(orden)
+    foto = _foto(orden)
+    _lo_que_vio_la_ia(foto, "Se ve un televisor.", pide_atencion=True)
+    _cierre(orden)
+
+    r = RC.revisar(orden)
+
+    assert r["veredicto"] != RC.NO_CERRAR, (
+        "la IA pide atencion; NO niega un cierre")
+
+
+def test_f6_sin_analisis_no_se_inventa_ninguno(orden, user_profile):
+    #  La visión puede estar apagada, o la foto en un formato que no se mira.
+    #  Silencio NO es aprobacion: se manda vacio, y la pantalla no puede
+    #  mostrar un «lo revisó la IA» que no pasó.
+    _foto(orden)
+    _cierre(orden)
+
+    e = _ev(RC.revisar(orden))
+
+    assert e["analisis"] == ""
+    assert e["pide_atencion"] is False
+
+
+def test_f7_solo_la_vuelta_que_corre(orden, user_profile):
+    #  Una orden devuelta y rehecha tiene fotos NUEVAS; la de la vuelta
+    #  anterior no dice nada de esta. Si se colara, el supervisor aprobaria
+    #  mirando la foto que ya habia rechazado.
+    vieja = _foto(orden)
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(vuelta=2)
+    orden.refresh_from_db()
+    nueva = _foto(orden)
+    _cierre(orden)
+
+    e = _ev(RC.revisar(orden))
+
+    assert e["evidencia_id"] == str(nueva.id)
+    assert e["evidencia_id"] != str(vieja.id)
+
+
+def test_f8_una_foto_VIEJA_que_llega_tarde_no_gana(orden, user_profile):
+    """SE MIDIO QUE HACIA FALTA (06/11/2026).
+
+    `test_f7` no mataba la mutacion que quita el filtro de vuelta: sin el, la
+    consulta trae las dos vueltas, pero el "ultima gana" por
+    `recibida_en_servidor` dejaba igual la nueva. La prueba afirmaba el
+    resultado sin distinguir QUIEN lo logro.
+
+    Este es el caso donde el orden por fecha NO alcanza, y es real: la app
+    encola las fotos y reintenta. Una de la vuelta 1 que se reintento y llego
+    DESPUES de la de la vuelta 2 queda ultima por fecha -- y es justo la que
+    el supervisor ya habia rechazado. Sin el filtro, aprobaria mirandola.
+    """
+    vieja = _foto(orden)
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(vuelta=2)
+    orden.refresh_from_db()
+    nueva = _foto(orden)
+    #  La vieja se reintento y entro al servidor DESPUES que la nueva.
+    EvidenciaTrabajo.objects.filter(pk=vieja.pk).update(
+        recibida_en_servidor=nueva.recibida_en_servidor + dt.timedelta(minutes=5))
+    _cierre(orden)
+
+    e = _ev(RC.revisar(orden))
+
+    assert e["evidencia_id"] == str(nueva.id), (
+        "manda la vuelta que corre, no la que entro ultima al servidor")
+
+
 def test_v1_todo_bien_se_puede_cerrar_y_dice_por_que(orden, user_profile):
     _foto(orden)
     _cierre(orden)
@@ -115,7 +295,13 @@ def test_v1_todo_bien_se_puede_cerrar_y_dice_por_que(orden, user_profile):
     assert _claves(r) == {"checklist": True, "reporte": True, "servicio": True,
                           "medicion": True, "material": True}
     assert r["solucion"] == "Cambié el conector"
-    assert r["evidencias"] == [{"id": "foto_ont", "titulo": "Foto de la ONT"}]
+    #  06/11/2026: esta lista gano `instrucciones`, `evidencia_id`,
+    #  `analisis` y `pide_atencion` para que el supervisor pueda COMPARAR lo
+    #  pedido con lo que llego. Se afirma lo que esta prueba vino a cuidar
+    #  --que el requisito este, con su titulo-- y no la forma entera, que
+    #  volveria a romper con cada dato nuevo sin que eso signifique nada.
+    assert [(e["id"], e["titulo"]) for e in r["evidencias"]] == [
+        ("foto_ont", "Foto de la ONT")]
     assert r["sugeridas"] == []
 
 
