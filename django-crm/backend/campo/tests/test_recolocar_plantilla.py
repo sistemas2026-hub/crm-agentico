@@ -109,6 +109,87 @@ class TestLoQueSiHace:
         assert o.tipo_trabajo_version_id == v2.id
 
 
+class TestElFiltroExacto:
+    """POR NUMERO, QUE ES EXACTO  --  06/11/2026.
+
+    EL CASO QUE LO ORIGINO, medido en produccion el mismo dia que se escribio
+    el comando: `--texto "tv"` trajo DIEZ ordenes abiertas y solo cuatro eran
+    de television. Las otras: un traslado de abonado, una derivacion a
+    Comercial y tres instalaciones. Aplicarlo habria movido un traslado a la
+    plantilla de TV, y nadie lo habria notado hasta que el tecnico llegara a
+    la casa con el formulario equivocado.
+
+    El texto libre sirve para MIRAR; para escribir hace falta el numero.
+    """
+
+    def test_solo_mueve_las_que_se_nombran(self, org_a, dos):
+        vieja, nueva = dos
+        si = _orden(org_a, 30, vieja, resumen="Punto de TV adicional")
+        no = _orden(org_a, 31, vieja, resumen="Traslado de abonado, ver TV")
+
+        _correr(org_a, numeros="30", aplicar=True)
+
+        si.refresh_from_db()
+        no.refresh_from_db()
+        assert si.tipo_trabajo_version_id == nueva.id
+        assert no.tipo_trabajo_version_id == vieja.id, (
+            "la que no se nombro no se toca, aunque su texto coincida")
+
+    def test_el_NUMERO_gana_sobre_el_texto(self, org_a, dos):
+        #  Si los dos se combinaran, un texto mal elegido podria SACAR del
+        #  conjunto una orden que se nombro a proposito. El numero es la
+        #  decision de una persona; el texto es una aproximacion.
+        vieja, nueva = dos
+        o = _orden(org_a, 32, vieja, resumen="Cambio de domicilio")
+
+        _correr(org_a, numeros="32", texto="televis", aplicar=True)
+
+        o.refresh_from_db()
+        assert o.tipo_trabajo_version_id == nueva.id
+
+    def test_varios_numeros_separados_por_coma(self, org_a, dos):
+        vieja, nueva = dos
+        a = _orden(org_a, 33, vieja)
+        b = _orden(org_a, 34, vieja)
+        c = _orden(org_a, 35, vieja)
+
+        _correr(org_a, numeros="33, 35", aplicar=True)
+
+        for o, esperada in ((a, nueva), (b, vieja), (c, nueva)):
+            o.refresh_from_db()
+            assert o.tipo_trabajo_version_id == esperada.id
+
+    def test_un_numero_que_no_es_numero_se_dice_sin_traza(self, org_a, dos):
+        with pytest.raises(CommandError, match="numeros"):
+            call_command(COMANDO, org=str(org_a.id), de="fibra", a="tv",
+                         numeros="42,tv,44")
+
+    def test_el_simulacro_MUESTRA_el_resumen_de_cada_una(self, org_a, dos, capsys):
+        #  Sin ver el texto no se puede decidir si esa orden corresponde: la
+        #  lista decia «OT #176 se moveria» y recien mirando el resumen se
+        #  veia que era un traslado, no un trabajo de TV.
+        vieja, _ = dos
+        _orden(org_a, 36, vieja, resumen="Traslado de abonado a otra direccion")
+
+        _correr(org_a)
+
+        assert "Traslado de abonado" in capsys.readouterr().out
+
+    def test_la_cabecera_dice_COMO_se_filtro(self, org_a, dos, capsys):
+        #  Sin filtro son TODAS las abiertas de esa plantilla, y quien lo
+        #  corra tiene que verlo antes de leer la lista.
+        vieja, _ = dos
+        _orden(org_a, 37, vieja)
+
+        _correr(org_a)
+        sin = capsys.readouterr().out
+        _correr(org_a, numeros="37")
+        con = capsys.readouterr().out
+
+        assert "NINGUNO" in sin
+        assert "exacto" in con
+
+
 class TestLoQueNoToca:
     @pytest.mark.parametrize("estado", [
         OrdenTrabajo.CERRADA, OrdenTrabajo.COMPLETADA_CAMPO,

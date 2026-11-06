@@ -51,6 +51,20 @@ from common.models import Org
 from common.tasks import set_rls_context
 
 
+def _como_se_filtro(numeros, texto) -> str:
+    """Qué se usó para elegir las órdenes, dicho en la cabecera.
+
+    QUE DIGA «NINGUNO» CUANDO NO HAY FILTRO ES EL PUNTO: sin eso, quien corre
+    el comando sin `--numeros` ni `--texto` ve una lista larga y puede creer
+    que filtró algo. Son TODAS las abiertas de esa plantilla.
+    """
+    if numeros:
+        return f"números {','.join(numeros)} (exacto)"
+    if texto:
+        return f"texto {texto!r} — aproximado, revisá la lista"
+    return "NINGUNO: todas las abiertas de esa plantilla"
+
+
 class Command(BaseCommand):
     help = "Mueve órdenes abiertas a otra plantilla, con su registro."
 
@@ -61,9 +75,13 @@ class Command(BaseCommand):
                             help="código de la plantilla que se eligió mal")
         parser.add_argument("--a", required=True,
                             help="código de la plantilla que corresponde")
+        parser.add_argument("--numeros", default="",
+                            help="números de orden separados por coma: el "
+                                 "filtro EXACTO. Ej: 42,44,116")
         parser.add_argument("--texto", default="",
-                            help="solo las órdenes cuyo RESUMEN contenga esto "
-                                 "(sin esto, TODAS las abiertas de --de)")
+                            help="solo las órdenes cuyo RESUMEN contenga esto. "
+                                 "SIRVE PARA MIRAR, no para aplicar: usá "
+                                 "--numeros con lo que el simulacro te muestre")
         parser.add_argument("--aplicar", action="store_true",
                             help="escribir (sin esto, solo dice qué haría)")
 
@@ -112,7 +130,27 @@ class Command(BaseCommand):
                               tipo_trabajo_version__work_type=origen_wt)
                       .select_related("tipo_trabajo_version")
                       .order_by("numero"))
-        if asunto:
+        #  POR NUMERO, QUE ES EXACTO (06/11/2026). El filtro por texto se
+        #  midio en produccion el mismo dia que se escribio: buscar "tv" en el
+        #  resumen trajo DIEZ ordenes y solo cuatro eran de television. Las
+        #  otras: un traslado de abonado, una derivacion a Comercial y tres
+        #  instalaciones. Aplicarlo habria movido un traslado a la plantilla
+        #  de TV, y nadie lo habria notado hasta que el tecnico llegara.
+        #
+        #  El texto libre sirve para MIRAR; para escribir hace falta el
+        #  numero. Por eso este filtro va primero y, cuando esta, el de texto
+        #  ni se mira.
+        numeros = [n.strip() for n in (options["numeros"] or "").split(",")
+                   if n.strip()]
+        if numeros:
+            try:
+                enteros = [int(n) for n in numeros]
+            except ValueError:
+                raise CommandError(
+                    f"--numeros lleva numeros separados por coma. "
+                    f"Recibi: {options['numeros']!r}") from None
+            candidatas = candidatas.filter(numero__in=enteros)
+        elif asunto:
             #  EL RESUMEN, que es donde vive el texto del ticket en la
             #  orden: `OrdenTrabajo` no tiene `asunto` --lo supuse al
             #  escribir esto y la prueba lo corrigio--. `origen_ref` apunta
@@ -129,8 +167,17 @@ class Command(BaseCommand):
             f"  de  : {origen_wt.nombre} ({origen_wt.codigo})\n"
             f"  a   : {destino.work_type.nombre} ({destino.work_type.codigo}) "
             f"v{destino.version}\n"
-            f"  filtro de asunto: {asunto or '(ninguno: todas las abiertas)'}\n"
+            f"  filtro: {_como_se_filtro(numeros, asunto)}\n"
             f"  órdenes abiertas que se moverían: {len(candidatas)}\n")
+        if asunto and not numeros and options["aplicar"]:
+            #  SE AVISA Y NO SE BLOQUEA: puede ser legítimo --un texto bien
+            #  elegido-- pero el caso medido dice que conviene mirar la lista
+            #  primero. Bloquearlo sería decidir por quien conoce sus tickets.
+            self.stdout.write(
+                "  OJO: estás aplicando con un filtro de TEXTO. Medido el\n"
+                "  06/11/2026: buscar «tv» trajo 10 órdenes y 4 eran de TV.\n"
+                "  Corré el simulacro, mirá los resúmenes y aplicá con\n"
+                "  --numeros sobre las que de verdad correspondan.\n")
         if not aplicar:
             self.stdout.write("  SIMULACRO: no se escribe nada. "
                               "Agregá --aplicar.\n")
@@ -179,9 +226,16 @@ class Command(BaseCommand):
             huerfanas_total += len(huerfanas)
             aviso = (f"   · {len(huerfanas)} foto(s) quedan sin requisito"
                      if huerfanas else "")
+            #  EL RESUMEN, EN EL SIMULACRO: sin verlo no se puede decidir si
+            #  esa orden de verdad corresponde. Lo pidió el caso medido del
+            #  06/11/2026 -- la lista decía «OT #176 se movería» y recién
+            #  mirando el texto se veía que era un traslado de abonado, no un
+            #  trabajo de televisión.
+            texto = (orden.resumen or "").replace("\n", " ").strip()[:70]
             self.stdout.write(
                 f"    OT #{orden.numero:<6} "
-                f"{'movida' if aplicar else 'se movería'}{aviso}")
+                f"{'movida' if aplicar else 'se movería'}{aviso}"
+                + (f"\n               {texto}" if texto and not aplicar else ""))
 
         self.stdout.write(
             f"\n  {'MOVIDAS' if aplicar else 'SE MOVERÍAN'}: {movidas}"
