@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import { fail } from '@sveltejs/kit';
 import { proponerReparto, leerZonasConocidas } from '$lib/server/v2/cuadrillas.js';
 import {
   leerPlantillasDeTrabajo,
   leerCasosDespachables,
-  despacharACampo
+  despacharACampo,
+  claveDeDespacho
 } from '$lib/server/v2/despacho.js';
 import { correrCiclo } from '$lib/server/v2/supervisor-noc.js';
 import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
@@ -180,35 +180,6 @@ export async function load({ url, cookies, locals }) {
  */
 function mensajeDe(e) {
   return mensajeDeError(e, 'No se pudo despachar.');
-}
-
-/**
- * La clave de idempotencia de un despacho: el caso, y la huella del cuerpo.
- *
- * El caso va delante en texto plano para que la fila sea legible cuando
- * alguien mire la tabla de mutaciones buscando qué pasó. La huella cubre los
- * trece campos; 32 caracteres de SHA-256 alcanzan de sobra y la columna
- * acepta 128.
- *
- * Las claves se ORDENAN antes de serializar: `JSON.stringify` respeta el
- * orden de inserción, así que sin ordenar, el mismo contenido escrito en otro
- * orden daría otra huella y un doble clic crearía dos órdenes.
- *
- * `undefined` desaparece en `JSON.stringify`, que es justo lo que se quiere:
- * un campo ausente y uno que nunca se mandó son el mismo despacho.
- *
- * @param {string} caseId
- * @param {Record<string, any>} cuerpo
- */
-export function claveDeDespacho(caseId, cuerpo) {
-  const ordenado = Object.fromEntries(
-    Object.keys(cuerpo).sort().map((k) => [k, cuerpo[k]])
-  );
-  const huella = createHash('sha256')
-    .update(JSON.stringify(ordenado))
-    .digest('hex')
-    .slice(0, 32);
-  return `despacho:${caseId || 'manual'}:${huella}`;
 }
 
 /** @type {import('./$types').Actions} */

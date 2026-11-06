@@ -33,7 +33,10 @@ const apiRequest = vi.fn();
 vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }));
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 
-const { load, actions, claveDeDespacho } = await import('./+page.server.js');
+const { load, actions } = await import('./+page.server.js');
+//  La clave vive en el modulo de despacho, NO en `+page.server.js`: SvelteKit
+//  solo acepta ahi sus exports propios y exportarla rompio el build (06/11).
+const { claveDeDespacho } = await vi.importActual('$lib/server/v2/despacho.js');
 
 /* ------------------------------------------------------------------ *
  *  LA FORMA REAL DEL BACKEND
