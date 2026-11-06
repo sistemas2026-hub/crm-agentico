@@ -24,6 +24,12 @@ import { rolDeSesion } from '$lib/server/v2/operadores.js';
  *
  * @type {import('./$types').LayoutServerLoad}
  */
+/* Cuantos dias de CERRADAS trae la cola. Las abiertas entran siempre. La
+   consulta del motor paga por conversacion y se repite cada 8 s: sin tope, el
+   costo crece con todo el historial de la empresa y no con lo que hay abierto.
+   Mas atras se llega buscando, no cargandolo todo en cada vuelta del reloj. */
+const CERRADAS_DIAS = 30;
+
 export async function load({ fetch, depends, locals }) {
   depends('app:conversaciones');
 
@@ -57,7 +63,7 @@ export async function load({ fetch, depends, locals }) {
        CHAT -- todas las conversaciones de un mismo número --, agrupado por el
        motor una sola vez. La pantalla no reimplementa la agrupación. */
     const resp = await fetch(
-      `${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}&por_numero=1`,
+      `${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}&por_numero=1&cerradas_dias=${CERRADAS_DIAS}`,
       { headers: headersMotor() });
     const datos = await resp.json();
     if (!resp.ok) {
@@ -77,7 +83,8 @@ export async function load({ fetch, depends, locals }) {
              areas: datos.areas ?? {},
              /* Los tres numeros crudos de la salud del canal. El veredicto
                 lo arma `lib/conversaciones/canal.js`, en un solo lugar. */
-             canal_whatsapp: datos.canal_whatsapp ?? null };
+             canal_whatsapp: datos.canal_whatsapp ?? null,
+             cerradas_dias: datos.cerradas_dias ?? null };
   } catch (/** @type {any} */ err) {
     return { conversaciones: [], yo, sondeadoEn, error: err?.message || 'No se pudo contactar al asistente' };
   }

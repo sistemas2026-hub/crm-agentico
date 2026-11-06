@@ -6360,8 +6360,18 @@ def conversaciones():
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
+    # Ventana de las CERRADAS (opcional): la bandeja pide solo las de los ultimos
+    # N dias, porque el listado cuesta por conversacion y se repite cada 8 s.
+    # Las abiertas siempre entran. Sin el parametro, todas (otros llamadores).
     try:
-        salida = persistencia.ultima_actividad(tenant, canal=request.args.get("canal"))
+        cerradas_dias = request.args.get("cerradas_dias")
+        cerradas_dias = None if cerradas_dias in (None, "") else max(1, min(int(cerradas_dias), 3650))
+    except ValueError:
+        return jsonify({"error": "cerradas_dias debe ser un numero de dias."}), 400
+
+    try:
+        salida = persistencia.ultima_actividad(tenant, canal=request.args.get("canal"),
+                                              cerradas_dias=cerradas_dias)
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -6450,6 +6460,7 @@ def conversaciones():
 
     return jsonify({"tenant": tenant, "conversaciones": salida,
                     "agrupada": por_numero,
+                    "cerradas_dias": cerradas_dias,
                     "sla_toma_minutos": sla,
                     "rotulos": rotulos,
                     # Las areas de la empresa, para decir «Escalada a Soporte

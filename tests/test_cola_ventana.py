@@ -61,7 +61,7 @@ CFG = cargar_config(yamls[0])
 reales = (api._config_de, api.persistencia.ultima_actividad,
           api.persistencia.salud_canal_whatsapp)
 api._config_de = lambda tenant: CFG
-api.persistencia.ultima_actividad = lambda tenant, canal=None: [dict(f) for f in FILAS]
+api.persistencia.ultima_actividad = lambda tenant, canal=None, cerradas_dias=None: [dict(f) for f in FILAS]
 api.persistencia.salud_canal_whatsapp = lambda tenant: None
 try:
     print()
@@ -84,7 +84,7 @@ try:
     # El ultimo mensaje del NUMERO puede estar en otra abierta del chat.
     vieja = dict(FILAS[0], ultimo_mensaje_cliente=ahora - timedelta(hours=30))
     nueva = dict(FILAS[0], id="a2", ultimo_mensaje_cliente=ahora - timedelta(hours=2))
-    api.persistencia.ultima_actividad = lambda tenant, canal=None: [vieja]
+    api.persistencia.ultima_actividad = lambda tenant, canal=None, cerradas_dias=None: [vieja]
     fila = {**vieja, "abiertas": [nueva]}
     real_agrupar = api.proyeccion.agrupar_por_numero
     api.proyeccion.agrupar_por_numero = lambda salida, nac: [fila]
