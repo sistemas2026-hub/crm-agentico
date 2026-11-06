@@ -91,6 +91,19 @@ class ResumenPendientes {
   /// activa— y el técnico esperaba material que nadie pidió.
   final int pedidosABodega;
 
+  /// Diferencias de material ya explicadas que todavía no subieron.
+  ///
+  /// NO ESTABAN EN ESTA CUENTA, Y SE MIDIO POR QUE IMPORTA (06/11/2026). El
+  /// envío automático dispara su reloj de dos minutos solo `if
+  /// (hayPendientes())`; sin contar las incidencias, una explicación recién
+  /// escrita hacía que la cuenta diera cero, el reloj no enviaba nada, y el
+  /// dato se quedaba en el teléfono hasta que el técnico tocara otra cosa o
+  /// apretara «Enviar ahora» -- con señal perfecta.
+  ///
+  /// Y la pantalla decía «0 cambios pendientes» teniendo uno: mostraba todo
+  /// al día cuando no lo estaba, que es peor que no mostrar nada.
+  final int incidencias;
+
   /// Una línea por cosa pendiente, tal como va en pantalla.
   final List<String> detalle;
 
@@ -101,6 +114,7 @@ class ResumenPendientes {
     required this.movimientosDeMaterial,
     required this.detalle,
     this.pedidosABodega = 0,
+    this.incidencias = 0,
   });
 
   const ResumenPendientes.vacio()
@@ -109,6 +123,7 @@ class ResumenPendientes {
         ordenesConDatos = 0,
         movimientosDeMaterial = 0,
         pedidosABodega = 0,
+        incidencias = 0,
         detalle = const <String>[];
 
   int get total =>
@@ -116,7 +131,8 @@ class ResumenPendientes {
       evidencias +
       ordenesConDatos +
       movimientosDeMaterial +
-      pedidosABodega;
+      pedidosABodega +
+      incidencias;
 
   bool get hayPendientes => total > 0;
 
@@ -190,6 +206,10 @@ class CicloDeVidaLocal {
     // purga, el pedido nunca sube —`_procesarPedidosDeMaterial` solo lee los de
     // la sesión activa— y el técnico espera material que nadie pidió. Lo
     // encontró una auditoría independiente.
+    final incidencias = await _db.getIncidenciasSinConfirmar(
+      orgId: orgId,
+      profileId: profileId,
+    );
     final pedidos = await _db.pedidosPendientes(
       orgId: orgId,
       profileId: profileId,
@@ -243,12 +263,23 @@ class CicloDeVidaLocal {
       );
     }
 
+    //  Con el nombre del material y su motivo, igual que el resto: quien lo
+    //  lee reconoce el conector que explicó hace una hora, no un número de
+    //  filas.
+    for (final i in incidencias) {
+      final String nombre = (i['material_nombre'] ?? '').toString().trim();
+      final String etiqueta =
+          nombre.isNotEmpty ? nombre : (i['material_codigo'] ?? 'Material').toString();
+      detalle.add('Diferencia explicada · $etiqueta');
+    }
+
     return ResumenPendientes(
       mutaciones: mutaciones.length,
       evidencias: evidencias,
       ordenesConDatos: datos.length,
       movimientosDeMaterial: movimientos.length,
       pedidosABodega: pedidos.length,
+      incidencias: incidencias.length,
       detalle: detalle,
     );
   }
