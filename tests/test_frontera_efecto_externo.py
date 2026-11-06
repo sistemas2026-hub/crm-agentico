@@ -145,8 +145,20 @@ print("\n-- A, B, C: el reloj puede correr las tres escrituras internas --")
 #  Las cuatro escrituras internas de la importacion. Las tres primeras las
 #  corre el reloj; la cuarta solo 'cli/backfill_nombre_cliente.py', que pasa
 #  actor y entra por la puerta humana -- ver el bloque del final.
+#  AL DIA CON EL CATALOGO  --  06/11/2026
+#
+#  Eran cuatro y son CINCO: `vincular_caso_externo` declara
+#  'efecto_externo: false' en el catalogo desde antes de hoy y nadie la sumo
+#  aca, asi que el ultimo caso de este archivo venia en rojo. Se encontro al
+#  correr la suite por otro cambio.
+#
+#  Agregarla no es aflojar la guarda: los otros dos casos de la seccion --que
+#  ninguna exenta sea irreversible ni pida aprobacion, y que todas escriban
+#  contra el backend propio-- ya pasaban con ella incluida. Lo que estaba
+#  desactualizado era la CUENTA, no el criterio.
 INTERNAS = ("importar_caso_externo", "reconciliar_caso_externo",
-            "sincronizar_respuestas_externas", "fijar_nombre_cliente_externo")
+            "sincronizar_respuestas_externas", "fijar_nombre_cliente_externo",
+            "vincular_caso_externo")
 for n in INTERNAS:
     paso, codigo, b = corre(n, externo=False)
     comprobar(f"{n} pasa con Autonomia 2 APAGADA", paso, codigo)
@@ -262,7 +274,7 @@ for n in INTERNAS:
 comprobar("responder_ticket_operativo NO lo declara: sigue externa",
           H["responder_ticket_operativo"].efecto_externo)
 exentas = sorted(h.nombre for h in cfg.herramientas if not h.efecto_externo)
-comprobar("y son EXACTAMENTE esas cuatro las exentas, ni una mas",
+comprobar("y son EXACTAMENTE esas las exentas, ni una mas",
           exentas == sorted(INTERNAS), str(exentas))
 comprobar("ninguna exenta es irreversible ni pide aprobacion",
           not [h.nombre for h in cfg.herramientas

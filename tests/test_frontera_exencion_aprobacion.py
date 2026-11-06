@@ -188,19 +188,54 @@ comprobar("B2. y el codigo es el de siempre",
 # =============================================================================
 print("\n-- C: la exencion no se contagia a otra herramienta --")
 # =============================================================================
-#  'responder_ticket_operativo' tiene la misma marca y NO declara la exencion.
-#  Un permiso con la exencion puesta no tiene que alcanzarle.
+#  'responder_ticket_operativo' tiene la misma marca y declara OTRA exencion
+#  --'nota_de_campo_en_el_ticket', desde el 06/11/2026--. Un permiso con la
+#  exencion del CIERRE no tiene que alcanzarle.
+#
+#  ANTES ESTE BLOQUE AFIRMABA "no declara ninguna exencion", y eso media de
+#  menos: pasaba por una razon que no era la que importa. Con dos exenciones
+#  en el catalogo lo que hay que afirmar es que NO SE CRUZAN -- cada una abre
+#  su herramienta y ninguna otra--, y eso se prueba en las dos direcciones.
 OTRA = next(h for h in config.herramientas
             if h.nombre == "responder_ticket_operativo")
 comprobar("C0. la otra tambien declara aprobacion_humana",
           OTRA.aprobacion_humana is True)
-comprobar("C1. y NO declara la exencion",
-          not OTRA.aprobacion_humana_salvo, str(OTRA.aprobacion_humana_salvo))
+comprobar("C1. y NO declara la exencion DEL CIERRE",
+          frontera.CIERRE_DE_ORDEN_REVISADA not in (OTRA.aprobacion_humana_salvo or []),
+          str(OTRA.aprobacion_humana_salvo))
 paso, codigo, _ = hasta_el_ultimo_metro(
     OTRA, exencion=frontera.CIERRE_DE_ORDEN_REVISADA)
-comprobar("C2. con la exencion puesta, la otra NO sale", not paso)
+comprobar("C2. con la exencion del cierre puesta, la otra NO sale", not paso)
 comprobar("C3. con el codigo de aprobacion",
           codigo == frontera.APROBACION_REQUERIDA, codigo)
+
+#  Y EL CRUCE INVERSO, que antes no se podia escribir porque no habia una
+#  segunda exencion: la de la NOTA no abre el CIERRE. Sin esto, agregar una
+#  exencion nueva mal atada --copiando la linea y olvidando la capacidad--
+#  dejaria cerrar tickets por el camino de las notas.
+EL_CIERRE = next(h for h in config.herramientas
+                 if h.nombre == "cerrar_ticket_operativo")
+comprobar("C1b. el cierre NO declara la exencion DE LA NOTA",
+          frontera.NOTA_DE_CAMPO_EN_EL_TICKET
+          not in (EL_CIERRE.aprobacion_humana_salvo or []),
+          str(EL_CIERRE.aprobacion_humana_salvo))
+paso, codigo, _ = hasta_el_ultimo_metro(
+    EL_CIERRE, exencion=frontera.NOTA_DE_CAMPO_EN_EL_TICKET)
+comprobar("C2b. con la exencion de la nota, el CIERRE no sale", not paso)
+comprobar("C3b. con el codigo de aprobacion",
+          codigo == frontera.APROBACION_REQUERIDA, codigo)
+
+#  Y que la que SI corresponde pase: una guarda que solo sabe negar no
+#  distingue "esta bien atada" de "no exime nunca".
+comprobar("C4. la nota SI declara su propia exencion",
+          frontera.NOTA_DE_CAMPO_EN_EL_TICKET in (OTRA.aprobacion_humana_salvo or []),
+          str(OTRA.aprobacion_humana_salvo))
+comprobar("C5. y por eso SI se exime con la suya",
+          frontera.exime_la_aprobacion(OTRA,
+                                       frontera.NOTA_DE_CAMPO_EN_EL_TICKET))
+paso, codigo, _ = hasta_el_ultimo_metro(
+    OTRA, exencion=frontera.NOTA_DE_CAMPO_EN_EL_TICKET)
+comprobar("C6. y llega al ultimo metro", paso, codigo)
 
 # =============================================================================
 print("\n-- C2: la exencion vale para SU herramienta, no para el bloque --")

@@ -77,6 +77,7 @@ from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import borrador
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguimiento import cierre_por_validacion
+from nucleo.seguimiento import nota_en_el_ticket
 from nucleo.seguridad import interruptor
 from nucleo.seguridad import listas_blancas
 from nucleo.seguridad import idempotencia
@@ -5475,6 +5476,68 @@ def interno_cerrar_ticket_por_el_supervisor(orden_id: str):
         codigo_http = 200
     elif resultado.codigo == cierre_por_validacion.FALLO:
         codigo_http = 502
+    else:
+        codigo_http = 409
+    return jsonify(resultado.como_dict()), codigo_http
+
+
+@app.post("/interno/orden/<orden_id>/anotar-en-el-ticket")
+def interno_anotar_en_el_ticket(orden_id: str):
+    """
+    Escribe en el ticket del ISP lo que paso en campo, SIN cerrarlo (06/11/2026).
+
+    Dos momentos, los dos por la puerta AUTONOMA con la exencion
+    'nota_de_campo_en_el_ticket': el reporte que manda el tecnico, y la
+    devolucion cuando el Supervisor lo manda a rehacer. El cierre es la otra
+    ruta, con su propia exencion.
+
+    POR QUE 'vuelta' ES OBLIGATORIA
+    -------------------------------
+    Entra en la clave idempotente. Un reporte, una devolucion y el reporte
+    siguiente son TRES escrituras legitimas sobre el mismo ticket; con la
+    orden sola como clave, la segunda y la tercera se descartarian en silencio
+    y el ticket se quedaria con el primer reporte para siempre. Ver
+    nucleo/seguimiento/nota_en_el_ticket.py.
+
+    NO ACEPTA EL ESTADO. Lo fija la herramienta ('ticket-estado: 2', En
+    Progreso). Si quien llama pudiera elegirlo, esta ruta seria un cierre sin
+    la exencion del cierre.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"ticket", "texto", "momento", "vuelta", "actor"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({
+            "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
+                     f"{sobra}: el estado del ticket lo fija la herramienta, y "
+                     f"elegirlo aca convertiria una nota en un cierre."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = nota_en_el_ticket.anotar(
+        config, tenant, orden_id=orden_id,
+        ticket=str(cuerpo.get("ticket") or ""),
+        texto=str(cuerpo.get("texto") or ""),
+        momento=str(cuerpo.get("momento") or ""),
+        vuelta=cuerpo.get("vuelta"),
+        actor=str(cuerpo.get("actor") or ""))
+    if resultado.anotada:
+        codigo_http = 200
+    elif resultado.codigo == nota_en_el_ticket.FALLO:
+        codigo_http = 502
+    elif resultado.codigo in (nota_en_el_ticket.FALTAN_DATOS,
+                              nota_en_el_ticket.MOMENTO_DESCONOCIDO,
+                              nota_en_el_ticket.VUELTA_INVALIDA):
+        #  400 y no 409: lo que llego esta mal formado, y quien llama lo puede
+        #  corregir. Un 409 invitaria a reintentar lo mismo.
+        codigo_http = 400
     else:
         codigo_http = 409
     return jsonify(resultado.como_dict()), codigo_http

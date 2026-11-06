@@ -3731,6 +3731,28 @@ herramientas:
     # por la puerta autonoma: 'aprobacion_humana' hace que la frontera la
     # frene (APROBACION_HUMANA_REQUERIDA). Por la puerta humana -- una
     # persona que responde desde la pantalla -- sigue funcionando igual.
+    # 06/11/2026, DECISION DEL USUARIO: en su instancia los tickets y sus
+    # respuestas NO se notifican al cliente. Eso resuelve el 'falta' que M06-D
+    # dejo abierto ('si WispHub notifica al cliente al agregar una respuesta')
+    # y habilita el camino de campo: el tecnico manda su reporte POR EL TICKET
+    # y el encargado deja escrita ahi su revision, que es como ya trabajan.
+    #
+    # NO se le quita 'aprobacion_humana', que sigue abajo: quitarla la abriria
+    # para el modelo en conversacion (cualquier rol de 'roles_permitidos') y
+    # para cualquier servicio por /interno/herramienta, con el texto que se le
+    # ocurra. La exencion abre SOLO el camino de campo, donde el texto lo arma
+    # el codigo desde la plantilla de la orden. Mismo criterio que el cierre.
+    aprobacion_humana_salvo: [nota_de_campo_en_el_ticket]
+    # EL TECHO DICE LO MISMO QUE LA DELEGACION (auditoria de frontera,
+    # 06/11/2026, H3 -- la misma leccion que H4 del 31/10, que no se habia
+    # aplicado a esta herramienta). Sin esta linea,
+    # 'techo.nivel_requerido_de' cae en el default de escritura --2,
+    # "coordinar"-- y hasta hoy daba igual porque 'aprobacion_humana' frenaba
+    # antes. Ahora que la exencion la deja salir, el techo es una de las
+    # cuatro compuertas que quedan: una empresa en nivel 2 escribiria sola en
+    # el sistema de un tercero. Escribir una nota en el ticket de un cliente
+    # no es menos efecto que cerrarlo, asi que exige lo mismo que el cierre.
+    nivel_autonomia: 3
     aprobacion_humana: true
     roles_permitidos: [soporte]
     base_url: https://api.wisphub.io

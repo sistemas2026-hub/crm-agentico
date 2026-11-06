@@ -180,7 +180,17 @@ def _intentar(orden, revision, ahora) -> str:
 
     if not _reclamar(orden, ahora):
         return "salteada"
-    ticket = cierre_en_isp.cerrar_ticket_por_el_supervisor(orden, revision)
+    #  CON LO QUE VALIDO (06/11/2026): el usuario pidio que el Supervisor
+    #  "deje su respuesta de lo validado". La `revision` ya esta en la mano;
+    #  lo que faltaba era escribirla del lado del ISP y no solo en Dexter.
+    try:
+        from campo.services.nota_al_isp import texto_de_la_revision
+
+        lo_validado = texto_de_la_revision(revision)
+    except Exception:                                            # noqa: BLE001
+        lo_validado = ""
+    ticket = cierre_en_isp.cerrar_ticket_por_el_supervisor(
+        orden, revision, extra=lo_validado)
     if ticket["estado"] not in SIGUE:
         EventoTrabajo.objects.create(
             org=orden.org, orden=orden, tipo=EVENTO_BLOQUEADO,

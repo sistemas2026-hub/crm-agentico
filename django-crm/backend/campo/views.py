@@ -1313,6 +1313,21 @@ class CompletarTrabajoView(APIView):
         #  llego antes, el Supervisor la revisa y decide en segundos.
         tareas_de_campo.pedir_revision_del_cierre(orden)
 
+        #  Y EL REPORTE VA AL TICKET DEL ISP (06/11/2026). Es el momento que
+        #  hoy el tecnico hace a mano en WispHub: manda su reporte por el
+        #  ticket y pide que lo revisen. Sin esto, quien mira WispHub ve el
+        #  ticket igual que antes -- "Nuevo", con el plazo corriendo -- hasta
+        #  que alguien cierre, que puede ser dos dias despues.
+        #
+        #  Envuelto: la orden YA esta completada y un fallo del ISP no puede
+        #  deshacer eso ni devolver un 500 al telefono del tecnico.
+        try:
+            from campo.services.nota_al_isp import anotar_reporte_del_tecnico
+
+            anotar_reporte_del_tecnico(orden, request.profile)
+        except Exception:                                        # noqa: BLE001
+            pass
+
         return Response({
             "ok": True,
             "estado_operativo": orden.estado_operativo,

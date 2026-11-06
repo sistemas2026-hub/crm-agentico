@@ -55,7 +55,8 @@ def _tapar(texto) -> str:
     return tapar(str(texto or ""))
 
 
-def resumen_de(orden, nombre_de_quien_valida: str) -> str:
+def resumen_de(orden, nombre_de_quien_valida: str,
+               encabezado: str = "") -> str:
     """Lo que queda escrito en el ticket: que se hizo, sin datos personales.
 
     Sale de la PLANTILLA de la orden, no de todo `orden.datos`: solo lo que el
@@ -70,7 +71,11 @@ def resumen_de(orden, nombre_de_quien_valida: str) -> str:
 
     #  Quien valido NO va aca: el motor antepone su nombre al texto
     #  (`operativo._firmado`), y ponerlo dos veces solo lo repite.
-    lineas = [f"Trabajo de campo OT #{orden.numero} ({tipo}) validado en Dexter."]
+    #  `encabezado` para el reporte del tecnico, que NO esta validado por
+    #  nadie todavia: escribir "validado en Dexter" ahi afirmaria lo contrario
+    #  de lo que paso. Sin el, el de siempre.
+    lineas = [encabezado.strip() or
+              f"Trabajo de campo OT #{orden.numero} ({tipo}) validado en Dexter."]
     for campo in esquema.get("campos") or []:
         if not isinstance(campo, dict):
             continue
@@ -136,7 +141,7 @@ def _anotar(orden, profile, tipo, datos):
                                  profile=profile, datos=datos)
 
 
-def cerrar_ticket_al_validar(orden, profile) -> dict:
+def cerrar_ticket_al_validar(orden, profile, extra: str = "") -> dict:
     """Cierra en el ISP el ticket de una orden recien validada. NUNCA lanza.
 
     Devuelve `{"estado": ..., "detalle": ...}` para que la respuesta de la
@@ -145,13 +150,14 @@ def cerrar_ticket_al_validar(orden, profile) -> dict:
     esa validacion en un 500 (auditoria de frontera, 13/10/2026).
     """
     try:
-        return _cerrar(orden, profile)
+        return _cerrar(orden, profile, extra=extra)
     except Exception as e:  # noqa: BLE001
         logger.warning("cierre en el ISP: fallo inesperado (%s)", type(e).__name__)
         return {"estado": "no_cerrado", "detalle": type(e).__name__}
 
 
-def cerrar_ticket_por_el_supervisor(orden, revision=None) -> dict:
+def cerrar_ticket_por_el_supervisor(orden, revision=None,
+                                   extra: str = "") -> dict:
     """El Supervisor cierra el ticket SOLO (30/10/2026,
     `campo/cierre_por_el_supervisor.py`). Por la ruta AUTONOMA del motor, que
     consulta el interruptor, el techo, Autonomia 2 con B-7 y la autorizacion de
@@ -164,7 +170,7 @@ def cerrar_ticket_por_el_supervisor(orden, revision=None) -> dict:
     """
     try:
         return _cerrar(orden, None, ruta="cerrar-ticket-supervisor",
-                       revision=_referencia_de(orden, revision))
+                       revision=_referencia_de(orden, revision), extra=extra)
     except Exception as e:  # noqa: BLE001
         logger.warning("cierre del Supervisor: fallo inesperado (%s)", type(e).__name__)
         return {"estado": "no_cerrado", "detalle": type(e).__name__}
@@ -180,7 +186,8 @@ def _referencia_de(orden, revision) -> str:
     return f"orden:{orden.id}|vuelta:{orden.vuelta}|{veredicto}"
 
 
-def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "") -> dict:
+def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "",
+            extra: str = "") -> dict:
     if not _habilitado():
         return {"estado": "apagado", "detalle": f"{BANDERA}=0"}
     ticket = numero_de_ticket(orden.contexto)
@@ -214,7 +221,13 @@ def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "") -> 
     user = getattr(profile, "user", None)
     quien = (getattr(user, "name", "") or "").strip() or "Oficina de operaciones"
     #  La ruta del Supervisor no acepta `actor`: quien cierra no lo elige el CRM.
-    cuerpo_pedido = {"ticket": ticket, "texto": resumen_de(orden, quien)}
+    #  `extra`: QUE se reviso, cuando hay revision (06/11/2026). Lo calcula
+    #  quien llama --`nota_al_isp.texto_de_la_revision`-- y no este modulo, para
+    #  que `cierre_en_isp` no importe a `nota_al_isp`, que ya lo importa a el.
+    texto_del_ticket = resumen_de(orden, quien)
+    if (extra or "").strip():
+        texto_del_ticket = f"{texto_del_ticket}\n{extra.strip()}"
+    cuerpo_pedido = {"ticket": ticket, "texto": texto_del_ticket}
     if ruta == "cerrar-ticket":
         cuerpo_pedido["actor"] = quien
     else:

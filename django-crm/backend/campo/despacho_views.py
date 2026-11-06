@@ -295,6 +295,19 @@ class ValidarTrabajoView(APIView):
                 orden = requerir_correccion(
                     orden, requisitos=d["requisitos_a_corregir"],
                     profile=request.profile, observacion=d["observacion"])
+                #  Y EL TICKET DEL ISP SE ENTERA (06/11/2026). Sin esto, quien
+                #  mira WispHub ve el ticket igual que antes de la devolucion:
+                #  no sabe que el trabajo volvio a campo ni por que. Envuelto
+                #  porque la orden YA se devolvio y un fallo del ISP no puede
+                #  deshacerlo.
+                try:
+                    from campo.services.nota_al_isp import anotar_devolucion
+
+                    anotar_devolucion(
+                        orden, requisitos=d["requisitos_a_corregir"],
+                        observacion=d["observacion"], profile=request.profile)
+                except Exception:                                # noqa: BLE001
+                    pass
         except TransicionInvalidaError as e:
             return Response({"error": "VALIDACION_INVALIDA", "detalle": str(e)},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -306,7 +319,19 @@ class ValidarTrabajoView(APIView):
         if d["decision"] == "aprobar":
             from campo.services.cierre_en_isp import cerrar_ticket_al_validar
 
-            ticket_isp = cerrar_ticket_al_validar(orden, request.profile)
+            #  Con QUE se reviso, cuando hay foto (06/11/2026): el usuario
+            #  pidio que el Supervisor "deje su respuesta de lo validado". El
+            #  texto sale de la estructura de la revision, no del detalle de
+            #  cada punto -- ver `nota_al_isp.texto_de_la_revision`.
+            extra = ""
+            try:
+                from campo.services.nota_al_isp import texto_de_la_revision
+
+                extra = texto_de_la_revision(foto)
+            except Exception:                                    # noqa: BLE001
+                extra = ""
+            ticket_isp = cerrar_ticket_al_validar(
+                orden, request.profile, extra=extra)
 
         orden.refresh_from_db()
         return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,

@@ -126,6 +126,34 @@ EXENCION_DESCONOCIDA = "EXENCION_DE_APROBACION_DESCONOCIDA"
 
 #  ===========================================================================
 #   LAS EXENCIONES DE 'aprobacion_humana'  --  31/10/2026
+#
+#  LA SEGUNDA EXENCION  --  06/11/2026
+#  -----------------------------------
+#  Misma forma, otro momento. En WispHub el tecnico manda su reporte POR EL
+#  TICKET y el encargado deja escrita ahi su revision; hasta hoy el ticket del
+#  ISP no se enteraba de nada hasta el cierre, asi que quien lo miraba veia un
+#  ticket "Nuevo" con el plazo vencido mientras el trabajo ya estaba hecho.
+#
+#  'responder_ticket_operativo' existia en el catalogo y NADIE la llamaba.
+#  Estaba frenada por 'aprobacion_humana' con este motivo escrito en M06-D:
+#  "una respuesta publicada no se puede retirar [...] puede ser visible o
+#  notificada al cliente", y un 'falta' abierto desde septiembre.
+#
+#  EL USUARIO RESOLVIO ESE 'falta' el 06/11/2026: en su instancia los tickets
+#  y sus respuestas NO se notifican al cliente. Es conocimiento de su
+#  operacion, no una medicion de este codigo, y por eso queda escrito aca con
+#  su fecha y a nombre de quien lo dijo -- si manana otra empresa se conecta,
+#  esa afirmacion es SUYA y hay que volver a preguntarla.
+#
+#  POR QUE UNA EXENCION Y NO QUITAR LA MARCA. El pedido fue "quita la
+#  aprobacion humana". Quitar 'aprobacion_humana: true' del catalogo la abre
+#  por TODOS los caminos, incluido el conversacional: el modelo podria
+#  escribir en un ticket de WispHub por su cuenta, con el texto que se le
+#  ocurra. La exencion abre SOLO el camino de campo, donde el texto lo arma
+#  'cierre_en_isp.resumen_de' a partir de la plantilla. Es la diferencia entre
+#  crecer en alcance y crecer en autonomia, y la pregunta de CLAUDE.md §4
+#  --"sigue habiendo validacion en codigo antes de que la accion tenga
+#  efecto?"-- se responde con SI solo en la segunda.
 #  ===========================================================================
 #  'aprobacion_humana' dice "esto no sale sin que una persona lo apruebe en el
 #  momento". Hay UN caso donde eso frena algo que YA fue revisado: el cierre de
@@ -168,10 +196,17 @@ EXENCION_DESCONOCIDA = "EXENCION_DE_APROBACION_DESCONOCIDA"
 #      YAML y esperar que surta efecto ya -- esa revocacion falla ABIERTA.
 CIERRE_DE_ORDEN_REVISADA = "cierre_de_orden_revisada"
 
+#: Lo que pasa en campo se escribe en el ticket del ISP sin cerrarlo.
+NOTA_DE_CAMPO_EN_EL_TICKET = "nota_de_campo_en_el_ticket"
+
 EXENCIONES = {
     CIERRE_DE_ORDEN_REVISADA: (
         "el Supervisor reviso el cierre de la orden de campo en codigo, punto "
         "por punto, y el tenant declaro esta herramienta en "
+        "'aprobacion_humana_salvo'"),
+    NOTA_DE_CAMPO_EN_EL_TICKET: (
+        "el texto lo arma el CODIGO a partir de la plantilla de la orden -- no "
+        "lo redacta el modelo -- y el tenant declaro esta herramienta en "
         "'aprobacion_humana_salvo'"),
 }
 
@@ -185,6 +220,7 @@ EXENCIONES = {
 #: tickets se eximia igual).
 CAPACIDAD_QUE_EXIGE = {
     CIERRE_DE_ORDEN_REVISADA: "cierra_ticket_operativo",
+    NOTA_DE_CAMPO_EN_EL_TICKET: "responde_ticket_operativo",
 }
 
 
