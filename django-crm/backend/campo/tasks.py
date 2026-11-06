@@ -431,6 +431,43 @@ PALABRAS_QUE_PIDEN_MIRAR = (
 )
 
 
+#: La marca que el modelo escribe cuando se le dijo QUE tenia que mostrar la
+#: foto (`nucleo/canales/vision.py`, regla 12). Ver `muestra_lo_pedido`.
+MARCA_MUESTRA = "muestra:"
+
+#: Lo que se puede afirmar de la correspondencia entre la foto y el requisito.
+#: `None` NO es "esta bien": es "no se sabe", y esa diferencia es el motivo de
+#: que esta funcion devuelva tres cosas y no un booleano. Un `False` por
+#: defecto haria que una plantilla sin instrucciones --donde el modelo no
+#: escribe la marca-- apareciera como si la foto no correspondiera.
+def muestra_lo_pedido(texto: str):
+    """`True` si la foto es lo que se pidio, `False` si no, `None` si no se sabe.
+
+    SE LEE LA ULTIMA MARCA Y NO LA PRIMERA, igual que `_pide_atencion`: si el
+    modelo la escribio dos veces, la de abajo es su conclusion.
+
+    SIN MARCA SE DEVUELVE None, nunca False. La regla 12 le pide la marca
+    SOLO cuando se le dijo que tenia que mostrar la foto, y una plantilla sin
+    instrucciones no se la dice. Tratar esa ausencia como "no corresponde"
+    marcaria en rojo cada foto de cada plantilla que todavia no escribio sus
+    instrucciones.
+    """
+    bajo = (texto or "").lower()
+    pos = bajo.rfind(MARCA_MUESTRA)
+    if pos == -1:
+        return None
+    resto = bajo[pos + len(MARCA_MUESTRA):].strip()
+    #  "no se sabe" ANTES que "no": empieza igual, y mirar "no" primero
+    #  convertiria todo "no se sabe" en un "no corresponde".
+    if resto.startswith(("no se sabe", "no se sabé", "nose sabe")):
+        return None
+    if resto.startswith(("si", "sí")):
+        return True
+    if resto.startswith("no"):
+        return False
+    return None
+
+
 def _pide_atencion(texto: str) -> bool:
     """Si este analisis amerita que una persona lo lea.
 

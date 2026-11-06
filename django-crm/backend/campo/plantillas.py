@@ -124,9 +124,24 @@ def _c(titulo, tipo=TEXTO, *, obligatorio=True, paso="", **extra):
             "paso": paso, **extra}
 
 
-def _f(titulo, *, obligatorio=True, paso="", instrucciones=""):
+def _f(titulo, *, obligatorio=True, paso="", instrucciones="",
+       es_captura=False):
+    """Una evidencia de la plantilla.
+
+    `es_captura` (06/11/2026): esta imagen NO se toma con la camara, se elige
+    de la galeria. Lo pidio el uso real -- la evidencia de un test de
+    velocidad ES una captura de pantalla, y la app solo abria la camara, asi
+    que el tecnico tenia que fotografiar la pantalla de otro telefono o no
+    podia cumplir el requisito.
+
+    POR QUE NO SE PERMITE EN TODAS. Una foto sacada en el momento es evidencia
+    de que alguien estuvo ahi; una de la galeria puede ser de otro dia o de
+    otra casa, y la orden la guardaria igual. Que lo decida la PLANTILLA deja
+    la eleccion donde se sabe que se esta pidiendo: quien la arma sabe si ese
+    requisito es una captura o es el dano en la pared.
+    """
     return {"titulo": titulo, "obligatorio": obligatorio, "paso": paso,
-            "instrucciones": instrucciones}
+            "instrucciones": instrucciones, "es_captura": es_captura}
 
 
 _POTENCIA = dict(unidad="dBm", min=-28.0, max=-8.0,

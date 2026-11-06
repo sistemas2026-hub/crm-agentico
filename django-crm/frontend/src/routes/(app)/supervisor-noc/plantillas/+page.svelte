@@ -57,7 +57,11 @@
     borrador.campos.push({ titulo: '', tipo: 'texto', obligatorio: true, paso: '' });
   }
   function agregarFoto() {
-    borrador.evidencias.push({ titulo: '', obligatorio: true, paso: '', instrucciones: '' });
+    borrador.evidencias.push({
+      titulo: '', obligatorio: true, paso: '', instrucciones: '',
+      //  Sin marcar: una foto se toma. La captura es la excepción, y se dice.
+      es_captura: false
+    });
   }
 
   /** Los cuatro reportes que el técnico manda mientras trabaja. */
@@ -423,6 +427,20 @@
                                  aria-label="Nombre de la foto {i + 1}" maxlength="120" />
                           <label class="snoc-body-sm">
                             <input type="checkbox" bind:checked={e.obligatorio} /> obligatoria
+                          </label>
+                          <!-- ES UNA CAPTURA (06/11/2026). Marcada, el técnico
+                               la elige de la galería en vez de abrir la
+                               cámara. Existe porque la evidencia de un test
+                               de velocidad ES una captura: pedirle que le
+                               tome foto a una pantalla es pedirle lo
+                               imposible bien hecho.
+
+                               Sin marcar sigue siendo cámara obligatoria, y
+                               eso es lo que hace que una foto valga como
+                               evidencia de que alguien estuvo ahí. -->
+                          <label class="snoc-secundario"
+                                 title="La elige de la galería (una captura de pantalla), en vez de tomarla con la cámara">
+                            <input type="checkbox" bind:checked={e.es_captura} /> es captura
                           </label>
                           <button type="button" class="snoc-btn" onclick={() => mover('evidencias', i, -1)}
                                   aria-label="Subir">↑</button>

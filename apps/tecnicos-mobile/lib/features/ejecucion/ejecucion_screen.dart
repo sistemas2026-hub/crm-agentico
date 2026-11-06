@@ -1,3 +1,4 @@
+import 'de_donde_sale_la_foto.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -240,12 +241,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _triggerSavedBanner();
   }
 
-  Future<void> _tomarFoto(String requisitoId) async {
+  Future<void> _tomarFoto(String requisitoId,
+      {ImageSource fuente = ImageSource.camera}) async {
     if (_orgId == null || _profileId == null) return;
 
     try {
       final XFile? foto = await _picker.pickImage(
-        source: ImageSource.camera,
+        source: fuente,
         imageQuality: 85,
         maxWidth: 1920,
       );
@@ -2012,6 +2014,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         (req['descripcion'] ?? req['titulo'] ?? reqId) as String;
     final obligatorio = req['obligatorio'] == true;
     final instrucciones = req['instrucciones'] as String?;
+    //  Lo dice la plantilla; ausente, es cámara. Ver `_deDondeSale`.
+    final esCaptura = esUnaCaptura(req);
 
     final evidencia = _evidenciasCapturadas.firstWhere(
       (e) => e['requisito_id'] == reqId,
@@ -2113,9 +2117,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   borderRadius: AppRadius.brTarjeta,
                 ),
               ),
-              icon: Icon(hasFoto ? Icons.replay : Icons.camera_alt, size: 18),
-              label: Text(hasFoto ? 'VOLVER A TOMAR' : 'TOMAR FOTOGRAFÍA'),
-              onPressed: () => _tomarFoto(reqId),
+              //  EL BOTÓN DICE LO QUE VA A PASAR. «Tomar fotografía» abriendo
+              //  la galería deja al técnico buscando la cámara que no se abre.
+              icon: Icon(
+                hasFoto
+                    ? Icons.replay
+                    : (esCaptura ? Icons.photo_library : Icons.camera_alt),
+                size: 18,
+              ),
+              label: Text(textoDelBoton(
+                  yaHayFoto: hasFoto, esCaptura: esCaptura)),
+              onPressed: () => _tomarFoto(reqId, fuente: fuenteDeLaEvidencia(req)),
             ),
           ),
         ],

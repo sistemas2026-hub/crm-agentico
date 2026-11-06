@@ -124,11 +124,92 @@ def revisar(orden, *, pendientes=None) -> dict | None:
         "puntos": puntos,
         #  Lo que una devolucion puede pedir rehacer (`requerir_correccion`
         #  exige nombrarlo), y lo que el checklist ya marca como faltante.
-        "evidencias": [{"id": e["id"], "titulo": e.get("titulo") or e["id"]}
-                       for e in esquema.get("evidencias", []) if e.get("id")],
+        #
+        #  DESDE EL 06/11/2026 CADA UNA DICE QUE DEBIA MOSTRAR Y QUE LLEGO.
+        #  El usuario: «el supervisor debe revisar si las fotos coinciden con
+        #  lo pedido; si piden foto del router y manda el TV no debe pasar».
+        #  Tenia razon y el hueco era de informacion, no de poder: el boton
+        #  «Devolver al tecnico» ya existia, pero esta lista mandaba solo el
+        #  id y el titulo --sin las instrucciones y sin la imagen--, asi que
+        #  no habia con que comparar. Decir «el checklist esta completo» es
+        #  contar fotos, no mirarlas.
+        "evidencias": _evidencias_para_revisar(orden, esquema),
         "sugeridas": next((p["faltan"] for p in puntos if p["clave"] == "checklist"), []),
         "solucion": _solucion(cierre),
     }
+
+
+def _evidencias_para_revisar(orden, esquema) -> list[dict]:
+    """Cada requisito de la plantilla con lo que pedia y lo que llego.
+
+    QUE SE MANDA Y POR QUE:
+
+    - `instrucciones`: lo que esa foto TENIA que mostrar, escrito por la
+      empresa en la plantilla. Sin esto el supervisor compara contra un
+      titulo de tres palabras y no puede saber si «Medicion al llegar» es el
+      medidor o el televisor.
+    - `evidencia_id`: con que ver la imagen. La ruta ya existe
+      (`campo/evidencias/<id>/archivo/`), y esta lista no la arma: manda el
+      id y quien dibuja decide si la pide. Una respuesta de revision no
+      carga megabytes de fotos.
+    - `analisis`: lo que la IA vio, si lo vio. Va como TEXTO y como
+      `pide_atencion`, nunca como un veredicto: la IA puede pedir atencion y
+      nunca negar un cierre (ver el encabezado de `inspeccion_visual.py`,
+      decidido el 31/10/2026).
+
+    LAS QUE FALTAN TAMBIEN SALEN, con `evidencia_id` en None. Una foto que no
+    llego es justamente la que hay que mirar, y si desapareciera de la lista
+    el supervisor veria menos filas sin notar cual.
+
+    SOLO LA VUELTA QUE CORRE. Una orden devuelta y rehecha tiene fotos nuevas;
+    las de la vuelta anterior no dicen nada de esta. Mismo criterio que
+    `EvidenciaTrabajo.vuelta` y que `_fotos()`.
+    """
+    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+    from campo.tasks import muestra_lo_pedido
+
+    vuelta = getattr(orden, "vuelta", 1) or 1
+    #  La ULTIMA por requisito: si el tecnico la rehizo, manda la de ahora.
+    llegaron = {}
+    for ev in EvidenciaTrabajo.objects.filter(
+            org=orden.org, orden_trabajo=orden,
+            vuelta=vuelta).order_by("recibida_en_servidor"):
+        llegaron[ev.requisito_id] = ev
+
+    #  Lo que la IA vio, por evidencia. Una sola consulta, no una por foto.
+    visto = {}
+    for a in AnalisisDeEvidencia.objects.filter(
+            org=orden.org, evidencia__orden_trabajo=orden,
+            vuelta=vuelta).order_by("created_at"):
+        #  La ULTIMA gana: una correccion de una persona es una fila nueva y
+        #  posterior, y es la que vale.
+        visto[str(a.evidencia_id)] = a
+
+    salida = []
+    for e in esquema.get("evidencias", []):
+        if not e.get("id"):
+            continue
+        ev = llegaron.get(e["id"])
+        a = visto.get(str(ev.id)) if ev else None
+        salida.append({
+            "id": e["id"],
+            "titulo": e.get("titulo") or e["id"],
+            #  Lo que tenia que mostrar. Es la mitad de la comparacion.
+            "instrucciones": str(e.get("instrucciones") or ""),
+            "obligatoria": e.get("obligatorio", True),
+            #  Y la otra mitad: con que ver lo que llego.
+            "evidencia_id": str(ev.id) if ev else None,
+            "analisis": (a.texto or "") if a else "",
+            "pide_atencion": bool(a.pide_atencion) if a else False,
+            #  SI LA FOTO ES LO QUE SE PIDIO (06/11/2026): True / False /
+            #  None, y `None` significa "no se sabe", no "esta bien". Se
+            #  calcula del texto y NO se persiste: `AnalisisDeEvidencia` es
+            #  append-only y volver a leer el mismo texto con el criterio de
+            #  hoy es lo correcto -- mismo motivo por el que
+            #  `revision_del_cierre` no persiste su veredicto.
+            "muestra_lo_pedido": muestra_lo_pedido(a.texto) if a else None,
+        })
+    return salida
 
 
 #: La foto de la revision al aprobar (`guardar_foto`).

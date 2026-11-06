@@ -150,7 +150,12 @@ beforeEach(() => {
 
 describe('load: lo que el backend manda llega a la pantalla', () => {
   it('no deja caer ninguna de las tres respuestas', async () => {
-    const d = await load(CTX);
+    //  `/** @type {any} */`: el tipo de `load` incluye `void`, asi que
+    //  TypeScript marca cada acceso aunque en esta prueba siempre devuelve el
+    //  objeto. Son errores de tipo en una prueba, no de runtime -- pero
+    //  subian la base de `svelte-check` y esa base es lo que deja ver un
+    //  error NUEVO de verdad.
+    const d = /** @type {any} */ (await load(CTX));
 
     //  Plantillas: el aviso de «sin clasificar» es el que decide si quien
     //  despacha sabe que esa plantilla NO la va a repartir el reparto.

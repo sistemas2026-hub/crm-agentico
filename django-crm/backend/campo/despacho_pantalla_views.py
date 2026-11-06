@@ -73,9 +73,27 @@ class PlantillasDeTrabajoView(APIView):
                 "codigo": v.work_type.codigo,
                 "nombre": v.work_type.nombre,
                 "labor": v.work_type.labor,
-                #  Cuantos requisitos trae: quien despacha puede anticipar que
-                #  le va a pedir al tecnico sin abrir la plantilla.
+                #  Cuantos DATOS pide el formulario del tecnico. El nombre
+                #  dice "requisitos" y cuenta `campos`: se mantiene como
+                #  estaba para no romper a quien ya lo lea.
                 "requisitos": len((v.esquema or {}).get("campos") or []),
+                #  Y QUE FOTOS VA A PEDIR (06/11/2026). El usuario: «el
+                #  supervisor debe saber que fotos pedir». El comentario de
+                #  arriba decia desde siempre que esto servia para «anticipar
+                #  que le va a pedir al tecnico sin abrir la plantilla» --y
+                #  contaba los campos del formulario, no las fotos--, asi que
+                #  lo unico que no se podia anticipar era justamente eso.
+                #
+                #  Van los TITULOS y si cada una es obligatoria, no un
+                #  numero: «3 fotos» no deja ver que una es la medicion de
+                #  potencia que este trabajo no necesita, que es el caso que
+                #  lo origino.
+                "fotos": [
+                    {"titulo": f.get("titulo") or f.get("id") or "",
+                     "obligatoria": f.get("obligatorio", True)}
+                    for f in ((v.esquema or {}).get("evidencias") or [])
+                    if f.get("titulo") or f.get("id")
+                ],
                 #  El plazo, para proponer «para cuando» con la plantilla que
                 #  se elija -- tambien si quien despacha la cambia (19/10/2026).
                 "plazo_dias": v.work_type.plazo_dias,

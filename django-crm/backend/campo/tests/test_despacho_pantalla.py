@@ -55,6 +55,100 @@ def _version(tipo, numero=1, estado=None):
     )
 
 
+def _con_fotos(tipo, evidencias, numero=1):
+    return WorkTypeVersion.objects.create(
+        work_type=tipo, version=numero, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [], "evidencias": evidencias})
+
+
+# ---------------------------------------------------------------------------
+# A0 · QUÉ FOTOS VA A PEDIR  --  06/11/2026
+#
+# El usuario: «el supervisor debe saber qué fotos pedir». La pantalla decía
+# desde siempre «define qué anota y qué fotos saca el técnico» y no las
+# nombraba; el único campo que viajaba (`requisitos`) cuenta los CAMPOS del
+# formulario, no las fotos, pese a que su comentario prometía dejar
+# «anticipar qué le va a pedir al técnico sin abrir la plantilla».
+# ---------------------------------------------------------------------------
+
+def test_a0_cada_plantilla_dice_que_fotos_pide(admin_client, org_a):
+    _con_fotos(_tipo(org_a, "sop"), [
+        {"id": "f1", "titulo": "Medición al llegar", "obligatorio": True},
+        {"id": "f2", "titulo": "Daño encontrado", "obligatorio": False},
+    ])
+
+    p = admin_client.get(PLANTILLAS).json()["plantillas"][0]
+
+    assert p["fotos"] == [
+        {"titulo": "Medición al llegar", "obligatoria": True},
+        {"titulo": "Daño encontrado", "obligatoria": False},
+    ]
+
+
+def test_a0b_van_los_TITULOS_no_un_numero(admin_client, org_a):
+    #  «3 fotos» no deja ver que una es la medición de potencia que este
+    #  trabajo no necesita, y ese es el caso que lo originó.
+    _con_fotos(_tipo(org_a, "sop"), [
+        {"id": "f1", "titulo": "Medición al llegar", "obligatorio": True}])
+
+    p = admin_client.get(PLANTILLAS).json()["plantillas"][0]
+
+    assert p["fotos"][0]["titulo"] == "Medición al llegar"
+
+
+def test_a0c_una_plantilla_SIN_fotos_lo_dice_con_una_lista_vacia(admin_client, org_a):
+    #  Y no omite la clave: la pantalla distingue «no pide ninguna» de «el
+    #  servidor viejo no lo manda», y eso ultimo se ve igual que lo primero
+    #  si la clave falta.
+    _con_fotos(_tipo(org_a, "sop"), [])
+
+    p = admin_client.get(PLANTILLAS).json()["plantillas"][0]
+
+    assert p["fotos"] == []
+    assert "fotos" in p
+
+
+def test_a0d_una_evidencia_SIN_ID_no_se_puede_ni_guardar(org_a):
+    #  SE MIDIO AL ESCRIBIR ESTA PRUEBA (06/11/2026): el caso que se queria
+    #  cubrir --una fila a medio llenar que apareceria como un renglon vacio
+    #  en la lista de fotos-- NO PUEDE EXISTIR. El validador del esquema lo
+    #  rechaza al guardar la plantilla, que es el lugar correcto.
+    #
+    #  Queda escrito porque la guarda de la lista depende de esto: si alguna
+    #  vez se aflojara el validador, esta prueba avisa antes de que la
+    #  pantalla empiece a mostrar renglones sin nombre.
+    from django.core.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match="id"):
+        _con_fotos(_tipo(org_a, "sop"), [{"obligatorio": True}])
+
+
+def test_a0e_sin_titulo_pero_con_id_se_muestra_el_id(admin_client, org_a):
+    #  Mejor un identificador que nada: al menos se puede buscar en la
+    #  plantilla cuál es.
+    _con_fotos(_tipo(org_a, "sop"), [{"id": "foto_ont", "obligatorio": True}])
+
+    p = admin_client.get(PLANTILLAS).json()["plantillas"][0]
+
+    assert p["fotos"] == [{"titulo": "foto_ont", "obligatoria": True}]
+
+
+def test_a0f_requisitos_sigue_contando_los_CAMPOS(admin_client, org_a):
+    #  No se cambió lo que ya existía: quien lo lea hoy sigue viendo lo
+    #  mismo. Las fotos viajan en una clave propia.
+    tipo = _tipo(org_a, "sop")
+    WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [{"id": "a", "tipo": "texto"},
+                            {"id": "b", "tipo": "texto"}],
+                 "evidencias": [{"id": "f1", "titulo": "Una foto"}]})
+
+    p = admin_client.get(PLANTILLAS).json()["plantillas"][0]
+
+    assert p["requisitos"] == 2
+    assert len(p["fotos"]) == 1
+
+
 # ---------------------------------------------------------------------------
 # A · con qué se puede despachar
 # ---------------------------------------------------------------------------

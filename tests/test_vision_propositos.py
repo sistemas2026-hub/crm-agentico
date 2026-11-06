@@ -260,11 +260,29 @@ comprobar("F5. y el CRM lee esa misma marca",
           'MARCA_ATENCION = "' + vision.MARCA_ATENCION.lower() + ':"' in TAREAS,
           vision.MARCA_ATENCION)
 
+#  LA SEGUNDA MARCA (06/11/2026): si la foto ES lo que se pidio. Va aparte de
+#  ATENCION porque son dos cosas --"se ve un cable suelto" dice que el TRABAJO
+#  tiene un problema; "hay un televisor donde pedian el router" dice que la
+#  FOTO esta mal-- y el supervisor necesita distinguirlas de un vistazo.
+comprobar("F8. la instruccion pide la marca de correspondencia",
+          "MUESTRA: si" in vision.INSTRUCCION_EVIDENCIA
+          and "MUESTRA: no" in vision.INSTRUCCION_EVIDENCIA)
+comprobar("F8b. con su tercera opcion, que NO es un no",
+          "MUESTRA: no se sabe" in vision.INSTRUCCION_EVIDENCIA)
+comprobar("F8c. y el CRM lee esa misma marca",
+          'MARCA_MUESTRA = "' + vision.MARCA_MUESTRA.lower() + '"' in TAREAS,
+          vision.MARCA_MUESTRA)
+comprobar("F8d. el CRM distingue 'no se sabe' de 'no'",
+          '"no se sabe"' in TAREAS)
+
 #  Solo la de evidencia la pide: las otras dos no tienen quien la lea.
 comprobar("F6. la del cliente no pide la marca",
           vision.MARCA_ATENCION not in vision.INSTRUCCION)
 comprobar("F7. la del asistente tampoco",
           vision.MARCA_ATENCION not in vision.INSTRUCCION_ASISTENTE)
+comprobar("F9. y ninguna de las dos pide la de correspondencia",
+          vision.MARCA_MUESTRA not in vision.INSTRUCCION.lower()
+          and vision.MARCA_MUESTRA not in vision.INSTRUCCION_ASISTENTE.lower())
 
 print("\n" + "=" * 72)
 if fallos:
