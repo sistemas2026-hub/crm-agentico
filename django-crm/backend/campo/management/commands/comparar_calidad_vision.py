@@ -189,19 +189,29 @@ class Command(BaseCommand):
         #  EL VEREDICTO, QUE ES LO QUE SE VINO A BUSCAR. Se mira la marca que
         #  el propio analisis escribe --«MUESTRA: si/no»-- y no el parecido de
         #  los textos: dos redacciones distintas pueden decir lo mismo.
+        #  SE REUSA EL PARSER DE PRODUCCION, no uno nuevo  --  06/11/2026
+        #
+        #  La primera version de este comando tenia el suyo, binario, y leia
+        #  "MUESTRA: no se sabe" como un "no". El resultado fue un veredicto
+        #  falso --"resultado raro"-- en la primera medicion de verdad.
+        #
+        #  `tasks.muestra_lo_pedido` ya resuelve los TRES valores, y su
+        #  comentario advierte exactamente este error: «"no se sabe" ANTES que
+        #  "no": empieza igual, y mirar "no" primero convertiria todo
+        #  "no se sabe" en un "no corresponde"». Escribir otro parser al lado
+        #  fue perder esa leccion.
+        from campo.tasks import muestra_lo_pedido
+
         def muestra(texto: str) -> str:
-            bajo = (texto or "").lower()
-            pos = bajo.rfind("muestra:")
-            if pos == -1:
-                return "?"
-            return "si" if bajo[pos + 8:].strip().startswith(("si", "sí")) else "no"
+            return {True: "si", False: "no", None: "no se sabe"}[
+                muestra_lo_pedido(texto)]
 
         hoy = muestra(textos.get("como hoy", ""))
         alta = muestra(textos.get("sin degradar", ""))
         self.stdout.write(self.style.MIGRATE_HEADING("  ===== VEREDICTO ====="))
         self.stdout.write(f"  como hoy     -> MUESTRA: {hoy}")
         self.stdout.write(f"  sin degradar -> MUESTRA: {alta}")
-        if hoy == "no" and alta == "si":
+        if hoy != "si" and alta == "si":
             self.stdout.write(self.style.SUCCESS(
                 "  LA COMPRESION ES LA CULPABLE: la misma foto, sin degradar, "
                 "SI muestra lo que se pidio."))
@@ -210,10 +220,19 @@ class Command(BaseCommand):
                 "  La compresion NO cambia el veredicto en esta foto. Si el "
                 "analisis se equivoca, mirar la foto o la instruccion de la "
                 "plantilla, no la calidad.")
+        elif hoy == "si" and alta == "no se sabe":
+            #  Pasa, y no es un error: con mas resolucion el modelo ve mejor y
+            #  se vuelve MAS cauto. Un "si" sobre una foto degradada puede ser
+            #  confianza que la imagen no sostiene.
+            self.stdout.write(
+                "  Con mas calidad el modelo es MAS cauto, no menos: afirmaba "
+                "y ahora dice que no se sabe. No es la compresion lo que falla; "
+                "la foto no alcanza para afirmar lo que se pidio.")
         else:
             self.stdout.write(
-                "  Resultado raro (la de hoy acierta y la buena no): una sola "
-                "foto no alcanza, probar con otra.")
+                f"  Sin conclusion con una sola foto (hoy={hoy}, alta={alta}): "
+                f"probar con otra, preferentemente de una medicion, donde "
+                f"'muestra lo pedido' es binario.")
         self.stdout.write(
             "\n  OJO: esto es UNA foto. Un caso no demuestra la regla; si "
             "confirma, repetir con dos o tres mas antes de cambiar el default.")
