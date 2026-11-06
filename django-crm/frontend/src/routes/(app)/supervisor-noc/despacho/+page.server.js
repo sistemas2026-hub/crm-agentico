@@ -3,7 +3,8 @@ import { proponerReparto, leerZonasConocidas } from '$lib/server/v2/cuadrillas.j
 import {
   leerPlantillasDeTrabajo,
   leerCasosDespachables,
-  despacharACampo
+  despacharACampo,
+  claveDeDespacho
 } from '$lib/server/v2/despacho.js';
 import { correrCiclo } from '$lib/server/v2/supervisor-noc.js';
 import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
@@ -227,36 +228,54 @@ export const actions = {
     const plantilla = String(f.get('work_type_version_id') ?? '').trim();
     if (!plantilla) return fail(400, { error: 'Elegí con qué plantilla va.' });
 
+    const programada = String(f.get('programada_para') ?? '').trim();
+
+    const cuerpo = {
+      work_type_version_id: plantilla,
+      case_id: caseId || undefined,
+      cliente_nombre: String(f.get('cliente_nombre') ?? '').trim(),
+      cliente_telefono: String(f.get('cliente_telefono') ?? '').trim(),
+      cliente_direccion: String(f.get('cliente_direccion') ?? '').trim(),
+      cliente_detalle_acceso: String(f.get('detalle_acceso') ?? '').trim(),
+      //  DE DÓNDE ES EL TRABAJO. Sin esto la orden nace sin zona y el
+      //  reparto la deja en `sin_zona` para siempre: nunca llega a una
+      //  cuadrilla, y el síntoma —«no se asignó»— no señala acá.
+      zona: String(f.get('zona') ?? '').trim() || undefined,
+      prioridad: String(f.get('prioridad') ?? '').trim() || undefined,
+      resumen: String(f.get('resumen') ?? '').trim() || undefined,
+      programada_para: programada || undefined,
+      //  ASIGNAR A MANO (opcional). Vacío = la reparte el sistema. Con valor,
+      //  el reparto la respeta y no la mueve (campo/reparto.py).
+      tecnico_profile_id: String(f.get('tecnico_profile_id') ?? '').trim() || undefined,
+      //  LA CUADRILLA DEL DÍA que cubre esa zona (13/10/2026). Le llega a su
+      //  gente con cuenta, como al publicar el reparto, y el reparto la respeta.
+      jornada_id: String(f.get('jornada_id') ?? '').trim() || undefined
+    };
+
     //  LA CLAVE DE IDEMPOTENCIA LA ARMA EL SERVIDOR, no el navegador: una
     //  clave nueva por intento es un identificador único, no una clave
-    //  idempotente, y un doble clic crearía dos órdenes. Con el caso y la
-    //  plantilla, el mismo despacho repetido es la misma clave; una segunda
-    //  visita deliberada lleva otra plantilla, u otra fecha.
-    const programada = String(f.get('programada_para') ?? '').trim();
-    const clave = `despacho:${caseId || 'manual'}:${plantilla}:${programada}`;
+    //  idempotente, y un doble clic crearía dos órdenes.
+    //
+    //  CUBRE TODO EL CUERPO, Y ESO SE CORRIGIÓ EL 06/11/2026. Antes se armaba
+    //  con tres campos —caso, plantilla y fecha— mientras que el cuerpo lleva
+    //  trece. Corregir cualquier otro —la dirección, el técnico, el resumen—
+    //  y volver a darle mandaba la MISMA clave con OTRO contenido, y el
+    //  backend lo rechazaba con «La misma Idempotency-Key fue reutilizada con
+    //  un payload o método diferente». El supervisor quedaba trabado sin
+    //  entender por qué: la pantalla le pedía justamente que confirmara o
+    //  corrigiera, y corregir era lo que rompía.
+    //
+    //  La guarda del backend estaba bien; mal elegido estaba el ALCANCE de la
+    //  clave. Derivarla del cuerpo entero conserva lo que se quería —mismo
+    //  contenido repetido, una sola orden— y deja pasar lo que es otra
+    //  operación de verdad. Se puede hacer porque NINGÚN campo del cuerpo
+    //  cambia solo: los trece salen del formulario, no hay reloj ni azar. Si
+    //  algún día entrara uno, la clave cambiaría en cada intento y volvería a
+    //  ser un identificador único, que es lo que CLAUDE.md §12 prohíbe.
+    const clave = claveDeDespacho(caseId, cuerpo);
 
     try {
-      const r = await despacharACampo({ cookies }, {
-        work_type_version_id: plantilla,
-        case_id: caseId || undefined,
-        cliente_nombre: String(f.get('cliente_nombre') ?? '').trim(),
-        cliente_telefono: String(f.get('cliente_telefono') ?? '').trim(),
-        cliente_direccion: String(f.get('cliente_direccion') ?? '').trim(),
-        cliente_detalle_acceso: String(f.get('detalle_acceso') ?? '').trim(),
-        //  DE DÓNDE ES EL TRABAJO. Sin esto la orden nace sin zona y el
-        //  reparto la deja en `sin_zona` para siempre: nunca llega a una
-        //  cuadrilla, y el síntoma —«no se asignó»— no señala acá.
-        zona: String(f.get('zona') ?? '').trim() || undefined,
-        prioridad: String(f.get('prioridad') ?? '').trim() || undefined,
-        resumen: String(f.get('resumen') ?? '').trim() || undefined,
-        programada_para: programada || undefined,
-        //  ASIGNAR A MANO (opcional). Vacío = la reparte el sistema. Con valor,
-        //  el reparto la respeta y no la mueve (campo/reparto.py).
-        tecnico_profile_id: String(f.get('tecnico_profile_id') ?? '').trim() || undefined,
-        //  LA CUADRILLA DEL DÍA que cubre esa zona (13/10/2026). Le llega a su
-        //  gente con cuenta, como al publicar el reparto, y el reparto la respeta.
-        jornada_id: String(f.get('jornada_id') ?? '').trim() || undefined
-      }, clave);
+      const r = await despacharACampo({ cookies }, cuerpo, clave);
 
       const numero = r?.orden?.numero;
       const quien = r?.orden?.tecnico_principal?.nombre;

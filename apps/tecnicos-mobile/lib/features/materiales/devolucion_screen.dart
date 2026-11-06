@@ -544,7 +544,11 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
         children: <Widget>[
           Text('Cerrar la jornada', style: AppTypography.tituloChico),
           const SizedBox(height: 8),
-          if (estado.motivos.isEmpty)
+          //  LA LISTA VIGENTE, no la cruda (06/11/2026): si se mostrara
+          //  la del servidor, el tecnico leeria «falta explicar el conector»
+          //  con el boton de cerrar ya habilitado. Una pantalla que se
+          //  contradice a si misma se lee como pantalla rota.
+          if (estado.motivosVigentes.isEmpty)
             Text(
               'Todo cuadra. Podés cerrar cuando entregues el material en '
               'bodega.',
@@ -555,7 +559,7 @@ class _DevolucionScreenState extends State<DevolucionScreen> {
             // qué tiene que hacer para poder irse a su casa.
             Text('Falta resolver esto:', style: AppTypography.cuerpoChico),
             const SizedBox(height: 6),
-            for (final motivo in estado.motivos)
+            for (final motivo in estado.motivosVigentes)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Row(

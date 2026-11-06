@@ -34,6 +34,9 @@ vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 
 const { load, actions } = await import('./+page.server.js');
+//  La clave vive en el modulo de despacho, NO en `+page.server.js`: SvelteKit
+//  solo acepta ahi sus exports propios y exportarla rompio el build (06/11).
+const { claveDeDespacho } = await vi.importActual('$lib/server/v2/despacho.js');
 
 /* ------------------------------------------------------------------ *
  *  LA FORMA REAL DEL BACKEND
@@ -389,6 +392,122 @@ describe('despachar', () => {
     //  idempotente: con eso, un doble clic crea dos órdenes (CLAUDE.md §12).
     expect(clave2).toBe(clave1);
     expect(clave1).toContain('caso-1');
+  });
+
+  it('CORREGIR un campo y volver a darle NO choca con la clave anterior', async () => {
+    //  EL DEFECTO DEL 06/11/2026, reportado desde la pantalla: «La misma
+    //  Idempotency-Key fue reutilizada con un payload o método diferente».
+    //
+    //  La clave se armaba con tres campos --caso, plantilla y fecha-- y el
+    //  cuerpo lleva trece. Corregir la direccion, el tecnico o el resumen
+    //  mandaba la MISMA clave con OTRO contenido, y el backend lo rechazaba
+    //  con 409. La pantalla pedia «confirmala o corregila», y corregir era
+    //  justo lo que rompia.
+    //
+    //  Se prueban los campos que una persona corrige de verdad mirando la
+    //  pantalla, uno por uno: si alguno quedara fuera de la clave, vuelve el
+    //  mismo 409 para ese campo.
+    await actions.despachar(submit(DESPACHO_OK));
+    const original = apiRequest.mock.calls[0][1].headers['Idempotency-Key'];
+
+    for (const [campo, valor] of [
+      ['cliente_direccion', 'Calle 38 # 78-33 apto 201'],
+      ['cliente_telefono', '3001112222'],
+      ['cliente_nombre', 'Ana María'],
+      ['detalle_acceso', 'Portería, timbre 3'],
+      ['resumen', 'Revisar el conector del segundo piso'],
+      ['prioridad', 'alta'],
+      ['zona', 'CACARAMOA'],
+      ['tecnico_profile_id', 'prof-9'],
+      ['jornada_id', 'j-9']
+    ]) {
+      apiRequest.mockClear();
+      await actions.despachar(submit({ ...DESPACHO_OK, [campo]: valor }));
+      const nueva = apiRequest.mock.calls[0][1].headers['Idempotency-Key'];
+      expect(nueva).not.toBe(original);
+    }
+  });
+
+  it('pero el MISMO contenido sigue dando la misma clave, campo por campo', async () => {
+    //  EL OTRO BORDE, y es el que impide "arreglar" esto con un azar: si la
+    //  clave cambiara en cada intento seria un identificador unico, no una
+    //  clave idempotente, y el doble clic volveria a crear dos ordenes.
+    //  Se repite el MISMO formulario completo, con todos los campos puestos.
+    const completo = {
+      ...DESPACHO_OK,
+      cliente_direccion: 'Calle 38 # 78-33',
+      cliente_telefono: '3001112222',
+      resumen: 'Internet lento',
+      prioridad: 'alta',
+      zona: 'CACARAMOA',
+      tecnico_profile_id: 'prof-9'
+    };
+
+    await actions.despachar(submit(completo));
+    await actions.despachar(submit(completo));
+
+    const [a, b] = apiRequest.mock.calls.map(
+      (c) => c[1].headers['Idempotency-Key']);
+    expect(b).toBe(a);
+  });
+
+  it('la clave entra en la columna del backend (128 caracteres)', async () => {
+    //  `MutacionIdempotente.idempotency_key` es CharField(max_length=128). Una
+    //  clave mas larga se cortaria en la base y dos despachos distintos
+    //  podrian colisionar en el mismo prefijo.
+    await actions.despachar(submit({
+      ...DESPACHO_OK,
+      resumen: 'x'.repeat(900),
+      cliente_direccion: 'y'.repeat(250)
+    }));
+
+    const clave = apiRequest.mock.calls[0][1].headers['Idempotency-Key'];
+    expect(clave.length).toBeLessThanOrEqual(128);
+  });
+
+  it('el ORDEN de los campos no cambia la clave', () => {
+    //  SE MIDIO QUE LA PRUEBA ANTERIOR NO MEDIA (06/11/2026). Pasaba por el
+    //  formulario, y ahi el cuerpo se arma con un objeto LITERAL: su orden es
+    //  fijo pase lo que pase, asi que quitar el `sort()` no cambiaba nada y
+    //  la mutacion sobrevivia. Se prueba la funcion directamente, que es
+    //  donde el orden puede variar de verdad.
+    //
+    //  Por que importa: `JSON.stringify` respeta el orden de insercion. El
+    //  dia que alguien arme el cuerpo en un bucle o con un spread
+    //  condicional, sin el `sort()` el mismo despacho daria dos claves y un
+    //  doble clic crearia dos ordenes. Es el modo de falla mas silencioso de
+    //  todo este arreglo.
+    const a = claveDeDespacho('caso-1', {
+      zona: 'CACARAMOA', cliente_nombre: 'Ana', work_type_version_id: 'wtv-1'
+    });
+    const b = claveDeDespacho('caso-1', {
+      work_type_version_id: 'wtv-1', cliente_nombre: 'Ana', zona: 'CACARAMOA'
+    });
+
+    expect(b).toBe(a);
+  });
+
+  it('doscientos despachos distintos dan doscientas claves distintas', () => {
+    //  SE MIDIO QUE HACIA FALTA (06/11/2026): con nueve payloads, recortar la
+    //  huella a dos caracteres pasaba todas las pruebas. Dos caracteres son
+    //  256 combinaciones, y por la paradoja del cumpleanos dos despachos
+    //  distintos colisionan muchisimo antes de llegar a 256.
+    //
+    //  QUE PASA SI COLISIONAN, que es lo que esto evita: el backend ve la
+    //  misma clave con otro contenido y contesta 409, o peor, si el hash
+    //  coincidiera devolveria la respuesta del PRIMER despacho y la segunda
+    //  orden no se crearia nunca -- sin error visible, porque la pantalla
+    //  mostraria una orden creada con exito. La del otro.
+    const claves = new Set();
+    for (let i = 0; i < 200; i++) {
+      claves.add(claveDeDespacho('caso-1', {
+        work_type_version_id: 'wtv-1',
+        cliente_direccion: `Calle ${i} # ${i}-${i}`,
+        resumen: `trabajo numero ${i}`
+      }));
+    }
+
+    expect(claves.size).toBe(200);
   });
 
   it('otra plantilla u otra fecha es otro despacho, y lleva otra clave', async () => {

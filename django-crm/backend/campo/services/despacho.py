@@ -25,6 +25,7 @@ import re
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 
+from campo import coordenadas_del_cliente
 from campo.models import AsignacionTrabajo, EventoTrabajo, OrdenTrabajo
 
 # Cuantas veces se reintenta pedir un consecutivo. Con dos supervisores creando
@@ -376,9 +377,35 @@ def cliente_para_la_orden(contexto, escrito: dict | None = None) -> dict:
         #  visitas anteriores de este servicio no se encontraban (18/10/2026).
         "id_abonado": (escrito.get("cliente_id_abonado")
                        or str((contexto or {}).get("servicio") or "")[:64]),
-        "gps_lat": escrito.get("gps_lat"),
-        "gps_lng": escrito.get("gps_lng"),
+        #  EL PUNTO DEL CLIENTE (05/11/2026). Hasta hoy solo salia de lo que
+        #  tecleaba quien despacha, asi que una orden IMPORTADA del ISP --que
+        #  no pasa por ningun formulario-- nacia siempre sin coordenadas y el
+        #  mapa decia «sin ubicacion» aunque el dato estuviera cargado del
+        #  otro lado. Mismo hueco que tuvieron 'direccion' y 'telefono' hasta
+        #  el 24/09/2026, y se cierra igual.
+        #
+        #  LO ESCRITO A MANO GANA, y no es un detalle: quien despacha pudo
+        #  corregir un punto mal cargado mirando el mapa. Si la ficha del
+        #  proveedor lo pisara, la correccion se perderia en el proximo
+        #  despacho sin que nadie se entere.
+        "gps_lat": _o_el_de_la_ficha(escrito.get("gps_lat"), contexto, "gps_lat"),
+        "gps_lng": _o_el_de_la_ficha(escrito.get("gps_lng"), contexto, "gps_lng"),
     }
+
+
+def _o_el_de_la_ficha(escrito_valor, contexto, clave):
+    """Lo que se escribio, y si no, lo que trajo la ficha ya parseado.
+
+    `0.0` ES UN VALOR, no un hueco: la latitud del ecuador. Por eso se compara
+    contra None y no se usa `or`, que lo tomaria por ausente y lo reemplazaria
+    por el de la ficha.
+    """
+    if escrito_valor is not None:
+        return escrito_valor
+    if not isinstance(contexto, dict):
+        return None
+    valor = contexto.get(clave)
+    return valor if isinstance(valor, (int, float)) else None
 
 
 def anotar_labor_sugerida(contexto, texto: str = "") -> None:
@@ -596,6 +623,18 @@ def sin_contexto(motivo: str, *, motor_alcanzado: bool) -> dict:
 # esos los llena quien despacha desde el formulario, y un caso IMPORTADO del
 # ISP no pasa por ningun formulario. Para esas ordenes, la ficha es la unica
 # fuente -- y sin direccion el tecnico no sabe a donde ir.
+#
+# 'coordenadas' NO esta en esta tupla y es a proposito (05/11/2026): el punto
+# se congela como PAR NUMERICO en 'gps_lat'/'gps_lng' --columnas de la orden--
+# y no como texto dentro del JSONB. Tres motivos, ninguno estetico:
+#
+#   1. 'anonimizar_campo' desplaza las columnas gps y NO mira adentro del
+#      contexto: el texto crudo sobreviviria intacto a una anonimizacion que
+#      dice por pantalla que lo reemplazo.
+#   2. Una sola representacion. Quien despacha puede corregir el punto a mano
+#      ('escrito.gps_lat' gana); una segunda copia congelada quedaria vieja
+#      sin que nada avise, y el mapa y la app leerian cosas distintas.
+#   3. 'OrdenTrabajo.gps_lat' es FloatField: hay que parsear igual.
 CAMPOS_CLIENTE_SNAPSHOT = ("nombre", "estado", "plan", "ip", "localidad",
                            "direccion", "telefono")
 
@@ -625,6 +664,18 @@ def depurar_contexto(crudo: dict, *, conversacion: dict | None = None,
         "cliente": {k: v for k, v in cliente.items()
                     if k in CAMPOS_CLIENTE_SNAPSHOT and v},
     }
+
+    #  DONDE QUEDA LA CASA (05/11/2026). El ISP lo guarda como un texto y la
+    #  orden lo guarda como dos numeros: se parsea ACA, una sola vez, y el
+    #  texto crudo no se congela (ver el comentario de CAMPOS_CLIENTE_SNAPSHOT).
+    #
+    #  Fail-closed: lo que 'leer' no reconoce sale (None, None) y entonces NO
+    #  se escribe la clave. Una orden sin coordenadas es lo que ya habia, y la
+    #  pantalla dice «sin ubicacion» -- que es verdad. Un punto aproximado
+    #  seria mentira, y un pin se lee como un hecho.
+    lat, lng = coordenadas_del_cliente.leer(cliente.get("coordenadas"))
+    if lat is not None and lng is not None:
+        snapshot["gps_lat"], snapshot["gps_lng"] = lat, lng
     if crudo.get("sn_onu"):
         snapshot["sn_onu"] = crudo["sn_onu"]
     if equipo:

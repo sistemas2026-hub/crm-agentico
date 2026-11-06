@@ -207,6 +207,51 @@ describe('el panel de abajo: cuándo se miró y quién reportó', () => {
   });
 });
 
+describe('la ruta se VE, no solo existe', () => {
+  //  EL DEFECTO DEL 06/11/2026. Las dos puntas estaban dibujadas y la línea
+  //  entre ellas también, pero era un trazo marrón al 45% de opacidad: sobre
+  //  el mapa claro se leía y sobre el satélite --una foto aérea de un
+  //  barrio-- desaparecía. El usuario mandó la captura con el técnico, la
+  //  casa, y nada en medio.
+  //
+  //  Leaflet solo corre en el navegador, así que esto no puede mirar píxeles.
+  //  Lee el código del dibujo, que es donde vive la decisión, y afirma lo que
+  //  la hace visible: que haya un trazo blanco debajo y que el de arriba sea
+  //  opaco. Es una guarda de contraste, no de píxeles -- y lo dice.
+  const fuente = readFileSync(
+    'src/lib/supervisor/MapaDeCuadrillas.svelte', 'utf8');
+  const dibujo = fuente.slice(
+    fuente.indexOf('if (q.une'), fuente.indexOf('if (!c.posicion)'));
+
+  it('lleva un halo blanco debajo, que la recorta contra cualquier fondo', () => {
+    expect(dibujo).toContain("color: '#fff'");
+    //  Más ancho que el trazo de color: si fuera igual o menor, no asomaría.
+    const blanco = Number(dibujo.match(/color: '#fff', weight: (\d+)/)?.[1] ?? 0);
+    const encima = Number(dibujo.match(/color: '#b45309', weight: (\d+)/)?.[1] ?? 0);
+    expect(blanco).toBeGreaterThan(encima);
+    expect(encima).toBeGreaterThan(0);
+  });
+
+  it('el trazo de color va OPACO: una ruta a medio tono se lee como aproximada', () => {
+    //  Y esta no lo es: une dos puntos medidos. El 0.45 de antes decía lo
+    //  contrario de lo que el dato merece.
+    expect(dibujo).toMatch(/color: '#b45309'[^}]*opacity: 1\b/);
+    expect(dibujo).not.toContain('opacity: 0.45');
+  });
+
+  it('sigue siendo punteada: no es la ruta por la calle', () => {
+    //  Es una recta entre dos puntos, no el camino que va a manejar. Una
+    //  línea llena se leería como un recorrido calculado.
+    expect(dibujo).toContain('dashArray');
+  });
+
+  it('y SOLO se dibuja con las dos puntas', () => {
+    //  La regla que no cambia: con una sola sería una ruta hacia un lugar que
+    //  nadie midió. Ver `destino-de-la-orden.js`.
+    expect(dibujo).toContain('q.une && q.vehiculo && q.destino');
+  });
+});
+
 describe('cuándo se dibuja el mapa', () => {
   it('solo si lo que se mira es hoy', () => {
     expect(seDibujaElMapa('2026-11-01', '2026-11-01')).toBe(true);

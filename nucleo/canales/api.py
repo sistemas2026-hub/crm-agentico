@@ -6945,8 +6945,20 @@ def _con_zona_declarada(equipo: dict, config) -> dict:
 # 'MARTHA GISELA', que es el barrio y coincide con la zona que reporta
 # SmartOLT. Pedir "la zona" y agregar el campo que se llama asi habria puesto
 # en pantalla algo que a un tecnico no le dice nada.
+#
+# 'coordenadas' entra el 05/11/2026, con el MISMO criterio y el mismo motivo
+# que 'direccion': el tecnico tiene que llegar, y la direccion escrita no
+# siempre alcanza -- un barrio sin nomenclatura, un predio sin numero. El dato
+# ya viajaba hasta aca y se cortaba en esta tupla.
+#
+# ES EL DOMICILIO DE UNA PERSONA, asi que: no entra a ninguna lista blanca de
+# rol (el modelo no lo ve: sigue en 'nunca_revelar'), no entra a la ficha de
+# la Bandeja ('CAMPOS_FICHA_CLIENTE', mas abajo, lo deja afuera a proposito) y
+# del lado del CRM no se congela el TEXTO sino el par numerico ya parseado
+# -- ver 'campo/coordenadas_del_cliente.py'. Una sola representacion, y donde
+# el comando de anonimizacion ya la alcanza.
 _CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula", "sn_onu",
-                 "telefono", "direccion", "localidad")
+                 "telefono", "direccion", "localidad", "coordenadas")
 
 
 def _inventario_onu(config, tenant: str) -> list:

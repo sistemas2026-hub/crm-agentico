@@ -10,6 +10,7 @@
  *
  * Server-only, por el mismo `apiRequest` que el resto del módulo.
  */
+import { createHash } from 'node:crypto';
 import { apiRequest } from '$lib/api-helpers.js';
 
 /**
@@ -123,6 +124,44 @@ export async function leerFichaDespachable(ctx, id) {
  * @param {Record<string, any>} cuerpo
  * @param {string} idempotencia
  */
+/**
+ * La clave de idempotencia de un despacho: el caso, y la huella del cuerpo.
+ *
+ * POR QUE VIVE ACA Y NO EN `+page.server.js` (06/11/2026). Estuvo alla, y
+ * exportarla para poder probarla ROMPIO EL BUILD: SvelteKit solo acepta
+ * `load`, `actions`, `prerender`, `csr`, `ssr`, `trailingSlash`, `config` y
+ * `entries` en un `+page.server.js`. El deploy fallo en produccion porque
+ * `vite build` --la unica guarda que lo detecta-- no se habia corrido: ni
+ * vitest ni svelte-check lo ven. Aca ademas esta su lugar: al lado de
+ * `despacharACampo`, que es quien la consume.
+ *
+ * EL CASO VA EN TEXTO PLANO para que la fila se lea cuando alguien mire la
+ * tabla de mutaciones buscando que paso. La huella cubre todo el cuerpo; 32
+ * caracteres de SHA-256 alcanzan de sobra y la columna del backend
+ * (`MutacionIdempotente.idempotency_key`) acepta 128.
+ *
+ * LAS CLAVES SE ORDENAN antes de serializar: `JSON.stringify` respeta el orden
+ * de insercion, asi que sin ordenar, el mismo contenido escrito en otro orden
+ * daria otra huella y un doble clic crearia dos ordenes.
+ *
+ * `undefined` desaparece en `JSON.stringify`, que es justo lo que se quiere:
+ * un campo ausente y uno que nunca se mando son el mismo despacho.
+ *
+ * @param {string} caseId
+ * @param {Record<string, any>} cuerpo
+ */
+export function claveDeDespacho(caseId, cuerpo) {
+  const ordenado = Object.fromEntries(
+    Object.keys(cuerpo).sort().map((k) => [k, cuerpo[k]])
+  );
+  const huella = createHash('sha256')
+    .update(JSON.stringify(ordenado))
+    .digest('hex')
+    .slice(0, 32);
+  return `despacho:${caseId || 'manual'}:${huella}`;
+}
+
+
 export async function despacharACampo(ctx, cuerpo, idempotencia) {
   return apiRequest('/campo/trabajos/crear/', {
     method: 'POST',
