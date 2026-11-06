@@ -187,7 +187,9 @@ class ResumenDeInicio {
       //
       // Lo que sí es un problema es que el servidor lo declare al evaluar el
       // cierre. Eso llega en `motivos`, escrito por quien hizo la cuenta.
-      if (jornada.motivos.isNotEmpty && jornada.diferencias > 0) {
+      //  VIGENTES (06/11/2026): lo que este telefono ya explico no se
+      //  vuelve a pedir en la pantalla de inicio. Ver `motivosVigentes`.
+      if (jornada.motivosVigentes.isNotEmpty && jornada.diferencias > 0) {
         avisos.add(AvisoDeInicio(
           titulo: jornada.diferencias == 1
               ? '1 material no cuadra'
@@ -198,7 +200,7 @@ class ResumenDeInicio {
       }
       // Los motivos del servidor se muestran tal cual: los escribió quien
       // sabe por qué no cuadra, y reescribirlos acá sería adivinar.
-      for (final motivo in jornada.motivos) {
+      for (final motivo in jornada.motivosVigentes) {
         if (motivo.toLowerCase().contains('serie')) {
           avisos.add(AvisoDeInicio(
             titulo: 'Un equipo sin ubicar',
