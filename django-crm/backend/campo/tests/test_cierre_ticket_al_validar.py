@@ -114,13 +114,40 @@ def test_a_aprobar_pide_el_cierre_con_ticket_quien_y_resumen_tapado(
         orden=orden, tipo=cierre_en_isp.EVENTO_CERRADO).count() == 1
 
 
-def test_b_devolver_para_corregir_no_pide_nada(admin_client, orden):
-    with mock.patch("requests.post") as post:
+def test_b_devolver_para_corregir_anota_pero_no_cierra(admin_client, orden):
+    """La devolucion SI le escribe al ISP desde el 06/11/2026 -- pero no cierra.
+
+    Antes esta prueba se llamaba `..._no_pide_nada` y afirmaba
+    `post.assert_not_called()`. Era cierto y era el defecto: el usuario pidio
+    que el ticket del ISP se entere cuando el trabajo vuelve a campo, porque
+    hasta entonces quedaba igual que antes de la devolucion y nadie sabia por
+    que. Ver `campo/services/nota_al_isp.py`.
+
+    Lo que esta prueba sigue cuidando es la parte que NO cambio: que la
+    devolucion no pida un CIERRE. Una nota y un cierre salen por exenciones
+    distintas, con niveles distintos, y confundirlos cerraria el ticket de un
+    trabajo que todavia hay que rehacer.
+    """
+    with mock.patch("requests.post", return_value=_Respuesta(
+            200, {"anotada": True, "codigo": "anotada"})) as post:
         r = _validar(admin_client, orden, decision="requerir_correccion")
     #  200: la devolucion SI ocurrio. Sin esto un 400 haria pasar la prueba
     #  sin haber probado nada.
     assert r.status_code == 200, r.content
-    post.assert_not_called()
+
+    post.assert_called_once()
+    url = post.call_args.args[0]
+    cuerpo = post.call_args.kwargs["json"]
+    #  LA RUTA ES LA DE ANOTAR, NUNCA LA DE CERRAR.
+    assert url.endswith(f"/interno/orden/{orden.id}/anotar-en-el-ticket")
+    assert "cerrar" not in url
+    assert cuerpo["momento"] == "devuelta_al_tecnico"
+    assert cuerpo["ticket"] == "94721"
+    #  La vuelta entra en la clave idempotente: sin ella, el segundo reporte
+    #  del tecnico se descartaria como si fuera un reintento.
+    assert isinstance(cuerpo["vuelta"], int)
+    #  Y el ticket del cliente nunca recibe el correo de nadie.
+    assert "@" not in str(cuerpo)
 
 
 def test_c_no_lo_pide_dos_veces_para_la_misma_orden(orden, admin_profile):

@@ -97,13 +97,44 @@ def _apagado() -> str:
     return ""
 
 
+def _json_seguro(valor):
+    """Un valor que `JSONField` pueda guardar, o su `repr` acortado.
+
+    POR QUE  --  06/11/2026, lo encontro `test_b_devolver_para_corregir`
+    -------------------------------------------------------------------
+    `EventoTrabajo.datos` es un JSONField. Cualquier cosa que no sea JSON ahi
+    adentro revienta EL INSERT, y un INSERT que falla deja la transaccion de
+    quien llamo en estado roto: a partir de ahi toda consulta posterior falla
+    con `TransactionManagementError`, aunque esta funcion se trague la
+    excepcion. Atrapar no es aislar.
+
+    Paso en la prueba con `mock.patch("requests.post")`: `r.status_code` era
+    un `MagicMock` y entraba al rastro. En produccion es un int, asi que no se
+    habria visto -- hasta el dia que algo devuelva otra cosa.
+    """
+    if valor is None or isinstance(valor, (str, int, float, bool)):
+        return valor
+    return repr(valor)[:200]
+
+
 def _anotar_evento(orden, profile, tipo: str, datos: dict) -> None:
-    """Deja el rastro en la orden. Nunca levanta: es la bitacora, no el efecto."""
+    """Deja el rastro en la orden. Nunca levanta Y NO ENSUCIA LA TRANSACCION.
+
+    El `atomic` propio no es decoracion: es un savepoint. Sin el, un INSERT
+    que falla rompe la transaccion de quien llamo --`ValidarTrabajoView`,
+    `CompletarTrabajoView`-- y la vista entera revienta DESPUES, por una
+    bitacora. El efecto ya ocurrio y la orden ya avanzo; perder el rastro es
+    aceptable, perder la respuesta de la vista no.
+    """
+    from django.db import transaction
+
+    limpios = {k: _json_seguro(v) for k, v in (datos or {}).items()}
     try:
         from campo.models import EventoTrabajo
 
-        EventoTrabajo.objects.create(org=orden.org, orden=orden, tipo=tipo,
-                                     profile=profile, datos=datos)
+        with transaction.atomic():
+            EventoTrabajo.objects.create(org=orden.org, orden=orden, tipo=tipo,
+                                         profile=profile, datos=limpios)
     except Exception:                                           # noqa: BLE001
         logger.warning("nota_al_isp: no se pudo anotar el evento %s", tipo)
 
@@ -168,9 +199,13 @@ def _pedir(orden, cuerpo: dict, profile=None) -> dict:
     #  EL RASTRO EN LA ORDEN (H6). Un `logger.info` lo ve quien mira los
     #  logs del contenedor; el evento lo ve quien mira la orden, que es quien
     #  pregunta si el ISP se entero.
+    #  `_json_seguro` se aplica igual en `_anotar_evento`; esto es que el
+    #  valor nazca legible y no como el `repr` de un objeto.
+    codigo = datos.get("codigo")
+    if not codigo:
+        codigo = getattr(r, "status_code", None)
     rastro = {"momento": cuerpo.get("momento"), "vuelta": cuerpo.get("vuelta"),
-              "ticket": cuerpo.get("ticket"),
-              "codigo": datos.get("codigo") or r.status_code}
+              "ticket": cuerpo.get("ticket"), "codigo": codigo}
     if datos.get("anotada"):
         _anotar_evento(orden, profile, EVENTO_ANOTADA, rastro)
     else:
