@@ -241,13 +241,17 @@ with escenario(reg, prov):
 
 reg, prov = Registro(), Proveedor()
 with escenario(reg, prov):
-    anotar(momento=nota.REPORTE_DEL_TECNICO, vuelta=1)
-    anotar(momento=nota.DEVUELTA_AL_TECNICO, vuelta=1)
-    afirmar(len(prov.llamadas) == 2,
-            "B2. reporte y devolucion de la MISMA vuelta no se pisan",
-            str(len(prov.llamadas)))
-    afirmar(len(reg.filas) == 2, "B2b. con claves distintas",
-            str(sorted(reg.filas)))
+    #  LOS TRES MOMENTOS, no dos: «quedo en duda» y «vuelve a campo» son
+    #  hechos distintos y comparten orden y vuelta. Si compartieran clave, una
+    #  orden que primero queda en duda y despues se devuelve escribiria UNA
+    #  sola vez -- y el ticket no diria que volvio a campo.
+    for m in sorted(nota.MOMENTOS):
+        anotar(momento=m, vuelta=1)
+    afirmar(len(prov.llamadas) == len(nota.MOMENTOS),
+            "B2. los momentos de la MISMA vuelta no se pisan entre si",
+            f"{len(prov.llamadas)} de {len(nota.MOMENTOS)}")
+    afirmar(len(reg.filas) == len(nota.MOMENTOS),
+            "B2b. con una clave distinta cada uno", str(sorted(reg.filas)))
 
 reg, prov = Registro(), Proveedor()
 with escenario(reg, prov):

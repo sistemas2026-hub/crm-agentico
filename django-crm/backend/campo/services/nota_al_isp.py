@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 #: Los momentos que el motor declara. Si no coinciden, la ruta contesta 400.
 REPORTE_DEL_TECNICO = "reporte_del_tecnico"
 DEVUELTA_AL_TECNICO = "devuelta_al_tecnico"
+REVISION_SIN_CIERRE = "revision_sin_cierre"
 
 #  ---------------------------------------------------------------------------
 #   EL INTERRUPTOR, Y POR QUE SON DOS  --  H6, auditoria de frontera 06/11/2026
@@ -205,7 +206,15 @@ def _pedir(orden, cuerpo: dict, profile=None) -> dict:
     if not codigo:
         codigo = getattr(r, "status_code", None)
     rastro = {"momento": cuerpo.get("momento"), "vuelta": cuerpo.get("vuelta"),
-              "ticket": cuerpo.get("ticket"), "codigo": codigo}
+              "ticket": cuerpo.get("ticket"), "codigo": codigo,
+              #  EL MOTIVO, NO SOLO EL CODIGO  --  06/11/2026
+              #
+              #  Sin esto el evento decia 'no_autorizada' y nada mas, y hubo
+              #  que salir a adivinar CUAL de las cuatro compuertas la freno.
+              #  Un rastro que dice que algo fallo pero no por que obliga a
+              #  reproducir el fallo para diagnosticarlo, que es justo lo que
+              #  el rastro existe para evitar.
+              "detalle": str(datos.get("detalle") or "")[:300]}
     if datos.get("anotada"):
         _anotar_evento(orden, profile, EVENTO_ANOTADA, rastro)
     else:
@@ -299,6 +308,86 @@ def anotar_devolucion(orden, *, requisitos=None, observacion: str = "",
 # ---------------------------------------------------------------------------
 #  3) LO QUE EL SUPERVISOR VALIDO, para el texto del CIERRE
 # ---------------------------------------------------------------------------
+
+def lo_que_falto(revision) -> list[str]:
+    """Los puntos que la revision marco como NO cumplidos, en texto.
+
+    Es lo que el tecnico necesita leer para saber que rehacer. Sale de la
+    revision, que ya lo calculo punto por punto; aca no se vuelve a decidir
+    nada, solo se escribe.
+    """
+    if not isinstance(revision, dict):
+        return []
+    fuera = []
+    for p in revision.get("puntos") or []:
+        if not isinstance(p, dict) or p.get("ok") is not False:
+            continue
+        texto = str(p.get("texto") or p.get("clave") or "").strip()
+        if texto:
+            fuera.append(texto)
+    return fuera
+
+
+def requisitos_a_rehacer(revision) -> list[str]:
+    """Que se le pide al tecnico que rehaga.
+
+    Primero lo que el checklist nombra como faltante (`sugeridas`), que son
+    ids de requisitos de verdad. Si no hay --porque fallo otra cosa, como el
+    reporte-- se usan las CLAVES de los puntos que no cumplieron: no es un id
+    de evidencia, pero nombra el problema, y `requerir_correccion` exige que
+    la devolucion diga QUE rehacer.
+    """
+    if not isinstance(revision, dict):
+        return []
+    sugeridas = [str(x).strip() for x in (revision.get("sugeridas") or [])
+                 if str(x).strip()]
+    if sugeridas:
+        return sugeridas
+    return [str(p.get("clave")).strip()
+            for p in (revision.get("puntos") or [])
+            if isinstance(p, dict) and p.get("ok") is False and p.get("clave")]
+
+
+def anotar_revision_sin_cierre(orden, revision) -> dict:
+    """El Supervisor reviso, NO cerro y tampoco devolvio: quedo una duda.
+
+    POR QUE SE ESCRIBE IGUAL  --  06/11/2026
+    ----------------------------------------
+    El usuario pidio que el Supervisor deje su respuesta "sea cierre o no".
+    Hasta hoy, una orden que quedaba en duda no dejaba NADA en el ticket del
+    ISP: quien lo miraba veia el reporte del tecnico y despues silencio, sin
+    saber si alguien lo habia mirado.
+
+    No devuelve el trabajo a propósito: una duda no es un error. El caso que
+    lo motiva es real -- «4 de 4 fotos piden una mirada» sobre fotos oscuras
+    de un trabajo que estaba bien hecho. Devolverlo por eso le haria rehacer
+    al tecnico algo que no esta mal.
+    """
+    from campo.services.cierre_en_isp import _tapar, numero_de_ticket
+
+    ticket = numero_de_ticket(orden.contexto)
+    if not ticket:
+        return {"anotada": False, "codigo": "sin_ticket",
+                "detalle": "la orden no nacio de un ticket del ISP"}
+
+    lineas = [f"El Supervisor reviso la OT #{orden.numero} y NO la cerro: "
+              f"queda para que la mire una persona."]
+    dudas = [p for p in (revision or {}).get("puntos") or []
+             if isinstance(p, dict) and p.get("ok") is None]
+    for p in dudas[:MAX_REQUISITOS]:
+        texto = str(p.get("texto") or p.get("clave") or "").strip()
+        if texto:
+            lineas.append(f"- {_tapar(texto)}")
+    for texto in lo_que_falto(revision)[:MAX_REQUISITOS]:
+        lineas.append(f"- {_tapar(texto)}")
+
+    return _pedir(orden, {
+        "ticket": ticket,
+        "texto": "\n".join(lineas),
+        "momento": REVISION_SIN_CIERRE,
+        "vuelta": _vuelta_de(orden),
+    })
+
 
 def texto_de_la_revision(foto) -> str:
     """Lo que el Supervisor escribe en el ticket al validar y cerrar.

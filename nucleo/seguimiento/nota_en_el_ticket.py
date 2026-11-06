@@ -78,9 +78,23 @@ FIRMA_DEL_SUPERVISOR = "Supervisor de Dexter"
 REPORTE_DEL_TECNICO = "reporte_del_tecnico"
 DEVUELTA_AL_TECNICO = "devuelta_al_tecnico"
 
+#: El Supervisor reviso y NO cerro, pero tampoco devolvio: quedo una duda que
+#: solo una persona puede resolver.
+#
+#  POR QUE UN TERCER MOMENTO Y NO REUSAR LA DEVOLUCION  --  06/11/2026
+#  -------------------------------------------------------------------
+#  Porque son hechos distintos y el ticket tiene que distinguirlos. «Vuelve a
+#  campo» le dice al tecnico que hay algo que rehacer; «quedo para revision»
+#  dice que nadie encontro un error y que una persona va a mirar. Usar el
+#  mismo momento para los dos, ademas de mentir, compartiria la clave
+#  idempotente: una orden que primero queda en duda y despues se devuelve
+#  escribiria una sola vez.
+REVISION_SIN_CIERRE = "revision_sin_cierre"
+
 MOMENTOS = {
     REPORTE_DEL_TECNICO: FIRMA_DE_CAMPO,
     DEVUELTA_AL_TECNICO: FIRMA_DEL_SUPERVISOR,
+    REVISION_SIN_CIERRE: FIRMA_DEL_SUPERVISOR,
 }
 
 #  Codigos del resultado. 'ANOTADA' es el unico que afirma que el texto quedo

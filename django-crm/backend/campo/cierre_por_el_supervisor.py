@@ -60,6 +60,9 @@ EVENTO_CERRADA = "cerrada_por_el_supervisor"
 EVENTO_DIVERGENCIA = "ticket_cerrado_con_la_orden_cambiada"
 #: Se tomo ESTA orden para intentarla. Se escribe ANTES de hablarle al motor.
 EVENTO_INTENTO = "cierre_del_supervisor_en_curso"
+#: El Supervisor devolvio la orden solo, porque la revision encontro
+#: algo que NO cumple. Distinto de `EVENTO_BLOQUEADO`, que es "no se pudo".
+EVENTO_DEVUELTA = "devuelta_por_el_supervisor"
 
 #: Cada cuanto se vuelve a intentar una orden que el motor no dejo cerrar. Una
 #: persona puede despertar el ciclo con el boton; esto evita que cada toque
@@ -139,14 +142,19 @@ def _reclamar(orden, ahora) -> bool:
     return True
 
 
-def listas_para_cerrar(org, ahora, *, solo=None) -> list | None:
-    """[(orden, revision)] que dio por buenas, o None si no se pudo saber
-    cuales esperan medicion (y entonces no se cierra ninguna).
+def revisadas(org, ahora, *, solo=None) -> list | None:
+    """TODAS las candidatas con su revision, sin filtrar por veredicto.
 
-    `solo` acota a UNA orden (su pk) sin cambiar ni un criterio: lo usa el
-    disparo inmediato de `cerrar_esta_orden`. Que el filtro viva en UN solo
-    lugar es lo que evita que las dos entradas --el ciclo horario y el reporte
-    recien llegado-- se separen el dia que se agregue una condicion.
+    EXISTE PARA QUE LOS TRES CAMINOS MIREN LO MISMO  --  06/11/2026
+    ---------------------------------------------------------------
+    Hasta hoy solo se recorrian las de veredicto "se puede cerrar"; las otras
+    dos --"no cumple" y "hay dudas"-- no las miraba nadie, y el ticket del ISP
+    no se enteraba de que alguien las habia revisado. El usuario pidio que el
+    Supervisor deje su respuesta "sea cierre o no".
+
+    Una sola consulta y un solo juego de filtros: la vuelta, el estado y la
+    medicion pendiente. Duplicarlos en un camino nuevo es como se pierde una
+    guarda sin que nadie lo note.
     """
     from campo import revision_del_cierre as RC
     from campo.models import OrdenTrabajo
@@ -163,10 +171,102 @@ def listas_para_cerrar(org, ahora, *, solo=None) -> list | None:
     salida = []
     for orden in candidatas:
         revision = RC.revisar(orden, pendientes=pendientes)
-        if revision and revision["veredicto"] == RC.CERRAR:
+        if revision:
             salida.append((orden, revision))
     return salida
 
+
+def listas_para_cerrar(org, ahora, *, solo=None) -> list | None:
+    """[(orden, revision)] que dio por buenas, o None si no se pudo saber
+    cuales esperan medicion (y entonces no se cierra ninguna).
+
+    `solo` acota a UNA orden (su pk) sin cambiar ni un criterio: lo usa el
+    disparo inmediato de `cerrar_esta_orden`. Que el filtro viva en UN solo
+    lugar es lo que evita que las dos entradas --el ciclo horario y el reporte
+    recien llegado-- se separen el dia que se agregue una condicion. Desde el
+    06/11/2026 ese lugar es `revisadas`, que ademas alcanza a las que no se
+    cierran.
+    """
+    from campo import revision_del_cierre as RC
+
+    todas = revisadas(org, ahora, solo=solo)
+    if todas is None:
+        return None
+    return [(o, r) for o, r in todas if r["veredicto"] == RC.CERRAR]
+
+
+def atender_la_que_no_cierra(orden, revision) -> str:
+    """El Supervisor devuelve al tecnico lo que objetivamente le falto.
+
+    EL USUARIO  --  06/11/2026
+    --------------------------
+    "en caso de que no cumpla uno de los requisito debe devolver al tecnico
+    indicando el error o lo que falto".
+
+    LO QUE ESTA FUNCION NO TOCA, Y POR QUE
+    ---------------------------------------
+    El alcance nacio mas ancho y cuatro guardas lo frenaron. No eran pruebas
+    desactualizadas: cada una describe un caso donde actuar es peor que no
+    hacer nada, y las cuatro afirman `post.assert_not_called()` -- que al ISP
+    no le llegue NADA.
+
+    1. LA QUE ESPERA LA MEDICION (`test_m`, `test_m2`). La medicion de la ONU
+       se mira a las 48 h; hasta entonces el veredicto es "hay dudas" con
+       `medicion: None`. Escribir "queda para que lo mire una persona" en el
+       ticket del CLIENTE seria mentir --no hay nada que mirar, se espera un
+       reloj-- y repetirlo cada hora llenaria el ticket de ruido.
+
+    2. "HAY DUDAS" EN GENERAL. Hoy ese veredicto no distingue "falta esperar"
+       de "algo no se pudo verificar", y sin esa distincion no hay nada
+       honesto que escribir. Queda afuera hasta que el veredicto sepa decir
+       cual es cual.
+
+    3. LO QUE FALLA SIN UN REQUISITO CONCRETO (`test_s4`, `test_i2b`). Cuando
+       el tecnico dice que el servicio no quedo funcionando, el punto que
+       falla es "servicio", que no es algo que el pueda "rehacer": puede
+       necesitar material, un tercero, o que alguien decida. Devolverselo
+       seria mandarle de vuelta un problema que no es suyo.
+
+    Queda SOLO el caso inequivoco: "no cumple" con requisitos del checklist
+    --falta esta foto, falta este campo--, donde el dato es duro y el tecnico
+    puede hacer algo con el.
+
+    Devuelve 'devuelta' | 'nada'. Nunca levanta: corre dentro del ciclo y un
+    fallo aca no puede frenar las demas ordenes.
+    """
+    from campo import revision_del_cierre as RC
+    from campo.models import EventoTrabajo
+    from campo.services import nota_al_isp
+    from campo.services.transiciones import requerir_correccion
+
+    if (revision or {}).get("veredicto") != RC.NO_CERRAR:
+        return "nada"
+
+    #  SOLO LOS DEL CHECKLIST. `requisitos_a_rehacer` cae a las claves de los
+    #  puntos que fallaron cuando no hay faltantes; esas no sirven para pedir
+    #  que se rehaga algo (ver el punto 3 de arriba).
+    requisitos = [str(x).strip() for x in (revision or {}).get("sugeridas") or []
+                  if str(x).strip()]
+    if not requisitos:
+        return "nada"
+
+    try:
+        observacion = " | ".join(nota_al_isp.lo_que_falto(revision))[:500]
+        #  EL TICKET PRIMERO, LA TRANSICION DESPUES. Al reves, subir la vuelta
+        #  cambiaria la clave idempotente de la nota y la devolucion de ESTA
+        #  vuelta se escribiria con el numero de la siguiente.
+        nota_al_isp.anotar_devolucion(orden, requisitos=requisitos,
+                                      observacion=observacion)
+        requerir_correccion(orden, requisitos=requisitos,
+                            observacion=observacion)
+        EventoTrabajo.objects.create(
+            org=orden.org, orden=orden, tipo=EVENTO_DEVUELTA,
+            datos={"requisitos": requisitos})
+        return "devuelta"
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("Supervisor: no se pudo devolver la orden (%s)",
+                       type(e).__name__)
+        return "nada"
 
 def _intentar(orden, revision, ahora) -> str:
     """Cerrar UNA: afuera primero, adentro despues. Devuelve que paso.
@@ -227,22 +327,33 @@ def cerrar_esta_orden(orden, *, ahora=None) -> dict:
     if motivo:
         logger.info("Supervisor: cierre inmediato en sombra (%s)", motivo)
         return {"modo": SOMBRA, "por_que": motivo, "resultado": ""}
-    listas = listas_para_cerrar(orden.org, ahora, solo=orden.pk)
-    if listas is None:
+    from campo import revision_del_cierre as RC
+
+    todas = revisadas(orden.org, ahora, solo=orden.pk)
+    if todas is None:
         return {"modo": ACCION, "por_que": "no se pudo saber si espera la medicion",
                 "resultado": ""}
-    if not listas:
-        #  TEXTO FIJO: puede ser que el veredicto no sea "se puede cerrar", que
-        #  ya este validada, o que sea una vuelta posterior. La tarjeta ya
-        #  muestra el veredicto con su detalle; aca solo interesa que no salio.
-        return {"modo": ACCION, "por_que": "la revision no la dio por buena ahora",
+    if not todas:
+        #  TEXTO FIJO: ya esta validada, o es una vuelta posterior, o no esta
+        #  completada todavia. No hay revision que mirar.
+        return {"modo": ACCION, "por_que": "no hay nada que revisar ahora",
                 "resultado": ""}
-    una, revision = listas[0]
-    return {"modo": ACCION, "por_que": "", "resultado": _intentar(una, revision, ahora)}
+    una, revision = todas[0]
+    if revision["veredicto"] == RC.CERRAR:
+        return {"modo": ACCION, "por_que": "",
+                "resultado": _intentar(una, revision, ahora)}
+    #  NO CIERRA, PERO ALGO PASA IGUAL (06/11/2026). Antes esta rama se iba en
+    #  silencio y el ticket del ISP no se enteraba de que alguien habia
+    #  revisado. Ahora se devuelve --si falta algo duro-- o se deja escrito que
+    #  quedo en duda.
+    return {"modo": ACCION, "por_que": "la revision no la dio por buena ahora",
+            "resultado": atender_la_que_no_cierra(una, revision)}
 
 
 def cerrar_lo_revisado(org, *, ahora=None) -> dict:
     """La fase. `{"cierre_de_lo_revisado": {...}}` para el resumen del ciclo."""
+    from campo import revision_del_cierre as RC
+
     ahora = ahora or timezone.now()
     listas = listas_para_cerrar(org, ahora)
     motivo = puertas(org)
@@ -263,9 +374,24 @@ def cerrar_lo_revisado(org, *, ahora=None) -> dict:
             cerradas += 1
         elif paso == "bloqueada":
             bloqueadas += 1
+
+    #  Y LAS QUE NO CIERRAN (06/11/2026). Son las mismas candidatas, con otro
+    #  veredicto: hasta hoy nadie las miraba y el ticket del ISP se quedaba sin
+    #  saber que habian sido revisadas. Se recorren DESPUES de los cierres a
+    #  proposito: si el ciclo se corta a la mitad, lo que se pierde es el aviso,
+    #  no un cierre.
+    devueltas = 0
+    todas = revisadas(org, ahora) or []
+    for orden, revision in todas:
+        if revision["veredicto"] == RC.CERRAR:
+            continue
+        if atender_la_que_no_cierra(orden, revision) == "devuelta":
+            devueltas += 1
+
     return {"cierre_de_lo_revisado": {"modo": ACCION, "por_que": "",
                                       "cerraria": len(listas), "cerradas": cerradas,
-                                      "bloqueadas": bloqueadas}}
+                                      "bloqueadas": bloqueadas,
+                                      "devueltas": devueltas}}
 
 
 def _aprobar_y_cerrar(orden, revision, ticket) -> bool:

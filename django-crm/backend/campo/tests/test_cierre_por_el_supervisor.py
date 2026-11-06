@@ -434,14 +434,37 @@ def test_i2_el_disparo_inmediato_pasa_por_las_mismas_puertas(org_a, orden):
     assert orden.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO
 
 
-def test_i2b_una_orden_que_la_revision_no_dio_por_buena_no_sale(abierto, orden):
-    """Mismo filtro que la fase: «Revisalo» no se cierra ni por este camino."""
+def test_i2b_una_orden_que_la_revision_no_dio_por_buena_no_se_cierra(abierto, orden):
+    """No se CIERRA -- y desde el 06/11/2026 se DEVUELVE al tecnico.
+
+    Lo que esta guarda cuidaba sigue intacto: «Revisalo» no se cierra ni por
+    este camino. Lo que cambio es lo que pasa en vez de nada.
+
+    El usuario: «en caso de que no cumpla uno de los requisito debe devolver
+    al tecnico indicando el error o lo que falto». Sin evidencias, al
+    checklist le falta una foto concreta: dato duro, y el tecnico puede
+    hacer algo con el. Antes la orden se quedaba quieta y nadie se enteraba.
+    """
     EvidenciaTrabajo.objects.filter(orden_trabajo=orden).delete()
-    with mock.patch("requests.post") as post:
+    with mock.patch("requests.post", return_value=_Respuesta(
+            200, {"anotada": True, "codigo": "anotada"})) as post:
         r = CS.cerrar_esta_orden(orden)
 
-    assert (r["modo"], r["resultado"]) == (CS.ACCION, ""), r
-    post.assert_not_called()
+    assert r["modo"] == CS.ACCION, r
+    assert r["resultado"] == "devuelta", r
+
+    #  LO QUE NO PUEDE PASAR: que esto se haya convertido en un cierre.
+    orden.refresh_from_db()
+    assert orden.estado_operativo == OrdenTrabajo.CORRECCION_REQUERIDA
+    assert orden.estado_validacion == OrdenTrabajo.REQUIERE_CORRECCION
+    urls = [c.args[0] for c in post.call_args_list]
+    assert all("anotar-en-el-ticket" in u for u in urls), urls
+    assert not any("cerrar-ticket" in u for u in urls), urls
+
+    #  Y que la devolucion diga QUE rehacer: sin eso el tecnico adivina.
+    cuerpo = post.call_args.kwargs["json"]
+    assert cuerpo["momento"] == "devuelta_al_tecnico"
+    assert "Rehacer" in cuerpo["texto"], cuerpo["texto"]
 
 
 def test_i3_el_reporte_de_cierre_del_tecnico_lo_encola(
