@@ -30,6 +30,15 @@ class SyncSummary {
 
   final int datosDirty;
 
+  /// La ultima vez que el servidor contesto, o `null` si nunca lo hizo
+  /// (CAMPO-DATA-036).
+  ///
+  /// NULLABLE A PROPOSITO, y no una fecha vieja de relleno: «no se sabe» y
+  /// «hace tres dias» llevan al tecnico a decisiones distintas, y una fecha
+  /// inventada las vuelve indistinguibles. Quien lo muestre escribe otra cosa
+  /// cuando es `null`; nunca una hora.
+  final DateTime? servidorContestoEn;
+
   const SyncSummary({
     required this.status,
     required this.isSyncing,
@@ -39,6 +48,7 @@ class SyncSummary {
     required this.evidenciasPendientes,
     this.seguimientosPendientes = 0,
     required this.datosDirty,
+    this.servidorContestoEn,
   });
 
   int get totalPendientes =>
@@ -154,6 +164,10 @@ class SyncQueueService {
       evidenciasPendientes: counts['evidencias_pendientes'] ?? 0,
       seguimientosPendientes: counts['seguimientos_pendientes'] ?? 0,
       datosDirty: counts['datos_dirty'] ?? 0,
+      servidorContestoEn: await _localDb.servidorContestoEn(
+        orgId: orgId,
+        profileId: profileId,
+      ),
     );
     _lastSummary = summary;
     _syncSummaryController.add(summary);
@@ -246,6 +260,22 @@ class SyncQueueService {
         await refreshSyncSummary(hasConnectionErrorOverride: true);
         return;
       }
+
+      //  LA MARCA VA ACA Y EN NINGUN OTRO LADO (CAMPO-DATA-036, 06/11/2026).
+      //
+      //  Este punto es el unico del metodo donde ya esta decidido que el
+      //  servidor respondio: arriba, el `return` se lleva el caso en que
+      //  ninguna de las dos descargas llego. Escribirla al empezar la pasada,
+      //  o en el `finally`, afirmaria que hubo contacto tambien cuando no lo
+      //  hubo -- y entonces el dato diria lo contrario de lo que existe para
+      //  decir. La guarda de `ultimo_contacto_con_el_servidor_test.dart`
+      //  corre los DOS caminos justamente para que eso no se pueda mover sin
+      //  que algo se ponga en rojo.
+      await _localDb.marcarServidorContesto(
+        orgId: orgId,
+        profileId: profileId,
+        cuando: DateTime.now(),
+      );
 
       _setStatus(SyncStatus.success);
       await refreshSyncSummary(hasConnectionErrorOverride: false);

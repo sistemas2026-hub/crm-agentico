@@ -1,3 +1,5 @@
+import '../tiempo/formato_de_momento.dart';
+import '../tiempo/momento_leido.dart';
 import '../widgets/dexter_sync_badge.dart';
 import 'sync_queue_service.dart';
 
@@ -7,9 +9,15 @@ import 'sync_queue_service.dart';
 /// aparte de los widgets para poder probarse sin montar nada, y aparte del
 /// servicio para que la pastilla no tenga que conocer la cola.
 ///
-/// Todo lo que devuelven se puede afirmar con lo que el servicio ya sabe. No
-/// hay "última sincronización hace 2 minutos": ese dato no existe todavía y
-/// decirlo sería inventarlo.
+/// Todo lo que devuelven se puede afirmar con lo que el servicio ya sabe.
+///
+/// Hasta el 06/11/2026 acá decía que «última sincronización hace 2 minutos»
+/// no se podía escribir porque el dato no existía. Ya existe
+/// —`SyncSummary.servidorContestoEn`, CAMPO-DATA-036— y la regla no cambió:
+/// se escribe cuando hay marca, y cuando es `null` la frase no la menciona.
+/// Un `null` ahí significa «este teléfono nunca habló con el servidor», que
+/// es distinto de «hace mucho», y la primera vez que alguien abre la
+/// aplicación es exactamente ese caso.
 class SyncPresentacion {
   const SyncPresentacion._();
 
@@ -56,7 +64,7 @@ class SyncPresentacion {
   }
 
   /// Frase de la franja oscura, que tiene más espacio que la pastilla.
-  static String fraseFranja(SyncSummary? resumen) {
+  static String fraseFranja(SyncSummary? resumen, {required DateTime ahora}) {
     if (resumen == null) return 'Revisando cambios guardados en el teléfono';
     if (resumen.isSyncing) return 'Enviando cambios al servidor';
     if (resumen.mutacionesConflicto > 0) {
@@ -72,10 +80,35 @@ class SyncPresentacion {
           ? '$base · se envían al volver la conexión'
           : '$base · esperando turno para enviarse';
     }
+    //  EL MOMENTO SE AGREGA EN ESTOS DOS Y NO EN TODOS, y no es por espacio.
+    //
+    //  Cuando hay cambios en cola, la frase ya dice que falta enviarlos: la
+    //  hora del envío anterior no cambia qué hacer. En estos dos sí: «todo
+    //  sincronizado» sin hora no dice si fue recién o hace un día, y «sin
+    //  conexión» sin hora no distingue dos minutos de ayer a la tarde --que
+    //  es la diferencia entre esperar y levantar el teléfono--.
+    final String cuando = _momento(resumen, ahora);
+
     if (resumen.hasConnectionError) {
-      return 'Sin conexión con el servidor · lo que hagas se guarda igual';
+      return cuando.isEmpty
+          ? 'Sin conexión con el servidor · lo que hagas se guarda igual'
+          : 'Sin conexión · lo último llegó $cuando · se guarda igual';
     }
-    return 'Todo sincronizado';
+    return cuando.isEmpty ? 'Todo sincronizado' : 'Todo sincronizado · $cuando';
+  }
+
+  /// Cómo se escribe el instante del último contacto, o `''` si no hay.
+  ///
+  /// La zona se declara en vez de adivinarse: la marca la puso este teléfono
+  /// con su propio reloj, así que es comparable contra `ahora` sin el riesgo
+  /// de las cinco horas que describe `momento_leido.dart`.
+  static String _momento(SyncSummary resumen, DateTime ahora) {
+    final DateTime? marca = resumen.servidorContestoEn;
+    if (marca == null) return '';
+    return textoDelMomento(
+      MomentoLeido(cuando: marca, zona: ZonaDelMomento.declarada),
+      ahora: ahora,
+    );
   }
 
   /// Si conviene ofrecer el botón de sincronizar ahora.

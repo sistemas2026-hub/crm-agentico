@@ -169,7 +169,7 @@ paso a paso y el estado de la conciliación previa al cierre.
 | CAMPO-DATA-032 | Ejecución | Medición | Longitud de onda de la medición | 1490nm Óptico | texto | Catálogo de red | `red.longitud_onda_medicion` | Sí | Baja | MOCK |
 | CAMPO-DATA-033 | Ejecución | Medición | Umbral de aceptación de la lectura | -15 a -25 dBm | rango | Parámetro de la empresa | `red.umbral_aceptacion_campo` | Sí | Alta | MOCK **que no valida**: se muestra como referencia, no bloquea el cierre ni marca la respuesta como incorrecta |
 | CAMPO-DATA-035 | Detalle | Franja superior | Nombre y versión del enlace de sincronización | Dexter Link v4.2 | texto | Backend de Dexter | `enlace.nombre`, `.version` | Sí | Baja | MOCK |
-| CAMPO-DATA-036 | Trabajo, Detalle | Pie y franja | Cuándo fue la última sincronización con éxito | Hace 1 min | marca de tiempo | **La propia aplicación** | — | Sí | Alta | MOCK. No es deuda del backend: la cola sabe cuántos cambios faltan, pero no guarda la hora del último envío bueno |
+| CAMPO-DATA-036 | Trabajo, Detalle | Pie y franja | Cuándo fue la última sincronización con éxito | hoy 08:17 | marca de tiempo | **La propia aplicación** | `SyncSummary.servidorContestoEn` | No | Alta | **HECHO el 06/11/2026.** Tabla `local_sincronizacion` (v27); la marca se escribe en el único punto donde ya se decidió que el servidor respondió, y en ninguno más. Aparece en «Todo sincronizado» y en «Sin conexión», que es donde dos minutos y un día entero se veían iguales. Sin marca no se escribe ninguna hora. Guarda: `test/ultimo_contacto_con_el_servidor_test.dart`, que corre los DOS caminos — mata mover la escritura al `finally` o antes del veredicto |
 | CAMPO-DATA-037 | Detalle | Cabecera | Qué hay que hacer, en una línea | Diagnóstico en domicilio y verificación de potencia | texto | Backend de Campo | `trabajo.resumen` | Sí | Baja | REAL DISPONIBLE desde el 22/09/2026: `resumen` en la orden |
 | CAMPO-DATA-038 | Inicio | Modo de jornada | En qué está el técnico: en sitio, en ruta, disponible, pausa | 4 estados | enum | Backend de Campo + cola propia | `jornada.estado` | Sí | Alta | MOCK. El selector cambia lo que se ve y **no guarda nada**: marcar "Pausa" no llega a ningún supervisor |
 | CAMPO-DATA-039 | Inicio | Tarjeta en curso | Hora estimada de llegada | 10:15 AM | hora | Cálculo con la posición del técnico | — | Sí | Media | MOCK |
@@ -186,10 +186,24 @@ paso a paso y el estado de la conciliación previa al cierre.
 | CAMPO-DATA-050 | Detalle | Guía FTTH | Procedimiento recomendado para la falla | 4 pasos | lista | Base de conocimiento de Dexter | `procedimiento.pasos[]` | Sí | Media | MOCK. Material de consulta: no valida ni completa nada |
 | CAMPO-DATA-051 | Materiales | Recepción | Acta del kit, quién lo despachó y a qué hora | Acta #K-2024-094 · M. Morales | estructura | Inventario de Dexter | `kit.acta`, `kit.despachado_por` | Sí | Media | MOCK |
 | CAMPO-DATA-052 | Materiales | Serializado | MAC del equipo, cómo llegó y en qué estado | 48:57:54:A9:B0:C1 · Validado OLT | estructura | Inventario de Dexter | `equipo.mac`, `.estado_previo` | Sí | Media | MOCK |
-| CAMPO-DATA-015 | Detalle | Estado de validación | Si el supervisor lo aprobó o lo devolvió | — | enum | **Ya existe en el backend** | `estado_validacion` | No (falta guardarlo en el teléfono) | Alta | REAL DISPONIBLE, sin consumir |
-| CAMPO-DATA-016 | Trabajo, Detalle | Ubicación del cliente | Coordenadas para navegar | — | decimal | **Ya existe en el backend** | `cliente.lat`, `cliente.lng` | No (falta guardarlo en el teléfono) | Media | REAL DISPONIBLE, sin consumir |
-| CAMPO-DATA-017 | Detalle | Cabecera | Cuándo se inició y cuándo se completó | — | fecha y hora | **Ya existe en el backend** | `iniciada_en`, `completada_campo_en` | No (falta guardarlo en el teléfono) | Baja | REAL DISPONIBLE, sin consumir |
+| CAMPO-DATA-015 | Detalle | Estado de validación | Si el supervisor lo aprobó o lo devolvió | — | enum | **Ya existe en el backend** | `estado_validacion` | No | Alta | **YA CONSUMIDO.** Columna en `local_ordenes` y en pantalla; el doc lo listaba como pendiente hasta el 06/11/2026 |
+| CAMPO-DATA-016 | Trabajo, Detalle | Ubicación del cliente | Coordenadas para navegar | — | decimal | **Ya existe en el backend** | `cliente.lat`, `cliente.lng` | No | Media | **YA CONSUMIDO.** Columnas `cliente_lat`/`cliente_lng` en `local_ordenes`; el doc lo listaba como pendiente hasta el 06/11/2026 |
+| CAMPO-DATA-017 | Detalle | Cabecera | Cuándo se inició y cuándo se completó | — | fecha y hora | **Ya existe en el backend** | `iniciada_en`, `completada_campo_en` | No | Baja | **YA CONSUMIDO.** Columnas `iniciada_en`/`completada_campo_en`; el doc lo listaba como pendiente hasta el 06/11/2026 |
 
+
+
+## Este documento se desactualiza, y eso cuesta (06/11/2026)
+
+Tres filas decían «REAL DISPONIBLE, sin consumir» —CAMPO-DATA-015, 016 y 017—
+y las tres estaban consumidas desde antes: columnas en `local_ordenes` y
+widgets dibujándolas. Se descubrió al armar un plan de trabajo **leyendo esta
+tabla**, que mandó a construir algo que ya existía.
+
+La tabla no es la fuente de verdad de lo que falta: el código lo es. Antes de
+tomar una fila de acá como pendiente, se verifica con un `grep` del campo
+esperado en `lib/` —fuera de `lib/demo/`—, que es lo que separa «existe» de
+«solo existe como dato de ejemplo». Al cerrar un ítem, se marca acá en el
+mismo cambio; dejarlo para después es exactamente cómo se llegó a esto.
 
 ## Una corrección de la paleta (22/09/2026)
 

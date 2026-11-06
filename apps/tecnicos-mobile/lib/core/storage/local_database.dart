@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 26,
+      version: 27,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -208,6 +208,21 @@ class LocalDatabase {
 
     // v26: las novedades de la cuadrilla (30/10/2026): «se pinchó la llanta».
     // Aditiva: una tabla nueva, vacía.
+    // v27: CUANDO FUE LA ULTIMA VEZ QUE EL SERVIDOR CONTESTO
+    // (CAMPO-DATA-036, 06/11/2026).
+    //
+    // La cola sabia CUANTO falta por enviar y no SI alguna vez llego. Con la
+    // pastilla en «Pendiente · sin conexion», el tecnico no podia distinguir
+    // «hace dos minutos que no sube» de «no sube desde ayer», y las dos cosas
+    // se deciden distinto: la primera se espera, la segunda se reporta.
+    //
+    // Tabla propia y no una columna de `local_jornada`: esto no es de la
+    // jornada --sobrevive a cerrarla y a abrir otra-- sino del par
+    // (empresa, persona) en este telefono.
+    if (oldVersion < 27) {
+      await _crearMarcaDeSincronizacion(db);
+    }
+
     if (oldVersion < 26) {
       await _crearColaDeNovedades(db);
     }
@@ -806,6 +821,29 @@ class LocalDatabase {
   /// encolarla, y la fila no se borra al subir — el técnico ve lo que avisó.
   /// «Ya seguí» también se encola (`resolver`): sin señal se cierra igual en el
   /// teléfono, y sube cuando haya.
+  /// Cuando el servidor contesto por ultima vez (CAMPO-DATA-036).
+  ///
+  /// UN SOLO INSTANTE, Y ES EL DEL EFECTO. No se escribe al empezar una
+  /// pasada ni al terminarla: se escribe en el unico punto donde
+  /// `sync_queue_service` ya decidio que el servidor respondio --el mismo
+  /// lugar que desde el 28/10/2026 decide si se puede decir «Sincronizado»--.
+  /// Si se escribiera antes, diria que hubo contacto cuando no lo hubo, que
+  /// es justo la mentira que este dato viene a tapar.
+  ///
+  /// Milisegundos de epoch: el instante lo pone ESTE telefono con su reloj,
+  /// asi que su zona se conoce por construccion y no hay que adivinarla como
+  /// en `MomentoLeido`.
+  static Future<void> _crearMarcaDeSincronizacion(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_sincronizacion (
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        servidor_contesto_en INTEGER,
+        PRIMARY KEY (org_id, profile_id)
+      )
+    ''');
+  }
+
   static Future<void> _crearColaDeNovedades(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS cola_novedades (
@@ -1174,6 +1212,7 @@ class LocalDatabase {
     await _crearColaDeNovedades(db);
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
+    await _crearMarcaDeSincronizacion(db);
 
     // Índices para optimizar consultas por tenant/usuario
     await db.execute(
@@ -1803,6 +1842,48 @@ class LocalDatabase {
       [nextAttemptAt, errorMensaje, id, orgId, profileId],
     );
     _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_mutaciones');
+  }
+
+  /// Deja escrito que el servidor contesto en [cuando].
+  ///
+  /// Sobrescribe: lo que interesa es la ULTIMA vez, no el historial.
+  Future<void> marcarServidorContesto({
+    required String orgId,
+    required String profileId,
+    required DateTime cuando,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'local_sincronizacion',
+      <String, Object?>{
+        'org_id': orgId,
+        'profile_id': profileId,
+        'servidor_contesto_en': cuando.millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// La ultima vez que el servidor contesto, o `null` si nunca contesto.
+  ///
+  /// `null` NO es un error ni un cero: es «todavia no se sabe», y quien lo
+  /// muestre tiene que escribir algo distinto en vez de inventar una hora.
+  Future<DateTime?> servidorContestoEn({
+    required String orgId,
+    required String profileId,
+  }) async {
+    final db = await database;
+    final List<Map<String, Object?>> filas = await db.query(
+      'local_sincronizacion',
+      columns: <String>['servidor_contesto_en'],
+      where: 'org_id = ? AND profile_id = ?',
+      whereArgs: <Object?>[orgId, profileId],
+      limit: 1,
+    );
+    if (filas.isEmpty) return null;
+    final Object? ms = filas.first['servidor_contesto_en'];
+    if (ms is! int) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
   }
 
   Future<Map<String, int>> getSyncCounts({

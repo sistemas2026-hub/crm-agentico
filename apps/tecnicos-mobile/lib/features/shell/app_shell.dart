@@ -817,7 +817,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
           DexterSyncStrip(
             estado: estadoSync,
-            frase: SyncPresentacion.fraseFranja(_resumen),
+            frase: SyncPresentacion.fraseFranja(_resumen, ahora: DateTime.now()),
             // El texto corto del diseño ("Cola de datos: N cambios locales")
             // solo cuando hay algo sin enviar y nada en conflicto. Si hay un
             // conflicto o no hay conexión, se dice eso, que importa más.

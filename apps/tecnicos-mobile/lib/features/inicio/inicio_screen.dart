@@ -1051,7 +1051,7 @@ class _InicioScreenState extends State<InicioScreen> {
                       ),
                     ),
                     Text(
-                      SyncPresentacion.fraseFranja(sync),
+                      SyncPresentacion.fraseFranja(sync, ahora: DateTime.now()),
                       style: AppTypography.cuerpoChico,
                     ),
                   ],
