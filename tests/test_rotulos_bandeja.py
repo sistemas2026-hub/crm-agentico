@@ -92,7 +92,7 @@ reales = (api._config_de, editor.guardar_rotulos_bandeja,
           api.olvidar_config)
 api._config_de = _config_de
 editor.guardar_rotulos_bandeja = _guardar
-api.persistencia.ultima_actividad = lambda tenant, canal=None: []
+api.persistencia.ultima_actividad = lambda tenant, canal=None, cerradas_dias=None: []
 api.persistencia.salud_canal_whatsapp = lambda tenant: None
 api.olvidar_config = lambda tenant: None
 

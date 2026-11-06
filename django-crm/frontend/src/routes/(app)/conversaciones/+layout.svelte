@@ -375,7 +375,8 @@
     { id: 'en-atencion', label: 'En atención', n: cuenta.n['en-atencion'], titulo: CUENTA_CHATS },
     { id: 'lleva-ia', label: 'Lleva la IA', n: cuenta.n['lleva-ia'],
       titulo: 'Chats abiertos que la IA contesta sola: nadie los pidió ni los tomó' },
-    { id: 'resueltas', label: 'Resueltas', n: cuenta.n.resueltas, titulo: CUENTA_CHATS },
+    { id: 'resueltas', label: 'Resueltas', n: cuenta.n.resueltas,
+      titulo: CUENTA_CHATS + (data.cerradas_dias ? `. Solo las de los últimos ${data.cerradas_dias} días` : '') },
     { id: 'todas', label: 'Todos', n: cuenta.n.todas, titulo: CUENTA_CHATS }
   ]);
   /* La frase de arriba de la columna. Los mismos dos números que ya mostraba

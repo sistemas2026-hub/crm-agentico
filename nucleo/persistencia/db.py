@@ -672,7 +672,8 @@ def actualizar_contenido_mensaje(tenant: str, mensaje_id: str, contenido: str) -
             (contenido, mensaje_id, org))
 
 
-def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
+def ultima_actividad(tenant: str, canal: str | None = None,
+                     cerradas_dias: int | None = None) -> list[dict]:
     """
     Una fila por conversacion: usuario_externo + cuando fue la ultima vez
     que se le escribio o respondio. Insumo del detector de seguimientos y de
@@ -696,6 +697,13 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
 
     'actualizado_en' viene como datetime con zona horaria, no como texto:
     es timestamptz en la base y quien consume ya no tiene que parsearlo.
+
+    'cerradas_dias': acota las CERRADAS a las que se movieron en esos dias.
+    Las abiertas entran siempre, sin importar su edad. None (lo que usan el
+    detector de seguimientos y el resto) = todas. Existe porque la consulta
+    cuesta cuatro subconsultas por conversacion y la bandeja la repite cada
+    8 s: sin tope, el costo crece con TODO el historial de la empresa y no
+    con lo que hay abierto hoy.
 
     'id_cliente'/'nombre_cliente' (ver supabase/202608131433_identidad_conversacion.sql)
     son NULL hasta que _ejecutar_confirmacion verifica al cliente -- antes de
@@ -795,19 +803,24 @@ def ultima_actividad(tenant: str, canal: str | None = None) -> list[dict]:
                     where conversation_id = c.id and rol = 'user'
                ) cliente on true"""
 
+    # El filtro va en el WHERE, ANTES de las subconsultas laterales: asi
+    # las cerradas viejas no pagan ni una.
+    donde, params = ["c.organization_id = %s"], []
+    if canal:
+        donde.append("c.canal = %s")
+    if cerradas_dias is not None:
+        donde.append("(c.estado <> 'cerrada' or c.actualizado_en > now() - make_interval(days => %s))")
     with sesion(tenant) as (cur, org):
+        params.append(org)
         if canal:
-            cur.execute(
-                f"""select {columnas} {desde}
-                    where c.organization_id = %s and c.canal = %s
-                    order by c.actualizado_en desc""",
-                (org, canal))
-        else:
-            cur.execute(
-                f"""select {columnas} {desde}
-                    where c.organization_id = %s
-                    order by c.actualizado_en desc""",
-                (org,))
+            params.append(canal)
+        if cerradas_dias is not None:
+            params.append(int(cerradas_dias))
+        cur.execute(
+            f"""select {columnas} {desde}
+                where {' and '.join(donde)}
+                order by c.actualizado_en desc""",
+            tuple(params))
         return [dict(f) for f in cur.fetchall()]
 
 
