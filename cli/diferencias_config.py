@@ -352,7 +352,12 @@ def main() -> None:
         print(f"[FALLA] {pendientes} diferencia(s) que el repo declara y la base "
               f"no tiene. Si son cambios que faltan aplicar, se aplican; si son "
               f"ediciones de la interfaz, el YAML esta viejo "
-              f"(cli/cargar_config.py {args.tenant} --exportar).")
+              f"(py -3.13 cli/cargar_config.py --exportar {args.tenant}).")
+        #  LA BANDERA VA PRIMERO. Estaba al reves y el comando fallaba con
+        #  `FileNotFoundError: rapilink`: `__main__` compara `args[0]` con
+        #  '--exportar' y toma `args[1]` como el slug, asi que invertido
+        #  interpreta el slug como la RUTA de un YAML. Lo copio alguien de
+        #  este mensaje y reventa en produccion (06/11/2026).
         raise SystemExit(1)
     print("[OK] La base tiene todo lo que el repo declara.")
 

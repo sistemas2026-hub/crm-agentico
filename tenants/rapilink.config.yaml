@@ -7362,6 +7362,27 @@ limites:
 #  el 19/10/2026 con lo que la empresa de verdad tiene.
 vision_habilitada: true
 
+#  LA MISMA HISTORIA, OTRA VEZ  --  06/11/2026
+#
+#  Estas dos nacieron el 31/10 con la inspeccion visual de evidencias, se
+#  encendieron en produccion desde la interfaz, y nunca bajaron al archivo.
+#  `diferencias_config.py` las reporto en la direccion peligrosa --"el repo lo
+#  declara y la base no dice lo mismo"-- igual que paso con `vision_habilitada`
+#  el 19/10: el archivo decia 'false', la base 'true', y cargar el archivo las
+#  habria APAGADO sin que nadie lo pidiera.
+#
+#  Apagadas, las fotos se siguen guardando y el asistente sigue contestando;
+#  lo unico que no pasa es que alguien las mire. Por eso el sintoma de
+#  apagarlas por accidente seria invisible.
+vision_evidencias_campo: true
+vision_asistente_interno: true
+
+#  Cuanto puede tardar alguien en TOMAR una conversacion antes de que la
+#  pantalla lo marque. 0 = sin objetivo, y entonces no se dibuja cuenta
+#  regresiva. Produccion tiene 48 desde antes del 06/11/2026 y el archivo
+#  tenia el default; se alinea por el mismo motivo que las de arriba.
+sla_toma_minutos: 48
+
 evaluacion:
   minimo_acierto_pct: 90.0
   # CERO, no "bajo". gemma3:4b respondia bien e inventaba cliente, plan y
@@ -7544,7 +7565,10 @@ mensajes_automaticos:
   # 30 min despues de cerrar un caso que vino de un chat. Se enciende cuando
   # este la tabla asistente.encuestas_whatsapp (migracion 202610281600).
   encuesta_cierre:
-    activo: false
+    #  Encendida en produccion desde antes del 06/11/2026; el archivo tenia
+    #  'false' y cargarlo la habria apagado. Mismo caso que las banderas de
+    #  vision de mas arriba.
+    activo: true
     plantilla: encuesta_satisfaccion
     datos: [cliente_nombre]
 
