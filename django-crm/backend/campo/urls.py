@@ -3,6 +3,7 @@
 
 from django.urls import path
 
+from campo import analisis_para_el_tecnico
 from campo import (
     avisos_views,
     configuracion_de_seguimiento_views,
@@ -219,5 +220,11 @@ urlpatterns = [
     path("evidencias/<uid:pk>/subir/", views.SubirEvidenciaDirectoView.as_view(), name="evidencia_subir"),
     path("evidencias/<uid:pk>/confirmar/", views.ConfirmarEvidenciaView.as_view(), name="evidencia_confirmar"),
     path("evidencias/<uid:pk>/url/", views.ObtenerUrlEvidenciaView.as_view(), name="evidencia_url"),
+    #  Lo que la mirada concluyo de la foto, para la app del tecnico
+    #  (06/11/2026). Sin esto el analisis solo lo lee el Supervisor, horas
+    #  despues, cuando el tecnico ya se fue de la casa del cliente.
+    path("evidencias/<uid:pk>/analisis/",
+         analisis_para_el_tecnico.AnalisisDeLaFotoView.as_view(),
+         name="evidencia_analisis"),
     path("evidencias/<uid:pk>/archivo/", views.ArchivoDeEvidenciaView.as_view(), name="evidencia_archivo"),
 ]
