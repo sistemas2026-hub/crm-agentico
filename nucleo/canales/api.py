@@ -5668,8 +5668,28 @@ def interno_analizar_evidencia():
     #  NO ESTA MEDIDO que las fotos de hoy traigan GPS: la app recodifica en
     #  el telefono y probablemente ya lo pierda. Se hace igual porque es una
     #  linea, cuesta menos y la unica ruta de subida escribe lo que le manden.
+    #  CALIDAD ELEGIBLE, PARA PODER MEDIRLA  --  06/11/2026
+    #
+    #  El usuario reporto fotos marcadas "no es lo que se pidio" que SI lo
+    #  eran. Hipotesis a medir: la pantalla de un medidor, recomprimida dos
+    #  veces, deja de ser legible para el modelo. Sin estos dos parametros no
+    #  hay forma de comparar la misma foto con y sin degradar, y la hipotesis
+    #  se queda en opinion.
+    #
+    #  Vacios = los de siempre: esta ruta se comporta igual que antes mientras
+    #  nadie los mande. Si la medicion confirma, esta es tambien la palanca
+    #  del arreglo -- subir la calidad SOLO para evidencias de campo, sin
+    #  tocar lo que llega por WhatsApp.
+    def _entero(nombre: str) -> int:
+        try:
+            return max(0, int(request.form.get(nombre) or 0))
+        except (TypeError, ValueError):
+            return 0
+
     try:
-        listo, _mime = media.preparar(contenido, "image", "image/jpeg")
+        listo, _mime = media.preparar(contenido, "image", "image/jpeg",
+                                      lado=_entero("lado"),
+                                      calidad=_entero("calidad"))
     except Exception:                                         # noqa: BLE001
         #  Si no se pudo recodificar NO se manda el original: el EXIF es
         #  justamente lo que esto viene a sacar.

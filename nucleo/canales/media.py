@@ -34,7 +34,8 @@ LADO_MAXIMO = 1600
 CALIDAD_JPEG = 80
 
 
-def comprimir_imagen(contenido: bytes, mime: str = "") -> tuple[bytes, str]:
+def comprimir_imagen(contenido: bytes, mime: str = "", *,
+                     lado: int = 0, calidad: int = 0) -> tuple[bytes, str]:
     """
     (bytes, mime) listos para guardar.
 
@@ -42,6 +43,16 @@ def comprimir_imagen(contenido: bytes, mime: str = "") -> tuple[bytes, str]:
     ya es chica la deja igual o mas pesada, y encima le agrega una recodificacion
     que solo pierde calidad.
     """
+    #  `lado` y `calidad` en 0 = los de siempre. Existen para UN caso
+    #  medido: la pantalla de un medidor optico fotografiada tiene numeros
+    #  chicos y poco contraste, y dos recompresiones encadenadas --85 en el
+    #  telefono, 80 aca-- pueden dejarla ilegible para el modelo que la mira.
+    #  Una etiqueta de router sobrevive; una lectura de -21.4 dBm, no siempre.
+    #
+    #  Quien llama elige. El default no cambia: lo que pasaba por aca antes
+    #  del 06/11/2026 sigue pasando igual.
+    lado = lado or LADO_MAXIMO
+    calidad = calidad or CALIDAD_JPEG
     try:
         from PIL import Image
     except ImportError:
@@ -65,13 +76,13 @@ def comprimir_imagen(contenido: bytes, mime: str = "") -> tuple[bytes, str]:
         elif img.mode != "RGB":
             img = img.convert("RGB")
 
-        if max(img.size) > LADO_MAXIMO:
-            img.thumbnail((LADO_MAXIMO, LADO_MAXIMO), Image.LANCZOS)
+        if max(img.size) > lado:
+            img.thumbnail((lado, lado), Image.LANCZOS)
 
         buffer = io.BytesIO()
         # optimize + progressive: dos pasadas mas al guardar, ~10% menos peso y
         # la foto se ve entera antes al cargarla en la bandeja.
-        img.save(buffer, format="JPEG", quality=CALIDAD_JPEG,
+        img.save(buffer, format="JPEG", quality=calidad,
                  optimize=True, progressive=True)
         comprimido = buffer.getvalue()
     except Exception:
@@ -82,7 +93,8 @@ def comprimir_imagen(contenido: bytes, mime: str = "") -> tuple[bytes, str]:
     return comprimido, "image/jpeg"
 
 
-def preparar(contenido: bytes, tipo: str, mime: str = "") -> tuple[bytes, str]:
+def preparar(contenido: bytes, tipo: str, mime: str = "", *,
+             lado: int = 0, calidad: int = 0) -> tuple[bytes, str]:
     """
     Aplica lo que corresponda segun el tipo.
 
@@ -91,5 +103,5 @@ def preparar(contenido: bytes, tipo: str, mime: str = "") -> tuple[bytes, str]:
     y ahorra poco, porque WhatsApp ya lo manda en opus. Se guarda tal cual.
     """
     if tipo == "image":
-        return comprimir_imagen(contenido, mime)
+        return comprimir_imagen(contenido, mime, lado=lado, calidad=calidad)
     return contenido, mime
