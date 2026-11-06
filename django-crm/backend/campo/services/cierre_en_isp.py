@@ -55,14 +55,81 @@ def _tapar(texto) -> str:
     return tapar(str(texto or ""))
 
 
+def _material_consumido(orden) -> list[str]:
+    """Las lineas de «MATERIAL Y CANTIDAD», como las escribe el tecnico hoy.
+
+    FORMATO DE ELLOS, NO UNO NUEVO (06/11/2026). El usuario mostro como queda
+    hoy un ticket de WispHub escrito a mano: el nombre del material en una
+    linea y la cantidad en la siguiente. Quien lo lee ya sabe leer eso; un
+    formato distinto obliga a aprender otro.
+
+    Nunca levanta: un reporte sin la seccion de material es menos util que uno
+    con ella, pero perder el reporte entero porque el inventario no contesto
+    seria peor.
+    """
+    try:
+        from campo.services.materiales_de_orden import materiales_de_orden
+
+        consumido = (materiales_de_orden(orden) or {}).get("consumido") or []
+    except Exception:                                            # noqa: BLE001
+        logger.warning("cierre en el ISP: no se pudo leer el material")
+        return []
+
+    lineas: list[str] = []
+    for linea in consumido:
+        if not isinstance(linea, dict):
+            continue
+        material = linea.get("material") or {}
+        nombre = str(material.get("nombre") or material.get("codigo") or "").strip()
+        if not nombre:
+            continue
+        cantidad = str(linea.get("cantidad") or "").strip() or "0"
+        #  La cantidad sin decimales cuando es entera: «1», no «1.000».
+        if cantidad.replace(".", "", 1).isdigit() and "." in cantidad:
+            try:
+                n = float(cantidad)
+                cantidad = str(int(n)) if n == int(n) else cantidad
+            except ValueError:
+                pass
+        lineas.append(_tapar(nombre))
+        lineas.append(cantidad)
+        serie = str(linea.get("serie") or "").strip()
+        if serie:
+            lineas.append(f"Serie: {_tapar(serie)}")
+    return lineas
+
+
 def resumen_de(orden, nombre_de_quien_valida: str,
                encabezado: str = "") -> str:
-    """Lo que queda escrito en el ticket: que se hizo, sin datos personales.
+    """Lo que queda escrito en el ticket del ISP: que se hizo, sin datos
+    personales.
 
-    Sale de la PLANTILLA de la orden, no de todo `orden.datos`: solo lo que el
-    tecnico respondio a una pregunta declarada, con el titulo de esa pregunta.
-    Cada valor pasa por `tapar` -- un «llamar al 300...» escrito en un texto
-    libre no tiene por que terminar en el ticket.
+    CON LA FORMA QUE ELLOS YA USAN  --  06/11/2026
+    ----------------------------------------------
+    El usuario mostro un ticket real escrito a mano por un tecnico:
+
+        Observaciones: se realiza instalacion, ya tenia fibra...
+        VALOR CANCELADO POR EL USUARIO=
+        Verificacion OZMAP: si
+        Niveles de potencia: -21-26 dbm
+        MATERIAL Y CANTIDAD
+        ONU CATV
+        1
+
+    Antes esto escribia «- Titulo: valor» con guiones y sin material. Se
+    parecia, pero no era lo mismo, y lo lee gente que ya tiene el ojo hecho al
+    formato de arriba.
+
+    LOS ROTULOS SALEN DE LA PLANTILLA, NO DEL CODIGO (decision del usuario,
+    06/11/2026). «VALOR CANCELADO POR EL USUARIO» o «Verificacion OZMAP» son
+    campos que la empresa define en /supervisor-noc/plantillas; si manana
+    agrega uno o le cambia el nombre, el ticket lo refleja sin tocar nada. La
+    alternativa --fijarlos aca-- habria salido identica hoy y habria dejado el
+    formato de UNA empresa escrito en el codigo de todas.
+
+    Solo lo que el tecnico respondio a una pregunta declarada, con el titulo
+    de esa pregunta. Cada valor pasa por `tapar`: un «llamar al 300...»
+    escrito en un texto libre no tiene por que terminar en el ticket.
     """
     version = orden.tipo_trabajo_version
     esquema = (version.esquema or {}) if version else {}
@@ -71,9 +138,6 @@ def resumen_de(orden, nombre_de_quien_valida: str,
 
     #  Quien valido NO va aca: el motor antepone su nombre al texto
     #  (`operativo._firmado`), y ponerlo dos veces solo lo repite.
-    #  `encabezado` para el reporte del tecnico, que NO esta validado por
-    #  nadie todavia: escribir "validado en Dexter" ahi afirmaria lo contrario
-    #  de lo que paso. Sin el, el de siempre.
     lineas = [encabezado.strip() or
               f"Trabajo de campo OT #{orden.numero} ({tipo}) validado en Dexter."]
     for campo in esquema.get("campos") or []:
@@ -84,15 +148,24 @@ def resumen_de(orden, nombre_de_quien_valida: str,
             continue
         titulo = campo.get("titulo") or campo.get("id")
         unidad = f" {campo['unidad']}" if campo.get("unidad") else ""
-        lineas.append(f"- {titulo}: {_tapar(valor)}{unidad}")
+        #  SIN el guion de antes: «Titulo: valor», como en el ticket escrito a
+        #  mano. El guion hacia que se leyera como una lista de sistema.
+        lineas.append(f"{titulo}: {_tapar(valor)}{unidad}")
         if len(lineas) > MAX_LINEAS:
-            lineas.append("- (sigue en Dexter)")
+            lineas.append("(sigue en Dexter)")
             break
+
+    material = _material_consumido(orden)
+    if material:
+        lineas.append("")
+        lineas.append("MATERIAL Y CANTIDAD")
+        lineas.extend(material)
+
     fotos = orden.evidencias.count() if hasattr(orden, "evidencias") else 0
     if fotos:
+        lineas.append("")
         lineas.append(f"Evidencias en Dexter: {fotos}.")
     return "\n".join(lineas)
-
 
 def numero_de_ticket(contexto) -> str:
     """El numero del ticket del ISP que guarda la ficha de la orden, o "".
@@ -221,12 +294,19 @@ def _cerrar(orden, profile, ruta: str = "cerrar-ticket", revision: str = "",
     user = getattr(profile, "user", None)
     quien = (getattr(user, "name", "") or "").strip() or "Oficina de operaciones"
     #  La ruta del Supervisor no acepta `actor`: quien cierra no lo elige el CRM.
-    #  `extra`: QUE se reviso, cuando hay revision (06/11/2026). Lo calcula
-    #  quien llama --`nota_al_isp.texto_de_la_revision`-- y no este modulo, para
-    #  que `cierre_en_isp` no importe a `nota_al_isp`, que ya lo importa a el.
-    texto_del_ticket = resumen_de(orden, quien)
-    if (extra or "").strip():
-        texto_del_ticket = f"{texto_del_ticket}\n{extra.strip()}"
+    #  EL CIERRE YA NO REPITE EL REPORTE  --  06/11/2026, decision del usuario
+    #
+    #  Antes escribia `resumen_de` entero porque era la UNICA escritura que
+    #  llegaba al ticket. Desde que el tecnico manda su reporte al completar
+    #  (`nota_al_isp.anotar_reporte_del_tecnico`), repetirlo en el cierre
+    #  duplica en el ticket lo que ya esta tres respuestas mas arriba.
+    #
+    #  Asi que cuando quien llama trae su propio texto --«SE VALIDA TICKET» mas
+    #  que se reviso, que es lo que una persona escribe hoy a mano-- ese es el
+    #  texto. Sin el, el de siempre: una instalacion vieja que se cierre por un
+    #  camino que no calcula revision sigue dejando el reporte completo, que es
+    #  mejor que no dejar nada.
+    texto_del_ticket = extra.strip() if (extra or "").strip() else resumen_de(orden, quien)
     cuerpo_pedido = {"ticket": ticket, "texto": texto_del_ticket}
     if ruta == "cerrar-ticket":
         cuerpo_pedido["actor"] = quien

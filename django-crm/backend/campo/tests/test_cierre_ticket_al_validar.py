@@ -106,10 +106,27 @@ def test_a_aprobar_pide_el_cierre_con_ticket_quien_y_resumen_tapado(
     assert admin_user.email not in str(cuerpo)
     assert "@" not in cuerpo["actor"]
     texto = cuerpo["texto"]
-    assert "OT #7001" in texto and "Correctivo de fibra" in texto
-    assert "Potencia al salir: -19.5 dBm" in texto
-    assert "cambio de conector" in texto
-    assert "3001234567" not in texto                         # tapado
+    #  DESDE EL 06/11/2026 EL CIERRE ESCRIBE CORTO, no el reporte entero.
+    #
+    #  Antes esta prueba exigia «OT #7001», la potencia y el texto libre del
+    #  tecnico, porque el cierre era la UNICA escritura que llegaba al ticket.
+    #  Ahora el tecnico manda su reporte al completar
+    #  (`nota_al_isp.anotar_reporte_del_tecnico`), asi que repetirlo dejaba el
+    #  mismo texto dos veces en el mismo ticket.
+    #
+    #  «SE VALIDA TICKET» es la frase que el supervisor escribe hoy a mano --
+    #  el usuario mostro un ticket real. La linea de revision es lo unico que
+    #  un cierre automatico agrega sobre uno humano: que se miro.
+    assert texto.startswith("SE VALIDA TICKET"), texto
+    assert "Revision:" in texto and "checklist" in texto
+    #  Y lo que NO puede volver: el reporte duplicado.
+    assert "Potencia al salir" not in texto, texto
+    assert "cambio de conector" not in texto, texto
+    #  El telefono que el tecnico escribio en el texto libre nunca llega al
+    #  ticket -- ahora porque ese texto no viaja, antes porque iba tapado. Se
+    #  afirma igual: el dia que el cierre vuelva a llevar texto del tecnico,
+    #  esto tiene que seguir siendo cierto.
+    assert "3001234567" not in texto
     assert EventoTrabajo.objects.filter(
         orden=orden, tipo=cierre_en_isp.EVENTO_CERRADO).count() == 1
 
@@ -148,6 +165,81 @@ def test_b_devolver_para_corregir_anota_pero_no_cierra(admin_client, orden):
     assert isinstance(cuerpo["vuelta"], int)
     #  Y el ticket del cliente nunca recibe el correo de nadie.
     assert "@" not in str(cuerpo)
+
+
+def test_formato_como_lo_escribe_un_tecnico_a_mano(orden):
+    """El texto tiene la forma del ticket real, no una propia.
+
+    EL FORMATO LO FIJO EL USUARIO MOSTRANDO UN TICKET  --  06/11/2026
+    -----------------------------------------------------------------
+    Hasta ese dia esto escribia «- Titulo: valor» con guiones. Se parecia al
+    formato que usan y no era el mismo, y lo lee gente que ya tiene el ojo
+    hecho al de abajo:
+
+        Observaciones: se realiza instalacion...
+        Niveles de potencia: -21-26 dbm
+        MATERIAL Y CANTIDAD
+        ONU CATV
+        1
+
+    Esta guarda afirma la FORMA, que es lo que se rompe sin que nadie lo note:
+    alguien vuelve a poner un guion, o cambia el orden, y el ticket sigue
+    saliendo -- solo que ilegible para quien lo lee todos los dias.
+    """
+    texto = cierre_en_isp.resumen_de(orden, "", encabezado="Reporte de campo")
+
+    assert texto.startswith("Reporte de campo")
+    #  «Titulo: valor», SIN guion delante. Es la diferencia que motivo el
+    #  cambio, asi que se afirma en los dos sentidos.
+    assert "Potencia al salir: -19.5 dBm" in texto
+    assert "- Potencia al salir" not in texto
+    assert "Que hizo: cambio de conector" in texto
+    #  Y lo que nunca puede aparecer: el telefono que el tecnico escribio
+    #  dentro del texto libre.
+    assert "3001234567" not in texto
+
+
+def test_el_cierre_no_repite_el_reporte_que_ya_escribio_el_tecnico(
+        orden, admin_profile):
+    """Con revision, el cierre escribe corto; sin ella, el reporte completo.
+
+    Antes el cierre mandaba `resumen_de` entero porque era la UNICA escritura
+    que llegaba al ticket. Desde que el tecnico manda su reporte al completar,
+    repetirlo deja el mismo texto dos veces en el mismo ticket.
+
+    El caso SIN revision sigue escribiendo el reporte a proposito: una orden
+    que se cierre por un camino que no calcula revision no puede quedarse sin
+    dejar nada.
+    """
+    from campo.services.nota_al_isp import texto_de_la_revision
+
+    revision = {"veredicto": "cerrar", "puntos": [
+        {"clave": "checklist", "ok": True},
+        {"clave": "reporte", "ok": True},
+        {"clave": "fotos", "ok": None},
+    ]}
+    corto = texto_de_la_revision(revision)
+    #  La frase que su equipo ya reconoce, no una inventada.
+    assert corto.startswith("SE VALIDA TICKET")
+    assert "checklist ok" in corto and "fotos sin datos" in corto
+
+    with mock.patch("requests.post", return_value=_Respuesta()) as post:
+        cierre_en_isp.cerrar_ticket_al_validar(orden, admin_profile,
+                                               extra=corto)
+    enviado = post.call_args.kwargs["json"]["texto"]
+    assert "SE VALIDA TICKET" in enviado
+    #  LA MITAD QUE IMPORTA: no repite lo que el tecnico ya escribio.
+    assert "Potencia al salir" not in enviado, enviado
+    assert "cambio de conector" not in enviado, enviado
+
+
+def test_sin_revision_el_cierre_sigue_dejando_el_reporte(orden, admin_profile):
+    """Sin `extra`, la conducta de antes: mejor el reporte que nada."""
+    with mock.patch("requests.post", return_value=_Respuesta()) as post:
+        cierre_en_isp.cerrar_ticket_al_validar(orden, admin_profile)
+    enviado = post.call_args.kwargs["json"]["texto"]
+    assert "Potencia al salir: -19.5 dBm" in enviado
+    assert "SE VALIDA TICKET" not in enviado
 
 
 def test_c_no_lo_pide_dos_veces_para_la_misma_orden(orden, admin_profile):

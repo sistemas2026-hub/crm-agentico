@@ -301,16 +301,27 @@ def anotar_devolucion(orden, *, requisitos=None, observacion: str = "",
 # ---------------------------------------------------------------------------
 
 def texto_de_la_revision(foto) -> str:
-    """Las lineas que describen QUE se reviso, para sumarlas al cierre.
+    """Lo que el Supervisor escribe en el ticket al validar y cerrar.
 
-    Devuelve `''` cuando no hay revision -- y entonces el cierre escribe lo
-    que escribia antes, sin inventar que alguien reviso algo.
+    COMO LO ESCRIBE UNA PERSONA HOY  --  06/11/2026
+    -----------------------------------------------
+    El usuario mostro un ticket real: el supervisor valida con dos palabras,
+    "SE VALIDA TICKET", y nada mas. Esa es la frase que su equipo reconoce, y
+    una validacion del Supervisor IA no tiene por que leerse distinta de una
+    humana -- quien revisa el ticket meses despues no deberia tener que
+    aprender dos formatos para el mismo hecho.
+
+    Se le suma UNA linea con los puntos que la revision miro, por decision del
+    usuario: la frase sola no deja rastro de QUE se valido, y eso es lo unico
+    que un cierre automatico puede ofrecer que uno a mano no.
 
     SOLO LA ESTRUCTURA, NUNCA EL TEXTO DE CADA PUNTO. Cada punto puede traer
     el detalle de una medicion o de un material; lo que hace falta en el
-    ticket es QUE se miro y como salio, no el contenido. Menos superficie para
-    que un dato del cliente se escape a un sistema de terceros, y mas corto
-    para quien lo lee.
+    ticket es QUE se miro y como salio. Menos superficie para que un dato del
+    cliente se escape a un sistema de terceros, y mas corto para quien lo lee.
+
+    Devuelve `''` cuando no hay revision -- y entonces el cierre escribe el
+    reporte completo, como hacia antes, en vez de afirmar que alguien reviso.
     """
     if not isinstance(foto, dict):
         return ""
@@ -326,13 +337,7 @@ def texto_de_la_revision(foto) -> str:
         clave = str(p.get("clave") or "").strip()
         if not clave:
             continue
-        partes.append(f"{clave}: {como.get(p.get('ok'), 'sin datos')}")
+        partes.append(f"{clave} {como.get(p.get('ok'), 'sin datos')}")
     if not partes:
         return ""
-    lineas = ["Revision del Supervisor: " + "; ".join(partes) + "."]
-    #  El veredicto viene de `TEXTOS`, que es texto fijo del codigo: no hay
-    #  nada de nadie ahi adentro.
-    veredicto = str(foto.get("texto") or "").strip()
-    if veredicto:
-        lineas.append(veredicto)
-    return "\n".join(lineas)
+    return ("SE VALIDA TICKET" + '\n' + "Revision: " + "; ".join(partes))
