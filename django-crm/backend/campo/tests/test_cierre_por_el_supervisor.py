@@ -761,6 +761,72 @@ def test_a1_la_marca_del_modelo_manda_sobre_las_palabras():
         "La foto está borrosa y no se puede determinar el serial. ATENCION: no") is False
 
 
+def test_a1b_la_foto_dice_si_ES_LO_QUE_SE_PIDIO():
+    """«Si piden foto del router y manda el TV no debe pasar» (06/11/2026).
+
+    VA APARTE DE `ATENCION` PORQUE SON DOS COSAS. «Se ve un cable suelto»
+    dice que el TRABAJO tiene un problema; «hay un televisor donde pedian el
+    router» dice que la FOTO esta mal. Una se arregla volviendo a la casa, la
+    otra sacando otra foto.
+    """
+    from campo.tasks import muestra_lo_pedido
+
+    assert muestra_lo_pedido(
+        "Se ve un router con tres luces verdes. MUESTRA: si") is True
+    assert muestra_lo_pedido(
+        "Se ve un televisor encendido. MUESTRA: no") is False
+
+
+def test_a1c_NO_SE_SABE_no_es_lo_mismo_que_NO():
+    """EL CASO QUE ROMPE UN `startswith` INGENUO, y por eso esta primero en el
+    codigo: «no se sabe» empieza con «no».
+
+    Confundirlos marcaria en rojo --«no es lo que se pidio»-- una foto que
+    quizas esta perfecta y solo salio oscura. El supervisor devolveria al
+    tecnico un trabajo bien hecho.
+    """
+    from campo.tasks import muestra_lo_pedido
+
+    assert muestra_lo_pedido(
+        "La imagen esta muy oscura. MUESTRA: no se sabe") is None
+    assert muestra_lo_pedido(
+        "Es un primer plano de un conector. MUESTRA: no se sabe") is None
+
+
+def test_a1d_SIN_LA_MARCA_no_se_sabe_y_NUNCA_es_un_no():
+    """La regla 12 le pide la marca SOLO cuando se le dijo que tenia que
+    mostrar la foto, y una plantilla sin instrucciones no se la dice.
+
+    Tratar esa ausencia como «no corresponde» marcaria en rojo cada foto de
+    cada plantilla que todavia no escribio sus instrucciones -- que hoy son
+    todas.
+    """
+    from campo.tasks import muestra_lo_pedido
+
+    assert muestra_lo_pedido("Se ve una ONT con tres luces verdes.") is None
+    assert muestra_lo_pedido("") is None
+    assert muestra_lo_pedido(None) is None
+
+
+def test_a1e_la_ULTIMA_marca_manda():
+    """Igual que `_pide_atencion`: si el modelo la escribio dos veces, la de
+    abajo es su conclusion."""
+    from campo.tasks import muestra_lo_pedido
+
+    assert muestra_lo_pedido(
+        "MUESTRA: no ... me corrijo, si se ve. MUESTRA: si") is True
+
+
+def test_a1f_una_respuesta_que_no_se_entiende_no_se_interpreta():
+    """Fail-closed hacia «no se sabe», que es lo que no acusa a nadie."""
+    from campo.tasks import muestra_lo_pedido
+
+    assert muestra_lo_pedido("MUESTRA: tal vez") is None
+    assert muestra_lo_pedido("MUESTRA:") is None
+    #  Y la palabra suelta en el parrafo no es la marca.
+    assert muestra_lo_pedido("La foto muestra un router.") is None
+
+
 def test_a2_sin_marca_cae_al_respaldo_y_el_respaldo_no_se_dispara_solo():
     """El modelo puede no escribir la marca: es guía, no garantía (PRD 7.4).
     Entonces manda la lista -- que ya no tiene las palabras que la propia

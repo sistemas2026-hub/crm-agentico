@@ -259,6 +259,20 @@ def _mime_de(contenido: bytes) -> str:
 
 #: LA MARCA QUE CIERRA EL ANALISIS DE UNA EVIDENCIA  --  05/11/2026
 #:
+#: LA FOTO ES LO QUE SE PIDIO, O NO (06/11/2026). El usuario: «si piden foto
+#: del router y manda el TV no debe pasar».
+#:
+#: VA APARTE DE `ATENCION` PORQUE SON DOS COSAS DISTINTAS, y mezclarlas le
+#: quita a cada una lo suyo: «se ve un cable suelto» dice que el TRABAJO tiene
+#: un problema; «hay un televisor donde pedian el router» dice que la FOTO
+#: esta mal. La primera se arregla volviendo a la casa; la segunda, sacando
+#: otra foto. El supervisor necesita distinguirlas de un vistazo.
+#:
+#: NO BLOQUEA NADA, y eso no cambia: la IA puede pedir atencion y nunca negar
+#: un cierre (ver `campo/inspeccion_visual.py`, decidido el 31/10/2026). Esto
+#: es una señal mas para quien mira.
+MARCA_MUESTRA = "muestra:"
+
 #: El modelo termina con "ATENCION: si" o "ATENCION: no", y eso es lo que el
 #: CRM lee para decidir si una persona tiene que mirar la foto
 #: (`campo/tasks.py::_pide_atencion`).
@@ -331,7 +345,15 @@ INSTRUCCION_EVIDENCIA = (
     "o si la foto no sirve como evidencia de lo que se pedia. Si lo unico "
     "que hiciste fue describir lo que hay, poné 'ATENCION: no'. Que algo "
     "este borroso o fuera de cuadro NO alcanza por si solo: decilo en el "
-    "parrafo y poné 'si' unicamente si por eso la foto no sirve."
+    "parrafo y poné 'si' unicamente si por eso la foto no sirve.\n"
+    "12. Si --y SOLO si-- te dijeron que tenia que mostrar esta foto, agregá "
+    "ANTES de esa linea otra sola que diga exactamente 'MUESTRA: si', "
+    "'MUESTRA: no' o 'MUESTRA: no se sabe'. 'no' es para cuando la imagen "
+    "muestra algo DISTINTO de lo que se pedia --pidieron el router y hay un "
+    "televisor--. 'no se sabe' es para cuando no se puede determinar: esta "
+    "borrosa, oscura, tapada, o es un primer plano del que no se deduce que "
+    "equipo es. Si no te dijeron que tenia que mostrar, NO escribas esta "
+    "linea."
 )
 
 

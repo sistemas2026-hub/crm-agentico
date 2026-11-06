@@ -166,6 +166,7 @@ def _evidencias_para_revisar(orden, esquema) -> list[dict]:
     `EvidenciaTrabajo.vuelta` y que `_fotos()`.
     """
     from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+    from campo.tasks import muestra_lo_pedido
 
     vuelta = getattr(orden, "vuelta", 1) or 1
     #  La ULTIMA por requisito: si el tecnico la rehizo, manda la de ahora.
@@ -200,6 +201,13 @@ def _evidencias_para_revisar(orden, esquema) -> list[dict]:
             "evidencia_id": str(ev.id) if ev else None,
             "analisis": (a.texto or "") if a else "",
             "pide_atencion": bool(a.pide_atencion) if a else False,
+            #  SI LA FOTO ES LO QUE SE PIDIO (06/11/2026): True / False /
+            #  None, y `None` significa "no se sabe", no "esta bien". Se
+            #  calcula del texto y NO se persiste: `AnalisisDeEvidencia` es
+            #  append-only y volver a leer el mismo texto con el criterio de
+            #  hoy es lo correcto -- mismo motivo por el que
+            #  `revision_del_cierre` no persiste su veredicto.
+            "muestra_lo_pedido": muestra_lo_pedido(a.texto) if a else None,
         })
     return salida
 

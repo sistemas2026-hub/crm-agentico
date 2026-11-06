@@ -33,6 +33,7 @@ const foto = (extra = {}) => ({
   evidencia_id: 'ev-1',
   analisis: '',
   pide_atencion: false,
+  muestra_lo_pedido: null,
   ...extra
 });
 
@@ -178,6 +179,38 @@ describe('las fotos, para poder compararlas', () => {
     expect(b).toContain('⚠');
     //  Y lo pedido sigue al lado: es lo que permite ver que NO coincide.
     expect(b).toContain('El router, con sus luces visibles.');
+  });
+
+  it('«NO es lo que se pidió» se dice APARTE del resto del análisis', () => {
+    //  Son dos cosas distintas y mezclarlas le quita a cada una lo suyo:
+    //  «se ve un cable suelto» dice que el TRABAJO tiene un problema; «hay un
+    //  televisor donde pedían el router» dice que la FOTO está mal. Una se
+    //  arregla volviendo a la casa, la otra sacando otra foto.
+    const b = html([
+      foto({ muestra_lo_pedido: false,
+             analisis: 'Se ve un televisor encendido.', pide_atencion: true })
+    ]);
+
+    expect(b).toContain('No es lo que se pidió');
+  });
+
+  it('«no se sabe» NO se muestra como si no correspondiera', () => {
+    //  `null` es "no se puede determinar" --borrosa, oscura, un primer
+    //  plano--, y tratarlo como `false` marcaría en rojo fotos que quizás
+    //  están bien. El texto del análisis ya dice qué pasó.
+    const b = html([
+      foto({ muestra_lo_pedido: null, analisis: 'La imagen está muy oscura.' })
+    ]);
+
+    expect(b).not.toContain('No es lo que se pidió');
+  });
+
+  it('una foto que SÍ corresponde no lleva ninguna marca roja', () => {
+    const b = html([
+      foto({ muestra_lo_pedido: true, analisis: 'Se ve el router con sus luces.' })
+    ]);
+
+    expect(b).not.toContain('No es lo que se pidió');
   });
 
   it('sin análisis no inventa un visto bueno', () => {

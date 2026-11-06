@@ -100,6 +100,14 @@
                 <!-- LO QUE LA IA VIO, como dato y nunca como veredicto: puede
                      pedir atención, nunca negar un cierre. Quien decide sigue
                      siendo quien mira. -->
+                <!-- NO ES LO QUE SE PIDIO: va primero y aparte del resto
+                     del analisis. «Se ve un cable suelto» dice que el TRABAJO
+                     tiene un problema; «hay un televisor donde pedian el
+                     router» dice que la FOTO esta mal. Una se arregla
+                     volviendo a la casa, la otra sacando otra foto. -->
+                {#if e.muestra_lo_pedido === false}
+                  <span class="rc-no-es">✗ No es lo que se pidió.</span>
+                {/if}
                 {#if e.analisis}
                   <span class="rc-ia" class:rc-ia-ojo={e.pide_atencion}>
                     {e.pide_atencion ? '⚠' : '·'} {e.analisis}
@@ -185,6 +193,9 @@
   .rc-no-llego { color: #b91c1c; font-weight: 600; }
   .rc-ia { color: var(--snoc-on-surface-variant, #666); }
   .rc-ia-ojo { color: #8a5300; }
+  /*  Mismo rojo que «No llegó»: las dos dicen que esa foto no sirve como
+      evidencia, por motivos distintos. */
+  .rc-no-es { color: #b91c1c; font-weight: 600; }
   .rc-punto-false { color: var(--snoc-error); font-weight: 600; }
   .rc-punto-null { color: #8a5300; }
   .rc-acciones { display: flex; flex-wrap: wrap; gap: 8px; }

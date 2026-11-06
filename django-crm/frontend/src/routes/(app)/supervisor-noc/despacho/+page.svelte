@@ -91,6 +91,24 @@
   let plantillaElegida = $state('');
 
   /**
+   * Las fotos que va a pedir la plantilla elegida.
+   *
+   * EL PEDIDO (06/11/2026): «el supervisor debe saber qué fotos pedir». La
+   * línea de abajo decía desde siempre «define qué anota y qué fotos saca el
+   * técnico» -- y no las nombraba, así que para saber cuáles había que abrir
+   * Plantillas en otra pestaña.
+   *
+   * VAN CON SU TÍTULO Y SI SON OBLIGATORIAS, no como un número: «3 fotos» no
+   * deja ver que una es la medición de potencia que este trabajo no necesita,
+   * y ese es el caso que lo originó. Con los títulos a la vista, quien
+   * despacha se da cuenta ahí mismo de que eligió la plantilla equivocada.
+   */
+  const fotosDeLaPlantilla = $derived(
+    (data.plantillas ?? []).find((/** @type {any} */ p) => p.id === plantillaElegida)
+      ?.fotos ?? []
+  );
+
+  /**
    * LAS DEL BACKEND, NO OTRAS (19/10/2026). Decía «normal / Alta / Urgente», y
    * la orden solo acepta alta, media y baja (campo/serializers.py): elegir
    * «Urgente» hacía fallar el despacho entero con un 400.
@@ -1004,6 +1022,29 @@
               {/if}
               Se crean y se editan en <a href="/supervisor-noc/plantillas">Plantillas</a>.
             </span>
+
+            <!-- QUÉ FOTOS VA A PEDIR, con nombre (06/11/2026). Es lo que
+                 convierte «elegir plantilla» en «indicarle al técnico qué
+                 fotos tomar», que es lo que se pidió. Y es el lugar barato
+                 para notar el error: si acá aparece «Medición al llegar» en
+                 un cambio de contraseña del wifi, la plantilla está mal
+                 elegida -- y todavía no salió nadie a la calle. -->
+            {#if fotosDeLaPlantilla.length}
+              <ul class="dp-fotos">
+                <li class="dp-fotos-titulo">Le va a pedir estas fotos:</li>
+                {#each fotosDeLaPlantilla as f (f.titulo)}
+                  <li>
+                    {f.titulo}{f.obligatoria ? '' : ' (opcional)'}
+                  </li>
+                {/each}
+              </ul>
+            {:else if plantillaElegida}
+              <!-- Decirlo es parte de lo mismo: «no pide ninguna» es una
+                   respuesta, y el silencio se lee como que no cargó. -->
+              <span class="snoc-body-sm snoc-secundario">
+                Esta plantilla no pide ninguna foto.
+              </span>
+            {/if}
           </label>
 
           <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
@@ -1210,3 +1251,20 @@
     </div>
   </div>
 </div>
+
+<style>
+  /*  LAS FOTOS QUE PIDE LA PLANTILLA (06/11/2026): una lista corta, legible
+      de un vistazo. Si hace falta leerla con cuidado, ya es tarde: el momento
+      de notar que la plantilla está mal elegida es ANTES de despachar. */
+  .dp-fotos {
+    list-style: none;
+    margin: var(--snoc-xs) 0 0;
+    padding: 0 0 0 var(--snoc-sm);
+    font-size: 12px;
+    color: var(--snoc-on-surface-variant, #666);
+    display: grid;
+    gap: 1px;
+    border-left: 2px solid var(--snoc-outline-variant, #ddd);
+  }
+  .dp-fotos-titulo { font-weight: 600; }
+</style>
