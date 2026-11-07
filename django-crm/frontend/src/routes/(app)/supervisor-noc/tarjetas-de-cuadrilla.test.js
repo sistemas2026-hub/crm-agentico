@@ -49,6 +49,19 @@ describe('el día de la cuadrilla, una sola vez en la pantalla', () => {
     expect(fuente()).toContain('<SeguimientoDeCuadrillas');
   });
 
+  //  EL CABLEADO (07/11/2026, segunda vuelta). `MaterialDeLaCuadrilla` solo
+  //  puede callar lo repetido si alguien le dice QUÉ le falta a todas, y eso
+  //  lo calcula la página. La decisión y su efecto se miden en las pruebas de
+  //  `material-del-dia` y del componente; lo que esta guarda cubre es el
+  //  cable: sin él, el componente recibe una lista vacía y vuelve el muro.
+  //  Es una afirmación sobre el archivo y no sobre lo dibujado, porque la
+  //  ruta no se renderiza en ninguna prueba (arnés solo-SSR).
+  it('la página calcula lo que le falta a todas y se lo pasa al material', () => {
+    const f = fuente();
+    expect(f).toContain('equiposDeTodas(material?.cuadrillas ?? [])');
+    expect(f).toMatch(/<MaterialDeLaCuadrilla[^/>]*\{comunes\}/);
+  });
+
   it('y la tarjeta de lo publicado no vuelve a leer el resumen del día', () => {
     //  Sin comentarios: el porqué de la decisión los nombra a propósito.
     const sinComentarios = fuente().replace(/<!--[\s\S]*?-->/g, '');

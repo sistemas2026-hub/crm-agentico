@@ -27,10 +27,16 @@
     resumenDeLineas
   } from './material-del-dia.js';
 
-  /** @type {{ m: any }} */
-  let { m } = $props();
+  /**
+   * `comunes`: los equipos que le faltan a TODAS las cuadrillas del día. No se
+   * repiten acá —ya se dicen una vez arriba— porque una pastilla idéntica en
+   * las cuatro tarjetas no distingue a ninguna. Ver `pastillaDeAvisos`.
+   * @type {{ m: any, comunes?: string[] }}
+   */
+  let { m, comunes = [] } = $props();
 
   let cargado = $derived(estadoDeCarga(m));
+  let chip = $derived(pastillaDeAvisos(m.avisos, comunes));
 </script>
 
 <section class="mc" aria-label="Material">
@@ -48,7 +54,7 @@
   <div class="mc-pie">
     {#if m.avisos.length}
       <details class="mc-avisos">
-        <summary><span class="mc-chip">{pastillaDeAvisos(m.avisos)}</span></summary>
+        <summary><span class="mc-chip" class:mc-chip-comun={!chip.propio}>{chip.texto}</span></summary>
         {#each m.avisos as a (a)}<p>{a}</p>{/each}
       </details>
     {/if}
@@ -120,6 +126,13 @@
     font-size: 12px;
     line-height: 18px;
     font-weight: 600;
+  }
+  /*  Nada propio que decir: el rótulo gris del desplegable, no una alarma.
+      Ver `pastillaDeAvisos` (07/11/2026, segunda vuelta). */
+  .mc-chip-comun {
+    background: var(--snoc-surface-container);
+    color: var(--snoc-on-surface-variant);
+    font-weight: 400;
   }
   .mc-avisos p { margin: 2px 0 0 2px; color: var(--snoc-error); }
 

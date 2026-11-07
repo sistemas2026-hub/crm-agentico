@@ -31,6 +31,7 @@
   } from '$lib/supervisor/dia-publicado.js';
   import {
     equipoQueFalta,
+    equiposDeTodas,
     opcionDelSupervisor,
     tituloDelMaterial
   } from '$lib/supervisor/material-del-dia.js';
@@ -116,6 +117,9 @@
   const faltantes = $derived(
     (material?.bodegas ?? []).filter((/** @type {any} */ b) => Number(b.falta) > 0)
   );
+  //  LO QUE LE FALTA A TODAS (07/11/2026): no se repite en cada tarjeta, se
+  //  dice una vez arriba. Ver `pastillaDeAvisos`.
+  const comunes = $derived(equiposDeTodas(material?.cuadrillas ?? []));
   const conf = $derived(data.configuracion);
   //  LOS KITS INCOMPLETOS (31/10/2026): si el material no se pudo leer es
   //  `null`, y la franja NO muestra la ficha. Un 0 ahi diria «estan todos
@@ -427,7 +431,7 @@
                   <!-- EL MATERIAL: compacto, con los avisos y la lista plegados
                        (29/10/2026). Ver MaterialDeLaCuadrilla.svelte. -->
                   {#if m && (m.lineas.length || m.avisos.length)}
-                    <MaterialDeLaCuadrilla {m} />
+                    <MaterialDeLaCuadrilla {m} {comunes} />
                   {/if}
                   {#if !c.ordenes.length}
                     <p class="snoc-body-sm snoc-secundario">Sin órdenes publicadas.</p>

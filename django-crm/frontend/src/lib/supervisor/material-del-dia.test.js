@@ -4,6 +4,7 @@ import {
   cantidad,
   cuerpoDeConfiguracion,
   equipoQueFalta,
+  equiposDeTodas,
   estadoDeCarga,
   lineaDeMaterial,
   tituloDelMaterial,
@@ -137,31 +138,104 @@ describe('lo que dice la pastilla de la tarjeta', () => {
   //  línea era «Falta material · sale sin ONU CATV y ONU WIFI», idéntica en
   //  las cuatro, y «Falta material» ya lo dicen las pastillas de arriba.
   it('EL DEFECTO: con equipo nombrado NO repite «Falta material»', () => {
-    expect(pastillaDeAvisos([FALTA, CATV, WIFI])).toBe('Sin ONU CATV y ONU WIFI');
+    expect(pastillaDeAvisos([FALTA, CATV, WIFI])).toEqual({
+      texto: 'Sin ONU CATV y ONU WIFI',
+      propio: true
+    });
   });
 
   it('un solo equipo va en singular, sin la «y» colgando', () => {
-    expect(pastillaDeAvisos([FALTA, CATV])).toBe('Sin ONU CATV');
+    expect(pastillaDeAvisos([FALTA, CATV]).texto).toBe('Sin ONU CATV');
   });
 
   it('tres equipos se separan con comas y una «y»', () => {
     const tres = ['A', 'B', 'C'].map((x) => `Sale sin ONU ${x}: no puede hacer el trabajo.`);
-    expect(pastillaDeAvisos(tres)).toBe('Sin ONU A, ONU B y ONU C');
+    expect(pastillaDeAvisos(tres).texto).toBe('Sin ONU A, ONU B y ONU C');
   });
 
   //  EL CONTROL: sin equipo nombrado hay que decir lo que hay, no quedarse
   //  callado. Una tarjeta sin pastilla se lee como «esta sale completa».
   it('sin equipo nombrado dice que falta material', () => {
-    expect(pastillaDeAvisos([FALTA])).toBe('Falta material');
+    expect(pastillaDeAvisos([FALTA])).toEqual({ texto: 'Falta material', propio: true });
   });
 
   it('un aviso que no reconoce se cuenta, no se pierde', () => {
-    expect(pastillaDeAvisos(['Algo raro pasó.'])).toBe('1 aviso más');
+    expect(pastillaDeAvisos(['Algo raro pasó.']).texto).toBe('1 aviso más');
   });
 
   it('sin avisos, nada', () => {
-    expect(pastillaDeAvisos([])).toBe('');
-    expect(pastillaDeAvisos(undefined)).toBe('');
+    expect(pastillaDeAvisos([]).texto).toBe('');
+    expect(pastillaDeAvisos(undefined).texto).toBe('');
+  });
+
+  //  EL SEGUNDO MURO (07/11/2026). El usuario, con la pantalla YA desplegada:
+  //  «esto sigue igual». Y era cierto: las cuatro tarjetas seguían diciendo
+  //  «Sin ONU CATV y ONU WIFI» palabra por palabra, debajo de un «Sin ONU
+  //  CATV: 4 cuadrillas» que ya lo decía. Acortar la frase no quitó la
+  //  repetición.
+  it('lo que le falta a TODAS no se repite en la tarjeta', () => {
+    expect(pastillaDeAvisos([FALTA, CATV, WIFI], ['ONU CATV', 'ONU WIFI'])).toEqual({
+      texto: '3 avisos',
+      propio: false
+    });
+  });
+
+  it('pero lo PROPIO sí sale, y el común no lo tapa', () => {
+    expect(pastillaDeAvisos([CATV, WIFI], ['ONU CATV'])).toEqual({
+      texto: 'Sin ONU WIFI',
+      propio: true
+    });
+  });
+
+  it('sin comunes se comporta como antes', () => {
+    expect(pastillaDeAvisos([FALTA, CATV, WIFI], [])).toEqual({
+      texto: 'Sin ONU CATV y ONU WIFI',
+      propio: true
+    });
+  });
+
+  it('el rótulo gris cuenta los avisos de esa cuadrilla, y uno va en singular', () => {
+    expect(pastillaDeAvisos([CATV], ['ONU CATV'])).toEqual({ texto: '1 aviso', propio: false });
+  });
+});
+
+describe('los equipos que le faltan a TODAS (07/11/2026)', () => {
+  it('solo los que están en todas las que tienen material', () => {
+    expect(
+      equiposDeTodas([
+        { avisos: [FALTA, CATV, WIFI] },
+        { avisos: [CATV, WIFI] },
+        { avisos: [FALTA, CATV] },
+        //  Sin material: no vota. Si votara, el conjunto quedaría vacío y
+        //  volvería el muro de la captura.
+        { avisos: [] }
+      ])
+    ).toEqual(['ONU CATV']);
+  });
+
+  it('si una se salva, ya no es de todas', () => {
+    expect(equiposDeTodas([{ avisos: [CATV] }, { avisos: [FALTA] }])).toEqual([]);
+  });
+
+  //  CON UNA SOLA CUADRILLA NO HAY REPETICIÓN POSIBLE: lo suyo es propio y
+  //  tiene que seguir saliendo en rojo en su tarjeta.
+  it('una sola cuadrilla con material no tiene nada en común con nadie', () => {
+    expect(equiposDeTodas([{ avisos: [CATV, WIFI] }])).toEqual([]);
+    expect(equiposDeTodas([{ avisos: [CATV] }, { avisos: [] }])).toEqual([]);
+    expect(equiposDeTodas([])).toEqual([]);
+    expect(equiposDeTodas(undefined)).toEqual([]);
+  });
+
+  it('el caso del usuario: las cuatro iguales, y la tarjeta deja de repetirlo', () => {
+    const cuatro = [
+      { avisos: [FALTA, CATV, WIFI] },
+      { avisos: [FALTA, CATV, WIFI] },
+      { avisos: [FALTA, CATV, WIFI] },
+      { avisos: [FALTA, CATV, WIFI] }
+    ];
+    const comunes = equiposDeTodas(cuatro);
+    expect(comunes).toEqual(['ONU CATV', 'ONU WIFI']);
+    for (const m of cuatro) expect(pastillaDeAvisos(m.avisos, comunes).propio).toBe(false);
   });
 });
 
@@ -176,13 +250,25 @@ describe('qué equipo falta hoy y a cuántas cuadrillas', () => {
         { avisos: [] }
       ])
     ).toEqual([
-      { equipo: 'ONU CATV', cuadrillas: 3 },
-      { equipo: 'ONU WIFI', cuadrillas: 2 }
+      { equipo: 'ONU CATV', cuadrillas: 3, todas: false },
+      { equipo: 'ONU WIFI', cuadrillas: 2, todas: false }
     ]);
   });
 
   it('dos avisos del mismo equipo en una cuadrilla siguen siendo UNA', () => {
-    expect(equipoQueFalta([{ avisos: [CATV, CATV] }])).toEqual([{ equipo: 'ONU CATV', cuadrillas: 1 }]);
+    expect(equipoQueFalta([{ avisos: [CATV, CATV] }])).toEqual([
+      { equipo: 'ONU CATV', cuadrillas: 1, todas: false }
+    ]);
+  });
+
+  //  CUANDO NO SE SALVA NINGUNA (07/11/2026): la tarjeta ya no lo repite, así
+  //  que esta pastilla es la ÚNICA vez que se dice. Tiene que quedar claro
+  //  que no es parcial.
+  it('marca el equipo que le falta a todas las que tienen material', () => {
+    expect(equipoQueFalta([{ avisos: [CATV, WIFI] }, { avisos: [CATV] }, { avisos: [] }])).toEqual([
+      { equipo: 'ONU CATV', cuadrillas: 2, todas: true },
+      { equipo: 'ONU WIFI', cuadrillas: 1, todas: false }
+    ]);
   });
 
   it('si no falta equipo no inventa una pastilla', () => {
@@ -194,5 +280,11 @@ describe('qué equipo falta hoy y a cuántas cuadrillas', () => {
   it('se lee «Sin ONU CATV: 3 cuadrillas», y una sola en singular', () => {
     expect(pastillaDeEquipo({ equipo: 'ONU CATV', cuadrillas: 3 })).toBe('Sin ONU CATV: 3 cuadrillas');
     expect(pastillaDeEquipo({ equipo: 'ONU WIFI', cuadrillas: 1 })).toBe('Sin ONU WIFI: 1 cuadrilla');
+  });
+
+  it('cuando no se salva ninguna lo dice con todas las letras: «las 4»', () => {
+    expect(pastillaDeEquipo({ equipo: 'ONU CATV', cuadrillas: 4, todas: true })).toBe(
+      'Sin ONU CATV: las 4 cuadrillas'
+    );
   });
 });

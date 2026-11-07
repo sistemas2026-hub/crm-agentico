@@ -112,13 +112,63 @@ function equipoDelAviso(a) {
  * Cuando el aviso nombra equipo, la pastilla dice solo eso. El texto completo
  * no se pierde: sigue adentro del desplegable.
  *
+ * LO QUE LE PASA A TODAS NO DISTINGUE A NINGUNA (07/11/2026, segunda vuelta).
+ * El usuario, con la pantalla ya desplegada: «esto sigue igual». Y tenía
+ * razón: acortar la frase no quitó la repetición. En su captura, las CUATRO
+ * cuadrillas decían «Sin ONU CATV y ONU WIFI», palabra por palabra, debajo de
+ * un «Sin ONU CATV: 4 cuadrillas» que ya lo decía una vez. Cuatro pastillas
+ * rojas iguales son un fondo rojo, no cuatro avisos.
+ *
+ * `comunes` son los equipos que le faltan a TODAS: se restan, porque de ellos
+ * la tarjeta no aporta nada. Si después de restarlos no le queda nada propio,
+ * la pastilla deja de ser roja y pasa a ser el rótulo gris del desplegable
+ * («2 avisos»): el texto entero sigue adentro, intacto.
+ *
+ * `propio` es lo que la pantalla usa para el rojo. El color no se decide acá.
+ *
  * @param {string[]} avisos
+ * @param {string[]} [comunes] equipos que le faltan a TODAS las cuadrillas
+ * @returns {{ texto: string, propio: boolean }}
  */
-export function pastillaDeAvisos(avisos) {
+export function pastillaDeAvisos(avisos, comunes) {
   const lista = avisos ?? [];
-  const sinEquipo = lista.map(equipoDelAviso).filter(Boolean);
-  if (sinEquipo.length) return `Sin ${unidos(/** @type {string[]} */ (sinEquipo))}`;
-  return resumenDeAvisos(lista);
+  const deTodas = new Set(comunes ?? []);
+  const sinEquipo = /** @type {string[]} */ (lista.map(equipoDelAviso).filter(Boolean));
+  const suyos = sinEquipo.filter((e) => !deTodas.has(e));
+  if (suyos.length) return { texto: `Sin ${unidos(suyos)}`, propio: true };
+  //  Nada propio que decir. Ni se calla —el detalle sigue a un clic— ni grita.
+  if (sinEquipo.length) {
+    const n = lista.length;
+    return { texto: n === 1 ? '1 aviso' : `${n} avisos`, propio: false };
+  }
+  return { texto: resumenDeAvisos(lista), propio: true };
+}
+
+/**
+ * LOS EQUIPOS QUE LE FALTAN A TODAS (07/11/2026). Lo que repetían las cuatro
+ * tarjetas de la captura del usuario.
+ *
+ * «Todas» son las cuadrillas que traen material; una sin material no vota, o
+ * una sola cuadrilla sin kit dejaría el conjunto vacío y volvería el muro.
+ * Con UNA sola cuadrilla con material no hay repetición posible: lo suyo es
+ * propio y se devuelve vacío.
+ *
+ * @param {{ avisos?: string[] }[]} [cuadrillas] el material de cada cuadrilla
+ * @returns {string[]} los equipos que aparecen en TODAS, ordenados
+ */
+export function equiposDeTodas(cuadrillas) {
+  const conMaterial = (cuadrillas ?? []).filter((m) => (m?.avisos ?? []).length);
+  if (conMaterial.length < 2) return [];
+  /** @type {Set<string> | null} */
+  let comunes = null;
+  for (const m of conMaterial) {
+    const suyos = new Set(
+      /** @type {string[]} */ ((m?.avisos ?? []).map(equipoDelAviso).filter(Boolean))
+    );
+    comunes = comunes === null ? suyos : new Set([...comunes].filter((e) => suyos.has(e)));
+    if (!comunes.size) return [];
+  }
+  return [...(comunes ?? [])].sort();
 }
 
 /**
@@ -129,12 +179,17 @@ export function pastillaDeAvisos(avisos) {
  * Se cuenta por cuadrilla, no por aviso: lo que el Supervisor decide con esto
  * es a qué bodega llamar y cuánto equipo mover.
  *
+ * `todas` dice que no le falta a algunas sino a TODAS las que tienen material:
+ * es la que la tarjeta ya no repite, así que arriba tiene que quedar claro que
+ * no es parcial (07/11/2026, segunda vuelta).
+ *
  * @param {{ avisos?: string[] }[]} [cuadrillas] el material de cada cuadrilla
- * @returns {{ equipo: string, cuadrillas: number }[]} de la más a la menos
+ * @returns {{ equipo: string, cuadrillas: number, todas: boolean }[]} de la más a la menos
  */
 export function equipoQueFalta(cuadrillas) {
   /** @type {Map<string, number>} */
   const cuenta = new Map();
+  const conMaterial = (cuadrillas ?? []).filter((m) => (m?.avisos ?? []).length).length;
   for (const m of cuadrillas ?? []) {
     //  Dos avisos del mismo equipo en una cuadrilla siguen siendo UNA
     //  cuadrilla: si no, «4 cuadrillas» podría salir con tres.
@@ -148,14 +203,23 @@ export function equipoQueFalta(cuadrillas) {
   }
   return [...cuenta]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([equipo, cuantas]) => ({ equipo, cuadrillas: cuantas }));
+    .map(([equipo, cuantas]) => ({
+      equipo,
+      cuadrillas: cuantas,
+      todas: conMaterial > 1 && cuantas === conMaterial
+    }));
 }
 
 /**
- * «Sin ONU CATV: 4 cuadrillas». @param {{ equipo: string, cuadrillas: number }} e
+ * «Sin ONU CATV: 4 cuadrillas», o «Sin ONU CATV: las 4 cuadrillas» cuando no
+ * se salva ninguna — «las 4» es lo que dice que es todas, y es la única vez
+ * que se dice, porque la tarjeta de cada cuadrilla ya no lo repite.
+ *
+ * @param {{ equipo: string, cuadrillas: number, todas?: boolean }} e
  */
 export function pastillaDeEquipo(e) {
-  return `Sin ${e.equipo}: ${e.cuadrillas} ${e.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'}`;
+  const cuantas = `${e.cuadrillas} ${e.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'}`;
+  return `Sin ${e.equipo}: ${e.todas ? `las ${cuantas}` : cuantas}`;
 }
 
 /** «A», «A y B», «A, B y C». @param {string[]} cosas */

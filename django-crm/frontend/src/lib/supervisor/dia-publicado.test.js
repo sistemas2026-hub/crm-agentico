@@ -32,6 +32,53 @@ describe('lo que la app de cada persona debería tener', () => {
     });
   });
 
+  //  UNA CAUSA, UNA PASTILLA ROJA (07/11/2026, segunda vuelta). El usuario,
+  //  con la pantalla ya desplegada: «esto sigue igual». JAVIER OLIVERA
+  //  llevaba TRES pastillas rojas —«10 sin bajar a su app», «sin teléfono
+  //  registrado», «nunca se conectó»— que son UN solo hecho.
+  it('EL DEFECTO: quien nunca abrió la app lo dice UNA vez, no tres', () => {
+    const p = pastillasDePersona(
+      { nombre: 'Javier Olivera', ordenes: 10, telefono: false, ultimo_contacto: null, sin_bajar: 10 },
+      dia
+    );
+    expect(p.pastillas).toEqual([
+      { texto: '10 órdenes', falta: false },
+      { texto: 'nunca abrió la app', falta: true }
+    ]);
+    expect(p.pastillas.filter((b) => b.falta)).toHaveLength(1);
+  });
+
+  it('pero quien YA abrió la app tiene hechos distintos, y los dice todos', () => {
+    //  JEIDER AMELL en la captura: se conectó el 30/10, no tiene teléfono
+    //  registrado y le quedaron 4 sin bajar. Las tres son cosas diferentes.
+    const p = pastillasDePersona(
+      { nombre: 'Jeider Amell', ordenes: 4, telefono: false, ultimo_contacto: '2026-10-27T18:02:00-05:00', sin_bajar: 4 },
+      dia
+    );
+    expect(p.pastillas.map((b) => b.texto)).toEqual([
+      '4 órdenes',
+      'sin teléfono registrado',
+      '4 sin bajar a su app',
+      'última conexión 27/10 18:02'
+    ]);
+  });
+
+  it('el viejo caso, sin sin_bajar', () => {
+    expect(
+      pastillasDePersona(
+        { nombre: 'Jeider Amell', ordenes: 2, telefono: false, ultimo_contacto: '2026-10-28T10:15:00-05:00' },
+        dia
+      )
+    ).toEqual({
+      nombre: 'Jeider Amell',
+      pastillas: [
+        { texto: '2 órdenes', falta: false },
+        { texto: 'sin teléfono registrado', falta: true },
+        { texto: 'última conexión 10:15', falta: false }
+      ]
+    });
+  });
+
   it('con teléfono no lo menciona; de otro día lleva la fecha; nunca conectado lo dice', () => {
     expect(
       pastillasDePersona({ nombre: 'Ana', ordenes: 1, telefono: true, ultimo_contacto: '2026-10-27T18:02:00-05:00' }, dia)
@@ -46,7 +93,7 @@ describe('lo que la app de cada persona debería tener', () => {
       nombre: 'Luis',
       pastillas: [
         { texto: '0 órdenes', falta: false },
-        { texto: 'nunca se conectó', falta: true }
+        { texto: 'nunca abrió la app', falta: true }
       ]
     });
   });
@@ -60,11 +107,7 @@ describe('lo que la app de cada persona debería tener', () => {
       { nombre: 'Luis', ordenes: 3, telefono: false, ultimo_contacto: null, sin_bajar: 3 },
       dia
     );
-    expect(malo.pastillas.filter((b) => b.falta).map((b) => b.texto)).toEqual([
-      '3 sin bajar a su app',
-      'sin teléfono registrado',
-      'nunca se conectó'
-    ]);
+    expect(malo.pastillas.filter((b) => b.falta).map((b) => b.texto)).toEqual(['nunca abrió la app']);
 
     const sano = pastillasDePersona(
       { nombre: 'Ana', ordenes: 3, telefono: true, ultimo_contacto: '2026-10-28T10:15:00-05:00', sin_bajar: 0 },

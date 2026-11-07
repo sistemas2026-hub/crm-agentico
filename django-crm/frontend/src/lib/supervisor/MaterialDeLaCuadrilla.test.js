@@ -93,6 +93,35 @@ describe('el material de una cuadrilla', () => {
     expect(html({ m: { ...m, avisos: [] } })).not.toContain('mc-chip');
   });
 
+  //  EL SEGUNDO MURO (07/11/2026). El usuario, con la pantalla YA desplegada:
+  //  «esto sigue igual». Las cuatro tarjetas seguían diciendo «Sin ONU CATV y
+  //  ONU WIFI», palabra por palabra, debajo de un «Sin ONU CATV: 4
+  //  cuadrillas» que ya lo decía. Se afirma sobre el EFECTO --qué dice la
+  //  pastilla y de qué color queda-- y no sobre la prop.
+  it('EL DEFECTO 2: lo que le falta a TODAS no se repite, y deja de ser rojo', () => {
+    const h = html({ m, comunes: ['ONU CATV', 'ONU WIFI'] });
+    const antesDeAbrir = h.slice(0, h.indexOf('</summary>'));
+    expect(antesDeAbrir).not.toContain('Sin ONU');
+    expect(antesDeAbrir).toContain('3 avisos');
+    expect(antesDeAbrir).toMatch(/class="mc-chip[^"]*mc-chip-comun/);
+    //  Y el texto entero sigue estando, a un clic.
+    expect(h).toContain(CATV);
+    expect(h).toContain(WIFI);
+  });
+
+  it('lo PROPIO de esa cuadrilla sí sale, y en rojo', () => {
+    const h = html({ m, comunes: ['ONU CATV'] });
+    const antesDeAbrir = h.slice(0, h.indexOf('</summary>'));
+    expect(antesDeAbrir).toContain('Sin ONU WIFI');
+    expect(antesDeAbrir).not.toContain('ONU CATV');
+    expect(antesDeAbrir).not.toContain('mc-chip-comun');
+  });
+
+  it('sin comunes se comporta como el día que se desplegó', () => {
+    const h = html({ m, comunes: [] });
+    expect(h.slice(0, h.indexOf('</summary>'))).toContain('Sin ONU CATV y ONU WIFI');
+  });
+
   it('el porqué del kit y de la bodega va adentro de la lista, no a la vista', () => {
     const h = html({ m });
     const lineas = h.slice(h.indexOf('mc-lineas'));

@@ -64,13 +64,24 @@ export function pastillasDePersona(p, dia) {
   const pastillas = [
     { texto: `${p.ordenes} ${p.ordenes === 1 ? 'orden' : 'órdenes'}`, falta: false }
   ];
-  if (p.sin_bajar) pastillas.push({ texto: textoSinBajar({ sin_bajar: p.sin_bajar }), falta: true });
+
+  //  UNA CAUSA, UNA PASTILLA ROJA (07/11/2026, segunda vuelta). El usuario,
+  //  con la pantalla ya desplegada: «esto sigue igual». En su captura, JAVIER
+  //  OLIVERA llevaba TRES pastillas rojas —«10 sin bajar a su app», «sin
+  //  teléfono registrado», «nunca se conectó»— que son UN solo hecho: nunca
+  //  abrió la app. Las otras dos son su consecuencia, y repetirla tres veces
+  //  no la hace más urgente: hace que el rojo deje de significar algo.
+  if (!p.ultimo_contacto) {
+    pastillas.push({ texto: 'nunca abrió la app', falta: true });
+    return { nombre: p.nombre, pastillas };
+  }
+
+  //  Ya abrió la app alguna vez, así que lo que sigue SÍ son hechos distintos:
+  //  el teléfono es por dónde le llegan los avisos, y lo que no bajó depende
+  //  de cuándo se conectó por última vez.
   if (!p.telefono) pastillas.push({ texto: 'sin teléfono registrado', falta: true });
-  pastillas.push(
-    p.ultimo_contacto
-      ? { texto: `última conexión ${momento(p.ultimo_contacto, dia)}`, falta: false }
-      : { texto: 'nunca se conectó', falta: true }
-  );
+  if (p.sin_bajar) pastillas.push({ texto: textoSinBajar({ sin_bajar: p.sin_bajar }), falta: true });
+  pastillas.push({ texto: `última conexión ${momento(p.ultimo_contacto, dia)}`, falta: false });
   return { nombre: p.nombre, pastillas };
 }
 
