@@ -151,7 +151,16 @@ def devolver(orden, profile=None) -> dict:
                 cerrado = True
 
             Activity.objects.create(
-                user=getattr(profile, "user", None),
+                #  EL PROFILE, NO SU USER  --  06/11/2026
+                #
+                #  `Activity.user` es FK a Profile. Con `profile.user`
+                #  esto levantaba ValueError ("must be a Profile
+                #  instance") y el `except` de abajo se lo tragaba: la
+                #  nota quedaba y la entrada en la LINEA DE TIEMPO no.
+                #  Nadie lo vio porque el cierre seguia funcionando.
+                #  Se encontro al escribir el aviso del avance, que
+                #  copio esta misma linea.
+                user=profile,
                 action=ACCION,
                 entity_type="Case",
                 entity_id=caso.pk,

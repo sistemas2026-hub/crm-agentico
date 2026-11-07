@@ -8,6 +8,8 @@ import binascii
 import uuid
 from datetime import datetime
 
+import logging
+
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -51,6 +53,8 @@ from campo.services.transiciones import (
 )
 from campo.services.validador import validar_campos_tecnicos, verificar_checklist_completo
 from campo import tasks as tareas_de_campo
+
+logger = logging.getLogger(__name__)
 
 
 def _debe_estar_asignado(request) -> bool:
@@ -748,6 +752,46 @@ class AccionesTrabajoView(APIView):
                 {"error": "TRANSICION_INVALIDA", "detalle": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        #  EL TICKET SE ENTERA DEL AVANCE  --  06/11/2026
+        #
+        #  El usuario marco "En camino" desde la app, vio el cambio en
+        #  Programacion --que lee el ESTADO de la orden-- y el ticket seguia
+        #  igual que cuando se abrio: solo "Ticket creado" y "Asignado a". No
+        #  habia forma de saber si el tecnico habia salido.
+        #
+        #  LOS DOS LADOS: el ticket del CRM (nota interna + linea de tiempo) y
+        #  el del ISP, que ademas queda En Progreso. Los dos son idempotentes
+        #  por (momento, vuelta): un doble toque no deja dos notas, y una orden
+        #  devuelta y rehecha SI avisa de nuevo, porque es otro viaje.
+        #
+        #  ENVUELTO Y DESPUES DE LA TRANSICION, a proposito: la orden ya
+        #  avanzo y el telefono espera respuesta. Un ticket sin la nota es un
+        #  problema; un boton que no contesta en la calle es uno peor.
+        try:
+            from campo import avisar_al_ticket
+            from campo.services import nota_al_isp
+
+            momento = {"marcar_en_camino": nota_al_isp.EN_CAMINO,
+                       "en_camino": nota_al_isp.EN_CAMINO,
+                       "marcar_llegada": nota_al_isp.EN_SITIO,
+                       "iniciar": nota_al_isp.EN_SITIO}.get(accion)
+            if momento:
+                quien = (getattr(getattr(request.profile, "user", None),
+                                 "name", "") or "").strip()
+                que_paso = nota_al_isp.TEXTO_DEL_AVANCE[momento]
+                avisar_al_ticket.avisar(
+                    orden,
+                    f"{quien + ': ' if quien else ''}{que_paso}.",
+                    momento, profile=request.profile)
+                nota_al_isp.anotar_avance(orden, momento,
+                                          profile=request.profile)
+        except Exception as e:                                   # noqa: BLE001
+            #  SE DEJA RASTRO, no `pass` a secas. Un `except` mudo aca
+            #  significa que el dia que el aviso deje de salir nadie se entera
+            #  -- y pasó el mismo dia que se escribio: la guarda fallaba y el
+            #  motivo no estaba en ningun lado. Por tipo y sin `str(e)`.
+            logger.warning("aviso del avance: no se pudo (%s)", type(e).__name__)
 
         return Response({
             "mutation_id": serializer.validated_data.get("client_mutation_id") or "",

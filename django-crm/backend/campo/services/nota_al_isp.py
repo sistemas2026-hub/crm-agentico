@@ -54,6 +54,15 @@ logger = logging.getLogger(__name__)
 REPORTE_DEL_TECNICO = "reporte_del_tecnico"
 DEVUELTA_AL_TECNICO = "devuelta_al_tecnico"
 REVISION_SIN_CIERRE = "revision_sin_cierre"
+EN_CAMINO = "en_camino"
+EN_SITIO = "en_sitio"
+
+#: Lo que se escribe en cada avance. En infinitivo no: el ticket cuenta lo que
+#: paso, y "va en camino" se lee como lo que es.
+TEXTO_DEL_AVANCE = {
+    EN_CAMINO: "va en camino",
+    EN_SITIO: "llego al sitio",
+}
 
 #  ---------------------------------------------------------------------------
 #   EL INTERRUPTOR, Y POR QUE SON DOS  --  H6, auditoria de frontera 06/11/2026
@@ -308,6 +317,42 @@ def anotar_devolucion(orden, *, requisitos=None, observacion: str = "",
 # ---------------------------------------------------------------------------
 #  3) LO QUE EL SUPERVISOR VALIDO, para el texto del CIERRE
 # ---------------------------------------------------------------------------
+
+def anotar_avance(orden, momento: str, profile=None) -> dict:
+    """Avisa en el ticket del ISP que el tecnico salio, o que llego.
+
+    POR QUE  --  06/11/2026
+    -----------------------
+    El usuario marco "En camino" desde la app y el ticket siguio igual que
+    cuando se abrio. Programacion mostraba el cambio --lee el estado de la
+    orden-- y quien miraba el ticket no sabia si habia pasado algo.
+
+    El ticket queda En Progreso, que lo fija la herramienta del catalogo
+    (`argumentos_fijos: ticket-estado: "2"`). No se elige desde aca: si quien
+    llama pudiera, un avance podria cerrar el ticket.
+
+    Lleva el NOMBRE del tecnico: la pregunta que el ticket contesta en este
+    momento es "¿quien va?", y una firma generica no la contesta.
+    """
+    from campo.services.cierre_en_isp import numero_de_ticket
+
+    if momento not in TEXTO_DEL_AVANCE:
+        return {"anotada": False, "codigo": "momento_desconocido",
+                "detalle": momento}
+
+    ticket = numero_de_ticket(orden.contexto)
+    if not ticket:
+        return {"anotada": False, "codigo": "sin_ticket",
+                "detalle": "la orden no nacio de un ticket del ISP"}
+
+    return _pedir(orden, {
+        "ticket": ticket,
+        "texto": f"{TEXTO_DEL_AVANCE[momento]} a la OT #{orden.numero}.",
+        "momento": momento,
+        "vuelta": _vuelta_de(orden),
+        "actor": _nombre_de(profile),
+    }, profile=profile)
+
 
 def lo_que_falto(revision) -> list[str]:
     """Los puntos que la revision marco como NO cumplidos, en texto.

@@ -91,10 +91,23 @@ DEVUELTA_AL_TECNICO = "devuelta_al_tecnico"
 #  escribiria una sola vez.
 REVISION_SIN_CIERRE = "revision_sin_cierre"
 
+#: Los avances del trabajo. Hasta el 06/11/2026 el ticket no se enteraba de
+#: que alguien habia salido: el usuario marco "En camino" desde la app, vio el
+#: cambio en Programacion --que lee el estado de la orden-- y el ticket seguia
+#: igual que cuando se abrio. Quien lo mira no sabia si habia pasado algo.
+#
+#  DOS MOMENTOS Y NO UNO: salir y llegar son hechos distintos, y comparten
+#  orden y vuelta. Con una sola clave, la llegada no se escribiria.
+EN_CAMINO = "en_camino"
+EN_SITIO = "en_sitio"
+
 MOMENTOS = {
     REPORTE_DEL_TECNICO: FIRMA_DE_CAMPO,
     DEVUELTA_AL_TECNICO: FIRMA_DEL_SUPERVISOR,
     REVISION_SIN_CIERRE: FIRMA_DEL_SUPERVISOR,
+    #  Los firma el tecnico: es el quien sale y quien llega.
+    EN_CAMINO: FIRMA_DE_CAMPO,
+    EN_SITIO: FIRMA_DE_CAMPO,
 }
 
 #  Codigos del resultado. 'ANOTADA' es el unico que afirma que el texto quedo
@@ -396,6 +409,15 @@ def _firma_de(momento: str, actor: str) -> str:
     #  escribio-- y de todos modos un momento sin declarar no llega hasta aca.
     base = MOMENTOS.get(momento) or FIRMA_DEL_SUPERVISOR
     actor = (actor or "").strip()
-    if momento == REPORTE_DEL_TECNICO and actor:
-        return f"{actor} ({base})"
+    #  EL NOMBRE VA EN LO QUE HACE EL TECNICO. En un avance la pregunta que el
+    #  ticket contesta es "¿quien va?", y "Tecnico de campo" no la contesta.
+    #  En lo que decide el Supervisor no: poner ahi el nombre de quien apreto
+    #  un boton diria algo que no es.
+    if actor and momento in (REPORTE_DEL_TECNICO, EN_CAMINO, EN_SITIO):
+        #  "MARIO VASQUEZ (Dexter)", no "MARIO VASQUEZ (Tecnico de campo
+        #  (Dexter))": el nombre ya dice quien es, y el parentesis anidado
+        #  solo hacia mas larga una linea que se lee en una lista de
+        #  respuestas. "(Dexter)" se queda porque distingue lo que escribio el
+        #  sistema de lo que alguien tipeo a mano en WispHub.
+        return f"{actor} (Dexter)"
     return base
