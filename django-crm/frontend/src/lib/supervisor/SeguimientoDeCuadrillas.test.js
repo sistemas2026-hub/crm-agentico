@@ -120,6 +120,36 @@ describe('el cuadro de cada cuadrilla', () => {
     expect(sin({ salio: '07:42', hechas: 4, total: 4, en_curso: null })).toContain('Terminó el día');
   });
 
+  it('la flecha anuncia la que sigue POR SU NOMBRE, no por el número solo (07/11/2026)', () => {
+    const h = html([
+      c({
+        resumen_del_dia: { salio: '07:42', hechas: 0, total: 4, en_curso: null },
+        ordenes: [
+          { numero: 2, asunto: 'Cambio De Contraseña En Router Wifi', direccion: 'CALLE 38', barrio: '', siguiente: true },
+          { numero: 167, asunto: 'Problemas De Conexión', direccion: 'CL 9', barrio: '', siguiente: false },
+          { numero: 21, asunto: 'Cambio De Domicilio', direccion: 'TRV 4A', barrio: '', siguiente: false }
+        ],
+        log: []
+      })
+    ]);
+    expect(h).toContain('Sigue: OT #167 · Problemas De Conexión');
+    expect(h).toContain('1 de 3');
+    //  La flecha es un botón de verdad, no un adorno.
+    expect(h).toMatch(/<button[^>]*class="sc-sigue/);
+  });
+
+  it('con una sola orden no hay recorrido que ofrecer', () => {
+    const h = html([
+      c({ ordenes: [{ numero: 12, asunto: 'Una sola', direccion: 'CL 1', barrio: '', siguiente: true }], log: [] })
+    ]);
+    expect(h).not.toContain('sc-sigue');
+    expect(h).not.toContain('1 de 1');
+  });
+
+  it('sin órdenes tampoco', () => {
+    expect(html([c()])).not.toContain('sc-sigue');
+  });
+
   it('sin cuadrillas no dibuja nada', () => {
     expect(html([])).not.toContain('sc-cuadro');
   });
