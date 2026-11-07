@@ -204,9 +204,13 @@ casos:
     humo: true
     rol: cliente_final
     mensajes: ["cuanto debo?"]
+    # 07/11/2026: el monto sale de consultar_mi_cuenta, NO de consultar_mi_servicio.
+    # La ficha trae un 'saldo' que no es lo que debe (un cliente con una factura
+    # pendiente aparecia con saldo 0.00) y el agente lo repetia. Este caso exigia
+    # la ficha; ahora exige la herramienta que suma las facturas pendientes.
     espera:
       deriva_a: facturacion_cliente
-      usa: [derivar_a_area, consultar_mi_servicio]
+      usa: [derivar_a_area, consultar_mi_cuenta]
       sin_errores: true
 
   # --- no miente sobre CUANDO hablaron ------------------------------------
