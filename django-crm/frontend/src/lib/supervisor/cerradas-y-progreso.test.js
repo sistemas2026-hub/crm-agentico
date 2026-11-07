@@ -33,6 +33,27 @@ describe('el progreso de cada orden', () => {
     expect(render(ProgresoDeLaOrden, { props: { estado: 'cancelada' } }).body).not.toContain('pg-');
   });
 
+  //  COMPACTO (07/11/2026). En el cuadro de seguimiento la tarjeta mide unos
+  //  210 px, y los cinco rótulos salían «En cami… · Comple… · C» (captura del
+  //  usuario: «ahora se dañó esta parte de acá»). Cinco nombres truncados
+  //  dicen menos que uno entero.
+  it('compacto: las cinco barras y UN rótulo, el del paso actual', () => {
+    const h = render(ProgresoDeLaOrden, { props: { estado: 'en_sitio', compacto: true } }).body;
+    //  Las cinco barras siguen: son las que cuentan la historia.
+    expect((h.match(/class="pg-barra/g) ?? []).length).toBe(5);
+    expect(h).toMatch(/<p class="pg-solo[^"]*">En sitio<\/p>/);
+    //  Y los nombres NO se quitan del DOM: se ocultan por CSS, para que un
+    //  lector de pantalla siga nombrando cada paso.
+    expect(h).toContain('Completada');
+    expect(h).toMatch(/class="pg [^"]*pg-compacto/);
+  });
+
+  it('sin compacto nada cambia: ni el rótulo suelto ni la clase', () => {
+    const h = render(ProgresoDeLaOrden, { props: { estado: 'en_sitio' } }).body;
+    expect(h).not.toContain('pg-solo');
+    expect(h).not.toContain('pg-compacto');
+  });
+
   it('sale en la tarjeta de cada orden de Hoy', () => {
     const h = render(OrdenDelDia, {
       props: { orden: { id: 'o', numero: 12, estado: 'en_camino', estado_texto: 'En camino', tecnicos: [] }, dia: '2026-10-30' }

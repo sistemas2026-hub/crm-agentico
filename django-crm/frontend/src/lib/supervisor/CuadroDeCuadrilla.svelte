@@ -47,7 +47,7 @@
   {#if asunto}<p class="sc-asunto">{asunto}</p>{/if}
   {#if donde}<p class="sc-donde">{donde}</p>{/if}
   <!-- El progreso de esa orden, como en la app (30/10/2026). -->
-  {#if o}<ProgresoDeLaOrden estado={o.estado} />{/if}
+  {#if o}<ProgresoDeLaOrden estado={o.estado} compacto />{/if}
   {#if paso.enElFoco && r.en_curso?.minutos != null}
     <p class="sc-reloj" aria-label={`Lleva ${r.en_curso.minutos} minutos`}>⏱ {r.en_curso.minutos} min</p>
   {:else if paso.enElFoco && r.en_curso?.desde}
@@ -120,6 +120,15 @@
 <style>
   .sc-cuadro {
     display: grid;
+    /*  NADA SE SALE DE LA TARJETA (07/11/2026). El usuario, con el cuadro ya
+        visible: «ahora se dañó esta parte de acá». Una columna `auto` --el
+        valor por omisión-- tiene como mínimo el ancho de su contenido, y acá
+        hay dos hijos con `white-space: nowrap`: el botón «Sigue: OT #6 ·
+        Recolección De Equipo» y los cinco rótulos del progreso. Entre los dos
+        empujaban la columna más allá del ancho de la tarjeta y el texto se
+        derramaba sobre la cuadrilla de al lado. `minmax(0, 1fr)` le saca ese
+        piso, y entonces sí funcionan los puntos suspensivos que ya tenían. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 4px;
     align-content: start;
     padding: 10px 12px;

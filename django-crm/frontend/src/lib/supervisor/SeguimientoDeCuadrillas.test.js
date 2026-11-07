@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 
@@ -152,5 +153,40 @@ describe('el cuadro de cada cuadrilla', () => {
 
   it('sin cuadrillas no dibuja nada', () => {
     expect(html([])).not.toContain('sc-cuadro');
+  });
+
+  /**
+   * NADA SE SALE DE LA TARJETA (07/11/2026). El usuario, con el cuadro ya
+   * visible en su pantalla: «ahora se dañó esta parte de acá». El botón
+   * «Sigue: OT #6 · Recolección De Equipo» y los cinco rótulos del progreso
+   * llevan `white-space: nowrap`, y en una columna de rejilla `auto` --la de
+   * por omisión-- el mínimo es el ancho del contenido: el texto se derramaba
+   * sobre la cuadrilla de al lado.
+   *
+   * El ancho no existe en una prueba de servidor, así que se lee el `<style>`
+   * del componente: mide el archivo y no lo dibujado, y por eso se dice.
+   */
+  it('la tarjeta no deja que su contenido le imponga el ancho', () => {
+    const fuente = readFileSync('src/lib/supervisor/CuadroDeCuadrilla.svelte', 'utf8');
+    const regla = /\.sc-cuadro \{[^}]*\}/.exec(fuente)?.[0] ?? '';
+    expect(regla).toMatch(/display:\s*grid/);
+    expect(regla).toMatch(/grid-template-columns:\s*minmax\(\s*0/);
+  });
+
+  //  Y el progreso va acá en su forma corta: cinco rótulos en 210 px salían
+  //  «En cami… · Comple… · C».
+  it('el progreso del cuadro va compacto: un solo rótulo', () => {
+    const h = html([
+      c({
+        resumen_del_dia: { salio: '07:42', hechas: 0, total: 2, en_curso: null },
+        ordenes: [
+          { numero: 2, asunto: 'Una', direccion: 'CL 1', barrio: '', siguiente: true, estado: 'en_sitio' },
+          { numero: 3, asunto: 'Otra', direccion: 'CL 2', barrio: '', siguiente: false, estado: 'asignada' }
+        ],
+        log: []
+      })
+    ]);
+    expect(h).toMatch(/<p class="pg-solo[^"]*">En sitio<\/p>/);
+    expect(h).toMatch(/class="pg [^"]*pg-compacto/);
   });
 });
