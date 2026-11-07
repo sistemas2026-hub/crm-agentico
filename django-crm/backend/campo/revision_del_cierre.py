@@ -325,13 +325,20 @@ def _servicio(cierre):
 def _medicion(orden, pendientes=None):
     """La señal despues del arreglo (`operaciones/verificacion_de_arreglos.py`),
     si el Supervisor ya la midio para ESTA orden. Si la espera y no llego,
-    «no se sabe». Si no la espera, no aplica."""
+    «no se sabe». Si no la espera, no aplica.
+
+    EL TEXTO YA NO NOMBRA UNA HORA  --  06/11/2026. Decia «el Supervisor mide
+    una vez por hora», y el usuario lo leyo como lo que era: una espera que no
+    tenia por que existir. Desde hoy la medicion sale apenas llega el reporte
+    (`campo/tasks.py::revisar_el_cierre_ya`), y el ciclo horario quedo de red
+    de atras. Si aun asi no se midio, es porque el proveedor no contesto o la
+    orden no entra en lo que se mide -- y ninguna de las dos es «esperar»."""
     from operaciones.models import PropuestaSupervisor
     from operaciones.verificacion_de_arreglos import FUENTE
 
     esperando = _punto("medicion", None,
-                       "La señal después del arreglo todavía no se midió: el "
-                       "Supervisor mide una vez por hora.")
+                       "La señal después del arreglo todavía no se "
+                       "pudo medir.")
 
     propuesta = (PropuestaSupervisor.objects
                  .filter(org=orden.org,

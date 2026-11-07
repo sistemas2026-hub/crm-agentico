@@ -1372,6 +1372,35 @@ class CompletarTrabajoView(APIView):
         except Exception:                                        # noqa: BLE001
             pass
 
+        #  Y AL TICKET DE DEXTER TAMBIEN  --  06/11/2026
+        #
+        #  El usuario, mirando la OT #184: «en dexter solo registro esos
+        #  cambios y en wisphub si registro todo». Tenia razon: los avances
+        #  --salio, llego-- dejaban nota en los dos tickets, y el reporte solo
+        #  en el del ISP. Quien miraba el ticket en Dexter veia al tecnico
+        #  salir y llegar, y despues nada.
+        #
+        #  RESUMIDO, NO ENTERO: `Comment.comment` es un CharField(255) y el
+        #  reporte no entra. El detalle vive en la orden y en el ticket del
+        #  ISP; esta nota avisa que llego y quien lo mando.
+        try:
+            from campo import avisar_al_ticket
+            from campo.services import nota_al_isp
+            from campo.services.cierre_en_isp import resumen_de
+
+            _quien = (getattr(getattr(request.profile, "user", None),
+                              "name", "") or "").strip()
+            _texto = resumen_de(
+                orden, "",
+                encabezado=f"Reporte de campo de la OT #{orden.numero}. "
+                           f"Pendiente de revision.")
+            avisar_al_ticket.avisar(
+                orden,
+                f"{_quien + ': ' if _quien else ''}{_texto}",
+                nota_al_isp.REPORTE_DEL_TECNICO, profile=request.profile)
+        except Exception:                                        # noqa: BLE001
+            pass
+
         return Response({
             "ok": True,
             "estado_operativo": orden.estado_operativo,

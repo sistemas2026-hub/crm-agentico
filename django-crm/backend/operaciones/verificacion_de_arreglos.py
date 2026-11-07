@@ -224,6 +224,75 @@ def escribir(propuesta, medicion: dict, orden_id: str, ahora) -> bool:
     return True
 
 
+def medir_este_arreglo(orden, *, ahora=None, medir=None) -> dict:
+    """LA MEDICION APENAS LLEGA EL REPORTE  --  06/11/2026
+
+    El usuario, mirando la revision de la OT #184: «dice que el supervisor
+    mide despues de 1 hora y no debe ser asi, el supervisor debe medir cuando
+    le llega el reporte».
+
+    Tenia razon y el hueco era este. `cierre_por_el_supervisor.cerrar_esta_orden`
+    (31/10) ya hacia que el Supervisor mirara la orden a los segundos de
+    llegar el reporte -- pero la senal despues del arreglo la media OTRO
+    proceso, el ciclo horario. El cierre inmediato llegaba, veia que la
+    medicion faltaba, y devolvia la orden a la espera. La aceleracion existia
+    y se frenaba contra una pieza que nadie habia acelerado.
+
+    NO ES UNA SEGUNDA PUERTA, por la misma razon que `cerrar_esta_orden` no lo
+    es: la cola sale de `candidatas()`, la MISMA funcion del ciclo, y se filtra
+    por esta orden. Todo lo que el ciclo descarta --el cambio de equipo, lo que
+    no es falla de servicio, la ventana de dos dias, el tope de reintentos--
+    sigue descartandose igual. Si `candidatas` no la trae, aca no se mide.
+
+    `{"medida": bool, "por_que": str, "veredicto": bool|None}`.
+    """
+    from operaciones import medicion_de_fallas as mdf
+    from operaciones import paso_a_despacho as pad
+
+    ahora = ahora or timezone.now()
+    medir = medir or mdf._medir_con_el_motor
+
+    cola = [t for t in candidatas(orden.org, ahora) if t[2] == str(orden.id)]
+    if not cola:
+        #  Lo normal, no un error: la mayoria de las ordenes no se miden.
+        return {"medida": False, "veredicto": None,
+                "por_que": "esta orden no entra en lo que se mide"}
+
+    propuesta, caso, orden_id = cola[0]
+    id_servicio = str(getattr(caso, "external_service_id", "") or "").strip()
+    if not id_servicio:
+        return {"medida": False, "veredicto": None,
+                "por_que": "el caso no tiene id de servicio"}
+
+    try:
+        respuesta = medir(orden.org, id_servicio)
+    except Exception as e:                                       # noqa: BLE001
+        #  Por tipo, sin `str(e)`: el mensaje puede traer datos del servicio.
+        logger.warning("medicion inmediata: no se pudo medir (%s)",
+                       type(e).__name__)
+        return {"medida": False, "veredicto": None,
+                "por_que": type(e).__name__}
+
+    medicion = mdf.de_la_respuesta(respuesta)
+    if medicion is None:
+        #  El ciclo horario la vuelve a intentar: `_toca` cuenta este intento.
+        return {"medida": False, "veredicto": None,
+                "por_que": "el proveedor no devolvio una medicion"}
+
+    try:
+        if not escribir(propuesta, medicion, orden_id, timezone.now()):
+            return {"medida": False, "veredicto": None,
+                    "por_que": "la medicion no se pudo anotar"}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("medicion inmediata: no se pudo guardar (%s)",
+                       type(e).__name__)
+        return {"medida": False, "veredicto": None,
+                "por_que": type(e).__name__}
+
+    return {"medida": True, "veredicto": quedo_en_rango(medicion),
+            "por_que": ""}
+
+
 def verificar_los_arreglos(org, *, desatendido: bool = False, medir=None,
                            presupuesto_=None) -> dict:
     """

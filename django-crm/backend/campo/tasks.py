@@ -295,6 +295,28 @@ def revisar_el_cierre_ya(org_id: str, orden_id: str) -> dict:
             orden = OrdenTrabajo.objects.get(pk=orden_id, org_id=org_id)
         except OrdenTrabajo.DoesNotExist:
             return {"resultado": "", "por_que": "la orden ya no esta"}
+        #  LA MEDICION PRIMERO, Y EN ESTE MISMO WORKER  --  06/11/2026
+        #
+        #  El usuario: «el supervisor debe medir cuando le llega el reporte».
+        #  Hasta hoy esta tarea corria enseguida y se encontraba con que la
+        #  senal despues del arreglo todavia no estaba: la media el ciclo
+        #  horario, que es otro proceso. La aceleracion llegaba a una pieza
+        #  que nadie habia acelerado.
+        #
+        #  AQUI DENTRO Y NO EN OTRA TAREA, a proposito: dos tareas encoladas a
+        #  la vez no tienen orden garantizado, y el cierre podia ganarle a la
+        #  medicion y volver a decir que falta. Secuencial en un solo worker,
+        #  con el contexto RLS ya puesto arriba.
+        #
+        #  ENVUELTO: si la medicion falla, el cierre igual se intenta. Puede
+        #  cerrar por otro camino, y el ciclo horario reintenta la medicion.
+        try:
+            from operaciones.verificacion_de_arreglos import medir_este_arreglo
+
+            medir_este_arreglo(orden)
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("medicion inmediata: fallo (%s)", type(e).__name__)
+
         return cerrar_esta_orden(orden)
     except Exception as e:                                       # noqa: BLE001
         logger.warning("cierre inmediato: fallo (%s)", type(e).__name__)

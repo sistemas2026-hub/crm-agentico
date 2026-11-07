@@ -58,6 +58,29 @@ CLAVE = "avisos_al_ticket"
 MAX_NOTA = 255
 
 
+def recortar(texto: str, tope: int = MAX_NOTA) -> str:
+    """El texto que entra en la nota, cortado donde termina una palabra.
+
+    POR QUE EXISTE  --  06/11/2026. `Comment.comment` es un CharField(255) y
+    el reporte de campo entero no entra: el de la OT #184 media ~300. Cortar
+    en seco dejaba la nota terminando a mitad de palabra, y peor: a mitad de
+    un dato ("CONECTOR AP"), que se lee como si fuera el dato completo.
+
+    El detalle entero vive en la orden y en el ticket del ISP; esta nota es un
+    aviso. Por eso termina en «…», que dice que hay mas.
+    """
+    texto = (texto or "").strip()
+    if len(texto) <= tope:
+        return texto
+    recorte = texto[:tope - 1]
+    espacio = recorte.rfind(" ")
+    #  Si no hay ningun espacio --una sola palabra larguisima-- se corta en
+    #  seco igual: mejor eso que devolver vacio.
+    if espacio > tope // 2:
+        recorte = recorte[:espacio]
+    return recorte.rstrip(" ,;.") + "\u2026"
+
+
 def _clave_de(momento: str, vuelta) -> str:
     """Identifica el aviso: momento y vuelta.
 
@@ -110,7 +133,7 @@ def avisar(orden, texto: str, momento: str, profile=None) -> dict:
                 org=fila.org,
                 content_type=ContentType.objects.get_for_model(Case),
                 object_id=caso.pk,
-                comment=texto[:MAX_NOTA],
+                comment=recortar(texto),
                 commented_by=profile,
                 #  INTERNA, como la del cierre: es para quien atiende el
                 #  ticket, no un mensaje al cliente.
