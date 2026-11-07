@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+#  PUERTA CONTRA UN DEPLOY ACCIDENTAL.
+#
+#  Push a `fix/integracion-wisphub` = DEPLOY A PRODUCCION (CLAUDE.md §7). Este
+#  hook rechaza cualquier push cuyo destino sea esa rama.
+#
+#  POR QUE HACE FALTA, MEDIDO EL 31/10/2026. Esta rama nace apuntando a la rama
+#  de deploy -- pasa en todos los worktrees nuevos de este repositorio -- y un
+#  `git push` a secas falla, pero NO calla: git imprime
+#
+#      git push origin HEAD:fix/integracion-wisphub
+#
+#  como sugerencia, en su propio mensaje de error. O sea que el camino mas
+#  corto desde un push equivocado hasta un deploy no deseado es copiar la linea
+#  que git acaba de ofrecer. Eso es lo que este hook corta.
+#
+#  QUE NO HACE. No impide pushear la rama propia: `git push -u origin
+#  spec/empresa-virtual-isp` pasa sin tocar nada. Solo mira el DESTINO.
+#
+#  Para desplegar a proposito, una persona escribe la intencion:
+#
+#      DEPLOY_A_PRODUCCION=si git push origin HEAD:fix/integracion-wisphub
+#
+#  No es una contrasena ni pretende serlo: es la diferencia entre un gesto
+#  automatico y uno deliberado, que es exactamente lo que fallaba.
+
+RAMA_DE_DEPLOY='refs/heads/fix/integracion-wisphub'
+
+while read -r _ref_local _sha_local ref_remoto _sha_remoto; do
+    [ "$ref_remoto" = "$RAMA_DE_DEPLOY" ] || continue
+
+    if [ "$DEPLOY_A_PRODUCCION" = "si" ]; then
+        echo "pre-push: DEPLOY A PRODUCCION declarado a proposito. Adelante." >&2
+        exit 0
+    fi
+
+    cat >&2 <<'FIN'
+
+  ================================================================
+   BLOQUEADO: el destino de este push es la rama de DEPLOY.
+
+   fix/integracion-wisphub tiene autodeploy. Pushear ahi publica a
+   produccion, aunque la sesion haya empezado con "no deploy".
+
+   Si lo que querias era subir TU rama:
+
+       git push -u origin spec/empresa-virtual-isp
+
+   Si de verdad vas a desplegar, declaralo:
+
+       DEPLOY_A_PRODUCCION=si git push origin HEAD:fix/integracion-wisphub
+  ================================================================
+
+FIN
+    exit 1
+done
+
+exit 0

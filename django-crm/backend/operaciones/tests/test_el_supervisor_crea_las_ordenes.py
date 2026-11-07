@@ -1,0 +1,539 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ EL SUPERVISOR CREA LAS ORDENES DE DESPACHO  --  23/10/2026
+================================================================================
+
+Fase 2.3 de SPEC/objetivos/supervisor-arma-la-jornada.md, entrega 1: la regla
+(`operaciones.ordenes_de_despacho.decidir`) y su vista previa. Afirma:
+
+  P  la prioridad: con plazo, vencida o vence hoy = alta, mañana = media,
+     despues = baja; sin plazo, por la espera (decision del usuario, 23/10)
+  D  el dia: antes de la hora de corte, hoy; despues, mañana; sin hora de
+     corte, no hay dia
+  C  que crea y que no, cada motivo con su caso, sembrado junto a lo que si
+  R  el corte de red: una sola orden por puerto, los demas atados
+  N  que no escribe nada ni le pregunta al motor, que no mira otra empresa,
+     y que la pantalla la pide solo quien gestiona
+
+    pytest operaciones/tests/test_el_supervisor_crea_las_ordenes.py
+================================================================================
+"""
+import datetime as dt
+import uuid
+import zoneinfo
+from unittest import mock
+
+import pytest
+
+from campo.cuadrillas import ConfiguracionDeReparto
+from campo.models import OrdenTrabajo, WorkType, WorkTypeVersion
+from campo.zonas import AliasDeZona, ZonaOperativa
+from cases.models import Case
+from operaciones import armado_de_jornadas as adj
+from operaciones import ordenes_de_despacho as O
+from operaciones import paso_a_despacho as pad
+from operaciones.models import PropuestaSupervisor as P
+
+pytestmark = pytest.mark.django_db
+
+BOGOTA = zoneinfo.ZoneInfo("America/Bogota")
+#: Martes 06/10/2026 a las 15:00 de Bogota.
+A_LAS_3 = dt.datetime(2026, 10, 6, 15, 0, tzinfo=BOGOTA)
+MARTES = dt.date(2026, 10, 6)
+BARRIO = "SOLEDAD CENTRO"
+VISTA = "/api/operaciones/ordenes/vista-previa/"
+
+
+def _bogota(dia, hora, minuto=0):
+    return dt.datetime(2026, 10, dia, hora, minuto, tzinfo=BOGOTA)
+
+
+# ---------------------------------------------------------------------------
+# P · la prioridad
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("creado_el, plazo, esperada", [
+    (3, 2, O.ALTA),     # vencio el 5
+    (4, 2, O.ALTA),     # vence hoy
+    (5, 2, O.MEDIA),    # vence mañana
+    (6, 2, O.BAJA),     # vence pasado
+    (4, None, O.ALTA),  # sin plazo: dos dias esperando
+    (5, None, O.MEDIA),  # uno
+    (6, None, O.BAJA),  # de hoy
+])
+def test_p_por_plazo_y_si_no_por_espera(creado_el, plazo, esperada):
+    creado = _bogota(creado_el, 10)
+    assert O.prioridad_de(creado, plazo, MARTES, BOGOTA) == esperada
+
+
+def test_p2_el_dia_es_el_de_la_empresa():
+    #  Las 9 de la noche del lunes en Bogota son el martes en UTC: con el dia
+    #  de UTC seria «de hoy» y no «un dia esperando».
+    creado = _bogota(5, 21)
+    assert creado.astimezone(dt.timezone.utc).date() == MARTES
+    assert O.prioridad_de(creado, None, MARTES, BOGOTA) == O.MEDIA
+
+
+def test_p3_sin_creacion_es_media():
+    assert O.prioridad_de(None, 2, MARTES, BOGOTA) == O.MEDIA
+
+
+# ---------------------------------------------------------------------------
+# D · el dia
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("entro, esperado", [
+    (_bogota(6, 11, 59), MARTES),                        # antes del corte
+    (_bogota(6, 12, 0), MARTES + dt.timedelta(days=1)),  # en el corte
+    (_bogota(6, 14, 0), MARTES + dt.timedelta(days=1)),  # despues
+    (_bogota(5, 18, 0), MARTES),                         # ayer: ya espero
+    (None, MARTES),                                      # sin la hora
+])
+def test_d_la_hora_de_corte(entro, esperado):
+    assert O.dia_de_la_orden(entro, dt.time(12, 0), A_LAS_3, BOGOTA) == esperado
+
+
+def test_d2_sin_hora_de_corte_no_hay_dia():
+    assert O.dia_de_la_orden(_bogota(6, 9), None, A_LAS_3, BOGOTA) is None
+
+
+# ---------------------------------------------------------------------------
+# Lo que se siembra
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def empresa(org_a):
+    org_a.timezone = "America/Bogota"
+    org_a.save(update_fields=["timezone"])
+    ConfiguracionDeReparto.objects.update_or_create(
+        org=org_a, defaults={"hora_de_corte": dt.time(12, 0)})
+    z = ZonaOperativa.objects.create(org=org_a, nombre="SOLEDAD")
+    AliasDeZona.objects.create(org=org_a, zona=z, localidad=BARRIO)
+    return org_a
+
+
+def _plantilla(org, codigo, labor, asuntos=(), plazo=None):
+    tipo = WorkType.objects.create(org=org, codigo=codigo, nombre=codigo.title(),
+                                   labor=labor, asuntos=list(asuntos),
+                                   plazo_dias=plazo)
+    return WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [{"id": "x", "tipo": "texto"}]})
+
+
+@pytest.fixture
+def plantillas(empresa):
+    return {
+        "soporte": _plantilla(empresa, "soporte", "correctivo",
+                              ["No tiene internet"], plazo=2),
+        "red": _plantilla(empresa, "red", "trabajos", ["Corte de fibra"]),
+        "instalacion": _plantilla(empresa, "instalacion", "instalacion",
+                                  ["Instalacion nueva"], plazo=3),
+    }
+
+
+def _caso(org, asunto="No tiene internet", grupo=pad.FALLA_DE_SERVICIO, *,
+          barrio=BARRIO, nuevo=False, creado=None, entro=None, medicion=None):
+    """Un caso en la cola de Despacho. `barrio` None = todavia no se pidio."""
+    caso = Case.objects.create(
+        org=org, name=asunto, status="Assigned", priority="Normal",
+        is_active=True, provider="wisphub", area="soporte_tecnico",
+        external_ticket_id=f"t{uuid.uuid4().hex[:8]}",
+        external_service_id=f"s{uuid.uuid4().hex[:6]}",
+        external_client_name="Zoraida Clientela")
+    Case.objects.filter(pk=caso.pk).update(created_at=creado or _bogota(5, 9))
+    caso.refresh_from_db()
+    ahora = A_LAS_3.isoformat()
+    evidencia = [{"fuente": pad.FUENTE_DE_LA_LECTURA, "id": str(caso.id),
+                  "dato": "lectura", "observado_en": ahora, "grupo": grupo}]
+    if barrio is not None:
+        evidencia.append({"fuente": adj.FUENTE_LOCALIDAD, "id": str(caso.id),
+                          "dato": "barrio", "observado_en": ahora,
+                          "localidad": barrio, "motivo": "",
+                          "cliente_nuevo": nuevo})
+    if medicion is not None:
+        evidencia.append({"fuente": pad.FUENTE_MEDICION, "id": str(caso.id),
+                          "observado_en": ahora, **medicion})
+    P.objects.create(
+        org=org, tipo_senal=P.TICKET_SIN_DIAGNOSTICO, origen_tipo="case",
+        origen_id=str(caso.id), estado=P.ACEPTADA,
+        revisado_en=entro or _bogota(6, 9), accion_propuesta="Revisar",
+        motivo="x", prioridad=30, evidencia=evidencia)
+    return caso
+
+
+def _orden_de(org, caso, version, estado=OrdenTrabajo.ASIGNADA):
+    return OrdenTrabajo.objects.create(
+        org=org, numero=OrdenTrabajo.objects.count() + 100,
+        tipo_trabajo_version=version, estado_operativo=estado,
+        origen_sistema="crm", origen_ref=str(caso.id))
+
+
+def _por_caso(salida):
+    return ({f["caso"]: f for f in salida["crear"]},
+            {f["caso"]: f for f in salida["no_se_crea"]},
+            {f["caso"]: f for f in salida["atadas"]})
+
+
+# ---------------------------------------------------------------------------
+# C · que crea y que no
+# ---------------------------------------------------------------------------
+
+def test_c_cada_caso_con_su_respuesta(empresa, plantillas):
+    crea = _caso(empresa, creado=_bogota(3, 9))
+    sin_leer = _caso(empresa, barrio=None)
+    sin_barrio = _caso(empresa, barrio="")
+    sin_zona = _caso(empresa, barrio="OFICINA")
+    #  Sin grupo: desde el 25/10/2026 «nada lo mide» tiene labor de fabrica.
+    sin_plantilla = _caso(empresa, asunto="Algo raro", grupo="")
+    con_orden = _caso(empresa)
+    _orden_de(empresa, con_orden, plantillas["soporte"])
+    cancelada = _caso(empresa)
+    _orden_de(empresa, cancelada, plantillas["soporte"], OrdenTrabajo.CANCELADA)
+    nueva = _caso(empresa, asunto="Instalacion nueva", grupo=pad.TRABAJO_PEDIDO,
+                  barrio="", nuevo=True)
+
+    crear, no, _ = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    c = crear[str(crea.id)]
+    assert (c["plantilla"], c["por"], c["prioridad"], c["para"], c["zona"]) == (
+        "Soporte", "asunto", O.ALTA, "2026-10-06", "SOLEDAD")
+    assert c["llamar_al_cliente"] is False
+    assert {k: no[str(v.id)]["motivo"] for k, v in {
+        "sin_leer": sin_leer, "sin_barrio": sin_barrio, "sin_zona": sin_zona,
+        "sin_plantilla": sin_plantilla, "con_orden": con_orden,
+        "cancelada": cancelada}.items()} == {
+        "sin_leer": O.SIN_BARRIO_TODAVIA, "sin_barrio": O.SIN_BARRIO,
+        "sin_zona": O.BARRIO_SIN_ZONA, "sin_plantilla": O.SIN_PLANTILLA,
+        "con_orden": O.YA_TIENE_ORDEN, "cancelada": O.YA_TUVO_ORDEN}
+    #  El barrio sin zona se NOMBRA: es lo que hay que ir a cargar.
+    assert "OFICINA" in no[str(sin_zona.id)]["detalle"]
+    #  La instalacion nueva se crea igual, sin barrio: llamar al cliente.
+    n = crear[str(nueva.id)]
+    assert (n["plantilla"], n["llamar_al_cliente"], n["barrio"]) == (
+        "Instalacion", True, "")
+    assert len(crear) == 2
+
+
+def test_c2_despues_del_corte_sale_mañana(empresa, plantillas):
+    antes = _caso(empresa, entro=_bogota(6, 11))
+    despues = _caso(empresa, entro=_bogota(6, 13))
+
+    crear, _, _ = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    assert crear[str(antes.id)]["para"] == "2026-10-06"
+    assert crear[str(despues.id)]["para"] == "2026-10-07"
+
+
+def test_c3_sin_hora_de_corte_dice_por_que_y_no_pone_dia(empresa, plantillas):
+    ConfiguracionDeReparto.objects.filter(org=empresa).update(hora_de_corte=None)
+    caso = _caso(empresa)
+
+    salida = O.decidir(empresa, A_LAS_3)
+
+    assert "hora de corte" in salida["porque"]
+    assert _por_caso(salida)[0][str(caso.id)]["para"] == ""
+
+
+def test_c4_la_labor_medida_no_la_pisa_el_asunto(empresa, plantillas):
+    """Una visita medida de trabajos con un asunto de soporte: sale con la
+    plantilla de su labor medida, no con la del asunto."""
+    caso = _caso(empresa, grupo="")
+    P.objects.filter(origen_id=str(caso.id)).update(
+        tipo_senal=P.CASO_REQUIERE_VISITA,
+        accion_propuesta="Despachar una visita de trabajos al cliente")
+
+    crear, _, _ = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    assert (crear[str(caso.id)]["plantilla"], crear[str(caso.id)]["por"]) == (
+        "Red", "labor")
+
+
+# ---------------------------------------------------------------------------
+# R · el corte de red
+# ---------------------------------------------------------------------------
+
+CORTE = {"puerto": "0/1/3", "onus_en_los_a_la_vez": 4, "causa_caida": "fibra"}
+
+
+def test_r_una_orden_por_puerto(empresa, plantillas):
+    #  Un asunto que ninguna plantilla tiene: la labor la decide el corte.
+    primero = _caso(empresa, asunto="Sin servicio", creado=_bogota(4, 9),
+                    medicion=CORTE)
+    segundo = _caso(empresa, asunto="No tiene internet", creado=_bogota(5, 9),
+                    medicion=CORTE)
+    otro_puerto = _caso(empresa, asunto="No tiene internet",
+                        medicion={**CORTE, "puerto": "0/1/4"})
+
+    crear, _, atadas = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    #  El mas viejo lleva la orden, de obra de red; el otro va atado a el.
+    assert crear[str(primero.id)]["corte_de_red"] is True
+    assert (crear[str(primero.id)]["labor"], crear[str(primero.id)]["por"]) == (
+        "Trabajos", "labor")
+    assert atadas[str(segundo.id)]["a_caso"] == str(primero.id)
+    assert atadas[str(segundo.id)]["a_ticket"] == primero.external_ticket_id
+    assert str(otro_puerto.id) in crear
+
+
+def test_r2_si_el_puerto_ya_tiene_orden_todos_se_atan_a_ella(
+        empresa, plantillas):
+    sin_orden = _caso(empresa, creado=_bogota(3, 9), medicion=CORTE)
+    con_orden = _caso(empresa, creado=_bogota(5, 9), medicion=CORTE)
+    _orden_de(empresa, con_orden, plantillas["red"])
+
+    crear, no, atadas = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    assert atadas[str(sin_orden.id)]["a_caso"] == str(con_orden.id)
+    assert no[str(con_orden.id)]["motivo"] == O.YA_TIENE_ORDEN
+    assert crear == {}
+
+
+# ---------------------------------------------------------------------------
+# N · lo que no hace
+# ---------------------------------------------------------------------------
+
+def test_n_no_escribe_ni_le_pregunta_al_motor(empresa, plantillas):
+    _caso(empresa)
+    _caso(empresa, barrio=None)
+    antes = (OrdenTrabajo.objects.count(),
+             list(P.objects.order_by("id").values_list("evidencia", flat=True)))
+
+    with mock.patch("campo.services.despacho.contexto_del_caso",
+                    side_effect=AssertionError("no se le pregunta al motor")):
+        O.decidir(empresa, A_LAS_3)
+
+    assert (OrdenTrabajo.objects.count(),
+            list(P.objects.order_by("id").values_list("evidencia", flat=True))
+            ) == antes
+
+
+def test_n2_otra_empresa_no(empresa, plantillas, org_b):
+    from conftest import rls_org
+
+    with rls_org(org_b):
+        _caso(org_b)
+    salida = O.decidir(empresa, A_LAS_3)
+    assert salida["crear"] == salida["no_se_crea"] == salida["atadas"] == []
+
+
+def test_n3_la_pantalla_la_pide_quien_gestiona(
+        admin_client, user_client, empresa, plantillas):
+    caso = _caso(empresa)
+
+    r = admin_client.get(VISTA)
+    assert r.status_code == 200
+    assert [f["caso"] for f in r.json()["crear"]] == [str(caso.id)]
+    assert user_client.get(VISTA).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# V · la prioridad con el nivel del asunto (regla del 24/10, integrada 26/10)
+# ---------------------------------------------------------------------------
+
+def _nivel(codigo, plazo, prioridad, por="persona"):
+    return {"nivel": codigo, "plazo_dias": plazo, "prioridad": prioridad,
+            "por": por}
+
+
+URG = _nivel("urgente", 0, O.ALTA)
+NOR = _nivel("normal", 2, O.MEDIA)
+PRO = _nivel("programable", 5, O.BAJA)
+
+
+def _prioridad(creado, nivel, plazo=30, caido=False):
+    return O.prioridad_del_caso(creado, nivel=nivel, plazo_de_la_plantilla=plazo,
+                                caido=caido, hoy=MARTES, zona=BOGOTA)
+
+
+@pytest.mark.parametrize("nivel, creado_el, esperada", [
+    (URG, 6, O.ALTA),     # urgente: alta desde que entra
+    (NOR, 6, O.MEDIA),    # faltan dos dias: arranca en la del nivel, no baja
+    (NOR, 5, O.MEDIA),    # vence mañana
+    (NOR, 4, O.ALTA),     # vence hoy
+    (PRO, 6, O.BAJA),
+    (PRO, 2, O.MEDIA),    # 2 + 5 = 7: vence mañana
+    (PRO, 1, O.ALTA),     # 1 + 5 = 6: vence hoy
+])
+def test_v_arranca_en_el_nivel_y_sube_con_su_plazo(nivel, creado_el, esperada):
+    """El plazo de la plantilla (30) no cuenta: manda el del nivel."""
+    assert _prioridad(_bogota(creado_el, 9), nivel) == esperada
+
+
+def test_v2_con_el_equipo_caido_alta():
+    hoy = _bogota(6, 9)
+    assert _prioridad(hoy, PRO, caido=True) == O.ALTA
+    assert _prioridad(hoy, None, plazo=5, caido=True) == O.ALTA
+
+
+def test_v3_sin_nivel_la_regla_del_23():
+    for creado_el, plazo in ((3, 2), (5, 2), (6, 2), (4, None), (6, None)):
+        creado = _bogota(creado_el, 9)
+        assert _prioridad(creado, None, plazo=plazo) == O.prioridad_de(
+            creado, plazo, MARTES, BOGOTA)
+
+
+def test_v4_sin_creacion_la_del_nivel():
+    assert _prioridad(None, PRO) == O.BAJA
+    assert _prioridad(None, URG) == O.ALTA
+    assert _prioridad(None, None) == O.MEDIA
+
+
+def test_v5_decidir_lee_el_nivel_del_asunto_y_la_caida(empresa, plantillas):
+    from campo import niveles as N
+    from operaciones import diagnostico_optico as optico
+
+    #  «No tiene internet» en Programable, por una persona: el plazo de la
+    #  plantilla (2 dias) deja de mandar en la prioridad.
+    N.decidir_por_persona(empresa, "No tiene internet", N.PROGRAMABLE)
+    #  WispHub guarda «Asunto - Cliente»: igual encuentra plantilla y nivel.
+    tranquilo = _caso(empresa, asunto="No tiene internet - Zoraida Clientela",
+                      creado=_bogota(3, 9))
+    caido = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.CAIDO,
+        "causa_caida": optico.CAUSA_FIBRA})
+    #  Una pieza que no midio el motor no dice nada del equipo, y un equipo
+    #  en linea no sube nada.
+    sin_motor = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "estado": optico.CAIDO})
+    en_linea = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.EN_LINEA})
+    #  Manda la medicion MAS RECIENTE, la pieza o una re-medicion de su
+    #  historial (auditor independiente, 26/10/2026, con sonda).
+    antes, despues = _bogota(6, 10).isoformat(), _bogota(6, 14).isoformat()
+    remedido_caido = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.EN_LINEA,
+        "observado_en": antes,
+        "historial": [{"observado_en": despues, "estado": optico.CAIDO,
+                       "causa_caida": optico.CAUSA_FIBRA}]})
+    remedido_en_linea = _caso(empresa, creado=_bogota(6, 9), medicion={
+        "medido_con": pad.MEDIDO_CON, "estado": optico.CAIDO,
+        "causa_caida": optico.CAUSA_SIN_ENERGIA, "observado_en": antes,
+        "historial": [{"observado_en": despues, "estado": optico.EN_LINEA}]})
+    sin_nivel = _caso(empresa, asunto="Instalacion nueva",
+                      grupo=pad.TRABAJO_PEDIDO, creado=_bogota(4, 9))
+
+    crear, _, _ = _por_caso(O.decidir(empresa, A_LAS_3))
+
+    t = crear[str(tranquilo.id)]
+    #  Con el plazo de la plantilla habria sido alta (vencio el 5).
+    assert (t["plantilla"], t["por"], t["nivel"], t["prioridad"]) == (
+        "Soporte", "asunto", N.PROGRAMABLE, O.BAJA)
+    c = crear[str(caido.id)]
+    assert (c["prioridad"], c["equipo_caido"], c["nivel_nombre"]) == (
+        O.ALTA, True, "Programable")
+    assert crear[str(sin_motor.id)]["prioridad"] == O.BAJA
+    assert crear[str(en_linea.id)]["prioridad"] == O.BAJA
+    assert crear[str(remedido_caido.id)]["prioridad"] == O.ALTA
+    assert crear[str(remedido_en_linea.id)]["prioridad"] == O.BAJA
+    #  Sin nivel: el plazo de su plantilla (3 dias desde el 4 = vence mañana).
+    s = crear[str(sin_nivel.id)]
+    assert (s["nivel"], s["prioridad"]) == ("", O.MEDIA)
+
+
+def test_v6_el_lector_contesta_lo_mismo_que_de_a_uno(empresa, plantillas):
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    N.ubicar_por_el_supervisor(empresa, "Corte de fibra", N.NORMAL, motivo="x",
+                               tickets=0, provisional=True)
+    N.ubicar_por_el_supervisor(empresa, "Instalacion nueva", N.PROGRAMABLE,
+                               motivo="x", tickets=5, provisional=False)
+    #  Una plantilla con « - » en el asunto: solo cortando contra las
+    #  plantillas se lo encuentra entero (auditor, 26/10/2026).
+    _plantilla(empresa, "upgrade", "correctivo", ["Cambio De Plan - Upgrade"])
+    N.decidir_por_persona(empresa, "Cambio De Plan - Upgrade", N.URGENTE)
+
+    leer = N.lector_de_niveles(empresa)
+
+    for asunto in ("No tiene internet", "No tiene internet - Zoraida",
+                   "Corte de fibra", "Instalacion nueva", "Otra cosa", "",
+                   "Cambio De Plan - Upgrade - Zoraida"):
+        assert leer(asunto) == N.nivel_del_asunto(empresa, asunto), asunto
+    assert leer("No tiene internet - Zoraida")["nivel"] == N.URGENTE
+    assert leer("Cambio De Plan - Upgrade - Zoraida")["nivel"] == N.URGENTE
+    #  El Normal provisional del Supervisor no es una decision.
+    assert leer("Corte de fibra") is None
+    assert leer("Instalacion nueva")["por"] == N.POR_SUPERVISOR
+
+
+def test_v7_decidir_no_pregunta_el_nivel_caso_por_caso(empresa, plantillas):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    _caso(empresa)
+    with CaptureQueriesContext(connection) as uno:
+        O.decidir(empresa, A_LAS_3)
+    for _ in range(3):
+        _caso(empresa)
+    with CaptureQueriesContext(connection) as cuatro:
+        salida = O.decidir(empresa, A_LAS_3)
+
+    assert len(salida["crear"]) == 4
+    assert len(cuatro.captured_queries) == len(uno.captured_queries)
+
+
+def test_v8_el_informe_muestra_el_nivel_y_la_prioridad(empresa, plantillas):
+    import io
+
+    from django.core.management import call_command
+
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    caso = _caso(empresa, asunto="No tiene internet - Zoraida Clientela",
+                 creado=_bogota(6, 9))
+    salida = io.StringIO()
+
+    #  Urgente es alta cualquier dia: no hace falta fijar el reloj.
+    call_command("informe_de_despacho", "--org", str(empresa.id), stdout=salida)
+
+    fila = next(linea for linea in salida.getvalue().splitlines()
+                if caso.external_ticket_id in linea)
+    assert fila.split()[-2:] == [N.URGENTE, O.ALTA]
+    assert "por nivel del asunto: urgente 1" in salida.getvalue()
+    assert "Zoraida" not in salida.getvalue()
+
+
+def test_v9_la_plantilla_por_el_asunto_cortado(empresa, plantillas):
+    """El corte de «Asunto - Cliente» no confunde una plantilla cuyo asunto
+    trae « - » con la mas corta (auditor independiente, 26/10/2026)."""
+    from campo import plantillas as P
+
+    _plantilla(empresa, "plan", "correctivo", ["Cambio De Plan"])
+    _plantilla(empresa, "upgrade", "correctivo", ["Cambio De Plan - Upgrade"])
+    ofrecidas = P.plantillas_que_se_ofrecen(empresa)
+
+    def cual(nombre):
+        v = P.plantilla_para_asunto(ofrecidas, nombre)
+        return v.work_type.codigo if v else None
+
+    assert [cual(n) for n in (
+        "Cambio De Plan - Upgrade", "Cambio De Plan - Upgrade - Zoraida",
+        "Cambio De Plan · Zoraida", "Cambio De Plan - Zoraida",
+        "No tiene internet", "Otra Cosa - Zoraida", "")] == [
+        "upgrade", "upgrade", "plan", "plan", "soporte", None, None]
+
+
+def test_v10_sin_poder_leer_los_niveles_queda_en_el_log(empresa, plantillas,
+                                                         caplog):
+    """Sin rastro, la regla del 23/10 no se distinguiria de «ningun asunto
+    tiene nivel» (auditor independiente, 26/10/2026)."""
+    import logging
+
+    from django.db import DatabaseError
+
+    from campo import niveles as N
+
+    N.decidir_por_persona(empresa, "No tiene internet", N.URGENTE)
+    caplog.set_level(logging.WARNING, logger="campo.niveles")
+    with mock.patch.object(N.NivelDeAsunto.objects, "filter",
+                           side_effect=DatabaseError("x")):
+        leer = N.lector_de_niveles(empresa)
+
+    assert leer("No tiene internet") is None
+    assert "no se pudieron leer los niveles" in caplog.text
