@@ -20,6 +20,7 @@
  * como promesa, con plazo, y la que falla deja su fila sin valor y una linea
  * en el log. Ver getSettingsHub().
  */
+import { conPlazo as conPlazoComun } from './plazo.js';
 import { leerConfiguracionAsistente } from './asistente-config.js';
 import { leerAjustesBandeja, leerRotulosBandeja } from './bandeja-config.js';
 import { leerOrganizacion } from './organizacion-config.js';
@@ -199,6 +200,10 @@ export const PLAZO_MOTOR_MS = 4000;
  * fijo, nunca el mensaje del error: un null que no deja rastro se ve igual
  * que una llamada mal escrita (ver settings-argumentos.test.js).
  *
+ * Desde el 07/11/2026 es la de `plazo.js`, compartida con el menú y la
+ * conversación; acá solo pone el plazo del motor por defecto y el prefijo
+ * que dice de qué pantalla es la lectura.
+ *
  * @template T
  * @param {Promise<T>} promesa
  * @param {number} [ms]
@@ -206,22 +211,7 @@ export const PLAZO_MOTOR_MS = 4000;
  * @returns {Promise<T | null>}
  */
 export function conPlazo(promesa, ms = PLAZO_MOTOR_MS, nombre) {
-  /** @param {string} motivo */
-  const avisar = (motivo) => {
-    if (nombre) console.warn(`[configuracion] ${nombre} sin valor: ${motivo}`);
-    return null;
-  };
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let reloj;
-  const vencido = new Promise((resolver) => {
-    reloj = setTimeout(() => resolver(avisar(`plazo de ${ms} ms`)), ms);
-  });
-  return Promise.race([
-    Promise.resolve(promesa).catch((/** @type {any} */ err) =>
-      avisar(`error ${err?.status ?? err?.name ?? 'desconocido'}`)
-    ),
-    vencido
-  ]).finally(() => clearTimeout(reloj));
+  return conPlazoComun(promesa, ms, nombre && `configuracion ${nombre}`);
 }
 
 /**

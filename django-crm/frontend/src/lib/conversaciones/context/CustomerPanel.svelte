@@ -35,7 +35,11 @@
     /** La ficha leída en vivo del sistema del ISP, o null. Cada campo se
         dibuja SÓLO si vino: la lista blanca del motor deja fuera lo que no
         corresponde, y un renglón con un guion no informa nada. */
-    ficha = null
+    ficha = null,
+    /** La ficha todavía viaja: llega después de la conversación (07/11/2026).
+        Sin esto, las secciones de abajo aparecían de golpe, o nunca, sin que
+        nada dijera que se las estaba buscando. */
+    consultando = false
   } = $props();
 
   const ROTULO_EQUIPO = {
@@ -144,6 +148,10 @@
        acá son reales. Ninguna se dibuja si no vino su dato: una sección con
        tres guiones se lee como "el sistema está roto", y lo que pasa es que
        ese cliente no tiene ese campo cargado. -->
+  {#if consultando}
+    <p class="panel-consultando consultando-ficha" role="status">Consultando el sistema del ISP…</p>
+  {/if}
+
   {#if hayUbicacion}
     <p class="panel-titulo panel-seccion">Ubicación</p>
     <div class="bloque">
@@ -284,6 +292,11 @@
 
   .sin-dato {
     color: var(--bandeja-texto-3);
+  }
+
+  /* Donde irían las secciones del ISP, con el mismo aire que las separa. */
+  .consultando-ficha {
+    margin-top: 16px;
   }
 
   /* Fechas y saldo: cifras alineadas, pero en la letra del texto. Se leen,

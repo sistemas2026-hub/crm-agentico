@@ -75,8 +75,60 @@
      anteriores, que se muestran arriba como en WhatsApp, y cuál es la actual. */
   let chat = $state(untrack(() => data.chat ?? { tramos: [], hay_anteriores: false, antes: null }));
   let cargandoAnteriores = $state(false);
-  let caso = $state(untrack(() => data.caso));
-  let owners = $state(untrack(() => data.owners ?? []));
+  /* LO QUE LLEGA DESPUÉS  --  07/11/2026
+     La ficha del cliente (sistema del ISP), la óptica (sistema de las OLT),
+     el ticket del CRM y la lista de operadores ya no retienen la pantalla: el
+     load los devuelve como promesas y la conversación se dibuja apenas llega
+     el hilo (ver +page.server.js). Cada uno se pone cuando llega.
+
+     `undefined` es «todavía viaja», y no es lo mismo que `null` («llegó y no
+     hay»): el panel dice «consultando» en el primer caso y su aviso de
+     ausencia en el segundo. Las promesas nunca rechazan. Y se acepta también
+     el valor plano --lo que no hacía falta pedir viaja así, y así arman
+     `data` las pruebas--, que se pone de una, sin pasar por «consultando». */
+  const esPromesa = (/** @type {any} */ v) => !!v && typeof v.then === 'function';
+  const yaVino = (/** @type {any} */ v) => (esPromesa(v) ? undefined : v);
+
+  // La ficha, la óptica y los operadores se siguen de `data`: una
+  // invalidación (refrescarRelevo) trae promesas nuevas, y mientras viajan
+  // queda el valor anterior en vez de volver a «consultando».
+  let fichaCliente = $state(untrack(() => yaVino(data.fichaCliente)));
+  let optica = $state(untrack(() => yaVino(data.optica)));
+  let operadores = $state(untrack(() => yaVino(data.operadores)));
+  $effect(() => {
+    let vigente = true;
+    /** @param {any} v @param {(x: any) => void} poner */
+    const cuandoLlegue = (v, poner) => {
+      if (!esPromesa(v)) poner(v);
+      else v.then((/** @type {any} */ x) => { if (vigente) poner(x); });
+    };
+    cuandoLlegue(data.fichaCliente, (x) => (fichaCliente = x));
+    cuandoLlegue(data.optica, (x) => (optica = x));
+    cuandoLlegue(data.operadores, (x) => (operadores = x));
+    return () => {
+      vigente = false;
+    };
+  });
+
+  // El ticket se toma UNA vez, como el resto del estado de arriba: después
+  // lo cambia la pantalla (la asignación) y una invalidación no lo pisa.
+  let caso = $state(untrack(() => yaVino(data.caso) ?? null));
+  let owners = $state(untrack(() => yaVino(data.owners) ?? []));
+  let cargandoCaso = $state(untrack(() => esPromesa(data.caso)));
+  untrack(() => {
+    if (esPromesa(data.caso)) {
+      data.caso.then((/** @type {any} */ v) => {
+        caso = v ?? null;
+        cargandoCaso = false;
+        // El responsable del ticket arranca del ticket: si llegó después de
+        // montar, lo que se tomó al montar era vacío.
+        if (!asignadoA) asignadoA = v?.assignee_id ?? '';
+      });
+    }
+    if (esPromesa(data.owners)) {
+      data.owners.then((/** @type {any} */ v) => (owners = v ?? []));
+    }
+  });
   let herramientas = $state(untrack(() => data.herramientas ?? []));
   // El registro del relevo. Mismo patrón que el resto: untrack porque el
   // componente se remonta entero al cambiar de conversación ({#key abierta}).
@@ -1166,7 +1218,8 @@
   const etiquetaLabel = (/** @type {string} */ e) => rotuloDe(e, data.rotulos);
 
 
-  let asignadoA = $state(caso?.assignee_id ?? '');
+  // El valor al montar; si el ticket llega después, lo pone su `then` (arriba).
+  let asignadoA = $state(untrack(() => caso?.assignee_id ?? ''));
   let ownerActual = $derived(owners.find((o) => o.id === asignadoA) ?? null);
   let listaAbierta = $state(false);
   /** @type {HTMLFormElement} */
@@ -1853,7 +1906,7 @@
     {conversacion}
     contextoAbierto={pantallaAncha ? !contextoRecogido : contextoAbierto}
     rotulos={data.rotulos ?? {}}
-    ficha={data.fichaCliente?.cliente ?? null}
+    ficha={fichaCliente?.cliente ?? null}
     onAlternarContexto={alternarContexto}
   />
 
@@ -1863,7 +1916,7 @@
     rotulos={data.rotulos ?? {}}
     areas={data.areas ?? {}}
     {escalandoArea} {errorEscalarArea} onEscalarArea={escalarArea}
-    operadores={data.operadores ?? []}
+    operadores={operadores ?? []}
     {iaEnPausa} {escalada} {atendida} {esMia} {asignadaA} {esAdmin} {gobernada}
     {estadoUnico}
     {marcandoAtendida} {errorAtender} onAtender={marcarAtendida}
@@ -2037,13 +2090,15 @@
        verificar de un vistazo contra el manifiesto. -->
   <div class="info-cuerpo">
     {#if pestanaContexto === 'cliente'}
-      <CustomerPanel {conversacion} ficha={data.fichaCliente?.cliente ?? null} />
+      <CustomerPanel {conversacion} ficha={fichaCliente?.cliente ?? null}
+        consultando={fichaCliente === undefined} />
 
     {:else if pestanaContexto === 'equipo'}
       <NetworkPanel
         acciones={accionesEquipo}
         serial={conversacion?.equipo?.sn_onu ?? null}
-        optica={data.optica ?? null}
+        optica={optica ?? null}
+        consultandoAlAbrir={optica === undefined}
         conversacionId={conversacion.id}
       />
 
@@ -2066,7 +2121,7 @@
            siguen sí son de la pestaña: encabezan paneles que no saben en qué
            pantalla los montaron. -->
       <CasePanel
-        {caso} {conversacion} {owners} {ownerActual}
+        {caso} {conversacion} {owners} {ownerActual} {cargandoCaso}
         rotulos={data.rotulos ?? {}}
         asignadaDexter={asignadaA}
         bind:asignadoA bind:listaAbierta bind:formularioAsignar

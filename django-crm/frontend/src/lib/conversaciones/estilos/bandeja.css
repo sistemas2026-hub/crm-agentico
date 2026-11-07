@@ -351,6 +351,19 @@ html:not(.dark) .bandeja {
   gap: 5px;
 }
 
+/* «Consultando…»: un dato que llega después de la conversación (la ficha del
+   ISP, la óptica, el ticket del CRM; 07/11/2026). Uno para todos los paneles,
+   por la misma razón que `.panel-tarjeta`. Texto gris y quieto, sin
+   animación: se lee de reojo mientras se lee el hilo, y algo que se mueve en
+   la columna de al lado distrae de lo que importa. */
+.bandeja .panel-consultando {
+  margin: 0;
+  font-family: var(--bandeja-sans);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--bandeja-texto-2);
+}
+
 .bandeja .panel-tarjeta-cabeza {
   display: flex;
   align-items: center;

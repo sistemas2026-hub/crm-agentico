@@ -34,7 +34,11 @@
     serial = null,
     /** La lectura óptica que trajo el server load, o su motivo de ausencia. */
     optica = null,
-    conversacionId = ''
+    conversacionId = '',
+    /** La lectura de la escalada todavía viaja: llega después de la
+        conversación (07/11/2026). Mientras tanto no es «Sin consultar», que
+        invitaría a apretar el botón y pedir la misma lectura dos veces. */
+    consultandoAlAbrir = false
   } = $props();
 
   const lineas = $derived(acciones.map(lineaDeAccion));
@@ -326,11 +330,22 @@
        inglés y en mayúscula, copiados de la referencia. Dicen lo mismo en
        español y escritos normal: el color y el recuadro ya los separan del
        texto, la mayúscula sólo los hacía más difíciles de leer. -->
-  <div class="procedencia">
-    <span class="procedencia-punto" class:procedencia-punto-mal={!medicion} aria-hidden="true"></span>
-    <span class="procedencia-rotulo">Confirmado — en vivo desde SmartOLT</span>
-    {#if medicion}<span class="procedencia-vivo">En vivo</span>{/if}
-  </div>
+  <!-- SÓLO CON MEDICIÓN, Y SIN NOMBRE DE PROVEEDOR  (07/11/2026).
+       La banda decía «Confirmado — en vivo desde SmartOLT» siempre: también
+       con «Sin consultar», con «El sistema de red no respondió» y mientras la
+       lectura todavía viajaba. Afirmaba algo que no había pasado; apagar el
+       punto no alcanzaba, porque lo que se lee es la frase. Sin medición no
+       se dibuja: el aviso de abajo ya dice por qué no la hay.
+       Y el nombre era el del proveedor de UNA empresa: otra puede tener su
+       red en otro sistema, y el motor no dice cuál contestó. «El sistema de
+       red» es como lo nombran los demás avisos de este panel. -->
+  {#if medicion}
+    <div class="procedencia">
+      <span class="procedencia-punto" aria-hidden="true"></span>
+      <span class="procedencia-rotulo">Confirmado — en vivo desde el sistema de red</span>
+      <span class="procedencia-vivo">En vivo</span>
+    </div>
+  {/if}
 
   {#if medicion}
     <!-- ── 1. LA UNIDAD ─────────────────────────────────────────────────── -->
@@ -584,6 +599,8 @@
     <p class="eq-pie">
       Firmware no lo devuelve ningún endpoint del sistema de red.
     </p>
+  {:else if consultandoAlAbrir}
+    <p class="panel-consultando" role="status">Consultando el equipo en el sistema de red…</p>
   {:else}
     <p class="vacio">{MOTIVO[lectura?.motivo] ?? 'Sin consultar.'}</p>
   {/if}
@@ -593,11 +610,11 @@
       type="button"
       class="v2-btn v2-btn-sm"
       onclick={consultarAhora}
-      disabled={consultando || !conversacionId}
-      aria-busy={consultando}
+      disabled={consultando || (consultandoAlAbrir && !lectura) || !conversacionId}
+      aria-busy={consultando || (consultandoAlAbrir && !lectura)}
     >
       <RefreshCw size={12} />
-      {consultando ? 'Consultando…' : 'Consultar ahora'}
+      {consultando || (consultandoAlAbrir && !lectura) ? 'Consultando…' : 'Consultar ahora'}
     </button>
     {#if lectura?.leido_en}
       <span class="opt-hora">Leído {haceCuanto(lectura.leido_en)}</span>
@@ -734,8 +751,8 @@
   /* ── LA BANDA DE PROCEDENCIA ───────────────────────────────────────────
      Reemplaza al rótulo «Estado del enlace», que nombraba la sección pero no
      decía de dónde salía el dato -- que es la pregunta que decide si se manda
-     un técnico. El punto se apaga cuando no hay medición: sin lectura no se
-     afirma que haya nada en vivo. */
+     un técnico. Sin medición la banda no se dibuja (07/11/2026): apagar el
+     punto dejaba la frase «Confirmado — en vivo», que es lo que se lee. */
   .procedencia {
     display: flex;
     align-items: center;
@@ -751,9 +768,6 @@
     border-radius: 50%;
     background: var(--bandeja-ok);
     flex: none;
-  }
-  .procedencia-punto-mal {
-    background: var(--bandeja-texto-3);
   }
 
   /* 04/11/2026: escrito normal. En versalita con espaciado se leía como un

@@ -32,7 +32,10 @@
     listaAbierta = $bindable(false),
     formularioAsignar = $bindable(),
     // Cómo se lee cada etiqueta en esta empresa (lib/conversaciones/rotulos.js).
-    rotulos = {}
+    rotulos = {},
+    /** El ticket todavía viaja desde el CRM: llega después de la conversación
+        (07/11/2026). No es lo mismo que "no hay caso". */
+    cargandoCaso = false
   } = $props();
 
   const etiquetaLabel = (/** @type {string} */ e) => rotuloDe(e, rotulos);
@@ -240,6 +243,14 @@
           lo determina Dexter.
         </span>
       </p>
+    </div>
+  {:else if cargandoCaso}
+    <!-- Mientras el ticket viaja, se dice. Sin esto el bloque aparecía de
+         golpe unos segundos después, o --si el CRM no contestaba-- nunca,
+         sin que nada dijera que se lo estaba buscando. -->
+    <div class="panel-tarjeta">
+      <div class="panel-tarjeta-cabeza"><span class="panel-titulo">Caso en el CRM</span></div>
+      <p class="panel-consultando" role="status">Consultando el CRM…</p>
     </div>
   {/if}
 

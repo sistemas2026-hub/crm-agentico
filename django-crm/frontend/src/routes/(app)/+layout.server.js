@@ -6,28 +6,15 @@ import { listInvoices } from '$lib/server/v2/invoices.js';
 import { countAwaitingApprovals } from '$lib/server/v2/approvals.js';
 import { countUnread } from '$lib/server/v2/notifications.js';
 import { getOrgShell } from '$lib/server/v2/organization.js';
+// El de `plazo.js`, que no depende de ninguna pantalla. Hasta el 07/11/2026
+// estaba copiado acá para no depender del hub de Configuración. Sin `nombre`:
+// corre en cada navegación, y un conteo sin insignia no merece una línea de
+// log por clic.
+import { conPlazo } from '$lib/server/v2/plazo.js';
 
 /** Cuanto espera la navegacion a cada conteo del menu antes de seguir sin su
  *  insignia. Corto a proposito: es lo que separa el clic de la pantalla. */
 const PLAZO_CONTEO_MS = 2000;
-
-/**
- * `promesa`, o `null` si falla o tarda mas de `ms`. Nunca rechaza. El plazo
- * corta la ESPERA, no el pedido, que sigue del otro lado hasta contestar.
- * Mismo criterio que settings.js::conPlazo, copiado aca y no importado: este
- * archivo no puede depender del hub de Configuracion.
- * @template T @param {Promise<T>} promesa @param {number} ms @returns {Promise<T|null>}
- */
-function conPlazo(promesa, ms) {
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let reloj;
-  const vencido = new Promise((resolver) => {
-    reloj = setTimeout(() => resolver(null), ms);
-  });
-  return Promise.race([Promise.resolve(promesa).catch(() => null), vencido]).finally(() =>
-    clearTimeout(reloj)
-  );
-}
 
 /**
  * Counts for migrated modules, fetched for real and merged over the fixtures.
