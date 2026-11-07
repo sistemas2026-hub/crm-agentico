@@ -38,16 +38,27 @@ pytestmark = pytest.mark.django_db
 PISO, TECHO = -27.0, -8.0
 
 
-def _orden(org, numero, *, al_salir="-35.0"):
+def _orden(org, numero, *, al_salir="-35.0", con_foto=False):
+    """`con_foto`: la plantilla declara `medicion_al_salir`.
+
+    LA FOTO ENTRA AL NACER, no se agrega despues. `WorkTypeVersion.clean`
+    rechaza tocar el esquema de una version PUBLICADA --una plantilla
+    congelada que cambia debajo de una orden es justo lo que la
+    inmutabilidad impide-- y la primera version de este andamiaje lo
+    intentaba. El modelo tenia razon.
+    """
     from campo.models import (EventoTrabajo, OrdenTrabajo, WorkType,
                               WorkTypeVersion)
 
+    evidencias = ([{"id": "medicion_al_salir", "tipo": "foto",
+                    "titulo": "Medición al salir", "obligatorio": True}]
+                  if con_foto else [])
     wt = WorkType.objects.create(org=org, codigo=f"eq{numero}",
                                  nombre="Soporte", labor="correctivo")
     version = WorkTypeVersion.objects.create(
         work_type=wt, version=9, schema_version=1,
         estado=WorkTypeVersion.PUBLICADA,
-        esquema={"pasos": [], "evidencias": [], "campos": [
+        esquema={"pasos": [], "evidencias": evidencias, "campos": [
             {"id": "potencia_al_salir", "tipo": "decimal",
              "titulo": "Potencia al salir", "unidad": "dBm",
              "bueno": {"min": PISO, "max": TECHO}}]})
@@ -61,6 +72,19 @@ def _orden(org, numero, *, al_salir="-35.0"):
     cierre = EventoTrabajo.objects.create(
         org=org, orden=orden, tipo="cierre_campo",
         datos={"vuelta": 1, "respuestas": {"solucion": "se cambia conector"}})
+    if con_foto:
+        #  Y LA FOTO LLEGA. Declararla sin subirla deja al CHECKLIST
+        #  marcandola como faltante, y entonces `sugeridas` la trae por ese
+        #  camino --no por el del rango-- y la guarda mide otra cosa. Medido
+        #  el 07/11/2026: con la foto declarada y ausente, las tres guardas
+        #  del caso bueno fallaban por una razon correcta.
+        from campo.models import EvidenciaTrabajo
+        EvidenciaTrabajo.objects.create(
+            org=org, orden_trabajo=orden, requisito_id="medicion_al_salir",
+            vuelta=orden.vuelta, sha256=f"e{numero}".ljust(64, "x")[:64],
+            storage_key=f"k/e{numero}", nombre_original="medidor.jpg",
+            mime_type="image/jpeg", bytes=1,
+            estado_archivo=EvidenciaTrabajo.RECIBIDO)
     return orden, cierre
 
 
@@ -243,3 +267,98 @@ def test_UNA_propuesta_con_dos_ordenes_no_confunde_las_piezas(org_a):
 
     assert p["ok"] is False, (
         "se uso la medicion de la orden vecina para dejar pasar esta: " + str(p))
+
+
+# ---------------------------------------------------------------------------
+#  Y SE DEVUELVE AL TECNICO  --  07/11/2026
+#
+#  El usuario, despues de que se le explicara por que una medida fuera de
+#  rango no frenaba ni devolvia: «si, hazlo todo».
+#
+#  La regla que lo impedia no se saltea: `atender_la_que_no_cierra` no
+#  devuelve lo que falla «sin un requisito concreto», y eso tiene su motivo
+#  medido --cuando falla «servicio», el tecnico puede necesitar material o un
+#  tercero, y devolverselo es darle un problema que no es suyo--. El rango SI
+#  tiene algo concreto que pedir: volver a medir y mandar la foto de la
+#  pantalla. Deja de ser ese caso en vez de esquivarlo.
+# ---------------------------------------------------------------------------
+
+def test_fuera_de_rango_NOMBRA_QUE_REHACER(org_a):
+    from campo.revision_del_cierre import revisar
+
+    orden, _c = _orden(org_a, 620, con_foto=True)
+
+    revision = revisar(orden)
+
+    assert "medicion_al_salir" in revision["sugeridas"], revision["sugeridas"]
+
+
+def test_sin_la_foto_DECLARADA_no_se_inventa_un_requisito(org_a):
+    """Pedir algo que el formulario no tiene deja al tecnico dando vueltas."""
+    from campo.revision_del_cierre import revisar
+
+    orden, _c = _orden(org_a, 621)          # la plantilla no declara fotos
+
+    assert revisar(orden)["sugeridas"] == []
+
+
+def test_con_el_equipo_en_rango_NO_se_pide_rehacer_nada(org_a):
+    """Si no frena, tampoco devuelve: seria mandar a medir de nuevo algo que
+    el equipo ya dijo que esta bien."""
+    from campo.revision_del_cierre import revisar
+
+    orden, _c = _orden(org_a, 622, con_foto=True)
+    _midio_el_equipo(orden, en_rango=True, dbm=-20.65)
+
+    assert revisar(orden)["sugeridas"] == []
+
+
+def test_una_medida_BUENA_no_pide_rehacer_nada(org_a):
+    from campo.revision_del_cierre import revisar
+
+    orden, _c = _orden(org_a, 623, al_salir="-18.0", con_foto=True)
+
+    assert revisar(orden)["sugeridas"] == []
+
+
+def test_LA_ORDEN_SE_DEVUELVE_DE_VERDAD(org_a):
+    """EL EFECTO, no la lista. Que `sugeridas` nombre el requisito no prueba
+    que la orden vuelva al tecnico: eso lo decide `atender_la_que_no_cierra`,
+    y hasta hoy devolvia 'nada' para este caso."""
+    from unittest import mock
+
+    from campo.cierre_por_el_supervisor import atender_la_que_no_cierra
+    from campo.models import OrdenTrabajo
+    from campo.revision_del_cierre import revisar
+
+    orden, _c = _orden(org_a, 624, con_foto=True)
+    antes = orden.vuelta
+
+    with mock.patch("requests.post") as post:
+        post.return_value = mock.Mock(status_code=200,
+                                      json=lambda: {"ok": True})
+        resultado = atender_la_que_no_cierra(orden, revisar(orden))
+
+    assert resultado == "devuelta", resultado
+    fresca = OrdenTrabajo.objects.get(pk=orden.pk)
+    assert fresca.estado_operativo == OrdenTrabajo.CORRECCION_REQUERIDA, \
+        fresca.estado_operativo
+    assert fresca.vuelta == antes + 1
+
+
+def test_con_el_equipo_en_rango_LA_ORDEN_NO_SE_DEVUELVE(org_a):
+    from unittest import mock
+
+    from campo.cierre_por_el_supervisor import atender_la_que_no_cierra
+    from campo.models import OrdenTrabajo
+    from campo.revision_del_cierre import revisar
+
+    orden, _c = _orden(org_a, 625, con_foto=True)
+    _midio_el_equipo(orden, en_rango=True, dbm=-20.65)
+
+    with mock.patch("requests.post") as post:
+        assert atender_la_que_no_cierra(orden, revisar(orden)) == "nada"
+        post.assert_not_called()
+
+    fresca = OrdenTrabajo.objects.get(pk=orden.pk)
+    assert fresca.estado_operativo != OrdenTrabajo.CORRECCION_REQUERIDA

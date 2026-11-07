@@ -135,9 +135,44 @@ def revisar(orden, *, pendientes=None) -> dict | None:
         #  no habia con que comparar. Decir «el checklist esta completo» es
         #  contar fotos, no mirarlas.
         "evidencias": _evidencias_para_revisar(orden, esquema),
-        "sugeridas": next((p["faltan"] for p in puntos if p["clave"] == "checklist"), []),
+        "sugeridas": _que_rehacer(puntos, esquema),
         "solucion": _solucion(cierre),
     }
+
+
+def _que_rehacer(puntos, esquema) -> list[str]:
+    """Los requisitos que una devolucion puede pedir que se rehagan.
+
+    POR QUE EL RANGO ENTRA ACA  --  07/11/2026
+    -------------------------------------------
+    Hasta hoy esta lista era solo lo que el checklist marca como faltante, y
+    una medida fuera de rango no frenaba ni devolvia: quedaba esperando a una
+    persona. El usuario pidio que se devuelva.
+
+    Y ESO EXIGIA NOMBRAR QUE REHACER, no saltear la regla que lo impedia.
+    `atender_la_que_no_cierra` no devuelve lo que falla «sin un requisito
+    concreto», y tiene su motivo medido: cuando el punto que falla es
+    «servicio», el tecnico puede necesitar material, un tercero o que alguien
+    decida, y mandarselo de vuelta es devolverle un problema que no es suyo.
+
+    El rango SI tiene algo concreto que pedir --volver a medir y mandar la
+    foto de la pantalla-- asi que deja de ser ese caso en vez de esquivarlo.
+
+    SOLO SI LA PLANTILLA LO DECLARA. Pedir un requisito que el formulario no
+    tiene le deja al tecnico una devolucion que no puede cumplir, y lo
+    dejaria dando vueltas. Sin esa foto declarada, la orden sigue esperando a
+    una persona, que es lo que hacia hasta hoy.
+    """
+    faltan = next((p["faltan"] for p in puntos if p["clave"] == "checklist"), [])
+    salida = [str(x).strip() for x in (faltan or []) if str(x).strip()]
+    fuera_de_rango = any(p.get("clave") == "rango" and p.get("ok") is False
+                         for p in puntos)
+    if fuera_de_rango:
+        declarada = any(isinstance(e, dict) and e.get("id") == REQUISITO_AL_SALIR
+                        for e in (esquema or {}).get("evidencias") or [])
+        if declarada and REQUISITO_AL_SALIR not in salida:
+            salida.append(REQUISITO_AL_SALIR)
+    return salida
 
 
 def _evidencias_para_revisar(orden, esquema) -> list[dict]:
@@ -276,6 +311,11 @@ def _fotos(orden):
 #:  punto que calla sin decir por que.
 CAMPO_AL_LLEGAR = "potencia_al_llegar"
 CAMPO_AL_SALIR = "potencia_al_salir"
+
+#:  La foto que respalda la medida al salir: la pantalla del medidor.
+#:  Es lo que se le pide rehacer cuando esa medida quedo fuera de rango
+#:  y ninguna lectura del equipo la contradice.
+REQUISITO_AL_SALIR = "medicion_al_salir"
 
 
 def _potencia_de_la_foto_al_salir(orden):
