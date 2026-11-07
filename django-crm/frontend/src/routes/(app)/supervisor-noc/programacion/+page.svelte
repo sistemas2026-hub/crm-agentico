@@ -499,6 +499,16 @@
       vistazo desde el escritorio del Supervisor. */
   .pg-ct {
     display: grid;
+    /*  EL CONTENIDO ARRIBA, NO REPARTIDO (07/11/2026). La rejilla estira cada
+        tarjeta a la altura de la más alta --la Cuadrilla #3, con 20 órdenes--
+        y en `grid` las filas se reparten ese alto sobrante: el nombre del
+        técnico quedaba flotando a media tarjeta, con huecos enormes (captura
+        del usuario). Es el MISMO defecto que `snoc-tarjeta` ya tenía con su
+        `justify-content: space-between`, que `snoc-pila-xs` tapaba con
+        `justify-content: flex-start`; al pasar a `grid` ese `flex-start`
+        dejó de hacer nada, porque en una rejilla ese eje es el horizontal.
+        El vertical lo manda `align-content`. */
+    align-content: start;
     gap: 3px;
     padding: 8px 10px;
   }

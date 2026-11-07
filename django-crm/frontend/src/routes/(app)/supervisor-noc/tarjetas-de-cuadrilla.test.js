@@ -21,7 +21,28 @@ describe('las tarjetas de cuadrilla', () => {
       const deCuadrilla = tarjetas.filter((t) => t.includes('min-width:0'));
 
       expect(deCuadrilla.length).toBe(1);
-      expect(deCuadrilla[0]).toContain('justify-content:flex-start');
+
+      //  LA PROPIEDAD DEPENDE DEL `display`, y por eso esta prueba lo mira
+      //  (07/11/2026). Afirmaba `justify-content:flex-start` a secas. El
+      //  07/11 la tarjeta de Programación pasó de `snoc-pila-xs` (flex) a
+      //  `pg-ct` (grid): el `justify-content` del estilo en línea seguía
+      //  escrito, así que la prueba siguió en verde, pero en una rejilla ese
+      //  eje es el HORIZONTAL y dejó de hacer nada. El resultado en la
+      //  pantalla del usuario fue el defecto de 2026-10-28 otra vez: las
+      //  tarjetas estiradas a la altura de la más larga, con el nombre del
+      //  técnico flotando a media tarjeta.
+      //
+      //  La condición verdadera es «no repartas el alto sobrante», y cómo se
+      //  escribe depende del display: `align-content` en grid,
+      //  `justify-content` en una columna flex.
+      const clase = /<div class="snoc-tarjeta ([a-z-]+)"/.exec(deCuadrilla[0])?.[1] ?? '';
+      const regla = new RegExp(`\\.${clase} \\{[^}]*\\}`).exec(fuente)?.[0] ?? '';
+
+      if (/display:\s*grid/.test(regla)) {
+        expect(regla).toMatch(/align-content:\s*(start|flex-start)/);
+      } else {
+        expect(deCuadrilla[0]).toContain('justify-content:flex-start');
+      }
     });
   }
 });
