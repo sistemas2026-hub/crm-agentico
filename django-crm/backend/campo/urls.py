@@ -4,6 +4,7 @@
 from django.urls import path
 
 from campo import analisis_para_el_tecnico
+from campo import probar_instruccion_de_foto
 from campo import (
     avisos_views,
     configuracion_de_seguimiento_views,
@@ -223,6 +224,11 @@ urlpatterns = [
     #  Lo que la mirada concluyo de la foto, para la app del tecnico
     #  (06/11/2026). Sin esto el analisis solo lo lee el Supervisor, horas
     #  despues, cuando el tecnico ya se fue de la casa del cliente.
+    #  Probar una instruccion candidata contra la foto que ya fallo, antes
+    #  de guardarla en la plantilla (06/11/2026). No escribe nada.
+    path("evidencias/<uid:pk>/probar-instruccion/",
+         probar_instruccion_de_foto.ProbarInstruccionDeFotoView.as_view(),
+         name="evidencia_probar_instruccion"),
     path("evidencias/<uid:pk>/analisis/",
          analisis_para_el_tecnico.AnalisisDeLaFotoView.as_view(),
          name="evidencia_analisis"),

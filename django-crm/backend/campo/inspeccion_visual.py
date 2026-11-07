@@ -221,8 +221,15 @@ def _bytes_de(evidencia) -> bytes | None:
         return None
 
 
-def analizar(evidencia) -> dict:
+def analizar(evidencia, instrucciones_propias: str = "") -> dict:
     """Mira UNA evidencia. Devuelve que paso; no escribe.
+
+    `instrucciones_propias` es para PROBAR una redaccion antes de guardarla
+    en la plantilla (06/11/2026). Va por el mismo camino, el mismo proposito
+    y el mismo envoltorio que produccion -- si fuera por otro, lo que se mida
+    aca no diria nada de lo que va a pasar despues. Que esta funcion NO
+    ESCRIBA es lo que hace seguro probar: un ensayo no deja un analisis
+    falso en la bitacora de la orden.
 
     `{"estado", "texto", "motivo", "modelo", "segundos", "tokens"}`.
 
@@ -269,7 +276,8 @@ def analizar(evidencia) -> dict:
             f"{base}/interno/vision/analizar-evidencia",
             params={"tenant": tenant},
             files={"imagen": ("evidencia.jpg", contenido, "image/jpeg")},
-            data={"pie": que_tenia_que_mostrar(evidencia)},
+            data={"pie": que_tenia_que_mostrar(evidencia,
+                                               instrucciones_propias)},
             headers=cabeceras, timeout=TIMEOUT_SEGUNDOS)
         cuerpo = r.json() if r.content else {}
         if not isinstance(cuerpo, dict):
