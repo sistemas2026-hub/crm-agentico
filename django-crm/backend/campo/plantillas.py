@@ -473,6 +473,34 @@ def componer(definicion: dict) -> dict:
             unidad = _texto(c.get("unidad"), "la unidad", obligatorio=False, largo=16)
             if unidad:
                 salida["unidad"] = unidad
+
+            #  EL RANGO QUE SE CONSIDERA BUENO  --  07/11/2026
+            #
+            #  El usuario: «hay que establecer que para que pueda diagnosticar
+            #  si una medida esta buena es entre este rango y cuando el note
+            #  un rango fuera de lo indicado ya diagnostica como malo».
+            #
+            #  NO ES `min`/`max`, Y LA DIFERENCIA ES EL PUNTO ENTERO. Aquellos
+            #  dicen que PUEDE ESCRIBIR el tecnico: el formulario rechaza lo
+            #  que cae afuera. Si el rango bueno se expresara ahi, el tecnico
+            #  no podria reportar la senal mala que justamente vino a
+            #  arreglar. Estos dicen que se considera SANO, y lo de afuera se
+            #  registra igual: se marca, no se bloquea.
+            #
+            #  Y VIVE EN LA PLANTILLA, no en el codigo: el rango de una red
+            #  varia por empresa (CLAUDE.md §3.3), y la plantilla ya es
+            #  configuracion versionada y editable sin desplegar.
+            bmn = _numero(c.get("bueno_min"), f"El minimo bueno de «{titulo}»")
+            bmx = _numero(c.get("bueno_max"), f"El maximo bueno de «{titulo}»")
+            if bmn is not None and bmx is not None and bmn > bmx:
+                raise ErrorPlantilla(
+                    "RANGO_BUENO_INVERTIDO",
+                    f"«{titulo}»: el minimo bueno es mayor que el maximo.")
+            #  LOS DOS O NINGUNO: con un solo extremo no hay rango que
+            #  juzgar, y guardarlo a medias deja una plantilla que parece
+            #  configurada y no diagnostica nada.
+            if bmn is not None and bmx is not None:
+                salida["bueno"] = {"min": bmn, "max": bmx}
         elif tipo == SELECCION:
             salida["tipo"] = "seleccion"
             opciones = []
@@ -632,8 +660,16 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
                                "y la app y el servidor lo entienden distinto")
             fila["tipo"] = TEXTO
         elif tipo == "decimal":
+            #  EL RANGO BUENO VUELVE A SALIR POR DONDE ENTRO. Sin estas dos
+            #  lineas, cualquier republicacion --y "Guardar en la plantilla"
+            #  de la pantalla del supervisor republica-- lo borraria sin que
+            #  nadie lo notara: el diagnostico dejaria de aparecer y el
+            #  esquema no mostraria por que. Es el mismo defecto que CLAUDE.md
+            #  anota como D7 sobre `editor._editar`.
+            bueno = c.get("bueno") if isinstance(c.get("bueno"), dict) else {}
             fila.update(tipo=NUMERO, min=reglas.get("min"), max=reglas.get("max"),
-                        unidad=c.get("unidad", ""))
+                        unidad=c.get("unidad", ""),
+                        bueno_min=bueno.get("min"), bueno_max=bueno.get("max"))
         elif tipo == "seleccion":
             opciones = list(reglas.get("options") or c.get("opciones") or [])
             if c.get("presentacion") == CHECKLIST:

@@ -109,7 +109,8 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     cierre = _cierre_de_esta_vuelta(orden)
     puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
                           _medicion(orden, pendientes), _material(orden, cierre),
-                          _fotos(orden))
+                          _fotos(orden), _potencia(orden, cierre),
+                          _en_rango(orden, cierre))
               if p is not None]
     if any(p["ok"] is False for p in puntos):
         veredicto = NO_CERRAR
@@ -266,6 +267,180 @@ def _fotos(orden):
     if p is None or p.get("ok") is False:
         return None
     return p
+
+
+#:  COMO SE LLAMAN LOS CAMPOS DE POTENCIA EN LA PLANTILLA.
+#:
+#:  EN UN SOLO LUGAR, y no repartidos por tres funciones: el dia que una
+#:  empresa los llame distinto, cambiarlos en dos de los tres sitios deja un
+#:  punto que calla sin decir por que.
+CAMPO_AL_LLEGAR = "potencia_al_llegar"
+CAMPO_AL_SALIR = "potencia_al_salir"
+
+
+def _potencia(orden, cierre):
+    """La potencia que muestra la FOTO contra la que ESCRIBIO el tecnico.
+
+    POR QUE  --  07/11/2026
+    -----------------------
+    El usuario, mirando la inspeccion de «Medicion al llegar» en la OT #187:
+    el modelo habia leido «la pantalla se lee: 1310 nm, "Lo" y -70.00 dBm» --
+    el dato mas importante de esa foto, porque «Lo» es perdida de senal -- y
+    ese numero moria en un parrafo. Mientras tanto el tecnico escribe su
+    propia lectura en `potencia_al_llegar`, y nadie cruzaba las dos.
+
+    COMO EL PUNTO DE LAS FOTOS, VALE `True` O `None`, NUNCA `False`. Un
+    `False` se convierte en NO_CERRAR y ademas alimenta el cierre autonomo
+    del Supervisor: una lectura que un modelo hizo de una pantalla
+    fotografiada no puede frenar el trabajo de un tecnico. Cuando no
+    coinciden, el punto queda en `None` --«miralo vos»-- con los dos numeros
+    escritos, que es lo que permite decidir a quien mira.
+
+    NO APARECE cuando no hay con que comparar: una plantilla sin campo de
+    potencia, un cierre sin numero, o una foto que el modelo no supo leer. Un
+    punto que siempre dice «no se sabe» entrena a ignorarlo.
+    """
+    try:
+        from campo import potencia_de_la_foto as PF
+
+        if cierre is None:
+            return None
+        respuestas = (cierre.datos or {}).get("respuestas") or {}
+        #  LOS DOS MOMENTOS, en el orden en que pasan. El de llegada es el que
+        #  el usuario señalo; el de salida es el que dice si el arreglo sirvio,
+        #  asi que si estan los dos se miran los dos y gana la peor noticia.
+        pares = ((CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
+                 (CAMPO_AL_SALIR, "medicion_al_salir", "al salir"))
+        dudas, vistos = [], 0
+        for campo, requisito, cuando in pares:
+            escrito = _a_numero(respuestas.get(campo))
+            de_la_foto = PF.uno_solo(_texto_de_la_foto(orden, requisito))
+            if escrito is None or de_la_foto is None:
+                continue
+            vistos += 1
+            ok, por_que = PF.comparar(de_la_foto, escrito)
+            if ok is False:
+                dudas.append(f"{cuando}, {por_que}")
+        if not vistos:
+            return None
+        if dudas:
+            return _punto("potencia", None,
+                          "La foto y el reporte no dicen lo mismo: "
+                          + "; ".join(dudas) + ".")
+        return _punto("potencia", True,
+                      "La potencia que muestra la foto coincide con la que "
+                      "reporto el tecnico.")
+    except Exception:                                            # noqa: BLE001
+        #  NO TUMBA LA REVISION, por lo mismo que `_fotos`: algo que se
+        #  agrega no puede romper lo que ya decide si una orden se cierra.
+        return None
+
+
+def _en_rango(orden, cierre):
+    """La potencia AL SALIR contra el rango que la empresa declaro bueno.
+
+    POR QUE  --  07/11/2026
+    -----------------------
+    El usuario: «hay que establecer que para que pueda diagnosticar si una
+    medida esta buena es entre este rango y cuando el note un rango fuera de
+    lo indicado ya diagnostica como malo».
+
+    SOLO AL SALIR, decidido con el usuario el 07/11/2026. Al llegar, una
+    senal mala ES la falla que el tecnico vino a arreglar: marcarla no aporta
+    nada y pondria un punto en rojo en casi toda orden correctiva, que es la
+    forma de que el rojo deje de significar algo. Al salir si importa, porque
+    es lo que dice si el arreglo sirvio.
+
+    EL RANGO SALE DE LA PLANTILLA, nunca de una constante: varia por empresa
+    (CLAUDE.md §3.3) y por tipo de trabajo. Rapilink declaro -8 a -27 dBm el
+    07/11/2026. Si la plantilla no lo declara, el punto NO APARECE -- no se
+    inventa un rango por omision, que seria decidir por una empresa que no
+    dijo nada.
+
+    ESTE SI PUEDE DECIR QUE NO, a diferencia de `_fotos` y `_potencia`. La
+    diferencia es quien lo afirma: aca el dato es el NUMERO QUE ESCRIBIO EL
+    TECNICO y el rango lo fijo la empresa; el codigo solo compara. No hay
+    ninguna lectura de un modelo en el medio (CLAUDE.md §4: el modelo compone,
+    el codigo calcula).
+    """
+    try:
+        if cierre is None:
+            return None
+        esquema = getattr(orden.tipo_trabajo_version, "esquema", None) or {}
+        campo = next((c for c in (esquema.get("campos") or [])
+                      if isinstance(c, dict) and c.get("id") == CAMPO_AL_SALIR),
+                     None)
+        if campo is None:
+            return None
+        bueno = campo.get("bueno")
+        if not isinstance(bueno, dict):
+            return None
+        mn, mx = _a_numero(bueno.get("min")), _a_numero(bueno.get("max"))
+        if mn is None or mx is None:
+            return None
+        #  EL RANGO VIENE COMO (min, max) Y EN dBm EL "MINIMO" ES EL MAS
+        #  NEGATIVO. Se ordena acá y no se confia en como quedo escrito: un
+        #  -8 cargado como minimo y un -27 como maximo describe el mismo
+        #  rango que al reves, y rechazarlo seria pedirle a quien configura
+        #  que adivine la convencion.
+        piso, techo = min(mn, mx), max(mn, mx)
+
+        valor = _a_numero(((cierre.datos or {}).get("respuestas") or {})
+                          .get(CAMPO_AL_SALIR))
+        if valor is None:
+            return None
+
+        unidad = campo.get("unidad") or "dBm"
+        if piso <= valor <= techo:
+            return _punto("rango", True,
+                          f"La medida al salir ({valor:g} {unidad}) está "
+                          f"dentro de lo que la empresa considera bueno "
+                          f"({piso:g} a {techo:g}).")
+        return _punto("rango", False,
+                      f"La medida al salir ({valor:g} {unidad}) quedó fuera "
+                      f"del rango bueno ({piso:g} a {techo:g}).")
+    except Exception:                                            # noqa: BLE001
+        #  No tumba la revision, por lo mismo que los otros puntos nuevos.
+        return None
+
+
+def _a_numero(valor):
+    """El decimal que el tecnico escribio, venga como numero o como texto.
+
+    El campo es `decimal` en la plantilla, pero lo que queda guardado en el
+    JSON del cierre puede ser `"-21.0"` o `-21.0` segun por donde entro. Leer
+    solo uno de los dos formatos es que el punto desaparezca sin motivo
+    visible la mitad de las veces.
+    """
+    if isinstance(valor, bool) or valor is None:
+        return None
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    try:
+        return float(str(valor).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
+def _texto_de_la_foto(orden, requisito_id: str) -> str:
+    """Lo que la IA escribio sobre ESA foto, en esta vuelta. `''` si no hay.
+
+    De la vuelta actual y no de cualquiera: una foto de la vuelta 1 ya fue
+    devuelta, y comparar contra ella diria que el tecnico se contradice
+    cuando lo que hizo fue corregir.
+    """
+    from campo.models import AnalisisDeEvidencia
+
+    a = (AnalisisDeEvidencia.objects
+         #  'org' ADEMAS del camino por la orden: es la misma consulta que
+         #  hace inspeccion_visual.punto_de_la_revision, y el filtro de tenant
+         #  va explicito aunque la orden ya lo acote (CLAUDE.md 4: olvidar
+         #  fijar el tenant devuelve cero filas, no todas).
+         .filter(org=orden.org, evidencia__orden_trabajo=orden,
+                 evidencia__requisito_id=requisito_id,
+                 vuelta=orden.vuelta)
+         .order_by("-created_at").first())
+    return (a.texto or "") if a else ""
 
 
 def _cierre_de_esta_vuelta(orden):
