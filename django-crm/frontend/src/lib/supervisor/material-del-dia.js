@@ -84,7 +84,7 @@ export function estadoDeCarga(m) {
  */
 export function resumenDeAvisos(avisos) {
   const lista = avisos ?? [];
-  const sinEquipo = lista.map((a) => /^Sale sin (.+?):/.exec(a)?.[1]).filter(Boolean);
+  const sinEquipo = lista.map(equipoDelAviso).filter(Boolean);
   const falta = lista.some((a) => a.startsWith('Le falta material'));
   const otros = lista.length - sinEquipo.length - (falta ? 1 : 0);
   const partes = [];
@@ -92,6 +92,70 @@ export function resumenDeAvisos(avisos) {
   if (sinEquipo.length) partes.push(`${partes.length ? 'sale' : 'Sale'} sin ${unidos(sinEquipo)}`);
   if (otros > 0) partes.push(`${otros} ${otros === 1 ? 'aviso' : 'avisos'} más`);
   return partes.join(' · ');
+}
+
+/** El equipo que nombra un aviso «Sale sin X: …», o `null`. @param {string} a */
+function equipoDelAviso(a) {
+  return /^Sale sin (.+?):/.exec(a)?.[1] ?? null;
+}
+
+/**
+ * LA PASTILLA DE LA TARJETA (07/11/2026). El usuario, con la captura: «qué
+ * otro arreglo se puede hacer para que no se vea tan maluco».
+ *
+ * `resumenDeAvisos` escribía «Falta material · sale sin ONU CATV y ONU WIFI»
+ * en rojo y en negrita, igual en las cuatro tarjetas. «Falta material» ya lo
+ * dicen las pastillas de arriba —«5 con faltantes», «BOG-SOLEDAD le faltan 14
+ * materiales»—, así que repetirlo en cada tarjeta gasta la única línea que
+ * tenía algo propio que decir: QUÉ no puede hacer ESTA cuadrilla.
+ *
+ * Cuando el aviso nombra equipo, la pastilla dice solo eso. El texto completo
+ * no se pierde: sigue adentro del desplegable.
+ *
+ * @param {string[]} avisos
+ */
+export function pastillaDeAvisos(avisos) {
+  const lista = avisos ?? [];
+  const sinEquipo = lista.map(equipoDelAviso).filter(Boolean);
+  if (sinEquipo.length) return `Sin ${unidos(/** @type {string[]} */ (sinEquipo))}`;
+  return resumenDeAvisos(lista);
+}
+
+/**
+ * EL EQUIPO QUE FALTA HOY, contado por cuadrillas y UNA sola vez arriba. Es lo
+ * que las tarjetas repetían y las pastillas de cuentas no decían: cuántas
+ * materiales faltan ya se sabía, pero no QUÉ equipo ni a cuántas les pega.
+ *
+ * Se cuenta por cuadrilla, no por aviso: lo que el Supervisor decide con esto
+ * es a qué bodega llamar y cuánto equipo mover.
+ *
+ * @param {{ avisos?: string[] }[]} [cuadrillas] el material de cada cuadrilla
+ * @returns {{ equipo: string, cuadrillas: number }[]} de la más a la menos
+ */
+export function equipoQueFalta(cuadrillas) {
+  /** @type {Map<string, number>} */
+  const cuenta = new Map();
+  for (const m of cuadrillas ?? []) {
+    //  Dos avisos del mismo equipo en una cuadrilla siguen siendo UNA
+    //  cuadrilla: si no, «4 cuadrillas» podría salir con tres.
+    const vistos = new Set();
+    for (const a of m?.avisos ?? []) {
+      const equipo = equipoDelAviso(a);
+      if (!equipo || vistos.has(equipo)) continue;
+      vistos.add(equipo);
+      cuenta.set(equipo, (cuenta.get(equipo) ?? 0) + 1);
+    }
+  }
+  return [...cuenta]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([equipo, cuantas]) => ({ equipo, cuadrillas: cuantas }));
+}
+
+/**
+ * «Sin ONU CATV: 4 cuadrillas». @param {{ equipo: string, cuadrillas: number }} e
+ */
+export function pastillaDeEquipo(e) {
+  return `Sin ${e.equipo}: ${e.cuadrillas} ${e.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'}`;
 }
 
 /** «A», «A y B», «A, B y C». @param {string[]} cosas */

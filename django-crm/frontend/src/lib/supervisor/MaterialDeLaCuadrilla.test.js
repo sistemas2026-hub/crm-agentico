@@ -54,16 +54,43 @@ describe('el material de una cuadrilla', () => {
     expect(h).not.toContain('MAT-20261029');
   });
 
-  it('los avisos se pliegan detrás de una línea que los resume', () => {
+  //  EL MURO (07/11/2026). El usuario, con la captura de cuatro tarjetas:
+  //  «qué otro arreglo se puede hacer para que no se vea tan maluco». La
+  //  línea decía «Falta material · sale sin ONU CATV y ONU WIFI» en rojo y en
+  //  negrita, idéntica en las cuatro. «Falta material» ya lo dicen las
+  //  pastillas de arriba: repetirlo gasta la única línea que tenía algo
+  //  propio que decir.
+  it('EL DEFECTO: la pastilla no repite lo que ya dicen las cuentas de arriba', () => {
     const h = html({ m });
-    expect(h).toMatch(/<details class="mc-avisos[^"]*"><summary[^>]*>Falta material · sale sin ONU CATV y ONU WIFI<\/summary>/);
+    const antesDeAbrir = h.slice(0, h.indexOf('</summary>'));
+    expect(antesDeAbrir).not.toContain('Falta material');
+    expect(antesDeAbrir).toContain('Sin ONU CATV y ONU WIFI');
+  });
+
+  it('y el texto entero no se pierde: sigue adentro del desplegable', () => {
+    const h = html({ m });
+    expect(h).toMatch(/<details class="mc-avisos/);
+    expect(h).toContain(CATV);
+    expect(h).toContain(FALTA);
+  });
+
+  it('un solo aviso también va en pastilla: una frase larga por tarjeta es el mismo muro', () => {
+    //  Reemplaza la regla del 29/10 de mostrarlo entero. Con una tarjeta por
+    //  cuadrilla, cuatro frases largas iguales pesan lo mismo tenga la
+    //  cuadrilla un aviso o tres.
+    const h = html({ m: { ...m, avisos: [CATV] } });
+    expect(h.slice(0, h.indexOf('</summary>'))).toContain('Sin ONU CATV');
+    expect(h).not.toContain('class="mc-aviso ');
     expect(h).toContain(CATV);
   });
 
-  it('un solo aviso se muestra entero, sin desplegable', () => {
-    const h = html({ m: { ...m, avisos: [CATV] } });
-    expect(h).not.toContain('mc-avisos');
-    expect(h).toMatch(/class="mc-aviso[^"]*">Sale sin ONU CATV/);
+  it('sin equipo nombrado la pastilla dice que falta material, que es lo que hay', () => {
+    const h = html({ m: { ...m, avisos: [FALTA] } });
+    expect(h.slice(0, h.indexOf('</summary>'))).toContain('Falta material');
+  });
+
+  it('sin avisos no dibuja pastilla', () => {
+    expect(html({ m: { ...m, avisos: [] } })).not.toContain('mc-chip');
   });
 
   it('el porqué del kit y de la bodega va adentro de la lista, no a la vista', () => {

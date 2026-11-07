@@ -81,3 +81,22 @@ describe('lo que se dibuja', () => {
     expect(h).not.toContain('fd-bodega');
   });
 });
+
+describe('el equipo que falta, una sola vez y arriba (07/11/2026)', () => {
+  const equipos = [
+    { equipo: 'ONU CATV', cuadrillas: 4 },
+    { equipo: 'ONU WIFI', cuadrillas: 2 }
+  ];
+
+  it('sale al lado de las cuentas, con a cuántas cuadrillas les pega', () => {
+    const h = render(FaltantesDelDia, { props: { cuentas, faltantes, equipos } }).body;
+    expect(h).toContain('Sin ONU CATV: 4 cuadrillas');
+    expect(h).toContain('Sin ONU WIFI: 2 cuadrillas');
+  });
+
+  it('sin equipos no agrega nada: la pantalla queda como estaba', () => {
+    const h = render(FaltantesDelDia, { props: { cuentas, faltantes } }).body;
+    expect(h).not.toContain('Sin ONU');
+    expect(h).toContain('1 de 5 con el kit completo');
+  });
+});

@@ -31,7 +31,11 @@
     textoDelDiaDeLaCuadrilla,
     textoSinBajar
   } from '$lib/supervisor/dia-publicado.js';
-  import { opcionDelSupervisor, tituloDelMaterial } from '$lib/supervisor/material-del-dia.js';
+  import {
+    equipoQueFalta,
+    opcionDelSupervisor,
+    tituloDelMaterial
+  } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
 
   /** @type {{ data: any, form: any }} */
@@ -316,7 +320,8 @@
               {:else if material}
                 <!-- Las cuentas en pastillas y una línea por bodega, con la
                      tabla plegada (29/10/2026: eran trece líneas rojas iguales). -->
-                <FaltantesDelDia cuentas={material.cuentas} {faltantes} />
+                <FaltantesDelDia cuentas={material.cuentas} {faltantes}
+                                 equipos={equipoQueFalta(material.cuadrillas)} />
               {/if}
               {#if conf}
                 <!-- EL SUPERVISOR ELIGE SOLO (28/10/2026: «la idea era que lo

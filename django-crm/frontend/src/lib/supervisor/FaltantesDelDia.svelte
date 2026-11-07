@@ -6,10 +6,16 @@
    * rojas iguales, una por material. Ahora: las cuentas en pastillas, una
    * línea por bodega y el detalle plegado en una tabla.
    */
-  import { cantidad, cuantosFaltan, faltantesPorBodega, pastillasDeCuentas } from './material-del-dia.js';
+  import {
+    cantidad,
+    cuantosFaltan,
+    faltantesPorBodega,
+    pastillaDeEquipo,
+    pastillasDeCuentas
+  } from './material-del-dia.js';
 
-  /** @type {{ cuentas: any, faltantes: any[] }} */
-  let { cuentas, faltantes } = $props();
+  /** @type {{ cuentas: any, faltantes: any[], equipos?: { equipo: string, cuadrillas: number }[] }} */
+  let { cuentas, faltantes, equipos = [] } = $props();
 
   const grupos = $derived(faltantesPorBodega(faltantes));
 </script>
@@ -18,6 +24,12 @@
   <div class="fd-cuentas">
     {#each pastillasDeCuentas(cuentas) as p (p.texto)}
       <span class="fd-pastilla fd-{p.tono}">{p.texto}</span>
+    {/each}
+    <!-- QUÉ EQUIPO FALTA Y A CUÁNTAS (07/11/2026): lo que cada tarjeta repetía
+         («sale sin ONU CATV y ONU WIFI», igual en las cuatro) y estas cuentas
+         no decían. Acá una vez; en la tarjeta, cuál le toca a cada una. -->
+    {#each equipos as e (e.equipo)}
+      <span class="fd-pastilla fd-falta">{pastillaDeEquipo(e)}</span>
     {/each}
   </div>
 
