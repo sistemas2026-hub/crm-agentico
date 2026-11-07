@@ -118,3 +118,102 @@ class ProbarInstruccionDeFotoView(APIView):
             "tokens": r.get("tokens") or 0,
             "segundos": r.get("segundos") or 0,
         })
+
+
+class GuardarInstruccionDeFotoView(APIView):
+    """Escribe la instruccion probada en la plantilla. Publica una version.
+
+    `POST /api/campo/evidencias/<pk>/guardar-instruccion/`
+    `{"instrucciones": "Resultado del test con los tres numeros legibles."}`
+
+    EL FRONTEND NO ARMA EL ESQUEMA, y es a proposito. La alternativa era
+    mandarle la definicion entera desde el navegador para que la reenviara;
+    cualquier campo que se perdiera en ese viaje de ida y vuelta se perderia
+    de la plantilla. Aca solo viaja el texto, y el esquema se lee, se cambia
+    en un punto y se vuelve a publicar.
+
+    SOBRE LA ULTIMA VERSION PUBLICADA, NO LA DE LA ORDEN. La orden congela su
+    version (`tipo_trabajo_version` es PROTECT) y escribir ahi no cambiaria
+    nada para las ordenes futuras, que es justamente lo que se quiere
+    arreglar. Consecuencia que hay que decirle a quien guarda: la orden que
+    tiene abierta adelante NO cambia.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo import plantillas as P
+        from campo.cuadrillas_views import _exigir_gestion
+        from campo.models import EvidenciaTrabajo
+        from campo.plantillas_views import _ordenes_vivas
+
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        instrucciones = str(request.data.get("instrucciones") or "").strip()
+        if not instrucciones:
+            return Response({"error": "FALTA_INSTRUCCION"}, status=400)
+        if len(instrucciones) > MAX_INSTRUCCION:
+            return Response({"error": "INSTRUCCION_LARGA"}, status=400)
+
+        evidencia = (EvidenciaTrabajo.objects
+                     .select_related("orden_trabajo__tipo_trabajo_version__work_type")
+                     .filter(org=request.org, pk=pk).first())
+        if evidencia is None:
+            return Response({"detail": "No encontrada."}, status=404)
+
+        version_de_la_orden = evidencia.orden_trabajo.tipo_trabajo_version
+        tipo = version_de_la_orden.work_type
+        vigente = P.ultima_publicada(tipo)
+        if vigente is None:
+            return Response(
+                {"error": "SIN_PLANTILLA",
+                 "detalle": "este tipo de trabajo no tiene ninguna version "
+                            "publicada"}, status=409)
+
+        definicion, motivos = P.leer_definicion(vigente.esquema)
+        if motivos:
+            #  NO SE PUBLICA LO QUE NO SE PUDO LEER ENTERO. Una plantilla
+            #  armada a mano puede tener cosas que el editor no entiende;
+            #  republicarla desde una lectura parcial las borraria. Es la
+            #  misma razon por la que el editor "no la abre" en vez de
+            #  reescribirla (plantillas.py, cabecera).
+            return Response(
+                {"error": "PLANTILLA_NO_EDITABLE", "motivos": motivos,
+                 "detalle": "esta plantilla tiene algo que el editor no puede "
+                            "leer; cambiarla desde aca borraria eso"},
+                status=409)
+
+        encontrada = False
+        for e in definicion.get("evidencias") or []:
+            if isinstance(e, dict) and e.get("id") == evidencia.requisito_id:
+                e["instrucciones"] = instrucciones
+                encontrada = True
+                break
+        if not encontrada:
+            return Response(
+                {"error": "REQUISITO_AUSENTE",
+                 "detalle": f"la version publicada ya no pide "
+                            f"'{evidencia.requisito_id}'"}, status=409)
+
+        try:
+            nueva, cambio = P.publicar(tipo, definicion)
+        except P.ErrorPlantilla as e:
+            return Response({"error": e.codigo, "detalle": e.mensaje},
+                            status=400)
+
+        #  LO QUE HAY QUE DECIRLE A QUIEN GUARDA: las ordenes vivas conservan
+        #  su version. Sin este dato alguien cree que el cambio ya llego a la
+        #  calle, y mira la orden que tiene delante esperando que cambie.
+        return Response({
+            "guardado": True,
+            "version": nueva.version,
+            "cambio": cambio,
+            "ordenes_vivas": _ordenes_vivas(tipo),
+            #  `False` cuando el esquema quedo igual: publicar es idempotente
+            #  por hash y no crea una version repetida.
+            "mismo_esquema": not cambio,
+            "la_orden_de_esta_foto_no_cambia": (
+                version_de_la_orden.version != nueva.version),
+        })

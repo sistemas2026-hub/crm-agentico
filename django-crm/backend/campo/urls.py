@@ -226,6 +226,11 @@ urlpatterns = [
     #  despues, cuando el tecnico ya se fue de la casa del cliente.
     #  Probar una instruccion candidata contra la foto que ya fallo, antes
     #  de guardarla en la plantilla (06/11/2026). No escribe nada.
+    #  Y guardarla en la plantilla: publica una version nueva, y avisa
+    #  cuantas ordenes vivas conservan la anterior.
+    path("evidencias/<uid:pk>/guardar-instruccion/",
+         probar_instruccion_de_foto.GuardarInstruccionDeFotoView.as_view(),
+         name="evidencia_guardar_instruccion"),
     path("evidencias/<uid:pk>/probar-instruccion/",
          probar_instruccion_de_foto.ProbarInstruccionDeFotoView.as_view(),
          name="evidencia_probar_instruccion"),

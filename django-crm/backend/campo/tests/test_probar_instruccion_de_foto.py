@@ -180,3 +180,121 @@ def test_un_texto_mas_largo_del_que_se_puede_guardar_se_rechaza(
     assert r.status_code == 400
     assert r.json()["error"] == "INSTRUCCION_LARGA"
     post.assert_not_called()
+
+
+# =============================================================================
+#  GUARDAR: publica una version, y la orden de esta foto NO cambia
+# =============================================================================
+
+def _url_guardar(evidencia) -> str:
+    return f"/api/campo/evidencias/{evidencia.id}/guardar-instruccion/"
+
+
+def test_guardar_publica_una_version_nueva(admin_client, evidencia):
+    from campo.models import WorkTypeVersion
+
+    antes = WorkTypeVersion.objects.count()
+    r = admin_client.post(
+        _url_guardar(evidencia),
+        {"instrucciones": "Los tres numeros del test: descarga, subida y ping."},
+        content_type="application/json")
+
+    assert r.status_code == 200, r.content
+    cuerpo = r.json()
+    assert cuerpo["guardado"] is True
+    assert cuerpo["cambio"] is True
+    assert WorkTypeVersion.objects.count() == antes + 1
+
+    #  Y el texto quedo en la version nueva, no en cualquier lado.
+    nueva = WorkTypeVersion.objects.order_by("-version").first()
+    ev = [e for e in nueva.esquema["evidencias"]
+          if e["id"] == "test_de_velocidad"][0]
+    assert ev["instrucciones"].startswith("Los tres numeros")
+
+
+def test_la_orden_de_esta_foto_NO_cambia(admin_client, evidencia):
+    """Lo que hay que decirle a quien guarda, y por eso viaja en la respuesta.
+
+    La orden congela su version (`tipo_trabajo_version` es PROTECT). Sin este
+    dato, alguien guarda y mira la orden que tiene delante esperando que
+    cambie -- y concluye que no funciono.
+    """
+    version_antes = evidencia.orden_trabajo.tipo_trabajo_version.version
+
+    cuerpo = admin_client.post(
+        _url_guardar(evidencia),
+        {"instrucciones": "Los tres numeros del test."},
+        content_type="application/json").json()
+
+    assert cuerpo["la_orden_de_esta_foto_no_cambia"] is True
+    evidencia.orden_trabajo.refresh_from_db()
+    assert (evidencia.orden_trabajo.tipo_trabajo_version.version
+            == version_antes), "la orden no puede haber cambiado de version"
+
+
+def test_guardar_lo_mismo_NO_crea_otra_version(admin_client, evidencia):
+    """Publicar es idempotente por hash: «v7» igual a «v6» ensucia la historia.
+
+    Importa para esta pantalla: alguien prueba, guarda, duda, y vuelve a
+    guardar el mismo texto. Eso no puede dejar tres versiones iguales.
+    """
+    from campo.models import WorkTypeVersion
+
+    texto = {"instrucciones": "Los tres numeros del test."}
+    admin_client.post(_url_guardar(evidencia), texto,
+                      content_type="application/json")
+    despues_de_la_primera = WorkTypeVersion.objects.count()
+
+    cuerpo = admin_client.post(_url_guardar(evidencia), texto,
+                               content_type="application/json").json()
+
+    assert cuerpo["cambio"] is False
+    assert cuerpo["mismo_esquema"] is True
+    assert WorkTypeVersion.objects.count() == despues_de_la_primera
+
+
+def test_un_tecnico_no_puede_guardar(user_client, evidencia):
+    r = user_client.post(_url_guardar(evidencia),
+                         {"instrucciones": "Lo que sea."},
+                         content_type="application/json")
+    assert r.status_code == 403, r.content
+
+
+def test_un_requisito_que_la_plantilla_ya_no_pide_se_rechaza(
+        admin_client, evidencia):
+    """No se inventa una entrada nueva en la plantilla.
+
+    Si alguien quito esa foto de la plantilla mientras tanto, agregarla de
+    vuelta desde aca seria revivir un requisito que alguien decidio sacar.
+    """
+    from campo import plantillas as P
+
+    #  SE QUITA LA FOTO COMO SE QUITA DE VERDAD: publicando una version
+    #  NUEVA sin ella.
+    #
+    #  El primer intento de esta prueba editaba `esquema` de la version
+    #  publicada, y el modelo lo rechazo: "El campo 'esquema' no puede
+    #  modificarse en una version PUBLICADA. Cree una nueva version". Esa
+    #  guarda del modelo es justamente por que las ordenes vivas pueden
+    #  confiar en su version -- asi que el escenario que hay que reproducir
+    #  es el real, no uno que el sistema no permite.
+    tipo = evidencia.orden_trabajo.tipo_trabajo_version.work_type
+    definicion, motivos = P.leer_definicion(P.ultima_publicada(tipo).esquema)
+    assert not motivos, motivos
+    #  SE REEMPLAZA, no se vacia: `publicar` rechaza una plantilla sin
+    #  ningun dato ni foto ("PLANTILLA_VACIA"). Otra guarda del sistema que
+    #  este caso encontro al intentar el atajo.
+    definicion["evidencias"] = [
+        {"id": "otra_foto", "titulo": "Otra foto", "obligatorio": False,
+         "instrucciones": "Cualquier cosa."}]
+    P.publicar(tipo, definicion)
+    #  Se comprueba que de verdad quedo sin ESE requisito antes de pedir nada:
+    #  si esto fallara, el 409 de abajo vendria por otra causa.
+    ids = {e["id"] for e in P.ultima_publicada(tipo).esquema.get("evidencias") or []}
+    assert "test_de_velocidad" not in ids, ids
+
+    r = admin_client.post(_url_guardar(evidencia),
+                          {"instrucciones": "Los tres numeros."},
+                          content_type="application/json")
+    assert r.status_code == 409, r.content
+    assert r.json()["error"] in ("REQUISITO_AUSENTE", "PLANTILLA_NO_EDITABLE")
