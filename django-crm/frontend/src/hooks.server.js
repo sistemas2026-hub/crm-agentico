@@ -16,6 +16,7 @@ import axios from 'axios';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { describeError } from '$lib/server/log-safe.js';
+import { marcarSinCache } from '$lib/server/sin-cache.js';
 import { verificarToken, leerSinVerificar } from '$lib/server/v2/verificar-jwt.js';
 
 // Server-side (this file runs per-request on the server), so PRIVATE_ over
@@ -377,5 +378,9 @@ export const handle = sequence(Sentry.sentryHandle(), async function _handle({ e
     }
   }
 
-  return resolve(event);
+  //  EL DOCUMENTO NO SE CACHEA (07/11/2026): tres deploys seguidos salieron y
+  //  la pantalla del usuario siguió corriendo el JavaScript de dos atrás. Ver
+  //  `$lib/server/sin-cache.js`, que tiene la medición y el porqué del
+  //  `no-store`.
+  return resolve(event, { transformPageChunk: marcarSinCache(event) });
 });
