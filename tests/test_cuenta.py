@@ -193,6 +193,48 @@ afirmar(r["monto_pendiente"] == "600.00", "dos facturas sin saldo anterior: se s
 
 p = Proveedor(ficha(), {"results": [factura("300.00", saldo="abc"), factura("300.00")]})
 afirmar(correr(p)["disponible"] is False, "un saldo ilegible se toma como que arrastra: no se suma")
+print("\n§3c  EL LINK DE PAGO: de la empresa, solo con algo que pagar y solo si es https limpio")
+CUENTA_LINK = {**CUENTA, "link_de_pago": "LINK_DE_PAGO"}
+CUENTA_H_LINK = Herramienta(
+    nombre="consultar_mi_cuenta", descripcion="Estado de cuenta.", tipo="interno",
+    solo_lectura=True, roles_permitidos=["facturacion_cliente"],
+    calcula_estado_de_cuenta=True, resolver_cliente_con="consultar_mi_servicio",
+    facturas_con="consultar_facturas", cuenta=CUENTA_LINK,
+    inyectar_sesion={"id_servicio": "id_cliente"}, inyectados_obligatorios=["id_servicio"])
+CATALOGO_LINK = [FICHA, FACTURAS, CUENTA_H_LINK]
+
+
+def correr_con_link(proveedor, variables, facturas=None):
+    real = C.ejecutor_http.ejecutar
+    C.ejecutor_http.ejecutar = proveedor
+    try:
+        return C.estado_de_cuenta(CUENTA_H_LINK, {"id_servicio": "5832"}, "t", variables,
+                                  catalogo=CATALOGO_LINK, hoy=HOY)
+    finally:
+        C.ejecutor_http.ejecutar = real
+
+
+DEBE = {"results": [factura("69900.00")]}
+r = correr_con_link(Proveedor(ficha(), DEBE), {"LINK_DE_PAGO": "https://pagos.ejemplo.co/rapilink"})
+afirmar(r.get("link_de_pago") == "https://pagos.ejemplo.co/rapilink", f"con deuda y link cargado, el link sale ({r})")
+r = correr_con_link(Proveedor(ficha(), {"results": []}), {"LINK_DE_PAGO": "https://pagos.ejemplo.co/rapilink"})
+afirmar("link_de_pago" not in r, "SIN facturas pendientes no se da el link: no hay nada que pagar")
+r = correr_con_link(Proveedor(ficha(), DEBE), {})
+afirmar(r["disponible"] is True and "link_de_pago" not in r, "sin la variable cargada no hay link, y nada se rompe")
+for malo, por_que in (("http://pagos.ejemplo.co/x", "sin https"),
+                      ("pagos.ejemplo.co/x", "sin esquema"),
+                      ("https://pagos.ejemplo.co/x y mas", "con espacios"),
+                      ("https://usuario:clave@pagos.ejemplo.co/x", "con usuario y clave incrustados"),
+                      ("javascript:alert(1)", "esquema peligroso"),
+                      ("https://" + "a" * 600 + ".co", "demasiado largo"),
+                      ("   ", "solo espacios")):
+    r = correr_con_link(Proveedor(ficha(), DEBE), {"LINK_DE_PAGO": malo})
+    afirmar("link_de_pago" not in r, f"un valor {por_que} NO se le da a un cliente")
+r = correr_con_link(Proveedor(ficha(usuario=""), DEBE), {"LINK_DE_PAGO": "https://pagos.ejemplo.co/rapilink"})
+afirmar(r["disponible"] is False and "link_de_pago" not in r, "sin cifra tampoco hay link")
+afirmar("link_de_pago" not in correr(Proveedor(ficha(), DEBE)),
+        "una configuracion que no declara 'cuenta.link_de_pago' nunca lo entrega")
+
 
 print("\n§4  'NO SE PUDO' NO ES 'NO DEBE NADA'")
 p = Proveedor(ficha(), {"results": []})

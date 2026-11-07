@@ -43,7 +43,7 @@ describe('el hub de Configuracion', () => {
     ]) {
       expect(html).toContain(grupo);
     }
-    for (const destino of ['/team', '/settings/escalation', '/settings/business-hours', '/settings/macros']) {
+    for (const destino of ['/team', '/settings/escalation', '/settings/business-hours', '/settings/macros', '/settings/pagos']) {
       expect(html).toContain(`href="${destino}"`);
     }
     //  Ninguna fila inventa un valor que no llego.

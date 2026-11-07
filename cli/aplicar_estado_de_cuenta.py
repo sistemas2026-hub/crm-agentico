@@ -52,6 +52,11 @@ FRASES = [
      'incluye_saldo_anterior=true, ese monto ya suma lo que arrastraba de\n'
      'facturas anteriores: dilo asi ("incluye saldo anterior") y no lo\n'
      'separes ni lo sumes otra vez.'),
+    # 07/11/2026: el link de pago de la empresa, si lo cargo en Configuracion -> Pagos.
+    ('separes ni lo sumes otra vez.',
+     'separes ni lo sumes otra vez. Si devuelve link_de_pago, ofrecelo para\n'
+     'que pague: ese link, tal cual. Si no llega, no digas que existe uno ni\n'
+     'inventes otro.'),
 ]
 
 
@@ -65,6 +70,12 @@ def semilla(tenant):
 def mutar(doc, herr, campos_cuenta, avisos):
     if any(h.get("nombre") == HERRAMIENTA for h in doc.get("herramientas", [])):
         avisos.append("la herramienta ya estaba: no se agrega de nuevo")
+        # Lo unico de ella que se actualiza: su 'cuenta' (de que variable sale el
+        # link). Nada mas de la herramienta se toca.
+        for h in doc["herramientas"]:
+            if h.get("nombre") == HERRAMIENTA:
+                h["cuenta"] = dict(herr["cuenta"])
+        avisos.append("herramienta: 'cuenta' al dia")
     else:
         doc.setdefault("herramientas", []).append(herr)
         avisos.append("herramienta agregada")

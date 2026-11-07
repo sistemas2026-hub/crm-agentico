@@ -538,7 +538,9 @@ roles:
       primera pagina: dilo como "al menos". Si devuelve
       incluye_saldo_anterior=true, ese monto ya suma lo que arrastraba de
       facturas anteriores: dilo asi ("incluye saldo anterior") y no lo
-      separes ni lo sumes otra vez.
+      separes ni lo sumes otra vez. Si devuelve link_de_pago, ofrecelo para
+      que pague: ese link, tal cual. Si no llega, no digas que existe uno ni
+      inventes otro.
 
       Una factura PENDIENTE no corta el servicio por si
       sola: solo lo afecta a partir de la fecha de corte -- compara esa
@@ -599,7 +601,8 @@ roles:
       # consultar_mi_cuenta, calculado en codigo.
       consultar_mi_servicio: [estado, estado_facturas, fecha_corte, plan_internet]
       consultar_mi_cuenta: [disponible, facturas_pendientes, monto_pendiente,
-            vencimiento_mas_antiguo, facturas_vencidas, completo, incluye_saldo_anterior]
+            vencimiento_mas_antiguo, facturas_vencidas, completo, incluye_saldo_anterior,
+            link_de_pago]
       # Sin 'resumen': ese campo es para el colaborador humano que va a leer
       # el caso, no para que el modelo se lo repita al cliente -- ya sabe
       # que decir por el mensaje fijo de 'comprobante_para_validar' (Fase
@@ -2925,6 +2928,10 @@ herramientas:
       total: total
       saldo: saldo
       vencimiento: fecha_vencimiento
+      # NOMBRE de la variable de la empresa con el link para pagar (se edita en
+      # Configuracion -> Pagos). Es opcional: sin ella no hay link y nada se rompe.
+      # Solo se entrega con deuda y si es https limpio (nucleo/herramientas/cuenta.py).
+      link_de_pago: LINK_DE_PAGO
     # El id sale de la sesion verificada, NUNCA del modelo: con un id que el
     # modelo escribe, una inyeccion de prompt pide la cuenta de otro.
     inyectar_sesion:

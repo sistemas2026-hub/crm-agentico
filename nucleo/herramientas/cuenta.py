@@ -213,6 +213,34 @@ def calcular(facturas: list[dict], *, usuario: str, cuenta: dict, hoy: date,
     return respuesta
 
 
+#: El link de pago es un dato de la EMPRESA (varia de una a otra), no del codigo:
+#: vive en una variable del tenant que la pantalla de Pagos edita, y la
+#: configuracion de esta herramienta solo dice CUAL variable ('cuenta.link_de_pago').
+LARGO_MAXIMO_DEL_LINK = 500
+
+
+def link_de_pago(herramienta, variables_tenant) -> str | None:
+    """
+    El link para pagar, o None. Solo si la empresa lo cargo Y es una direccion
+    https limpia: un valor mal escrito (sin esquema, con espacios, con usuario y
+    clave incrustados) no se le da a un cliente. Fail-closed: ante la duda, nada.
+    """
+    nombre = ((herramienta.cuenta or {}).get("link_de_pago") or "").strip()
+    if not nombre:
+        return None
+    valor = str((variables_tenant or {}).get(nombre) or "").strip()
+    if not valor or len(valor) > LARGO_MAXIMO_DEL_LINK or any(c.isspace() for c in valor):
+        return None
+    from urllib.parse import urlsplit
+    try:
+        partes = urlsplit(valor)
+    except ValueError:
+        return None
+    if partes.scheme != "https" or not partes.hostname or partes.username or partes.password:
+        return None
+    return valor
+
+
 def _hoy(config) -> date:
     """El dia de hoy EN LA ZONA DE LA EMPRESA: a las 8 pm en Bogota ya es manana en UTC."""
     from datetime import timezone
@@ -282,5 +310,12 @@ def estado_de_cuenta(herramienta, argumentos, tenant, variables_tenant,
         return _no_disponible("no se pudieron consultar las facturas")
 
     hay_mas = isinstance(crudo_f, dict) and bool(crudo_f.get("next"))
-    return calcular(_filas(crudo_f), usuario=usuario, cuenta=cuenta, hoy=hoy,
-                    hay_mas_paginas=hay_mas)
+    respuesta = calcular(_filas(crudo_f), usuario=usuario, cuenta=cuenta, hoy=hoy,
+                         hay_mas_paginas=hay_mas)
+    # El link SOLO viaja con una cuenta calculada Y con algo que pagar: a quien
+    # no debe nada no se le da, y sin cifra tampoco (no hay "esta factura").
+    if respuesta.get("disponible") and respuesta.get("facturas_pendientes"):
+        enlace = link_de_pago(herramienta, variables_tenant)
+        if enlace:
+            respuesta["link_de_pago"] = enlace
+    return respuesta

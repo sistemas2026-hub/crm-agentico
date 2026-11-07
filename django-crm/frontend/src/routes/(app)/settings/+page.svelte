@@ -328,6 +328,16 @@
           warn: !!motor.canalWhatsapp && !motor.canalWhatsapp.activo && !!motor.canalWhatsapp.numero_visible
         },
         {
+          href: '/settings/pagos',
+          title: 'Pagos',
+          body: 'El link con el que un cliente puede pagar; el asistente se lo ofrece a quien debe una factura.',
+          // Sin link no es una falla: el asistente dice cuánto se debe y no ofrece
+          // dónde pagar. Y el valor no se lee acá a propósito: no le suma otra
+          // llamada al motor a un hub que ya hace una docena.
+          value: null,
+          warn: false
+        },
+        {
           href: '/settings/canales/avisos',
           title: 'Avisos de campo',
           body: 'Por dónde se le avisa a la cuadrilla cuando un supervisor devuelve un trabajo.',
