@@ -66,9 +66,17 @@ def test_lo_que_no_entra_corta_donde_TERMINA_una_palabra():
     r = recortar(texto, tope=70)
     assert len(r) <= 70, r
     assert r.endswith("…"), r
-    #  Cada palabra del recorte, entera. «CONECTOR AP» no pasaria.
-    enteras = {p.rstrip(",;.") for p in texto.split(" ")}
-    assert set(r[:-1].split(" ")) <= enteras, r
+    #  Cada palabra del recorte, entera. «CONECTOR AP» no pasaria porque «AP»
+    #  no es ninguna palabra del texto.
+    #
+    #  LA PUNTUACION SE QUITA DE LOS DOS LADOS. La primera version la quitaba
+    #  solo del texto, y «revision.» no coincidia con «revision»: la guarda
+    #  fallaba con el codigo correcto, que es la otra forma de guarda inutil
+    #  -- una que grita cuando no pasa nada enseña a ignorarla.
+    def _palabras(s):
+        return {p.strip(",;.") for p in s.split(" ") if p.strip(",;.")}
+
+    assert _palabras(r[:-1]) <= _palabras(texto), r
 
 
 def test_una_sola_palabra_larguisima_igual_devuelve_algo():
