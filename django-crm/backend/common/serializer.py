@@ -735,9 +735,21 @@ class AttachmentsSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(str)
     def get_file_path(self, obj):
-        if obj.attachment:
-            return obj.attachment.url
-        return None
+        """La URL por la que el archivo SE PUEDE abrir.
+
+        Devolvia `obj.attachment.url`, o sea `/media/attachments/...`, que
+        `crm/urls.py` sirve SOLO con DEBUG encendido: en produccion todo
+        adjunto contestaba 404, desde siempre. Medido el 07/11/2026 sobre el
+        ticket #074a9550, donde los cuatro archivos se listaban y ninguno
+        abria.
+
+        Ahora apunta a la vista que pide sesion y empresa. Ver
+        common/views/attachment_views.py para por que no se encendio
+        `/media/` y ya.
+        """
+        if not obj.attachment:
+            return None
+        return f"/api/attachments/{obj.id}/archivo/"
 
     class Meta:
         model = Attachments

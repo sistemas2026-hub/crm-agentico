@@ -188,8 +188,13 @@ def test_cuando_la_revision_NO_ENTRA_se_pierde_ella_y_no_la_OT(org_a,
     from campo.devolver_al_ticket import MAX_NOTA, _resumen
 
     orden, _caso = _orden_con_caso(org_a, user_profile, numero=189)
+    #  CUANTOS PUNTOS, DERIVADO DEL TOPE. Eran 30 fijos, que pasaban el tope
+    #  de 255 de entonces; cuando subio a 2000 el 07/11/2026 dejaron de
+    #  pasarlo y esta guarda se puso roja sin que el mecanismo cambiara. Cada
+    #  punto rinde ~50 caracteres en el texto de la revision.
+    cuantos = (MAX_NOTA // 50) + 10
     _con_revision(orden, [{"clave": "punto_con_nombre_larguisimo_%d" % i,
-                           "ok": None} for i in range(30)])
+                           "ok": None} for i in range(cuantos)])
 
     nota = _resumen(orden)
 

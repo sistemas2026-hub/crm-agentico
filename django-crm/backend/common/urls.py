@@ -1,5 +1,6 @@
 from django.urls import path
 
+from common.views.attachment_views import AttachmentArchivoView
 from common.views.auth_views import (
     GoogleIdTokenView,
     GoogleOAuthCallbackView,
@@ -191,6 +192,14 @@ urlpatterns = [
     # Vertical packs: any member may list; apply/clear are ADMIN-only (see
     # common/views/pack_views.py). sample-data/ must precede
     # <str:pack_id>/apply/ so it is never captured as a pack id.
+    #  El archivo de un adjunto. No se sirve por `/media/`, que en
+    #  produccion no existe y ademas seria publico: ver
+    #  common/views/attachment_views.py.
+    path(
+        "attachments/<uid:pk>/archivo/",
+        AttachmentArchivoView.as_view(),
+        name="attachment_archivo",
+    ),
     path("packs/", PackListView.as_view(), name="pack_list"),
     path("packs/sample-data/", PackSampleDataView.as_view(), name="pack_sample_data"),
     path("packs/<str:pack_id>/apply/", PackApplyView.as_view(), name="pack_apply"),

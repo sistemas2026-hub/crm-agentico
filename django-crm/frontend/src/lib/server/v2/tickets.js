@@ -346,9 +346,16 @@ export async function getTicket({ cookies }, id) {
     attachments: (response.attachments ?? []).map((/** @type {any} */ file) => ({
       id: file.id,
       name: file.file_name ?? '',
-      // Resolved to an absolute URL so the rail can offer it as a download; the
-      // rail used to render the name as dead text even though the path was here.
-      url: fileUrl(file.file_path),
+      // RUTA PROPIA, NO LA DE LA API. Apuntaba al host de Django con
+      // `fileUrl(file.file_path)`, o sea `/media/...`, y en produccion eso
+      // contestaba 404 para TODO adjunto: `crm/urls.py` solo sirve `/media/`
+      // con DEBUG. Medido el 07/11/2026 en el ticket #074a9550, con cuatro
+      // archivos listados y ninguno que abriera.
+      //
+      // `/adjuntos/<id>` es una ruta de este mismo origen, que lleva el token
+      // httpOnly que el navegador nunca manda al host de la API. Ver
+      // `routes/(app)/adjuntos/[id]/+server.js`.
+      url: file.id ? `/adjuntos/${file.id}` : fileUrl(file.file_path),
       at: file.created_at
     })),
     // Este bloque decia que habia DOS clases `ActivitySerializer` en

@@ -54,8 +54,20 @@ ACCION = "updated"
 #: lista obligaria a recorrerla.
 CLAVE = "avisos_al_ticket"
 
-#: `Comment.comment` es un CharField de 255.
-MAX_NOTA = 255
+#: Tope de la nota.
+#:
+#:  YA NO ES EL DE LA COLUMNA  --  07/11/2026. `Comment.comment` era un
+#:  CharField(255) y por eso este numero valia 255. El usuario vio el costo en
+#:  la OT #188: el reporte llegaba entero a WispHub y en Dexter terminaba en
+#:  «MATERIAL Y...», o sea que la seccion que dice QUE SE GASTO caia completa.
+#:  La columna pasa a `text` en la misma entrega (common/0047).
+#:
+#:  PERO NO SE QUITA EL TOPE. Sin ninguno, un reporte largo convierte un
+#:  renglon de bitacora en una pagina y la linea de tiempo deja de leerse. Y
+#:  el detalle entero sigue viviendo en la orden: esta nota es un aviso. 2000
+#:  entra el reporte completo que se midio (~350 con material y evidencias)
+#:  con margen de sobra, y sigue siendo un parrafo, no un documento.
+MAX_NOTA = 2000
 
 
 def recortar(texto: str, tope: int = MAX_NOTA) -> str:

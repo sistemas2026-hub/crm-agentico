@@ -291,7 +291,10 @@ function buildTaskActivity(response) {
       at: a.created_at,
       by: null,
       body: a.file_name || 'Adjunto',
-      href: fileUrl(a.file_path)
+      // Ruta propia, no la de la API: el token vive en una cookie httpOnly
+      // que el navegador no manda al host de Django, y `/media/` ni siquiera
+      // existe en produccion. Ver `routes/(app)/adjuntos/[id]/+server.js`.
+      href: a.id ? `/adjuntos/${a.id}` : fileUrl(a.file_path)
     });
   }
 

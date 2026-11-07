@@ -117,15 +117,21 @@ def test_la_nota_que_se_ESCRIBE_usa_el_recorte(org_a, user_profile):
         estado_operativo=OrdenTrabajo.EN_SITIO,
         origen_sistema="crm", origen_ref=str(caso.pk), contexto={})
 
-    #  Mas largo que el campo, y terminando en un dato que no se puede partir.
-    largo = ("palabra " * 40) + "CONECTOR APC"
+    #  MAS LARGO QUE EL TOPE, DERIVADO DE EL Y NO DE UN NUMERO ESCRITO ACA.
+    #  Esta linea decia `* 40`, que pasaba el tope de 255 de entonces. El
+    #  07/11/2026 el tope subio a 2000 --la columna dejo de ser un
+    #  CharField(255)-- y el texto dejo de pasarlo: la guarda se puso roja sin
+    #  que el mecanismo que mide se hubiera roto. Atada al tope, mide el corte
+    #  y no la cifra.
+    veces = (avisar_al_ticket.MAX_NOTA // len("palabra ")) + 10
+    largo = ("palabra " * veces) + "CONECTOR APC"
     r = avisar_al_ticket.avisar(orden, largo, "reporte_del_tecnico",
                                 profile=user_profile)
     assert r["hecho"] is True, r
 
     nota = Comment.objects.filter(object_id=caso.pk).first()
     assert nota is not None
-    assert len(nota.comment) <= 255, len(nota.comment)
+    assert len(nota.comment) <= avisar_al_ticket.MAX_NOTA, len(nota.comment)
     assert nota.comment.endswith("…"), nota.comment
     #  LA QUE MATA EL CORTE EN SECO: ninguna palabra partida.
     assert set(nota.comment[:-1].split(" ")) <= {"palabra", ""}, nota.comment

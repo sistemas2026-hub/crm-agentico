@@ -310,7 +310,18 @@ class Comment(BaseModel):
     object_id = models.UUIDField()
     content_object = GenericForeignKey("content_type", "object_id")
 
-    comment = models.CharField(max_length=255)
+    #  SIN TOPE DE 255  --  07/11/2026
+    #
+    #  Era `CharField(max_length=255)`, y el usuario lo vio: el reporte de
+    #  campo de la OT #188 llegaba entero a WispHub y en Dexter terminaba
+    #  en «MATERIAL Y...». La seccion de material --que es la que dice que
+    #  se gasto-- caia completa, y ninguna pantalla avisaba: se guardaba
+    #  recortado y listo.
+    #
+    #  El tope no protegia nada. No era una regla del negocio ni un limite
+    #  de un tercero: era el default de un CharField. En Postgres el cambio
+    #  a `text` es solo de catalogo, sin reescribir la tabla.
+    comment = models.TextField()
     commented_on = models.DateTimeField(auto_now_add=True)
     commented_by = models.ForeignKey(
         Profile, on_delete=models.CASCADE, blank=True, null=True

@@ -53,6 +53,11 @@ API_RESOURCES = frozenset(
         "accounts",
         "activities",
         "api-settings",
+        # El archivo de un adjunto, servido por sesion y empresa en vez
+        # de por `/media/`, que en produccion no existe y seria publico.
+        # Lo que un token alcanza aca son fotos de casas de clientes, asi
+        # que la raiz se declara para que un scope pueda nombrarla.
+        "attachments",
         "auth",
         "boards",
         "business-hours",
