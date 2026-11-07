@@ -10,7 +10,8 @@ repo no (la encuesta de cierre, encendida con 'solo_a'). Esto toca cuatro cosas 
 
   1. agrega la herramienta 'consultar_mi_cuenta' (si no esta);
   2. se la da a 'facturacion_cliente' (puede_consultar);
-  3. cambia su lista blanca: ve 'consultar_mi_cuenta' y YA NO el 'saldo' de la ficha;
+  3. cambia su lista blanca: ve 'consultar_mi_cuenta' y YA NO el 'saldo' de la ficha; y el
+     agente 'facturacion' deja de ver 'saldo' en sus dos herramientas de facturas;
   4. corrige tres frases de su prompt. Si alguna ya no esta tal cual en la base (alguien
      la edito desde /agentes), NO escribe nada y lo dice: se corrige a mano.
 
@@ -30,6 +31,8 @@ sys.path.insert(0, str(RAIZ))
 ROL = "facturacion_cliente"
 HERRAMIENTA = "consultar_mi_cuenta"
 LISTA_BLANCA_FICHA = ["estado", "estado_facturas", "fecha_corte", "plan_internet"]
+ROL_FACTURAS = "facturacion"
+HERRAMIENTAS_DE_FACTURAS = ("consultar_facturas", "consultar_factura_detalle")
 
 FRASES = [
     ("saldo concreto que debe y desde cuando figura cortado. Es lo que\nnecesita para resolverlo.",
@@ -92,6 +95,19 @@ def mutar(doc, herr, campos_cuenta, avisos):
     cp = rol.setdefault("campos_permitidos", {})
     cp["consultar_mi_servicio"] = list(LISTA_BLANCA_FICHA)
     cp[HERRAMIENTA] = list(campos_cuenta)
+    # Las FACTURAS tampoco llevan 'saldo' para el agente de facturacion (07/11/2026): vale
+    # siempre 0.00 en Rapilink. Se quita de la lista que YA tiene la base, sin pisarla con
+    # la del repo. Las fichas y 'registrar_pago' (su respuesta de un pago real) no se tocan.
+    quitados = []
+    for rol_n, rol_d in doc.get('roles', {}).items():
+        if rol_n != ROL_FACTURAS:
+            continue
+        for tool in HERRAMIENTAS_DE_FACTURAS:
+            lista = (rol_d.get('campos_permitidos') or {}).get(tool)
+            if isinstance(lista, list) and 'saldo' in lista:
+                lista[:] = [c for c in lista if c != 'saldo']
+                quitados.append(tool)
+    avisos.append(f"facturas sin 'saldo': {quitados}" if quitados else "facturas: ya sin 'saldo'")
     avisos.append("lista blanca: ficha sin 'saldo' + consultar_mi_cuenta")
     texto = rol.get("descripcion") or ""
     for i, (viejo, nuevo) in enumerate(FRASES):

@@ -285,13 +285,16 @@ roles:
         ciudad, estado_facturas, saldo, fecha_corte, plan_internet]
       consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono,
             estado_facturas, saldo, fecha_corte, plan_internet]
-      consultar_facturas: [id_factura, estado, total, saldo, fecha_emision, fecha_vencimiento,
+      # SIN 'saldo' en las facturas (07/11/2026): en Rapilink vale siempre 0.00, y un
+      # 0.00 que el modelo lee es un 'no debe nada' dicho a quien si debe. Lo que se
+      # debe es el 'total' de las facturas PENDIENTE (estado), y la suma la hace codigo.
+      consultar_facturas: [id_factura, estado, total, fecha_emision, fecha_vencimiento,
             fecha_pago]
       # Sin 'cliente' completo (mismo criterio que 'servicio' en tickets):
       # trae email/telefono/direccion/cedula que ya se consultan aparte si
       # hacen falta. 'cliente.nombre' alcanza para confirmar de quien es.
       consultar_factura_detalle: [id_factura, folio, fecha_emision, fecha_vencimiento, fecha_pago,
-            estado, tipo, sub_total, descuento, saldo, total, cliente.nombre, articulos]
+            estado, tipo, sub_total, descuento, total, cliente.nombre, articulos]
       consultar_formas_pago: [id, nombre]
       registrar_pago: [resultado, id_factura, total_cobrado, mensajes, messages, task_id, errors]
       # aprobacion_humana salta la lista blanca (ver el comentario igual en
