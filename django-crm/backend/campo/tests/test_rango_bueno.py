@@ -363,3 +363,77 @@ def test_fuera_de_rango_BAJA_el_veredicto_a_NO_CERRAR(org_a):
     orden, _c = _armar(org_a, 331, "-28.5")
 
     assert revisar(orden)["veredicto"] == NO_CERRAR
+
+
+# ---------------------------------------------------------------------------
+#  LO QUE MANDA LA PANTALLA  --  07/11/2026
+#
+#  Hasta hoy el rango se cargaba con `manage.py fijar_rango_bueno`, un parche
+#  declarado como tal. Ahora el editor de plantillas tiene «Bueno desde» y
+#  «Bueno hasta», y manda `bueno_min` / `bueno_max` dentro de cada campo.
+#
+#  ESTA GUARDA VA DESDE LO QUE LA PANTALLA ENVIA, no desde una definicion
+#  armada a mano con la forma que yo supongo. Es la leccion del mismo dia:
+#  una prueba cuyo andamiaje inventa la forma del dato confirma la suposicion
+#  de quien la escribio, no la realidad (ver test_el_dato_vive_en_la_orden).
+# ---------------------------------------------------------------------------
+
+def test_lo_que_manda_el_EDITOR_llega_al_esquema(org_a):
+    from campo import plantillas as P
+    from campo.models import WorkType
+
+    #  Tal cual lo serializa `JSON.stringify(borrador)` en
+    #  routes/(app)/supervisor-noc/plantillas/+page.svelte.
+    de_la_pantalla = {
+        "campos": [{"titulo": "Potencia al salir", "tipo": "numero",
+                    "obligatorio": True, "paso": "", "unidad": "dBm",
+                    "min": -60, "max": -8,
+                    "bueno_min": -27, "bueno_max": -8}],
+        "evidencias": [],
+    }
+    tipo = WorkType.objects.create(org=org_a, codigo="desde_pantalla",
+                                   nombre="Soporte", labor="correctivo")
+
+    version, _ = P.publicar(tipo, de_la_pantalla)
+
+    campo = version.esquema["campos"][0]
+    assert campo["bueno"] == {"min": -27.0, "max": -8.0}, campo
+    #  Y lo otro no se pisa: el tecnico sigue pudiendo escribir -35.
+    assert campo["reglas"]["min"] == -60.0, campo["reglas"]
+
+
+def test_el_editor_lo_VUELVE_A_ABRIR_con_los_valores_puestos(org_a):
+    """Sin esto la casilla abre vacia y el primer guardado borra el rango."""
+    from campo import plantillas as P
+    from campo.models import WorkType
+
+    tipo = WorkType.objects.create(org=org_a, codigo="vuelve_a_abrir",
+                                   nombre="Soporte", labor="correctivo")
+    version, _ = P.publicar(tipo, {
+        "campos": [{"titulo": "Potencia al salir", "tipo": "numero",
+                    "obligatorio": True, "unidad": "dBm",
+                    "bueno_min": -27, "bueno_max": -8}],
+        "evidencias": []})
+
+    definicion, motivos = P.leer_definicion(version.esquema)
+
+    assert not motivos, motivos
+    campo = definicion["campos"][0]
+    assert campo["bueno_min"] == -27.0 and campo["bueno_max"] == -8.0, campo
+
+
+def test_dejarlo_VACIO_desde_la_pantalla_no_pone_rango(org_a):
+    """«Vacío: no juzga», que es lo que la pantalla promete."""
+    from campo import plantillas as P
+    from campo.models import WorkType
+
+    tipo = WorkType.objects.create(org=org_a, codigo="sin_rango_pantalla",
+                                   nombre="Soporte", labor="correctivo")
+
+    version, _ = P.publicar(tipo, {
+        "campos": [{"titulo": "Potencia al salir", "tipo": "numero",
+                    "obligatorio": True, "unidad": "dBm",
+                    "bueno_min": None, "bueno_max": None}],
+        "evidencias": []})
+
+    assert "bueno" not in version.esquema["campos"][0], version.esquema

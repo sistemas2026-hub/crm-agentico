@@ -155,11 +155,35 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
         instrucciones = (instrucciones_propias.strip()
                          or str(e.get("instrucciones") or "").strip())
         titulo = str(e.get("titulo") or "").strip()
+        #  SI ES UNA CAPTURA, SE LO DECIMOS  --  07/11/2026
+        #
+        #  El usuario: «que siga distinguiendo entre una foto a otra pantalla
+        #  y captura». Son dos cosas distintas y el modelo no tenia como
+        #  separarlas: veia pixeles de pantalla y marcaba ATENCION en las dos.
+        #
+        #  Una CAPTURA es legitima --el test de velocidad ES una captura, por
+        #  eso existe `es_captura` en la plantilla-- y una foto tomada DE otra
+        #  pantalla es sospechosa: puede ser el trabajo de otro, o una
+        #  impresion. La diferencia no la puede inventar el modelo; la sabe la
+        #  plantilla, que ya declara cual es cual.
+        #
+        #  SOLO SE AFLOJA DONDE LA EMPRESA LO DECLARO. En las demas fotos la
+        #  sospecha queda intacta, que es justo lo que el usuario pidio
+        #  conservar.
+        if bool(e.get("es_captura")):
+            marca = (" Esta evidencia ES una captura de pantalla del telefono, "
+                     "declarada asi por la empresa: que se vea una pantalla no "
+                     "es motivo de atencion. Si en cambio parece una foto "
+                     "TOMADA de otra pantalla o de una impresion --con "
+                     "reflejos, bordes del equipo, trama o la pantalla "
+                     "inclinada-- decilo.")
+        else:
+            marca = ""
         if instrucciones:
             return (f"Esta foto tenia que mostrar: {titulo or evidencia.requisito_id}. "
-                    f"{instrucciones}")
+                    f"{instrucciones}{marca}")
         if titulo:
-            return f"Esta foto tenia que mostrar: {titulo}."
+            return f"Esta foto tenia que mostrar: {titulo}.{marca}"
         break
     return ""
 

@@ -392,6 +392,27 @@
                             <input class="snoc-campo" style="width:7rem;" type="number" step="any"
                                    placeholder="Máximo" bind:value={c.max} aria-label="Máximo" />
                           </div>
+                          <!-- EL RANGO SANO, y por qué no es Mínimo/Máximo (07/11/2026).
+                               Mínimo y Máximo limitan lo que el técnico PUEDE ESCRIBIR;
+                               confundirlos con lo sano le impide reportar la señal rota
+                               que fue a arreglar. Este rango dice qué está BIEN: el
+                               Supervisor lo usa para devolver la orden cuando la medida
+                               de salida queda afuera. Se cargaba por un comando de
+                               consola; varía por empresa, así que va acá (CLAUDE.md §3.3). -->
+                          <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                            <span class="snoc-body-sm snoc-secundario"
+                                  style="align-self:center;">Rango sano</span>
+                            <input class="snoc-campo" style="width:7rem;" type="number" step="any"
+                                   placeholder="Bueno desde" bind:value={c.bueno_min}
+                                   aria-label="Bueno desde" />
+                            <input class="snoc-campo" style="width:7rem;" type="number" step="any"
+                                   placeholder="Bueno hasta" bind:value={c.bueno_max}
+                                   aria-label="Bueno hasta" />
+                            <span class="snoc-body-sm snoc-secundario"
+                                  style="align-self:center;">
+                              Fuera de esto, el Supervisor devuelve la orden. Vacío: no juzga.
+                            </span>
+                          </div>
                         {:else if c.tipo === 'seleccion'}
                           <textarea class="snoc-campo" rows="3" placeholder="Una opción por renglón"
                                     aria-label="Opciones"
