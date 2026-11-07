@@ -19,10 +19,12 @@ Que se afirma (el EFECTO, no la presencia del mecanismo)
   2. El script que lo aplica a la base lo quita de la lista que la base YA tiene,
      una sola vez, sin tocar fichas, 'registrar_pago' ni otros roles.
 
+Tambien, desde 07/11/2026 (cuenta de colaborador): el 'saldo' de la FICHA del cliente
+ya no llega a soporte, facturacion ni supervisor_noc; lo que se debe sale de
+'consultar_cuenta_de_cliente' (ver test_cuenta_de_colaborador.py).
+
 Que NO se toco, a proposito
 ---------------------------
-  - El 'saldo' de la FICHA del cliente (soporte, facturacion, supervisor_noc):
-    decision pendiente aparte.
   - 'total_cobrado' de 'registrar_pago': es la respuesta de un pago real, no un
     campo de la factura.
 
@@ -84,11 +86,11 @@ afirmar(vista.get("total") == "69900.00" and vista.get("cliente", {}).get("nombr
         and "cedula" not in vista.get("cliente", {}),
         "el detalle conserva el total y solo el nombre del cliente (sin cedula ni email)")
 
-print("\n§2  LO QUE NO SE TOCO")
-afirmar("saldo" in CONFIG.roles["soporte"].campos_permitidos["consultar_cliente"],
-        "la FICHA de soporte sigue igual (decision pendiente aparte)")
-afirmar("saldo" in FACTURACION.campos_permitidos["consultar_cliente"],
-        "la FICHA de facturacion sigue igual")
+print("\n§2  LAS FICHAS SIN SALDO, Y LO QUE NO SE TOCO")
+afirmar("saldo" not in CONFIG.roles["soporte"].campos_permitidos["consultar_cliente"],
+        "la FICHA de soporte tampoco lleva saldo (la cuenta sale de consultar_cuenta_de_cliente)")
+afirmar("saldo" not in FACTURACION.campos_permitidos["consultar_cliente"],
+        "la FICHA de facturacion tampoco")
 afirmar("total_cobrado" in FACTURACION.campos_permitidos["registrar_pago"],
         "'registrar_pago' sigue devolviendo 'total_cobrado': es un pago real, no un campo de factura")
 

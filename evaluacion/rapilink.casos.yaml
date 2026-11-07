@@ -1036,6 +1036,18 @@ casos:
       usa: [consultar_factura_detalle]
       sin_errores: true
 
+  # 07/11/2026 -- lo que debe un cliente, para quien lo atiende. La ficha decia
+  # 'saldo 0.00' a quien tenia una factura pendiente, y sin una suma hecha por
+  # codigo el modelo la haria de cabeza. Se afirma la TRAZA: que use la cuenta
+  # calculada y no termine en un error, nunca la redaccion ni el formato del monto.
+  # Se corre despues de aplicar la config con --base (la herramienta vive en la base).
+  - nombre: un colaborador que pregunta cuanto debe un cliente usa la cuenta calculada
+    rol: facturacion
+    mensajes: ["El cliente con cedula 7031571 ¿cuanto debe?"]
+    espera:
+      usa: [consultar_cuenta_de_cliente]
+      sin_errores: true
+
   # agregar_promesa_pago verificado en vivo contra esta misma factura ANTES
   # de que quedara pagada (POST real, 201, promesa creada) -- ver skill
   # wisphub-api. NO se agrega un caso dorado para "no proponer una promesa

@@ -1447,6 +1447,14 @@ class Herramienta(Base):
     resolver_cliente_con: str = ""
     facturas_con: str = ""
     cuenta: dict[str, str] = Field(default_factory=dict)
+    # El estado de cuenta para un COLABORADOR: el mismo calculo, pero el
+    # 'id_servicio' lo pasa el modelo (el colaborador atiende a un cliente y dice cual)
+    # en vez de salir de una sesion verificada. Es la misma regla que protege a la
+    # version de clientes puesta al reves, asi que el esquema la ata a tres cosas:
+    # solo roles orientados a colaborador (un cliente que pudiera pasar un id
+    # pediria la cuenta de otro), el id declarado como argumento verificado y
+    # requerido, y NO invocable por un servicio. Ver nucleo/herramientas/cuenta.py.
+    cuenta_de_colaborador: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
@@ -2011,16 +2019,35 @@ class Herramienta(Base):
                 f"'{self.nombre}' es irreversible y no puede ser invocable por "
                 f"un servicio: esa ruta no tiene a quien pedirle la aprobacion.")
 
+        if self.cuenta_de_colaborador and not self.calcula_estado_de_cuenta:
+            raise ValueError(
+                f"'{self.nombre}': 'cuenta_de_colaborador' solo tiene sentido en el "
+                f"estado de cuenta ('calcula_estado_de_cuenta').")
+
         if self.calcula_estado_de_cuenta:
             falta = [k for k in ("usuario", "filtro", "total", "saldo", "vencimiento")
                      if not (self.cuenta or {}).get(k)]
             if (self.tipo != "interno" or not self.resolver_cliente_con
-                    or not self.facturas_con or falta
-                    or "id_servicio" not in self.inyectados_obligatorios):
+                    or not self.facturas_con or falta):
                 raise ValueError(
                     f"'{self.nombre}': el estado de cuenta es 'interno', nombra "
-                    f"'resolver_cliente_con' y 'facturas_con', declara en 'cuenta' "
-                    f"{falta or 'usuario/filtro/total/saldo/vencimiento'} y exige "
+                    f"'resolver_cliente_con' y 'facturas_con' y declara en 'cuenta' "
+                    f"{falta or 'usuario/filtro/total/saldo/vencimiento'}.")
+            if self.cuenta_de_colaborador:
+                # El id lo pone el modelo: tiene que ser un argumento declarado y
+                # exigido, nunca de la sesion (seria la version de clientes), y la
+                # ruta sin persona no puede llegar aca.
+                if ("id_servicio" in self.inyectar_sesion
+                        or "id_servicio" not in self.filtros_verificados
+                        or "id_servicio" not in self.requeridos
+                        or self.invocable_por_servicio):
+                    raise ValueError(
+                        f"'{self.nombre}': la cuenta de colaborador recibe 'id_servicio' "
+                        f"como argumento verificado y requerido ('filtros_verificados' + "
+                        f"'requeridos'), sin 'inyectar_sesion' y sin 'invocable_por_servicio'.")
+            elif "id_servicio" not in self.inyectados_obligatorios:
+                raise ValueError(
+                    f"'{self.nombre}': el estado de cuenta de un cliente exige "
                     f"'id_servicio' inyectado de la sesion: sin eso el modelo "
                     f"podria pedir la cuenta de otro cliente.")
 
@@ -4369,6 +4396,17 @@ class TenantConfig(Base):
                         f"cualquier cliente a un desconocido.")
 
         for nombre_rol, rol in self.roles.items():
+            # La cuenta de colaborador recibe el id del modelo: un rol de CLIENTE no
+            # la puede tener, ni por 'puede_consultar' ni nombrada en la herramienta.
+            if rol.orientado_a != "colaborador":
+                prohibidas = sorted(
+                    h.nombre for h in self.herramientas if h.cuenta_de_colaborador
+                    and (h.nombre in rol.puede_consultar or nombre_rol in h.roles_permitidos))
+                if prohibidas:
+                    raise ValueError(
+                        f"rol '{nombre_rol}' esta orientado a un cliente y no puede usar "
+                        f"{prohibidas}: la cuenta de colaborador recibe el id del modelo, "
+                        f"y con eso un cliente pediria la cuenta de otro.")
             # Un rol no puede usar una herramienta que no existe.
             faltantes = set(rol.puede_consultar) - nombres_herr
             if faltantes:

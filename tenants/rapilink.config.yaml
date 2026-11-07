@@ -186,15 +186,19 @@ roles:
           diagnosticar_falla_ont, consultar_estado_catv, activar_catv, cambiar_tipo_onu,
           consultar_guia_sintonizacion,
           consultar_incidente_red, consultar_dispositivos_conectados,
-          consultar_tecnicos, crear_ticket, responder_ticket,
+          consultar_tecnicos, consultar_cuenta_de_cliente, crear_ticket, responder_ticket,
           actualizar_estado_ticket, cargar_habilidad,
           consultar_documentacion]
     campos_permitidos:
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
-        ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, fecha_corte]
+        ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, fecha_corte]
       consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono, direccion,
-        localidad, ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, saldo, 
+        localidad, ciudad, plan_internet, zona, fecha_instalacion, estado_facturas, 
             fecha_corte]
+      # La suma de lo que debe UN cliente, calculada en codigo (07/11/2026). Sin
+      # link ni medios de pago: eso es lo que se le ofrece al cliente, no al colaborador.
+      consultar_cuenta_de_cliente: [disponible, facturas_pendientes, monto_pendiente, vencimiento_mas_antiguo,
+            facturas_vencidas, completo, incluye_saldo_anterior]
       # BottleCRM: nombres reales verificados en vivo (ver skill bottlecrm-api),
       # no los que sugeriria la doc. 'account'/'assigned_to'/'tags' completos
       # NO se listan -- son objetos pesados con datos de cuenta que nadie pidio;
@@ -272,19 +276,28 @@ roles:
       usuario_router_wifi, coordenadas]
 
   facturacion:
-    descripcion: Revisa facturas, saldos y registra pagos.
+    descripcion: >
+      Revisa facturas y registra pagos. Cuanto debe un cliente sale SIEMPRE de
+      consultar_cuenta_de_cliente (la suma ya viene hecha, no la calcules). El
+      'saldo' de una ficha no es lo que debe y no lo des como si lo fuera. Si
+      devuelve disponible=false no se pudo calcular: dilo, y eso NO significa
+      que no deba nada.
     area: Facturación
     cargo: Agente de Facturación
     puede_consultar: [consultar_cliente, consultar_cliente_por_cedula, consultar_facturas,
           consultar_factura_detalle, consultar_formas_pago, registrar_pago, agregar_promesa_pago,
-          contar_facturas, contar_clientes, cargar_habilidad,
+          contar_facturas, contar_clientes, consultar_cuenta_de_cliente, cargar_habilidad,
           consultar_documentacion]
     campos_permitidos:
       # Sin datos de red ni tickets: no hacen a su trabajo.
       consultar_cliente: [id_servicio, nombre, cedula, estado, email, telefono, direccion, localidad,
-        ciudad, estado_facturas, saldo, fecha_corte, plan_internet]
+        ciudad, estado_facturas, fecha_corte, plan_internet]
       consultar_cliente_por_cedula: [id_servicio, nombre, cedula, estado, email, telefono,
-            estado_facturas, saldo, fecha_corte, plan_internet]
+            estado_facturas, fecha_corte, plan_internet]
+      # La suma de lo que debe UN cliente, calculada en codigo (07/11/2026). Sin
+      # link ni medios de pago: eso es lo que se le ofrece al cliente, no al colaborador.
+      consultar_cuenta_de_cliente: [disponible, facturas_pendientes, monto_pendiente, vencimiento_mas_antiguo,
+            facturas_vencidas, completo, incluye_saldo_anterior]
       # SIN 'saldo' en las facturas (07/11/2026): en Rapilink vale siempre 0.00, y un
       # 0.00 que el modelo lee es un 'no debe nada' dicho a quien si debe. Lo que se
       # debe es el 'total' de las facturas PENDIENTE (estado), y la suma la hace codigo.
@@ -1954,7 +1967,7 @@ roles:
       consultar_tickets_de_cliente: [id_ticket, asunto, estado, prioridad, tecnico, fecha_creacion]
       consultar_tecnicos: [id, username, nombre]
       consultar_cliente: [id_servicio, nombre, estado, localidad, ciudad, plan_internet, zona, fecha_instalacion,
-  estado_facturas, saldo, fecha_corte]
+  estado_facturas, fecha_corte]
     nunca_revelar:
       - cedula
       - celular
@@ -2947,6 +2960,40 @@ herramientas:
     inyectar_sesion:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]
+  # Lo mismo que consultar_mi_cuenta, para quien ATIENDE a un cliente (07/11/2026).
+  # Ahi el id sale de la sesion verificada y el modelo no lo toca; aca lo dice el
+  # colaborador, porque el no es el cliente. Por eso el esquema la ata a roles
+  # orientados a colaborador, al id como argumento verificado y requerido, y a
+  # NO ser invocable por un servicio.
+  - nombre: consultar_cuenta_de_cliente
+    tipo: interno
+    descripcion: >
+      Cuanto debe UN cliente, pedido por su id_servicio: cuantas facturas
+      pendientes tiene, cuanto suman, cual es la mas antigua y cuantas ya
+      vencieron. Es la UNICA fuente de lo que debe: el 'saldo' de la ficha NO lo
+      es (medido el 07/11/2026: una factura pendiente con saldo 0.00). La suma la
+      hace el codigo, no la hagas tu. Si devuelve disponible=false, no se pudo
+      calcular: eso NO significa que no deba nada.
+    solo_lectura: true
+    roles_permitidos: [facturacion, soporte]
+    calcula_estado_de_cuenta: true
+    cuenta_de_colaborador: true
+    resolver_cliente_con: consultar_mi_servicio
+    facturas_con: consultar_facturas
+    cuenta:
+      usuario: usuario
+      filtro: cliente
+      total: total
+      saldo: saldo
+      vencimiento: fecha_vencimiento
+    # El id lo elige el modelo, y es legitimo: es el mismo filtro de la ficha, ya
+    # verificado contra la API real (consultar_cliente, 2026-10-07).
+    filtros_verificados:
+      id_servicio:
+        param: id_servicio
+        tipo: id
+        verificado_el: 2026-10-07
+    requeridos: [id_servicio]
   - nombre: consultar_plan_tv
     tipo: http
     # EL DETALLE del sync de precios. Ya existia para otra cosa --saber si un
