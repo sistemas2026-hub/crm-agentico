@@ -47,6 +47,10 @@ vi.mock('./bandeja-config.js', () => ({
     sin_rotulo: { motivos: ['frustracion_detectada'], etiquetas: [], casos: ['problema_de_tv'] }
   })
 }));
+// Lectura del motor sumada al hub el 31/10/2026 (df9c190c). Sin este mock el
+// archivo no cargaba: importa motor-headers.js, que pide $env, y la prueba
+// entera dejaba de correr.
+vi.mock('./organizacion-config.js', () => ({ leerOrganizacion: async () => null }));
 vi.mock('./avisos-campo.js', () => ({ leerAvisos: async () => ({ canales: [1, 2] }) }));
 vi.mock('./business-hours.js', () => ({ getBusinessHours: async () => ({ calendar: {} }) }));
 vi.mock('./custom-fields.js', () => ({ getCustomFields: async () => ({ totals: {} }) }));
