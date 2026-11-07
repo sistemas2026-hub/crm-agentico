@@ -10,13 +10,37 @@ import '../api/api_client.dart';
 import '../api/api_endpoints.dart';
 import '../storage/local_database.dart';
 import '../storage/secure_storage_service.dart';
+import 'una_pasada_a_la_vez.dart';
 
 enum SyncStatus { idle, syncing, error, success }
 
 class SyncSummary {
   final SyncStatus status;
   final bool isSyncing;
+
+  /// NO HAY RED. El teléfono lo dice, no se deduce de que algo falló.
+  ///
+  /// EL DEFECTO QUE ESTO PARTE EN DOS  --  06/11/2026, reportado por el
+  /// usuario: «falla al mandar como si no mandara, sale sin internet
+  /// teniendo internet».
+  ///
+  /// Hasta hoy esto era `_currentStatus == SyncStatus.error`: CUALQUIER
+  /// fallo se pintaba «Sin conexión». Una sesión vencida, un 500 del
+  /// servidor, un cuerpo vacío -- los tres salían idénticos a estar sin
+  /// señal. El técnico miraba la barra de señal llena y la app diciéndole
+  /// que no había internet, y no tenía forma de saber qué hacer.
+  ///
+  /// Son dos problemas con dos salidas opuestas: sin red, esperar alcanza;
+  /// con red y el servidor fallando, esperar no arregla nada y hay que
+  /// avisar. Ver [falloDelServidor].
   final bool hasConnectionError;
+
+  /// FALLÓ CON RED DISPONIBLE: el problema es del otro lado, no del técnico.
+  ///
+  /// Se pone cuando la pasada terminó en error y el teléfono dice que SÍ
+  /// hay red. Quien lo muestre tiene que decir algo distinto de «sin
+  /// conexión», porque esperar no lo va a resolver.
+  final bool falloDelServidor;
   final int mutacionesPendientes;
   final int mutacionesConflicto;
   final int evidenciasPendientes;
@@ -43,6 +67,7 @@ class SyncSummary {
     required this.status,
     required this.isSyncing,
     required this.hasConnectionError,
+    this.falloDelServidor = false,
     required this.mutacionesPendientes,
     required this.mutacionesConflicto,
     required this.evidenciasPendientes,
@@ -90,6 +115,9 @@ class SyncQueueService {
 
   bool _isSyncing = false;
 
+  /// Quién decide si esta pasada corre ahora o se anota para después.
+  final UnaPasadaALaVez _turno = UnaPasadaALaVez();
+
   void _setStatus(SyncStatus status) {
     _currentStatus = status;
     _syncStatusController.add(status);
@@ -127,18 +155,70 @@ class SyncQueueService {
     return (delaySeconds * 1000) + jitterMs;
   }
 
+  //  LO QUE EL TELEFONO DICE DE SU RED  --  06/11/2026.
+  //
+  //  `connectivity_plus` ya se escuchaba en `app_shell.dart`, pero esa señal
+  //  solo alimentaba a `EnvioAutomatico`: el resumen que la pastilla dibuja
+  //  nunca la veía, y por eso tenía que ADIVINARLA desde «algo falló». Acá se
+  //  la deja al alcance de quien arma el resumen.
+  //
+  //  `null` = todavía no se sabe. Se trata como «hay red» a propósito: al
+  //  abrir la app, antes del primer dato del sistema, decir «sin conexión»
+  //  sería afirmar lo que nadie midió. Un falso «sin conexión» manda al
+  //  técnico a buscar señal que ya tiene; un falso «falló el servidor» lo
+  //  manda a avisar, que es lo que igual hay que hacer si no se arregla.
+  bool? _hayRed;
+
+  /// Lo que el sistema dice de la red. Lo llama quien escucha
+  /// `connectivity_plus` (ver `app_shell.dart`).
+  void anotarRed(bool hayRed) {
+    _hayRed = hayRed;
+  }
+
+  /// Si se puede dar por sentado que hay red. Sin dato, se asume que sí.
+  bool get _conRed => _hayRed != false;
+
+  //  LO QUE DIJO EL ULTIMO FALLO, que manda sobre lo que dice el sistema.
+  //
+  //  `connectivity_plus` contesta si hay una interfaz LEVANTADA, no si hay
+  //  salida: el wifi del barrio con el router sin internet da «hay red» y
+  //  ningun pedido llega. Cuando Dio dice `connectionError` --o se corto el
+  //  socket, o vencio el plazo-- eso ES falta de conexion, aunque el telefono
+  //  crea que esta conectado. Lo encontro la guarda de `sesion_vencida_test`
+  //  el 06/11/2026, que simula justo ese caso.
+  bool _ultimoFalloFueDeRed = false;
+
+  /// Si este error significa «no se pudo llegar», no «el servidor contestó mal».
+  static bool esFalloDeRed(Object e) {
+    if (e is! DioException) return false;
+    return e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.error is SocketException;
+  }
+
   /// Refresca el resumen de sincronización consultando el estado real en SQLite
   Future<SyncSummary> refreshSyncSummary({
     bool? hasConnectionErrorOverride,
   }) async {
+    //  El fallo se reparte en una de las dos columnas segun la red, nunca en
+    //  las dos: la pantalla tiene que poder decir UNA cosa.
+    final bool fallo = hasConnectionErrorOverride ??
+        (_currentStatus == SyncStatus.error);
+    //  Sin red por cualquiera de las dos vias: lo que dice el telefono, o lo
+    //  que dijo el pedido al fallar. La segunda es mas confiable --mide la
+    //  salida, no la interfaz-- asi que alcanza con una.
+    final bool sinRed = fallo && (!_conRed || _ultimoFalloFueDeRed);
+    final bool delServidor = fallo && !sinRed;
     final orgId = await _storage.getOrgId();
     final profileId = await _storage.getProfileId();
     if (orgId == null || profileId == null) {
       final empty = SyncSummary(
         status: _currentStatus,
         isSyncing: _isSyncing,
-        hasConnectionError:
-            hasConnectionErrorOverride ?? (_currentStatus == SyncStatus.error),
+        hasConnectionError: sinRed,
+        falloDelServidor: delServidor,
         mutacionesPendientes: 0,
         mutacionesConflicto: 0,
         evidenciasPendientes: 0,
@@ -157,8 +237,8 @@ class SyncQueueService {
     final summary = SyncSummary(
       status: _currentStatus,
       isSyncing: _isSyncing,
-      hasConnectionError:
-          hasConnectionErrorOverride ?? (_currentStatus == SyncStatus.error),
+      hasConnectionError: sinRed,
+      falloDelServidor: delServidor,
       mutacionesPendientes: counts['mutaciones_pendientes'] ?? 0,
       mutacionesConflicto: counts['mutaciones_conflicto'] ?? 0,
       evidenciasPendientes: counts['evidencias_pendientes'] ?? 0,
@@ -181,9 +261,15 @@ class SyncQueueService {
   }
 
   /// Procesa todo el ciclo de sincronización de manera determinista (DAG)
-  Future<void> procesarCola() async {
-    if (_isSyncing) return;
+  /// Sincroniza. Si ya hay una pasada corriendo, se anota y sale: la actual
+  /// vuelve a correr al terminar (ver [UnaPasadaALaVez]).
+  Future<void> procesarCola() => _turno.correr(_unaPasada);
+
+  Future<void> _unaPasada() async {
     _isSyncing = true;
+    //  Cada pasada se juzga sola: sin esto, un corte de red de hace media
+    //  hora seguiría explicando un 500 de ahora.
+    _ultimoFalloFueDeRed = false;
     _setStatus(SyncStatus.syncing);
     await refreshSyncSummary(hasConnectionErrorOverride: false);
 
@@ -280,6 +366,7 @@ class SyncQueueService {
       _setStatus(SyncStatus.success);
       await refreshSyncSummary(hasConnectionErrorOverride: false);
     } catch (e) {
+      _ultimoFalloFueDeRed = esFalloDeRed(e);
       _setStatus(SyncStatus.error);
       await refreshSyncSummary(hasConnectionErrorOverride: true);
     } finally {
@@ -1344,9 +1431,14 @@ class SyncQueueService {
           vistas: vistas,
         );
       }
-    } catch (_) {
+    } catch (e) {
       // Offline o error de red: los datos locales quedan. Lo que NO queda en
       // silencio es el resultado: quien llama sabe si el servidor contestó.
+      //  Y QUE CLASE de fallo fue, que es lo que separa «sin conexión» de «el
+      //  servidor falla» (06/11/2026). Acá el error se traga a propósito para
+      //  no tumbar la pasada, así que si no se anota este dato se pierde: es
+      //  el único punto donde todavía existe.
+      if (esFalloDeRed(e)) _ultimoFalloFueDeRed = true;
     }
     return llego;
   }

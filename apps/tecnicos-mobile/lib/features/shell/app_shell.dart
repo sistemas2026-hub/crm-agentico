@@ -428,6 +428,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _suscripcionConexion = conectividad.listen(
         (bool hayRed) {
           _envio.alCambiarLaRed(hayRed);
+          //  Y LA COLA TAMBIEN SE ENTERA  --  06/11/2026. Hasta hoy esta
+          //  señal moria en `_envio`: el resumen que dibuja la pastilla tenia
+          //  que ADIVINAR si habia red desde «algo fallo», y por eso un 500
+          //  del servidor salia escrito «Sin conexión» con la barra de señal
+          //  llena. Ver `SyncSummary.falloDelServidor`.
+          SyncQueueService().anotarRed(hayRed);
           if (mounted) setState(() => _hayRed = hayRed);
         },
         onError: (Object _) {

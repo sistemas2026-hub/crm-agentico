@@ -30,6 +30,9 @@ class SyncPresentacion {
     // Sin nada pendiente, pero el último intento no llegó al servidor: no se
     // puede decir "sincronizado" con la misma cara de siempre.
     if (resumen.hasConnectionError) return DexterSyncStatus.pendiente;
+    //  Fallo CON red: no es «pendiente de que vuelva la señal», es algo roto
+    //  del otro lado. Va como error para que se vea distinto de esperar.
+    if (resumen.falloDelServidor) return DexterSyncStatus.error;
     return DexterSyncStatus.sincronizado;
   }
 
@@ -57,9 +60,15 @@ class SyncPresentacion {
       // de QUE cola habla, que es lo que la distingue del «Esta OT: n» del
       // bloque de la orden.
       final pendientes = '${resumen.totalPendientes} en cola';
-      return resumen.hasConnectionError ? '$pendientes · sin conexión' : pendientes;
+      if (resumen.hasConnectionError) return '$pendientes · sin conexión';
+      //  CON red y fallando: decir «sin conexión» acá fue el reclamo entero
+      //  --«sale sin internet teniendo internet»--. El técnico mira la barra
+      //  de señal, la ve llena, y deja de creerle a la pastilla.
+      if (resumen.falloDelServidor) return '$pendientes · el servidor falla';
+      return pendientes;
     }
     if (resumen.hasConnectionError) return 'Sin conexión';
+    if (resumen.falloDelServidor) return 'El servidor falla';
     return null;
   }
 
@@ -76,9 +85,15 @@ class SyncPresentacion {
     if (resumen.totalPendientes > 0) {
       final n = resumen.totalPendientes;
       final base = n == 1 ? 'Un cambio guardado acá' : '$n cambios guardados acá';
-      return resumen.hasConnectionError
-          ? '$base · se envían al volver la conexión'
-          : '$base · esperando turno para enviarse';
+      if (resumen.hasConnectionError) {
+        return '$base · se envían al volver la conexión';
+      }
+      //  Y acá se dice qué hacer, porque esperar NO lo arregla: es la
+      //  diferencia práctica entre los dos estados.
+      if (resumen.falloDelServidor) {
+        return '$base · hay señal pero el servidor no responde · avisá al NOC';
+      }
+      return '$base · esperando turno para enviarse';
     }
     //  EL MOMENTO SE AGREGA EN ESTOS DOS Y NO EN TODOS, y no es por espacio.
     //
@@ -93,6 +108,11 @@ class SyncPresentacion {
       return cuando.isEmpty
           ? 'Sin conexión con el servidor · lo que hagas se guarda igual'
           : 'Sin conexión · lo último llegó $cuando · se guarda igual';
+    }
+    if (resumen.falloDelServidor) {
+      return cuando.isEmpty
+          ? 'Hay señal pero el servidor no responde · avisá al NOC'
+          : 'El servidor no responde · lo último llegó $cuando · avisá al NOC';
     }
     return cuando.isEmpty ? 'Todo sincronizado' : 'Todo sincronizado · $cuando';
   }
@@ -115,6 +135,8 @@ class SyncPresentacion {
   static bool puedeSincronizarAhora(SyncSummary? resumen) {
     if (resumen == null) return false;
     if (resumen.isSyncing) return false;
-    return resumen.totalPendientes > 0 || resumen.hasConnectionError;
+    return resumen.totalPendientes > 0 ||
+        resumen.hasConnectionError ||
+        resumen.falloDelServidor;
   }
 }
