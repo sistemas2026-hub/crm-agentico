@@ -516,16 +516,28 @@ roles:
       no lo devuelvas a soporte tecnico. Te lo derivaron justamente
       porque no es una falla: esta cortado por cartera, y el equipo
       puede estar perfecto. Diselo en una linea, sin sermon, con el
-      saldo concreto que debe y desde cuando figura cortado. Es lo que
-      necesita para resolverlo.
+      monto que debe (el de consultar_mi_cuenta) y desde cuando figura
+      cortado. Es lo que necesita para resolverlo.
 
       Nunca lo mandes de vuelta al area tecnica ni le pidas revisar el
       equipo: ya se miro y no esta roto. Y si te pregunta cuando se
       reconecta despues de pagar, no inventes un plazo -- si no tienes
       el dato, dile que no lo tienes.
 
-      Lo que resuelves: saldo actual, si tiene facturas pendientes, y la
-      fecha de corte. Una factura PENDIENTE no corta el servicio por si
+      Lo que resuelves: cuanto debe, si tiene facturas pendientes, y la
+      fecha de corte.
+
+      CUANTO DEBE sale SIEMPRE de consultar_mi_cuenta (monto_pendiente,
+      facturas_pendientes, facturas_vencidas): la suma ya viene hecha, no la
+      calcules. NO existe un "saldo" de la ficha que puedas decir: no lo
+      tienes, y un 0.00 inventado le dice a quien debe que no debe nada. Si
+      consultar_mi_cuenta devuelve disponible=false, NO pudiste calcular el
+      monto: dile que no lo pudiste confirmar ahora y que un colaborador
+      sigue el caso (derivar_a_area), sin dar una cifra ni decir que no
+      debe nada. Si devuelve completo=false, el monto es lo que hay en la
+      primera pagina: dilo como "al menos".
+
+      Una factura PENDIENTE no corta el servicio por si
       sola: solo lo afecta a partir de la fecha de corte -- compara esa
       fecha con la de hoy antes de decir que el servicio esta en riesgo.
 
@@ -574,12 +586,17 @@ roles:
       la clausula de permanencia de 12 meses.
     orientado_a: cliente_final
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_mi_servicio, derivar_a_area, cargar_habilidad,
+          consultar_mi_servicio, consultar_mi_cuenta, derivar_a_area, cargar_habilidad,
           consultar_documentacion, reportar_comprobante_pago]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
-      consultar_mi_servicio: [estado, estado_facturas, saldo, fecha_corte, plan_internet]
+      # SIN 'saldo' (07/11/2026): el de la ficha no es lo que debe, y un 0.00
+      # que el modelo lee es un 0.00 que el cliente escucha. El monto sale de
+      # consultar_mi_cuenta, calculado en codigo.
+      consultar_mi_servicio: [estado, estado_facturas, fecha_corte, plan_internet]
+      consultar_mi_cuenta: [disponible, facturas_pendientes, monto_pendiente,
+            vencimiento_mas_antiguo, facturas_vencidas, completo]
       # Sin 'resumen': ese campo es para el colaborador humano que va a leer
       # el caso, no para que el modelo se lo repita al cliente -- ya sabe
       # que decir por el mensaje fijo de 'comprobante_para_validar' (Fase
@@ -2878,6 +2895,35 @@ herramientas:
     metodo: GET
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
+    inyectar_sesion:
+      id_servicio: id_cliente
+    inyectados_obligatorios: [id_servicio]
+  - nombre: consultar_mi_cuenta
+    tipo: interno
+    descripcion: >
+      Cuanto debe el cliente autenticado: cuantas facturas pendientes tiene,
+      cuanto suman, cual es la mas antigua y cuantas ya vencieron. Es la UNICA
+      fuente del monto que debe: el 'saldo' de la ficha del cliente NO es lo
+      que debe (medido el 07/11/2026: un cliente con una factura pendiente
+      tenia saldo 0.00). La suma la hace el codigo. Si devuelve
+      disponible=false, no se pudo calcular: eso NO significa que no deba nada.
+    solo_lectura: true
+    roles_permitidos: [facturacion_cliente]
+    calcula_estado_de_cuenta: true
+    resolver_cliente_con: consultar_mi_servicio
+    facturas_con: consultar_facturas
+    # Como se llaman, en WispHub, los datos que hacen falta. 'usuario' es el
+    # campo de la ficha que identifica al cliente en las facturas: el filtro
+    # 'servicio'/'id_servicio' de /api/facturas/ la API lo IGNORA en silencio
+    # (skill wisphub-api, verificado 19/08/2026).
+    cuenta:
+      usuario: usuario
+      filtro: cliente
+      total: total
+      saldo: saldo
+      vencimiento: fecha_vencimiento
+    # El id sale de la sesion verificada, NUNCA del modelo: con un id que el
+    # modelo escribe, una inyeccion de prompt pide la cuenta de otro.
     inyectar_sesion:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]

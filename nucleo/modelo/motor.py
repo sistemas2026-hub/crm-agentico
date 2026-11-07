@@ -54,6 +54,7 @@ from nucleo.herramientas import agregado as ejecutor_agregado
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
 from nucleo.herramientas import diagnostico_servicio as ejecutor_diagnostico
+from nucleo.herramientas import cuenta as ejecutor_cuenta
 from nucleo.herramientas import flota as ejecutor_flota
 from nucleo.herramientas import estabilidad as ejecutor_estabilidad
 from nucleo.herramientas import wifi as ejecutor_wifi
@@ -2705,6 +2706,14 @@ def _despacho_de_herramienta(herramienta, argumentos: dict,
     #  despacho y a todos sus llamadores: lo necesita UN ejecutor de nueve.
     if herramienta.tipo == "interno" and herramienta.diagnostica_servicio:
         return ejecutor_diagnostico.diagnosticar(
+            herramienta, argumentos, tenant, variables_tenant)
+
+    #  EL ESTADO DE CUENTA: solo por este despacho, el del modelo, y a proposito NO
+    #  por 'ejecutar_para_servicio'. Es la cuenta de quien esta verificado en la
+    #  conversacion; un servicio no tiene sesion, y esa ruta la rechaza porque la
+    #  herramienta no es 'invocable_por_servicio'.
+    if herramienta.tipo == "interno" and herramienta.calcula_estado_de_cuenta:
+        return ejecutor_cuenta.estado_de_cuenta(
             herramienta, argumentos, tenant, variables_tenant)
 
     #  La lectura de FLOTA. Va junto a la anterior porque las dos hablan con

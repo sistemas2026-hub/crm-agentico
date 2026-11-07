@@ -1430,6 +1430,24 @@ class Herramienta(Base):
     # Ver nucleo/herramientas/pagos.py. Agregado en Fase #7 (03/09/2026).
     reporta_comprobante_pago: bool = False
 
+    # Tipo 'interno': el ESTADO DE CUENTA de quien esta en la sesion -- cuantas
+    # facturas debe y cuanto suman -- calculado en CODIGO. Existe porque la ficha
+    # del cliente trae un 'saldo' que no es lo que debe (medido el 07/11/2026: un
+    # cliente con una factura pendiente aparecia con saldo 0.00) y el agente de
+    # cobro repetia ese numero. Ver nucleo/herramientas/cuenta.py.
+    #
+    # Nombra DOS herramientas del mismo catalogo en vez de escribir aqui un
+    # proveedor: la que lee la ficha ('resolver_cliente_con') y la que lista
+    # las facturas ('facturas_con'). 'cuenta' dice como se llaman, en ESE
+    # proveedor, los cuatro datos que hacen falta: el campo de la ficha que
+    # identifica al cliente en las facturas ('usuario'), el filtro de facturas
+    # que lo recibe ('filtro'), y los campos 'total', 'saldo' y 'vencimiento'.
+    # El modelo no pasa ningun identificador: sale de 'inyectar_sesion'.
+    calcula_estado_de_cuenta: bool = False
+    resolver_cliente_con: str = ""
+    facturas_con: str = ""
+    cuenta: dict[str, str] = Field(default_factory=dict)
+
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
     # tenant igual que 'endpoint', solo que compartido por varias
@@ -1992,6 +2010,19 @@ class Herramienta(Base):
             raise ValueError(
                 f"'{self.nombre}' es irreversible y no puede ser invocable por "
                 f"un servicio: esa ruta no tiene a quien pedirle la aprobacion.")
+
+        if self.calcula_estado_de_cuenta:
+            falta = [k for k in ("usuario", "filtro", "total", "saldo", "vencimiento")
+                     if not (self.cuenta or {}).get(k)]
+            if (self.tipo != "interno" or not self.resolver_cliente_con
+                    or not self.facturas_con or falta
+                    or "id_servicio" not in self.inyectados_obligatorios):
+                raise ValueError(
+                    f"'{self.nombre}': el estado de cuenta es 'interno', nombra "
+                    f"'resolver_cliente_con' y 'facturas_con', declara en 'cuenta' "
+                    f"{falta or 'usuario/filtro/total/saldo/vencimiento'} y exige "
+                    f"'id_servicio' inyectado de la sesion: sin eso el modelo "
+                    f"podria pedir la cuenta de otro cliente.")
 
         sobrantes_inyectados = set(self.inyectados_obligatorios) - set(self.inyectar_sesion)
         if sobrantes_inyectados:
