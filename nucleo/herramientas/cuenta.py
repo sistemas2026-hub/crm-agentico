@@ -241,6 +241,61 @@ def link_de_pago(herramienta, variables_tenant) -> str | None:
     return valor
 
 
+#: Otros medios de pago (un punto fisico con su convenio, una cuenta bancaria):
+#: tambien son un dato de la EMPRESA y viven en una variable del tenant que la
+#: pantalla de Pagos edita ('cuenta.medios_de_pago' dice CUAL). Es una lista JSON
+#: de {"nombre", "instruccion"}. El texto lo escribe la empresa, no el cliente.
+MAXIMO_MEDIOS_DE_PAGO = 10
+LARGO_MAXIMO_DEL_MEDIO = 60
+LARGO_MAXIMO_DE_LA_INSTRUCCION = 300
+
+
+def _limpio(valor) -> str:
+    """Un texto de una sola linea, sin caracteres de control. No es texto de un
+    cliente: no se redacta (enmascarar el numero de un convenio lo inutilizaria)."""
+    import unicodedata
+    if not isinstance(valor, str):
+        return ""
+    sin_control = "".join(" " if unicodedata.category(c) == "Cc" else c for c in valor)
+    return " ".join(sin_control.split())
+
+
+def medios_de_pago(herramienta, variables_tenant) -> list[str]:
+    """
+    Los medios de pago de la empresa como textos "Nombre: como se paga", o [].
+    Fail-closed por entrada: lo que no es un par de textos, esta vacio o pasa del
+    tope se DESCARTA ENTERO (recortarlo podria cortar un numero de convenio y
+    dar un dato falso). Un JSON roto o una variable ausente no dan nada.
+    """
+    nombre = ((herramienta.cuenta or {}).get("medios_de_pago") or "").strip()
+    if not nombre:
+        return []
+    crudo = (variables_tenant or {}).get(nombre)
+    if not isinstance(crudo, str) or not crudo.strip():
+        return []
+    import json
+    try:
+        entradas = json.loads(crudo)
+    except ValueError:
+        return []
+    if not isinstance(entradas, list):
+        return []
+    salida: list[str] = []
+    for e in entradas:
+        if not isinstance(e, dict):
+            continue
+        medio = _limpio(e.get("nombre"))
+        como = _limpio(e.get("instruccion"))
+        if not medio or not como:
+            continue
+        if len(medio) > LARGO_MAXIMO_DEL_MEDIO or len(como) > LARGO_MAXIMO_DE_LA_INSTRUCCION:
+            continue
+        salida.append(f"{medio}: {como}")
+        if len(salida) >= MAXIMO_MEDIOS_DE_PAGO:
+            break
+    return salida
+
+
 def _hoy(config) -> date:
     """El dia de hoy EN LA ZONA DE LA EMPRESA: a las 8 pm en Bogota ya es manana en UTC."""
     from datetime import timezone
@@ -318,4 +373,7 @@ def estado_de_cuenta(herramienta, argumentos, tenant, variables_tenant,
         enlace = link_de_pago(herramienta, variables_tenant)
         if enlace:
             respuesta["link_de_pago"] = enlace
+        otros = medios_de_pago(herramienta, variables_tenant)
+        if otros:
+            respuesta["otros_medios_de_pago"] = otros
     return respuesta

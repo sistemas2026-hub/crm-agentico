@@ -57,6 +57,12 @@ FRASES = [
      'separes ni lo sumes otra vez. Si devuelve link_de_pago, ofrecelo para\n'
      'que pague: ese link, tal cual. Si no llega, no digas que existe uno ni\n'
      'inventes otro.'),
+    # 07/11/2026: otros medios de pago (punto fisico con convenio), de Configuracion -> Pagos.
+    ('inventes otro.',
+     'inventes otro. Si devuelve otros_medios_de_pago\n'
+     '(puntos fisicos, bancos), es una lista de textos "Nombre: como pagar":\n'
+     'ofrecelos tal cual, sin cambiar ni inventar ningun numero. Si no llega,\n'
+     'no digas que existen otros medios.'),
 ]
 
 
@@ -71,7 +77,7 @@ def mutar(doc, herr, campos_cuenta, avisos):
     if any(h.get("nombre") == HERRAMIENTA for h in doc.get("herramientas", [])):
         avisos.append("la herramienta ya estaba: no se agrega de nuevo")
         # Lo unico de ella que se actualiza: su 'cuenta' (de que variable sale el
-        # link). Nada mas de la herramienta se toca.
+        # link y de los otros medios de pago). Nada mas de la herramienta se toca.
         for h in doc["herramientas"]:
             if h.get("nombre") == HERRAMIENTA:
                 h["cuenta"] = dict(herr["cuenta"])
@@ -110,7 +116,7 @@ def main():
     herr, campos = semilla(tenant)
     if "--aplicar" not in sys.argv:
         print(f"[solo lectura] aplicaria a '{tenant}': herramienta {HERRAMIENTA} + permiso + "
-              f"lista blanca de {ROL} (sin 'saldo' de la ficha) + 2 frases del prompt.\n"
+              f"lista blanca de {ROL} (sin 'saldo' de la ficha) + las frases del prompt.\n"
               "Para escribir: agregar --aplicar (DESPUES del push).")
         return
     from nucleo.config import editor

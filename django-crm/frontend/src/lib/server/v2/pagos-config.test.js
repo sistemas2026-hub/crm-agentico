@@ -1,18 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
- * El puente del link de pago.
+ * El puente de lo que un cliente puede usar para pagar: el link y los otros medios.
  *
- * Lo que se afirma es el EFECTO: que un link que no es https limpio NO salga al
- * motor (el motor tampoco se lo daría a un cliente, pero acá se avisa a quien lo
- * escribe), que vacío QUITE la variable en vez de guardar un vacío (el motor
- * rechaza un valor vacío), y que leer nunca tire.
+ * Lo que se afirma es el EFECTO: que un link que no es https limpio, o un medio
+ * pasado del tope, NO salga al motor (el motor tampoco se lo daría a un cliente,
+ * pero acá se avisa a quien lo escribe), que vacío QUITE la variable en vez de
+ * guardar un vacío (el motor rechaza un valor vacío), y que leer nunca tire.
  */
 const { envMock } = vi.hoisted(() => ({ /** @type {Record<string, string>} */ envMock: {} }));
 vi.mock('$env/dynamic/private', () => ({ env: envMock }));
 
-const { leerLinkDePago, guardarLinkDePago, validarLinkDePago, VARIABLE_LINK_DE_PAGO } =
-  await import('./pagos-config.js');
+const {
+  leerAjustesDePago,
+  guardarLinkDePago,
+  guardarMediosDePago,
+  validarLinkDePago,
+  validarMediosDePago,
+  leerMediosGuardados,
+  VARIABLE_LINK_DE_PAGO,
+  VARIABLE_MEDIOS_DE_PAGO
+} = await import('./pagos-config.js');
 
 const LOCALS = /** @type {any} */ ({ tenant: 'rapilink' });
 let fetchMock = vi.fn();
@@ -50,31 +58,48 @@ describe('validarLinkDePago', () => {
   });
 });
 
-describe('leerLinkDePago', () => {
-  it('devuelve el link cargado', async () => {
+describe('leerAjustesDePago', () => {
+  it('devuelve el link cargado y, sin medios guardados, la lista vacía', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ variables: { LINK_DE_PAGO: 'https://pagos.ejemplo.co' } })
     });
-    expect(await leerLinkDePago(LOCALS, fetchMock)).toEqual({ link: 'https://pagos.ejemplo.co' });
+    expect(await leerAjustesDePago(LOCALS, fetchMock)).toEqual({
+      link: 'https://pagos.ejemplo.co',
+      medios: [],
+      medios_ilegibles: false
+    });
   });
-  it('sin la variable devuelve link vacío, no null: el asistente sí contestó', async () => {
+  it('trae los medios guardados en la misma lectura', async () => {
+    const guardado = JSON.stringify([{ nombre: 'Efecty', instruccion: 'Convenio 12345. Di tu cedula.' }]);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ variables: { MEDIOS_DE_PAGO: guardado } }) });
+    const r = await leerAjustesDePago(LOCALS, fetchMock);
+    expect(r?.medios).toEqual([{ nombre: 'Efecty', instruccion: 'Convenio 12345. Di tu cedula.' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('un valor guardado que no se puede leer se MARCA, no se muestra como vacío', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ variables: { MEDIOS_DE_PAGO: 'no es json' } }) });
+    const r = await leerAjustesDePago(LOCALS, fetchMock);
+    expect(r?.medios).toEqual([]);
+    expect(r?.medios_ilegibles).toBe(true);
+  });
+  it('sin las variables devuelve link vacío, no null: el asistente sí contestó', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ variables: { OTRA: 'x' } }) });
-    expect(await leerLinkDePago(LOCALS, fetchMock)).toEqual({ link: '' });
+    expect(await leerAjustesDePago(LOCALS, fetchMock)).toEqual({ link: '', medios: [], medios_ilegibles: false });
   });
   it('manda el tenant del servidor', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ variables: {} }) });
-    await leerLinkDePago(LOCALS, fetchMock);
+    await leerAjustesDePago(LOCALS, fetchMock);
     expect(fetchMock.mock.calls[0][0]).toContain('tenant=rapilink');
   });
   it('devuelve null --sin tirar-- si el motor falla o no hay asistente', async () => {
     fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
-    await expect(leerLinkDePago(LOCALS, fetchMock)).resolves.toBeNull();
+    await expect(leerAjustesDePago(LOCALS, fetchMock)).resolves.toBeNull();
     fetchMock.mockResolvedValue({ ok: false, json: async () => ({}) });
-    await expect(leerLinkDePago(LOCALS, fetchMock)).resolves.toBeNull();
+    await expect(leerAjustesDePago(LOCALS, fetchMock)).resolves.toBeNull();
     delete envMock.PRIVATE_ASISTENTE_URL;
     fetchMock.mockClear();
-    await expect(leerLinkDePago(LOCALS, fetchMock)).resolves.toBeNull();
+    await expect(leerAjustesDePago(LOCALS, fetchMock)).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -108,5 +133,99 @@ describe('guardarLinkDePago', () => {
     delete envMock.PRIVATE_ASISTENTE_URL;
     await expect(guardarLinkDePago(LOCALS, fetchMock, 'https://pagos.ejemplo.co')).rejects.toThrow(/no configurado/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('validarMediosDePago', () => {
+  it('acepta un medio y lo devuelve aplanado, con el número intacto', () => {
+    const r = validarMediosDePago([{ nombre: '  Efecty ', instruccion: 'Convenio 12345.\n\tDi tu   cedula.' }]);
+    expect(r).toEqual({
+      ok: true,
+      medios: [{ nombre: 'Efecty', instruccion: 'Convenio 12345. Di tu cedula.' }]
+    });
+  });
+  it('una fila vacía por completo se ignora (la que queda al apretar Agregar)', () => {
+    const r = validarMediosDePago([
+      { nombre: '', instruccion: '' },
+      { nombre: 'Banco', instruccion: 'Cuenta 000' },
+      { nombre: ' ', instruccion: ' ' }
+    ]);
+    expect(r).toEqual({ ok: true, medios: [{ nombre: 'Banco', instruccion: 'Cuenta 000' }] });
+  });
+  it('sin ninguna fila es válido: significa quitar todos', () => {
+    expect(validarMediosDePago([])).toEqual({ ok: true, medios: [] });
+  });
+  it.each([
+    [{ nombre: '', instruccion: 'Convenio 1' }, /falta el nombre/],
+    [{ nombre: 'Efecty', instruccion: '' }, /falta decir c/],
+    [{ nombre: 'N'.repeat(61), instruccion: 'x' }, /pasa de 60/],
+    [{ nombre: 'Efecty', instruccion: 'i'.repeat(301) }, /pasa de 300/]
+  ])('una fila a medias o pasada del tope es un ERROR con motivo, no se descarta callada (%#)', (fila, motivo) => {
+    const r = validarMediosDePago([fila]);
+    expect(r.ok).toBe(false);
+    expect(/** @type {any} */ (r).error).toMatch(motivo);
+  });
+  it('más de diez es un error', () => {
+    const filas = Array.from({ length: 11 }, (_, i) => ({ nombre: 'M' + i, instruccion: 'ok' }));
+    expect(validarMediosDePago(filas).ok).toBe(false);
+  });
+  it('un valor que no es texto no pasa por texto', () => {
+    expect(validarMediosDePago([{ nombre: 5, instruccion: {} }])).toEqual({ ok: true, medios: [] });
+  });
+});
+
+describe('leerMediosGuardados', () => {
+  it('aplica las mismas reglas del motor: lo que el motor descartaría no se muestra', () => {
+    const crudo = JSON.stringify([
+      { nombre: 'Efecty', instruccion: 'Convenio 12345.' },
+      { nombre: 'Sin texto', instruccion: '' },
+      { nombre: 'X', instruccion: 'i'.repeat(301) },
+      'no soy un par'
+    ]);
+    expect(leerMediosGuardados(crudo)).toEqual({
+      medios: [{ nombre: 'Efecty', instruccion: 'Convenio 12345.' }],
+      ilegible: false
+    });
+  });
+  it('ausente o vacío no es ilegible; roto o de otra forma sí', () => {
+    expect(leerMediosGuardados(undefined)).toEqual({ medios: [], ilegible: false });
+    expect(leerMediosGuardados('  ')).toEqual({ medios: [], ilegible: false });
+    expect(leerMediosGuardados('{')).toEqual({ medios: [], ilegible: true });
+    expect(leerMediosGuardados('{}')).toEqual({ medios: [], ilegible: true });
+  });
+  it('no devuelve más de diez', () => {
+    const crudo = JSON.stringify(Array.from({ length: 25 }, (_, i) => ({ nombre: 'M' + i, instruccion: 'ok' })));
+    expect(leerMediosGuardados(crudo).medios).toHaveLength(10);
+  });
+});
+
+describe('guardarMediosDePago', () => {
+  it('hace PUT a la variable MEDIOS_DE_PAGO con la lista como JSON y el tenant del servidor', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await guardarMediosDePago(LOCALS, fetchMock, [{ nombre: 'Efecty', instruccion: 'Convenio 12345.' }]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`http://motor:5000/configuracion/variables/${VARIABLE_MEDIOS_DE_PAGO}`);
+    expect(init.method).toBe('PUT');
+    const cuerpo = JSON.parse(init.body);
+    expect(cuerpo.tenant).toBe('rapilink');
+    expect(JSON.parse(cuerpo.valor)).toEqual([{ nombre: 'Efecty', instruccion: 'Convenio 12345.' }]);
+  });
+  it('sin ningún medio QUITA la variable (DELETE): el motor no acepta un valor vacío', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await guardarMediosDePago(LOCALS, fetchMock, [{ nombre: '', instruccion: '' }]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(init.method).toBe('DELETE');
+    expect(url).toContain(`/configuracion/variables/${VARIABLE_MEDIOS_DE_PAGO}?tenant=rapilink`);
+  });
+  it('una fila a medias NO sale al motor, y el error dice cuál', async () => {
+    await expect(guardarMediosDePago(LOCALS, fetchMock, [{ nombre: 'Efecty', instruccion: '' }])).rejects.toThrow(/Efecty/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('el link y los medios se guardan en variables DISTINTAS', () => {
+    expect(VARIABLE_MEDIOS_DE_PAGO).not.toBe(VARIABLE_LINK_DE_PAGO);
+  });
+  it('si el motor rechaza, el mensaje llega a quien lo escribió', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: async () => ({ error: 'config invalida: y' }) });
+    await expect(guardarMediosDePago(LOCALS, fetchMock, [{ nombre: 'A', instruccion: 'b' }])).rejects.toThrow('config invalida: y');
   });
 });

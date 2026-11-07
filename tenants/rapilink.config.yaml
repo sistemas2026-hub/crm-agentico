@@ -540,7 +540,10 @@ roles:
       facturas anteriores: dilo asi ("incluye saldo anterior") y no lo
       separes ni lo sumes otra vez. Si devuelve link_de_pago, ofrecelo para
       que pague: ese link, tal cual. Si no llega, no digas que existe uno ni
-      inventes otro.
+      inventes otro. Si devuelve otros_medios_de_pago
+      (puntos fisicos, bancos), es una lista de textos "Nombre: como pagar":
+      ofrecelos tal cual, sin cambiar ni inventar ningun numero. Si no llega,
+      no digas que existen otros medios.
 
       Una factura PENDIENTE no corta el servicio por si
       sola: solo lo afecta a partir de la fecha de corte -- compara esa
@@ -602,7 +605,7 @@ roles:
       consultar_mi_servicio: [estado, estado_facturas, fecha_corte, plan_internet]
       consultar_mi_cuenta: [disponible, facturas_pendientes, monto_pendiente,
             vencimiento_mas_antiguo, facturas_vencidas, completo, incluye_saldo_anterior,
-            link_de_pago]
+            link_de_pago, otros_medios_de_pago]
       # Sin 'resumen': ese campo es para el colaborador humano que va a leer
       # el caso, no para que el modelo se lo repita al cliente -- ya sabe
       # que decir por el mensaje fijo de 'comprobante_para_validar' (Fase
@@ -2932,6 +2935,10 @@ herramientas:
       # Configuracion -> Pagos). Es opcional: sin ella no hay link y nada se rompe.
       # Solo se entrega con deuda y si es https limpio (nucleo/herramientas/cuenta.py).
       link_de_pago: LINK_DE_PAGO
+      # NOMBRE de la variable con los otros medios de pago (puntos fisicos con su
+      # convenio, cuentas): una lista JSON de {nombre, instruccion} que se edita en
+      # Configuracion -> Pagos. Opcional, y el texto lo escribe la empresa.
+      medios_de_pago: MEDIOS_DE_PAGO
     # El id sale de la sesion verificada, NUNCA del modelo: con un id que el
     # modelo escribe, una inyeccion de prompt pide la cuenta de otro.
     inyectar_sesion:
