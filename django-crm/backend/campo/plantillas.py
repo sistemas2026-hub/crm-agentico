@@ -554,6 +554,19 @@ def componer(definicion: dict) -> dict:
         paso = paso_de(e.get("paso"))
         if paso:
             salida["paso"] = paso
+        #  LA CAPTURA SOBREVIVE AL GUARDADO  --  07/11/2026
+        #
+        #  El usuario: «en plantilla cuando marco captura de pantalla despues
+        #  de guardar se pone en blanco otra vez». Y era literal: esta linea
+        #  no existia, asi que el editor mandaba la marca, `componer` la
+        #  tiraba, y la foto volvia a pedir camara. El flag solo vivia en las
+        #  plantillas que nacen en codigo (`_f(..., es_captura=True)`), y
+        #  cualquier guardado desde la interfaz lo borraba.
+        #
+        #  Es el mismo agujero que D7 describe y que el rango bueno esquivo
+        #  el mismo dia: lo que `componer` no nombra, no existe.
+        if bool(e.get("es_captura")):
+            salida["es_captura"] = True
         evidencias.append(salida)
 
     esquema = {"pasos": pasos, "campos": campos, "evidencias": evidencias}
@@ -694,6 +707,10 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
         evidencias.append({"id": e.get("id"), "titulo": titulo,
                            "obligatorio": bool(e.get("obligatorio", False)),
                            "instrucciones": e.get("instrucciones", ""),
+                           #  SIN ESTA LINEA la casilla abre destildada aunque
+                           #  la plantilla la tenga, y el primer guardado la
+                           #  borra de verdad. Las dos puntas o ninguna.
+                           "es_captura": bool(e.get("es_captura", False)),
                            "paso": titulos_paso.get(e.get("paso"), "")})
 
     #  Las fotos de cada reporte. Un momento sin declarar se muestra con la

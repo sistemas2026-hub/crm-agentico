@@ -278,6 +278,86 @@ CAMPO_AL_LLEGAR = "potencia_al_llegar"
 CAMPO_AL_SALIR = "potencia_al_salir"
 
 
+def _potencia_de_la_foto_al_salir(orden):
+    """El dBm que el modelo leyo en la foto del medidor AL SALIR, o `None`.
+
+    La tercera lectura. El usuario la pidio junto con la del equipo --«y
+    tambien debe comparar la foto del ticket»-- y es la que desempata: si la
+    foto marca lo mismo que el equipo, lo que sobra es el numero escrito; si
+    marca lo mismo que el escrito, lo que hay que mirar es el equipo.
+
+    `None` cuando no hay foto analizada, o cuando el modelo leyo mas de un
+    nivel en ella: elegir uno seria inventar la mitad del dato
+    (`potencia_de_la_foto.uno_solo`).
+    """
+    try:
+        from campo import potencia_de_la_foto as PF
+
+        return PF.uno_solo(_texto_de_la_foto(orden, "medicion_al_salir"))
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _pieza_de_medicion(orden):
+    """Lo que el Supervisor midio CONTRA EL EQUIPO para esta orden, o `None`.
+
+    Se extrajo de `_medicion` el 07/11/2026 porque ahora la necesitan dos
+    puntos: el que la reporta y el del rango, que desde hoy le cede la
+    palabra. Una sola consulta escrita una sola vez.
+    """
+    from operaciones.models import PropuestaSupervisor
+    from operaciones.verificacion_de_arreglos import FUENTE
+
+    propuesta = (PropuestaSupervisor.objects
+                 .filter(org=orden.org,
+                         evidencia__contains=[{"fuente": FUENTE,
+                                               "orden": str(orden.id)}])
+                 .order_by("-updated_at").first())
+    if propuesta is None:
+        return None
+    return next((p for p in reversed(propuesta.evidencia or [])
+                 if isinstance(p, dict) and p.get("fuente") == FUENTE
+                 and p.get("orden") == str(orden.id)), None)
+
+
+def _lo_que_escribio_el_tecnico(orden, cierre) -> dict:
+    """El formulario del trabajo, de donde de verdad vive.
+
+    DOS LUGARES, Y NO ES CAPRICHO  --  07/11/2026
+    ----------------------------------------------
+    Los campos que el tecnico llena --«Potencia al salir», «Que encontro»--
+    se guardan en `OrdenTrabajo.datos`, validados contra el esquema. El
+    evento de cierre lleva en `datos["respuestas"]` lo que se mando EN ESE
+    MOMENTO: `solucion`, `servicio_validado`. Son dos cosas distintas y
+    hasta hoy este archivo leia solo la segunda.
+
+    MEDIDO EN LA OT #185 (07/11/2026, produccion). El tecnico escribio -35.0
+    dBm al salir, la nota del ticket lo mostraba --`cierre_en_isp.resumen_de`
+    lee `orden.datos`-- y el punto del rango no aparecia:
+
+        respuestas pot: {}
+        punto rango   : None
+        punto potencia: None
+
+    Las 37 guardas de ese bloque estaban en verde porque el andamiaje ponia
+    la potencia en `cierre.datos["respuestas"]`. La prueba confirmaba la
+    suposicion de quien la escribio, no la forma del dato real. Por eso la
+    guarda nueva arma la orden como produccion la tiene: el evento SIN
+    potencia y `orden.datos` CON ella.
+
+    GANA `orden.datos`, que es el formulario de registro --el mismo que el
+    ticket del ISP imprime--; el evento queda de respaldo para lo que solo
+    vive ahi.
+    """
+    salida = {}
+    if cierre is not None:
+        salida.update((cierre.datos or {}).get("respuestas") or {})
+    for clave, valor in (getattr(orden, "datos", None) or {}).items():
+        if valor not in (None, ""):
+            salida[clave] = valor
+    return salida
+
+
 def _potencia(orden, cierre):
     """La potencia que muestra la FOTO contra la que ESCRIBIO el tecnico.
 
@@ -305,7 +385,7 @@ def _potencia(orden, cierre):
 
         if cierre is None:
             return None
-        respuestas = (cierre.datos or {}).get("respuestas") or {}
+        respuestas = _lo_que_escribio_el_tecnico(orden, cierre)
         #  LOS DOS MOMENTOS, en el orden en que pasan. El de llegada es el que
         #  el usuario señalo; el de salida es el que dice si el arreglo sirvio,
         #  asi que si estan los dos se miran los dos y gana la peor noticia.
@@ -385,7 +465,7 @@ def _en_rango(orden, cierre):
         #  que adivine la convencion.
         piso, techo = min(mn, mx), max(mn, mx)
 
-        valor = _a_numero(((cierre.datos or {}).get("respuestas") or {})
+        valor = _a_numero(_lo_que_escribio_el_tecnico(orden, cierre)
                           .get(CAMPO_AL_SALIR))
         if valor is None:
             return None
@@ -396,6 +476,41 @@ def _en_rango(orden, cierre):
                           f"La medida al salir ({valor:g} {unidad}) está "
                           f"dentro de lo que la empresa considera bueno "
                           f"({piso:g} a {techo:g}).")
+        #  MANDA EL EQUIPO  --  07/11/2026
+        #
+        #  El usuario, viendo la OT #185 con -35.0 escrito a mano y la OLT
+        #  midiendo -20.65: «no, si esta midiendo bien en la OLT esta bien, y
+        #  tambien debe comparar la foto del ticket».
+        #
+        #  Y tiene razon sobre quien sabe. El numero escrito es la
+        #  transcripcion de una persona que mira una pantalla; la lectura del
+        #  equipo la da el equipo. Cuando se contradicen, frenar un cierre por
+        #  la transcripcion es frenarlo por el eslabon mas debil.
+        #
+        #  PERO NO SE CALLA. Que no frene no lo vuelve irrelevante: una
+        #  diferencia de 15 dBm entre lo escrito y lo medido es un dato malo
+        #  en el ticket, y alguien tiene que verlo. Queda en «miralo vos» con
+        #  las tres lecturas que haya --equipo, foto y lo escrito-- juntas en
+        #  un renglon, que es lo unico que permite decidir cual sobra.
+        medida = _pieza_de_medicion(orden)
+        del_equipo = (medida or {}).get("senal_dbm")
+        if (medida or {}).get("quedo_en_rango") is True:
+            lecturas = [f"el equipo mide {del_equipo:g} {unidad}"
+                        if isinstance(del_equipo, (int, float))
+                        else "el equipo la mide en rango"]
+            de_la_foto = _potencia_de_la_foto_al_salir(orden)
+            if de_la_foto is not None:
+                lecturas.append(f"la foto marca {de_la_foto:g} {unidad}")
+            lecturas.append(f"el técnico escribió {valor:g} {unidad}")
+            return _punto("rango", None,
+                          "El número escrito quedó fuera del rango bueno "
+                          f"({piso:g} a {techo:g}), pero no coincide con el "
+                          "equipo: " + "; ".join(lecturas) + ".")
+
+        #  SIN LECTURA DEL EQUIPO QUE LA CONTRADIGA, el numero escrito es lo
+        #  unico que hay, y dice que la señal quedo mal. Ahi si frena: lo
+        #  contrario seria dejar pasar toda medida mala cada vez que la
+        #  medicion del equipo no se pudo hacer, que es seguido.
         return _punto("rango", False,
                       f"La medida al salir ({valor:g} {unidad}) quedó fuera "
                       f"del rango bueno ({piso:g} a {techo:g}).")
