@@ -29,11 +29,27 @@ const m = {
 
 const html = (props) => render(MaterialDeLaCuadrilla, { props }).body;
 
+/**
+ * EL TEXTO QUE SE LEE, sin etiquetas ni los marcadores que mete Svelte. Un
+ * `toContain` sobre el HTML crudo no puede afirmar sobre una frase que cruza
+ * de una etiqueta a la otra, que es justo donde se perdia el espacio.
+ * @param {string} h
+ */
+const leido = (h) => h.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '');
+
 describe('el material de una cuadrilla', () => {
   it('a la vista: el kit, de dónde, para quién y cuándo se cargó; sin el acta', () => {
     const h = html({ m });
-    expect(h).toContain('Kit de instalacion');
-    expect(h).toContain('de BOG-SOLEDAD para JEIDER AMELL');
+    //  LA FRASE COMO SE LEE, no un pedazo que empieza DESPUES del defecto
+    //  (07/11/2026). Esta prueba afirmaba «de BOG-SOLEDAD para JEIDER AMELL»
+    //  por separado, y por eso estuvo en verde mientras la pantalla decia
+    //  «Kit de instalacionde BOG-SOLEDAD».
+    //
+    //  Svelte RECORTA el espacio con el que arranca el contenido de un
+    //  elemento --medido el 07/11/2026 compilando la misma linea para cliente
+    //  y para servidor: los dos se lo comen-- y el corte caia justo entre las
+    //  dos etiquetas, donde un `toContain` sobre el HTML crudo no mira.
+    expect(leido(h)).toContain('Kit de instalacion de BOG-SOLEDAD para JEIDER AMELL');
     expect(h).toContain('Cargado a las 12:36');
     expect(h).not.toContain('MAT-20261029');
   });

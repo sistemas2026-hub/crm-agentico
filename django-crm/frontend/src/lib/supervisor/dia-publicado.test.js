@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  cupoDeLaCuadrilla,
   lineaDePersona,
+  resumenDeLoSinBajar,
   quienLaAsigno,
   textoDelAviso,
   textoDeLaSiguiente,
@@ -34,8 +36,77 @@ describe('lo que la app de cada persona debería tener', () => {
 
   it('lo asignado después de la última conexión, y nada si no hay', () => {
     expect(textoSinBajar({ sin_bajar: 0 })).toBe('');
-    expect(textoSinBajar({ sin_bajar: 1 })).toContain('1 asignada después');
-    expect(textoSinBajar({ sin_bajar: 3 })).toContain('3 asignadas después');
+    expect(textoSinBajar({ sin_bajar: 1 })).toBe('1 sin bajar a su app');
+    expect(textoSinBajar({ sin_bajar: 3 })).toBe('3 sin bajar a su app');
+  });
+
+  //  EL MURO ROJO (07/11/2026). El usuario, con la captura: «qué otro arreglo
+  //  se puede hacer para que no se vea tan maluco». La frase entera salía en
+  //  CADA tarjeta —cuatro párrafos rojos idénticos de dos renglones— y cuatro
+  //  avisos iguales no avisan: el rojo deja de marcar nada.
+  it('la marca de la tarjeta es corta: el párrafo entero ya no se repite', () => {
+    const corto = textoSinBajar({ sin_bajar: 10 });
+    expect(corto).not.toContain('Que abra la app');
+    expect(corto).not.toContain('última conexión');
+    expect(corto.length).toBeLessThan(25);
+  });
+
+  it('pero el porqué y el qué hacer se siguen diciendo, UNA vez y arriba', () => {
+    const r = resumenDeLoSinBajar([
+      { personas: [{ sin_bajar: 10 }] },
+      //  DOS personas de la MISMA cuadrilla con pendientes: una cuadrilla,
+      //  siete órdenes. Sumar solo la primera es el error silencioso.
+      { personas: [{ sin_bajar: 4 }, { sin_bajar: 3 }] },
+      { personas: [{ sin_bajar: 0 }] }
+    ]);
+    expect(r).toBe('2 cuadrillas no abrieron la app: 17 órdenes todavía no están en los teléfonos. Que abran la app para recibirlas.');
+  });
+
+  it('una sola cuadrilla y una sola orden van en singular', () => {
+    expect(resumenDeLoSinBajar([{ personas: [{ sin_bajar: 1 }] }]))
+      .toBe('1 cuadrilla no abrió la app: 1 orden todavía no está en el teléfono. Que abran la app para recibirlas.');
+  });
+
+  it('si todas bajaron, no se dice nada: un aviso siempre visible no es un aviso', () => {
+    expect(resumenDeLoSinBajar([{ personas: [{ sin_bajar: 0 }] }, { personas: [] }])).toBe('');
+    expect(resumenDeLoSinBajar([])).toBe('');
+    expect(resumenDeLoSinBajar(undefined)).toBe('');
+  });
+});
+
+describe('cuántas órdenes tiene la cuadrilla y cuántas le caben', () => {
+  //  EL DEFECTO, en la captura del 07/11/2026: la cabecera armaba
+  //  «${cuantas} de ${tope} órdenes» sin mirar los números, y la Cuadrilla #3
+  //  decía «20 de 10 órdenes». Se lee como una pantalla rota, y lo que de
+  //  verdad pasa --que tiene el doble de lo que le cabe-- queda escondido.
+  it('EL DEFECTO: pasada de cupo no dice «20 de 10»', () => {
+    const c = cupoDeLaCuadrilla(20, 10);
+    expect(c.texto).not.toContain('20 de 10');
+    expect(c.texto).toBe('20 órdenes · 10 sobre el tope de 10');
+    expect(c.pasada).toBe(true);
+  });
+
+  it('por una sola orden de más también lo dice', () => {
+    expect(cupoDeLaCuadrilla(11, 10).texto).toBe('11 órdenes · 1 sobre el tope de 10');
+  });
+
+  //  EL CONTROL: lo normal tiene que seguir leyéndose igual que siempre.
+  it('dentro del cupo, y justo en el cupo, se lee como antes', () => {
+    expect(cupoDeLaCuadrilla(4, 10)).toEqual({ texto: '4 de 10 órdenes', pasada: false });
+    expect(cupoDeLaCuadrilla(10, 10)).toEqual({ texto: '10 de 10 órdenes', pasada: false });
+    //  El plural va con el TOPE: «1 de 10 orden» está mal escrito.
+    expect(cupoDeLaCuadrilla(1, 10).texto).toBe('1 de 10 órdenes');
+    expect(cupoDeLaCuadrilla(1, 1).texto).toBe('1 de 1 orden');
+  });
+
+  it('sin tope no inventa uno', () => {
+    expect(cupoDeLaCuadrilla(7, 0)).toEqual({ texto: '7 órdenes', pasada: false });
+    expect(cupoDeLaCuadrilla(7, undefined).texto).toBe('7 órdenes');
+    expect(cupoDeLaCuadrilla(1, null).texto).toBe('1 orden');
+  });
+
+  it('sin órdenes no se marca en rojo', () => {
+    expect(cupoDeLaCuadrilla(0, 10)).toEqual({ texto: '0 de 10 órdenes', pasada: false });
   });
 });
 

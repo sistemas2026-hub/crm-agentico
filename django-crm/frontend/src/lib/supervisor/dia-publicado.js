@@ -55,16 +55,76 @@ export function lineaDePersona(p, dia) {
 }
 
 /**
+ * CUÁNTAS ÓRDENES TIENE Y CUÁNTAS LE CABEN (07/11/2026). El usuario, con la
+ * captura: «qué otro arreglo se puede hacer para que no se vea tan maluco».
+ *
+ * La cabecera decía `${cuantas} de ${tope} órdenes` sin mirar los números, y
+ * con una cuadrilla pasada de cupo salía **«20 de 10 órdenes»**: se lee como
+ * una pantalla rota, y lo que de verdad pasa —que tiene el doble de lo que le
+ * cabe— queda escondido en una forma que nadie asocia con un problema.
+ *
+ * `pasada` lo deja decidir a la pantalla: acá se escribe el texto, no el color.
+ *
+ * @param {number} cuantas las órdenes publicadas de la cuadrilla
+ * @param {number} [tope] su tope del día; 0 o ausente = sin tope
+ * @returns {{ texto: string, pasada: boolean }}
+ */
+export function cupoDeLaCuadrilla(cuantas, tope) {
+  const n = cuantas ?? 0;
+  const plural = n === 1 ? 'orden' : 'órdenes';
+  if (!tope) return { texto: `${n} ${plural}`, pasada: false };
+  if (n > tope) {
+    return { texto: `${n} ${plural} · ${n - tope} sobre el tope de ${tope}`, pasada: true };
+  }
+  //  El plural va con el TOPE, no con la cantidad: «1 de 10 orden» está mal.
+  return { texto: `${n} de ${tope} ${tope === 1 ? 'orden' : 'órdenes'}`, pasada: false };
+}
+
+/**
  * Lo único que se afirma sobre la app: lo asignado DESPUÉS de su última
  * conexión todavía no puede estar en el teléfono. Vacío si no hay.
+ *
+ * CORTO A PROPÓSITO desde el 07/11/2026. Decía la frase entera —«N asignadas
+ * después de su última conexión: su app todavía no las tiene. Que abra la
+ * app.»— en CADA tarjeta, y en la captura del usuario eran cuatro párrafos
+ * rojos idénticos de dos renglones. Cuatro avisos iguales no avisan: el rojo
+ * deja de marcar nada y la pantalla se vuelve un muro. El porqué y qué hacer
+ * se dicen UNA vez arriba, con `resumenDeLoSinBajar`; acá queda la marca de a
+ * quién le pasa.
  *
  * @param {{ sin_bajar: number }} p
  */
 export function textoSinBajar(p) {
   if (!p.sin_bajar) return '';
-  return p.sin_bajar === 1
-    ? '1 asignada después de su última conexión: su app todavía no la tiene. Que abra la app.'
-    : `${p.sin_bajar} asignadas después de su última conexión: su app todavía no las tiene. Que abra la app.`;
+  return p.sin_bajar === 1 ? '1 sin bajar a su app' : `${p.sin_bajar} sin bajar a su app`;
+}
+
+/**
+ * El aviso de las apps, UNA sola vez y arriba de las tarjetas: a cuántas
+ * cuadrillas les pasa, cuántas órdenes son y qué hay que hacer. Vacío si no le
+ * pasa a nadie.
+ *
+ * Se cuenta por CUADRILLA y por ÓRDENES, no por persona: lo que el Supervisor
+ * decide con esto es a quién llamar, y llama a la cuadrilla.
+ *
+ * @param {{ personas?: { sin_bajar?: number }[] }[]} [cuadrillas]
+ */
+export function resumenDeLoSinBajar(cuadrillas) {
+  let conCuantas = 0;
+  let ordenes = 0;
+  for (const c of cuadrillas ?? []) {
+    const suyas = (c.personas ?? []).reduce((n, p) => n + (p.sin_bajar ?? 0), 0);
+    if (suyas) {
+      conCuantas += 1;
+      ordenes += suyas;
+    }
+  }
+  if (!conCuantas) return '';
+  const cuales = conCuantas === 1 ? '1 cuadrilla no abrió la app' : `${conCuantas} cuadrillas no abrieron la app`;
+  const cuantas = ordenes === 1
+    ? '1 orden todavía no está en el teléfono'
+    : `${ordenes} órdenes todavía no están en los teléfonos`;
+  return `${cuales}: ${cuantas}. Que abran la app para recibirlas.`;
 }
 
 /**

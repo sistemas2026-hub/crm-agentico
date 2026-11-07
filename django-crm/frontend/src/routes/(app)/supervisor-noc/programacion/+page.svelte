@@ -22,8 +22,10 @@
   import ResumenDelDia from '$lib/supervisor/ResumenDelDia.svelte';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
+    cupoDeLaCuadrilla,
     lineaDePersona,
     quienLaAsigno,
+    resumenDeLoSinBajar,
     seDibujaElMapa,
     textoDeLaSiguiente,
     textoDelDiaDeLaCuadrilla,
@@ -373,13 +375,25 @@
             {#if !publicado.cuadrillas.length}
               <p class="snoc-body-sm snoc-secundario">No hay cuadrillas armadas para este día.</p>
             {/if}
+            <!-- LAS APPS QUE NO BAJARON LO PUBLICADO, una vez y acá arriba
+                 (07/11/2026). Antes la frase entera se repetía en cada
+                 tarjeta: cuatro párrafos rojos iguales, y ninguno resaltaba.
+                 En la tarjeta queda la marca de a quién le pasa. -->
+            {#if resumenDeLoSinBajar(publicado.cuadrillas)}
+              <p class="snoc-body-sm snoc-error-txt">{resumenDeLoSinBajar(publicado.cuadrillas)}</p>
+            {/if}
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:var(--snoc-sm);">
               {#each publicado.cuadrillas as c (c.jornada)}
                 {@const m = materialPor.get(c.jornada)}
+                <!-- «20 de 10 órdenes» se leía como una pantalla rota
+                     (07/11/2026): pasada de cupo lo dice con todas las letras,
+                     y en rojo. -->
+                {@const cupo = cupoDeLaCuadrilla(c.ordenes.length, c.tope)}
                 <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0; justify-content:flex-start;">
                   <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs); align-items:baseline;">
                     <strong style="font-size:15px;">{c.cuadrilla}</strong>
-                    <span class="snoc-body-sm snoc-secundario">{c.ordenes.length} de {c.tope} órdenes</span>
+                    <span class="snoc-body-sm" class:snoc-secundario={!cupo.pasada}
+                          class:snoc-error-txt={cupo.pasada}>{cupo.texto}</span>
                   </div>
                   <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:center;">
                     {#if c.labor}<span style="padding:0 8px; border-radius:999px; background:var(--snoc-surface-container); color:var(--snoc-on-surface-variant); font-size:12px; line-height:20px; font-weight:600;">{c.labor}</span>{/if}
@@ -398,10 +412,9 @@
                        tarjeta cuenta las de toda la cuadrilla; la app, las de la
                        cuenta con que se entró (28/10/2026). -->
                   {#each c.personas ?? [] as p, i (i)}
-                    <p class="snoc-body-sm snoc-secundario">{lineaDePersona(p, data.dia)}</p>
-                    {#if p.sin_bajar}
-                      <p class="snoc-body-sm snoc-error-txt">{textoSinBajar(p)}</p>
-                    {/if}
+                    <p class="snoc-body-sm snoc-secundario">
+                      {lineaDePersona(p, data.dia)}{#if p.sin_bajar}<span class="pg-sinbajar">{textoSinBajar(p)}</span>{/if}
+                    </p>
                   {/each}
                   <!-- EL MATERIAL: compacto, con los avisos y la lista plegados
                        (29/10/2026). Ver MaterialDeLaCuadrilla.svelte. -->
@@ -460,5 +473,21 @@
   }
   @media (max-width: 1100px) {
     .pg-donde { grid-template-columns: 1fr; }
+  }
+
+  /*  LO QUE NO BAJÓ A LA APP (07/11/2026): una pastilla al lado del nombre, y
+      no un párrafo rojo por tarjeta. El porqué y el qué hacer se dicen una
+      sola vez arriba de las tarjetas. */
+  .pg-sinbajar {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: var(--snoc-error-container);
+    color: var(--snoc-on-error-container);
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 </style>
