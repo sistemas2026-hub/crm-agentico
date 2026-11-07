@@ -1401,6 +1401,24 @@ class CompletarTrabajoView(APIView):
         except Exception:                                        # noqa: BLE001
             pass
 
+        #  Y LAS FOTOS SE VEN EN EL TICKET  --  07/11/2026
+        #
+        #  El usuario, probando la OT #186: «en dexter sale bien hasta donde
+        #  dice evidencia en... no muestra las fotos». La nota decia
+        #  «Evidencias en Dexter: 4» y quien leia el ticket tenia que irse a
+        #  buscarlas a otra pantalla.
+        #
+        #  DESPUES DE LA NOTA, a proposito: la nota es barata y las fotos son
+        #  E/S. Si esto tarda o falla, el ticket ya tiene el texto.
+        #
+        #  ENVUELTO: la orden YA esta completada y el tecnico espera respuesta.
+        try:
+            from campo import fotos_al_ticket
+
+            fotos_al_ticket.adjuntar(orden, profile=request.profile)
+        except Exception:                                        # noqa: BLE001
+            pass
+
         return Response({
             "ok": True,
             "estado_operativo": orden.estado_operativo,
