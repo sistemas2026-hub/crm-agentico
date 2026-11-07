@@ -428,3 +428,72 @@ describe('"Asignarme"', () => {
     expect(r.data.error).toMatch(/área/);
   });
 });
+
+/**
+ * EL NUMERO CONTRA EL QUE SE COMPARA  --  06/11/2026
+ *
+ * El aviso de arriba de las tarjetas dice "buscando «mario»: 10 de 712". Ese
+ * 712 salia del badge "Cola" del armazon, y los conteos del armazon vencen
+ * por plazo: el que no llega se queda SIN insignia a proposito. Medido en
+ * produccion ese dia, el badge no estaba, y el aviso quedo diciendo "10
+ * tickets" -- sin la mitad que lo vuelve util.
+ *
+ * Se afirma sobre el EFECTO: que numero queda en 'totalSinFiltrar', y con que
+ * parametros se pidio. Afirmar que la consulta "existe" dejaria pasar que se
+ * pida CON la busqueda puesta, que es el error que la haria inutil.
+ */
+describe('cuantos hay sin el filtro puesto', () => {
+  /** Las llamadas a listTickets de la ultima corrida, como URLSearchParams. */
+  const llamadas = () => listTickets.mock.calls.map((c) => c[1]);
+
+  it('sin filtro no se cuenta nada aparte, y no se inventa un total', async () => {
+    listTickets.mockReset();
+    listTickets.mockResolvedValue(respuesta());
+    const data = /** @type {any} */ (await load(evento('?area=soporte_tecnico')));
+    expect(data.totalSinFiltrar).toBe(null);
+    //  Dos: el desglose global de las tarjetas y la cola. Ninguna tercera.
+    expect(listTickets.mock.calls.length).toBe(2);
+  });
+
+  it('con una busqueda, el total se pide SIN la busqueda', async () => {
+    listTickets.mockReset();
+    listTickets.mockImplementation(async (_e, p) =>
+      p?.get('search') ? respuesta([DE_SOPORTE]) : respuesta(TODOS));
+    const data = /** @type {any} */ (await load(evento('?search=mario')));
+    //  Los seis de la cola entera, no el que coincide.
+    expect(data.totalSinFiltrar).toBe(TODOS.length);
+    const sinBusqueda = llamadas().filter((p) => p && !p.get('search'));
+    expect(sinBusqueda.length).toBe(1);
+  });
+
+  it('el total hereda los estados de la cola, no cuenta los cerrados', async () => {
+    listTickets.mockReset();
+    listTickets.mockResolvedValue(respuesta());
+    await load(evento('?search=mario'));
+    const sinBusqueda = llamadas().find((p) => p && !p.get('search'));
+    expect(sinBusqueda.getAll('status')).toEqual(['New', 'Assigned', 'Pending']);
+    //  limit=1: se pide el conteo, no las filas.
+    expect(sinBusqueda.get('limit')).toBe('1');
+  });
+
+  it('un filtro de la barra tambien pide el total, y sin ese filtro', async () => {
+    listTickets.mockReset();
+    listTickets.mockImplementation(async (_e, p) =>
+      p?.get('priority') ? respuesta([DE_SOPORTE]) : respuesta(TODOS));
+    const data = /** @type {any} */ (await load(evento('?priority=High')));
+    expect(data.totalSinFiltrar).toBe(TODOS.length);
+  });
+
+  //  Perder el contexto es aceptable; perder la cola no. Si la consulta del
+  //  total falla, la pantalla tiene que salir igual.
+  it('si el total falla, la cola sale igual y el aviso se queda sin el "de"', async () => {
+    listTickets.mockReset();
+    listTickets.mockImplementation(async (_e, p) => {
+      if (p && !p.get('search')) throw new Error('timeout');
+      return respuesta();
+    });
+    const data = /** @type {any} */ (await load(evento('?search=mario')));
+    expect(data.totalSinFiltrar).toBe(null);
+    expect(data.tickets.length).toBeGreaterThan(0);
+  });
+});
