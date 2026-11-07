@@ -10,6 +10,7 @@ import { areaDelCaso, resumenPorArea, responsablesSinArea, responsablesDeArea, S
   from '$lib/v2/tickets-resumen.js';
 import { calcularPaginacion, numerosDePagina, enlaceAPagina }
   from '$lib/v2/paginacion.js';
+import { filtrosDeLaCola, FILTROS_QUE_RECORTAN } from '$lib/v2/filtros-de-la-cola.js';
 
 /**
  * Only filters the API actually applies are forwarded. A parameter that
@@ -208,9 +209,33 @@ export async function load({ cookies, url, locals, fetch }) {
     paramsGlobal.delete(clave);
   }
   paramsGlobal.set('limit', '1');
-  const [global, { results, totals, openByAssignee }] = await Promise.all([
+
+  //  CUANTOS HAY SIN EL FILTRO PUESTO  --  06/11/2026
+  //
+  //  El aviso de "buscando X: 10 de 712" necesita ese 712, y el 712 no puede
+  //  salir del badge "Cola" de arriba: los conteos del armazon corren con
+  //  PLAZO_CONTEO_MS y el que no llega se queda SIN insignia a proposito
+  //  (+layout.server.js). Medido en produccion el 06/11/2026: el badge estaba
+  //  ausente en las dos capturas del usuario, asi que el aviso perdia la
+  //  mitad que lo hace util -- el numero contra el que comparar.
+  //
+  //  Se pide aca, 'limit=1' (el API contesta el conteo, no las filas), en
+  //  paralelo con las otras dos y SOLO cuando hay un filtro puesto: sin
+  //  busqueda, que es el caso corriente, no cuesta ninguna ronda. Hereda de
+  //  'paramsGlobal' el universo de estados, asi que con '?status=cerrado' el
+  //  total tambien es de cerrados y los dos numeros del aviso se pueden
+  //  comparar. Si falla, queda null y el aviso dice "10 tickets" sin el "de":
+  //  perder el contexto es aceptable, no mostrar el aviso no lo es.
+  const recortaLaCola = filtrosDeLaCola(url).hay;
+  const paramsSinFiltro = new URLSearchParams(paramsGlobal);
+  for (const clave of FILTROS_QUE_RECORTAN) paramsSinFiltro.delete(clave);
+
+  const [global, sinFiltro, { results, totals, openByAssignee }] = await Promise.all([
     !soloMiArea && dentroDeUnArea
       ? listTickets({ cookies }, paramsGlobal).catch(() => null)
+      : Promise.resolve(null),
+    recortaLaCola
+      ? listTickets({ cookies }, paramsSinFiltro).catch(() => null)
       : Promise.resolve(null),
     listTickets({ cookies }, params)
   ]);
@@ -406,6 +431,9 @@ export async function load({ cookies, url, locals, fetch }) {
     totals,
     showAll,
     status,
+    //  El total de la cola sin el filtro puesto, para el aviso de arriba de
+    //  las tarjetas. null = no hay filtro, o no se pudo contar.
+    totalSinFiltrar: sinFiltro ? sinFiltro.totals.open : null,
     search: params.get('search') ?? '',
     priority: params.get('priority') ?? '',
     people: orgPeople.people,

@@ -33,12 +33,13 @@
   //  que habia miraba 'page.url.search' -- la query string entera -- y salia
   //  con '?area=soporte' sin que hubiera ningun filtro puesto.
   let filtro = $derived(filtrosDeLaCola(page.url));
-  //  El total de la cola SIN filtrar ya esta en la pagina: es el mismo numero
-  //  del badge "Cola" de arriba, que el layout cuenta aparte
-  //  (+layout.server.js::tickets). No cuesta una consulta mas. Con '?all=1' no
-  //  se compara: ese total es de abiertos y esa cola trae ademas los cerrados.
-  let totalSinFiltrar = $derived(
-    data.showAll ? null : (page.data.counts?.tickets ?? null));
+  //  El total de la cola SIN el filtro puesto. Lo cuenta el cargador de esta
+  //  pantalla, no el badge "Cola" de arriba: los conteos del armazon vencen
+  //  por plazo y el que no llega se queda sin insignia (+layout.server.js).
+  //  El 06/11/2026 ese badge estaba ausente en produccion y el aviso quedo
+  //  diciendo "10 tickets" en vez de "10 de 712" -- justo la comparacion que
+  //  lo hace util. null = no se pudo contar; el aviso sale igual, sin el "de".
+  let totalSinFiltrar = $derived(data.totalSinFiltrar ?? null);
   //  Cuantos coinciden en TODA la cola, no en el area elegida: es el total de
   //  la tarjeta "Todas las áreas", que el cargador pide sin filtro de area
   //  pero con la busqueda puesta. Usar 'totals.open' diria "6 de 721" estando
@@ -294,7 +295,9 @@
       <span class="aviso-filtro-texto">
         {#if filtro.busqueda}Buscando <b>«{filtro.busqueda}»</b>{/if}{#if filtro.busqueda && filtro.otros.length}, filtrando por {filtro.otros.join(' y ')}{:else if filtro.otros.length}Filtrando por {filtro.otros.join(' y ')}{/if}:
         {#if coincidencias != null && totalSinFiltrar != null}
-          <b>{count(coincidencias)}</b> de {count(totalSinFiltrar)} tickets abiertos.
+          <b>{count(coincidencias)}</b> de {count(totalSinFiltrar)} tickets{data.showAll
+            ? ''
+            : ' abiertos'}.
         {:else if coincidencias != null}
           <b>{count(coincidencias)}</b> {coincidencias === 1 ? 'ticket' : 'tickets'}.
         {/if}
