@@ -211,15 +211,21 @@ export function equipoQueFalta(cuadrillas) {
 }
 
 /**
- * «Sin ONU CATV: 4 cuadrillas», o «Sin ONU CATV: las 4 cuadrillas» cuando no
- * se salva ninguna — «las 4» es lo que dice que es todas, y es la única vez
- * que se dice, porque la tarjeta de cada cuadrilla ya no lo repite.
+ * LO QUE FALTA, COMO FRASE (07/11/2026, tercera vuelta). El usuario eligió,
+ * sobre la maqueta, que lo accionable viva en un bloque aparte: «hacelo así
+ * pero más pequeño». Dentro de ese bloque es una lista que se lee de corrido,
+ * así que estos renglones son frases y no pastillas sueltas.
+ *
+ * «A las 5 cuadrillas les falta ONU CATV» cuando no se salva ninguna —«las 5»
+ * es lo que dice que son todas, y es la única vez que se dice, porque la
+ * tarjeta de cada cuadrilla ya no lo repite—, «A 3 cuadrillas les falta ONU
+ * WIFI» si no, y en singular «A 1 cuadrilla le falta X».
  *
  * @param {{ equipo: string, cuadrillas: number, todas?: boolean }} e
  */
-export function pastillaDeEquipo(e) {
-  const cuantas = `${e.cuadrillas} ${e.cuadrillas === 1 ? 'cuadrilla' : 'cuadrillas'}`;
-  return `Sin ${e.equipo}: ${e.todas ? `las ${cuantas}` : cuantas}`;
+export function lineaDeEquipo(e) {
+  if (e.cuadrillas === 1) return `A 1 cuadrilla le falta ${e.equipo}`;
+  return `A ${e.todas ? 'las ' : ''}${e.cuadrillas} cuadrillas les falta ${e.equipo}`;
 }
 
 /** «A», «A y B», «A, B y C». @param {string[]} cosas */
@@ -305,6 +311,29 @@ export function cuantosFaltan(n) {
  */
 export function pastillaDeBodega(g) {
   return `${g.bodega}: ${cuantosFaltan(g.materiales?.length ?? 0)}`;
+}
+
+/**
+ * EL BLOQUE «PARA QUE EL DÍA SALGA COMPLETO» (07/11/2026, tercera vuelta).
+ *
+ * Después de dos vueltas, lo repetido ya no estaba en las tarjetas sino
+ * ARRIBA: seis pastillas rojas y un párrafo rojo, de tres familias distintas
+ * —cuentas, equipo que falta, apps sin abrir— mezcladas en la misma franja.
+ * El usuario eligió sobre la maqueta juntar lo accionable en un bloque y
+ * devolverle a las cuentas su gris: una cuenta no es una alarma.
+ *
+ * Orden: primero lo que deja a una cuadrilla sin poder trabajar, después lo
+ * que impide que le llegue el trabajo. Las bodegas no entran acá porque
+ * llevan su tabla desplegable; van debajo, en sus pastillas.
+ *
+ * @param {{ equipo: string, cuadrillas: number, todas?: boolean }[]} equipos
+ * @param {string} apps lo de `resumenDeLoSinBajar`, o vacío
+ * @returns {string[]} una frase por renglón, vacío si no hay nada que hacer
+ */
+export function loQueHayQueResolver(equipos, apps) {
+  const salida = (equipos ?? []).map(lineaDeEquipo);
+  if (apps) salida.push(apps);
+  return salida;
 }
 
 /**

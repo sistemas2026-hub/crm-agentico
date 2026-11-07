@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 
@@ -99,7 +100,7 @@ describe('lo que se dibuja', () => {
     expect(fila.match(/<details class="fd-bodega/g)).toHaveLength(2);
     //  Y la pastilla de la bodega es una pastilla, como las cuentas: la misma
     //  forma para la misma clase de dato.
-    expect(fila).toMatch(/<span class="fd-pastilla fd-falta[^"]*">BOG-SOLEDAD/);
+    expect(fila).toMatch(/<span class="fd-pastilla fd-b[^"]*">BOG-SOLEDAD/);
   });
 
   it('la tabla dice material, cuánto se pide, cuánto hay y cuánto falta', () => {
@@ -123,21 +124,65 @@ describe('lo que se dibuja', () => {
   });
 });
 
-describe('el equipo que falta, una sola vez y arriba (07/11/2026)', () => {
+/**
+ * EL BLOQUE «PARA QUE EL DÍA SALGA COMPLETO» (07/11/2026, tercera vuelta).
+ *
+ * Eran seis pastillas rojas y un párrafo rojo suelto, de tres familias
+ * distintas —cuentas, equipo que falta, apps sin abrir— repartidos por la
+ * franja. El usuario eligió sobre la maqueta juntar lo accionable y
+ * devolverle a las cuentas su gris.
+ */
+describe('lo que hay que resolver, junto y en un solo bloque', () => {
   const equipos = [
-    { equipo: 'ONU CATV', cuadrillas: 4 },
+    { equipo: 'ONU CATV', cuadrillas: 4, todas: true },
     { equipo: 'ONU WIFI', cuadrillas: 2 }
   ];
+  const apps = '4 cuadrillas no abrieron la app: 44 órdenes todavía no están en los teléfonos.';
 
-  it('sale al lado de las cuentas, con a cuántas cuadrillas les pega', () => {
-    const h = render(FaltantesDelDia, { props: { cuentas, faltantes, equipos } }).body;
-    expect(h).toContain('Sin ONU CATV: 4 cuadrillas');
-    expect(h).toContain('Sin ONU WIFI: 2 cuadrillas');
+  it('el equipo que falta y las apps caen DENTRO del bloque, no sueltos', () => {
+    const h = render(FaltantesDelDia, { props: { cuentas, faltantes, equipos, apps } }).body;
+    const bloque = h.slice(h.search(/class="fd-resolver/), h.indexOf('</ul>'));
+    expect(bloque).toContain('Para que el día salga completo');
+    expect(leido(bloque)).toContain('A las 4 cuadrillas les falta ONU CATV');
+    expect(leido(bloque)).toContain('A 2 cuadrillas les falta ONU WIFI');
+    expect(leido(bloque)).toContain(apps);
   });
 
-  it('sin equipos no agrega nada: la pantalla queda como estaba', () => {
+  //  EL DEFECTO: «5 con faltantes» en rojo, al lado de cuatro alarmas rojas
+  //  más. Una cuenta del día no es algo que atender.
+  //  El color lo da el CSS, que el render de servidor no emite: afirmar sobre
+  //  el HTML no puede ver de qué color queda una pastilla, y la primera
+  //  versión de esta prueba sobrevivió intacta a devolverle el rojo a
+  //  `.fd-falta` (medido con la mutación, 07/11/2026). Así que acá se lee el
+  //  `<style>` del componente: mide el archivo y no lo dibujado, y por eso se
+  //  dice. La afirmación sobre el bloque es el control, para que no pase con
+  //  todo gris.
+  it('las cuentas quedan en gris: el rojo es solo del bloque', () => {
+    const h = render(FaltantesDelDia, { props: { cuentas, faltantes, equipos, apps } }).body;
+    const franja = h.slice(h.search(/class="fd-cuentas/), h.search(/class="fd-resolver/));
+    expect(leido(franja)).toContain('3 con faltantes');
+    expect(franja).not.toContain('fd-resolver');
+
+    const fuente = readFileSync('src/lib/supervisor/FaltantesDelDia.svelte', 'utf8');
+    /** @param {string} clase */
+    const reglaDe = (clase) =>
+      new RegExp(`\\.${clase} \\{[^}]*\\}`).exec(fuente)?.[0] ?? `(sin regla .${clase})`;
+    for (const cuenta of ['fd-ok', 'fd-falta', 'fd-sin']) {
+      expect(reglaDe(cuenta)).not.toContain('error');
+    }
+    expect(reglaDe('fd-resolver')).toContain('error');
+  });
+
+  it('sin nada que resolver no dibuja el bloque: un aviso siempre visible no avisa', () => {
     const h = render(FaltantesDelDia, { props: { cuentas, faltantes } }).body;
-    expect(h).not.toContain('Sin ONU');
+    expect(h).not.toContain('fd-resolver');
+    expect(h).not.toContain('Para que el día salga completo');
     expect(h).toContain('1 de 5 con el kit completo');
+  });
+
+  it('con una sola de las dos cosas el bloque igual sale', () => {
+    const soloApps = render(FaltantesDelDia, { props: { cuentas, faltantes, apps } }).body;
+    expect(soloApps).toContain('fd-resolver');
+    expect(leido(soloApps)).toContain(apps);
   });
 });

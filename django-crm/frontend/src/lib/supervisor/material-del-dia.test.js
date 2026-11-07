@@ -6,11 +6,12 @@ import {
   equipoQueFalta,
   equiposDeTodas,
   estadoDeCarga,
+  lineaDeEquipo,
   lineaDeMaterial,
+  loQueHayQueResolver,
   tituloDelMaterial,
   opcionDelSupervisor,
   pastillaDeAvisos,
-  pastillaDeEquipo,
   porQue,
   resumenDeAvisos,
   resumenDeLineas
@@ -277,14 +278,48 @@ describe('qué equipo falta hoy y a cuántas cuadrillas', () => {
     expect(equipoQueFalta(undefined)).toEqual([]);
   });
 
-  it('se lee «Sin ONU CATV: 3 cuadrillas», y una sola en singular', () => {
-    expect(pastillaDeEquipo({ equipo: 'ONU CATV', cuadrillas: 3 })).toBe('Sin ONU CATV: 3 cuadrillas');
-    expect(pastillaDeEquipo({ equipo: 'ONU WIFI', cuadrillas: 1 })).toBe('Sin ONU WIFI: 1 cuadrilla');
+  //  COMO FRASE desde el 07/11/2026 (tercera vuelta): el renglón vive dentro
+  //  del bloque «Para que el día salga completo», que se lee de corrido.
+  it('se lee «A 3 cuadrillas les falta ONU CATV», y una sola en singular', () => {
+    expect(lineaDeEquipo({ equipo: 'ONU CATV', cuadrillas: 3 })).toBe('A 3 cuadrillas les falta ONU CATV');
+    expect(lineaDeEquipo({ equipo: 'ONU WIFI', cuadrillas: 1 })).toBe('A 1 cuadrilla le falta ONU WIFI');
   });
 
   it('cuando no se salva ninguna lo dice con todas las letras: «las 4»', () => {
-    expect(pastillaDeEquipo({ equipo: 'ONU CATV', cuadrillas: 4, todas: true })).toBe(
-      'Sin ONU CATV: las 4 cuadrillas'
+    expect(lineaDeEquipo({ equipo: 'ONU CATV', cuadrillas: 4, todas: true })).toBe(
+      'A las 4 cuadrillas les falta ONU CATV'
     );
+  });
+
+  //  EL BLOQUE (07/11/2026, tercera vuelta). Eran seis pastillas rojas y un
+  //  párrafo suelto repartidos por la franja; el usuario eligió sobre la
+  //  maqueta juntarlos. El orden importa: primero lo que deja a una cuadrilla
+  //  sin poder trabajar, después lo que impide que le llegue el trabajo.
+  it('junta el equipo que falta y las apps, en ese orden', () => {
+    expect(
+      loQueHayQueResolver(
+        [
+          { equipo: 'ONU CATV', cuadrillas: 5, todas: true },
+          { equipo: 'ONU WIFI', cuadrillas: 2 }
+        ],
+        '4 cuadrillas no abrieron la app: 44 órdenes todavía no están en los teléfonos. Que abran la app para recibirlas.'
+      )
+    ).toEqual([
+      'A las 5 cuadrillas les falta ONU CATV',
+      'A 2 cuadrillas les falta ONU WIFI',
+      '4 cuadrillas no abrieron la app: 44 órdenes todavía no están en los teléfonos. Que abran la app para recibirlas.'
+    ]);
+  });
+
+  it('sin nada que resolver no hay bloque: un aviso siempre visible no avisa', () => {
+    expect(loQueHayQueResolver([], '')).toEqual([]);
+    expect(loQueHayQueResolver(undefined, '')).toEqual([]);
+  });
+
+  it('con una sola de las dos cosas, el bloque igual sale', () => {
+    expect(loQueHayQueResolver([], 'Alguien no abrió la app.')).toEqual(['Alguien no abrió la app.']);
+    expect(loQueHayQueResolver([{ equipo: 'ONU WIFI', cuadrillas: 1 }], '')).toEqual([
+      'A 1 cuadrilla le falta ONU WIFI'
+    ]);
   });
 });

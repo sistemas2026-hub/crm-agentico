@@ -49,9 +49,24 @@ describe('el material de una cuadrilla', () => {
     //  elemento --medido el 07/11/2026 compilando la misma linea para cliente
     //  y para servidor: los dos se lo comen-- y el corte caia justo entre las
     //  dos etiquetas, donde un `toContain` sobre el HTML crudo no mira.
-    expect(leido(h)).toContain('Kit de instalacion de BOG-SOLEDAD para JEIDER AMELL');
+    expect(leido(h)).toContain('Kit de instalacion · BOG-SOLEDAD → JEIDER AMELL');
     expect(h).toContain('Cargado a las 12:36');
     expect(h).not.toContain('MAT-20261029');
+  });
+
+  //  DOS RENGLONES, NO CUATRO (07/11/2026, tercera vuelta). El usuario,
+  //  eligiendo sobre la maqueta: «hacelo así pero más pequeño». La cabecera
+  //  «Material» gastaba un renglón entero en decir de qué sección se trata,
+  //  con el kit en negrita justo debajo diciéndolo mejor.
+  it('EL DEFECTO 3: sin cabecera propia, y el estado en la fila de abajo', () => {
+    const h = html({ m });
+    expect(h).not.toContain('mc-cabeza');
+    expect(leido(h)).not.toContain('Material');
+    //  Pero el estado NO se pierde: baja a la fila de los desplegables.
+    const pie = h.slice(h.search(/class="mc-pie/));
+    expect(pie).toContain('Cargado a las 12:36');
+    //  Y la sección sigue nombrada para quien no ve la pantalla.
+    expect(h).toMatch(/aria-label="Material"/);
   });
 
   //  EL MURO (07/11/2026). El usuario, con la captura de cuatro tarjetas:

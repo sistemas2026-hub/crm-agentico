@@ -39,19 +39,23 @@
   let chip = $derived(pastillaDeAvisos(m.avisos, comunes));
 </script>
 
+<!--
+  DOS RENGLONES, NO CUATRO (07/11/2026, tercera vuelta). El usuario, eligiendo
+  sobre la maqueta: «hacelo así pero más pequeño». La cabecera «Material ·
+  Propuesta» era un renglón entero para decir de qué sección se trata, con el
+  kit en negrita justo debajo diciéndolo mejor. El estado de carga se mudó a la
+  fila de los desplegables, donde ocupa el hueco que ya había. Con cinco
+  cuadrillas, son diez renglones menos.
+-->
 <section class="mc" aria-label="Material">
-  <div class="mc-cabeza">
-    <span class="mc-titulo">Material</span>
-    <span class="mc-estado" class:mc-cargado={cargado}>{cargado || 'Propuesta'}</span>
-  </div>
-
   {#if m.kit}
     <p class="mc-kit">
-      <strong>{m.kit}</strong>{#if m.kit_apoyo}<span> + </span><strong>{m.kit_apoyo}</strong>{/if}{#if m.lineas.length}<span class="mc-desde">{' de '}{m.bodega} para {m.lider}</span>{/if}
+      <strong>{m.kit}</strong>{#if m.kit_apoyo}<span> + </span><strong>{m.kit_apoyo}</strong>{/if}{#if m.lineas.length}<span class="mc-desde">{' · '}{m.bodega} → {m.lider}</span>{/if}
     </p>
   {/if}
 
   <div class="mc-pie">
+    <span class="mc-estado" class:mc-cargado={cargado}>{cargado || 'Propuesta'}</span>
     {#if m.avisos.length}
       <details class="mc-avisos">
         <summary><span class="mc-chip" class:mc-chip-comun={!chip.propio}>{chip.texto}</span></summary>
@@ -73,23 +77,13 @@
 <style>
   .mc {
     display: grid;
-    gap: 4px;
-    padding: 8px 10px;
+    gap: 2px;
+    padding: 6px 9px;
     border-radius: var(--snoc-r-xl);
     background: var(--snoc-surface-container-low);
     font-size: 13px;
     line-height: 18px;
     color: var(--snoc-on-surface-variant);
-  }
-  .mc-cabeza {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .mc-titulo {
-    font-weight: 700;
-    color: var(--snoc-on-surface);
   }
   .mc-estado {
     font-size: 12px;
@@ -111,7 +105,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 4px 10px;
+    gap: 3px 8px;
   }
   .mc-pie details[open] { flex: 1 0 100%; }
 

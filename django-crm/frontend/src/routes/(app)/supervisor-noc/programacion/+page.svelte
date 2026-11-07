@@ -323,7 +323,8 @@
                 <!-- Las cuentas en pastillas y una línea por bodega, con la
                      tabla plegada (29/10/2026: eran trece líneas rojas iguales). -->
                 <FaltantesDelDia cuentas={material.cuentas} {faltantes}
-                                 equipos={equipoQueFalta(material.cuadrillas)} />
+                                 equipos={equipoQueFalta(material.cuadrillas)}
+                                 apps={resumenDeLoSinBajar(publicado.cuadrillas)} />
               {/if}
               {#if conf}
                 <!-- EL SUPERVISOR ELIGE SOLO (28/10/2026: «la idea era que lo
@@ -382,30 +383,30 @@
             {#if !publicado.cuadrillas.length}
               <p class="snoc-body-sm snoc-secundario">No hay cuadrillas armadas para este día.</p>
             {/if}
-            <!-- LAS APPS QUE NO BAJARON LO PUBLICADO, una vez y acá arriba
-                 (07/11/2026). Antes la frase entera se repetía en cada
-                 tarjeta: cuatro párrafos rojos iguales, y ninguno resaltaba.
-                 En la tarjeta queda la marca de a quién le pasa. -->
-            {#if resumenDeLoSinBajar(publicado.cuadrillas)}
-              <p class="snoc-body-sm snoc-error-txt">{resumenDeLoSinBajar(publicado.cuadrillas)}</p>
-            {/if}
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:var(--snoc-sm);">
+            <!-- LAS APPS QUE NO BAJARON LO PUBLICADO ya no viven acá
+                 (07/11/2026, tercera vuelta). Eran un párrafo rojo de ancho
+                 completo, suelto entre la franja del material y las tarjetas.
+                 Ahora entran al bloque «Para que el día salga completo», con
+                 las otras dos cosas que alguien tiene que resolver hoy: es la
+                 misma clase de cosa y se lee de una. En la tarjeta queda la
+                 marca de a quién le pasa. -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap:var(--snoc-xs);">
               {#each publicado.cuadrillas as c (c.jornada)}
                 {@const m = materialPor.get(c.jornada)}
                 <!-- «20 de 10 órdenes» se leía como una pantalla rota
                      (07/11/2026): pasada de cupo lo dice con todas las letras,
                      y en rojo. -->
                 {@const cupo = cupoDeLaCuadrilla(c.ordenes.length, c.tope)}
-                <div class="snoc-tarjeta snoc-pila-xs" style="min-width:0; justify-content:flex-start;">
-                  <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs); align-items:baseline;">
-                    <strong style="font-size:15px;">{c.cuadrilla}</strong>
+                <div class="snoc-tarjeta pg-ct" style="min-width:0; justify-content:flex-start;">
+                  <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:4px; align-items:baseline;">
+                    <strong style="font-size:14px;">{c.cuadrilla}</strong>
                     <span class="snoc-body-sm" class:snoc-secundario={!cupo.pasada}
                           class:snoc-error-txt={cupo.pasada}>{cupo.texto}</span>
                   </div>
-                  <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap; align-items:center;">
-                    {#if c.labor}<span style="padding:0 8px; border-radius:999px; background:var(--snoc-surface-container); color:var(--snoc-on-surface-variant); font-size:12px; line-height:20px; font-weight:600;">{c.labor}</span>{/if}
+                  <div class="snoc-fila" style="gap:6px; flex-wrap:wrap; align-items:center;">
+                    {#if c.labor}<span style="padding:0 8px; border-radius:999px; background:var(--snoc-surface-container); color:var(--snoc-on-surface-variant); font-size:12px; line-height:18px; font-weight:600;">{c.labor}</span>{/if}
                     <!-- La de apoyo (30/10/2026): con el cupo libre, órdenes de esta otra. -->
-                    {#if c.apoyo}<span style="padding:0 8px; border-radius:999px; border:1px dashed var(--snoc-outline-variant); color:var(--snoc-secondary); font-size:12px; line-height:20px; font-weight:600;">Apoyo: {c.apoyo}</span>{/if}
+                    {#if c.apoyo}<span style="padding:0 8px; border-radius:999px; border:1px dashed var(--snoc-outline-variant); color:var(--snoc-secondary); font-size:12px; line-height:18px; font-weight:600;">Apoyo: {c.apoyo}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
                   <!-- EL DÍA DE LA CUADRILLA NO SE REPITE ACÁ (07/11/2026). Era
@@ -492,11 +493,20 @@
       Lo rojo es lo que hay que atender —sin teléfono, nunca se conectó, lo que
       no bajó a la app—; el porqué y el qué hacer se dicen una sola vez arriba
       de las tarjetas. */
+  /*  MÁS CHICA (07/11/2026, tercera vuelta). El usuario, sobre la maqueta:
+      «hacelo así pero más pequeño». La tarjeta aprieta sus espacios; el
+      cuerpo del texto no baja de 12-13 px, que es donde deja de leerse de un
+      vistazo desde el escritorio del Supervisor. */
+  .pg-ct {
+    display: grid;
+    gap: 3px;
+    padding: 8px 10px;
+  }
   .pg-persona {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 4px 6px;
+    gap: 3px 5px;
   }
   .pg-quien {
     font-size: 13px;
@@ -505,7 +515,7 @@
     overflow-wrap: anywhere;
   }
   .pg-marca {
-    padding: 0 8px;
+    padding: 0 7px;
     border-radius: 999px;
     background: var(--snoc-surface-container);
     color: var(--snoc-on-surface-variant);

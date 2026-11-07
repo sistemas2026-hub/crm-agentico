@@ -15,7 +15,9 @@ describe('las tarjetas de cuadrilla', () => {
   for (const archivo of ['programacion/+page.svelte', 'despacho/+page.svelte']) {
     it(`${archivo}: el contenido va arriba`, () => {
       const fuente = readFileSync(`${RUTA}/${archivo}`, 'utf8');
-      const tarjetas = fuente.match(/<div class="snoc-tarjeta snoc-pila-xs" style="[^"]*"/g) ?? [];
+      //  `pg-ct` desde el 07/11/2026: la tarjeta de Programación aprieta sus
+      //  espacios con una clase propia en vez de `snoc-pila-xs`.
+      const tarjetas = fuente.match(/<div class="snoc-tarjeta (?:snoc-pila-xs|pg-ct)" style="[^"]*"/g) ?? [];
       const deCuadrilla = tarjetas.filter((t) => t.includes('min-width:0'));
 
       expect(deCuadrilla.length).toBe(1);
@@ -60,6 +62,17 @@ describe('el día de la cuadrilla, una sola vez en la pantalla', () => {
     const f = fuente();
     expect(f).toContain('equiposDeTodas(material?.cuadrillas ?? [])');
     expect(f).toMatch(/<MaterialDeLaCuadrilla[^/>]*\{comunes\}/);
+  });
+
+  //  Lo mismo para el bloque «Para que el día salga completo» (07/11/2026,
+  //  tercera vuelta): sin el cable, el bloque pierde el renglón de las apps
+  //  y esa frase se cae de la pantalla, porque ya no está el párrafo suelto
+  //  que la decía antes.
+  it('y le pasa al bloque las apps que no bajaron lo publicado', () => {
+    const f = fuente();
+    expect(f).toMatch(/<FaltantesDelDia[\s\S]*?apps=\{resumenDeLoSinBajar\(publicado\.cuadrillas\)\}/);
+    //  Y ya no queda el párrafo rojo suelto que repetía esa misma frase.
+    expect(f).not.toContain('snoc-error-txt">{resumenDeLoSinBajar');
   });
 
   it('y la tarjeta de lo publicado no vuelve a leer el resumen del día', () => {
