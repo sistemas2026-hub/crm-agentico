@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cupoDeLaCuadrilla,
-  lineaDePersona,
+  pastillasDePersona,
   resumenDeLoSinBajar,
   quienLaAsigno,
   textoDelAviso,
@@ -16,22 +16,62 @@ import {
 describe('lo que la app de cada persona debería tener', () => {
   const dia = '2026-10-28';
 
-  it('órdenes, teléfono y última conexión', () => {
+  it('el nombre aparte, y órdenes, teléfono y última conexión como pastillas', () => {
     expect(
-      lineaDePersona(
+      pastillasDePersona(
         { nombre: 'Jeider Amell', ordenes: 2, telefono: false, ultimo_contacto: '2026-10-28T10:15:00-05:00' },
         dia
       )
-    ).toBe('Jeider Amell: 2 órdenes · sin teléfono registrado · última conexión 10:15');
+    ).toEqual({
+      nombre: 'Jeider Amell',
+      pastillas: [
+        { texto: '2 órdenes', falta: false },
+        { texto: 'sin teléfono registrado', falta: true },
+        { texto: 'última conexión 10:15', falta: false }
+      ]
+    });
   });
 
   it('con teléfono no lo menciona; de otro día lleva la fecha; nunca conectado lo dice', () => {
     expect(
-      lineaDePersona({ nombre: 'Ana', ordenes: 1, telefono: true, ultimo_contacto: '2026-10-27T18:02:00-05:00' }, dia)
-    ).toBe('Ana: 1 orden · última conexión 27/10 18:02');
-    expect(lineaDePersona({ nombre: 'Luis', ordenes: 0, telefono: true, ultimo_contacto: null }, dia)).toBe(
-      'Luis: 0 órdenes · nunca se conectó'
+      pastillasDePersona({ nombre: 'Ana', ordenes: 1, telefono: true, ultimo_contacto: '2026-10-27T18:02:00-05:00' }, dia)
+    ).toEqual({
+      nombre: 'Ana',
+      pastillas: [
+        { texto: '1 orden', falta: false },
+        { texto: 'última conexión 27/10 18:02', falta: false }
+      ]
+    });
+    expect(pastillasDePersona({ nombre: 'Luis', ordenes: 0, telefono: true, ultimo_contacto: null }, dia)).toEqual({
+      nombre: 'Luis',
+      pastillas: [
+        { texto: '0 órdenes', falta: false },
+        { texto: 'nunca se conectó', falta: true }
+      ]
+    });
+  });
+
+  //  CUÁL ES EL PROBLEMA, Y CUÁL NO (07/11/2026). La frase anterior pintaba
+  //  los cinco datos del mismo gris: «sin teléfono registrado» y «2 órdenes»
+  //  pesaban igual. `falta` es lo único que la pantalla usa para el rojo, así
+  //  que afirmar sobre él es afirmar sobre lo que se ve.
+  it('solo lo que hay que atender queda marcado como falta', () => {
+    const malo = pastillasDePersona(
+      { nombre: 'Luis', ordenes: 3, telefono: false, ultimo_contacto: null, sin_bajar: 3 },
+      dia
     );
+    expect(malo.pastillas.filter((b) => b.falta).map((b) => b.texto)).toEqual([
+      '3 sin bajar a su app',
+      'sin teléfono registrado',
+      'nunca se conectó'
+    ]);
+
+    const sano = pastillasDePersona(
+      { nombre: 'Ana', ordenes: 3, telefono: true, ultimo_contacto: '2026-10-28T10:15:00-05:00', sin_bajar: 0 },
+      dia
+    );
+    expect(sano.pastillas.some((b) => b.falta)).toBe(false);
+    expect(sano.pastillas).toHaveLength(2);
   });
 
   it('lo asignado después de la última conexión, y nada si no hay', () => {

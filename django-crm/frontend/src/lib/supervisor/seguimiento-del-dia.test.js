@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 
 import OrdenDelDia from './OrdenDelDia.svelte';
-import { textoDelDiaDeLaCuadrilla, textoDeSeguimiento, textoDeTiempos } from './dia-publicado.js';
+import { textoDeSeguimiento, textoDeTiempos } from './dia-publicado.js';
 
 /**
  * El seguimiento de las cuadrillas en Programación (30/10/2026). El usuario:
@@ -23,22 +23,13 @@ describe('los textos', () => {
     expect(textoDeTiempos(null)).toBe('');
   });
 
-  it('el día de la cuadrilla en una línea', () => {
-    expect(
-      textoDelDiaDeLaCuadrilla({
-        salio: '07:42',
-        hechas: 3,
-        total: 6,
-        en_curso: { numero: 12, estado: 'en_sitio', desde: '09:10' }
-      })
-    ).toBe('Salió 07:42 · 3 de 6 hechas · en sitio en OT #12 desde 09:10');
-    expect(
-      textoDelDiaDeLaCuadrilla({ salio: '07:42', hechas: 0, total: 2, en_curso: { numero: 5, estado: 'en_camino', desde: '07:42' } })
-    ).toBe('Salió 07:42 · 0 de 2 hechas · en camino a OT #5 desde 07:42');
-    expect(textoDelDiaDeLaCuadrilla({ salio: null, hechas: 0, total: 4, en_curso: null })).toBe(
-      'Todavía no sale · 0 de 4 hechas'
-    );
-  });
+  //  ACÁ SE PROBABA `textoDelDiaDeLaCuadrilla` (30/10/2026 – 07/11/2026): el
+  //  día de una cuadrilla en una línea, dentro de su tarjeta. La función se
+  //  fue con su único llamador —el cuadro de Seguimiento, arriba en la misma
+  //  pantalla, ya lo dice mejor— y sus pruebas con ella: una suite en verde
+  //  sobre código que nadie ejecuta es justo el falso verde que este proyecto
+  //  persigue. Que la tarjeta no lo repita lo mide
+  //  `routes/(app)/supervisor-noc/tarjetas-de-cuadrilla.test.js`.
 
   it('la regla de los 30 minutos: vencida, o por qué no corre', () => {
     expect(textoDeSeguimiento({ tipo: 'vencido', minutos_desde_la_referencia: 38 })).toBe('Sin reporte hace 38 min');

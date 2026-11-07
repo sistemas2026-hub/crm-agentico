@@ -216,9 +216,31 @@ export function faltantesPorBodega(faltantes) {
   }));
 }
 
-/** «le faltan 13 materiales», «le falta 1 material». @param {number} n */
+/**
+ * «faltan 13 materiales», «falta 1 material». Sin el «le» desde el
+ * 07/11/2026: ahora va detrás del nombre de la bodega y dos puntos
+ * («BOG-SOLEDAD: faltan 13 materiales»), donde el «le» sobra.
+ *
+ * @param {number} n
+ */
 export function cuantosFaltan(n) {
-  return n === 1 ? 'le falta 1 material' : `le faltan ${n} materiales`;
+  return n === 1 ? 'falta 1 material' : `faltan ${n} materiales`;
+}
+
+/**
+ * CADA BODEGA EN UNA PASTILLA (07/11/2026). El usuario, con la captura: «qué
+ * otro arreglo se puede hacer para que no se vea tan maluco».
+ *
+ * Eran dos barras de ancho completo, una debajo de la otra, con el borde rojo
+ * a la izquierda: dos bodegas ocupaban el mismo alto que las cinco pastillas
+ * de cuentas de arriba, sin decir más. Como pastilla entran las dos en una
+ * fila, al lado de las cuentas que ya están en esa forma; al abrirla, la tabla
+ * se lleva el ancho entero.
+ *
+ * @param {{ bodega: string, materiales: unknown[] }} g un grupo de `faltantesPorBodega`
+ */
+export function pastillaDeBodega(g) {
+  return `${g.bodega}: ${cuantosFaltan(g.materiales?.length ?? 0)}`;
 }
 
 /**

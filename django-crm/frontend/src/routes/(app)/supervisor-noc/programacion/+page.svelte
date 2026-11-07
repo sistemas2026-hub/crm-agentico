@@ -23,13 +23,11 @@
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
     cupoDeLaCuadrilla,
-    lineaDePersona,
+    pastillasDePersona,
     quienLaAsigno,
     resumenDeLoSinBajar,
     seDibujaElMapa,
-    textoDeLaSiguiente,
-    textoDelDiaDeLaCuadrilla,
-    textoSinBajar
+    textoDeLaSiguiente
   } from '$lib/supervisor/dia-publicado.js';
   import {
     equipoQueFalta,
@@ -406,20 +404,25 @@
                     {#if c.apoyo}<span style="padding:0 8px; border-radius:999px; border:1px dashed var(--snoc-outline-variant); color:var(--snoc-secondary); font-size:12px; line-height:20px; font-weight:600;">Apoyo: {c.apoyo}</span>{/if}
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
-                  <!-- EL DÍA EN UNA LÍNEA (30/10/2026): a qué hora salió, cuántas
-                       lleva y en cuál está. -->
-                  {#if c.resumen_del_dia}
-                    <span class="snoc-body-sm snoc-secundario">{textoDelDiaDeLaCuadrilla(c.resumen_del_dia)}</span>
-                  {/if}
+                  <!-- EL DÍA DE LA CUADRILLA NO SE REPITE ACÁ (07/11/2026). Era
+                       una línea gris —«Todavía no sale · 0 de 10 hechas»— que
+                       el cuadro de «Seguimiento de las cuadrillas», arriba en
+                       esta misma pantalla, ya dice con el estado como título,
+                       los minutos en grande y su barra de avance. Ver el
+                       comentario en dia-publicado.js. -->
                   <!-- LO QUE AVISÓ LA CUADRILLA (30/10/2026): «se pinchó la llanta». -->
                   <NovedadesDeLaCuadrilla novedades={c.novedades ?? []} />
                   <!-- POR PERSONA: lo que la app de cada uno debería tener. La
                        tarjeta cuenta las de toda la cuadrilla; la app, las de la
                        cuenta con que se entró (28/10/2026). -->
                   {#each c.personas ?? [] as p, i (i)}
-                    <p class="snoc-body-sm snoc-secundario">
-                      {lineaDePersona(p, data.dia)}{#if p.sin_bajar}<span class="pg-sinbajar">{textoSinBajar(p)}</span>{/if}
-                    </p>
+                    {@const persona = pastillasDePersona(p, data.dia)}
+                    <div class="pg-persona">
+                      <span class="pg-quien">{persona.nombre}</span>
+                      {#each persona.pastillas as b (b.texto)}
+                        <span class="pg-marca" class:pg-marca-falta={b.falta}>{b.texto}</span>
+                      {/each}
+                    </div>
                   {/each}
                   <!-- EL MATERIAL: compacto, con los avisos y la lista plegados
                        (29/10/2026). Ver MaterialDeLaCuadrilla.svelte. -->
@@ -480,19 +483,35 @@
     .pg-donde { grid-template-columns: 1fr; }
   }
 
-  /*  LO QUE NO BAJÓ A LA APP (07/11/2026): una pastilla al lado del nombre, y
-      no un párrafo rojo por tarjeta. El porqué y el qué hacer se dicen una
-      sola vez arriba de las tarjetas. */
-  .pg-sinbajar {
-    display: inline-block;
-    margin-left: 6px;
+  /*  CADA PERSONA: SU NOMBRE, Y SUS ESTADOS EN PASTILLAS (07/11/2026). Era una
+      frase gris con todo pegado y de dos renglones; ver `pastillasDePersona`.
+      Lo rojo es lo que hay que atender —sin teléfono, nunca se conectó, lo que
+      no bajó a la app—; el porqué y el qué hacer se dicen una sola vez arriba
+      de las tarjetas. */
+  .pg-persona {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 6px;
+  }
+  .pg-quien {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--snoc-on-surface);
+    overflow-wrap: anywhere;
+  }
+  .pg-marca {
     padding: 0 8px;
     border-radius: 999px;
-    background: var(--snoc-error-container);
-    color: var(--snoc-on-error-container);
+    background: var(--snoc-surface-container);
+    color: var(--snoc-on-surface-variant);
     font-size: 12px;
     line-height: 18px;
     font-weight: 600;
     white-space: nowrap;
+  }
+  .pg-marca-falta {
+    background: var(--snoc-error-container);
+    color: var(--snoc-on-error-container);
   }
 </style>

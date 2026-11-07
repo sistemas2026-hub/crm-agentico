@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 
 import FaltantesDelDia from './FaltantesDelDia.svelte';
-import { cuantosFaltan, faltantesPorBodega, pastillasDeCuentas } from './material-del-dia.js';
+import {
+  cuantosFaltan,
+  faltantesPorBodega,
+  pastillaDeBodega,
+  pastillasDeCuentas
+} from './material-del-dia.js';
 
 /**
  * Las cuentas y los faltantes del material del día (29/10/2026). El usuario,
@@ -30,6 +35,15 @@ const faltantes = [
 
 const html = (props) => render(FaltantesDelDia, { props }).body;
 
+/**
+ * El HTML como lo LEE una persona: sin etiquetas ni los comentarios que Svelte
+ * intercala entre un texto y el siguiente. Sin esto, un `toContain` de una
+ * frase que la plantilla parte en dos nodos falla por donde no importa.
+ *
+ * @param {string} h
+ */
+const leido = (h) => h.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '');
+
 describe('los ayudantes', () => {
   it('las cuentas en pastillas; lo que está en cero no se dice, salvo las completas', () => {
     expect(pastillasDeCuentas(cuentas)).toEqual([
@@ -48,17 +62,44 @@ describe('los ayudantes', () => {
       ['BOG-SOLEDAD', 2, true],
       ['BOG-NORTE', 2, false]
     ]);
-    expect(cuantosFaltan(13)).toBe('le faltan 13 materiales');
-    expect(cuantosFaltan(1)).toBe('le falta 1 material');
+    expect(cuantosFaltan(13)).toBe('faltan 13 materiales');
+    expect(cuantosFaltan(1)).toBe('falta 1 material');
+  });
+
+  //  CADA BODEGA EN UNA PASTILLA (07/11/2026): eran dos barras de ancho
+  //  completo apiladas, con el mismo alto que las cinco pastillas de arriba y
+  //  sin decir más.
+  it('la pastilla de una bodega nombra la bodega y cuántos materiales le faltan', () => {
+    expect(pastillaDeBodega({ bodega: 'BOG-SOLEDAD', materiales: [1, 2] })).toBe(
+      'BOG-SOLEDAD: faltan 2 materiales'
+    );
+    expect(pastillaDeBodega({ bodega: 'BOF-SAB_GRANDE', materiales: [1] })).toBe(
+      'BOF-SAB_GRANDE: falta 1 material'
+    );
   });
 });
 
 describe('lo que se dibuja', () => {
-  it('una línea por bodega, plegada, y no una por material', () => {
+  it('una pastilla por bodega, plegada, y no una línea por material', () => {
     const h = html({ cuentas, faltantes });
     expect(h.match(/<details class="fd-bodega/g)).toHaveLength(2);
-    expect(h).toMatch(/BOG-SOLEDAD<\/span>\s*<span class="fd-cuenta[^"]*">le faltan 2 materiales/);
+    expect(leido(h)).toContain('BOG-SOLEDAD: faltan 2 materiales');
     expect(h).not.toContain('libres; se piden');
+  });
+
+  //  LAS DOS BODEGAS EN UNA FILA (07/11/2026). Eran dos barras de ancho
+  //  completo, una debajo de la otra: se afirma que las dos están DENTRO del
+  //  mismo contenedor de fila, que es lo que las pone lado a lado. La
+  //  mutación que vuelve a apilarlas —sacar el `.fd-bodegas`— la mata.
+  it('las bodegas van las dos en la misma fila, al lado de las cuentas', () => {
+    const h = html({ cuentas, faltantes });
+    //  Svelte le agrega su clase de ámbito, así que se busca el prefijo.
+    expect(h).toMatch(/class="fd-bodegas/);
+    const fila = h.slice(h.search(/class="fd-bodegas/));
+    expect(fila.match(/<details class="fd-bodega/g)).toHaveLength(2);
+    //  Y la pastilla de la bodega es una pastilla, como las cuentas: la misma
+    //  forma para la misma clase de dato.
+    expect(fila).toMatch(/<span class="fd-pastilla fd-falta[^"]*">BOG-SOLEDAD/);
   });
 
   it('la tabla dice material, cuánto se pide, cuánto hay y cuánto falta', () => {

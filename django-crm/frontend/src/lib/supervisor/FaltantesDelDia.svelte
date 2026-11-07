@@ -8,8 +8,8 @@
    */
   import {
     cantidad,
-    cuantosFaltan,
     faltantesPorBodega,
+    pastillaDeBodega,
     pastillaDeEquipo,
     pastillasDeCuentas
   } from './material-del-dia.js';
@@ -33,35 +33,42 @@
     {/each}
   </div>
 
-  {#each grupos as g (g.bodega)}
-    <details class="fd-bodega">
-      <summary>
-        <span class="fd-nombre">{g.bodega}</span>
-        <span class="fd-cuenta">{cuantosFaltan(g.materiales.length)}</span>
-      </summary>
-      {#if g.sinNada}
-        <p class="fd-pista">
-          No hay libre nada de lo que piden los kits. Si en la bodega sí hay, falta cargar su
-          stock en Inventario.
-        </p>
-      {/if}
-      <table class="fd-tabla">
-        <thead>
-          <tr><th>Material</th><th>Se piden</th><th>Hay libres</th><th>Faltan</th></tr>
-        </thead>
-        <tbody>
-          {#each g.materiales as m (m.material)}
-            <tr>
-              <td>{m.material}</td>
-              <td>{cantidad(m.pedido, m.unidad)}</td>
-              <td>{m.disponible}</td>
-              <td class="fd-faltan">{m.falta}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </details>
-  {/each}
+  <!-- CADA BODEGA EN UNA PASTILLA, TODAS EN UNA FILA (07/11/2026). Eran dos
+       barras de ancho completo apiladas; ver `pastillaDeBodega`. Lo que se
+       abre se lleva la fila entera: una tabla de cuatro columnas en una
+       columna de 200 px no se lee. -->
+  {#if grupos.length}
+    <div class="fd-bodegas">
+      {#each grupos as g (g.bodega)}
+        <details class="fd-bodega">
+          <summary>
+            <span class="fd-pastilla fd-falta">{pastillaDeBodega(g)}<span class="fd-punta" aria-hidden="true">▾</span></span>
+          </summary>
+          {#if g.sinNada}
+            <p class="fd-pista">
+              No hay libre nada de lo que piden los kits. Si en la bodega sí hay, falta cargar su
+              stock en Inventario.
+            </p>
+          {/if}
+          <table class="fd-tabla">
+            <thead>
+              <tr><th>Material</th><th>Se piden</th><th>Hay libres</th><th>Faltan</th></tr>
+            </thead>
+            <tbody>
+              {#each g.materiales as m (m.material)}
+                <tr>
+                  <td>{m.material}</td>
+                  <td>{cantidad(m.pedido, m.unidad)}</td>
+                  <td>{m.disponible}</td>
+                  <td class="fd-faltan">{m.falta}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </details>
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -78,6 +85,7 @@
     gap: 6px;
   }
   .fd-pastilla {
+    display: inline-block;
     padding: 2px 10px;
     border-radius: 999px;
     font-size: 12px;
@@ -87,21 +95,26 @@
   .fd-falta { background: var(--snoc-error-container); color: var(--snoc-on-error-container); }
   .fd-sin { background: var(--snoc-surface-container); color: var(--snoc-on-surface-variant); }
 
-  .fd-bodega {
+  /*  LAS BODEGAS EN UNA FILA (07/11/2026): la que se abre se lleva el ancho
+      entero para que la tabla quepa. */
+  .fd-bodegas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .fd-bodega { min-width: 0; }
+  .fd-bodega[open] {
+    flex: 1 0 100%;
     padding: 8px 10px;
     border-radius: var(--snoc-r-xl);
     border-left: 3px solid var(--snoc-error);
     background: var(--snoc-surface-container-low);
   }
-  .fd-bodega summary {
-    cursor: pointer;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: baseline;
-  }
-  .fd-nombre { font-weight: 700; color: var(--snoc-on-surface); }
-  .fd-cuenta { color: var(--snoc-error); font-weight: 600; }
+  .fd-bodega summary { cursor: pointer; list-style: none; }
+  .fd-bodega summary::-webkit-details-marker { display: none; }
+  .fd-punta { margin-left: 6px; font-size: 10px; }
+  .fd-bodega[open] .fd-punta { transform: rotate(180deg); display: inline-block; }
   .fd-pista { margin: 6px 0 0; color: var(--snoc-secondary); }
 
   .fd-tabla {

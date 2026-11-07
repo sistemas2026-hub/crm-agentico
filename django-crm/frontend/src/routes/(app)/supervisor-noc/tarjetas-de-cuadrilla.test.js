@@ -23,3 +23,35 @@ describe('las tarjetas de cuadrilla', () => {
     });
   }
 });
+
+/**
+ * LO QUE EL CUADRO DE SEGUIMIENTO YA DICE NO SE REPITE EN LA TARJETA
+ * (07/11/2026). El usuario, con la captura: «qué otro arreglo se puede hacer
+ * para que no se vea tan maluco».
+ *
+ * Programación dibuja DOS cosas por cuadrilla: arriba el cuadro de
+ * «Seguimiento de las cuadrillas» —estado y OT como título, los minutos en
+ * grande, «3 de 6 · salió 07:42» con barra— y abajo su tarjeta de lo
+ * publicado. La tarjeta repetía el día en una línea gris chica
+ * («Todavía no sale · 0 de 10 hechas»), cuatro veces, debajo de un cuadro que
+ * lo decía mejor.
+ *
+ * Se afirma sobre el DATO (`resumen_del_dia`) y no sobre el nombre de la
+ * función que lo escribía: volver a imprimirlo de cualquier otra forma
+ * también tiene que leer ese campo, así que la mutación no se escapa
+ * renombrando. Y se exige que el cuadro siga estando: sin él, no habría nada
+ * que repita y la tarjeta tendría que volver a decirlo.
+ */
+describe('el día de la cuadrilla, una sola vez en la pantalla', () => {
+  const fuente = () => readFileSync(`${RUTA}/programacion/+page.svelte`, 'utf8');
+
+  it('el cuadro de seguimiento se dibuja', () => {
+    expect(fuente()).toContain('<SeguimientoDeCuadrillas');
+  });
+
+  it('y la tarjeta de lo publicado no vuelve a leer el resumen del día', () => {
+    //  Sin comentarios: el porqué de la decisión los nombra a propósito.
+    const sinComentarios = fuente().replace(/<!--[\s\S]*?-->/g, '');
+    expect(sinComentarios).not.toContain('resumen_del_dia');
+  });
+});

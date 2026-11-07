@@ -37,21 +37,41 @@ function momento(iso, dia) {
 }
 
 /**
- * Lo que la app de UNA persona debería tener (28/10/2026): «Jeider Amell: 2
- * órdenes · sin teléfono registrado · última conexión 10:15».
+ * Lo que la app de UNA persona debería tener (28/10/2026), EN PASTILLAS desde
+ * el 07/11/2026.
  *
  * La tarjeta cuenta las órdenes de toda la cuadrilla; la app, las de la cuenta
  * con que se entró. Lo que publica el Supervisor va a todos los de la
  * cuadrilla; lo que se despacha a mano, a uno solo.
  *
- * @param {{ nombre: string, ordenes: number, telefono: boolean, ultimo_contacto: string | null }} p
+ * Era UNA frase gris con todo pegado —«JEIDER AMELL: 2 órdenes · sin teléfono
+ * registrado · última conexión 10:15»— que en una tarjeta de 300 px ocupaba
+ * dos renglones y dejaba el nombre y el problema con el mismo peso: en la
+ * captura del usuario, tres personas por cuadrilla eran seis renglones grises
+ * donde no se distinguía quién estaba mal. Ahora el nombre va aparte y cada
+ * estado es una pastilla, y `falta` dice cuál de ellas es un problema —el
+ * color lo elige la pantalla, acá se escribe el texto.
+ *
+ * `sin_bajar` entra como una pastilla más y no como un párrafo aparte: es otro
+ * estado de la misma persona.
+ *
+ * @param {{ nombre: string, ordenes: number, telefono: boolean, ultimo_contacto: string | null, sin_bajar?: number }} p
  * @param {string} dia AAAA-MM-DD
+ * @returns {{ nombre: string, pastillas: { texto: string, falta: boolean }[] }}
  */
-export function lineaDePersona(p, dia) {
-  const partes = [`${p.nombre}: ${p.ordenes} ${p.ordenes === 1 ? 'orden' : 'órdenes'}`];
-  if (!p.telefono) partes.push('sin teléfono registrado');
-  partes.push(p.ultimo_contacto ? `última conexión ${momento(p.ultimo_contacto, dia)}` : 'nunca se conectó');
-  return partes.join(' · ');
+export function pastillasDePersona(p, dia) {
+  /** @type {{ texto: string, falta: boolean }[]} */
+  const pastillas = [
+    { texto: `${p.ordenes} ${p.ordenes === 1 ? 'orden' : 'órdenes'}`, falta: false }
+  ];
+  if (p.sin_bajar) pastillas.push({ texto: textoSinBajar({ sin_bajar: p.sin_bajar }), falta: true });
+  if (!p.telefono) pastillas.push({ texto: 'sin teléfono registrado', falta: true });
+  pastillas.push(
+    p.ultimo_contacto
+      ? { texto: `última conexión ${momento(p.ultimo_contacto, dia)}`, falta: false }
+      : { texto: 'nunca se conectó', falta: true }
+  );
+  return { nombre: p.nombre, pastillas };
 }
 
 /**
@@ -186,21 +206,22 @@ export function textoDeTiempos(t) {
   return partes.join(' · ');
 }
 
-/**
- * El día de una cuadrilla en una línea (30/10/2026): «Salió 07:42 · 3 de 6
- * hechas · en sitio en OT #12 desde 09:10», o «Todavía no sale · 0 de 6».
+/*
+ *  AQUÍ VIVÍA `textoDelDiaDeLaCuadrilla` (30/10/2026 – 07/11/2026). Escribía
+ *  el día de una cuadrilla en una línea —«Salió 07:42 · 3 de 6 hechas · en
+ *  sitio en OT #12 desde 09:10»— dentro de su tarjeta de Programación.
  *
- * @param {{ salio?: string | null, hechas: number, total: number, en_curso?: { numero: number, estado: string, desde?: string | null } | null } | null | undefined} r
+ *  Se fue porque desde el 30/10 el cuadro de «Seguimiento de las cuadrillas»
+ *  está arriba, en la MISMA pantalla y con la misma condición, y dice las tres
+ *  cosas mejor: el estado y la OT como título, los minutos en grande, y
+ *  «3 de 6 · salió 07:42» con su barra de avance. La línea de la tarjeta
+ *  repetía eso en gris chico, cuatro veces, y era el renglón que más se
+ *  parecía a relleno en la captura del usuario (07/11/2026).
+ *
+ *  No se reemplaza por nada: la pregunta «¿cómo va esta cuadrilla?» ya tiene
+ *  su lugar. Si vuelve a hacer falta, está en el historial de git — pero
+ *  entonces hay que decidir también qué deja de decir el cuadro de arriba.
  */
-export function textoDelDiaDeLaCuadrilla(r) {
-  if (!r) return '';
-  const partes = [r.salio ? `Salió ${r.salio}` : 'Todavía no sale', `${r.hechas} de ${r.total} hechas`];
-  if (r.en_curso) {
-    const donde = r.en_curso.estado === 'en_sitio' ? 'en sitio en' : 'en camino a';
-    partes.push(`${donde} OT #${r.en_curso.numero}${r.en_curso.desde ? ` desde ${r.en_curso.desde}` : ''}`);
-  }
-  return partes.join(' · ');
-}
 
 /**
  * La regla de los 30 minutos de una orden, como la calcula el servidor
