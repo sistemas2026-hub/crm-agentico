@@ -195,9 +195,15 @@ def calcular(facturas: list[dict], *, usuario: str, cuenta: dict, hoy: date,
         "monto_pendiente": f"{total:.2f}",
         "vencimiento_mas_antiguo": (min(vencimientos).isoformat()
                                     if vencimientos else None),
-        # Solo se cuentan las que TRAEN fecha: una sin fecha no se declara vencida.
-        "facturas_vencidas": sum(1 for v in vencimientos if v < hoy),
     }
+    # Solo se cuentan las que TRAEN fecha: una sin fecha no se declara vencida.
+    vencidas = sum(1 for v in vencimientos if v < hoy)
+    if vencidas:
+        # SOLO SALE CUANDO HAY. Con 0 el campo no existe: un "0" que el modelo ve
+        # es un "no tienes facturas vencidas" que el cliente escucha, y es ruido
+        # (decision del dueno, 07/11/2026). Que el modelo no pueda mencionar lo que
+        # no recibe es la garantia; pedirselo en el prompt seria solo una guia.
+        respuesta["facturas_vencidas"] = vencidas
     if con_saldo:
         # Una sola factura, y su total ya incluye lo anterior: se dice.
         respuesta["incluye_saldo_anterior"] = True

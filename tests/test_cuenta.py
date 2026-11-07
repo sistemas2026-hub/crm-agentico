@@ -124,6 +124,12 @@ afirmar(r.get("disponible") is True and r["monto_pendiente"] == "110000.00",
 afirmar(r["facturas_pendientes"] == 2, "cuenta las facturas")
 afirmar(r["vencimiento_mas_antiguo"] == "2026-10-01", "la mas antigua es la de octubre")
 afirmar(r["facturas_vencidas"] == 1, "una ya vencio a hoy (7/11), la de diciembre no")
+p0 = Proveedor(ficha(), {"results": [factura("60000.00", vence="2026-12-06")]})
+r0 = correr(p0)
+afirmar("facturas_vencidas" not in r0,
+        f"con 0 vencidas el campo NO existe: el modelo no puede decir 'no tienes vencidas' ({r0})")
+p0 = Proveedor(ficha(), {"results": [factura("60000.00", vence="2026-11-07")]})
+afirmar("facturas_vencidas" not in correr(p0), "vence HOY: todavia no esta vencida (vencida es antes de hoy)")
 afirmar(C.monto_de({"total": "450.00", "saldo": "150.00"}, "total") == C.Decimal("450.00"),
         "una factura con saldo anterior cuenta su TOTAL (que ya lo incluye), no el saldo")
 
