@@ -18,9 +18,36 @@
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import { origenDelTicket } from '$lib/v2/ticket-origen.js';
+  import { filtrosDeLaCola, sinLosFiltros } from '$lib/v2/filtros-de-la-cola.js';
 
   /** @type {{ data: any, form?: any }} */
   let { data, form } = $props();
+
+  //  EL AVISO DE QUE HAY UN FILTRO PUESTO  --  06/11/2026, pedido del usuario
+  //  con dos capturas: «el antes y despues de la busqueda se desaparecen los
+  //  ticket». Buscar "mario" dejaba Ventas en 0 teniendo 87 y Operativo en 0
+  //  teniendo 50. Los numeros eran correctos -- pulsar Ventas con esa busqueda
+  //  muestra 0 -- pero nada en la pantalla decia que estaba filtrando, asi que
+  //  un area viva se leia como un area vacia.
+  //  Que recorta y que no lo decide filtros-de-la-cola.js, probado: la linea
+  //  que habia miraba 'page.url.search' -- la query string entera -- y salia
+  //  con '?area=soporte' sin que hubiera ningun filtro puesto.
+  let filtro = $derived(filtrosDeLaCola(page.url));
+  //  El total de la cola SIN filtrar ya esta en la pagina: es el mismo numero
+  //  del badge "Cola" de arriba, que el layout cuenta aparte
+  //  (+layout.server.js::tickets). No cuesta una consulta mas. Con '?all=1' no
+  //  se compara: ese total es de abiertos y esa cola trae ademas los cerrados.
+  let totalSinFiltrar = $derived(
+    data.showAll ? null : (page.data.counts?.tickets ?? null));
+  //  Cuantos coinciden en TODA la cola, no en el area elegida: es el total de
+  //  la tarjeta "Todas las áreas", que el cargador pide sin filtro de area
+  //  pero con la busqueda puesta. Usar 'totals.open' diria "6 de 721" estando
+  //  dentro de Soporte -- dos recortes distintos comparados como si fueran
+  //  uno. Un colaborador no tiene esa tarjeta: ahi se cae a su propia cola y
+  //  el "de 721" no se muestra.
+  let coincidencias = $derived(
+    (data.tarjetas ?? []).find((/** @type {any} */ a) => a.todas)?.total
+      ?? (data.soloMiArea ? data.totals?.open : null) ?? null);
 
   //  Si no se pudo tomar -- otra persona lo tomo primero -- la fila que se ve
   //  ya esta vieja: se recarga la cola ademas de mostrar el motivo.
@@ -257,6 +284,26 @@
   {#if form?.error}
     <p class="aviso-accion" role="alert">{form.error}</p>
   {/if}
+  <!-- QUE FILTRO ESTA PUESTO, ARRIBA DE LAS TARJETAS Y CON LA SALIDA AL LADO
+       --  06/11/2026. Va ACA, antes de los números, porque los números son lo
+       que el filtro cambia: leerlos sin saberlo fue el defecto. La línea que
+       había vivía abajo, dentro de `{#if data.areaElegida}`, así que sin área
+       elegida las tarjetas caían a cero sin ninguna explicación. -->
+  {#if filtro.hay}
+    <div class="aviso-filtro" role="status">
+      <span class="aviso-filtro-texto">
+        {#if filtro.busqueda}Buscando <b>«{filtro.busqueda}»</b>{/if}{#if filtro.busqueda && filtro.otros.length}, filtrando por {filtro.otros.join(' y ')}{:else if filtro.otros.length}Filtrando por {filtro.otros.join(' y ')}{/if}:
+        {#if coincidencias != null && totalSinFiltrar != null}
+          <b>{count(coincidencias)}</b> de {count(totalSinFiltrar)} tickets abiertos.
+        {:else if coincidencias != null}
+          <b>{count(coincidencias)}</b> {coincidencias === 1 ? 'ticket' : 'tickets'}.
+        {/if}
+        Las tarjetas cuentan solo las coincidencias; un área en cero tiene sus
+        tickets intactos.
+      </span>
+      <a class="aviso-filtro-salida" href={sinLosFiltros(page.url)}>Ver la cola completa</a>
+    </div>
+  {/if}
   <!-- LAS TARJETAS POR AREA  --  27/10/2026, pedido del usuario: «no están
        saliendo las tarjetas como antes: administración, soporte, operativo,
        cartera, ventas». Las del 19/10 --total, urgentes, sin respuesta, sin
@@ -269,6 +316,7 @@
         {@const Icono = a.todas ? LifeBuoy : ICONOS[a.icono]}
         <a
           class="area-tarjeta"
+          class:sin-coincidencias={filtro.hay && !a.total}
           href={hrefCon('area', a.nombre)}
           aria-current={data.areaElegida === a.nombre ? 'page' : undefined}
           style="--area-color: {a.todas ? 'var(--v2-slate)' : colorDeArea(a)}"
@@ -334,9 +382,10 @@
     </div>
   </div>
 
-{#if page.url.search}
-  <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">Estos números describen la cola filtrada.</p>
-{/if}
+<!-- La línea "Estos números describen la cola filtrada" se fue el 06/11/2026:
+     miraba 'page.url.search' --la query string entera--, así que salía con
+     '?area=soporte' sin ningún filtro puesto, y vivía debajo de la barra, ya
+     pasadas las tarjetas que describía. La reemplaza el aviso de arriba. -->
 {#if data.deOtrasAreas > 0}
   <p class="v2-sub" style="font-size:11.5px;margin:8px 0 0">
     En esta página {data.deOtrasAreas === 1 ? 'hay 1 ticket de otra área asignado' : `hay ${data.deOtrasAreas} tickets de otra área asignados`}
@@ -620,6 +669,23 @@
     border-color: var(--area-color);
     box-shadow: inset 0 0 0 1px var(--area-color);
   }
+  /* Un area sin coincidencias MIENTRAS hay un filtro puesto se apaga, para
+     que no se lea igual que un area de verdad vacia. Se apaga, no se
+     esconde: sigue siendo un destino que se puede pulsar, y una tarjeta que
+     desaparece y vuelve al escribir es peor que una apagada. El texto no baja
+     de #6b6f6a sobre blanco (contraste 4.8:1), asi que sigue siendo legible.
+     -- 06/11/2026 */
+  .area-tarjeta.sin-coincidencias {
+    background: var(--v2-bg, #f7f7f5);
+    border-style: dashed;
+  }
+  .area-tarjeta.sin-coincidencias .area-nombre,
+  .area-tarjeta.sin-coincidencias .area-total {
+    color: #6b6f6a;
+  }
+  .area-tarjeta.sin-coincidencias .area-marca {
+    opacity: 0.45;
+  }
   /* El color del area se aplica a la marca, no a la tarjeta entera: cinco
      tarjetas de fondo saturado compiten entre si y ninguna resalta. */
   .area-marca {
@@ -835,6 +901,37 @@
   }
   .aviso-sin-area p {
     margin: 0;
+  }
+  /* El aviso de filtro puesto. Va pegado arriba de las tarjetas y comparte
+     fila con su salida: leer "Ventas 0" y no encontrar cómo volver fue el
+     reclamo entero. -- 06/11/2026 */
+  .aviso-filtro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px 14px;
+    margin: 12px var(--v2-pad) 0;
+    padding: 9px 13px;
+    border: 1px solid var(--v2-line, #e3e4e1);
+    border-left: 3px solid var(--v2-slate, #6b6f6a);
+    border-radius: 8px;
+    background: var(--v2-card, #fff);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .aviso-filtro-texto {
+    flex: 1 1 18rem;
+    color: var(--v2-slate, #6b6f6a);
+  }
+  .aviso-filtro-texto b {
+    color: var(--v2-ink, #1c1d1a);
+    font-weight: 600;
+  }
+  .aviso-filtro-salida {
+    flex: 0 0 auto;
+    font-weight: 600;
+    white-space: nowrap;
   }
   .aviso-accion {
     margin: 12px 0 0;
