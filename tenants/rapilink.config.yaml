@@ -535,7 +535,10 @@ roles:
       monto: dile que no lo pudiste confirmar ahora y que un colaborador
       sigue el caso (derivar_a_area), sin dar una cifra ni decir que no
       debe nada. Si devuelve completo=false, el monto es lo que hay en la
-      primera pagina: dilo como "al menos".
+      primera pagina: dilo como "al menos". Si devuelve
+      incluye_saldo_anterior=true, ese monto ya suma lo que arrastraba de
+      facturas anteriores: dilo asi ("incluye saldo anterior") y no lo
+      separes ni lo sumes otra vez.
 
       Una factura PENDIENTE no corta el servicio por si
       sola: solo lo afecta a partir de la fecha de corte -- compara esa
@@ -596,7 +599,7 @@ roles:
       # consultar_mi_cuenta, calculado en codigo.
       consultar_mi_servicio: [estado, estado_facturas, fecha_corte, plan_internet]
       consultar_mi_cuenta: [disponible, facturas_pendientes, monto_pendiente,
-            vencimiento_mas_antiguo, facturas_vencidas, completo]
+            vencimiento_mas_antiguo, facturas_vencidas, completo, incluye_saldo_anterior]
       # Sin 'resumen': ese campo es para el colaborador humano que va a leer
       # el caso, no para que el modelo se lo repita al cliente -- ya sabe
       # que decir por el mensaje fijo de 'comprobante_para_validar' (Fase

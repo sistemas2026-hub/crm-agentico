@@ -50,13 +50,23 @@ Por eso aqui:
 es {"disponible": False, "motivo": ...} y lo segundo {"disponible": True,
 "facturas_pendientes": 0}.
 
-QUE NO ESTA VERIFICADO EN VIVO (y se dice)
-------------------------------------------
-Los nombres de los campos del proveedor (usuario, filtro, total, saldo,
-vencimiento) vienen de la configuracion del tenant y de la skill wisphub-api.
-La suma toma, por factura, el 'saldo' si es mayor que cero y si no el 'total':
-es una decision SIN medir contra una factura pagada a medias. Quien cierre esa
-medicion la ajusta en 'monto_de'.
+QUE SE SUMA, Y DE DONDE SALE (07/11/2026)
+-----------------------------------------
+Por factura se suma el 'total', SIEMPRE. En la factura de ejemplo de la
+documentacion de WispHub el 'saldo' es el saldo pendiente de facturas ANTERIORES
+y el 'total' (el gran total) YA LO INCLUYE: subtotal 300 + saldo 150 = total 450.
+Tomar el 'saldo' como lo que se debe (lo que hacia la primera version) habria
+dicho 150 donde se deben 450.
+
+Por eso, si dos facturas pendientes de la misma persona traen saldo mayor que
+cero, no se suma: la segunda podria estar arrastrando lo de la primera, y sumar
+los dos totales contaria ese dinero dos veces. Sin cifra, y a una persona.
+Con UNA sola, el total es exacto y se avisa que incluye saldo anterior.
+
+LO QUE NO ESTA VERIFICADO CON DATOS REALES (y se dice): las 4.390 facturas de
+Rapilink (904 pendientes, 3.479 pagadas, 7 canceladas) tienen 'saldo' en 0 sin
+una sola excepcion, asi que esta lectura sale de la documentacion y no de una
+factura real con saldo. Cuando aparezca la primera, hay que contrastarla.
 """
 
 from __future__ import annotations
@@ -104,16 +114,23 @@ def _a_fecha(valor) -> date | None:
     return None
 
 
-def monto_de(factura: dict, campo_total: str, campo_saldo: str) -> Decimal | None:
+def monto_de(factura: dict, campo_total: str) -> Decimal | None:
     """
-    Lo que falta pagar de UNA factura pendiente: su saldo si es mayor que cero,
-    y si no su total. Sin ninguno de los dos, None -- y entonces la cuenta entera
-    no se afirma (ver 'calcular'): una factura sin monto no es una factura de cero.
+    Lo que se debe de UNA factura pendiente: su 'total', que ya incluye cualquier
+    saldo anterior que arrastre. Sin total, None -- y entonces la cuenta entera no
+    se afirma (ver 'calcular'): una factura sin monto no es una factura de cero.
     """
-    saldo = _a_dinero(factura.get(campo_saldo))
-    if saldo is not None and saldo > 0:
-        return saldo
     return _a_dinero(factura.get(campo_total))
+
+
+def arrastra_saldo(factura: dict, campo_saldo: str) -> bool:
+    """Si la factura trae saldo anterior (mayor que cero). Un saldo ilegible NO
+    cuenta como cero: se toma como que arrastra, que es el lado prudente."""
+    valor = factura.get(campo_saldo)
+    if valor is None or str(valor).strip() == "":
+        return False
+    saldo = _a_dinero(valor)
+    return saldo is None or saldo > 0
 
 
 def _filas(crudo) -> list[dict]:
@@ -152,10 +169,19 @@ def calcular(facturas: list[dict], *, usuario: str, cuenta: dict, hoy: date,
             registrar("cuenta", "una factura viene a nombre de otro cliente")
             return _no_disponible("el proveedor devolvio facturas de otro cliente")
 
+    con_saldo = sum(1 for f in facturas if arrastra_saldo(f, cuenta["saldo"]))
+    if con_saldo and len(facturas) > 1:
+        # La segunda puede estar arrastrando lo de la primera: sumar los totales
+        # contaria ese dinero dos veces. No se afirma ninguna cifra.
+        registrar("cuenta", "varias facturas pendientes y alguna arrastra saldo: "
+                            "no se suma para no contar dos veces",
+                  facturas=len(facturas), con_saldo=con_saldo)
+        return _no_disponible("hay saldo anterior arrastrado entre varias facturas")
+
     total = Decimal("0")
     vencimientos: list[date] = []
     for f in facturas:
-        monto = monto_de(f, cuenta["total"], cuenta["saldo"])
+        monto = monto_de(f, cuenta["total"])
         if monto is None:
             return _no_disponible("una factura pendiente no trae monto")
         total += monto
@@ -172,6 +198,9 @@ def calcular(facturas: list[dict], *, usuario: str, cuenta: dict, hoy: date,
         # Solo se cuentan las que TRAEN fecha: una sin fecha no se declara vencida.
         "facturas_vencidas": sum(1 for v in vencimientos if v < hoy),
     }
+    if con_saldo:
+        # Una sola factura, y su total ya incluye lo anterior: se dice.
+        respuesta["incluye_saldo_anterior"] = True
     if hay_mas_paginas:
         # No se afirma el total completo: es lo que hay en la primera pagina.
         respuesta["completo"] = False

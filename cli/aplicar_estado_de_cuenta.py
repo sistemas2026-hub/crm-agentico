@@ -46,6 +46,12 @@ FRASES = [
      "debe nada. Si devuelve completo=false, el monto es lo que hay en la\n"
      "primera pagina: dilo como \"al menos\".\n\n"
      "Una factura PENDIENTE no corta el servicio por si"),
+    # 07/11/2026: una sola factura con saldo anterior -> su total ya lo incluye.
+    ('primera pagina: dilo como "al menos".',
+     'primera pagina: dilo como "al menos". Si devuelve\n'
+     'incluye_saldo_anterior=true, ese monto ya suma lo que arrastraba de\n'
+     'facturas anteriores: dilo asi ("incluye saldo anterior") y no lo\n'
+     'separes ni lo sumes otra vez.'),
 ]
 
 
@@ -71,8 +77,10 @@ def mutar(doc, herr, campos_cuenta, avisos):
     cp[HERRAMIENTA] = list(campos_cuenta)
     avisos.append("lista blanca: ficha sin 'saldo' + consultar_mi_cuenta")
     texto = rol.get("descripcion") or ""
-    for viejo, nuevo in FRASES:
-        if nuevo in texto:
+    for i, (viejo, nuevo) in enumerate(FRASES):
+        # Una frase posterior EXTIENDE a las anteriores (se inserta dentro de su
+        # texto), asi que si ya esta la ultima, las de antes tambien lo estan.
+        if any(n in texto for _, n in FRASES[i:]):
             avisos.append("frase del prompt: ya estaba corregida")
         elif viejo in texto:
             texto = texto.replace(viejo, nuevo, 1)

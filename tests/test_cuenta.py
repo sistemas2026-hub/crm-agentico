@@ -124,8 +124,8 @@ afirmar(r.get("disponible") is True and r["monto_pendiente"] == "110000.00",
 afirmar(r["facturas_pendientes"] == 2, "cuenta las facturas")
 afirmar(r["vencimiento_mas_antiguo"] == "2026-10-01", "la mas antigua es la de octubre")
 afirmar(r["facturas_vencidas"] == 1, "una ya vencio a hoy (7/11), la de diciembre no")
-afirmar(C.monto_de({"total": "60000.00", "saldo": "15000.00"}, "total", "saldo") == C.Decimal("15000.00"),
-        "una factura con saldo parcial cuenta su saldo, no su total")
+afirmar(C.monto_de({"total": "450.00", "saldo": "150.00"}, "total") == C.Decimal("450.00"),
+        "una factura con saldo anterior cuenta su TOTAL (que ya lo incluye), no el saldo")
 
 print("\n§2  EL MODELO NO PASA IDENTIFICADOR")
 afirmar(p.pedidos[0] == ("consultar_mi_servicio", {"id_servicio": "5832"}),
@@ -163,6 +163,30 @@ afirmar(r["disponible"] is False and "monto_pendiente" not in r,
 p = Proveedor(ficha(), {"results": [factura("1000.00"), {"id_factura": 2, "total": None, "saldo": ""}]})
 r = correr(p)
 afirmar(r["disponible"] is False, "una factura sin monto no es una factura de cero")
+
+print("\n§3b  SALDO ANTERIOR: el total ya lo incluye (factura de ejemplo de WispHub: 300 + 150 = 450)")
+p = Proveedor(ficha(), {"results": [factura("450.00", saldo="150.00")]})
+r = correr(p)
+afirmar(r.get("disponible") is True and r["monto_pendiente"] == "450.00",
+        f"una factura con saldo 150 y total 450 se debe 450, NO 150 ({r})")
+afirmar(r.get("incluye_saldo_anterior") is True, "y dice que incluye saldo anterior")
+
+p = Proveedor(ficha(), {"results": [factura("69900.00", saldo="0.0")]})
+r = correr(p)
+afirmar(r["monto_pendiente"] == "69900.00" and "incluye_saldo_anterior" not in r,
+        "saldo 0 (el caso de Rapilink): el total, sin el aviso")
+
+p = Proveedor(ficha(), {"results": [factura("450.00", saldo="150.00"), factura("300.00", saldo="0.00")]})
+r = correr(p)
+afirmar(r["disponible"] is False and "monto_pendiente" not in r,
+        "dos facturas y una arrastra saldo: NO se suma (contaria el dinero dos veces)")
+
+p = Proveedor(ficha(), {"results": [factura("300.00", saldo="0.00"), factura("300.00", saldo="0.00")]})
+r = correr(p)
+afirmar(r["monto_pendiente"] == "600.00", "dos facturas sin saldo anterior: se suman normal")
+
+p = Proveedor(ficha(), {"results": [factura("300.00", saldo="abc"), factura("300.00")]})
+afirmar(correr(p)["disponible"] is False, "un saldo ilegible se toma como que arrastra: no se suma")
 
 print("\n§4  'NO SE PUDO' NO ES 'NO DEBE NADA'")
 p = Proveedor(ficha(), {"results": []})
