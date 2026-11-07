@@ -7,8 +7,11 @@ import hashlib
 import json
 import logging
 from functools import wraps
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, OperationalError, transaction
+from django.http import Http404
+from rest_framework.exceptions import APIException
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -54,6 +57,24 @@ SIN_COPIA = {
     "detalle": ("La operación se aplicó. No se pudo guardar la copia de la "
                 "respuesta, así que este reintento no trae el detalle."),
 }
+
+
+#  LO QUE RECIBE QUIEN REINTENTA UNA CLAVE QUE REVENTO A MEDIO CAMINO.
+#  No dice "fallo": dice que no se sabe, que es lo unico cierto. Lo mismo que
+#  CLAUDE.md §12 ya declara para una llamada externa cuya respuesta se perdio.
+EFECTO_INCIERTO = {
+    "error": "EFECTO_INCIERTO",
+    "detalle": ("El intento anterior con esta misma clave falló después de "
+                "empezar. Puede haberse aplicado. Revisá antes de repetirlo: "
+                "si hace falta rehacerlo, cambiá algún dato para que sea una "
+                "operación nueva."),
+}
+
+#  LAS QUE SIGNIFICAN «la peticion no pasa», no «se rompio a mitad de camino».
+#  APIException cubre ValidationError, PermissionDenied, NotAuthenticated,
+#  Throttled y las demas de DRF; Http404 y PermissionDenied de Django entran
+#  por separado porque no heredan de ella.
+_LA_VISTA_RECHAZO = (APIException, Http404, DjangoPermissionDenied)
 
 
 class _Encoder(DjangoJSONEncoder):
@@ -210,9 +231,59 @@ def manejar_idempotencia(vista_func):
         # 2. Ejecutar la vista de negocio
         try:
             response = vista_func(view_instance, request, *args, **kwargs)
-        except Exception:
-            # Si la vista lanza excepción no capturada, marcar como fallida y relanzar
+        except _LA_VISTA_RECHAZO:
+            #  LA VISTA DIJO QUE NO, Y LO DIJO ANTES DE HACER NADA.
+            #
+            #  Http404, ValidationError, PermissionDenied y las demas de DRF
+            #  salen de validar la peticion: el efecto no ocurrio, asi que la
+            #  clave tiene que quedar libre para que el reintento --con la
+            #  misma clave, desde la app, que las deriva de ids locales y no
+            #  del cuerpo-- vuelva a intentar. Se borra, como siempre.
             MutacionIdempotente.objects.filter(pk=mutacion.pk).delete()
+            raise
+        except Exception as exc:                                 # noqa: BLE001
+            #  REVENTO ALGO QUE NADIE PREVIO, Y ESO NO SIGNIFICA QUE NO PASO
+            #  NADA  --  06/11/2026, auditoria de frontera, medido.
+            #
+            #  Hasta hoy esta rama tambien borraba la fila. El escenario que
+            #  eso rompe es el mismo que acaba de costar este arreglo: la
+            #  orden ya creada (`crear_orden` commitea) y el aviso ya en el
+            #  telefono (`asignar` lo manda por on_commit), reventando
+            #  despues al armar la respuesta. Borrada la fila, el reintento
+            #  con la MISMA clave no encontraba nada que repetir y creaba una
+            #  SEGUNDA orden con un SEGUNDO aviso. Medido: `ordenes = 2`,
+            #  `numeros = [2, 1]`, una sola Idempotency-Key.
+            #
+            #  No hay forma de saber desde aca si el efecto ocurrio, y entre
+            #  las dos equivocaciones posibles no son equivalentes: repetir
+            #  una visita real al cliente es peor que negar un reintento.
+            #  CLAUDE.md §12 -- una mutacion externa se ejecuta UNA vez --
+            #  manda elegir negar. La fila queda COMPLETADA con un cuerpo que
+            #  lo dice, y con 409: quien reintenta recibe una respuesta
+            #  determinista que lo nombra, en vez de una segunda orden o de
+            #  un 409 «se esta procesando» que no termina nunca.
+            #
+            #  Para volver a intentar de verdad hay otra puerta y es la
+            #  correcta: cambiar el cuerpo cambia la clave (ver
+            #  `claveDeDespacho`), que es otra operacion y merece otra fila.
+            logger.warning(
+                "idempotencia: la vista revento, la clave se niega por si "
+                "hubo efecto (endpoint=%s clave=%s error=%s)",
+                endpoint, mutacion.pk, type(exc).__name__, exc_info=True)
+            try:
+                with transaction.atomic():
+                    MutacionIdempotente.objects.filter(pk=mutacion.pk).update(
+                        estado=MutacionIdempotente.COMPLETADA,
+                        status_code=status.HTTP_409_CONFLICT,
+                        respuesta_json=EFECTO_INCIERTO,
+                    )
+            except Exception:                                    # noqa: BLE001
+                #  Si ni eso se puede, la fila queda 'procesando' y la clave
+                #  da 409 igual. El resultado para quien reintenta es el
+                #  mismo; lo que se pierde es el motivo.
+                logger.warning(
+                    "idempotencia: ademas quedo sin completar (clave=%s)",
+                    mutacion.pk, exc_info=True)
             raise
 
         # 3. Almacenar resultado completado

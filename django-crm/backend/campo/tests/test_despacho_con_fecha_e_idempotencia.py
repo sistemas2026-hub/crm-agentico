@@ -260,3 +260,107 @@ def test_un_campo_raro_no_se_lleva_el_cuerpo_entero(supervisor, version_a):
     assert guardado is not None, "se descarto el cuerpo entero por un campo"
     assert guardado["orden"]["numero"] == 77
     assert guardado["orden"]["raro"], "el campo raro quedo vacio"
+
+
+# ==========================================================================
+#  LA VISTA REVIENTA A MEDIO CAMINO  --  F2 de la auditoría del 06/11/2026
+#
+#  El hermano del defecto de arriba, dos líneas más arriba en el mismo
+#  decorador: el paso 2 BORRABA la fila ante cualquier excepción, y el
+#  reintento con la misma clave creaba una SEGUNDA orden con un SEGUNDO aviso.
+#  Medido por el auditor: `ordenes = 2`, `numeros = [2, 1]`, una sola clave.
+#
+#  Los dos pasos sostenían supuestos opuestos sobre el mismo hecho: el 3 dice
+#  «ya hubo efecto, nunca relanzar»; el 2 decía «reventó, no pasó nada».
+# ==========================================================================
+
+def _revienta_al_responder(monkeypatch):
+    """La orden ya está creada y el aviso ya salió; truena al armar la
+    respuesta. Es exactamente dónde vivía el TypeError de los datetime."""
+    from campo import despacho_views
+
+    def bomba(*a, **k):
+        raise RuntimeError("revento al armar la respuesta")
+
+    monkeypatch.setattr(despacho_views, "OrdenTrabajoDetailSerializer", bomba)
+
+
+def test_el_reintento_no_crea_una_segunda_visita(supervisor, version_a, org_a,
+                                                 monkeypatch):
+    """EL DEFECTO: dos órdenes y dos avisos con una sola Idempotency-Key."""
+    cli, _ = supervisor
+    clave = "despacho:caso-8:hhh"
+
+    _revienta_al_responder(monkeypatch)
+    with pytest.raises(RuntimeError):
+        despachar(cli, version_a, clave, programada_para=CUANDO)
+    assert OrdenTrabajo.objects.filter(org=org_a).count() == 1
+
+    #  La vista vuelve a andar: es el reintento de quien vio el error.
+    monkeypatch.undo()
+    segunda = despachar(cli, version_a, clave, programada_para=CUANDO)
+
+    assert OrdenTrabajo.objects.filter(org=org_a).count() == 1, (
+        "el reintento creó una SEGUNDA visita con la misma clave")
+
+
+def test_el_reintento_dice_que_el_efecto_es_incierto(supervisor, version_a,
+                                                     org_a, monkeypatch):
+    """
+    No alcanza con no duplicar: quien reintenta tiene que entender por qué no
+    le llegó su orden. Un 409 mudo manda a crear una visita a mano -- que es
+    el duplicado, por otra puerta.
+    """
+    cli, _ = supervisor
+    clave = "despacho:caso-9:iii"
+
+    _revienta_al_responder(monkeypatch)
+    with pytest.raises(RuntimeError):
+        despachar(cli, version_a, clave, programada_para=CUANDO)
+    monkeypatch.undo()
+
+    segunda = despachar(cli, version_a, clave, programada_para=CUANDO)
+    assert segunda.status_code == 409, segunda.status_code
+    assert segunda.content, "cero bytes: el cliente lo lee como servidor roto"
+    assert segunda.json().get("error") == "EFECTO_INCIERTO", segunda.json()
+    assert "Revisá" in segunda.json().get("detalle", ""), "no dice qué hacer"
+
+
+def test_la_clave_no_queda_en_procesando(supervisor, version_a, monkeypatch):
+    """
+    Dejarla en PROCESANDO también evita el duplicado, pero con el 409 ambiguo
+    de «se está procesando»: una operación en curso y una abandonada se leen
+    igual, y nadie la va a terminar nunca.
+    """
+    cli, _ = supervisor
+    clave = "despacho:caso-10:jjj"
+
+    _revienta_al_responder(monkeypatch)
+    with pytest.raises(RuntimeError):
+        despachar(cli, version_a, clave, programada_para=CUANDO)
+
+    fila = MutacionIdempotente.objects.get(idempotency_key=clave)
+    assert fila.estado == MutacionIdempotente.COMPLETADA, fila.estado
+
+
+def test_una_peticion_rechazada_deja_la_clave_libre(supervisor, org_a):
+    """
+    EL CONTROL, y es la mitad que no se puede romper al arreglar la otra.
+
+    Un 404 --una plantilla que no existe-- sale de validar: no hubo efecto, y
+    la clave tiene que quedar libre. La app de campo deriva sus claves de ids
+    locales, no del cuerpo, así que reintenta con la MISMA clave; negarle ese
+    reintento dejaría trabado un trabajo que nunca se hizo.
+    """
+    import uuid
+
+    cli, _ = supervisor
+    clave = "despacho:caso-11:kkk"
+
+    class Falsa:
+        id = uuid.uuid4()
+
+    primera = despachar(cli, Falsa, clave, programada_para=CUANDO)
+    assert primera.status_code == 404, primera.status_code
+    assert not MutacionIdempotente.objects.filter(
+        idempotency_key=clave).exists(), "la clave quedó tomada sin efecto"
