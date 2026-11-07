@@ -221,7 +221,11 @@ def test_el_cierre_no_repite_el_reporte_que_ya_escribio_el_tecnico(
     corto = texto_de_la_revision(revision)
     #  La frase que su equipo ya reconoce, no una inventada.
     assert corto.startswith("SE VALIDA TICKET")
-    assert "checklist ok" in corto and "fotos sin datos" in corto
+    #  «no se pudo verificar», no «sin datos» (07/11/2026). El usuario leyo
+    #  «fotos sin datos» en su propia validacion: en el checklist se lee bien,
+    #  en fotos suena a que la foto no traia metadatos, y lo que paso es que la
+    #  inspeccion no pudo concluir. Ver test_los_dos_tickets_dicen_lo_mismo.
+    assert "checklist ok" in corto and "fotos no se pudo verificar" in corto
 
     with mock.patch("requests.post", return_value=_Respuesta()) as post:
         cierre_en_isp.cerrar_ticket_al_validar(orden, admin_profile,

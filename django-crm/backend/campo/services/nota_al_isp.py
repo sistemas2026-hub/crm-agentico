@@ -463,7 +463,17 @@ def texto_de_la_revision(foto) -> str:
     if not isinstance(puntos, list) or not puntos:
         return ""
 
-    como = {True: "ok", False: "no cumple", None: "sin datos"}
+    #  «SIN DATOS» NO DICE NADA  --  07/11/2026
+    #
+    #  El usuario, leyendo su propia validacion en el ticket: «fotos sin
+    #  datos». En el checklist se lee bien; en fotos suena a que la foto no
+    #  traia metadatos, y lo que paso es otra cosa -- la inspeccion no pudo
+    #  concluir, porque una foto quedo pidiendo atencion.
+    #
+    #  «no se pudo verificar» es verdad para los cuatro puntos y no inventa
+    #  detalle. Quien lea el ticket en seis meses sabe que ese punto quedo
+    #  abierto, que es justo lo que «sin datos» escondia.
+    como = {True: "ok", False: "no cumple", None: "no se pudo verificar"}
     partes = []
     for p in puntos:
         if not isinstance(p, dict):

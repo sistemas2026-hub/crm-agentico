@@ -89,8 +89,61 @@ def _resumen(orden) -> str:
         partes.append(f"{cuantas} evidencia{'s' if cuantas != 1 else ''}")
 
     partes.append(f"OT #{orden.numero}")
+
+    #  Y QUE SE VALIDO  --  07/11/2026
+    #
+    #  El usuario cerro una orden y comparo los dos tickets. En WispHub quedo
+    #  «SE VALIDA TICKET» con los puntos revisados; en Dexter, solo «Campo: se
+    #  tensiono cable · Tecnico: ... · 4 evidencias».
+    #  El mismo acto, dos historias: quien abriera el ticket en Dexter no se
+    #  enteraba de que alguien habia revisado, ni de que miro.
+    #
+    #  VA AL FINAL Y SOLO SI ENTRA: lo primero sigue siendo lo que el tecnico
+    #  hizo, que es lo que el ticket no tenia.
+    linea = _lo_que_se_valido(orden)
     texto = " · ".join(partes)
+    if linea and len(texto) + len(linea) + 3 <= MAX_NOTA:
+        texto = texto + " · " + linea
     return texto if len(texto) <= MAX_NOTA else texto[: MAX_NOTA - 1] + "…"
+
+
+def _lo_que_se_valido(orden) -> str:
+    """La revision en una linea, o `''` si no hubo.
+
+    DE DONDE SALE. De la FOTO que `revision_del_cierre.guardar_foto` dejo en
+    la bitacora al aprobar, no de recalcular la revision: despues de aprobada
+    ya no se revisa, y recalcularla diria otra cosa -- es el mismo motivo por
+    el que esa foto existe. Si no hay foto (una orden cerrada sin pasar por la
+    revision) no se escribe nada: mejor callar que afirmar que alguien reviso.
+
+    SE REUSA `texto_de_la_revision`, el mismo que va al ISP, para que los dos
+    tickets digan lo mismo. Escribir aca una segunda version del texto es
+    garantizar que dentro de un mes digan cosas distintas otra vez.
+
+    SIN LA FRASE «SE VALIDA TICKET», que es la que el equipo reconoce EN
+    WISPHUB y alli va sola en su renglon. Aca la nota es un renglon de
+    bitacora, no la respuesta del ticket.
+    """
+    try:
+        from campo.models import EventoTrabajo
+        from campo.revision_del_cierre import FOTO
+        from campo.services.nota_al_isp import texto_de_la_revision
+
+        ev = (EventoTrabajo.objects
+              .filter(orden=orden, tipo=FOTO)
+              .order_by("-created_at").first())
+        completo = texto_de_la_revision((ev.datos or {}) if ev else None)
+    except Exception as e:                                       # noqa: BLE001
+        #  Por tipo, sin `str(e)`: el mensaje puede traer datos de la fila. Y
+        #  sin levantar: una nota incompleta no puede impedir un cierre.
+        logger.warning("Campo: no se pudo leer la revision (%s)",
+                       type(e).__name__)
+        return ""
+    if not completo:
+        return ""
+    #  `texto_de_la_revision` devuelve «SE VALIDA TICKET\nRevision: ...».
+    partes_t = completo.split("\n", 1)
+    return (partes_t[1] if len(partes_t) > 1 else partes_t[0]).strip()
 
 
 def devolver(orden, profile=None) -> dict:
