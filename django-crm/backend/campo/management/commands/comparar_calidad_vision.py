@@ -163,12 +163,20 @@ class Command(BaseCommand):
         #  Con `--pie` se prueba el texto candidato contra una foto REAL
         #  antes de escribirlo en la plantilla, que es donde empieza a
         #  afectar a todas las ordenes nuevas.
-        pie = pie_propio.strip() or IV.que_tenia_que_mostrar(evidencia)
+        #  POR EL MISMO ENVOLTORIO QUE PRODUCCION. Antes esto reemplazaba
+        #  el pie entero y perdia el prefijo "Esta foto tenia que mostrar:
+        #  <titulo>." -- que es lo que dispara las reglas 7 y 12, la de
+        #  MUESTRA: entre ellas. El comando podia aprobar un texto que al
+        #  guardarlo se comportaba distinto.
+        pie = IV.que_tenia_que_mostrar(evidencia, pie_propio)
         base, cabeceras = IV._motor()
 
         self.stdout.write(f"\n  evidencia : {evidencia.id}")
         self.stdout.write(f"  requisito : {evidencia.requisito_id}")
         self.stdout.write(f"  original  : {len(contenido) // 1024} KB")
+        #  SE IMPRIME EL PIE ARMADO, no el texto que se escribio. Es lo que
+        #  de verdad viaja, y la diferencia entre los dos fue justamente el
+        #  defecto del 06/11/2026.
         self.stdout.write(f"  se pidio  : {pie or '(la plantilla no lo dice)'}")
         self.stdout.write("")
 

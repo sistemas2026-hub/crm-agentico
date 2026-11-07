@@ -126,7 +126,7 @@ def se_puede_mirar(contenido: bytes) -> str:
     return ""
 
 
-def que_tenia_que_mostrar(evidencia) -> str:
+def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
     """El texto que la plantilla declara para ESTE requisito, o "".
 
     Sale de `evidencias[].instrucciones` del esquema de la version del tipo de
@@ -139,7 +139,21 @@ def que_tenia_que_mostrar(evidencia) -> str:
     for e in esquema.get("evidencias") or []:
         if not isinstance(e, dict) or e.get("id") != evidencia.requisito_id:
             continue
-        instrucciones = str(e.get("instrucciones") or "").strip()
+        #  `instrucciones_propias` SOLO reemplaza el texto de la plantilla,
+        #  nunca el envoltorio  --  06/11/2026
+        #
+        #  Existe para poder PROBAR una redaccion antes de guardarla. Y entra
+        #  aca, y no en quien llama, porque el prefijo "Esta foto tenia que
+        #  mostrar: <titulo>." es portante: las reglas 7 y 12 de
+        #  `INSTRUCCION_EVIDENCIA` disparan solo "si te dijeron que tenia que
+        #  mostrar", y la linea MUESTRA: es una de ellas.
+        #
+        #  La primera version del comando de prueba reemplazaba el pie
+        #  COMPLETO. Probaba un prompt sin prefijo y guardaba uno con prefijo:
+        #  podia decir que un texto funciona y que al guardarlo cambiara el
+        #  veredicto. Un instrumento que mide otro camino que el que corre.
+        instrucciones = (instrucciones_propias.strip()
+                         or str(e.get("instrucciones") or "").strip())
         titulo = str(e.get("titulo") or "").strip()
         if instrucciones:
             return (f"Esta foto tenia que mostrar: {titulo or evidencia.requisito_id}. "
