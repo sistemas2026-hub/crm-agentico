@@ -1,4 +1,19 @@
 <script>
+  import { codigoDesde } from '$lib/components/manual/entrenar.js';
+
+  /**
+   * Guarda derivando el código del nombre cuando nadie lo escribió.
+   *
+   * No valida ni decide nada más: `crearHabilidad` sigue siendo quien habla
+   * con el servidor y maneja el error. Esto solo le saca a la persona un
+   * campo que no tiene por qué inventar.
+   */
+  function crearConCodigo() {
+    if (!(borrador.codigo || '').trim() && (borrador.nombre || '').trim()) {
+      borrador.codigo = codigoDesde(borrador.nombre);
+    }
+    return crearHabilidad();
+  }
   /**
    * Habilidades: procedimientos que un agente carga cuando le hacen falta.
    * Ver nucleo/habilidades/catalogo.py.
@@ -343,19 +358,34 @@
 
     <!-- === CREAR A MANO =========================================== -->
     <section class="v2-card" style="padding:16px 18px">
-      <div class="v2-label" style="margin-bottom:10px">Escribir un procedimiento</div>
+      <div class="v2-label" style="margin-bottom:10px">Enseñarle algo</div>
+      <!-- EL CODIGO NO SE PIDE MAS (06/11/2026). El usuario: «para que el
+           entrenamiento sea más fácil para cualquier persona». Pedirle a
+           alguien de operaciones que invente un «HAB-RECLAMO-DUPLICADO»
+           antes de poder escribir lo que sabe es la barrera, no un dato.
+
+           `codigoDesde` lo deriva del nombre y ya existía: la usa el botón
+           «Corregir» desde el 02/11, y esta pantalla la ignoraba. Eran dos
+           formas distintas de hacer lo mismo, y la difícil era la que estaba
+           a la vista. Se sigue pudiendo escribir uno a mano, plegado, para
+           quien quiera elegirlo. -->
       <div style="display:flex;flex-direction:column;gap:8px">
-        <input class="v2-input" placeholder="Código (ej: HAB-RECLAMO-DUPLICADO)"
-          bind:value={borrador.codigo} />
-        <input class="v2-input" placeholder="Nombre" bind:value={borrador.nombre} />
+        <input class="v2-input" placeholder="¿Qué tiene que saber hacer? (ej: Reclamo por cobro duplicado)"
+          bind:value={borrador.nombre} />
         <textarea class="v2-input" rows="2"
-          placeholder="Cuándo usarla — la condición que dispara el procedimiento"
+          placeholder="¿Cuándo lo usa? — qué le tiene que decir el cliente para que aplique"
           bind:value={borrador.cuando_usarla}></textarea>
         <textarea class="v2-input" rows="5"
-          placeholder="Pasos, numerados: 1. ... 2. ..."
+          placeholder="¿Qué tiene que hacer, paso por paso?&#10;1. Pedir el número de factura&#10;2. Verificar en el sistema&#10;3. Si está duplicado, derivar a facturación"
           bind:value={borrador.pasos}></textarea>
+        <details style="font-size:12px">
+          <summary class="v2-muted" style="cursor:pointer">Elegir el código a mano</summary>
+          <input class="v2-input" style="margin-top:6px"
+            placeholder={borrador.nombre ? codigoDesde(borrador.nombre) : 'Se arma solo con el nombre'}
+            bind:value={borrador.codigo} />
+        </details>
         <button class="v2-btn v2-btn-primary" style="align-self:flex-start"
-          onclick={crearHabilidad} disabled={creando}>
+          onclick={crearConCodigo} disabled={creando}>
           {creando ? 'Guardando…' : 'Guardar como propuesta'}
         </button>
       </div>
