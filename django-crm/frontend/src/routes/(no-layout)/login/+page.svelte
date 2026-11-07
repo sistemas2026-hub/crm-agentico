@@ -24,7 +24,19 @@
     return async ({ result, update }) => {
       isSigningIn = false;
       if (result?.type === 'failure') {
-        passwordError = result.data?.error || 'Correo o contraseña incorrectos.';
+        //  EL RESPALDO NO ACUSA A LA CONTRASEÑA  --  06/11/2026. Decía
+        //  «Correo o contraseña incorrectos» para cualquier fallo sin
+        //  mensaje, que es la misma mentira que el servidor ya dejó de
+        //  decir: con el backend lento, mandaba a probar claves correctas.
+        //  Acá no se sabe nada del motivo, así que no se inventa uno.
+        passwordError = result.data?.error ||
+          'No se pudo iniciar sesión. Probá de nuevo.';
+      } else if (result?.type === 'error') {
+        //  Ni siquiera llegó una respuesta de la acción: la red del
+        //  navegador. Antes esto caía en el `else` y la pantalla se quedaba
+        //  sin decir nada, con el botón vuelto a su estado normal.
+        passwordError =
+          'No pudimos contactar al servidor. Revisá tu conexión y probá de nuevo.';
       } else {
         // 'success' here is the server redirecting to /org; 'redirect' if
         // SvelteKit already followed it. Either way there is nothing local

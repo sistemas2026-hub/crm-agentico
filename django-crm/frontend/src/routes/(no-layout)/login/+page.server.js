@@ -216,6 +216,72 @@ async function generateOAuthUrl(cookies, destino) {
   return { google_url: google_login_url };
 }
 
+/**
+ * POR QUE NO ENTRO: el servidor lo rechazo, o nunca lo contesto.
+ *
+ * EL DEFECTO  --  06/11/2026, medido contra produccion. El `catch` de abajo
+ * decia esto para TODO:
+ *
+ *     error.response?.data?.error || 'Correo o contraseña incorrectos'
+ *
+ * Un timeout, un 500, un DNS caido y una clave mal escrita salian con la
+ * MISMA frase. El usuario quedo diez minutos probando contrasenas correctas
+ * mientras el backend tardaba de mas: tres ingresos seguidos midieron 10,7 s,
+ * 3,2 s y 1,7 s contra un plazo de 10 s, asi que el fallo era intermitente y
+ * siempre se explicaba por el lado equivocado.
+ *
+ * Lo que separa los casos es si el servidor CONTESTO. Sin `error.response` no
+ * hubo respuesta: no se sabe nada de la contrasena, y decir que esta mal es
+ * inventar. Con respuesta, el 401 es el unico que habla de credenciales; un
+ * 5xx es del servidor y tambien hay que decirlo asi, porque reintentar a los
+ * dos segundos sirve y cambiar la contrasena no.
+ *
+ * Lo que NO cambia: no se nombra si fallo el correo o la contrasena. Eso le
+ * confirmaria a cualquiera que ese correo tiene cuenta.
+ *
+ * @param {any} error
+ * @returns {{ estado: number, mensaje: string }}
+ */
+function porQueNoEntro(error) {
+  const respuesta = error?.response;
+
+  //  NUNCA LLEGO. Timeout, conexion rechazada, DNS: el servidor no dijo nada
+  //  sobre estas credenciales. 503 y no 400: no es un pedido mal hecho.
+  if (!respuesta) {
+    return {
+      estado: 503,
+      mensaje: 'No pudimos contactar al servidor. Esperá unos segundos y ' +
+        'probá de nuevo: tus datos pueden estar bien.'
+    };
+  }
+
+  const codigo = respuesta.status;
+
+  //  El servidor se rompio. Repetir sirve; cambiar la contrasena no.
+  if (codigo >= 500) {
+    return {
+      estado: 502,
+      mensaje: 'El servidor tuvo un problema al procesar el ingreso. No es ' +
+        'tu contraseña. Probá de nuevo en un momento.'
+    };
+  }
+
+  //  El unico codigo que de verdad habla de las credenciales.
+  if (codigo === 401) {
+    return {
+      estado: 401,
+      mensaje: respuesta.data?.error || 'Correo o contraseña incorrectos'
+    };
+  }
+
+  //  Un 4xx cualquiera: lo que diga el backend, que sabe mas que esto.
+  return {
+    estado: codigo === 429 ? 429 : 400,
+    mensaje: respuesta.data?.error ||
+      'No se pudo iniciar sesión. Revisá los datos e intentá de nuevo.'
+  };
+}
+
 /** @type {import('@sveltejs/kit').Actions} */
 export const actions = {
   // Aca vivia la accion `magicLink` (pedir un enlace de acceso por correo). Se
@@ -241,7 +307,12 @@ export const actions = {
       const response = await axios.post(
         `${apiUrl}/api/auth/login/`,
         { email, password },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+        //  EL PLAZO, medido el 06/11/2026: tres ingresos seguidos tardaron
+        //  10,7 s, 3,2 s y 1,7 s. Con 10 s el primero se cortaba y la
+        //  pantalla culpaba a la contrasena. 30 s cubre el pico sin dejar a
+        //  nadie mirando un boton girando para siempre, y si se pasa el
+        //  mensaje ahora dice que fue el servidor.
+        { headers: { 'Content-Type': 'application/json' }, timeout: 30000 }
       );
 
       const { access_token, refresh_token } = response.data;
@@ -261,8 +332,8 @@ export const actions = {
         maxAge: 60 * 60 * 24 * 365 // 1 year
       });
     } catch (/** @type {any} */ error) {
-      const errorMessage = error.response?.data?.error || 'Correo o contraseña incorrectos';
-      return fail(error.response?.status === 401 ? 401 : 400, { error: errorMessage });
+      const { estado, mensaje } = porQueNoEntro(error);
+      return fail(estado, { error: mensaje });
     }
 
     throw redirect(307, `/org${comoParametro(url.searchParams.get('redirect'))}`);
