@@ -69,6 +69,14 @@ class Command(BaseCommand):
         parser.add_argument("--evidencia", default="")
         parser.add_argument("--ultima-con-atencion", action="store_true")
         parser.add_argument("--listar", action="store_true")
+        parser.add_argument(
+            "--pie", default="",
+            help="Probar OTRA instruccion en vez de la de la plantilla. "
+                 "Sirve para afinar el texto antes de guardarlo.")
+        parser.add_argument(
+            "--solo-una", action="store_true",
+            help="Una sola pasada, con la calidad de hoy. Para probar "
+                 "instrucciones sin pagar dos llamadas al modelo.")
 
     def handle(self, *args, **options):
         from django.core.exceptions import ValidationError
@@ -119,10 +127,11 @@ class Command(BaseCommand):
             raise CommandError(f"no existe la evidencia {evidencia_id!r} en esta "
                                f"empresa")
 
-        self._comparar(org, evidencia)
+        self._comparar(org, evidencia, pie_propio=options["pie"],
+                       solo_una=options["solo_una"])
 
     # ------------------------------------------------------------------
-    def _comparar(self, org, evidencia):
+    def _comparar(self, org, evidencia, *, pie_propio="", solo_una=False):
         import requests
 
         from campo import inspeccion_visual as IV
@@ -143,7 +152,18 @@ class Command(BaseCommand):
         if motivo:
             raise CommandError(motivo)
 
-        pie = IV.que_tenia_que_mostrar(evidencia)
+        #  `--pie` PROBAR UNA INSTRUCCION ANTES DE GUARDARLA (06/11/2026).
+        #
+        #  El usuario intento afinar las instrucciones pegandolas en el chat
+        #  de /asistente, y el agente conversacional le contesto como si
+        #  fuera un cliente preguntando por su internet: ese chat es otro
+        #  camino, con otras instrucciones. El analizador de evidencias solo
+        #  se alcanza por aca.
+        #
+        #  Con `--pie` se prueba el texto candidato contra una foto REAL
+        #  antes de escribirlo en la plantilla, que es donde empieza a
+        #  afectar a todas las ordenes nuevas.
+        pie = pie_propio.strip() or IV.que_tenia_que_mostrar(evidencia)
         base, cabeceras = IV._motor()
 
         self.stdout.write(f"\n  evidencia : {evidencia.id}")
@@ -152,8 +172,13 @@ class Command(BaseCommand):
         self.stdout.write(f"  se pidio  : {pie or '(la plantilla no lo dice)'}")
         self.stdout.write("")
 
+        if pie_propio.strip():
+            self.stdout.write(self.style.WARNING(
+                "  (probando una instruccion distinta de la de la plantilla)" + '\n'))
+
         textos = {}
-        for etiqueta, lado, calidad in VARIANTES:
+        variantes = VARIANTES[:1] if solo_una else VARIANTES
+        for etiqueta, lado, calidad in variantes:
             datos = {"pie": pie}
             if lado:
                 datos["lado"] = str(lado)
@@ -205,6 +230,15 @@ class Command(BaseCommand):
         def muestra(texto: str) -> str:
             return {True: "si", False: "no", None: "no se sabe"}[
                 muestra_lo_pedido(texto)]
+
+        if solo_una:
+            #  Sin la segunda no hay nada que comparar: se dice el juicio y
+            #  nada mas. Imprimir un "veredicto" de una sola medicion seria
+            #  darle forma de comparacion a algo que no lo es.
+            self.stdout.write(self.style.MIGRATE_HEADING("  ===== JUICIO ====="))
+            self.stdout.write(
+                f"  MUESTRA lo que se pidio: {muestra(textos.get('como hoy', ''))}")
+            return
 
         hoy = muestra(textos.get("como hoy", ""))
         alta = muestra(textos.get("sin degradar", ""))
