@@ -338,6 +338,51 @@ def _potencia_de_la_foto_al_salir(orden):
         return None
 
 
+def _lo_que_el_tecnico_PODRIA_escribir(orden, campo_id):
+    """`(piso, techo)` de ese campo segun la plantilla, o `None`.
+
+    NO ES EL RANGO SANO: es `min`/`max`, lo que el formulario acepta. Rapilink
+    declaro -60 a -8. Sirve para otra cosa y por eso se lee aparte.
+    """
+    esquema = getattr(orden.tipo_trabajo_version, "esquema", None) or {}
+    campo = next((c for c in (esquema.get("campos") or [])
+                  if isinstance(c, dict) and c.get("id") == campo_id), None)
+    reglas = (campo or {}).get("reglas") or {}
+    mn, mx = _a_numero(reglas.get("min")), _a_numero(reglas.get("max"))
+    if mn is None or mx is None:
+        return None
+    return min(mn, mx), max(mn, mx)
+
+
+def _lectura_creible(valor, limites):
+    """Si ese numero puede ser la medicion que se pidio.
+
+    EL MODELO LE CORRE LA COMA  --  08/11/2026
+    -------------------------------------------
+    Medido en tres ordenes seguidas (186, 198 y 204): la pantalla del medidor
+    dice -21.0 dBm y el analisis leyo -2.10 dBm, las dos veces, en los dos
+    momentos. El usuario lo confirmo mirando la foto. El tecnico escribe bien;
+    lo que falla es la lectura.
+
+    Y el punto que compara las dos cosas saltaba en TODAS las ordenes. Un «?»
+    que aparece siempre enseña a ignorarlo, que es exactamente lo que el
+    encabezado de `_potencia` dice que hay que evitar.
+
+    EL LIMITE SALE DE LA PLANTILLA, no de una constante nueva. La empresa ya
+    declaro que acepta de -60 a -8 en ese campo: un -2.10 esta fuera de lo que
+    un tecnico siquiera PODRIA escribir, asi que no es la medicion de esa
+    pantalla y no sirve para compararla. Varia por empresa y por tipo de
+    trabajo, y ya esta donde tiene que estar (CLAUDE.md §3.3).
+
+    SIN LIMITES DECLARADOS NO SE FILTRA NADA: se prefiere una comparacion de
+    mas a decidir por una empresa que no dijo nada.
+    """
+    if valor is None or limites is None:
+        return valor is not None
+    piso, techo = limites
+    return piso <= valor <= techo
+
+
 def _pieza_de_medicion(orden):
     """Lo que el Supervisor midio CONTRA EL EQUIPO para esta orden, o `None`.
 
@@ -435,6 +480,14 @@ def _potencia(orden, cierre):
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
             de_la_foto = PF.uno_solo(_texto_de_la_foto(orden, requisito))
+            #  UNA LECTURA IMPOSIBLE NO SE COMPARA, se descarta. Ver
+            #  `_lectura_creible`: no se "corrige" lo que el modelo leyo
+            #  --eso seria inventar el dato-- se deja de opinar sobre una
+            #  foto cuya lectura no se puede sostener.
+            if not _lectura_creible(de_la_foto,
+                                    _lo_que_el_tecnico_PODRIA_escribir(
+                                        orden, campo)):
+                de_la_foto = None
             if escrito is None or de_la_foto is None:
                 continue
             vistos += 1

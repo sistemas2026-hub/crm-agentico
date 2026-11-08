@@ -208,3 +208,136 @@ def test_una_DIFERENCIA_no_baja_el_veredicto_a_NO_CERRAR(org_a, user_profile):
     #  APORTE un False.
     p = next(x for x in revisar(orden)["puntos"] if x["clave"] == "potencia")
     assert p["ok"] is not False, p
+
+
+# ---------------------------------------------------------------------------
+#  EL MODELO LE CORRE LA COMA  --  08/11/2026
+#
+#  Medido en tres ordenes seguidas de produccion (186, 198 y 204): la pantalla
+#  del medidor dice -21.0 dBm y el analisis leyo -2.10 dBm, las dos veces, en
+#  los dos momentos. El usuario lo confirmo mirando la foto: el tecnico
+#  escribe bien.
+#
+#  Y este punto saltaba en TODAS las ordenes. Un «?» que aparece siempre
+#  enseña a ignorarlo -- lo dice el encabezado de `_potencia`, y estaba
+#  pasando.
+#
+#  El limite sale de la PLANTILLA (`reglas.min/max`, lo que el formulario
+#  acepta), no de una constante nueva: ya esta declarado, ya varia por
+#  empresa, y un -2.10 esta fuera de lo que un tecnico siquiera podria
+#  escribir.
+# ---------------------------------------------------------------------------
+
+def _orden_con_limites(org, numero, *, escrito, en_la_foto, limites=(-60.0, -8.0)):
+    from campo.models import (AnalisisDeEvidencia, EventoTrabajo,
+                              EvidenciaTrabajo, OrdenTrabajo, WorkType,
+                              WorkTypeVersion)
+
+    campo = {"id": "potencia_al_salir", "tipo": "decimal",
+             "titulo": "Potencia al salir", "unidad": "dBm"}
+    if limites is not None:
+        campo["reglas"] = {"min": limites[0], "max": limites[1]}
+    wt = WorkType.objects.create(org=org, codigo=f"coma{numero}",
+                                 nombre="Soporte", labor="correctivo")
+    version = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [], "evidencias": [], "campos": [campo]})
+    orden = OrdenTrabajo.objects.create(
+        org=org, numero=numero, tipo_trabajo_version=version,
+        cliente_nombre="MARIO SABANAGRANDE",
+        estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+        origen_sistema="manual", contexto={},
+        datos={"potencia_al_salir": escrito})
+    cierre = EventoTrabajo.objects.create(
+        org=org, orden=orden, tipo="cierre_campo",
+        datos={"vuelta": 1, "respuestas": {"solucion": "x"}})
+    ev = EvidenciaTrabajo.objects.create(
+        org=org, orden_trabajo=orden, requisito_id="medicion_al_salir",
+        vuelta=orden.vuelta, sha256=f"c{numero}".ljust(64, "x")[:64],
+        storage_key=f"k/c{numero}", nombre_original="m.jpg",
+        mime_type="image/jpeg", bytes=1,
+        estado_archivo=EvidenciaTrabajo.RECIBIDO)
+    AnalisisDeEvidencia.objects.create(
+        org=org, evidencia=ev, vuelta=orden.vuelta,
+        texto=f"se lee 1550 nm, {en_la_foto} dBm y 0.682 uW")
+    return orden, cierre
+
+
+def test_una_lectura_IMPOSIBLE_no_dispara_el_punto(org_a):
+    """El caso exacto de produccion: -2.10 leido, -21.0 escrito."""
+    from campo.revision_del_cierre import _potencia
+
+    orden, cierre = _orden_con_limites(org_a, 901, escrito="-21.0",
+                                       en_la_foto="-2.10")
+
+    assert _potencia(orden, cierre) is None, (
+        "el punto salto con una lectura que la plantilla ni siquiera "
+        "aceptaria como respuesta")
+
+
+def test_una_diferencia_REAL_sigue_disparando(org_a):
+    """No se apago el punto: se apago el falso positivo."""
+    from campo.revision_del_cierre import _potencia
+
+    orden, cierre = _orden_con_limites(org_a, 902, escrito="-21.0",
+                                       en_la_foto="-35.0")
+
+    p = _potencia(orden, cierre)
+    assert p is not None and p["ok"] is None, p
+    assert "-35" in p["texto"] and "-21" in p["texto"], p["texto"]
+
+
+def test_las_dos_que_COINCIDEN_siguen_dando_que_si(org_a):
+    from campo.revision_del_cierre import _potencia
+
+    orden, cierre = _orden_con_limites(org_a, 903, escrito="-21.0",
+                                       en_la_foto="-21.0")
+
+    assert _potencia(orden, cierre)["ok"] is True
+
+
+def test_SIN_limites_declarados_no_se_filtra_nada(org_a):
+    """Se prefiere una comparacion de mas a decidir por una empresa que no
+    declaro nada."""
+    from campo.revision_del_cierre import _potencia
+
+    orden, cierre = _orden_con_limites(org_a, 904, escrito="-21.0",
+                                       en_la_foto="-2.10", limites=None)
+
+    assert _potencia(orden, cierre) is not None
+
+
+def test_los_BORDES_del_rango_declarado_se_comparan(org_a):
+    """-8 y -60 son valores que el formulario acepta: no se descartan."""
+    from campo.revision_del_cierre import _potencia
+
+    orden, cierre = _orden_con_limites(org_a, 905, escrito="-21.0",
+                                       en_la_foto="-8")
+
+    assert _potencia(orden, cierre) is not None
+
+
+def test_el_rango_ESCRITO_AL_REVES_funciona_igual(org_a):
+    """En dBm el «minimo» es el mas negativo, y quien configura puede
+    cargarlo en cualquier orden. Pedirle que adivine la convencion es el
+    mismo error que `_en_rango` ya evita con su propio `min`/`max`.
+
+    Medido el 08/11/2026: sin esta guarda, la mutacion que quita el ordenado
+    sobrevive a las quince de este archivo."""
+    from campo.revision_del_cierre import _potencia
+
+    #  CON UNA LECTURA BUENA, no con una imposible. La primera version de
+    #  esta guarda uso -2.10 y la mutacion sobrevivia igual: sin ordenar, el
+    #  rango queda vacio y descarta TODO, incluido el -2.10 -- el resultado
+    #  coincidia por accidente. Lo que el desorden rompe es lo contrario:
+    #  pierde las lecturas VALIDAS.
+    orden, cierre = _orden_con_limites(org_a, 906, escrito="-35.0",
+                                       en_la_foto="-21.0",
+                                       limites=(-8.0, -60.0))   # al reves
+
+    p = _potencia(orden, cierre)
+    assert p is not None, (
+        "con el rango cargado al reves se descarto una lectura que esta "
+        "dentro de lo que la empresa acepta")
+    assert "-21" in p["texto"] and "-35" in p["texto"], p["texto"]
