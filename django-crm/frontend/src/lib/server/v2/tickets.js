@@ -239,6 +239,38 @@ export async function listTickets({ cookies }, params) {
  *
  * @param {any} response
  */
+/**
+ * Si esa respuesta del proveedor la escribio Dexter.
+ *
+ * TODO LO QUE EL MOTOR MANDA AL ISP VA FIRMADO, porque el proveedor firma
+ * cada respuesta con la cuenta de la API key y el campo del autor no se
+ * puede elegir: sin el nombre adentro del texto, el historico del ticket
+ * diria que contesto el sistema. Esa firma es la que sirve para reconocerlo.
+ *
+ * Las tres que el motor puede emitir (`nucleo/seguimiento/nota_en_el_ticket.py`):
+ *
+ *   "<nombre> (Dexter): ..."        un avance o el reporte del tecnico
+ *   "Tecnico de campo (Dexter): ..." el mismo, sin nombre
+ *   "Supervisor de Dexter: ..."      lo que decide el Supervisor
+ *
+ * SE ATA CON UNA GUARDA DEL OTRO LADO. Esta funcion vive en JavaScript y las
+ * firmas en Python, asi que nada impide cambiarlas por separado y que esto
+ * deje de esconder nada en silencio. `tests/test_la_firma_que_la_pantalla_esconde.py`
+ * afirma que toda firma que el motor puede emitir sigue entrando aca.
+ *
+ * @param {string|null|undefined} cuerpo
+ */
+function esNuestro(cuerpo) {
+  const texto = String(cuerpo ?? '').trimStart();
+  // La firma va antes del primer ':', y es una linea corta: pedir las dos
+  // cosas evita que un texto del cliente que mencione "Dexter" mas abajo se
+  // tome por nuestro.
+  const corte = texto.indexOf(':');
+  if (corte < 0 || corte > 80) return false;
+  const firma = texto.slice(0, corte);
+  return firma.endsWith('(Dexter)') || firma === 'Supervisor de Dexter';
+}
+
 function toConversation(response) {
   /** @type {any[]} */
   const entries = [];
@@ -283,6 +315,19 @@ function toConversation(response) {
   // sola conversacion, no reconstruirla saltando entre dos listas. Lo que si
   // hace falta es saber DONDE se dijo cada cosa, y para eso va 'origen'.
   for (const r of response.respuestas_externas ?? []) {
+    // EL ECO DE LO QUE ESCRIBIMOS NOSOTROS NO SE MUESTRA DOS VECES
+    // (07/11/2026). Cada avance del tecnico se escribe en los dos sistemas:
+    // una nota interna en Dexter y una respuesta en WispHub. Las dos llegan
+    // a esta lista, asi que el usuario veia cada aviso repetido:
+    //
+    //   Rapilink SAS WISPHUB  Mario Vasquez (Dexter): va en camino a la OT #198.
+    //   mario.vasquez...      Mario Vasquez: va en camino.
+    //
+    // Se esconde la del proveedor y NO se deja de escribir: el dia que
+    // WispHub rechace el envio --paso ese mismo dia, un 400 en la OT #198--
+    // la nota de Dexter es lo unico que queda, y ahi si se ve. Decision del
+    // usuario, con ese caso a la vista.
+    if (esNuestro(r.cuerpo)) continue;
     entries.push({
       id: `x-${r.id}`,
       kind: 'externo',
