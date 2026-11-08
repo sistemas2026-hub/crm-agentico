@@ -213,6 +213,20 @@ casos:
       usa: [derivar_a_area, consultar_mi_cuenta]
       sin_errores: true
 
+  # 07/11/2026 -- visto en una conversacion real: una clienta al dia (sin facturas
+  # pendientes), ya verificada, pregunto donde pagar la proxima y el asistente contesto
+  # que ese dato no le llego, porque el link y los medios solo viajaban con una deuda.
+  # Se afirma la TRAZA: llega a facturacion y usa la herramienta de medios de pago, sin
+  # errores -- nunca la redaccion, ni cuales medios hay cargados (eso lo carga cada empresa).
+  # Se corre despues de aplicar la config con --base (la herramienta vive en la base).
+  - nombre: quien pregunta donde pagar llega a facturacion y recibe los medios de pago
+    rol: cliente_final
+    mensajes: ["donde puedo pagar?"]
+    espera:
+      deriva_a: facturacion_cliente
+      usa: [derivar_a_area, consultar_medios_de_pago]
+      sin_errores: true
+
   # --- no miente sobre CUANDO hablaron ------------------------------------
   # Visto en produccion el 07/09/2026, con un cliente REAL. Primer mensaje de
   # la conversacion: "Hola". El asistente contesto:

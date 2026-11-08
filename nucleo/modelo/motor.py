@@ -2716,6 +2716,12 @@ def _despacho_de_herramienta(herramienta, argumentos: dict,
         return ejecutor_cuenta.estado_de_cuenta(
             herramienta, argumentos, tenant, variables_tenant)
 
+    #  LOS MEDIOS DE PAGO: con que puede pagar un cliente verificado. Solo por este
+    #  despacho (el del modelo): el esquema la declara no invocable por un servicio.
+    if herramienta.tipo == "interno" and herramienta.entrega_medios_de_pago:
+        return ejecutor_cuenta.medios_de_pago_de_la_empresa(
+            herramienta, argumentos, tenant, variables_tenant)
+
     #  La lectura de FLOTA. Va junto a la anterior porque las dos hablan con
     #  SmartOLT, y separadas porque contestan preguntas distintas: aquella
     #  parte de un cliente, esta no parte de nadie.

@@ -92,10 +92,12 @@ describe('la pantalla de Pagos', () => {
     expect(html).not.toContain('Sin puntos de pago</p>');
   });
 
-  it('el panel dice a quién se le da y a quién no', () => {
+  it('el panel dice a quién se le da (con deuda o preguntando dónde pagar) y a quién no', () => {
     const html = dibujar({ ajustes: VACIO, can_edit: true });
     expect(html).toContain('ya verificado');
-    expect(html).toContain('no debe nada');
+    expect(html).toContain('deba algo o no');
+    expect(html).toContain('no se pudo verificar');
+    expect(html).not.toContain('no debe nada');
   });
 
   it('quien no es administrador ve lo cargado pero ningún botón de editar', () => {

@@ -487,7 +487,8 @@ roles:
     # edita desde /agentes/flujo, no en el prompt del router.
     atiende: >-
       Plata: saldo, facturas pendientes, fecha de corte, un cobro que no
-      entiende, cuando se le vence, promesas de pago. Y dar de baja o
+      entiende, cuando se le vence, promesas de pago, donde y como pagar (puntos
+      de pago, convenios). Y dar de baja o
       cancelar el servicio contratado: eso lo lleva cartera, que es esta
       misma area
     descripcion: |
@@ -559,7 +560,12 @@ roles:
       inventes otro. Si devuelve otros_medios_de_pago
       (puntos fisicos, bancos), es una lista de textos "Nombre: como pagar":
       ofrecelos tal cual, sin cambiar ni inventar ningun numero. Si no llega,
-      no digas que existen otros medios.
+      no digas que existen otros medios. Cuando le digas cuanto debe, ofrece
+      tambien esos medios. Si el cliente ya verificado pregunta DONDE o COMO
+      puede pagar -- aunque no deba nada --, llama consultar_medios_de_pago y
+      dale lo que devuelva, tal cual. Si devuelve hay_medios_de_pago=false, dile
+      que no los tienes a mano y que un colaborador se los comparte
+      (derivar_a_area), sin inventar ninguno.
 
       Una factura PENDIENTE no corta el servicio por si
       sola: solo lo afecta a partir de la fecha de corte -- compara esa
@@ -610,7 +616,8 @@ roles:
       la clausula de permanencia de 12 meses.
     orientado_a: cliente_final
     puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
-          consultar_mi_servicio, consultar_mi_cuenta, derivar_a_area, cargar_habilidad,
+          consultar_mi_servicio, consultar_mi_cuenta, consultar_medios_de_pago, derivar_a_area,
+          cargar_habilidad,
           consultar_documentacion, reportar_comprobante_pago]
     campos_permitidos:
       # Mismo criterio que cliente_final: lista blanca minima para el tema
@@ -622,6 +629,10 @@ roles:
       consultar_mi_cuenta: [disponible, facturas_pendientes, monto_pendiente,
             vencimiento_mas_antiguo, facturas_vencidas, completo, incluye_saldo_anterior,
             link_de_pago, otros_medios_de_pago]
+      # Con que puede pagar, con o sin deuda (07/11/2026): un cliente verificado que
+      # pregunta DONDE pagar tiene derecho a la respuesta aunque no deba nada.
+      consultar_medios_de_pago: [disponible, hay_medios_de_pago, link_de_pago,
+            otros_medios_de_pago]
       # Sin 'resumen': ese campo es para el colaborador humano que va a leer
       # el caso, no para que el modelo se lo repita al cliente -- ya sabe
       # que decir por el mensaje fijo de 'comprobante_para_validar' (Fase
@@ -2960,6 +2971,30 @@ herramientas:
     inyectar_sesion:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]
+  # Con que puede pagar un cliente verificado (07/11/2026), con o sin deuda. Nace de una
+  # conversacion real: alguien sin facturas pendientes pregunto donde pagar la proxima y el
+  # asistente contesto que ese dato no le llego, porque el link y los medios solo viajaban
+  # con una deuda. No llama a ningun proveedor; lee lo que la empresa cargo en
+  # Configuracion -> Pagos. Sigue exigiendo la sesion verificada.
+  - nombre: consultar_medios_de_pago
+    tipo: interno
+    descripcion: >
+      Con que puede pagar el cliente autenticado: el link de pago y los otros
+      medios (puntos fisicos con su convenio, cuentas) que la empresa tiene
+      cargados. Sirve cuando pregunta donde o como pagar, deba algo o no. Si
+      devuelve hay_medios_de_pago=false, la empresa no cargo ninguno: no inventes
+      uno.
+    solo_lectura: true
+    roles_permitidos: [facturacion_cliente]
+    entrega_medios_de_pago: true
+    cuenta:
+      link_de_pago: LINK_DE_PAGO
+      medios_de_pago: MEDIOS_DE_PAGO
+    # Solo un cliente verificado: el id sale de la sesion, el modelo no lo toca.
+    inyectar_sesion:
+      id_servicio: id_cliente
+    inyectados_obligatorios: [id_servicio]
+
   # Lo mismo que consultar_mi_cuenta, para quien ATIENDE a un cliente (07/11/2026).
   # Ahi el id sale de la sesion verificada y el modelo no lo toca; aca lo dice el
   # colaborador, porque el no es el cliente. Por eso el esquema la ata a roles

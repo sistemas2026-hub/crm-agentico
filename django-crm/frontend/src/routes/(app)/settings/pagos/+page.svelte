@@ -18,10 +18,11 @@
    *
    * QUE PASA CON ESTO
    * -----------------
-   * No va en el prompt de ningún agente. El asistente lo recibe de la herramienta
-   * de cuenta, y solo si la persona ya está verificada y tiene algo por pagar: a
-   * quien no debe nada no se le da, y un valor mal escrito tampoco. El panel de
-   * la derecha lo dice en la pantalla para que nadie tenga que adivinarlo.
+   * No va en el prompt de ningún agente. El asistente lo recibe de dos herramientas:
+   * la de cuenta (cuando la persona debe algo) y la de medios de pago (cuando
+   * pregunta dónde o cómo pagar, deba o no). Las dos exigen que ya esté verificada,
+   * y un valor mal escrito no se entrega. El panel de la derecha lo dice en la
+   * pantalla para que nadie tenga que adivinarlo.
    *
    * VACIO NO ES UN ERROR
    * --------------------
@@ -292,11 +293,15 @@
           <dl class="pg-reglas">
             <div>
               <dt>Quién lo recibe</dt>
-              <dd>Solo un cliente ya verificado que tenga una factura pendiente.</dd>
+              <dd>
+                Un cliente ya verificado. Si tiene una factura pendiente, el asistente se
+                lo ofrece al decirle cuánto debe. Si pregunta dónde o cómo pagar, se lo da,
+                deba algo o no.
+              </dd>
             </div>
             <div>
               <dt>Quién no</dt>
-              <dd>A quien no debe nada no se le da nada, ni a quien no se pudo verificar.</dd>
+              <dd>Quien no se pudo verificar como cliente.</dd>
             </div>
             <div>
               <dt>Cómo lo dice</dt>

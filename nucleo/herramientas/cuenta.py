@@ -296,6 +296,32 @@ def medios_de_pago(herramienta, variables_tenant) -> list[str]:
     return salida
 
 
+def medios_de_pago_de_la_empresa(herramienta, argumentos, tenant, variables_tenant) -> dict:
+    """
+    Con que puede pagar un cliente: el link y los otros medios que la empresa cargo.
+
+    NO llama a ningun proveedor: lee dos variables del tenant, asi que responde aunque
+    el sistema de facturas este caido y no depende de que el cliente deba algo. Un
+    cliente verificado que pregunta DONDE pagar tiene derecho a la respuesta con o sin
+    deuda. Lo que SI exige es la sesion verificada (el id inyectado): el dato es igual
+    para todos, pero quien lo pide tiene que ser un cliente ya identificado. Sin id,
+    'no disponible' (distinto de 'la empresa no cargo ninguno').
+    """
+    if not str((argumentos or {}).get("id_servicio") or "").strip():
+        return _no_disponible("no hay un cliente verificado en la conversacion")
+    respuesta: dict = {"disponible": True}
+    enlace = link_de_pago(herramienta, variables_tenant)
+    if enlace:
+        respuesta["link_de_pago"] = enlace
+    otros = medios_de_pago(herramienta, variables_tenant)
+    if otros:
+        respuesta["otros_medios_de_pago"] = otros
+    # 'hay_medios_de_pago: false' le dice al modelo que la empresa no cargo ninguno: es
+    # una respuesta, no un error, y no hay nada que inventar.
+    respuesta["hay_medios_de_pago"] = bool(enlace or otros)
+    return respuesta
+
+
 def _hoy(config) -> date:
     """El dia de hoy EN LA ZONA DE LA EMPRESA: a las 8 pm en Bogota ya es manana en UTC."""
     from datetime import timezone

@@ -1455,6 +1455,16 @@ class Herramienta(Base):
     # pediria la cuenta de otro), el id declarado como argumento verificado y
     # requerido, y NO invocable por un servicio. Ver nucleo/herramientas/cuenta.py.
     cuenta_de_colaborador: bool = False
+    # Tipo 'interno': con QUE puede pagar un cliente -- el link y los otros medios de
+    # pago (un punto fisico con su convenio, una cuenta) --, tal como la empresa los
+    # cargo en Configuracion -> Pagos. No llama a ningun proveedor: lee dos variables
+    # de la empresa ('cuenta.link_de_pago' y 'cuenta.medios_de_pago' dicen CUALES).
+    # Existe aparte del estado de cuenta porque un cliente verificado que pregunta
+    # DONDE pagar tiene derecho a la respuesta aunque no deba nada, y porque asi
+    # funciona aunque el proveedor de facturas este caido. Sigue exigiendo la sesion
+    # verificada ('id_servicio' inyectado): lo que se protege es quien pregunta, no el
+    # dato, que es igual para todos. Ver nucleo/herramientas/cuenta.py.
+    entrega_medios_de_pago: bool = False
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
@@ -2019,6 +2029,16 @@ class Herramienta(Base):
                 f"'{self.nombre}' es irreversible y no puede ser invocable por "
                 f"un servicio: esa ruta no tiene a quien pedirle la aprobacion.")
 
+        if self.entrega_medios_de_pago:
+            nombres = [k for k in ("link_de_pago", "medios_de_pago") if (self.cuenta or {}).get(k)]
+            if (self.tipo != "interno" or self.calcula_estado_de_cuenta or not nombres
+                    or "id_servicio" not in self.inyectados_obligatorios
+                    or self.invocable_por_servicio):
+                raise ValueError(
+                    f"'{self.nombre}': los medios de pago son 'interno', no son un estado de "
+                    f"cuenta, nombran en 'cuenta' al menos 'link_de_pago' o 'medios_de_pago', "
+                    f"exigen 'id_servicio' inyectado de la sesion (solo un cliente verificado) "
+                    f"y no son invocables por un servicio.")
         if self.cuenta_de_colaborador and not self.calcula_estado_de_cuenta:
             raise ValueError(
                 f"'{self.nombre}': 'cuenta_de_colaborador' solo tiene sentido en el "
