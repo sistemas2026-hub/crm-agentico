@@ -197,26 +197,51 @@ def _evidencias_para_revisar(orden, esquema) -> list[dict]:
     llego es justamente la que hay que mirar, y si desapareciera de la lista
     el supervisor veria menos filas sin notar cual.
 
-    SOLO LA VUELTA QUE CORRE. Una orden devuelta y rehecha tiene fotos nuevas;
-    las de la vuelta anterior no dicen nada de esta. Mismo criterio que
-    `EvidenciaTrabajo.vuelta` y que `_fotos()`.
+    LA ULTIMA DE CADA REQUISITO, VENGA DE LA VUELTA QUE VENGA  --  08/11/2026
+    ------------------------------------------------------------------------
+    Decia «solo la vuelta que corre» y era una tercera regla, distinta de la
+    que usa el checklist. El usuario lo vio probando una devolucion: se le
+    pidieron al tecnico DOS fotos, las rehizo, y la revision mostro las otras
+    dos --las que nadie le pidio tocar-- como «No llego», mientras arriba
+    decia «El checklist esta completo: datos y fotos».
+
+    La regla buena ya existia en `services/validador.py`: un requisito que NO
+    se pidio rehacer se satisface con la evidencia de CUALQUIER vuelta, y uno
+    que SI se pidio exige una nueva. Aca se copia la primera mitad -- mostrar
+    la ultima que llego-- y la segunda la sigue haciendo cumplir el checklist,
+    que es quien dice «hace falta evidencia nueva, de esta vuelta».
+
+    Asi que un tecnico que no rehizo lo que le pidieron no pasa igual: lo
+    frena el punto del checklist, no una foto que desaparece de la lista.
     """
     from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
     from campo.tasks import muestra_lo_pedido
 
-    vuelta = getattr(orden, "vuelta", 1) or 1
-    #  La ULTIMA por requisito: si el tecnico la rehizo, manda la de ahora.
+    #  LA VUELTA PESA PRIMERO, Y DESPUES LA FECHA  --  08/11/2026
+    #
+    #  Lo caza `test_f8_una_foto_VIEJA_que_llega_tarde_no_gana`, que existe
+    #  desde el 06/11 por un caso real: la app ENCOLA las fotos y reintenta,
+    #  asi que una de la vuelta 1 que se reintento puede entrar al servidor
+    #  DESPUES de la de la vuelta 2. Ordenar solo por `recibida_en_servidor`
+    #  la dejaria ultima, y es justo la que el supervisor ya rechazo.
+    #
+    #  Con `vuelta` adelante se cumplen las dos cosas a la vez: la rehecha
+    #  gana siempre --aunque haya llegado antes-- y la que nadie pidio
+    #  rehacer sigue siendo la evidencia de su requisito.
     llegaron = {}
     for ev in EvidenciaTrabajo.objects.filter(
-            org=orden.org, orden_trabajo=orden,
-            vuelta=vuelta).order_by("recibida_en_servidor"):
+            org=orden.org,
+            orden_trabajo=orden).order_by("vuelta", "recibida_en_servidor"):
         llegaron[ev.requisito_id] = ev
 
     #  Lo que la IA vio, por evidencia. Una sola consulta, no una por foto.
+    #  SIN FILTRAR POR VUELTA tampoco: si la foto que se muestra es de la
+    #  vuelta anterior, su analisis tambien lo es, y filtrarlo la dejaria sin
+    #  lo que la IA vio -- que es justo la mitad util de esta lista.
     visto = {}
     for a in AnalisisDeEvidencia.objects.filter(
-            org=orden.org, evidencia__orden_trabajo=orden,
-            vuelta=vuelta).order_by("created_at"):
+            org=orden.org,
+            evidencia__orden_trabajo=orden).order_by("created_at"):
         #  La ULTIMA gana: una correccion de una persona es una fila nueva y
         #  posterior, y es la que vale.
         visto[str(a.evidencia_id)] = a
@@ -653,9 +678,13 @@ def _a_numero(valor):
 def _texto_de_la_foto(orden, requisito_id: str) -> str:
     """Lo que la IA escribio sobre ESA foto, en esta vuelta. `''` si no hay.
 
-    De la vuelta actual y no de cualquiera: una foto de la vuelta 1 ya fue
-    devuelta, y comparar contra ella diria que el tecnico se contradice
-    cuando lo que hizo fue corregir.
+    LA ULTIMA, venga de la vuelta que venga -- 08/11/2026, por lo mismo que
+    `_evidencias_para_revisar`. Decia «de la vuelta actual», y en una orden
+    devuelta eso dejaba sin comparar las mediciones que nadie pidio rehacer:
+    el punto desaparecia en silencio justo donde habia mas para mirar.
+
+    Si el tecnico la rehizo, la nueva es la ultima y manda. Si no se la
+    pidieron, la que habia sigue siendo la evidencia de esa medicion.
     """
     from campo.models import AnalisisDeEvidencia
 
@@ -665,9 +694,11 @@ def _texto_de_la_foto(orden, requisito_id: str) -> str:
          #  va explicito aunque la orden ya lo acote (CLAUDE.md 4: olvidar
          #  fijar el tenant devuelve cero filas, no todas).
          .filter(org=orden.org, evidencia__orden_trabajo=orden,
-                 evidencia__requisito_id=requisito_id,
-                 vuelta=orden.vuelta)
-         .order_by("-created_at").first())
+                 evidencia__requisito_id=requisito_id)
+         #  La vuelta primero, por lo mismo que en
+         #  `_evidencias_para_revisar`: una foto reintentada de la vuelta
+         #  anterior puede ser la mas nueva por fecha.
+         .order_by("-vuelta", "-created_at").first())
     return (a.texto or "") if a else ""
 
 
