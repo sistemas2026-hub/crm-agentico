@@ -171,12 +171,29 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
         #  sospecha queda intacta, que es justo lo que el usuario pidio
         #  conservar.
         if bool(e.get("es_captura")):
-            marca = (" Esta evidencia ES una captura de pantalla del telefono, "
-                     "declarada asi por la empresa: que se vea una pantalla no "
-                     "es motivo de atencion. Si en cambio parece una foto "
-                     "TOMADA de otra pantalla o de una impresion --con "
-                     "reflejos, bordes del equipo, trama o la pantalla "
-                     "inclinada-- decilo.")
+            #  LAS DOS FORMAS VALEN  --  08/11/2026
+            #
+            #  El usuario: «el test de velocidad debe permitir foto a otra
+            #  pantalla o captura, porque a veces se toma la foto para el
+            #  test». Y es el uso real: el tecnico corre el speedtest en el
+            #  telefono del cliente y lo fotografia con el suyo.
+            #
+            #  No contradice lo que pidio el dia anterior --«que siga
+            #  distinguiendo entre una foto a otra pantalla y captura»--: se
+            #  sigue distinguiendo y se dice cual es, lo que cambia es que no
+            #  levanta ATENCION. Describir no es marcar.
+            #
+            #  Lo que SI tiene que marcar es lo unico que importa aca: que los
+            #  numeros no se puedan leer. Una captura perfecta de la que no se
+            #  lee la velocidad no sirve, y una foto torcida de la que se lee
+            #  todo, si.
+            marca = (" Esta evidencia puede ser una captura de pantalla del "
+                     "telefono O una foto tomada de otra pantalla: la empresa "
+                     "acepta las dos, asi que NADA de eso es motivo de "
+                     "atencion --ni reflejos, ni trama, ni bordes, ni que la "
+                     "pantalla este inclinada--. Deci cual de las dos parece, "
+                     "en pocas palabras, y marca atencion SOLO si los numeros "
+                     "que se pedian no se pueden leer.")
         else:
             marca = ""
         if instrucciones:

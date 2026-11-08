@@ -350,7 +350,27 @@ def _lo_que_el_tecnico_PODRIA_escribir(orden, campo_id):
     reglas = (campo or {}).get("reglas") or {}
     mn, mx = _a_numero(reglas.get("min")), _a_numero(reglas.get("max"))
     if mn is None or mx is None:
-        return None
+        #  SI ESTE CAMPO NO LOS DECLARA, SIRVEN LOS DEL OTRO  --  08/11/2026
+        #
+        #  Medido en produccion: `potencia_al_llegar` no declara limites --su
+        #  regla es solo `required: False`, porque al llegar puede no haber
+        #  señal-- asi que el filtro no filtraba nada ahi y el punto salto con
+        #  «la foto marca -5.0 dBm y el reporte dice -50.0: 45.0 de
+        #  diferencia». El arreglo cubria al salir y no al llegar.
+        #
+        #  Los dos campos son LA MISMA MEDICION: el mismo instrumento sobre el
+        #  mismo equipo, en dos momentos. Si la empresa declaro que al salir se
+        #  escribe entre -60 y -8, una lectura de -5 en la foto de llegada
+        #  tampoco puede ser de esa pantalla. No se inventa un rango: se usa el
+        #  que la empresa ya declaro para la otra mitad de la misma medicion.
+        otro = CAMPO_AL_SALIR if campo_id == CAMPO_AL_LLEGAR else CAMPO_AL_LLEGAR
+        if campo_id in (CAMPO_AL_LLEGAR, CAMPO_AL_SALIR):
+            gemelo = next((c for c in (esquema.get("campos") or [])
+                           if isinstance(c, dict) and c.get("id") == otro), None)
+            r2 = (gemelo or {}).get("reglas") or {}
+            mn, mx = _a_numero(r2.get("min")), _a_numero(r2.get("max"))
+        if mn is None or mx is None:
+            return None
     return min(mn, mx), max(mn, mx)
 
 

@@ -341,3 +341,59 @@ def test_el_rango_ESCRITO_AL_REVES_funciona_igual(org_a):
         "con el rango cargado al reves se descarto una lectura que esta "
         "dentro de lo que la empresa acepta")
     assert "-21" in p["texto"] and "-35" in p["texto"], p["texto"]
+
+
+def test_AL_LLEGAR_sin_limites_propios_usa_los_del_otro_campo(org_a):
+    """EL HUECO QUE EL USUARIO ENCONTRO  --  08/11/2026.
+
+    `potencia_al_llegar` no declara `min`/`max` --al llegar puede no haber
+    señal-- asi que el filtro no filtraba nada ahi, y el punto salto con «la
+    foto marca -5.0 dBm y el reporte dice -50.0: 45.0 de diferencia». El
+    arreglo cubria al salir y no al llegar.
+
+    Los dos campos son LA MISMA MEDICION: mismo instrumento, mismo equipo,
+    dos momentos. No se inventa un rango -- se usa el que la empresa ya
+    declaro para la otra mitad.
+    """
+    from campo.models import (AnalisisDeEvidencia, EventoTrabajo,
+                              EvidenciaTrabajo, OrdenTrabajo, WorkType,
+                              WorkTypeVersion)
+    from campo.revision_del_cierre import _potencia
+
+    #  Tal como esta en produccion: al llegar sin limites, al salir con ellos.
+    campos = [
+        {"id": "potencia_al_llegar", "tipo": "decimal",
+         "titulo": "Potencia al llegar", "unidad": "dBm",
+         "reglas": {"required": False}},
+        {"id": "potencia_al_salir", "tipo": "decimal",
+         "titulo": "Potencia al salir", "unidad": "dBm",
+         "reglas": {"min": -60.0, "max": -8.0, "required": True}},
+    ]
+    wt = WorkType.objects.create(org=org_a, codigo="llegar907",
+                                 nombre="Soporte", labor="correctivo")
+    version = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [], "evidencias": [], "campos": campos})
+    orden = OrdenTrabajo.objects.create(
+        org=org_a, numero=907, tipo_trabajo_version=version,
+        cliente_nombre="MARIO SABANAGRANDE",
+        estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+        origen_sistema="manual", contexto={},
+        datos={"potencia_al_llegar": "-50.0"})
+    cierre = EventoTrabajo.objects.create(
+        org=org_a, orden=orden, tipo="cierre_campo",
+        datos={"vuelta": 1, "respuestas": {"solucion": "x"}})
+    ev = EvidenciaTrabajo.objects.create(
+        org=org_a, orden_trabajo=orden, requisito_id="medicion_al_llegar",
+        vuelta=orden.vuelta, sha256="l907".ljust(64, "x")[:64],
+        storage_key="k/l907", nombre_original="m.jpg",
+        mime_type="image/jpeg", bytes=1,
+        estado_archivo=EvidenciaTrabajo.RECIBIDO)
+    AnalisisDeEvidencia.objects.create(
+        org=org_a, evidencia=ev, vuelta=orden.vuelta,
+        texto="se lee 1550 nm, -5.00 dBm y 0.000 uW")
+
+    assert _potencia(orden, cierre) is None, (
+        "el -5.00 de la foto de llegada no se filtro: ese campo no declara "
+        "limites y no se cayo a los del campo gemelo")

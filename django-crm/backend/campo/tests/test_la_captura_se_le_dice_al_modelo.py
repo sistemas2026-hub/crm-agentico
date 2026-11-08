@@ -79,8 +79,8 @@ def _texto(evidencia):
 def test_a_una_CAPTURA_se_le_dice_que_lo_es(org_a):
     texto = _texto(_evidencia(org_a, es_captura=True, numero=701))
 
-    assert "ES una captura" in texto, texto
-    assert "no es motivo de atencion" in texto, texto
+    assert "captura de pantalla" in texto, texto
+    assert "NADA de eso es motivo de atencion" in texto, texto
 
 
 def test_la_instruccion_de_la_plantilla_SIGUE_LLEGANDO_entera(org_a):
@@ -92,12 +92,32 @@ def test_la_instruccion_de_la_plantilla_SIGUE_LLEGANDO_entera(org_a):
         texto
 
 
-def test_aun_siendo_captura_SE_SIGUE_PIDIENDO_marcar_la_foto_de_otra_pantalla(org_a):
-    """Aflojar una cosa no es aflojar las dos."""
+def test_la_foto_de_otra_pantalla_TAMBIEN_vale(org_a):
+    """08/11/2026, decision del usuario: «el test de velocidad debe permitir
+    foto a otra pantalla o captura, porque a veces se toma la foto para el
+    test». Es el uso real -- el speedtest corre en el telefono del cliente.
+
+    No contradice el pedido del dia anterior («que siga distinguiendo»): se
+    sigue pidiendo que diga CUAL de las dos es. Lo que cambia es que no
+    levanta atencion por eso."""
     texto = _texto(_evidencia(org_a, es_captura=True, numero=703))
 
-    assert "TOMADA de otra pantalla" in texto, texto
-    assert "impresion" in texto, texto
+    assert "foto tomada de otra pantalla" in texto, texto
+    assert "las dos" in texto, texto
+    #  Y SE SIGUE DISTINGUIENDO: se le pide que diga cual parece.
+    assert "Deci cual de las dos" in texto, texto
+
+
+def test_lo_UNICO_que_marca_es_que_no_se_lean_los_numeros(org_a):
+    """Una captura perfecta de la que no se lee la velocidad no sirve; una
+    foto torcida de la que se lee todo, si."""
+    texto = _texto(_evidencia(org_a, es_captura=True, numero=708))
+
+    #  LA CONDICION ENTERA, no su comienzo: la primera version afirmaba
+    #  solo «SOLO si los numeros» y la mutacion que invierte el final
+    #  --«se leen perfecto»-- sobrevivia, porque el principio seguia ahi.
+    esperado = "SOLO si los numeros que se pedian no se pueden leer"
+    assert esperado in texto, texto
 
 
 def test_una_captura_SIN_instrucciones_tambien_la_recibe(org_a):
@@ -106,7 +126,7 @@ def test_una_captura_SIN_instrucciones_tambien_la_recibe(org_a):
     texto = _texto(_evidencia(org_a, es_captura=True, numero=704,
                               instrucciones=""))
 
-    assert "ES una captura" in texto, texto
+    assert "captura de pantalla" in texto, texto
     assert "Test de velocidad" in texto, texto
 
 
