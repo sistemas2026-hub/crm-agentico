@@ -233,7 +233,7 @@ async function escribirVariable(locals, fetch, nombreVariable, valor) {
  */
 export async function guardarLinkDePago(locals, fetch, crudo) {
   const v = validarLinkDePago(crudo);
-  if (!v.ok) throw new Error(v.error);
+  if (v.ok === false) throw new Error(v.error);
   return escribirVariable(locals, fetch, VARIABLE_LINK_DE_PAGO, v.link);
 }
 
@@ -244,7 +244,7 @@ export async function guardarLinkDePago(locals, fetch, crudo) {
  */
 export async function guardarMediosDePago(locals, fetch, filas) {
   const v = validarMediosDePago(filas);
-  if (!v.ok) throw new Error(v.error);
+  if (v.ok === false) throw new Error(v.error);
   return escribirVariable(
     locals,
     fetch,

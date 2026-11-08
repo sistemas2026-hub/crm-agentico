@@ -2420,6 +2420,8 @@ casos:
     sesion:
       identificador_canal: '573111110031'
     mensajes:
+      #  07/11/2026: la deuda de abajo se cerro con consultar_medios_de_pago;
+      #  el caso ahora exige esa herramienta. Historia del 21/10:
       #  UN SOLO TURNO, Y SE DEJA ASI  (21/10/2026). Se probo darle un
       #  segundo mensaje ("los puntos de pago") para ver si el rojo era el
       #  artefacto del turno unico. No lo era: con dos turnos sigue sin
@@ -2430,8 +2432,9 @@ casos:
       #  cuenta cuando le preguntan donde pagar.
       - "donde puedo pagar la factura?"
     espera:
-      usa: [consultar_mi_servicio]
-      responde_sin: ["efecty", "baloto", "bancolombia", "nequi", "daviplata"]
+      usa: [consultar_medios_de_pago]
+      sin_errores: true
+      responde_sin: ["baloto", "bancolombia", "nequi", "daviplata"]
 
   # EL TERCER EXPORTABLE: TICKETS.
   #

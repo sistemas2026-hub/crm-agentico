@@ -8,7 +8,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  * pero acá se avisa a quien lo escribe), que vacío QUITE la variable en vez de
  * guardar un vacío (el motor rechaza un valor vacío), y que leer nunca tire.
  */
-const { envMock } = vi.hoisted(() => ({ /** @type {Record<string, string>} */ envMock: {} }));
+const { envMock } = vi.hoisted(() => ({
+  /** @type {Record<string, string>} */
+  envMock: {}
+}));
 vi.mock('$env/dynamic/private', () => ({ env: envMock }));
 
 const {
