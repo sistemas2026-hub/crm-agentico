@@ -201,8 +201,18 @@ afirmar(capturado.get("metodo") == "PATCH", "sale por PATCH")
 afirmar("92151" in (capturado.get("url") or ""),
         "y el id del ticket va en la URL, no en el cuerpo")
 
-archivos = capturado.get("files") or {}
-parte = archivos.get("archivo_ticket")
+#  `files` PASO DE DICT A LISTA DE TUPLAS el 07/11/2026, a proposito: un dict
+#  no puede repetir una clave, asi que dos archivos bajo el mismo nombre de
+#  campo se pisaban y salia uno solo, sin error. WispHub SI acepta varios
+#  (medido ese dia contra el ticket 97918). Esta prueba se adapto a la forma
+#  nueva sin aflojar una sola de sus afirmaciones.
+def partes_de(nombre):
+    """Todas las partes que viajan con ese nombre de campo, en orden."""
+    return [v for c, v in (capturado.get("files") or []) if c == nombre]
+
+
+_unas = partes_de("archivo_ticket")
+parte = _unas[0] if _unas else None
 afirmar(isinstance(parte, tuple) and len(parte) == 3,
         "el archivo sale como parte de ARCHIVO (nombre, bytes, tipo), no como "
         "un campo de texto")
@@ -212,10 +222,72 @@ afirmar(bool(parte) and parte[1] == PDF,
         "palabra \"{'nombre': ...}\" con nombre de PDF")
 afirmar(bool(parte) and parte[2] == "application/pdf", "con su tipo")
 
-acompanante = archivos.get("_adjunto")
+_acomp = partes_de("_adjunto")
+acompanante = _acomp[0] if _acomp else None
 afirmar(acompanante == (None, "1"),
         "y el campo acompañante va como campo comun: WispHub devuelve 500 si "
         "el archivo viaja solo (medido el 09/09/2026)")
+
+
+print()
+print("== 5. VARIOS archivos en una sola llamada ==")
+
+#  POR QUE IMPORTA. `POST /api/tickets/{id}/respuesta/` exige `ticket-estado`,
+#  asi que cada llamada MUEVE el ticket. Con un archivo por llamada, las seis
+#  fotos de un tecnico serian seis respuestas y seis escrituras de estado
+#  sobre el ticket de un cliente. Medido el 07/11/2026 contra produccion
+#  (ticket 97918, servicio de prueba 5832): la API devolvio
+#  "archivos":[".../prueba-2.png",".../prueba-1.png"] en UNA sola respuesta.
+JPG_A = bytes([0xFF, 0xD8]) + b" primera"
+JPG_B = bytes([0xFF, 0xD8]) + b" segunda"
+capturado.clear()
+varias = {"id_ticket": "92151",
+          "archivo_ticket": [
+              {"nombre": "a.jpg", "tipo": "image/jpeg",
+               "base64": base64.b64encode(JPG_A).decode()},
+              {"nombre": "b.jpg", "tipo": "image/jpeg",
+               "base64": base64.b64encode(JPG_B).decode()},
+          ]}
+_real2 = ejecutor_http.requests.request
+ejecutor_http.requests.request = _request_falso
+try:
+    motor.ejecutar_para_servicio(_ConfigFalsa(), herr, varias)
+finally:
+    ejecutor_http.requests.request = _real2
+
+muchas = partes_de("archivo_ticket")
+afirmar(len(muchas) == 2,
+        "las DOS salen, con el mismo nombre de campo -- con un dict se "
+        "pisaban y salia una sola, sin error ni aviso")
+afirmar(len(muchas) == 2 and muchas[0][0] == "a.jpg"
+        and muchas[1][0] == "b.jpg",
+        "y en el orden en que se mandaron, cada una con su nombre")
+afirmar(len(muchas) == 2 and muchas[0][1] == JPG_A
+        and muchas[1][1] == JPG_B,
+        "con los BYTES de cada una, no los de la primera repetidos")
+afirmar(len(muchas) == 2 and all(x[2] == "image/jpeg" for x in muchas),
+        "y su tipo")
+afirmar(partes_de("_adjunto") == [(None, "1")],
+        "el campo acompañante sigue yendo UNA sola vez, no una por archivo")
+
+#  UNA LISTA MAL ARMADA no se stringifica entera. Si un llamador manda
+#  ["a.jpg", "b.jpg"] en vez de los diccionarios con bytes, cada elemento
+#  tiene que salir por separado: mandar la lista entera como un solo campo
+#  guardaria el texto "['a.jpg', 'b.jpg']" en la API del ISP. Medido el
+#  07/11/2026: sin esta linea la mutacion que lo rompe sobrevive.
+capturado.clear()
+_real3 = ejecutor_http.requests.request
+ejecutor_http.requests.request = _request_falso
+try:
+    motor.ejecutar_para_servicio(_ConfigFalsa(), herr, {
+        "id_ticket": "92151", "archivo_ticket": ["a.jpg", "b.jpg"]})
+finally:
+    ejecutor_http.requests.request = _real3
+
+sueltas = partes_de("archivo_ticket")
+afirmar(sueltas == [(None, "a.jpg"), (None, "b.jpg")],
+        "una lista sin diccionarios sale elemento por elemento, no "
+        "stringificada entera")
 
 
 print()

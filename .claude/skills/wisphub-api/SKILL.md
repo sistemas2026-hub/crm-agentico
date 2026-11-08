@@ -742,8 +742,40 @@ con un `GET` posterior, no solo por el eco de la respuesta).
 | `ticket-estado` | si | **1** Nuevo, **2** En Progreso, **3** Resuelto, **4** Cerrado |
 | `ticket-prioridad` | si | **1** Baja, **2** Normal, **3** Alta, **4** Muy Alta |
 | `ticket-falla` | no | Lista cerrada de ~30 fallas (incluye `Cambio de Contraseña en Router Wifi`) |
-| `archivo` | no | PDF/Word/imagen |
+| `archivo` | no | PDF/Word/imagen. **Acepta VARIOS en una sola llamada** -- ver abajo |
 | `reabrir-ticket` | no | Responde y reabre |
+
+> **`archivo` es singular en la doc y acepta VARIOS igual** (medido el
+> 07/11/2026, ticket 97918 del servicio de prueba 5832). Se mandan como
+> varias partes multipart con el MISMO nombre de campo --`archivo` repetido--
+> y la respuesta devuelve `archivos` en plural con una URL por cada uno:
+>
+> ```
+> HTTP 201
+> {"respuesta":"...","archivos":[
+>    "https://avisos.wisphub.io/media/tickets/respuesta/.../prueba-2.png",
+>    "https://avisos.wisphub.io/media/tickets/respuesta/.../prueba-1.png"]}
+> ```
+>
+> **Importa mucho mas de lo que parece**: como `ticket-estado` es obligatorio,
+> CADA llamada mueve el ticket. Si `archivo` aceptara uno solo, adjuntar las
+> seis fotos de un tecnico serian seis respuestas y seis escrituras de estado
+> sobre el ticket de un cliente. Con varias partes es UNA.
+>
+> Del lado nuestro hay una trampa que costo un instrumento: en Python,
+> `requests` arma las partes desde un **dict** si se le pasa un dict, y un
+> dict no repite claves -- el segundo archivo pisa al primero y sale uno
+> solo, sin error. Hay que pasarle una **lista de tuplas**
+> `[("archivo", (...)), ("archivo", (...))]`. La primera version de la sonda
+> usaba un dict y habria concluido "acepta uno" midiendo su propio defecto.
+>
+> El ORDEN no se conserva: se mandaron prueba-1 y prueba-2, y volvieron al
+> reves. No asumir que el primero de la lista es el primero del ticket.
+>
+> Y otra, de lectura: la lista `respuestas` que devuelve `GET /api/tickets/
+> {id}/` **no viene con la mas nueva al final**. Leer `respuestas[-1]` para
+> verificar lo que se acaba de escribir devuelve otra. Se verifica por el
+> cuerpo del 201 o contando.
 
 > **No es "dejar un comentario": es responder Y MOVER EL TICKET.** `ticket-estado`
 > es obligatorio, asi que toda respuesta fija un estado. Comprobado sin querer:

@@ -215,20 +215,47 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
             # con (None, valor) se manda cada campo como parte de formulario
             # comun, sin ser un archivo real. Ver el campo 'multipart' en
             # nucleo/config/schema.py:Herramienta para el motivo.
-            archivos = {}
+            # UNA LISTA DE TUPLAS Y NO UN DICT  --  07/11/2026
+            #
+            # Era un dict {campo: parte}, y un dict no puede repetir una
+            # clave: dos archivos bajo el mismo nombre de campo se pisaban y
+            # salia UNO SOLO, sin error ni aviso.
+            #
+            # Importa porque WispHub SI acepta varios. Medido en produccion
+            # ese dia sobre el ticket 97918 (servicio de prueba 5832), con
+            # dos PNG distintos en una sola llamada:
+            #
+            #   HTTP 201 ... "archivos":[".../prueba-2.png",
+            #                            ".../prueba-1.png"]
+            #
+            # Y no es un detalle: `POST /respuesta/` exige `ticket-estado`,
+            # asi que cada llamada MUEVE el ticket. Con un archivo por
+            # llamada, seis fotos de un tecnico serian seis respuestas y seis
+            # escrituras de estado sobre el ticket de un cliente.
+            partes = []
             for c, v in args.items():
-                if c in herramienta.argumentos_archivo and isinstance(v, dict):
-                    # Una parte de ARCHIVO de verdad: nombre, bytes y tipo.
-                    # Llega en base64 porque el puente entre servicios es JSON
-                    # -- ver 'argumentos_archivo' en schema.py.
-                    import base64
-                    archivos[c] = (v.get("nombre") or c,
-                                   base64.b64decode(v.get("base64") or ""),
-                                   v.get("tipo") or "application/octet-stream")
-                else:
-                    archivos[c] = (None, str(v))
+                # Una LISTA bajo un argumento de archivo son varias partes
+                # con el MISMO nombre de campo, que es lo que el formato
+                # multipart permite y el dict impedia.
+                valores = v if (c in herramienta.argumentos_archivo
+                                and isinstance(v, list)) else [v]
+                for uno in valores:
+                    if (c in herramienta.argumentos_archivo
+                            and isinstance(uno, dict)):
+                        # Una parte de ARCHIVO de verdad: nombre, bytes y
+                        # tipo. Llega en base64 porque el puente entre
+                        # servicios es JSON -- ver 'argumentos_archivo' en
+                        # schema.py.
+                        import base64
+                        partes.append((c, (uno.get("nombre") or c,
+                                           base64.b64decode(
+                                               uno.get("base64") or ""),
+                                           uno.get("tipo")
+                                           or "application/octet-stream")))
+                    else:
+                        partes.append((c, (None, str(uno))))
             return requests.request(herramienta.metodo, url, headers=headers,
-                                    files=archivos, timeout=TIMEOUT_SEGUNDOS)
+                                    files=partes, timeout=TIMEOUT_SEGUNDOS)
         return requests.request(herramienta.metodo, url, headers=headers,
                                 json=args, timeout=TIMEOUT_SEGUNDOS)
 
