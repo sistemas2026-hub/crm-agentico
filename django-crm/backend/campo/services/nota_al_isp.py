@@ -223,7 +223,15 @@ def _pedir(orden, cuerpo: dict, profile=None) -> dict:
               #  Un rastro que dice que algo fallo pero no por que obliga a
               #  reproducir el fallo para diagnosticarlo, que es justo lo que
               #  el rastro existe para evitar.
-              "detalle": str(datos.get("detalle") or "")[:300]}
+              #  'error' TAMBIEN  --  07/11/2026. El rastro leia solo
+              #  'detalle', y el endpoint del motor contesta sus 400 con
+              #  'error'. Resultado medido en la OT #198: el evento decia
+              #  `codigo: 400, detalle: ''` y hubo que ir al motor a grepear
+              #  para saber que la lista blanca del cuerpo habia rechazado
+              #  'fotos'. Es literalmente lo que el comentario de arriba dice
+              #  que este rastro existe para evitar.
+              "detalle": str(datos.get("detalle")
+                             or datos.get("error") or "")[:300]}
     if datos.get("anotada"):
         _anotar_evento(orden, profile, EVENTO_ANOTADA, rastro)
     else:

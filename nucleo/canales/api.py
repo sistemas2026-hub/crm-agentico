@@ -5509,7 +5509,12 @@ def interno_anotar_en_el_ticket(orden_id: str):
     cuerpo = request.get_json(silent=True) or {}
     if not isinstance(cuerpo, dict):
         return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
-    permitidos = {"ticket", "texto", "momento", "vuelta", "actor"}
+    #  "fotos" ENTRA, y sigue siendo lista blanca: lo que no esta aca se
+    #  rechaza con 400 en vez de viajar. Lo que cada foto puede ser
+    #  --tipo, peso, cuantas-- lo acota `nota_en_el_ticket`, que es donde
+    #  vive el tope y donde se puede probar sin levantar Flask.
+    permitidos = {"ticket", "texto", "momento", "vuelta", "actor",
+                  "fotos"}
     sobra = sorted(set(cuerpo) - permitidos)
     if sobra:
         return jsonify({
