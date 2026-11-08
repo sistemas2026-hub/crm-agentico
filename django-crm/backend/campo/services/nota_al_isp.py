@@ -249,6 +249,82 @@ def _vuelta_de(orden) -> int:
 #  1) EL REPORTE DEL TECNICO
 # ---------------------------------------------------------------------------
 
+def fotos_de_la_vuelta(orden) -> list[dict]:
+    """Las evidencias de ESTA vuelta, listas para viajar al ticket del ISP.
+
+    `[{"nombre", "tipo", "base64"}]`. Nunca levanta: si no se puede leer una
+    foto, el reporte se escribe igual sin ella. Lo que el ticket no tenia es
+    el reporte.
+
+    EL MISMO NOMBRE QUE EN DEXTER. Se reusa `fotos_al_ticket._nombre`, que
+    pone el requisito adelante («dano_encontrado-2.jpg») en vez del nombre
+    que trajo el telefono. Si cada lado nombrara distinto, cruzar los dos
+    tickets --que es lo que el equipo hace-- seria adivinar.
+
+    SOLO LA VUELTA QUE CORRE, y por el mismo motivo que en todos lados: una
+    orden devuelta y rehecha trae fotos NUEVAS, y las viejas ya se mandaron
+    en su momento.
+
+    EL TOPE DE ACA ES PARA NO LEER DE MAS del disco; el que decide que viaja
+    de verdad vive en el motor (`nota_en_el_ticket`), que es quien le habla
+    al proveedor. Dos topes del mismo numero a proposito: si alguien sube
+    uno sin el otro, el de abajo sigue acotando.
+    """
+    import base64
+    import os
+
+    try:
+        from campo.fotos_al_ticket import MAX_POR_VUELTA, _nombre
+        from campo.services.storage import CampoStorage
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota_al_isp: no se pudieron preparar las fotos (%s)",
+                       type(e).__name__)
+        return []
+
+    salida = []
+    try:
+        evidencias = list(orden.evidencias
+                          .filter(vuelta=orden.vuelta, evento__isnull=True)
+                          .order_by("recibida_en_servidor")[:MAX_POR_VUELTA])
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota_al_isp: no se pudieron listar las fotos (%s)",
+                       type(e).__name__)
+        return []
+
+    for i, ev in enumerate(evidencias, start=1):
+        try:
+            ruta = CampoStorage.ruta_absoluta(ev.storage_key)
+            #  DEFENSA REDUNDANTE, Y SE DEJA A SABIENDAS. Quitar este `if`
+            #  NO cambia la conducta: `open("")` levanta y el `except` de
+            #  abajo lo convierte en el mismo "esta no, las otras si".
+            #  Medido el 07/11/2026: la mutacion que lo borra sobrevive a las
+            #  siete guardas, y es correcto que sobreviva -- no hay efecto
+            #  que afirmar. Mismo caso, y misma decision, que en
+            #  `fotos_al_ticket.adjuntar`.
+            #
+            #  Se conserva porque un archivo faltante es lo ESPERADO --un
+            #  borrado manual, una subida a medias-- y pasar por una
+            #  excepcion lo registraria como un fallo en el log, mezclado con
+            #  los que si lo son.
+            if not ruta or not os.path.exists(ruta):
+                continue
+            with open(ruta, "rb") as f:
+                crudo = f.read()
+            salida.append({
+                "nombre": _nombre(ev, i),
+                #  EL TIPO QUE LA EVIDENCIA DECLARA, en minusculas: el motor
+                #  lo compara contra una lista blanca y 'IMAGE/JPEG' no es
+                #  'image/jpeg' para un `in`.
+                "tipo": (ev.mime_type or "image/jpeg").lower().strip(),
+                "base64": base64.b64encode(crudo).decode(),
+            })
+        except Exception as e:                                   # noqa: BLE001
+            #  Por tipo, sin `str(e)`: el mensaje puede traer la ruta.
+            logger.warning("nota_al_isp: una foto no se pudo leer (%s)",
+                           type(e).__name__)
+    return salida
+
+
 def anotar_reporte_del_tecnico(orden, profile=None) -> dict:
     """Escribe en el ticket del ISP lo que el tecnico reporto desde la app.
 
@@ -271,6 +347,12 @@ def anotar_reporte_del_tecnico(orden, profile=None) -> dict:
         "texto": texto,
         "momento": REPORTE_DEL_TECNICO,
         "vuelta": _vuelta_de(orden),
+        #  LAS FOTOS VAN CON EL REPORTE, en la misma respuesta. El usuario:
+        #  se ven en el ticket de Dexter y no en el de WispHub, y su equipo
+        #  mira los dos. Una sola respuesta y no una por foto, porque
+        #  `ticket-estado` es obligatorio en ese endpoint y cada llamada
+        #  mueve el ticket (medido el 07/11/2026 contra produccion).
+        "fotos": fotos_de_la_vuelta(orden),
         #  El nombre del tecnico SI va en este momento: es quien firma el
         #  reporte hoy a mano. En la devolucion no (decide el Supervisor).
         "actor": _nombre_de(profile),

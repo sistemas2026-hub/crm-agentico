@@ -5527,7 +5527,8 @@ def interno_anotar_en_el_ticket(orden_id: str):
         texto=str(cuerpo.get("texto") or ""),
         momento=str(cuerpo.get("momento") or ""),
         vuelta=cuerpo.get("vuelta"),
-        actor=str(cuerpo.get("actor") or ""))
+        actor=str(cuerpo.get("actor") or ""),
+        fotos=cuerpo.get("fotos"))
     if resultado.anotada:
         codigo_http = 200
     elif resultado.codigo == nota_en_el_ticket.FALLO:

@@ -3877,7 +3877,23 @@ herramientas:
     # Sin esta linea se descartan en silencio y la llamada muere
     # armando la URL -- asi fue como la cancelacion de una solicitud
     # nunca cerro su ticket (09/09/2026).
-    argumentos_sobrescribibles: [id_ticket, respuesta]
+    argumentos_sobrescribibles: [id_ticket, respuesta, archivo]
+    # LAS FOTOS DEL TECNICO VIAJAN CON LA NOTA (07/11/2026). El usuario:
+    # las fotos se ven en el ticket de Dexter y no en el de WispHub, y su
+    # equipo mira los dos.
+    #
+    # VA UNA SOLA RESPUESTA CON TODAS, no una por foto: medido contra
+    # produccion ese dia (ticket 97918, servicio de prueba 5832), WispHub
+    # acepta varios 'archivo' en la misma llamada y devuelve 'archivos' en
+    # plural. Importa porque 'ticket-estado' es obligatorio, asi que cada
+    # respuesta MUEVE el ticket: con una foto por llamada, seis fotos serian
+    # seis escrituras de estado sobre el ticket de un cliente.
+    #
+    # El cuantas, el peso y el tipo los acota el motor
+    # (nucleo/seguimiento/nota_en_el_ticket.py), no esta linea: aca solo se
+    # declara que esta herramienta PUEDE llevar archivos. Un tenant que no lo
+    # declare no manda ninguno aunque le lleguen.
+    argumentos_archivo: [archivo]
     argumentos_fijos:
       ticket-estado: "2"                          # En Progreso
       ticket-prioridad: "2"                       # Normal

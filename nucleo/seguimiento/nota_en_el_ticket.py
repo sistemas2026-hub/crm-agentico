@@ -133,6 +133,75 @@ VUELTA_INVALIDA = "vuelta_invalida"
 ANOTARIA_UN_CIERRE = "anotaria_un_cierre"
 
 
+#:  LAS FOTOS QUE VIAJAN CON LA NOTA  --  07/11/2026
+#:
+#:  WispHub acepta varios `archivo` en una sola respuesta: medido contra
+#:  produccion ese dia sobre el ticket 97918 (servicio de prueba 5832), que
+#:  devolvio `"archivos":[...2.png, ...1.png]` en un solo 201. Por eso las
+#:  fotos de un tecnico van en UNA nota y no en seis -- cada respuesta a ese
+#:  endpoint mueve el ticket, porque `ticket-estado` es obligatorio.
+#:
+#:  LOS TOPES NO SON DECORACION. Esto manda bytes al sistema de un tercero
+#:  desde un servicio, no desde el modelo: un defecto aguas arriba podria
+#:  empujarle cien megas al ISP. Fallan cerrado -- lo que no cumple no viaja.
+MAX_FOTOS = 8
+MAX_BYTES_FOTO = 5 * 1024 * 1024
+MAX_BYTES_TOTAL = 15 * 1024 * 1024
+
+#:  Lo que el ISP muestra y el navegador de quien lee el ticket no ejecuta.
+#:  Lista BLANCA: un tipo nuevo que el proveedor acepte no entra por defecto.
+TIPOS_DE_FOTO = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+
+
+def fotos_que_pueden_viajar(fotos) -> tuple[list[dict], list[str]]:
+    """`(las que viajan, por que se quedaron las otras)`.
+
+    UNA FOTO QUE NO CUMPLE NO TUMBA LA NOTA. El reporte del tecnico es lo que
+    el ticket no tenia; que una imagen pese de mas no puede impedir que se
+    escriba. Pero tampoco se descarta en silencio: los motivos salen y quien
+    llama los deja en el rastro de la orden.
+    """
+    import base64
+
+    if not isinstance(fotos, list):
+        return [], [] if fotos in (None, "") else ["no es una lista"]
+    viajan, motivos, total = [], [], 0
+    for i, f in enumerate(fotos, 1):
+        if len(viajan) >= MAX_FOTOS:
+            motivos.append(f"{len(fotos) - len(viajan)} de mas "
+                           f"(el tope es {MAX_FOTOS})")
+            break
+        if not isinstance(f, dict):
+            motivos.append(f"la {i} no se entiende")
+            continue
+        tipo = str(f.get("tipo") or "").lower().strip()
+        if tipo not in TIPOS_DE_FOTO:
+            motivos.append(f"la {i} es '{tipo or 'sin tipo'}'")
+            continue
+        try:
+            crudo = base64.b64decode(f.get("base64") or "", validate=True)
+        except Exception:                                      # noqa: BLE001
+            motivos.append(f"la {i} no se pudo decodificar")
+            continue
+        if not crudo:
+            motivos.append(f"la {i} llego vacia")
+            continue
+        if len(crudo) > MAX_BYTES_FOTO:
+            motivos.append(f"la {i} pesa {len(crudo) // 1024} KB")
+            continue
+        if total + len(crudo) > MAX_BYTES_TOTAL:
+            motivos.append(f"la {i} no entra en el tope total")
+            continue
+        total += len(crudo)
+        #  SE REARMA, no se reenvia lo que llego: asi solo viajan las tres
+        #  claves que el ejecutor usa, y un campo de mas que alguien agregue
+        #  aguas arriba no llega al proveedor.
+        viajan.append({"nombre": str(f.get("nombre") or f"foto-{i}")[:120],
+                       "tipo": tipo,
+                       "base64": base64.b64encode(crudo).decode()})
+    return viajan, motivos
+
+
 @dataclass
 class ResultadoNota:
     codigo: str
@@ -199,7 +268,8 @@ def _pide_lo_mismo_que_el_cierre(config, herr) -> bool:
 
 
 def anotar(config, tenant: str, *, orden_id: str, ticket: str, texto: str,
-           momento: str, vuelta, actor: str = "") -> ResultadoNota:
+           momento: str, vuelta, actor: str = "",
+           fotos=None) -> ResultadoNota:
     """Escribe `texto` en el ticket del ISP y lo deja En Progreso.
 
     Por la puerta AUTONOMA, con la exencion `NOTA_DE_CAMPO_EN_EL_TICKET`: a lo
@@ -276,6 +346,17 @@ def anotar(config, tenant: str, *, orden_id: str, ticket: str, texto: str,
     argumentos = dict(herr.argumentos_fijos or {})
     argumentos.update({"id_ticket": ticket,
                        "respuesta": _firmado(texto, _firma_de(momento, actor))})
+
+    #  LAS FOTOS, SOLO SI LA HERRAMIENTA LAS DECLARA. `argumentos_archivo`
+    #  nombra el campo que el proveedor espera; sin esa declaracion no se
+    #  manda nada, aunque lleguen. Un tenant que no lo declaro no quiere que
+    #  su ISP reciba archivos, y el codigo no se lo discute.
+    viajan, descartadas = fotos_que_pueden_viajar(fotos)
+    campo_archivo = next(iter(herr.argumentos_archivo or []), "")
+    if viajan and campo_archivo:
+        argumentos[campo_archivo] = viajan
+    elif viajan:
+        descartadas.append("la herramienta no declara 'argumentos_archivo'")
 
     origen = f"nota_de_campo:{orden_id}|{momento}|{vuelta}"
     #  LA CLAVE LLEVA EL MOMENTO Y LA VUELTA. Ver la cabecera: sin eso, el
@@ -380,7 +461,14 @@ def anotar(config, tenant: str, *, orden_id: str, ticket: str, texto: str,
             f"{codigo or 'sin codigo'}: no se ejecuto y nada quedo escrito "
             f"en el ISP", referencia=origen)
 
-    return ResultadoNota(ANOTADA, referencia=origen)
+    #  CUANTAS FOTOS SALIERON Y QUE SE QUEDO. Va en el `detalle`, que campo
+    #  guarda en el evento de la orden: quien pregunte "¿por que el ticket
+    #  del ISP tiene tres fotos y la orden cinco?" lo lee ahi, sin tener que
+    #  reproducir el envio. Descartar en silencio es lo que obliga a eso.
+    detalle = f"{len(viajan)} foto(s)" if viajan else ""
+    if descartadas:
+        detalle = (detalle + "; sin mandar: " + ", ".join(descartadas[:4])).strip("; ")
+    return ResultadoNota(ANOTADA, detalle=detalle[:300], referencia=origen)
 
 
 def _firma_de(momento: str, actor: str) -> str:
