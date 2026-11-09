@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'campana_de_avisos.dart';
 
 /// Qué se sabe del enlace con el servidor.
 enum EstadoConexion {
@@ -41,6 +42,7 @@ class DexterAppHeader extends StatelessWidget {
     this.seccion,
     this.iniciales,
     this.notificacionesSinLeer = 0,
+    this.onAvisos,
     this.onPerfil,
   });
 
@@ -56,9 +58,13 @@ class DexterAppHeader extends StatelessWidget {
 
   final String? iniciales;
 
-  /// Sin uso en este diseño: esta familia de pantallas no tiene campana. Se
-  /// conserva el parámetro para no romper a quien ya lo pasa.
+  /// Cuántos avisos tiene sin leer. Lo dibuja la campana desde el 09/11/2026;
+  /// hasta ese día este parámetro se recibía y no se usaba.
   final int notificacionesSinLeer;
+
+  /// Qué hacer al tocar la campana. Sin esto no se dibuja: una campana que no
+  /// abre nada es peor que no tenerla, porque el técnico la toca igual.
+  final VoidCallback? onAvisos;
 
   final VoidCallback? onPerfil;
 
@@ -102,6 +108,17 @@ class DexterAppHeader extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.sm),
           PastillaDeConexion(estado: conexion),
+          // LA CAMPANA (09/11/2026, pedido del usuario). Va entre la pastilla
+          // de conexión y el avatar: es lo que el técnico mira cuando le llega
+          // algo, y desde acá se ve en TODAS las pantallas. Antes los avisos
+          // solo existían dentro de Inicio, debajo del trabajo del día.
+          if (onAvisos != null) ...<Widget>[
+            const SizedBox(width: AppSpacing.xs),
+            CampanaDeAvisos(
+              sinLeer: notificacionesSinLeer,
+              onTap: onAvisos!,
+            ),
+          ],
           const SizedBox(width: AppSpacing.sm),
           AvatarDeTecnico(
             iniciales: iniciales,

@@ -27,8 +27,10 @@ import '../../core/sync/sync_queue_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/dexter_app_header.dart';
 import '../../core/widgets/contenido_centrado.dart';
+import '../../core/widgets/campana_de_avisos.dart';
 import '../../core/widgets/dexter_bottom_nav.dart';
 import '../../core/widgets/dexter_sync_strip.dart';
+import '../notificaciones/notificaciones_screen.dart';
 import '../auth/login_screen.dart';
 import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
@@ -614,6 +616,35 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     return EstadoConexion.desconocido;
   }
 
+  /// Despliega los avisos bajo la campana (09/11/2026).
+  ///
+  /// Se reutiliza `NotificacionesScreen`, que es la que ya sabe leerlos,
+  /// marcarlos leídos y abrir la orden de un aviso: acá cambia DÓNDE se ven,
+  /// no qué dicen. `ocultarSiVacio: false` a propósito — si el técnico tocó la
+  /// campana y no hay nada, el panel tiene que decírselo; un panel que no se
+  /// abre se lee como una aplicación trabada.
+  ///
+  /// Al cerrarse se recuenta: adentro pudo marcar avisos como leídos, y la
+  /// chapita roja tiene que reflejarlo sin esperar al siguiente evento de la
+  /// base.
+  Future<void> _abrirAvisos() async {
+    await mostrarPanelDeAvisos(
+      context,
+      contenido: (BuildContext _) => NotificacionesScreen(
+        ocultarSiVacio: false,
+        alAbrirOrden: widget.dependencias.abrirOrdenPorId == null
+            ? null
+            : (String ordenId) {
+                //  Primero se cierra el panel: si no, la ficha de la orden se
+                //  abriría detrás del velo y el técnico la vería gris.
+                Navigator.of(context).maybePop();
+                widget.dependencias.abrirOrdenPorId!(context, ordenId);
+              },
+      ),
+    );
+    await _contarAvisos();
+  }
+
   Future<void> _abrirPerfil() async {
     final salir = await showModalBottomSheet<bool>(
       context: context,
@@ -817,8 +848,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             seccion: etiquetaDe(_seccion),
             iniciales: _identidad?.iniciales,
             conexion: _estadoConexion,
-            // Dato de ejemplo: todavía no hay notificaciones de verdad.
-            notificacionesSinLeer: FieldMockData.notificacionesSinLeer,
+            // EL NÚMERO REAL (09/11/2026). Hasta hoy acá iba
+            // `FieldMockData.notificacionesSinLeer`, con un comentario que
+            // decía «dato de ejemplo: todavía no hay notificaciones de
+            // verdad». Las hay: ese número ya se calculaba contra
+            // `local_notificaciones` para el punto de la barra de abajo, y es
+            // el que se usa. Una campana con una cifra inventada enseña, en
+            // dos días, a no mirar la campana.
+            notificacionesSinLeer: _avisosSinLeer,
+            onAvisos: _abrirAvisos,
             onPerfil: _abrirPerfil,
           ),
           DexterSyncStrip(

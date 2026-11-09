@@ -4,6 +4,7 @@ import 'package:campo/core/estado/ordenes_jornada.dart';
 import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/inicio/inicio_screen.dart';
+import 'package:campo/features/notificaciones/notificaciones_screen.dart';
 import 'package:campo/features/inicio/labor_de_hoy.dart';
 import 'package:campo/features/inicio/novedad_de_cuadrilla.dart';
 import 'package:campo/features/materiales/estado_de_jornada.dart';
@@ -640,8 +641,37 @@ void main() {
       await tester.pumpWidget(banco.app(resumen: _sync(), jornada: _jornada()));
       await tester.pumpAndSettle();
 
-      // Desde el 29/10/2026 las alertas van dentro de «Avisos».
-      expect(find.text('Avisos'), findsNothing);
+      // Desde el 29/10/2026 las alertas tienen su bloque, y desde el
+      // 09/11/2026 se llama «Para resolver hoy»: los avisos de la plataforma
+      // se mudaron a la campana del encabezado.
+      expect(find.text('Para resolver hoy'), findsNothing);
+      await banco.cerrar();
+    });
+
+    /// LOS AVISOS DE LA PLATAFORMA NO ESTÁN EN DOS LADOS (09/11/2026).
+    ///
+    /// El usuario, al ver la campana nueva andando: «la campana sale, pero aún
+    /// sigue saliendo la tarjeta de aviso abajo». Estaban en los dos lugares a
+    /// la vez.
+    ///
+    /// Se afirma sobre el widget y no sobre un texto porque la lista puede
+    /// venir vacía, y entonces un `findsNothing` sobre su contenido pasaría
+    /// sin medir nada. Lo que no puede volver es el bloque.
+    testWidgets('la lista de avisos no vuelve a Inicio: vive en la campana',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+      ]);
+      await tester.pumpWidget(banco.app(
+        resumen: _sync(pendientes: 3),
+        jornada: _jornada(),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NotificacionesScreen), findsNothing);
+      //  Y las alertas de la jornada --que son otra cosa-- siguen a la vista.
+      expect(find.text('Para resolver hoy'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -652,7 +682,7 @@ void main() {
       await tester.pumpWidget(banco.app(resumen: _sync(pendientes: 3)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Avisos'), findsOneWidget);
+      expect(find.text('Para resolver hoy'), findsOneWidget);
       expect(find.text('3 registros sin enviar'), findsOneWidget);
       expect(
         find.text('Suben solos cuando haya señal. No hace falta esperar acá.'),
@@ -715,8 +745,10 @@ void main() {
       await tester.pumpWidget(banco.app(jornada: _jornada(diferencias: 2)));
       await tester.pumpAndSettle();
 
-      // Desde el 29/10/2026 las alertas van dentro de «Avisos».
-      expect(find.text('Avisos'), findsNothing);
+      // Desde el 29/10/2026 las alertas tienen su bloque, y desde el
+      // 09/11/2026 se llama «Para resolver hoy»: los avisos de la plataforma
+      // se mudaron a la campana del encabezado.
+      expect(find.text('Para resolver hoy'), findsNothing);
       await banco.cerrar();
     });
 
@@ -764,8 +796,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Desde el 29/10/2026 las alertas van dentro de «Avisos».
-      expect(find.text('Avisos'), findsNothing);
+      // Desde el 29/10/2026 las alertas tienen su bloque, y desde el
+      // 09/11/2026 se llama «Para resolver hoy»: los avisos de la plataforma
+      // se mudaron a la campana del encabezado.
+      expect(find.text('Para resolver hoy'), findsNothing);
       await banco.cerrar();
     });
   });
@@ -1010,8 +1044,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      final Finder recuadro = find.byKey(const ValueKey<String>('avisos-con-scroll'));
-      expect(find.text('Avisos'), findsOneWidget);
+      final Finder recuadro = find.byKey(const ValueKey<String>('alertas-de-la-jornada'));
+      expect(find.text('Para resolver hoy'), findsOneWidget);
       expect(recuadro, findsOneWidget);
       expect(find.text('Deslizá dentro del recuadro para ver el otro'), findsOneWidget);
 
@@ -1049,7 +1083,7 @@ void main() {
 
       expect(find.text('3 registros sin enviar'), findsOneWidget);
       expect(find.text('1 cambio rechazado'), findsOneWidget);
-      expect(find.byKey(const ValueKey<String>('avisos-con-scroll')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('alertas-de-la-jornada')), findsNothing);
       expect(find.textContaining('Deslizá dentro del recuadro'), findsNothing);
       await banco.cerrar();
     });
