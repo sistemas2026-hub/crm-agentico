@@ -1,4 +1,5 @@
 import 'cercania.dart';
+import 'conteo_de_mi_trabajo.dart';
 import 'orden_operativo.dart';
 import '../../core/acciones/lector_de_codigo.dart';
 import 'package:flutter/material.dart';
@@ -44,7 +45,24 @@ class TrabajoScreen extends StatefulWidget {
 }
 
 class _TrabajoScreenState extends State<TrabajoScreen> {
+  /// Arranca SIN filtro, que es lo que antes hacía el chip «Todos».
+  ///
+  /// El chip se fue (pedido del usuario, 09/11/2026) pero la vista completa no:
+  /// es la única que muestra la jornada entera en el orden del día, y ese orden
+  /// es justamente lo que las tarjetas marcan con su lugar. Se vuelve a ella
+  /// tocando de nuevo el filtro que esté encendido.
   PestanaTrabajo _pestana = PestanaTrabajo.todos;
+
+  /// Los filtros que se dibujan. `todos` queda fuera de la fila: no es un
+  /// filtro, es la ausencia de uno. El valor del enum NO se borra porque
+  /// `perteneceA` lo usa como «sin filtrar», y lo usa también el buscador.
+  static const List<PestanaTrabajo> _filtrosVisibles = <PestanaTrabajo>[
+    PestanaTrabajo.pendientes,
+    PestanaTrabajo.enProceso,
+    PestanaTrabajo.detenidas,
+    PestanaTrabajo.finalizadas,
+    PestanaTrabajo.conNovedad,
+  ];
   /// SOPORTE E INSTALACIONES, SEPARADAS (29/10/2026). El usuario: «quita
   /// Órdenes» (tenía el mismo número que Tickets) y «si asignan soporte e
   /// instalación, que no salgan revueltos: que salgan al presionar
@@ -356,8 +374,13 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
   }
 
   /// "Mi Trabajo" y cuántas órdenes tiene la jornada. Dato real.
+  ///
+  /// El conteo vive en `conteo_de_mi_trabajo.dart` desde el 09/11/2026: acá se
+  /// hacía `trabajos.length` y se rotulaba «asignadas para la jornada de hoy»,
+  /// con las cerradas y las canceladas adentro.
   Widget _encabezado() {
-    final int total = widget.ordenes.trabajos.length;
+    final ConteoDeMiTrabajo conteo =
+        ConteoDeMiTrabajo.de(widget.ordenes.trabajos);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -370,12 +393,7 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text('Mi Trabajo', style: AppTypography.tituloGrande),
-          Text(
-            total == 1
-                ? '1 orden asignada para la jornada de hoy'
-                : '$total órdenes asignadas para la jornada de hoy',
-            style: AppTypography.cuerpoChico,
-          ),
+          Text(conteo.linea, style: AppTypography.cuerpoChico),
           // El orden de siempre ya no se explica (29/10/2026, el usuario: «eso
           // para qué es, no le veo uso»): cada tarjeta trae su lugar del día y
           // la que sigue va marcada. Se dice solo cuando el técnico pidió
@@ -545,15 +563,27 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
                   ),
                   const SizedBox(width: AppSpacing.sm),
                 ],
-                for (final PestanaTrabajo filtro in PestanaTrabajo.values) ...<Widget>[
-                  if (filtro != PestanaTrabajo.values.first)
+                // «TODOS» YA NO ES UN CHIP (09/11/2026, pedido del usuario).
+                //
+                // No decía nada que no estuviera al lado --los otros cinco
+                // traen su cuenta y entre todos cubren el universo-- y empujaba
+                // al resto fuera de la pantalla, que es el problema que esta
+                // misma fila ya tuvo con «Cerca mío».
+                //
+                // Pero la VISTA completa se queda: la pantalla abre sin filtro
+                // y se vuelve a eso tocando otra vez el filtro encendido. Es la
+                // única vista que muestra la jornada entera en el orden del
+                // día, y ese orden es lo que cada tarjeta marca con su lugar.
+                // Un filtro que no se puede apagar sería una pantalla donde el
+                // técnico no puede volver a ver su día completo.
+                for (final PestanaTrabajo filtro in _filtrosVisibles) ...<Widget>[
+                  if (filtro != _filtrosVisibles.first)
                     const SizedBox(width: AppSpacing.sm),
                   _ChipFiltro(
-                    texto: filtro == PestanaTrabajo.todos
-                        ? filtro.etiqueta
-                        : '${filtro.etiqueta} (${cuantos(filtro)})',
+                    texto: '${filtro.etiqueta} (${cuantos(filtro)})',
                     activo: _pestana == filtro,
-                    onTap: () => setState(() => _pestana = filtro),
+                    onTap: () => setState(() => _pestana =
+                        _pestana == filtro ? PestanaTrabajo.todos : filtro),
                   ),
                 ],
               ],
@@ -589,10 +619,16 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     if (_busqueda.text.trim().isNotEmpty) {
       return 'Sin resultados para "${_busqueda.text.trim()}"';
     }
+    // NO TENER NADA NO ES LO MISMO QUE NO TENER NADA EN ESTE FILTRO
+    // (09/11/2026). Al quitar el chip «Todos», la pantalla abre en
+    // «Pendientes»; sin esta guarda, un técnico sin ninguna orden asignada
+    // leía «No tenés trabajos pendientes» y se quedaba buscando en los otros
+    // filtros una jornada que no existe. La frase que corresponde es la misma
+    // que decía antes, y no depende de en qué chip esté parado.
+    if (widget.ordenes.trabajos.isEmpty) return 'No tenés trabajos asignados';
     return switch (_pestana) {
-      PestanaTrabajo.todos => widget.ordenes.trabajos.isEmpty
-          ? 'No tenés trabajos asignados'
-          : 'No hay ${_segmento.etiqueta.toLowerCase()} en tu jornada',
+      PestanaTrabajo.todos =>
+        'No hay ${_segmento.etiqueta.toLowerCase()} en tu jornada',
       PestanaTrabajo.pendientes => 'No tenés trabajos pendientes',
       PestanaTrabajo.enProceso => 'No tenés ningún trabajo empezado',
       PestanaTrabajo.detenidas => 'Ninguno detenido',

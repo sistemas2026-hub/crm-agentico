@@ -242,6 +242,35 @@ void main() {
       await banco.cerrar();
     });
 
+    /// EL CHIP «TODOS» SE FUE Y LA VISTA COMPLETA SE QUEDÓ (09/11/2026).
+    ///
+    /// El usuario pidió quitar ese chip. Quitarlo sin más dejaría al técnico
+    /// sin ninguna forma de volver a ver su jornada entera en el orden del
+    /// día, que es justo el orden que cada tarjeta marca con su lugar. Ahora
+    /// se vuelve tocando otra vez el filtro encendido.
+    testWidgets('7b. Tocar de nuevo el filtro encendido muestra todo otra vez',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 4832, estado: 'asignada', cliente: 'Carlos Gomez', compromiso: hoy),
+        _orden(id: '2', numero: 4833, estado: 'en_sitio', cliente: 'Marta Rodriguez', compromiso: ayer),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      //  El chip ya no existe: la vista completa no es un filtro.
+      expect(find.text('Todos'), findsNothing);
+
+      await tester.tap(find.textContaining('En Proceso'));
+      await tester.pumpAndSettle();
+      expect(find.text('Carlos Gomez'), findsNothing);
+
+      await tester.tap(find.textContaining('En Proceso'));
+      await tester.pumpAndSettle();
+      expect(find.text('Carlos Gomez'), findsOneWidget);
+      expect(find.text('Marta Rodriguez'), findsOneWidget);
+      await banco.cerrar();
+    });
+
     testWidgets('8. La tarjeta distingue la clase de trabajo sin unificarlas',
         (WidgetTester tester) async {
       final banco = _Banco(filas: <Map<String, dynamic>>[
@@ -437,7 +466,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Mi Trabajo'), findsOneWidget);
-      expect(find.text('2 órdenes asignadas para la jornada de hoy'), findsOneWidget);
+      expect(find.text('2 asignadas hoy'), findsOneWidget);
       // Lo que está en el teléfono, que es lo que se puede abrir sin señal.
       expect(find.textContaining('2 OTs sincronizadas localmente'), findsOneWidget);
 
