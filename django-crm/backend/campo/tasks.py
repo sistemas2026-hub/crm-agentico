@@ -317,6 +317,21 @@ def revisar_el_cierre_ya(org_id: str, orden_id: str) -> dict:
         except Exception as e:                                   # noqa: BLE001
             logger.warning("medicion inmediata: fallo (%s)", type(e).__name__)
 
+        #  Y LAS FOTOS, POR EL MISMO MOTIVO EXACTO  --  09/11/2026
+        #
+        #  Subir la foto encola una tarea; mandar el reporte encola esta. Sin
+        #  esto, cuando el cierre le gana al analisis la revision decide sobre
+        #  una foto que nadie miro -- y `punto_de_la_revision` ni la ve, asi
+        #  que una orden con el resto en orden salia CERRAR. Ver
+        #  `mirar_las_que_faltan`, que lo cuenta entero.
+        #
+        #  ENVUELTO IGUAL QUE LA MEDICION: si el modelo no contesta, el cierre
+        #  se intenta y la foto sin fila deja el veredicto en REVISAR.
+        try:
+            mirar_las_que_faltan(orden)
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("mirada inmediata: fallo (%s)", type(e).__name__)
+
         return cerrar_esta_orden(orden)
     except Exception as e:                                       # noqa: BLE001
         logger.warning("cierre inmediato: fallo (%s)", type(e).__name__)
@@ -362,8 +377,7 @@ def analizar_evidencia(org_id: str, evidencia_id: str) -> dict:
     APPEND-ONLY: cada intento es una fila. Si se reintenta quedan las dos, y
     es a proposito -- ver 'campo/analisis_de_evidencia.py'.
     """
-    from campo import inspeccion_visual as IV
-    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+    from campo.models import EvidenciaTrabajo
     from common.tasks import clear_rls_context, set_rls_context
 
     try:
@@ -375,29 +389,7 @@ def analizar_evidencia(org_id: str, evidencia_id: str) -> dict:
         except EvidenciaTrabajo.DoesNotExist:
             return {"estado": "", "motivo": "la evidencia ya no esta"}
 
-        r = IV.analizar(evidencia)
-        #  APAGADO NO DEJA RASTRO (revisor de PII, 31/10/2026, H1). Si la
-        #  empresa no lo tiene habilitado, no se escribe fila: con la fila
-        #  escrita, `punto_de_la_revision` veia "ninguna se pudo mirar",
-        #  devolvia el punto en "no se sabe" y el veredicto pasaba a REVISAR
-        #  -- o sea que la funcion APAGADA, que es el default, habria frenado
-        #  el cierre autonomo del Supervisor en toda orden con evidencia.
-        #
-        #  Un FALLO si se guarda, y la diferencia importa: un fallo hay que
-        #  poder verlo; "esta empresa no lo pidio" no es nada que haya pasado.
-        if r["motivo"] == IV.MOTIVO_APAGADO:
-            return {"estado": "", "motivo": r["motivo"]}
-
-        #  'pide_atencion' LO ESCRIBE EL CODIGO, no el modelo: es la unica
-        #  senal que llega a la revision del cierre.
-        AnalisisDeEvidencia.objects.create(
-            org_id=org_id, evidencia=evidencia, vuelta=evidencia.vuelta,
-            origen=AnalisisDeEvidencia.IA,
-            texto=r["texto"], motivo=r["motivo"],
-            pide_atencion=_pide_atencion(r["texto"]),
-            modelo=r["modelo"], segundos=r["segundos"] or 0,
-            tokens=r["tokens"] or 0)
-        return {"estado": r["estado"], "motivo": r["motivo"]}
+        return _mirar_y_anotar(evidencia)
     except Exception as e:                                       # noqa: BLE001
         logger.warning("inspeccion visual: fallo (%s)", type(e).__name__)
         return {"estado": "", "motivo": type(e).__name__}
@@ -509,6 +501,132 @@ def _pide_atencion(texto: str) -> bool:
         resto = bajo[pos + len(MARCA_ATENCION):].strip()
         return resto.startswith(("si", "sí"))
     return any(p in bajo for p in PALABRAS_QUE_PIDEN_MIRAR)
+
+
+def _mirar_y_anotar(evidencia) -> dict:
+    """Mira UNA evidencia y escribe su analisis. El contexto RLS ya esta puesto.
+
+    Esta afuera de la tarea para que la mirada inmediata del Supervisor
+    (`mirar_las_que_faltan`) use EXACTAMENTE este codigo y no una copia: lo
+    que se escriba por el camino acelerado tiene que ser indistinguible de lo
+    que escribe la tarea, o el veredicto dependeria de quien miro la foto.
+    """
+    from campo import inspeccion_visual as IV
+    from campo.models import AnalisisDeEvidencia
+
+    r = IV.analizar(evidencia)
+    #  APAGADO NO DEJA RASTRO (revisor de PII, 31/10/2026, H1). Si la
+    #  empresa no lo tiene habilitado, no se escribe fila: con la fila
+    #  escrita, `punto_de_la_revision` veia "ninguna se pudo mirar",
+    #  devolvia el punto en "no se sabe" y el veredicto pasaba a REVISAR
+    #  -- o sea que la funcion APAGADA, que es el default, habria frenado
+    #  el cierre autonomo del Supervisor en toda orden con evidencia.
+    #
+    #  Un FALLO si se guarda, y la diferencia importa: un fallo hay que
+    #  poder verlo; "esta empresa no lo pidio" no es nada que haya pasado.
+    if r["motivo"] == IV.MOTIVO_APAGADO:
+        return {"estado": "", "motivo": r["motivo"]}
+
+    #  'pide_atencion' LO ESCRIBE EL CODIGO, no el modelo: es la unica
+    #  senal que llega a la revision del cierre.
+    AnalisisDeEvidencia.objects.create(
+        org_id=evidencia.org_id, evidencia=evidencia, vuelta=evidencia.vuelta,
+        origen=AnalisisDeEvidencia.IA,
+        texto=r["texto"], motivo=r["motivo"],
+        pide_atencion=_pide_atencion(r["texto"]),
+        modelo=r["modelo"], segundos=r["segundos"] or 0,
+        tokens=r["tokens"] or 0)
+    return {"estado": r["estado"], "motivo": r["motivo"]}
+
+
+#: Cuantas fotos mira el camino acelerado antes de darse por vencido. Las
+#: plantillas de hoy piden entre 4 y 8; el tope existe para que una plantilla
+#: con treinta evidencias no deje la tarea colgada hablandole al modelo. Lo
+#: que no alcance a mirar lo mira la tarea por foto, que sigue existiendo, y
+#: el ciclo horario vuelve a revisar.
+MAX_FOTOS_EN_EL_MOMENTO = 12
+
+
+def mirar_las_que_faltan(orden) -> dict:
+    """Las fotos de esta orden que todavia no tienen analisis, mirADAS AHORA.
+
+    POR QUE ESTO EXISTE  --  09/11/2026
+    -----------------------------------
+    El usuario, despues de ver que una foto equivocada esperaba hasta el
+    ciclo de la hora siguiente:
+
+        «la orden no puede esperar cierto tiempo para devolverse. El proceso
+        correcto es que apenas el tecnico mande el reporte el supervisor
+        revisa y si encuentra algo malo devolver el ticket en ese mismo
+        momento, para que el tecnico no se mueva hacia otro ticket y tenga
+        que devolverse».
+
+    Y el camino inmediato ya existia --`revisar_el_cierre_ya`-- pero decidia
+    sobre fotos que nadie habia mirado todavia. Subir una foto encola
+    `analizar_evidencia`; mandar el reporte encola `revisar_el_cierre_ya`.
+    Son dos tareas en la cola SIN ORDEN GARANTIZADO, y cuando el cierre le
+    gana al analisis, `inspeccion_visual.punto_de_la_revision` se encuentra
+    sin ninguna fila y hace `if not analisis: return None`: la foto no
+    aparece ni como «no se pudo mirar» -- NO APARECE. El veredicto se calcula
+    sin ella.
+
+    Eso tenia dos consecuencias, y la segunda es la grave:
+      · la foto equivocada no se nombraba, y la devolucion automatica no
+        pasaba hasta el ciclo horario -- lo que el usuario vio;
+      · y el punto de la inspeccion quedaba fuera del veredicto, de modo que
+        una orden con el checklist y la medicion en orden daba CERRAR. Con el
+        cierre autonomo encendido, se cerraba sola SIN HABER MIRADO NINGUNA
+        FOTO.
+
+    ES EL MISMO ARREGLO QUE YA SE ELIGIO PARA LA MEDICION el 06/11 en esta
+    misma tarea, con las mismas palabras: aqui dentro y no en otra tarea,
+    secuencial, en un solo worker, con el contexto RLS ya puesto. «La
+    aceleracion llegaba a una pieza que nadie habia acelerado.»
+
+    NO ES UNA PUERTA NUEVA. No decide nada: solo hace que exista el dato que
+    la revision ya iba a leer. Si el modelo no contesta, se escribe la fila
+    con su motivo y el punto dice «no se pudieron mirar» -- que deja el
+    veredicto en REVISAR y NO cierra. Falla cerrado.
+
+    QUE MIRA: las evidencias con archivo recibido cuya ULTIMA vuelta no tiene
+    analisis. Por requisito y no por `vuelta=orden.vuelta`, porque en una
+    orden devuelta el tecnico rehace solo algunas fotos y las demas siguen en
+    la vuelta anterior con su analisis ya escrito: filtrar por la vuelta
+    actual las haria mirar de nuevo en cada devolucion, y pagar el modelo de
+    nuevo por una foto que no cambio.
+    """
+    from campo.models import AnalisisDeEvidencia, EvidenciaTrabajo
+
+    #  La ultima evidencia de cada requisito: la vuelta pesa primero, igual
+    #  que en `revision_del_cierre`. La app encola y reintenta, asi que una
+    #  foto de la vuelta anterior puede llegar DESPUES de la rehecha.
+    ultima = {}
+    for ev in (EvidenciaTrabajo.objects
+               .filter(org=orden.org, orden_trabajo=orden,
+                       estado_archivo=EvidenciaTrabajo.RECIBIDO)
+               .order_by("vuelta", "recibida_en_servidor")):
+        ultima[ev.requisito_id] = ev
+
+    if not ultima:
+        return {"miradas": 0, "faltaban": 0}
+
+    ya = set(AnalisisDeEvidencia.objects
+             .filter(org=orden.org, evidencia_id__in=[e.id for e in ultima.values()])
+             .values_list("evidencia_id", flat=True))
+    faltan = [e for e in ultima.values() if e.id not in ya]
+
+    miradas = 0
+    for evidencia in faltan[:MAX_FOTOS_EN_EL_MOMENTO]:
+        try:
+            _mirar_y_anotar(evidencia)
+            miradas += 1
+        except Exception as e:                                   # noqa: BLE001
+            #  UNA FOTO QUE FALLA NO FRENA A LAS DEMAS. Sin fila, el punto de
+            #  la inspeccion no la ve, y eso ya quedaba igual que antes: la
+            #  red de atras es la tarea por foto y el ciclo horario.
+            logger.warning("mirada inmediata: fallo una foto (%s)",
+                           type(e).__name__)
+    return {"miradas": miradas, "faltaban": len(faltan)}
 
 
 def pedir_analisis_de_la_foto(evidencia) -> None:
