@@ -390,11 +390,39 @@ def punto_de_la_revision(orden):
                           f"fotos: {sin_mirar[0].motivo}")}
 
     con_atencion = [a for a in mirados if a.pide_atencion]
-    if con_atencion or sin_mirar:
+
+    #  Y LAS QUE MUESTRAN OTRA COSA  --  08/11/2026
+    #
+    #  Este punto miraba SOLO `ATENCION`, y `MUESTRA` es otra marca: el
+    #  modelo puede decir que la foto muestra algo distinto de lo que se
+    #  pidio --«MUESTRA: no»-- sin levantar atencion. En la practica las dos
+    #  suelen ir juntas, porque la regla 11 del prompt pide atencion cuando
+    #  «la foto no sirve como evidencia de lo que se pedia». Pero «suelen»
+    #  no es una garantia, y lo que estaba en juego es grande: una foto que
+    #  muestra otra cosa, sin atencion, dejaba el veredicto en «se puede
+    #  cerrar» y la orden se cerraba sola.
+    #
+    #  Lo encontro una guarda del efecto el 08/11/2026, al escribir la
+    #  devolucion automatica: el caso de prueba tenia «MUESTRA: no» sin
+    #  «ATENCION: si» y este punto contesto «nada llamo la atencion».
+    #
+    #  SIGUE SIN PODER DECIR QUE NO: `ok` es None, nunca False. La regla del
+    #  31/10 --una opinion no verificada no frena el trabajo de un tecnico--
+    #  no cambia; lo que cambia es que esa opinion deje de pasar inadvertida.
+    from campo.tasks import muestra_lo_pedido
+    otra_cosa = [a for a in mirados
+                 if a not in con_atencion
+                 and muestra_lo_pedido(a.texto or "") is False]
+
+    if con_atencion or otra_cosa or sin_mirar:
         partes = []
         if con_atencion:
             partes.append(f"{len(con_atencion)} de {len(mirados)} fotos piden "
                           f"una mirada")
+        if otra_cosa:
+            partes.append(f"{len(otra_cosa)} no es lo que se pidio"
+                          if len(otra_cosa) == 1 else
+                          f"{len(otra_cosa)} no son lo que se pidio")
         if sin_mirar:
             partes.append(f"{len(sin_mirar)} no se pudieron mirar")
         return {"clave": CLAVE, "ok": None,

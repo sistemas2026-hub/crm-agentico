@@ -239,7 +239,25 @@ def atender_la_que_no_cierra(orden, revision) -> str:
     from campo.services import nota_al_isp
     from campo.services.transiciones import requerir_correccion
 
-    if (revision or {}).get("veredicto") != RC.NO_CERRAR:
+    #  «HAY DUDAS» ENTRA, PERO SOLO CON ALGO CONCRETO QUE PEDIR  --  08/11/2026
+    #
+    #  El punto 2 de arriba dejaba afuera todo veredicto REVISAR, y nombraba
+    #  la condicion para levantarlo: «hoy ese veredicto no distingue "falta
+    #  esperar" de "algo no se pudo verificar", y sin esa distincion no hay
+    #  nada honesto que escribir. Queda afuera HASTA QUE EL VEREDICTO SEPA
+    #  DECIR CUAL ES CUAL».
+    #
+    #  Ya sabe. `revision_del_cierre._fotos_que_muestran_otra_cosa` nombra el
+    #  requisito cuya foto el modelo afirma que muestra OTRA COSA --la marca
+    #  `MUESTRA: no`, nunca «no se sabe»--, y eso entra en `sugeridas`. Una
+    #  revision que dice «hay dudas» Y ademas nombra que rehacer no es «falta
+    #  esperar»: es algo que el tecnico puede arreglar.
+    #
+    #  Lo de siempre lo sigue filtrando el `if not requisitos` de abajo: una
+    #  duda sin nada concreto que pedir --la medicion que no llego todavia,
+    #  una foto que el modelo no supo leer-- sale por ahi y no se devuelve.
+    veredicto = (revision or {}).get("veredicto")
+    if veredicto not in (RC.NO_CERRAR, RC.REVISAR):
         return "nada"
 
     #  SOLO LOS DEL CHECKLIST. `requisitos_a_rehacer` cae a las claves de los

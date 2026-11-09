@@ -56,6 +56,12 @@ def _orden_en_vuelta_2(org, numero=950):
         org=org, numero=numero, tipo_trabajo_version=version,
         cliente_nombre="MARIO SABANAGRANDE",
         estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+        #  `aplica()` exige LOS DOS estados: sin `estado_validacion`,
+        #  `revisar` devuelve None y cualquier guarda sobre el veredicto mide
+        #  el vacio. Lo encontro `test_LA_ORDEN_SE_DEVUELVE_DE_VERDAD`, que
+        #  es la que mira el EFECTO -- las que llaman a `_que_rehacer` sola
+        #  pasaban igual.
+        estado_validacion=OrdenTrabajo.PENDIENTE,
         origen_sistema="manual", contexto={}, vuelta=2)
 
 
@@ -245,3 +251,215 @@ def test_la_POTENCIA_tampoco_lee_la_foto_vieja_reintentada(org_a):
         "se leyo el analisis de la foto que el supervisor ya habia "
         "rechazado: " + texto)
     assert "-70.00" not in texto, texto
+
+
+# ---------------------------------------------------------------------------
+#  UNA FOTO QUE MUESTRA OTRA COSA SE DEVUELVE SOLA  --  08/11/2026
+#
+#  El usuario mando a proposito un teclado de laptop donde se pedia el
+#  conector. El Supervisor la marco bien y NO la devolvio: hubo que apretar
+#  el boton. «Deberia mandar automatico el Supervisor».
+#
+#  SOLO CON «MUESTRA: no», NUNCA CON «no se sabe». Decision del usuario con
+#  las dos opciones y su costo a la vista: «no» es verificable mirando --se
+#  pidio el conector y hay un teclado--; «no se sabe» es una foto que el
+#  modelo no supo leer, y mandar al tecnico de vuelta por eso lo hace viajar
+#  por nada.
+# ---------------------------------------------------------------------------
+
+def _con_analisis(orden, requisito, texto, vuelta=None):
+    return _foto(orden, requisito, vuelta or orden.vuelta, texto=texto)
+
+
+def _orden_en_vuelta_1(org, numero):
+    from campo.models import OrdenTrabajo
+
+    o = _orden_en_vuelta_2(org, numero)
+    OrdenTrabajo.objects.filter(pk=o.pk).update(vuelta=1)
+    o.refresh_from_db()
+    return o
+
+
+def test_una_foto_que_MUESTRA_OTRA_COSA_se_pide_rehacer(org_a):
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_1(org_a, 960)
+    _con_analisis(orden, "dano_encontrado",
+                  "Solo un teclado y trackpad de laptop. MUESTRA: no")
+
+    esquema = orden.tipo_trabajo_version.esquema
+    assert "dano_encontrado" in _que_rehacer([], esquema, orden)
+
+
+def test_una_que_el_modelo_NO_SUPO_LEER_no_se_pide(org_a):
+    """«no se sabe» no manda a nadie a viajar."""
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_1(org_a, 961)
+    _con_analisis(orden, "dano_encontrado",
+                  "La imagen esta borrosa. MUESTRA: no se sabe")
+
+    assert _que_rehacer([], orden.tipo_trabajo_version.esquema, orden) == []
+
+
+def test_una_foto_BUENA_no_se_pide(org_a):
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_1(org_a, 962)
+    _con_analisis(orden, "dano_encontrado",
+                  "Se ve el conector afectado. MUESTRA: si")
+
+    assert _que_rehacer([], orden.tipo_trabajo_version.esquema, orden) == []
+
+
+def test_una_SIN_MARCA_tampoco(org_a):
+    """Una plantilla sin instrucciones no recibe la marca, y eso no es un no."""
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_1(org_a, 963)
+    _con_analisis(orden, "dano_encontrado", "Se ve un conector verde.")
+
+    assert _que_rehacer([], orden.tipo_trabajo_version.esquema, orden) == []
+
+
+def test_si_la_REHIZO_y_ahora_esta_bien_no_se_vuelve_a_pedir(org_a):
+    """La ultima gana, con la vuelta pesando primero."""
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_2(org_a, 964)
+    _foto(orden, "dano_encontrado", 1, texto="un teclado. MUESTRA: no")
+    _foto(orden, "dano_encontrado", 2, texto="el conector. MUESTRA: si")
+
+    assert _que_rehacer([], orden.tipo_trabajo_version.esquema, orden) == []
+
+
+def test_LA_ORDEN_SE_DEVUELVE_DE_VERDAD(org_a):
+    """EL EFECTO. Que `sugeridas` la nombre no prueba que la orden vuelva."""
+    from unittest import mock
+
+    from campo.cierre_por_el_supervisor import atender_la_que_no_cierra
+    from campo.models import OrdenTrabajo
+    from campo.revision_del_cierre import revisar
+
+    from campo.models import EventoTrabajo
+
+    orden = _orden_en_vuelta_1(org_a, 965)
+    #  CADA REQUISITO UNA SOLA VEZ: la base tiene un unique
+    #  (orden, requisito, sha256) y la primera version de esta guarda creaba
+    #  `dano_encontrado` dos veces en la misma vuelta.
+    for f in FOTOS:
+        texto = ("un teclado de laptop. MUESTRA: no"
+                 if f == "dano_encontrado" else "bien. MUESTRA: si")
+        _foto(orden, f, 1, texto=texto)
+    #  TODO LO DEMAS EN VERDE, para que el veredicto sea «hay dudas» y no
+    #  «no se cierra». Sin esto el caso pasaba por otro camino --faltaba el
+    #  reporte de cierre, asi que el veredicto era NO_CERRAR-- y la rama que
+    #  este cambio agrega NO SE EJECUTABA. Lo encontro la mutacion.
+    EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo="cierre_campo",
+        datos={"vuelta": 1,
+               "respuestas": {"solucion": "se cambia conector APC",
+                              "servicio_validado": "Hecho"},
+               "sin_material_confirmado": True})
+    antes = orden.vuelta
+
+    #  LA REVISION SE MIRA ANTES DEL EFECTO. Despues de devolver, la orden
+    #  pasa a CORRECCION_REQUERIDA y `aplica()` da False, asi que `revisar`
+    #  devuelve None: afirmar ahi medía el vacio.
+    from campo.revision_del_cierre import REVISAR
+    revision = revisar(orden)
+    #  LA RAMA QUE IMPORTA: con todo lo demas bien, el veredicto es «hay
+    #  dudas», y hasta hoy eso no devolvia nada. Si fuera NO_CERRAR, esta
+    #  guarda pasaria por el camino viejo sin tocar el nuevo.
+    assert revision["veredicto"] == REVISAR, revision["puntos"]
+    assert "dano_encontrado" in revision["sugeridas"], revision["sugeridas"]
+
+    with mock.patch("requests.post") as post:
+        post.return_value = mock.Mock(status_code=200, json=lambda: {"ok": True})
+        resultado = atender_la_que_no_cierra(orden, revision)
+
+    assert resultado == "devuelta", resultado
+    fresca = OrdenTrabajo.objects.get(pk=orden.pk)
+    assert fresca.estado_operativo == OrdenTrabajo.CORRECCION_REQUERIDA
+    assert fresca.vuelta == antes + 1
+
+
+def test_la_opinion_del_modelo_SIGUE_SIN_PODER_decir_que_no(org_a):
+    """Lo que NO cambio, y es la mitad de la decision del 31/10/2026.
+
+    `_fotos` sigue valiendo True o None, nunca False: una opinion no
+    verificada no frena un cierre por si sola. Lo que se abrio es mas
+    angosto -- que una foto que muestra OTRA COSA se pueda nombrar como algo
+    a rehacer.
+    """
+    from campo.revision_del_cierre import _fotos
+
+    orden = _orden_en_vuelta_1(org_a, 966)
+    _con_analisis(orden, "dano_encontrado",
+                  "un teclado de laptop. MUESTRA: no ATENCION: si")
+
+    p = _fotos(orden)
+    assert p is None or p.get("ok") is not False, p
+
+
+def test_no_se_pide_rehacer_algo_que_la_PLANTILLA_NO_DECLARA(org_a):
+    """Pedir un requisito que el formulario no tiene deja al tecnico sin
+    poder cumplirlo. Medido: sin esta guarda la mutacion sobrevive."""
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_1(org_a, 967)
+    #  Una evidencia que llego para un requisito que la plantilla NO declara
+    #  (la plantilla solo tiene las tres de FOTOS).
+    _foto(orden, "foto_de_otra_plantilla", 1,
+          texto="un teclado de laptop. MUESTRA: no")
+
+    assert _que_rehacer([], orden.tipo_trabajo_version.esquema, orden) == []
+
+
+def test_la_REHECHA_gana_aunque_la_vieja_se_haya_analizado_despues(org_a):
+    """El mismo caso de la foto reintentada, en la marca MUESTRA.
+
+    La app encola y reintenta: el analisis de la vuelta 1 puede quedar MAS
+    NUEVO por fecha que el de la vuelta 2. Sin la vuelta pesando primero, se
+    leeria el «MUESTRA: no» ya corregido y la orden volveria al tecnico por
+    algo que ya rehizo.
+    """
+    import datetime as dt
+
+    from campo.models import AnalisisDeEvidencia
+    from campo.revision_del_cierre import _que_rehacer
+
+    orden = _orden_en_vuelta_2(org_a, 968)
+    _foto(orden, "dano_encontrado", 1, texto="un teclado. MUESTRA: no")
+    nueva = _foto(orden, "dano_encontrado", 2,
+                  texto="el conector afectado. MUESTRA: si")
+    de_la_nueva = AnalisisDeEvidencia.objects.get(evidencia=nueva)
+    (AnalisisDeEvidencia.objects
+     .filter(evidencia__vuelta=1, evidencia__orden_trabajo=orden)
+     .update(created_at=de_la_nueva.created_at + dt.timedelta(minutes=5)))
+
+    assert _que_rehacer([], orden.tipo_trabajo_version.esquema, orden) == [], (
+        "se pidio rehacer una foto que el tecnico ya corrigio")
+
+
+def test_una_foto_que_muestra_otra_cosa_SIN_atencion_igual_se_mira(org_a):
+    """EL HUECO QUE VOLVIA PELIGROSO TODO ESTO.
+
+    `punto_de_la_revision` miraba SOLO la marca ATENCION. Una foto con
+    «MUESTRA: no» y «ATENCION: no» dejaba el veredicto en «se puede cerrar»
+    -- y con el cierre autonomo encendido, la orden se cerraba sola con una
+    foto que muestra otra cosa.
+
+    En la practica las dos marcas suelen ir juntas. «Suelen» no es una
+    garantia, y lo que estaba en juego era un cierre.
+    """
+    from campo.revision_del_cierre import _fotos
+
+    orden = _orden_en_vuelta_1(org_a, 969)
+    _foto(orden, "dano_encontrado", 1,
+          texto="un teclado de laptop. MUESTRA: no ATENCION: no")
+
+    p = _fotos(orden)
+    assert p is not None, "la foto equivocada no aparecio en la revision"
+    assert p["ok"] is None, p
+    assert "no es lo que se pidio" in p["texto"], p["texto"]

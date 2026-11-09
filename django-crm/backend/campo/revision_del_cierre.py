@@ -135,12 +135,60 @@ def revisar(orden, *, pendientes=None) -> dict | None:
         #  no habia con que comparar. Decir «el checklist esta completo» es
         #  contar fotos, no mirarlas.
         "evidencias": _evidencias_para_revisar(orden, esquema),
-        "sugeridas": _que_rehacer(puntos, esquema),
+        "sugeridas": _que_rehacer(puntos, esquema, orden),
         "solucion": _solucion(cierre),
     }
 
 
-def _que_rehacer(puntos, esquema) -> list[str]:
+def _fotos_que_muestran_otra_cosa(orden) -> list[str]:
+    """Los requisitos cuya foto llego pero muestra algo DISTINTO.
+
+    SOLO `MUESTRA: no`, NUNCA «no se sabe»  --  08/11/2026
+    ------------------------------------------------------
+    El usuario mando a proposito una foto equivocada --un teclado de laptop
+    donde se pedia el conector-- y el Supervisor la marco bien, pero no la
+    devolvio sola: hubo que apretar el boton. «Deberia mandar automatico el
+    Supervisor».
+
+    ESTO REVIERTE EN PARTE UNA DECISION REGISTRADA, y por eso se acota tanto.
+    El 31/10/2026 se escribio que «una opinion no verificada de un modelo no
+    puede frenar el trabajo de un tecnico», y `_fotos` sigue sin poder decir
+    que no. Lo que cambia es mas angosto: cuando el modelo afirma que la foto
+    muestra OTRA COSA --la marca `MUESTRA: no`, no «no se sabe»-- esa foto se
+    nombra como algo a rehacer.
+
+    LA DIFERENCIA ENTRE LAS DOS MARCAS ES LA QUE SOSTIENE ESTO. «no se sabe»
+    es borrosa, tapada, un primer plano del que no se deduce que equipo es:
+    ahi el modelo no sabe, y mandar al tecnico de vuelta por eso seria
+    hacerlo viajar por una foto que no se pudo leer. «no» es otra cosa: se
+    pidio el router y hay un televisor. Esa es verificable mirando, y es la
+    que el usuario eligio.
+
+    Decision del usuario del 08/11/2026, tomada con las dos opciones y su
+    costo a la vista.
+    """
+    try:
+        from campo.models import AnalisisDeEvidencia
+        from campo.tasks import muestra_lo_pedido
+    except Exception:                                            # noqa: BLE001
+        return []
+    #  La ultima por requisito, con la vuelta pesando primero: lo mismo que
+    #  en `_evidencias_para_revisar`, y por el mismo caso de la foto
+    #  reintentada.
+    ultimo = {}
+    try:
+        for a in (AnalisisDeEvidencia.objects
+                  .filter(org=orden.org, evidencia__orden_trabajo=orden)
+                  .select_related("evidencia")
+                  .order_by("evidencia__vuelta", "created_at")):
+            ultimo[a.evidencia.requisito_id] = a
+    except Exception:                                            # noqa: BLE001
+        return []
+    return sorted(r for r, a in ultimo.items()
+                  if muestra_lo_pedido(a.texto or "") is False)
+
+
+def _que_rehacer(puntos, esquema, orden=None) -> list[str]:
     """Los requisitos que una devolucion puede pedir que se rehagan.
 
     POR QUE EL RANGO ENTRA ACA  --  07/11/2026
@@ -172,6 +220,18 @@ def _que_rehacer(puntos, esquema) -> list[str]:
                         for e in (esquema or {}).get("evidencias") or [])
         if declarada and REQUISITO_AL_SALIR not in salida:
             salida.append(REQUISITO_AL_SALIR)
+
+    #  Y LAS FOTOS QUE MUESTRAN OTRA COSA. Ver `_fotos_que_muestran_otra_cosa`
+    #  para por que solo esas y no las que el modelo no supo leer.
+    if orden is not None:
+        declaradas = {e.get("id") for e in (esquema or {}).get("evidencias") or []
+                      if isinstance(e, dict) and e.get("id")}
+        for requisito in _fotos_que_muestran_otra_cosa(orden):
+            #  Solo lo que la plantilla declara: pedir rehacer algo que el
+            #  formulario no tiene deja al tecnico sin poder cumplirlo. Mismo
+            #  criterio que con la foto de la medicion.
+            if requisito in declaradas and requisito not in salida:
+                salida.append(requisito)
     return salida
 
 
