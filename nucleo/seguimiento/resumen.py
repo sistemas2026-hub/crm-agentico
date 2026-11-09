@@ -117,6 +117,11 @@ def hace_cuanto(horas: float) -> str:
     return f"hace {meses} {'mes' if meses == 1 else 'meses'}"
 
 
+# Con lo que empieza el mensaje de system que trae un resumen anterior. El motor lo usa para
+# distinguirlo del system PROPIO del agente (ver motor.responder).
+PREFIJO_CONTEXTO = "Contexto de una conversacion ANTERIOR"
+
+
 def como_contexto(resumen: str, horas: float | None = None) -> dict:
     """
     El resumen, con la forma en que entra al historial del turno nuevo.
@@ -135,7 +140,7 @@ def como_contexto(resumen: str, horas: float | None = None) -> dict:
     """
     cuando = hace_cuanto(horas) if horas is not None else "en una fecha que no consta"
     return {"role": "system", "content":
-            "Contexto de una conversacion ANTERIOR con este mismo cliente, "
+            f"{PREFIJO_CONTEXTO} con este mismo cliente, "
             f"cerrada por inactividad {cuando.upper()}. Sirve para que no le "
             "hagas repetir lo que ya conto:\n\n"
             f"{resumen}\n\n"

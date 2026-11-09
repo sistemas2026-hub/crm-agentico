@@ -62,6 +62,7 @@ from nucleo.herramientas import pagos as ejecutor_pagos
 from nucleo.herramientas import informes
 from nucleo.modelo import cliente
 from nucleo.modelo import tuteo
+from nucleo.seguimiento import resumen as resumen_previo
 from nucleo.relevo import autorizacion as autorizacion_relevo
 from nucleo.persistencia import db as persistencia
 from nucleo.habilidades import catalogo as catalogo_habilidades
@@ -3353,6 +3354,22 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # justo antes de contestar -- ver 'campo_obligatorio_en_respuesta'.
     obligatorios: list[str] = []
 
+    # EL CONTEXTO QUE LLEGA ANTES NO REEMPLAZA AL PROMPT DEL AGENTE. atender_turno mete en el
+    # historial el resumen de la conversacion anterior (o los ultimos mensajes, tras un
+    # reinicio) ANTES de llamar aca; con 'if not historial' a secas, un cliente que vuelve
+    # dejaba el historial "no vacio" y el modelo recibia SOLO ese resumen: sin identidad, sin
+    # reglas, sin la franja del dia (medido el 09/11/2026: ['system','user','system'] y el
+    # unico system era el resumen; contesto "Buenas noches" a las 11:58). Si no hay un system
+    # que no sea un resumen, se aparta lo que hay, se arma el preambulo de siempre y se
+    # vuelve a poner despues, en el orden en que ocurrio.
+    previo: list[dict] = []
+    if historial and not any(
+            m.get("role") == "system"
+            and not str(m.get("content") or "").startswith(resumen_previo.PREFIJO_CONTEXTO)
+            for m in historial):
+        previo = list(historial)
+        historial.clear()
+
     if not historial:
         historial.append({"role": "system", "content": construir_system(config, nombre_rol)})
         if nota_continuidad:
@@ -3420,6 +3437,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 "necesitas su documento. Que corresponde hacer ahora lo "
                 "decide tu rol; lo que no puedes es dar por sabido lo que no "
                 "sabes."})
+    historial.extend(previo)
+
     # LO QUE VIO UNA CAMARA ES CONTEXTO, NO UN MENSAJE PARA REENVIAR.
     #
     # Va JUSTO ANTES del mensaje del usuario, y no arriba con el resto del
