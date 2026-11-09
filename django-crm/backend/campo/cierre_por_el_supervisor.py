@@ -30,8 +30,15 @@ persona y la tarjeta dice por que.
 
 QUE NO (auditoria de frontera, 30/10/2026):
 - «Revisalo» y «No se cierra»: una persona.
-- Una orden ya DEVUELTA al tecnico (vuelta > 1): su ticket pudo cerrarse y
-  reabrirse en el ISP en la vuelta anterior, y nadie lo sabe desde aca (H4).
+- Una orden en vuelta > 1, SALVO la que devolvio el propio Supervisor y cuyo
+  ticket nunca se cerro. Su ticket pudo cerrarse y reabrirse en el ISP, y
+  nadie lo sabe desde aca (H4). Hasta el 09/11/2026 el filtro era «toda
+  vuelta > 1»; se afino porque desde el 08/11 el Supervisor devuelve ordenes
+  el mismo, y de ESA trayectoria hay registro entero: `EVENTO_DEVUELTA` dice
+  que la devolvio el, y la ausencia de `EVENTO_CERRADO` que nunca toco el
+  ticket. Si la devolvio una PERSONA sigue afuera: esa persona pudo cerrar el
+  ticket a mano en WispHub, y ahi no hay fila que leer.
+- Devolver DOS VECES sola la misma orden: la segunda la mira una persona.
 - Una de falla cuya medicion despues del arreglo todavia no llego: la revision
   la marca «Revisalo» (H6). Si no se pudo saber cuales esperan medicion, no se
   cierra ninguna.
@@ -47,6 +54,7 @@ import logging
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -157,15 +165,53 @@ def revisadas(org, ahora, *, solo=None) -> list | None:
     guarda sin que nadie lo note.
     """
     from campo import revision_del_cierre as RC
-    from campo.models import OrdenTrabajo
+    from campo.models import EventoTrabajo, OrdenTrabajo
+    from campo.services.cierre_en_isp import EVENTO_CERRADO
 
     pendientes = RC.pendientes_de_medir(org, ahora)
     if pendientes is None:
         return None
+
+    #  LA VUELTA SOLA NO ERA LA PREGUNTA  --  09/11/2026
+    #
+    #  H4 dejaba afuera toda orden en vuelta > 1 con este motivo escrito: «su
+    #  ticket pudo cerrarse y reabrirse en el ISP en la vuelta anterior, y
+    #  NADIE LO SABE DESDE ACA». La condicion era la ignorancia, no el numero
+    #  de vuelta -- y desde el 08/11 el Supervisor devuelve ordenes el mismo,
+    #  asi que hay una clase entera de ordenes devueltas cuyo ticket Dexter
+    #  JAMAS toco.
+    #
+    #  Y eso si se sabe: cerrar el ticket del ISP escribe `EVENTO_CERRADO`
+    #  (`campo/services/cierre_en_isp.py`). Sin esa fila, no hubo cierre que
+    #  alguien pudiera reabrir. Se lee la bitacora en vez de suponer.
+    #
+    #  LO QUE NO CAMBIA: una orden en vuelta > 1 cuyo ticket SI se cerro
+    #  alguna vez sigue afuera, exactamente como la dejo H4. Y esto no dice
+    #  nada de un cierre hecho a mano por una persona en WispHub: eso Dexter
+    #  no lo ve, ni lo veia en la vuelta 1 -- el filtro por vuelta nunca
+    #  protegio de ese caso.
+    #
+    #  El usuario lo encontro en la OT 212: la devolvio el Supervisor, el
+    #  tecnico corrigio la foto, los siete puntos quedaron en verde y la
+    #  orden no cerraba, sin que la pantalla pudiera decir por que.
+    #  SOLO LA TRAYECTORIA QUE DEXTER CONOCE ENTERA. Una orden en vuelta > 1
+    #  entra unicamente si EL SUPERVISOR fue quien la devolvio y su ticket
+    #  nunca se cerro. Si la devolvio una PERSONA, esa persona pudo cerrar el
+    #  ticket a mano en WispHub, y ahi H4 sigue entero: no hay fila que leer.
+    #
+    #  Lo encontro la guarda `test_v_una_orden_ya_devuelta_no_la_cierra_solo`,
+    #  que se puso en rojo con la primera version de este cambio -- su orden
+    #  en vuelta 2 no tiene devolucion del Supervisor, y aun asi entraba.
+    devueltas_por_el_supervisor = EventoTrabajo.objects.filter(
+        org=org, tipo=EVENTO_DEVUELTA).values_list("orden_id", flat=True)
+    ya_cerraron = EventoTrabajo.objects.filter(
+        org=org, tipo=EVENTO_CERRADO).values_list("orden_id", flat=True)
     candidatas = OrdenTrabajo.objects.filter(
         org=org, estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
         estado_validacion__in=(OrdenTrabajo.PENDIENTE, OrdenTrabajo.REQUIERE_REVISION),
-        vuelta__lte=1)
+    ).filter(
+        Q(vuelta__lte=1)
+        | (Q(id__in=devueltas_por_el_supervisor) & ~Q(id__in=ya_cerraron)))
     if solo is not None:
         candidatas = candidatas.filter(pk=solo)
     salida = []
@@ -266,6 +312,27 @@ def atender_la_que_no_cierra(orden, revision) -> str:
     requisitos = [str(x).strip() for x in (revision or {}).get("sugeridas") or []
                   if str(x).strip()]
     if not requisitos:
+        return "nada"
+
+    #  UNA SOLA VEZ POR ORDEN  --  09/11/2026
+    #
+    #  Este tope existia sin decirlo: `revisadas` filtraba `vuelta__lte=1`, de
+    #  modo que una orden ya devuelta no volvia a entrar por ningun camino.
+    #  Al abrir ese filtro para poder CERRAR lo que el tecnico corrigio, la
+    #  devolucion automatica quedaria tambien abierta -- y el tecnico podria
+    #  entrar en ping-pong con el Supervisor sin que nadie lo mire.
+    #
+    #  Despues de una devolucion automatica, lo que siga mal lo mira una
+    #  persona: si el tecnico ya fue, corrigio, y el Supervisor sigue sin
+    #  darlo por bueno, la garantia dejo de poder darse en codigo (CLAUDE.md
+    #  §10, «escalar al humano»). El ticket del ISP igual se entera por la
+    #  nota, que es otro camino.
+    #
+    #  SE CUENTAN LAS DEL SUPERVISOR, no las de una persona: devolver a mano
+    #  es una decision tomada, y no gasta el unico intento automatico.
+    if EventoTrabajo.objects.filter(
+            org=orden.org, orden=orden, tipo=EVENTO_DEVUELTA).exists():
+        logger.info("Supervisor: ya la devolvio una vez; queda para una persona")
         return "nada"
 
     try:
