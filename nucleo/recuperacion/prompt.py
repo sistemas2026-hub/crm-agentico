@@ -94,7 +94,10 @@ def _hoy_en(zona: str) -> str:
             f"{franja_del_dia(ahora.hour)}. Usalo para cualquier "
             f"cuenta con fechas -- si una fecha de corte, de vencimiento o de "
             f"cita todavia no llego, NO hables de ella como si ya hubiera "
-            f"pasado -- y para saludar a la hora que es.")
+            f"pasado -- y para saludar a la hora que es. El saludo lo decide ESTA "
+            f"franja, no el del cliente: si te escribe 'buenas noches' y es de "
+            f"mañana o de tarde, contesta con la franja real ('buenos dias', "
+            f"'buenas tardes') sin corregirlo ni comentarlo.")
 
 
 def construir_system(config, nombre_rol: str) -> str:
