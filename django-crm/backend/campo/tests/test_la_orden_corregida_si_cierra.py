@@ -243,12 +243,22 @@ def test_el_ticket_cerrado_de_OTRA_orden_no_tapa_a_esta(org_a):
 #  3) UNA SOLA DEVOLUCION AUTOMATICA
 # ---------------------------------------------------------------------------
 
-def test_NO_SE_DEVUELVE_DOS_VECES_sola(org_a):
-    """El tope que `vuelta__lte=1` daba sin decirlo.
+def test_SE_DEVUELVE_LAS_VECES_QUE_HAGA_FALTA(org_a):
+    """DECISION DEL USUARIO, 09/11/2026.
 
-    Sin esto, el tecnico corrige, el Supervisor vuelve a no darlo por bueno,
-    y lo devuelve otra vez -- sin que ninguna persona se entere de que ya van
-    dos. La segunda es donde la garantia dejo de poder darse en codigo.
+    Esta guarda afirmaba lo contrario hace una hora. Se escribio junto con un
+    tope de una sola devolucion automatica --el que `vuelta__lte=1` daba sin
+    decirlo-- y la primera prueba en vivo lo encontro: el usuario puso mal la
+    foto del daño en una orden ya devuelta, «y esta vez no devolvio el ticket
+    al tecnico». Preguntado entre devolver siempre, una sola vez, o dos o
+    tres, eligio SIEMPRE.
+
+    QUEDA ESCRITA EN VEZ DE BORRADA porque el tope tenia un motivo --que
+    nadie se entere de que ya van tres-- y ese motivo sigue existiendo; lo
+    que cambio es quien paga el costo. Lo que lo hace seguro es que no hay
+    bucle que la maquina corra sola: una orden devuelta queda en
+    CORRECCION_REQUERIDA y `revisadas` solo mira las COMPLETADA_CAMPO, asi
+    que no vuelve a entrar hasta que EL TECNICO mande otro reporte.
     """
     from campo.cierre_por_el_supervisor import atender_la_que_no_cierra
     from campo.models import OrdenTrabajo
@@ -260,13 +270,54 @@ def test_NO_SE_DEVUELVE_DOS_VECES_sola(org_a):
                 "puntos": []}
 
     with mock.patch("requests.post") as post:
+        post.return_value = mock.Mock(status_code=200, content=b"{}",
+                                      json=lambda: {"ok": True})
         r = atender_la_que_no_cierra(orden, revision)
-        assert post.call_count == 0, "le hablo al ISP en la segunda devolucion"
 
-    assert r == "nada", r
+    assert r == "devuelta", r
     fresca = OrdenTrabajo.objects.get(pk=orden.pk)
-    assert fresca.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO
-    assert fresca.vuelta == 2, "subio la vuelta una segunda vez"
+    assert fresca.estado_operativo == OrdenTrabajo.CORRECCION_REQUERIDA
+    assert fresca.vuelta == 3, "la segunda devolucion no subio la vuelta"
+
+
+def test_y_la_TERCERA_tambien(org_a):
+    """«Siempre» quiere decir siempre: una guarda que solo mira la segunda
+    pasaria en verde con un tope de dos puesto."""
+    from campo.cierre_por_el_supervisor import atender_la_que_no_cierra
+    from campo.models import OrdenTrabajo
+    from campo.revision_del_cierre import NO_CERRAR
+
+    orden = _orden(org_a, 223, vuelta=3)
+    _evento(orden, "devuelta_por_el_supervisor", {"requisitos": ["foto_ont"]})
+    _evento(orden, "devuelta_por_el_supervisor", {"requisitos": ["foto_ont"]})
+    revision = {"veredicto": NO_CERRAR, "sugeridas": ["foto_ont"],
+                "puntos": []}
+
+    with mock.patch("requests.post") as post:
+        post.return_value = mock.Mock(status_code=200, content=b"{}",
+                                      json=lambda: {"ok": True})
+        r = atender_la_que_no_cierra(orden, revision)
+
+    assert r == "devuelta", r
+    assert OrdenTrabajo.objects.get(pk=orden.pk).vuelta == 4
+
+
+def test_una_orden_DEVUELTA_no_vuelve_a_entrar_sola_al_ciclo(org_a):
+    """LO QUE HACE SEGURO NO TENER TOPE, afirmado en vez de razonado.
+
+    Si `revisadas` alcanzara una orden en CORRECCION_REQUERIDA, el ciclo de
+    cada hora la miraria de nuevo sin que el tecnico hiciera nada, y «sin
+    tope» pasaria a significar una devolucion por hora para siempre. Lo que
+    lo impide es el filtro por estado operativo.
+    """
+    from campo.models import OrdenTrabajo
+
+    orden = _orden(org_a, 224, vuelta=2)
+    _evento(orden, "devuelta_por_el_supervisor", {"requisitos": ["foto_ont"]})
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(
+        estado_operativo=OrdenTrabajo.CORRECCION_REQUERIDA)
+
+    assert 224 not in _candidatas(org_a)
 
 
 def test_la_PRIMERA_devolucion_sigue_pasando(org_a):

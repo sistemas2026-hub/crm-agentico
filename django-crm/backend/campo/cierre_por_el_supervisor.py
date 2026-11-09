@@ -38,7 +38,6 @@ QUE NO (auditoria de frontera, 30/10/2026):
   que la devolvio el, y la ausencia de `EVENTO_CERRADO` que nunca toco el
   ticket. Si la devolvio una PERSONA sigue afuera: esa persona pudo cerrar el
   ticket a mano en WispHub, y ahi no hay fila que leer.
-- Devolver DOS VECES sola la misma orden: la segunda la mira una persona.
 - Una de falla cuya medicion despues del arreglo todavia no llego: la revision
   la marca «Revisalo» (H6). Si no se pudo saber cuales esperan medicion, no se
   cierra ninguna.
@@ -314,26 +313,24 @@ def atender_la_que_no_cierra(orden, revision) -> str:
     if not requisitos:
         return "nada"
 
-    #  UNA SOLA VEZ POR ORDEN  --  09/11/2026
+    #  SIN TOPE DE DEVOLUCIONES  --  decision del usuario, 09/11/2026
     #
-    #  Este tope existia sin decirlo: `revisadas` filtraba `vuelta__lte=1`, de
-    #  modo que una orden ya devuelta no volvia a entrar por ningun camino.
-    #  Al abrir ese filtro para poder CERRAR lo que el tecnico corrigio, la
-    #  devolucion automatica quedaria tambien abierta -- y el tecnico podria
-    #  entrar en ping-pong con el Supervisor sin que nadie lo mire.
+    #  Se probo con un tope de una sola devolucion automatica --el que
+    #  `vuelta__lte=1` daba sin decirlo-- y la primera prueba en vivo lo
+    #  encontro enseguida: una foto equivocada en una orden ya devuelta no
+    #  volvia al tecnico. Preguntado, el usuario eligio que devuelva siempre.
     #
-    #  Despues de una devolucion automatica, lo que siga mal lo mira una
-    #  persona: si el tecnico ya fue, corrigio, y el Supervisor sigue sin
-    #  darlo por bueno, la garantia dejo de poder darse en codigo (CLAUDE.md
-    #  §10, «escalar al humano»). El ticket del ISP igual se entera por la
-    #  nota, que es otro camino.
+    #  POR QUE ES SEGURO, Y NO UNA SIMPLE PREFERENCIA: no hay bucle que la
+    #  maquina pueda correr sola. Una orden devuelta queda en
+    #  CORRECCION_REQUERIDA, y `revisadas` solo mira las COMPLETADA_CAMPO: no
+    #  vuelve a entrar hasta que EL TECNICO mande otro reporte. Cada vuelta
+    #  exige trabajo humano del otro lado, asi que el ida y vuelta no puede
+    #  acelerarse solo ni repetirse sin que alguien lo provoque.
     #
-    #  SE CUENTAN LAS DEL SUPERVISOR, no las de una persona: devolver a mano
-    #  es una decision tomada, y no gasta el unico intento automatico.
-    if EventoTrabajo.objects.filter(
-            org=orden.org, orden=orden, tipo=EVENTO_DEVUELTA).exists():
-        logger.info("Supervisor: ya la devolvio una vez; queda para una persona")
-        return "nada"
+    #  LO QUE SE PIERDE: si el tecnico no entiende que le piden, nadie se
+    #  entera de que ya van tres. Hoy eso lo cubre la bitacora de la orden,
+    #  que cuenta las vueltas. El dia que haya una medicion de cuantas
+    #  ordenes pasan de dos vueltas, se puede reabrir con ese numero.
 
     try:
         observacion = " | ".join(nota_al_isp.lo_que_falto(revision))[:500]
