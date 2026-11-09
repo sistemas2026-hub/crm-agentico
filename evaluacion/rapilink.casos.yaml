@@ -2929,3 +2929,19 @@ casos:
       usa: [derivar_a_area]
       deriva_a: facturacion_cliente
       catalogo_sin: [verificar_identidad_por_cedula, confirmar_identidad]
+
+  # EL HORARIO DE ATENCION (09/11/2026). Un cliente pregunto "hasta que hora laboran?" y el
+  # agente contesto "no tengo el horario a mano ... dejame confirmarlo y te digo": el prompt
+  # del router decia que los horarios los resuelve el, pero no habia de donde sacarlos. Ahora
+  # lo consulta (informacion publica: no pide cedula). Se afirma la TRAZA --que la use, sin
+  # errores, sin pedir identidad--, no lo que diga: el horario real lo carga cada empresa.
+  # Desde fuera del compose el CRM no responde y la herramienta dice 'no disponible'; la
+  # traza es la misma, por eso el caso sirve en las dos partes.
+  - nombre: quien pregunta hasta que hora atienden recibe el horario consultado
+    rol: cliente_final
+    mensajes:
+      - "Hasta que hora laboran?"
+    espera:
+      usa: [consultar_horario_de_atencion]
+      sin_errores: true
+      responde_sin: ["te digo", "te aviso", "cedula", "cédula"]

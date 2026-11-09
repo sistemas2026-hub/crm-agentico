@@ -102,6 +102,11 @@
     <div class="v2-split">
       <div>
         <div class="v2-label" style="margin-bottom:10px">Horario de apertura</div>
+        <p class="v2-sub" style="font-size:12px;margin:-4px 0 12px">
+          Es también el horario de atención que Dexter le dice a los clientes por WhatsApp
+          («¿hasta qué hora atienden?», «¿están abiertos?»). Si la zona horaria sigue en UTC con
+          el horario de fábrica, Dexter responde que todavía no lo tiene en vez de inventarlo.
+        </p>
 
         {#if editingHours}
           <SettingsFormPanel

@@ -359,7 +359,10 @@ roles:
 
       Frases a evitar y su alternativa (protocolo real de la empresa, S7):
       - Nunca "no se puede" -> decir que SI se puede hacer.
-      - Nunca "no se" -> "dejame confirmar eso y te digo".
+      - Nunca "no se" -> "dejame confirmar eso y te digo" SOLO si de verdad puedes
+        confirmarlo (una herramienta tuya, o pasarlo con derivar_a_area a un
+        colaborador). Si no hay como, di que no lo tienes y que un colaborador se
+        lo confirma: nunca prometas volver con una respuesta que no vas a poder dar.
       - Nunca "calmate" en seco ante un reclamo -> "entiendo, lo resolvemos".
       - Nunca "espera" sin explicar por que -> "dejame revisar tu cuenta un momento".
 
@@ -403,7 +406,11 @@ roles:
       volviera a escribir.
 
       Lo unico que SI resuelves tu: una pregunta general que no es de
-      ningun area (horarios, como contactar a la empresa). Si pregunta por
+      ningun area (el horario de atencion, como contactar a la
+      empresa). Si pregunta hasta que hora atienden, si estan abiertos o cuando
+      abren, llama consultar_horario_de_atencion ANTES de contestar y dile lo que
+      devuelva, tal cual: no hace falta pedirle la cedula, es informacion publica.
+      Si pregunta por
       planes, precios, o quiere CONTRATAR un servicio nuevo, deriva a
       'ventas' apenas lo entiendas -- tiene el catalogo real de planes y
       precios (no improvises esos datos vos) y su propia forma de manejar
@@ -472,8 +479,9 @@ roles:
     # (ventas) significaba engordarlo mas. Con catalogos chicos y
     # enfocados, cada agente elige mejor su herramienta -- y sumar un area
     # es un rol nuevo, no tocar el que ya funciona.
-    puede_consultar: [derivar_a_area]
-    campos_permitidos: {}
+    puede_consultar: [derivar_a_area, consultar_horario_de_atencion]
+    campos_permitidos:
+      consultar_horario_de_atencion: [disponible, motivo, horario, abierto_ahora, hoy_es_festivo, proxima_apertura, festivos_proximos]
     nunca_revelar: [password_servicio, password_cpe, password_router_wifi, usuario_router_wifi, 
           cedula, direccion, coordenadas, ip, mac_cpe, sn_onu, sectorial, router.nombre]
 
@@ -615,11 +623,12 @@ roles:
       esta documentado, y lo unico verificado sobre terminar un servicio es
       la clausula de permanencia de 12 meses.
     orientado_a: cliente_final
-    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+    puede_consultar: [consultar_horario_de_atencion, verificar_identidad_por_cedula, confirmar_identidad,
           consultar_mi_servicio, consultar_mi_cuenta, consultar_medios_de_pago, derivar_a_area,
           cargar_habilidad,
           consultar_documentacion, reportar_comprobante_pago]
     campos_permitidos:
+      consultar_horario_de_atencion: [disponible, motivo, horario, abierto_ahora, hoy_es_festivo, proxima_apertura, festivos_proximos]
       # Mismo criterio que cliente_final: lista blanca minima para el tema
       # de esta area. Sin acceso a ssid_router_wifi -- no hace a su trabajo.
       # SIN 'saldo' (07/11/2026): el de la ficha no es lo que debe, y un 0.00
@@ -1328,7 +1337,7 @@ roles:
       Si la consulta en realidad es de facturacion, llama a derivar_a_area
       hacia facturacion_cliente -- no intentes resolverla tu.
     orientado_a: cliente_final
-    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+    puede_consultar: [consultar_horario_de_atencion, verificar_identidad_por_cedula, confirmar_identidad,
           consultar_mi_servicio, ping_cliente, derivar_a_area,
           consultar_plan_tv, consultar_estado_ont, consultar_senal_ont,
           reiniciar_ont, diagnosticar_falla_ont, consultar_estado_catv, activar_catv,
@@ -1338,6 +1347,7 @@ roles:
           consultar_estabilidad_enlace, registrar_pedido_wifi,
           cargar_habilidad, consultar_documentacion]
     campos_permitidos:
+      consultar_horario_de_atencion: [disponible, motivo, horario, abierto_ahora, hoy_es_festivo, proxima_apertura, festivos_proximos]
       consultar_mi_servicio: [estado, plan_internet, ssid_router_wifi]
       # El pedido de WiFi no trae datos del cliente que haya que tapar: son
       # los valores que el mismo acaba de escribir, mas el veredicto de la
@@ -1752,7 +1762,7 @@ roles:
     # una sola no alcanzaba: el catalogo que se le OFRECE al modelo lo
     # arma 'puede_consultar', asi que 'ventas' seguia pudiendo llamarla
     # aunque ya no estuviera en el prompt. Ver incidente "doña manuela".
-    puede_consultar: [verificar_identidad_por_cedula, confirmar_identidad,
+    puede_consultar: [consultar_horario_de_atencion, verificar_identidad_por_cedula, confirmar_identidad,
           consultar_planes_venta, consultar_planes, consultar_plan_detalle,
           consultar_servicios_ofrecidos, consultar_parrilla_canales,
           consultar_mi_servicio, consultar_plan_tv,
@@ -1760,6 +1770,7 @@ roles:
           registrar_solicitud_servicio, cargar_habilidad,
           consultar_documentacion, derivar_a_area]
     campos_permitidos:
+      consultar_horario_de_atencion: [disponible, motivo, horario, abierto_ahora, hoy_es_festivo, proxima_apertura, festivos_proximos]
       # Un cliente ACTUAL preguntando por un canal: la parrilla es la misma
       # para todos, pero si su plan no incluye TV el canal esta y el no lo ve.
       # Saberlo exige mirar SU plan, y por eso la lista blanca es de un solo
@@ -2994,6 +3005,38 @@ herramientas:
     inyectar_sesion:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]
+
+  # El horario de atencion de la empresa (09/11/2026). Lee el calendario laboral que la
+  # empresa carga en Configuracion -> Horario laboral; NO es una segunda fuente. Es
+  # informacion publica, igual para todos: no pide verificar identidad.
+  - nombre: leer_calendario_laboral
+    tipo: http
+    descripcion: >
+      Calendario laboral de la empresa tal como esta cargado en el CRM. Solo lo usa
+      consultar_horario_de_atencion; ningun agente la llama directamente.
+    solo_lectura: true
+    # El esquema exige un rol; ningun rol la lista en 'puede_consultar', asi que el modelo
+    # nunca la ve: solo la llama consultar_horario_de_atencion.
+    roles_permitidos: [cliente_final]
+    base_url: http://backend:8000/api
+    auth_ref: BOTTLECRM_API_TOKEN
+    endpoint: /business-hours/calendar/
+    metodo: GET
+
+  - nombre: consultar_horario_de_atencion
+    tipo: interno
+    descripcion: >
+      El horario en que la empresa atiende, ya calculado: los siete dias, si esta abierta
+      AHORA (abierto_ahora) y cuando vuelve a abrir (proxima_apertura). Sirve cuando
+      preguntan hasta que hora atienden, si estan abiertos o cuando abren; no hace falta
+      verificar al cliente, es informacion publica. Dilo tal cual: no lo calcules tu. Si
+      devuelve disponible=false, la empresa no tiene cargado su horario: dile que no lo
+      tienes y que un colaborador se lo confirma (derivar_a_area), sin prometer que
+      volveras con la respuesta y sin inventar uno.
+    solo_lectura: true
+    roles_permitidos: [cliente_final, facturacion_cliente, soporte_tecnico_cliente, ventas]
+    entrega_horario_de_atencion: true
+    calendario_con: leer_calendario_laboral
 
   # Lo mismo que consultar_mi_cuenta, para quien ATIENDE a un cliente (07/11/2026).
   # Ahi el id sale de la sesion verificada y el modelo no lo toca; aca lo dice el

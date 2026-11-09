@@ -55,6 +55,7 @@ from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import incidentes as ejecutor_incidentes
 from nucleo.herramientas import diagnostico_servicio as ejecutor_diagnostico
 from nucleo.herramientas import cuenta as ejecutor_cuenta
+from nucleo.herramientas import horario as ejecutor_horario
 from nucleo.herramientas import flota as ejecutor_flota
 from nucleo.herramientas import estabilidad as ejecutor_estabilidad
 from nucleo.herramientas import wifi as ejecutor_wifi
@@ -2723,6 +2724,12 @@ def _despacho_de_herramienta(herramienta, argumentos: dict,
         return ejecutor_cuenta.medios_de_pago_de_la_empresa(
             herramienta, argumentos, tenant, variables_tenant)
 
+    #  EL HORARIO DE ATENCION: lee el calendario laboral de la empresa y devuelve el horario
+    #  con 'abierto_ahora' ya calculado. Informacion publica: no exige sesion verificada.
+    if herramienta.tipo == "interno" and herramienta.entrega_horario_de_atencion:
+        return ejecutor_horario.horario_de_atencion(
+            herramienta, argumentos, tenant, variables_tenant)
+
     #  La lectura de FLOTA. Va junto a la anterior porque las dos hablan con
     #  SmartOLT, y separadas porque contestan preguntas distintas: aquella
     #  parte de un cliente, esta no parte de nadie.
@@ -3924,6 +3931,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                 # justo antes de verificar -- el procedimiento puede ser el
                 # que explica COMO pedir la verificacion.
                 salida = _ejecutar_carga_habilidad(config, nombre_rol, llamada.argumentos)
+            elif herramienta.tipo == "interno" and herramienta.entrega_horario_de_atencion:
+                # Fuera del gate: el horario de atencion es igual para todos y no menciona a
+                # ningun cliente. Un prospecto, o alguien que todavia no verifico, tiene
+                # derecho a saber hasta que hora lo atienden (09/11/2026: un cliente
+                # pregunto "hasta que hora laboran?" y no habia de donde contestarlo).
+                salida = ejecutor_horario.horario_de_atencion(
+                    herramienta, llamada.argumentos, config.identidad.slug,
+                    config.variables_tenant, catalogo=config.herramientas)
             elif (rol_cfg.orientado_a == "cliente_final" and (sesion is None or sesion.nivel < nivel_exigido)
                   # Excepcion: 'derivar_a_area' hacia un area que declara
                   # exige_verificacion=False (ej. 'ventas') tiene que poder

@@ -185,7 +185,7 @@
         {
           href: '/settings/business-hours',
           title: 'Horario laboral',
-          body: 'El reloj contra el que se mide cada objetivo de respuesta.',
+          body: 'El horario de atención: mide los plazos de respuesta y es el que Dexter le dice a los clientes.',
           value: d.calendar ? `${d.calendar.name} · ${hoursSummary}` : null,
           warn: false
         },

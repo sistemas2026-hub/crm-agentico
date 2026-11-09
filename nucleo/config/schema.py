@@ -1465,6 +1465,13 @@ class Herramienta(Base):
     # verificada ('id_servicio' inyectado): lo que se protege es quien pregunta, no el
     # dato, que es igual para todos. Ver nucleo/herramientas/cuenta.py.
     entrega_medios_de_pago: bool = False
+    # Tipo 'interno': el horario de atencion de la empresa, ya calculado ('abierto_ahora' y
+    # 'proxima_apertura' los decide el codigo). Lee el calendario laboral que la empresa carga
+    # en Configuracion -> Horario laboral por la herramienta http que nombra 'calendario_con'
+    # (solo lectura): no es una segunda fuente de horarios. Es informacion publica, igual para
+    # todos, asi que NO exige sesion verificada ni inyecta nada. Ver nucleo/herramientas/horario.py.
+    entrega_horario_de_atencion: bool = False
+    calendario_con: str = ""
 
     # --- http / agregado ---
     # No es secreto (no dispara el barrido de _barrer_secretos): es dato de
@@ -2039,6 +2046,15 @@ class Herramienta(Base):
                     f"cuenta, nombran en 'cuenta' al menos 'link_de_pago' o 'medios_de_pago', "
                     f"exigen 'id_servicio' inyectado de la sesion (solo un cliente verificado) "
                     f"y no son invocables por un servicio.")
+        if self.entrega_horario_de_atencion:
+            if (self.tipo != "interno" or not self.calendario_con or self.calcula_estado_de_cuenta
+                    or self.entrega_medios_de_pago or self.inyectados_obligatorios
+                    or self.invocable_por_servicio or not self.solo_lectura):
+                raise ValueError(
+                    f"'{self.nombre}': el horario de atencion es 'interno', de solo lectura, "
+                    f"nombra en 'calendario_con' la herramienta que lee el calendario laboral, "
+                    f"no inyecta nada de la sesion (es informacion publica) y no es invocable "
+                    f"por un servicio.")
         if self.cuenta_de_colaborador and not self.calcula_estado_de_cuenta:
             raise ValueError(
                 f"'{self.nombre}': 'cuenta_de_colaborador' solo tiene sentido en el "
