@@ -119,6 +119,19 @@ class _FranjaDelServicioState extends State<FranjaDelServicio> {
                         '${t.veredictoSenal.isEmpty ? '' : ' · ${t.veredictoSenal.replaceAll('_', ' ')}'}'
                         '${t.fichaCapturadaEn == null ? '' : ' · al despachar ${_fecha(t.fichaCapturadaEn!.toLocal())}'}',
                   ),
+                //  LA SEÑAL TIENE DOS DIRECCIONES  --  10/11/2026
+                //
+                //  El usuario pidió «los niveles leídos», en plural, y acá solo
+                //  estaba el de bajada. La de subida (1310nm, ONU→OLT) es la que
+                //  delata un empalme malo del lado del cliente, que es
+                //  justamente lo que el técnico tiene delante.
+                //
+                //  Va en su PROPIA fila, nunca sumada a la de Rx: lo dice el
+                //  accesor en `trabajo_vista.dart` --«se muestra aparte, nunca
+                //  en su lugar»--. Y sin veredicto, porque el único que hay está
+                //  calculado contra los umbrales de la de bajada.
+                if (t.potenciaOpticaSubida.isNotEmpty)
+                  _fila('Señal Tx', t.potenciaOpticaSubida),
               ],
             ],
           ),

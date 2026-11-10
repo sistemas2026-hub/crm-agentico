@@ -43,7 +43,8 @@ const Map<String, dynamic> _campoOtro = <String, dynamic>{
 
 void main() {
   group('A · la franja del servicio', () {
-    TrabajoVista trabajo() => TrabajoVista.desdeOrden(<String, dynamic>{
+    TrabajoVista trabajo({bool conSubida = true}) =>
+        TrabajoVista.desdeOrden(<String, dynamic>{
           'id': 'ot-1',
           'numero': 1849,
           'estado': 'en_sitio',
@@ -58,6 +59,7 @@ void main() {
             'equipo': <String, dynamic>{
               'onu_signal_1490': '-21.19 dBm',
               'onu_signal_1490_veredicto': 'aceptable',
+              if (conSubida) 'onu_signal_1310': '2.07 dBm',
               'odb_name': 'CTO 56',
             },
           }),
@@ -99,6 +101,46 @@ void main() {
       await t.tap(find.byTooltip('Copiar IP'));
       await t.pumpAndSettle();
       expect(copiado, <String>['172.16.40.70']);
+    });
+
+    /// LOS DOS NIVELES, Y CADA UNO EN SU RENGLÓN  --  10/11/2026
+    ///
+    /// El usuario pidió «los niveles leídos», en plural, y la franja traía
+    /// solo el de bajada. El de subida (1310nm) ya llegaba a la app sin que
+    /// nadie lo dibujara.
+    ///
+    /// Afirma el EFECTO y no la presencia: que el valor de subida se lea en la
+    /// pantalla, en una fila PROPIA. Sumarlo al renglón de Rx haría pasar un
+    /// `textContaining` y es justo lo que el accesor prohíbe --«se muestra
+    /// aparte, nunca en su lugar»--, porque el veredicto que acompaña a Rx
+    /// está calculado contra los umbrales de bajada y no aplica al de subida.
+    testWidgets('desplegada: la señal de subida se lee, y aparte de la de bajada',
+        (WidgetTester t) async {
+      await _montar(t, FranjaDelServicio(trabajo: trabajo()));
+      await t.tap(find.textContaining('Ticket #95218'));
+      await t.pumpAndSettle();
+
+      expect(find.text('Señal Tx'), findsOneWidget);
+      expect(find.text('2.07 dBm'), findsOneWidget);
+
+      //  En su propio renglón, y DEBAJO. Se afirma por la POSICIÓN en la
+      //  pantalla y no por el texto: sumarlo al renglón de Rx dejaría pasar
+      //  cualquier `textContaining`, y es justo lo que hay que impedir.
+      final double rx = t.getTopLeft(find.text('Señal Rx')).dy;
+      final double tx = t.getTopLeft(find.text('Señal Tx')).dy;
+      expect(tx > rx, isTrue, reason: 'la de subida va en su propia fila, debajo');
+    });
+
+    testWidgets('sin señal de subida, no dibuja la fila vacía',
+        (WidgetTester t) async {
+      //  El contexto de una orden vieja puede no traerla. Una etiqueta sin
+      //  valor al lado se lee como un dato perdido.
+      await _montar(t, FranjaDelServicio(trabajo: trabajo(conSubida: false)));
+      await t.tap(find.textContaining('Ticket #95218'));
+      await t.pumpAndSettle();
+
+      expect(find.text('Señal Tx'), findsNothing);
+      expect(find.text('Señal Rx'), findsOneWidget);
     });
 
     testWidgets('sin ningún dato no ocupa lugar', (WidgetTester t) async {
