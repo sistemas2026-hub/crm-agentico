@@ -2113,6 +2113,7 @@
         optica={optica ?? null}
         consultandoAlAbrir={optica === undefined}
         conversacionId={conversacion.id}
+        profundaSola={!!conversacion?.escalada_a_humano && conversacion.estado !== 'cerrada'}
       />
 
     {:else if pestanaContexto === 'caso'}

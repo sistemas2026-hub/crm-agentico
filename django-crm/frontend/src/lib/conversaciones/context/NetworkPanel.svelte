@@ -39,7 +39,11 @@
     /** La lectura de la escalada todavía viaja: llega después de la
         conversación (07/11/2026). Mientras tanto no es «Sin consultar», que
         invitaría a apretar el botón y pedir la misma lectura dos veces. */
-    consultandoAlAbrir = false
+    consultandoAlAbrir = false,
+    /** La conversación está en manos de una persona (10/11/2026): ahí se
+        trae sola también la lectura profunda (temperatura, Tx), que
+        SmartOLT autoriza para investigar un problema puntual. */
+    profundaSola = false
   } = $props();
 
   const lineas = $derived(acciones.map(lineaDeAccion));
@@ -100,10 +104,29 @@
      motivo es que nadie la pidió: 'sin_equipo' o 'sin_herramienta' no se
      arreglan consultando. */
   onMount(() => {
-    if (!conversacionId || consultandoAlAbrir || lectura?.disponible) return;
+    if (!conversacionId) return;
+    if (profundaSola) {
+      leerProfundaSiFalta();
+      return;
+    }
+    if (consultandoAlAbrir || lectura?.disponible) return;
     if ((optica?.motivo ?? 'no_consultada') !== 'no_consultada') return;
     consultar(`/api/conversaciones/${conversacionId}/optica`);
   });
+
+  /* LA PROFUNDA, SOLA, SOLO CON UNA PERSONA EN EL CASO (10/11/2026).
+     Temperatura y Tx del equipo solo salen de la consulta de ~10 s, que
+     SmartOLT autoriza para investigar un problema puntual y pide no usar en
+     bucle. Con la conversación en manos de una persona, eso es lo que está
+     pasando; en el resto sigue siendo del botón. Y una vez por conversación:
+     si ya hay lectura profunda (también la recordada de antes de cambiar de
+     pestaña), no se repite. Usa la misma llamada que el botón porque la
+     memoria del motor no distingue liviana de profunda: sin 'forzar'
+     devolvería la liviana guardada. */
+  function leerProfundaSiFalta() {
+    if (profundo) return;
+    consultarAhora();
+  }
 
   /** @param {string} url */
   async function consultar(url) {
@@ -216,6 +239,12 @@
     const n = numeroODinero(v);
     return n === null ? String(v) : `${n} ${unidad}`;
   };
+
+  /* Lo que recibe la OLT desde la casa: la de la lectura liviana (1310) y,
+     si no vino, la misma medida de la profunda. Ver las celdas. */
+  const recibeLaOlt = $derived(
+    medicion?.rxSubida != null ? `${medicion.rxSubida} dBm` : conUnidad(profundo?.olt_rx, 'dBm')
+  );
 
   /* LA ESCALA DE LA BARRA, construida sólo con números reales.
      La referencia dibuja un medidor con un rango de industria (-14 a -24 dBm)
@@ -522,38 +551,43 @@
         {/if}
       {/if}
 
-      <!-- LAS CUATRO CELDAS de la imagen. Dos tienen dato hoy; las otras dos
-           esperan la lectura profunda. Se dibujan las cuatro para que la
-           rejilla no cambie de forma según lo que haya venido. -->
+      <!-- TRES CELDAS Y NO CUATRO (10/11/2026). «Subida (1310 nm)» y «RX en
+           la OLT» eran el MISMO número: lo que recibe la OLT desde la casa.
+           Medido el 19/10/2026 sobre la misma ONU: la lectura liviana dio
+           1310 = -20,87 y la profunda, «OLT Rx ONT optical power» = -20,87.
+           Una tenía el valor y la otra un guion hasta apretar el botón. Ahora
+           es una sola celda, con la profunda de respaldo si la liviana no lo
+           trajo. Es el otro extremo del enlace: lo que separa un problema de
+           bajada de uno de subida.
+
+           Temperatura y Tx solo los trae la lectura profunda: en vez de un
+           guion, que parece un dato que falta, dicen cómo se obtienen. -->
       <div class="eq-celdas">
-        <div class="eq-celda">
-          <span class="eq-celda-rotulo">Subida (1310 nm)</span>
-          <b class="eq-celda-valor" class:panel-sin={medicion.rxSubida === null}>
-            {medicion.rxSubida !== null ? `${medicion.rxSubida} dBm` : '—'}
+        <div class="eq-celda eq-celda-ancha">
+          <span class="eq-celda-rotulo">Lo que recibe la OLT del equipo (1310 nm)</span>
+          <b class="eq-celda-valor" class:panel-sin={recibeLaOlt === null}>
+            {recibeLaOlt ?? '—'}
           </b>
         </div>
         <div class="eq-celda">
           <span class="eq-celda-rotulo">Temperatura</span>
-          <b class="eq-celda-valor" class:panel-sin={!profundo?.temperatura}>
-            {conUnidad(profundo?.temperatura, '°C') ?? '—'}
-          </b>
+          {#if profundo}
+            <b class="eq-celda-valor" class:panel-sin={!profundo.temperatura}>
+              {conUnidad(profundo.temperatura, '°C') ?? '—'}
+            </b>
+          {:else}
+            <span class="eq-celda-pendiente">{consultando ? 'Leyendo…' : 'Se lee con «Consultar ahora»'}</span>
+          {/if}
         </div>
-        <!-- LA CUARTA CELDA NO ES «voltaje»: ese campo no existe en ningun
-             endpoint (medido, 82 + 86 campos). En su lugar va lo que la OLT
-             SI mide del equipo -- cuanta luz le llega a ella desde la casa --
-             que es el otro extremo del mismo enlace y la unica forma de saber
-             si el problema es de bajada o de subida. -->
         <div class="eq-celda">
           <span class="eq-celda-rotulo">Tx del equipo</span>
-          <b class="eq-celda-valor" class:panel-sin={!profundo?.tx}>
-            {conUnidad(profundo?.tx, 'dBm') ?? '—'}
-          </b>
-        </div>
-        <div class="eq-celda">
-          <span class="eq-celda-rotulo">RX en la OLT</span>
-          <b class="eq-celda-valor" class:panel-sin={!profundo?.olt_rx}>
-            {conUnidad(profundo?.olt_rx, 'dBm') ?? '—'}
-          </b>
+          {#if profundo}
+            <b class="eq-celda-valor" class:panel-sin={!profundo.tx}>
+              {conUnidad(profundo.tx, 'dBm') ?? '—'}
+            </b>
+          {:else}
+            <span class="eq-celda-pendiente">{consultando ? 'Leyendo…' : 'Se lee con «Consultar ahora»'}</span>
+          {/if}
         </div>
       </div>
     </div>
@@ -1208,6 +1242,17 @@
     border-radius: 3px;
     background: var(--bandeja-superficie-suave);
     min-width: 0;
+  }
+  /* La de la OLT ocupa el renglón entero: con tres celdas en dos columnas,
+     sin esto la última quedaba sola y la rejilla, despareja. */
+  .eq-celda-ancha {
+    grid-column: 1 / -1;
+  }
+  /* Lo que todavía no se pidió: cómo se obtiene, en texto chico. No es un
+     guion, que se lee como un dato que falta. */
+  .eq-celda-pendiente {
+    font-size: 11.5px;
+    color: var(--bandeja-texto-3);
   }
 
   .eq-celda-rotulo {
