@@ -333,7 +333,15 @@ def atender_la_que_no_cierra(orden, revision) -> str:
     #  ordenes pasan de dos vueltas, se puede reabrir con ese numero.
 
     try:
-        observacion = " | ".join(nota_al_isp.lo_que_falto(revision))[:500]
+        #  EL MOTIVO, NO SOLO EL REQUISITO  --  09/11/2026, OT #217
+        #
+        #  `lo_que_falto` mira solo los puntos `ok is False`, y los dos que
+        #  devuelven una orden sola valen `None` a proposito (31/10). Asi que
+        #  esta observacion salia SIEMPRE vacia: al tecnico le llegaba
+        #  «Rehacer: medicion_al_llegar» sin decir que estaba mal. Corrigio el
+        #  numero escrito --lo que ese pedido parece pedir-- y quedo trabado,
+        #  porque el checklist exige la FOTO de esta vuelta.
+        observacion = " | ".join(nota_al_isp.por_que_se_devuelve(revision))[:500]
         #  EL TICKET PRIMERO, LA TRANSICION DESPUES. Al reves, subir la vuelta
         #  cambiaria la clave idempotente de la nota y la devolucion de ESTA
         #  vuelta se escribiria con el numero de la siguiente.

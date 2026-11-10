@@ -463,6 +463,49 @@ def lo_que_falto(revision) -> list[str]:
     return fuera
 
 
+#: Lo que el tecnico NO puede rehacer hoy: esperar. El punto de la medicion
+#: despues del arreglo dice «se mira a las 48 h», y escrito en una devolucion
+#: es ruido que tapa el motivo de verdad.
+CLAVES_QUE_SON_UNA_ESPERA = ("medicion",)
+
+
+def por_que_se_devuelve(revision) -> list[str]:
+    """El MOTIVO que va escrito en la devolucion, no solo QUE requisito.
+
+    POR QUE NO ALCANZA `lo_que_falto`  --  09/11/2026, medido en la OT #217
+    -----------------------------------------------------------------------
+    `lo_que_falto` toma solo los puntos con `ok is False`. Pero las dos cosas
+    que hoy devuelven una orden SOLAS --una foto que muestra otra cosa, y un
+    numero que no salio de esa pantalla-- valen `None` a proposito: es la
+    decision del 31/10, «una opinion no verificada de un modelo no puede
+    frenar el trabajo de un tecnico». Consecuencia que nadie vio hasta que la
+    bitacora la mostro: TODA devolucion automatica salia con la observacion
+    vacia.
+
+    Lo que paso de verdad en la OT #217 (09/11, 21:18 Bogota): la orden
+    volvio diciendo «Rehacer: medicion_al_llegar» y nada mas. El tecnico
+    corrigio el NUMERO escrito --la lectura razonable de ese pedido-- y mando
+    el reporte tres veces; como el checklist exige la FOTO de esta vuelta
+    (`services/validador.py`, CORRECCION_PENDIENTE), nunca pudo finalizar y
+    la orden se quedo en `en_sitio`. Desde afuera: «la orden sigue
+    apareciendo».
+
+    Entra todo punto que no esta en orden, menos la espera.
+    """
+    if not isinstance(revision, dict):
+        return []
+    fuera = []
+    for p in revision.get("puntos") or []:
+        if not isinstance(p, dict) or p.get("ok") is True:
+            continue
+        if p.get("ok") is None and p.get("clave") in CLAVES_QUE_SON_UNA_ESPERA:
+            continue
+        texto = str(p.get("texto") or p.get("clave") or "").strip()
+        if texto:
+            fuera.append(texto)
+    return fuera
+
+
 def requisitos_a_rehacer(revision) -> list[str]:
     """Que se le pide al tecnico que rehaga.
 
