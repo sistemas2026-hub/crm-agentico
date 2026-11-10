@@ -68,6 +68,9 @@
     </div>
   </div>
 
+  <!-- Lo unico que hace scroll: el titulo y los botones quedan siempre a la
+       vista (10/11/2026). -->
+  <div class="cuerpo">
   {#if errorCatalogo}
     <p class="aviso-mal">{errorCatalogo}</p>
   {/if}
@@ -110,6 +113,7 @@
       placeholder="Qué pasó, en una línea. Sin datos personales del cliente."
     ></textarea>
   </label>
+  </div>
 
   <div class="pie">
     <!-- La consecuencia va junto al botón, que es donde se decide. Arriba,
@@ -148,10 +152,37 @@
     border-radius: 8px;
     margin-top: 10px;
     background: var(--bandeja-superficie);
+    /* NO SE DEJA APLASTAR, Y SI NO CABE HACE SCROLL ADENTRO (10/11/2026).
+       El panel vive en la columna central, que es flex en columna. Con
+       'overflow: hidden' (puesto para que el encabezado respetara las
+       esquinas) un hijo flex pierde su altura minima, y en una pantalla
+       baja la columna lo achicaba y cortaba las opciones sin dejar hacer
+       scroll. 'flex: none' lo saca del reparto y el tope deja lugar al
+       hilo de la conversacion.
+
+       Encabezado, cuerpo y pie en columna, y SOLO el cuerpo hace scroll: el
+       titulo y "Cerrar el caso" quedan siempre a la vista. Se probo primero
+       con 'position: sticky' dentro de un panel con scroll, y Chromium pintaba
+       las fichas por encima del borde del panel (medido en el navegador). */
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    max-height: 65vh;
     overflow: hidden;
-    padding-bottom: 14px;
+  }
+  .cuerpo {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 14px 16px 0;
+  }
+  /* Un error, si lo hay, va debajo del pie: necesita su propio aire. */
+  .cierre > .aviso-mal:last-child {
+    margin: 0 16px 12px;
   }
   .cabeza {
+    flex: none;
     display: flex;
     align-items: flex-start;
     gap: 10px;
@@ -175,13 +206,6 @@
     margin: 2px 0 0;
     font-size: 12.5px;
     color: var(--bandeja-texto-2);
-  }
-  .cierre > :not(.cabeza) {
-    margin-left: 16px;
-    margin-right: 16px;
-  }
-  .cierre > .grupo:first-of-type {
-    margin-top: 14px;
   }
 
   .grupo {
@@ -301,6 +325,14 @@
     gap: 8px 16px;
     margin-top: 12px;
     flex-wrap: wrap;
+  }
+  /* Fijo abajo, de borde a borde, separado del cuerpo que hace scroll. */
+  .cierre > .pie {
+    flex: none;
+    margin: 12px 0 0;
+    padding: 10px 16px 12px;
+    background: var(--bandeja-superficie);
+    border-top: 1px solid var(--bandeja-borde);
   }
   .consecuencia {
     margin: 0;
