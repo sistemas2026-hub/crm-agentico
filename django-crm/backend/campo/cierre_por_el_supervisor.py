@@ -70,6 +70,10 @@ EVENTO_INTENTO = "cierre_del_supervisor_en_curso"
 #: El Supervisor devolvio la orden solo, porque la revision encontro
 #: algo que NO cumple. Distinto de `EVENTO_BLOQUEADO`, que es "no se pudo".
 EVENTO_DEVUELTA = "devuelta_por_el_supervisor"
+#: Se tomo ESTA vuelta de ESTA orden para devolverla. Se escribe ANTES de
+#: tocar el ticket y la vuelta. La clave es la VUELTA, no una ventana de
+#: tiempo: ver `_reclamar_la_devolucion`.
+EVENTO_DEVOLUCION_EN_CURSO = "devolucion_del_supervisor_en_curso"
 
 #: Cada cuanto se vuelve a intentar una orden que el motor no dejo cerrar. Una
 #: persona puede despertar el ciclo con el boton; esto evita que cada toque
@@ -146,6 +150,89 @@ def _reclamar(orden, ahora) -> bool:
             return False
         EventoTrabajo.objects.create(org=orden.org, orden=orden,
                                      tipo=EVENTO_INTENTO, datos={})
+    return True
+
+
+def _reclamar_la_devolucion(orden) -> bool:
+    """Toma ESTA VUELTA de esta orden para devolverla, o dice que ya la tomo
+    alguien.
+
+    LA CARRERA, MEDIDA EN LA OT #218  --  10/11/2026, 11:58 Bogota
+    ---------------------------------------------------------------
+        11:58:20  correccion_requerida       vuelta_anterior=1  vuelta_nueva=2
+        11:58:21  reapertura_correccion      vuelta=2
+        11:58:21  correccion_requerida       vuelta_anterior=1  vuelta_nueva=2
+        11:58:21  reapertura_correccion      vuelta=2
+        11:58:21  devuelta_por_el_supervisor
+        11:58:22  devuelta_por_el_supervisor
+
+    Las DOS dicen `vuelta_anterior=1`: dos tareas leyeron la orden en la
+    vuelta 1 y las dos escribieron la 2. Es el mismo choque que `_reclamar`
+    cerro para el cierre el 31/10 (H6, «el reporte del tecnico y el
+    "finalizar" son DOS peticiones, segundos aparte, y cada una despierta
+    esta fase»), sobre el unico camino del Supervisor que H6 no cubrio:
+    `atender_la_que_no_cierra` nacio el 06/11, despues del reclamo.
+
+    `requerir_correccion` es `@transaction.atomic`, y eso no alcanza: hace
+    `orden.vuelta = vuelta_anterior + 1` sobre un objeto leido FUERA de la
+    transaccion. Dos copias en la vuelta 1 escriben la misma 2 -- una
+    actualizacion perdida de manual.
+
+    LO QUE EL TECNICO VEIA: dos avisos de devolucion por la misma devolucion
+    (`avisar_devolucion` corre una vez por llamada), y la orden apareciendo
+    devuelta de nuevo.
+
+    LA CLAVE ES LA VUELTA, NO UNA VENTANA DE TIEMPO
+    ------------------------------------------------
+    Reusar `_reclamar` habria introducido el bug inverso: su marca dura
+    `MINUTOS_ENTRE_INTENTOS` (60), asi que la vuelta SIGUIENTE --el tecnico
+    corrige en minutos y manda otro reporte-- se quedaria sin devolver ni
+    cerrar durante una hora. Una devolucion de la vuelta 2 es trabajo
+    legitimo; una segunda de la vuelta 1 es la carrera. Por eso la marca
+    lleva su vuelta y no caduca: cada vuelta tiene la suya.
+
+    SE MIRA EL ESTADO, NO SOLO LA VUELTA  --  la primera version fallo aca
+    ----------------------------------------------------------------------
+    Con la vuelta sola, el reclamo dependia de que el llamador NO reusara el
+    objeto: `requerir_correccion` sube `orden.vuelta` sobre el mismo objeto
+    que recibe, asi que una segunda llamada con esa instancia ya actualizada
+    encontraba `fresca.vuelta == orden.vuelta` y reclamaba de nuevo. Un
+    reclamo que depende de como el que llama trate su variable no es un
+    reclamo.
+
+    El estado es la condicion de verdad, y es la misma que `_aprobar_y_cerrar`
+    lee bajo bloqueo para cerrar: una orden ya devuelta esta en
+    CORRECCION_REQUERIDA y no se vuelve a devolver. De paso cubre que una
+    PERSONA la haya aprobado o devuelto entre la revision y esto.
+
+    La comparacion `fresca.vuelta != orden.vuelta` queda como segunda guarda:
+    atrapa a quien ya movio la vuelta sin haber cambiado el estado.
+
+    La transaccion se cierra ANTES de hablarle al ISP -- ninguna transaccion
+    abierta mientras se espera una operacion externa (CLAUDE.md §12).
+    """
+    from campo.models import EventoTrabajo, OrdenTrabajo
+
+    with transaction.atomic():
+        #  El lock es sobre la orden: la fila que las dos tareas comparten.
+        fresca = type(orden).objects.select_for_update().filter(
+            pk=orden.pk).first()
+        if fresca is None:
+            return False
+        if (fresca.estado_operativo != OrdenTrabajo.COMPLETADA_CAMPO
+                or fresca.estado_validacion not in (OrdenTrabajo.PENDIENTE,
+                                                    OrdenTrabajo.REQUIERE_REVISION)):
+            return False
+        if fresca.vuelta != orden.vuelta:
+            return False
+        if EventoTrabajo.objects.filter(
+                org=orden.org, orden=orden,
+                tipo=EVENTO_DEVOLUCION_EN_CURSO,
+                datos__vuelta=orden.vuelta).exists():
+            return False
+        EventoTrabajo.objects.create(
+            org=orden.org, orden=orden, tipo=EVENTO_DEVOLUCION_EN_CURSO,
+            datos={"vuelta": orden.vuelta})
     return True
 
 
@@ -331,6 +418,15 @@ def atender_la_que_no_cierra(orden, revision) -> str:
     #  entera de que ya van tres. Hoy eso lo cubre la bitacora de la orden,
     #  que cuenta las vueltas. El dia que haya una medicion de cuantas
     #  ordenes pasan de dos vueltas, se puede reabrir con ese numero.
+
+    #  UNA SOLA DEVOLUCION POR VUELTA  --  10/11/2026, OT #218
+    #
+    #  Va DESPUES de los dos filtros de arriba a proposito: una orden que no
+    #  se va a devolver no deja marca. Y ANTES del ticket, porque lo que se
+    #  serializa es todo lo que sigue. El motivo largo esta en
+    #  `_reclamar_la_devolucion`.
+    if not _reclamar_la_devolucion(orden):
+        return "nada"
 
     try:
         #  EL MOTIVO, NO SOLO EL REQUISITO  --  09/11/2026, OT #217
