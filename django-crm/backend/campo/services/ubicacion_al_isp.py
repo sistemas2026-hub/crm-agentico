@@ -39,17 +39,34 @@ def _tenant_de(orden):
 
 
 def _nombre_de(profile) -> str:
-    """El NOMBRE de quien decidio, nunca el email."""
+    """Quien decidio, para la puerta humana. El NOMBRE, nunca el email.
+
+    EL MODELO DE ESTE PROYECTO TIENE UN SOLO CAMPO DE NOMBRE: `name`
+    (`common/models.py`). No tiene `get_full_name`, ni `first_name`, ni
+    `username` -- `USERNAME_FIELD` es el email.
+
+    Esta funcion buscaba esos tres, medido el 10/11/2026 con el boton ya
+    desplegado: ninguno existia, devolvia cadena vacia, y la peticion moria en
+    `sin_actor` con un 400 antes de salir de Django. El motor no llego a
+    enterarse. La prueba no lo vio porque su doble de usuario TENIA
+    `get_full_name()`: estaba verde contra un modelo imaginario.
+
+    Y SI NO HAY NOMBRE, CAE AL ID DEL PERFIL en vez de rechazar. Una cuenta
+    sin nombre cargado es un dato faltante, no una falta de responsable: el
+    perfil identifica a la persona igual --mejor, incluso: dos tecnicos
+    homonimos son el mismo nombre y distinto id--. Rechazar por eso dejaba la
+    capacidad muerta para cualquier cuenta sin nombre.
+    """
     if profile is None:
         return ""
     user = getattr(profile, "user", None)
-    for atributo in ("get_full_name", "first_name", "username"):
-        valor = getattr(user, atributo, None)
-        if callable(valor):
-            valor = valor()
-        if valor:
-            return str(valor).strip()
-    return ""
+    nombre = str(getattr(user, "name", "") or "").strip()
+    if nombre:
+        return nombre
+    #  El email NO: identifica a la persona igual pero es un dato de contacto,
+    #  y este valor viaja al motor y puede quedar en una fila de auditoria.
+    pid = getattr(profile, "id", None)
+    return f"perfil:{pid}" if pid else ""
 
 
 def _numero(valor):

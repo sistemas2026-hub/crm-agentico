@@ -91,13 +91,23 @@ GUARDADA = {"estado": "guardada", "motivo": "", "destinos": [
     {"herramienta": "servicio", "ok": True}]}
 
 
-class _Perfil:
-    class user:
-        first_name = "Laura Gomez"
+class _Usuario:
+    """Como es el User de verdad: UN campo `name`, y nada mas.
 
-        @staticmethod
-        def get_full_name():
-            return "Laura Gomez"
+    El doble anterior tenia `get_full_name()` y `first_name`, que este modelo
+    NO tiene (`common/models.py`: `name`, y `USERNAME_FIELD = "email"`). Por
+    eso las quince pruebas estaban en verde mientras el boton devolvia 400 en
+    produccion: median contra un usuario imaginario.
+    """
+
+    def __init__(self, name=""):
+        self.name = name
+
+
+class _Perfil:
+    def __init__(self, name="Mario Vasquez", pid="perfil-123"):
+        self.user = _Usuario(name)
+        self.id = pid
 
 
 # --------------------------------------------------------------------------- #
@@ -141,7 +151,7 @@ def test_a3_manda_quien_lo_decidio_y_por_su_nombre(orden):
 
     #  SIN ACTOR NO HAY PUERTA HUMANA: es la evidencia de que detras de la
     #  escritura hay una persona.
-    assert post.call_args.kwargs["json"]["actor"] == "Laura Gomez"
+    assert post.call_args.kwargs["json"]["actor"] == "Mario Vasquez"
 
 
 def test_a4_sin_poder_saber_quien_fue_no_se_manda(orden):
@@ -151,6 +161,36 @@ def test_a4_sin_poder_saber_quien_fue_no_se_manda(orden):
 
     assert r["guardada"] is False and r["codigo"] == "sin_actor"
     assert post.call_count == 0, "y no se hizo el viaje"
+
+
+def test_a5_el_nombre_sale_del_campo_QUE_EXISTE(orden):
+    #  Medido el 10/11/2026 con el boton desplegado: la funcion buscaba
+    #  `get_full_name`, `first_name` y `username`, y este modelo no tiene
+    #  NINGUNO de los tres. Devolvia "" y la peticion moria en 400 sin salir
+    #  de Django.
+    with _motor_contesta(GUARDADA) as post:
+        r = ubicacion_al_isp.guardar_ubicacion(
+            orden, latitud=LAT, longitud=LNG,
+            profile=_Perfil(name="Mario Vasquez"))
+
+    assert r["guardada"] is True, "con un usuario REAL la ubicacion sale"
+    assert post.call_args.kwargs["json"]["actor"] == "Mario Vasquez"
+
+
+def test_a6_sin_nombre_cargado_usa_el_perfil_y_NO_rechaza(orden):
+    #  Una cuenta sin nombre es un dato faltante, no una falta de
+    #  responsable. Rechazarla dejaba la capacidad muerta para esa persona.
+    with _motor_contesta(GUARDADA) as post:
+        r = ubicacion_al_isp.guardar_ubicacion(
+            orden, latitud=LAT, longitud=LNG,
+            profile=_Perfil(name="", pid="perfil-abc"))
+
+    assert r["guardada"] is True
+    actor = post.call_args.kwargs["json"]["actor"]
+    assert "perfil-abc" in actor, f"identifica por el perfil: {actor}"
+    #  EL EMAIL NO: identifica igual, pero es un dato de contacto y este valor
+    #  viaja al motor y puede quedar en una fila de auditoria.
+    assert "@" not in actor, f"y nunca el email: {actor}"
 
 
 # --------------------------------------------------------------------------- #
