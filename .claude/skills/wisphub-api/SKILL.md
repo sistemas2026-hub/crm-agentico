@@ -650,6 +650,54 @@ por dos operaciones, y por ninguna otra:
 | Crear | `POST /api/clientes/agregar-cliente/{id_zona}/` | opcional, `type: string`. El `required` del body es solo `usuario_rb`, `ip`, `plan_internet` | **`202` + `task_id`** (uuid) + `messages`. No declara 200 ni 201 |
 | Editar | `PUT /api/clientes/{id_servicio}/` | opcional a nivel de campo; el `requestBody` entero es `required: true` | **`200`** con el cliente, **o `202`** con `task_id`. El spec NO dice cuando devuelve cada una |
 
+### VERIFICADO el 10/11/2026: el `PUT` de cliente es SINCRONO, y devuelve la ficha
+
+El spec dejaba la duda («200 **o** 202, no dice cuando»), y la duda no era
+academica: un `202` pasa `raise_for_status()` sin ruido, asi que el sistema
+habria marcado la operacion como exitosa y dicho «guardada» sin que nadie
+comprobara que se aplico -- y con la fila de idempotencia en `exitosa`, sin
+forma de volver a intentarlo.
+
+Medido contra el servicio de prueba con `cli/medir_respuesta_coordenada.py`:
+
+    PUT /api/clientes/5832/  {"coordenadas": "<valor con un decimal movido>"}
+      -> 200   (nunca 202; sin `task_id` en la respuesta)
+    GET de control            -> el valor CAMBIO
+    PUT de restauracion       -> 200, quedo como estaba
+
+**Es sincrono.** Quien escriba por aca puede confiar en el codigo de estado.
+(Ojo: esto es el `PUT` de EDITAR. El `POST` de crear si es asincrono y
+devuelve `202` + `task_id` -- son dos endpoints distintos.)
+
+### Y LA RESPUESTA DEVUELVE LA FICHA ENTERA: 34 CAMPOS, CON TRES CONTRASENAS
+
+Medido en la misma corrida. Las claves que vuelven, sin sus valores:
+
+    asesor, auto_activar_servicio, comentarios, COORDENADAS, estado,
+    facturas_pagadas, fecha_cancelacion, fecha_instalacion, fecha_registro,
+    firewall, forma_contratacion, id_servicio, interfaz_lan, ip,
+    ip_router_wifi, local_address_pppoe, mac_cpe, mac_router_wifi,
+    modelo_antena, modelo_router_wifi, PASSWORD_CPE, PASSWORD_ROUTER_WIFI,
+    PASSWORD_SSID_ROUTER_WIFI, plan_internet, protocolo_conexion_cpe,
+    router, sectorial, sn_onu, ssid_router_wifi, tecnico, usuario_cpe,
+    usuario_rb, usuario_router_wifi, zona
+
+**Un PUT a este endpoint no es «una confirmacion corta»: es una ficha de
+cliente.** Importa porque lo que devuelve el ejecutor se guarda en
+`asistente.operaciones_externas.respuesta`, en claro y sin pasar por ninguna
+lista blanca -- esa vive en el bucle del modelo, y las rutas dedicadas no
+pasan por ahi. La migracion de esa tabla asume lo contrario: «para las tres
+acciones de red es una confirmacion corta, no una ficha de cliente».
+
+Quien escriba por este endpoint tiene que DESCARTAR el cuerpo antes de que
+llegue a la idempotencia, o esas tres contrasenas y el domicilio quedan
+guardados de nuestro lado. Hecho en
+`nucleo/seguimiento/coordenada_del_cliente.py`, que devuelve un acuse.
+
+Lo encontro una auditoria de PII como hipotesis («plausible, no medido»), y
+esta corrida lo confirmo.
+
+
 **No existe `PATCH` de cliente, y no hay endpoint de ubicacion sola.** Buscado
 en `api-main.yaml`: ningun path contiene `ubicacion`, `coordenadas`, `latitud`,
 `longitud`, `gps` ni `mapa`. Las unicas escrituras de cliente son las dos de
