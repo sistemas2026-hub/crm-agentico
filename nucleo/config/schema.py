@@ -829,6 +829,55 @@ class Comprobacion(Base):
     valores: list[str] = Field(default_factory=list)
 
 
+class ParametrosDeCoordenada(Base):
+    """Como se llaman, en ESTE proveedor, los parametros de una ubicacion GPS.
+
+    POR QUE ESTA DECLARADO Y NO DEDUCIDO (10/11/2026). Dos sistemas del mismo
+    ISP guardan la ubicacion de forma distinta, medido: uno pide `latitude` y
+    `longitude` como dos strings separados, y el otro UN solo campo de texto
+    con la forma `"lat,lon"`. El motor no puede adivinar cual, y deducirlo del
+    nombre de la herramienta seria conocer al cliente desde el nucleo
+    (CLAUDE.md 3.1).
+
+    Tampoco alcanza con el ORDEN de `requeridos`: una lista reordenada por
+    quien edita la configuracion desde la interfaz mandaria la latitud al
+    campo del identificador, y el proveedor responderia 200 igual. Los nombres
+    van por nombre.
+    """
+
+    #: Como se llama el parametro que identifica al cliente o a su equipo
+    #: (`sn_onu`, `id_servicio`, el que sea).
+    identificador: str
+
+    #: Para la forma de DOS campos. Los dos juntos, o ninguno.
+    latitud: str | None = None
+    longitud: str | None = None
+
+    #: Para la forma de UN campo combinado, `"lat,lon"`.
+    combinada: str | None = None
+
+    @model_validator(mode="after")
+    def _una_forma_u_otra(self):
+        dos = bool(self.latitud) and bool(self.longitud)
+        media = bool(self.latitud) != bool(self.longitud)
+        if media:
+            raise ValueError(
+                "latitud y longitud van juntas o no van: con una sola, la "
+                "mitad de la ubicacion se escribe y la otra queda como estaba, "
+                "y eso deja un punto en el lugar equivocado sin que nadie lo "
+                "note")
+        if dos and self.combinada:
+            raise ValueError(
+                "o dos campos separados o uno combinado, no los dos: con los "
+                "dos declarados nadie sabe cual gana y el proveedor acepta "
+                "cualquiera de los dos sin quejarse")
+        if not dos and not self.combinada:
+            raise ValueError(
+                "falta decir como se escribe la ubicacion: 'latitud'+'longitud' "
+                "o 'combinada'")
+        return self
+
+
 class Verificacion(Base):
     """
     Que medir despues de una accion, cuando, y que cuenta como confirmado.
@@ -1310,6 +1359,24 @@ class Herramienta(Base):
     verificacion: Verificacion | None = None
     responde_ticket_operativo: bool = False
     cierra_ticket_operativo: bool = False
+    #: Escribe la ubicacion GPS del EQUIPO del cliente, con la latitud y la
+    #: longitud en campos SEPARADOS.
+    #:
+    #: Dos marcas y no una, porque los dos sistemas de un mismo ISP pueden
+    #: guardar la ubicacion de forma distinta y el motor no puede adivinar
+    #: cual: medido el 10/11/2026, uno pide `latitude`/`longitude` como dos
+    #: strings y el otro UN solo campo de texto `"lat,lon"`. Quien escribe en
+    #: los dos convierte, y eso tiene que estar declarado en la configuracion
+    #: --no deducido de un nombre de herramienta, que seria conocer al cliente
+    #: desde el nucleo--.
+    escribe_coordenada_equipo: bool = False
+    #: Escribe la ubicacion GPS del SERVICIO del cliente, en UN solo campo de
+    #: texto con la forma `"lat,lon"`. Ver la marca de arriba.
+    escribe_coordenada_servicio: bool = False
+    #: Como se llaman los parametros de la ubicacion en este proveedor.
+    #: Obligatorio cuando la herramienta declara una de las dos marcas de
+    #: arriba: sin esto el motor tendria que adivinar los nombres.
+    parametros_de_coordenada: ParametrosDeCoordenada | None = None
     #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
     #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
     #: para poder recuperarlo si el id se pierde (Q2.1).
@@ -2035,6 +2102,34 @@ class Herramienta(Base):
             raise ValueError(
                 f"'{self.nombre}' es irreversible y no puede ser invocable por "
                 f"un servicio: esa ruta no tiene a quien pedirle la aprobacion.")
+
+        #  UNA MARCA DE COORDENADA SIN SUS PARAMETROS NO SIRVE, Y FALLA TARDE.
+        #  Sin esto el motor encontraria la herramienta por la marca y no
+        #  sabria como llamar a los campos: mandaria un cuerpo que el
+        #  proveedor acepta con 200 sin escribir nada --medido en los dos
+        #  sistemas el 10/11/2026-- y el tecnico veria el boton en verde con
+        #  la casa sin ubicar. Se rechaza al cargar la configuracion.
+        marcada = self.escribe_coordenada_equipo or self.escribe_coordenada_servicio
+        if marcada and self.parametros_de_coordenada is None:
+            raise ValueError(
+                f"'{self.nombre}' dice que escribe una ubicacion pero no "
+                f"declara 'parametros_de_coordenada': el motor no puede "
+                f"adivinar como se llaman los campos, y el proveedor responde "
+                f"200 igual sin escribir nada.")
+        if self.parametros_de_coordenada is not None:
+            pc = self.parametros_de_coordenada
+            if self.escribe_coordenada_equipo and not pc.latitud:
+                raise ValueError(
+                    f"'{self.nombre}' escribe la ubicacion del equipo, que va "
+                    f"en dos campos separados, pero declara la forma combinada.")
+            if self.escribe_coordenada_servicio and not pc.combinada:
+                raise ValueError(
+                    f"'{self.nombre}' escribe la ubicacion del servicio, que va "
+                    f"en un solo campo, pero declara la forma de dos campos.")
+            if not marcada:
+                raise ValueError(
+                    f"'{self.nombre}' declara 'parametros_de_coordenada' sin "
+                    f"ninguna marca que diga que escribe una ubicacion.")
 
         if self.entrega_medios_de_pago:
             nombres = [k for k in ("link_de_pago", "medios_de_pago") if (self.cuenta or {}).get(k)]

@@ -6272,6 +6272,111 @@ herramientas:
     reintentar_identificador_como:
       sn_onu: gpon_hex
 
+  # --- la ubicacion del cliente, escrita por el tecnico (10/11/2026) -----
+  #
+  # POR QUE EXISTEN ESTAS DOS. En SmartOLT solo 10 de 5.186 ONUs tienen
+  # coordenada (0,19 %): 5.082 en `null` y 94 vacias, medido el 10/11/2026 con
+  # `get_all_onus_gps_coordinates`. El dato lo tiene el tecnico, parado en la
+  # casa del cliente, y hasta hoy no habia forma de que lo dejara escrito.
+  #
+  # NO LAS LLAMA EL MODELO, y no es una preferencia: `coordenadas` esta en
+  # `nunca_revelar` para todos los roles. Las llama el backend cuando una
+  # persona identificada toca el boton, y entran por `frontera.humana()`
+  # --nunca por `/interno/herramienta/`, que es la puerta AUTONOMA y hoy esta
+  # cerrada por Autonomia 2--.
+  #
+  # EL BOTON SOLO APARECE SI NO HAY COORDENADA UTILIZABLE (decision del
+  # usuario, 10/11/2026): el campo vacio, o uno que el parser no puede leer.
+  # Nunca pisa una coordenada buena -- hay 1.350 clientes con una cargada y
+  # bien formada, y perderlas seria peor que no tener el boton.
+
+  - nombre: guardar_coordenada_onu_smartolt
+    tipo: http
+    descripcion: >
+      Guarda la ubicacion GPS de la ONU de un cliente en SmartOLT. NO la llama
+      el modelo: la llama el backend cuando un tecnico, parado en la casa,
+      confirma la ubicacion desde la app de campo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    invocable_por_servicio: true
+    roles_permitidos: [administracion]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/update_location_details/{sn_onu}
+    metodo: POST
+    # EL CUERPO VA COMO FORMULARIO, Y SIN ESTO NO SE ESCRIBE NADA.
+    # Medido el 10/11/2026: SmartOLT acepta `x-www-form-urlencoded` y
+    # `multipart/form-data` con 200, y un `application/json` devuelve 400
+    # IDENTICO al de no mandar cuerpo. El motor manda `json=args` por defecto
+    # (`nucleo/herramientas/http.py`), asi que sin `multipart: true` SmartOLT
+    # no lee ni un parametro y el fallo no dice por que.
+    multipart: true
+    # COMO LA ENCUENTRA EL MOTOR: por esta marca, nunca por el nombre. El
+    # nucleo no conoce a ningun cliente (CLAUDE.md 3.1), y buscarla por
+    # "guardar_coordenada_onu_smartolt" seria exactamente eso.
+    escribe_coordenada_equipo: true
+    # DOS CAMPOS SEPARADOS, y declarados por NOMBRE y no por el orden de
+    # 'requeridos': una lista reordenada desde la interfaz mandaria la latitud
+    # al campo del identificador y SmartOLT responderia 200 igual.
+    parametros_de_coordenada:
+      identificador: sn_onu
+      latitud: latitude
+      longitud: longitude
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    # DOS CAMPOS SEPARADOS, STRING. No existe ningun campo combinado en los 86
+    # de `get_onu_details` ni en los 3 del endpoint de GPS. WispHub hace lo
+    # contrario --un solo `coordenadas` con "lat,lon"-- asi que quien escriba
+    # en los dos lados convierte; por eso son dos herramientas y no una.
+    #
+    # `seal_number` NO SE MANDA NUNCA, aunque el endpoint lo acepte: es el
+    # precinto del equipo y mandarlo desde acá rompería su atomicidad.
+    requeridos: [sn_onu, latitude, longitude]
+    filtros_verificados:
+      sn_onu: {param: sn_onu, tipo: texto, verificado_el: 2026-11-10}
+      latitude: {param: latitude, tipo: texto, verificado_el: 2026-11-10}
+      longitude: {param: longitude, tipo: texto, verificado_el: 2026-11-10}
+
+  - nombre: guardar_coordenada_cliente_wisphub
+    tipo: http
+    descripcion: >
+      Guarda la ubicacion GPS del servicio de un cliente en WispHub. NO la
+      llama el modelo: la llama el backend junto con la de SmartOLT, cuando un
+      tecnico confirma la ubicacion desde la app de campo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    invocable_por_servicio: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/clientes/{id_servicio}/
+    # ES PUT Y NO PATCH. Con `PATCH` un dict anidado devuelve 500 y una clave
+    # que no existe devuelve 200 sin cambiar nada -- el mismo modo de falla
+    # que costo un diagnostico entero con `tecnico` el 28/08/2026.
+    #
+    # Y OJO CON LA NOTA DE `reasignar_ticket_instalacion`, que dice que PUT
+    # exige el conjunto COMPLETO: eso se midio sobre `/api/tickets/{id}/`.
+    # Sobre `/api/clientes/{id}/` se midio lo contrario el 10/11/2026 -- un
+    # PUT con solo `coordenadas` aplica y deja intactos los otros 33 campos,
+    # comprobado campo por campo antes y despues. Son dos recursos distintos:
+    # no se deduce uno del otro.
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    # UN SOLO CAMPO DE TEXTO, "lat,lon" con coma y sin espacio: es la forma
+    # que el proveedor ya tiene cargada y la unica que el parser lee sin
+    # ambiguedad (`campo/coordenadas_del_cliente.py`).
+    escribe_coordenada_servicio: true
+    # UN SOLO CAMPO combinado "lat,lon" -- al reves que SmartOLT, y por eso
+    # son dos herramientas con dos formas, no una con un parametro de mas.
+    parametros_de_coordenada:
+      identificador: id_servicio
+      combinada: coordenadas
+    requeridos: [id_servicio, coordenadas]
+    filtros_verificados:
+      id_servicio: {param: id_servicio, tipo: texto, verificado_el: 2026-11-10}
+      coordenadas: {param: coordenadas, tipo: texto, verificado_el: 2026-11-10}
+
   - nombre: reiniciar_ont
     tipo: http
     descripcion: >
