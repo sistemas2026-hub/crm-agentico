@@ -454,7 +454,8 @@
              de la sección y no una fila más. -->
         <div class="rx-cabeza">
           <span class="panel-etiqueta">Potencia óptica (RX)</span>
-          <b class="rx-grande" class:rx-mal={atenuado === true}>{medicion.rx} dBm</b>
+          <b class="rx-grande" class:rx-mal={atenuado === true}
+            class:rx-bien={atenuado === false && !medicion.veredicto}>{medicion.rx} dBm</b>
         </div>
 
         <!-- ── LA BARRA ───────────────────────────────────────────────────
@@ -996,10 +997,19 @@
     font-size: 11.5px;
   }
 
+  /* «Onli / ne» (10/11/2026): el valor de la fila puede cortarse en cualquier
+     carácter (`overflow-wrap: anywhere`, bandeja.css), y con la fecha al lado
+     en el mismo renglón la palabra se partía. La palabra no se corta; lo que
+     no entra baja entero al renglón de abajo. */
   .con-punto {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 2px 6px;
+  }
+  .con-punto b {
+    white-space: nowrap;
+    overflow-wrap: normal;
   }
 
   /* Verde cuando el enlace responde. El punto acompaña a la palabra, no la
@@ -1021,15 +1031,24 @@
     color: var(--bandeja-texto-3);
   }
 
+  /* EL COLOR NO CONTRADICE AL TEXTO (10/11/2026). El chip era verde por
+     defecto y rojo solo si la potencia pasaba el umbral de la Bandeja. Pero el
+     texto sale de OTRA fuente --los rangos que la empresa declara en el
+     catálogo--, y las dos pueden no coincidir: con rangos que dicen «débil»
+     por debajo de -25 y un umbral de -27, una lectura de -25,68 salía «fuera
+     de rango -- señal débil» en verde. Esta pantalla no sabe cuál de los
+     rangos es «bien» (son etiquetas libres de cada empresa), así que el chip
+     va neutro y el texto habla; rojo solo cuando la Bandeja lo afirma.
+     Y envuelve: con `nowrap` la frase se salía del panel. */
   .rx-chip {
-    padding: 1px 5px;
+    padding: 1px 6px;
     border-radius: 3px;
-    border: 1px solid color-mix(in srgb, var(--bandeja-ok) 30%, transparent);
-    background: color-mix(in srgb, var(--bandeja-ok) 10%, transparent);
+    border: 1px solid var(--bandeja-neutro-borde);
+    background: var(--bandeja-neutro-fondo);
     font-size: 11px;
     font-weight: 600;
-    color: var(--bandeja-ok);
-    white-space: nowrap;
+    color: var(--bandeja-neutro-texto);
+    overflow-wrap: anywhere;
   }
   .rx-chip-mal {
     border-color: var(--bandeja-error-borde);
@@ -1059,6 +1078,14 @@
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
+    color: var(--bandeja-texto);
+  }
+
+  /* Verde solo cuando nada lo contradice (10/11/2026): con un veredicto de
+     los rangos de la empresa al lado, el umbral de la Bandeja puede decir
+     «bien» mientras el texto dice «débil» (ver .rx-chip). Entonces el número
+     va en tinta y habla el texto; rojo sigue siendo rojo. */
+  .rx-grande.rx-bien {
     color: var(--bandeja-ok);
   }
 

@@ -29,6 +29,8 @@
   import { ShieldCheck, ShieldQuestion, ChevronDown } from '@lucide/svelte';
   import { tonoDeEstadoServicio, fechaLegible, montoLegible } from '$lib/conversaciones/formato.js';
   import { avisoDeCorte, telefonoDelCanal } from './ficha-cliente.js';
+  import { resumenDeCuenta } from '$lib/conversaciones/cuenta.js';
+  import { Copy, Check } from '@lucide/svelte';
 
   let {
     conversacion,
@@ -39,8 +41,25 @@
     /** La ficha todavía viaja: llega después de la conversación (07/11/2026).
         Sin esto, las secciones de abajo aparecían de golpe, o nunca, sin que
         nada dijera que se las estaba buscando. */
-    consultando = false
+    consultando = false,
+    /** Lo que debe, calculado por el motor (10/11/2026): la misma cuenta que
+        usa el agente de cobro. Reemplaza al «saldo» de la ficha. */
+    cuenta = null,
+    consultandoCuenta = false
   } = $props();
+
+  const resumen = $derived(resumenDeCuenta(consultandoCuenta ? undefined : cuenta));
+
+  let linkCopiado = $state(false);
+  async function copiarLink(/** @type {string} */ link) {
+    try {
+      await navigator.clipboard.writeText(link);
+      linkCopiado = true;
+      setTimeout(() => (linkCopiado = false), 1500);
+    } catch {
+      // Portapapeles bloqueado: el link está a la vista y se selecciona a mano.
+    }
+  }
 
   const ROTULO_EQUIPO = {
     sn_onu: 'Serial de la ONU',
@@ -55,9 +74,11 @@
      un rotulo "Ubicacion" sin nada debajo es peor que no tenerlo. */
   const hayUbicacion = $derived(!!(ficha?.direccion || ficha?.localidad || ficha?.ciudad || ficha?.zona));
   const hayServicio = $derived(!!(ficha?.plan_internet || ficha?.estado || ficha?.fecha_instalacion));
+  /* El «saldo» de la ficha ya no cuenta (10/11/2026): no es lo que se debe.
+     La sección existe si hay cuenta que decir --o que se está calculando-- o
+     si la ficha trae cobranza o corte. */
   const hayFacturacion = $derived(
-    !!(ficha?.estado_facturas || ficha?.fecha_corte) ||
-      (ficha?.saldo !== undefined && ficha?.saldo !== null)
+    !!(ficha?.estado_facturas || ficha?.fecha_corte) || resumen.tipo !== 'nada'
   );
 
   /* Cortado o suspendido se marca: es lo que explica la mitad de las
@@ -199,17 +220,62 @@
 
   {#if hayFacturacion}
     <p class="panel-titulo panel-seccion">Facturación</p>
+    <!-- LO QUE DEBE (10/11/2026), calculado por el motor con la misma cuenta
+         que usa el agente de cobro. Antes acá iba el «saldo» de la ficha, que
+         NO es lo que se debe: el 07/11 dijo 0,00 a un cliente con una factura
+         pendiente y el servicio suspendido. «No se pudo» y «al día» nunca se
+         dibujan igual (cuenta.js). -->
+    <div class="cuenta cuenta-{resumen.tipo}" role={resumen.tipo === 'consultando' ? 'status' : undefined}>
+      {#if resumen.tipo === 'consultando'}
+        <p class="panel-consultando">Calculando lo que debe…</p>
+      {:else if resumen.tipo === 'debe'}
+        <div class="cuenta-cabeza">
+          <span class="cuenta-rotulo">Debe</span>
+          <!-- Sin moneda: varía por empresa y no se inventa. -->
+          <span class="cuenta-monto cifra">{montoLegible(resumen.monto)}</span>
+        </div>
+        <p class="cuenta-detalle">
+          {resumen.pendientes === 1 ? '1 factura pendiente' : `${resumen.pendientes} facturas pendientes`}{#if resumen.vencidas > 0}{' · '}<span class="cuenta-vencidas">{resumen.vencidas === 1 ? '1 vencida' : `${resumen.vencidas} vencidas`}</span>{/if}
+        </p>
+        {#if resumen.masAntigua}
+          <p class="cuenta-nota">La más antigua vence el {fechaLegible(resumen.masAntigua)}</p>
+        {/if}
+        {#if resumen.incluyeSaldo}
+          <p class="cuenta-nota">El total incluye saldo de facturas anteriores.</p>
+        {/if}
+        {#if resumen.parcial}
+          <p class="cuenta-nota">Puede haber más: el sistema del ISP no devolvió todas.</p>
+        {/if}
+        {#if resumen.link}
+          <button type="button" class="v2-btn v2-btn-sm cuenta-link" onclick={() => copiarLink(resumen.link ?? '')}>
+            {#if linkCopiado}<Check size={13} aria-hidden="true" /> Link copiado{:else}<Copy size={13} aria-hidden="true" /> Copiar link de pago{/if}
+          </button>
+        {/if}
+        {#if resumen.otrosMedios.length}
+          <details class="cuenta-medios">
+            <summary>Otros medios de pago</summary>
+            <ul>
+              {#each resumen.otrosMedios as medio (medio)}<li>{medio}</li>{/each}
+            </ul>
+          </details>
+        {/if}
+      {:else if resumen.tipo === 'al_dia'}
+        <p class="cuenta-al-dia"><Check size={13} aria-hidden="true" /> Al día: sin facturas pendientes</p>
+      {:else if resumen.tipo === 'sin_identificar'}
+        <p class="cuenta-nota">Lo que debe se calcula cuando el cliente esté identificado.</p>
+      {:else if resumen.tipo === 'no_se_pudo'}
+        <p class="cuenta-no">
+          No se pudo calcular lo que debe{resumen.detalle ? `: ${resumen.detalle}` : '.'}
+          <b>Eso no quiere decir que esté al día.</b>
+        </p>
+      {/if}
+    </div>
     <div class="bloque">
-      {#if ficha.estado_facturas}
+      {#if ficha?.estado_facturas}
         <div class="panel-fila"><span class="panel-etiqueta">Cobranza</span>
           <span class="panel-valor">{ficha.estado_facturas}</span></div>
       {/if}
-      {#if ficha.saldo !== undefined && ficha.saldo !== null}
-        <div class="panel-fila"><span class="panel-etiqueta">Saldo</span>
-          <!-- Sin moneda: varía por empresa y no se inventa. -->
-          <span class="panel-valor cifra">{montoLegible(ficha.saldo)}</span></div>
-      {/if}
-      {#if ficha.fecha_corte}
+      {#if ficha?.fecha_corte}
         <div class="panel-fila"><span class="panel-etiqueta">Fecha de corte</span>
           <span class="panel-valor cifra">
             {fechaLegible(ficha.fecha_corte)}
@@ -319,6 +385,102 @@
     font-weight: 600;
     color: var(--bandeja-aviso);
     white-space: nowrap;
+  }
+
+  /* LO QUE DEBE: una tarjeta, porque es el dato por el que más se pregunta
+     y el único de la sección que es una cifra calculada. El monto grande; el
+     detalle chico. Rojo sólo para lo vencido; ámbar para «no se pudo», que
+     pide cuidado antes de contestar pero no es una deuda. */
+  .cuenta {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio);
+    background: var(--bandeja-superficie);
+  }
+  .cuenta-consultando,
+  .cuenta-sin_identificar {
+    padding: 8px 12px;
+    background: var(--bandeja-superficie-suave);
+  }
+  .cuenta-no_se_pudo {
+    border-color: var(--bandeja-aviso-borde);
+    background: var(--bandeja-aviso-fondo);
+  }
+  .cuenta-cabeza {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .cuenta-rotulo {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--bandeja-texto-2);
+  }
+  .cuenta-monto {
+    font-family: var(--bandeja-titulo);
+    font-size: 22px;
+    font-weight: 650;
+    line-height: 1.1;
+    color: var(--bandeja-texto);
+  }
+  .cuenta-detalle {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--bandeja-texto);
+  }
+  .cuenta-vencidas {
+    font-weight: 650;
+    color: var(--bandeja-error);
+  }
+  .cuenta-nota {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+  }
+  .cuenta-al-dia {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--bandeja-ok);
+  }
+  .cuenta-no {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--bandeja-aviso);
+  }
+  .cuenta-no b {
+    display: block;
+    margin-top: 2px;
+  }
+  .cuenta-link {
+    margin-top: 10px;
+    border: 1px solid var(--bandeja-borde-fuerte);
+    background: var(--bandeja-superficie);
+    color: var(--bandeja-texto);
+    font-size: 12px;
+  }
+  .cuenta-medios {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+  }
+  .cuenta-medios summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .cuenta-medios ul {
+    margin: 4px 0 0;
+    padding-left: 16px;
+    color: var(--bandeja-texto);
+  }
+  .cuenta .panel-consultando {
+    margin: 0;
   }
 
   .verificacion {

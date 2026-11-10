@@ -71,6 +71,7 @@ from nucleo.config.organizacion import PLANTILLAS_DE_SALA, organizacion_de
 #  sitios cada vez que el catalogo crezca.
 from nucleo.habilidades import analista
 from nucleo.herramientas import http as ejecutor_http
+from nucleo.herramientas import cuenta as ejecutor_cuenta
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
@@ -8990,6 +8991,84 @@ def conversaciones_cliente(id_conversacion):
     # Sin 'registrar' de los valores: esta respuesta es la ficha personal de
     # alguien y no entra a ningun log ni a ninguna traza.
     return jsonify({"disponible": True, "motivo": None, "cliente": ficha})
+
+
+@app.get("/conversaciones/<id_conversacion>/cuenta")
+def conversaciones_cuenta(id_conversacion):
+    """
+    Cuanto debe el cliente de esta conversacion, para quien la atiende (10/11/2026).
+
+    POR QUE NO ALCANZABA LA FICHA
+    -----------------------------
+    La pestaña Cliente mostraba el 'saldo' de la ficha del sistema del ISP, y
+    ese numero NO es lo que se debe: el 07/11/2026 un cliente con una factura
+    pendiente y el servicio suspendido aparecio con saldo 0.00. El agente de
+    cobro dejo de usarlo ese dia (nucleo/herramientas/cuenta.py); la pantalla
+    lo seguia mostrando, asi que una persona podia leer "al dia" donde habia
+    deuda.
+
+    EL MISMO CALCULO QUE EL AGENTE, NO UNO PARECIDO
+    ------------------------------------------------
+    Llama a 'cuenta.estado_de_cuenta' con la herramienta que la empresa
+    declara para eso (la que tiene 'calcula_estado_de_cuenta', buscada por esa
+    marca y no por su nombre). Con eso hereda lo que la hace segura: el cliente
+    sale de la identidad de ESTA conversacion, nunca de un parametro; la ficha
+    se acepta solo si es la de ese servicio; y si el proveedor devuelve
+    facturas de otro, o mas de las que una persona puede deber, no hay cifra.
+
+    Lee y devuelve, sin escribir una fila ni registrar un monto. Las
+    respuestas que no son una cuenta van con 'disponible: false' y un motivo
+    con codigo, como la ficha; si el calculo se nego, el porque va en
+    'detalle', que es un texto fijo del calculo y no trae datos de nadie.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        identidad = persistencia.identidad_de_conversacion(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("cuenta", "fallo al leer la identidad de la conversacion",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+
+    if not identidad:
+        return jsonify({"error": "No existe esa conversacion."}), 404
+
+    id_servicio = (identidad.get("id_cliente") or "").strip()
+    if not id_servicio:
+        return jsonify({"disponible": False, "motivo": "sin_identificar"})
+
+    config = _config_de(tenant)
+    # Una empresa puede declarar dos: la del cliente y la de un colaborador que
+    # consulta la cuenta de otro ('cuenta_de_colaborador'). El calculo es el
+    # mismo; se prefiere la del cliente, que es la que esta atada a una
+    # conversacion como esta.
+    candidatas = sorted(
+        (h for h in config.herramientas
+         if h.tipo == "interno" and getattr(h, "calcula_estado_de_cuenta", False)),
+        key=lambda h: bool(getattr(h, "cuenta_de_colaborador", False)))
+    herramienta = candidatas[0] if candidatas else None
+    if herramienta is None:
+        return jsonify({"disponible": False, "motivo": "sin_herramienta"})
+
+    try:
+        cuenta = ejecutor_cuenta.estado_de_cuenta(
+            herramienta, {"id_servicio": id_servicio}, tenant,
+            getattr(config, "variables_tenant", None),
+            catalogo=config.herramientas,
+            hoy=ejecutor_cuenta.hoy_de_la_empresa(config))
+    except Exception as e:
+        registrar("cuenta", "no se pudo calcular el estado de cuenta",
+                  conversation_id=id_interno(id_conversacion), error=e)
+        return jsonify({"disponible": False, "motivo": "sin_conexion"})
+
+    if not cuenta.get("disponible"):
+        return jsonify({"disponible": False, "motivo": "no_calculable",
+                        "detalle": cuenta.get("motivo")})
+    return jsonify(cuenta)
 
 
 """

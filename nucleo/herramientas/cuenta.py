@@ -322,7 +322,7 @@ def medios_de_pago_de_la_empresa(herramienta, argumentos, tenant, variables_tena
     return respuesta
 
 
-def _hoy(config) -> date:
+def hoy_de_la_empresa(config) -> date:
     """El dia de hoy EN LA ZONA DE LA EMPRESA: a las 8 pm en Bogota ya es manana en UTC."""
     from datetime import timezone
     try:
@@ -349,7 +349,7 @@ def estado_de_cuenta(herramienta, argumentos, tenant, variables_tenant,
             registrar("cuenta", "no se pudo leer la configuracion del tenant", error=e)
             return _no_disponible("no se pudo leer la configuracion")
         catalogo = catalogo if catalogo is not None else config.herramientas
-        hoy = hoy or _hoy(config)
+        hoy = hoy or hoy_de_la_empresa(config)
 
     por_nombre = {h.nombre: h for h in (catalogo or [])}
     ficha_h = por_nombre.get(herramienta.resolver_cliente_con)

@@ -86,6 +86,13 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   const fichaCliente = leer('cliente', PLAZO_EXTERNO_MS).then(
     (r) => siLlego(r) ?? { disponible: false, motivo: 'sin_respuesta', cliente: null }
   );
+  /* LA CUENTA (10/11/2026): cuánto debe, calculado por el motor con la misma
+     herramienta que el agente de cobro --dos idas al sistema del ISP, ficha y
+     facturas pendientes--. Reemplaza al «saldo» de la ficha, que no es lo
+     que se debe. Tampoco se espera. */
+  const cuenta = leer('cuenta', PLAZO_EXTERNO_MS).then(
+    (r) => siLlego(r) ?? { disponible: false, motivo: 'sin_respuesta' }
+  );
 
   // Los pedidos son independientes entre si -- en paralelo, no uno atras del
   // otro. Antes se esperaba mensajes, DESPUES herramientas, DESPUES casos:
@@ -210,7 +217,7 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   const yo = { id: locals.user?.id ?? '', nombre: (locals.user?.name || locals.user?.email || '').trim() };
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
-    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores, fichaCliente, optica,
+    relevo, equipo, sincronizaciones, acciones, yo, rol, operadores, fichaCliente, cuenta, optica,
     // Sin el chat no se sabe si esta es la última del número: 'agrupa: false'
     // no ofrece escribirle a una cerrada a ciegas.
     chat: chat ?? { tramos: [], hay_anteriores: false, antes: null,

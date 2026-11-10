@@ -93,6 +93,7 @@
   // invalidación (refrescarRelevo) trae promesas nuevas, y mientras viajan
   // queda el valor anterior en vez de volver a «consultando».
   let fichaCliente = $state(untrack(() => yaVino(data.fichaCliente)));
+  let cuenta = $state(untrack(() => yaVino(data.cuenta)));
   let optica = $state(untrack(() => yaVino(data.optica)));
   let operadores = $state(untrack(() => yaVino(data.operadores)));
   $effect(() => {
@@ -103,6 +104,7 @@
       else v.then((/** @type {any} */ x) => { if (vigente) poner(x); });
     };
     cuandoLlegue(data.fichaCliente, (x) => (fichaCliente = x));
+    cuandoLlegue(data.cuenta, (x) => (cuenta = x));
     cuandoLlegue(data.optica, (x) => (optica = x));
     cuandoLlegue(data.operadores, (x) => (operadores = x));
     return () => {
@@ -2098,7 +2100,8 @@
   <div class="info-cuerpo">
     {#if pestanaContexto === 'cliente'}
       <CustomerPanel {conversacion} ficha={fichaCliente?.cliente ?? null}
-        consultando={fichaCliente === undefined} />
+        consultando={fichaCliente === undefined}
+        cuenta={cuenta ?? null} consultandoCuenta={cuenta === undefined} />
 
     {:else if pestanaContexto === 'equipo'}
       <NetworkPanel

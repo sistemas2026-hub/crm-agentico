@@ -103,12 +103,13 @@ describe('la conversación se abre sin esperar a lo lento', () => {
     crm.ticket = nunca;
     crm.operadores = nunca;
     const datos = await terminaSinEsperar(
-      load(evento(motor(['cliente', 'optica'], { escalada_a_humano: true, caso_id: 'k1' })))
+      load(evento(motor(['cliente', 'cuenta', 'optica'], { escalada_a_humano: true, caso_id: 'k1' })))
     );
     expect(datos.mensajes).toEqual([{ id: 'm1' }]);
     expect(datos.relevo).toEqual([{ tipo: 'cerrada' }]);
     // Viajan aparte; la pantalla los recibe cuando lleguen.
     expect(datos.fichaCliente).toBeInstanceOf(Promise);
+    expect(datos.cuenta).toBeInstanceOf(Promise);
     expect(datos.optica).toBeInstanceOf(Promise);
     expect(datos.caso).toBeInstanceOf(Promise);
     expect(datos.operadores).toBeInstanceOf(Promise);
@@ -133,6 +134,12 @@ describe('y lo lento tampoco cuelga para siempre', () => {
     for (const [linea] of /** @type {any} */ (console.warn).mock.calls) {
       expect(String(linea)).not.toContain(ID);
     }
+  });
+
+  it('la cuenta colgada llega como «sin respuesta», nunca como «al día»', async () => {
+    const datos = await terminaSinEsperar(load(evento(motor(['cuenta']))));
+    await vi.advanceTimersByTimeAsync(PLAZO_EXTERNO_MS + 10);
+    expect(await datos.cuenta).toEqual({ disponible: false, motivo: 'sin_respuesta' });
   });
 
   it('la óptica colgada de una escalada llega sin medición', async () => {
