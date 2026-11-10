@@ -1257,9 +1257,12 @@ roles:
       - CATV en 'Disabled': el servicio de television esta APAGADO en el
         equipo. Esa ES la falla, y la resuelves TU: llama a activar_catv.
         No derives a un humano por esto y no le pidas que sintonice
-        antes -- primero encendelo. Despues cuentale que ya quedo
-        activado y pidele que sintonice: el equipo necesita volver a
-        buscar los canales despues de recuperar la señal. Los PASOS
+        antes -- primero encendelo. Llamarla NO la activa en el acto:
+        queda pedida (por aprobar, o para salir apenas termines de
+        responder), y SmartOLT puede encolarla. Cuentale que quedo
+        PEDIDA, nunca que "ya quedo activada"; cuando el sistema confirme
+        que se encendio, ahi si pidele que sintonice: el equipo necesita
+        volver a buscar los canales despues de recuperar la señal. Los PASOS
         salen de consultar_guia_sintonizacion, no de tu memoria --
         preguntale si el coaxial entra directo al TV o pasa por una
         cajita, y si es directo tambien la marca.
@@ -1273,9 +1276,12 @@ roles:
         television?"
 
         - UN SOLO equipo: el aparato si puede dar TV; lo que esta mal es
-          el tipo con que figura. Llama a cambiar_tipo_onu, despues
-          vuelve a leer consultar_estado_catv (tiene que dejar de decir
-          'Not supported') y activa con activar_catv. No hace falta
+          el tipo con que figura. Llama a cambiar_tipo_onu y cuentale que
+          quedo pedido el cambio. NO sigas con activar_catv en esta misma
+          conversacion: el tipo no cambia hasta que la accion sale, y
+          activar_catv exige leer 'Disabled' antes. Cuando el cliente
+          vuelva, relee consultar_estado_catv: si ya no dice 'Not
+          supported', ahi si activa con activar_catv. No hace falta
           visita ni cambiarle nada fisico: se arregla desde la central.
 
         - DOS equipos: la television NO pasa por la ONU, va por una
@@ -6597,6 +6603,24 @@ herramientas:
     # origen -> destino en vez de un destino fijo.
     argumentos_fijos:
       onu_type: CDATA-CATV
+    # El reintento con la forma hexadecimal que ya tenian reiniciar_ont y
+    # activar_catv: sin el, las 68 ONUs registradas asi fallaban siempre
+    # (10/11/2026). Solo se reintenta ante un rechazo del identificador.
+    reintentar_identificador_como:
+      sn_onu: gpon_hex
+    # QUE EL EFECTO APARECIO, NO QUE LA LLAMADA VOLVIO 200 (10/11/2026). La
+    # documentacion de octubre de SmartOLT dice que una accion puede quedar
+    # en cola y que no hay que darla por hecha. Lo que se buscaba al cambiar el
+    # tipo es que el equipo exponga el puerto de TV: 'catv' deja de decir
+    # 'Not supported'. Sin esta verificacion la herramienta ademas no podia
+    # ganar autonomia nunca (autonomia_ganada: 'efecto_no_verificable').
+    verificacion:
+      espera_segundos: 180
+      max_intentos: 3
+      escalar_si_no_confirma: accion_sin_efecto
+      comprobaciones:
+        - {herramienta: consultar_estado_catv, campo: catv, regla: valores,
+           valores: [Enabled, Disabled]}
 
   - nombre: activar_catv
     tipo: http
@@ -6664,6 +6688,18 @@ herramientas:
       - herramienta: consultar_estado_catv
         campo: catv
         valor: Disabled
+    # QUE LA TELEVISION QUEDO ENCENDIDA, NO QUE LA LLAMADA VOLVIO 200
+    # (10/11/2026). Segun la documentacion de octubre de SmartOLT, si la ONU
+    # ya tiene acciones en cola, 'enable_catv' tambien se encola y responde
+    # 'queued: true': aceptada, no hecha. Se relee 'catv' de la ONU. Sin esto
+    # la herramienta ademas no podia ganar autonomia nunca.
+    verificacion:
+      espera_segundos: 180
+      max_intentos: 3
+      escalar_si_no_confirma: accion_sin_efecto
+      comprobaciones:
+        - {herramienta: consultar_estado_catv, campo: catv, regla: valores,
+           valores: [Enabled]}
 
   - nombre: consultar_dispositivos_conectados
     tipo: http
