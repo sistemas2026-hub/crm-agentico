@@ -449,6 +449,42 @@ PALABRAS_QUE_PIDEN_MIRAR = (
 #: foto (`nucleo/canales/vision.py`, regla 12). Ver `muestra_lo_pedido`.
 MARCA_MUESTRA = "muestra:"
 
+#: La marca de la regla 13: si la imagen es material de producto en vez de una
+#: foto del trabajo. Las dos grafias, con y sin tilde.
+MARCAS_CATALOGO = ("catalogo:", "catálogo:")
+
+
+def es_de_catalogo(texto: str):
+    """`True` si la imagen es material de producto, `False` si no, `None` si
+    el modelo no lo dijo.
+
+    POR QUE SE BUSCA AL PRINCIPIO DE UNA LINEA, y no con `rfind` sobre todo el
+    texto como `muestra_lo_pedido`  --  09/11/2026
+    -----------------------------------------------------------------------
+    Porque la palabra aparece en la prosa de estas mismas fotos. El analisis
+    real que origino esto dice: «Equipo sobre fondo blanco, sin entorno de
+    instalacion; imagen de catalogo.» Un `rfind("catalogo")` pegaria ahi, y
+    de ahi en adelante el veredicto dependeria de como redacto el modelo esa
+    frase, no de la marca que se le pidio. `muestra_lo_pedido` no tiene ese
+    problema: nadie escribe «muestra:» en prosa.
+
+    SIN MARCA, `None` -- nunca `True`. Un analisis viejo, de antes de la
+    regla 13, no la trae, y tratar esa ausencia como «es de catalogo»
+    devolveria ordenes por fotos que nadie miro con este criterio.
+    """
+    for linea in (texto or "").splitlines():
+        bajo = linea.strip().lower()
+        for marca in MARCAS_CATALOGO:
+            if not bajo.startswith(marca):
+                continue
+            resto = bajo[len(marca):].strip()
+            if resto.startswith(("si", "sí")):
+                return True
+            if resto.startswith("no"):
+                return False
+    return None
+
+
 #: Lo que se puede afirmar de la correspondencia entre la foto y el requisito.
 #: `None` NO es "esta bien": es "no se sabe", y esa diferencia es el motivo de
 #: que esta funcion devuelva tres cosas y no un booleano. Un `False` por

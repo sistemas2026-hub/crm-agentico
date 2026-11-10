@@ -414,8 +414,25 @@ def punto_de_la_revision(orden):
                  if a not in con_atencion
                  and muestra_lo_pedido(a.texto or "") is False]
 
-    if con_atencion or otra_cosa or sin_mirar:
+    #  LAS DE CATALOGO SE CUENTAN APARTE  --  09/11/2026
+    #
+    #  Caian dentro de «piden una mirada» --el modelo marca ATENCION cuando ve
+    #  material de producto-- y ese texto no distingue una foto oscura de una
+    #  imagen bajada de una tienda. El supervisor leia «2 de 4 fotos piden una
+    #  mirada» y no tenia como saber que la diferencia era esa.
+    from campo.tasks import es_de_catalogo
+
+    de_catalogo = [a for a in mirados if es_de_catalogo(a.texto or "") is True]
+    con_atencion = [a for a in con_atencion if a not in de_catalogo]
+
+    if con_atencion or otra_cosa or de_catalogo or sin_mirar:
         partes = []
+        if de_catalogo:
+            partes.append(
+                f"{len(de_catalogo)} es una imagen de producto, no una foto "
+                f"del trabajo" if len(de_catalogo) == 1 else
+                f"{len(de_catalogo)} son imágenes de producto, no fotos del "
+                f"trabajo")
         if con_atencion:
             partes.append(f"{len(con_atencion)} de {len(mirados)} fotos piden "
                           f"una mirada")

@@ -64,9 +64,9 @@ MAX_RESUMEN = 220
 def _resumen(texto: str) -> str:
     """La frase que le sirve al tecnico, sin las marcas del protocolo.
 
-    `MUESTRA:` y `ATENCION:` son como el codigo habla consigo mismo. Mostrarlas
-    en la app seria filtrar la plomeria a quien tiene que decidir si vuelve a
-    sacar una foto.
+    `MUESTRA:`, `ATENCION:` y `CATALOGO:` son como el codigo habla consigo
+    mismo. Mostrarlas en la app seria filtrar la plomeria a quien tiene que
+    decidir si vuelve a sacar una foto.
     """
     lineas = []
     for linea in (texto or "").splitlines():
@@ -74,7 +74,8 @@ def _resumen(texto: str) -> str:
         if not limpia:
             continue
         bajo = limpia.lower()
-        if bajo.startswith(("muestra:", "atencion:", "atención:")):
+        if bajo.startswith(("muestra:", "atencion:", "atención:",
+                            "catalogo:", "catálogo:")):
             continue
         lineas.append(limpia)
     junto = " ".join(lineas).strip()

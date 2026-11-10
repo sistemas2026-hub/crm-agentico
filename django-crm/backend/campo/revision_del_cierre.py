@@ -188,6 +188,53 @@ def _fotos_que_muestran_otra_cosa(orden) -> list[str]:
                   if muestra_lo_pedido(a.texto or "") is False)
 
 
+def _fotos_de_catalogo(orden) -> list[str]:
+    """Los requisitos cuya foto es material de producto, no del trabajo.
+
+    EL CASO, MEDIDO  --  09/11/2026
+    --------------------------------
+    El usuario subio como evidencia la foto de catalogo de un medidor Rouhan
+    --el equipo recortado sobre fondo blanco, de una tienda-- en las dos
+    mediciones de una orden. El modelo lo vio y lo escribio las dos veces:
+    «Equipo sobre fondo blanco, sin entorno de instalacion; imagen de
+    catalogo».
+
+    Y la orden paso igual. `MUESTRA` decia `si` --el medidor SE VE, y eso era
+    lo que se pedia-- y `ATENCION: si` por si solo no devuelve nada desde la
+    decision del 06/11: «4 de 4 fotos piden una mirada» sobre fotos oscuras
+    de un trabajo bien hecho, y devolver por eso haria rehacer lo que no esta
+    mal.
+
+    POR QUE ESTA SI DEVUELVE, Y «ATENCION» NO. Son dos afirmaciones de
+    distinto peso. «Pide una mirada» es un juicio difuso sobre la calidad de
+    una foto. «Es material de producto» es un hecho sobre su ORIGEN: esa
+    imagen no se tomo en la casa del cliente, asi que no es evidencia de
+    nada, por nitida que sea. Es el mismo criterio con el que `MUESTRA: no`
+    devuelve: lo verificable mirando.
+
+    Y SE REPITE. La misma marca salio en las dos fotos de la prueba, en dos
+    analisis independientes.
+
+    Sin marca, no devuelve: ver `es_de_catalogo`.
+    """
+    try:
+        from campo.models import AnalisisDeEvidencia
+        from campo.tasks import es_de_catalogo
+    except Exception:                                            # noqa: BLE001
+        return []
+    ultimo = {}
+    try:
+        for a in (AnalisisDeEvidencia.objects
+                  .filter(org=orden.org, evidencia__orden_trabajo=orden)
+                  .select_related("evidencia")
+                  .order_by("evidencia__vuelta", "created_at")):
+            ultimo[a.evidencia.requisito_id] = a
+    except Exception:                                            # noqa: BLE001
+        return []
+    return sorted(r for r, a in ultimo.items()
+                  if es_de_catalogo(a.texto or "") is True)
+
+
 def _que_rehacer(puntos, esquema, orden=None) -> list[str]:
     """Los requisitos que una devolucion puede pedir que se rehagan.
 
@@ -260,6 +307,13 @@ def _que_rehacer(puntos, esquema, orden=None) -> list[str]:
             #  Solo lo que la plantilla declara: pedir rehacer algo que el
             #  formulario no tiene deja al tecnico sin poder cumplirlo. Mismo
             #  criterio que con la foto de la medicion.
+            if requisito in declaradas and requisito not in salida:
+                salida.append(requisito)
+
+        #  Y LAS QUE SON MATERIAL DE PRODUCTO. Ver `_fotos_de_catalogo`: no es
+        #  un juicio sobre la calidad de la foto sino sobre su ORIGEN. Una
+        #  imagen bajada de una tienda no es evidencia de nada.
+        for requisito in _fotos_de_catalogo(orden):
             if requisito in declaradas and requisito not in salida:
                 salida.append(requisito)
     return salida

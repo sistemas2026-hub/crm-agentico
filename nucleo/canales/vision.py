@@ -361,7 +361,14 @@ INSTRUCCION_EVIDENCIA = (
     "televisor--. 'no se sabe' es para cuando no se puede determinar: esta "
     "borrosa, oscura, tapada, o es un primer plano del que no se deduce que "
     "equipo es. Si no te dijeron que tenia que mostrar, NO escribas esta "
-    "linea."
+    "linea.\n"
+    "13. Agregá SIEMPRE, antes de las dos lineas anteriores, otra sola que "
+    "diga exactamente 'CATALOGO: si' o 'CATALOGO: no'. Poné 'si' cuando la "
+    "imagen no sea una foto tomada en el trabajo sino material de producto: "
+    "el equipo solo, recortado o sobre un fondo blanco o liso, sin nada "
+    "alrededor, como en la pagina de una tienda. Una foto tomada de otra "
+    "pantalla NO es catalogo, y una captura tampoco: para esas poné 'no'. "
+    "Ante la duda poné 'no'."
 )
 
 
