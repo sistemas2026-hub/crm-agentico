@@ -236,8 +236,17 @@ def _reclamar_la_devolucion(orden) -> bool:
     return True
 
 
-def revisadas(org, ahora, *, solo=None) -> list | None:
+def revisadas(org, ahora, *, solo=None, mirar=False) -> list | None:
     """TODAS las candidatas con su revision, sin filtrar por veredicto.
+
+    `mirar=True` mira ANTES de revisar las fotos de cada candidata que
+    todavia no tengan un analisis con texto. Lo pide la fase horaria y nadie
+    mas; el detalle de por que esta en `cerrar_lo_revisado`.
+
+    EL DEFAULT ES `False` A PROPOSITO: mirar le habla al modelo y escribe
+    filas, y esta funcion tambien la llama el comando de diagnostico
+    `por_que_no_cerro`, que es de solo lectura. Una herramienta de mirar que
+    cambia lo que mira no sirve para diagnosticar.
 
     EXISTE PARA QUE LOS TRES CAMINOS MIREN LO MISMO  --  06/11/2026
     ---------------------------------------------------------------
@@ -302,13 +311,25 @@ def revisadas(org, ahora, *, solo=None) -> list | None:
         candidatas = candidatas.filter(pk=solo)
     salida = []
     for orden in candidatas:
+        if mirar:
+            #  ANTES DE REVISAR, no despues: la revision lee los analisis, y
+            #  una foto sin texto cambia el veredicto. Envuelto porque un
+            #  fallo del modelo no puede dejar sin revisar a las demas --
+            #  igual que la medicion y las fotos en `revisar_el_cierre_ya`.
+            try:
+                from campo.tasks import mirar_las_que_faltan
+
+                mirar_las_que_faltan(orden)
+            except Exception as e:                               # noqa: BLE001
+                logger.warning("Supervisor: no se pudo mirar una foto (%s)",
+                               type(e).__name__)
         revision = RC.revisar(orden, pendientes=pendientes)
         if revision:
             salida.append((orden, revision))
     return salida
 
 
-def listas_para_cerrar(org, ahora, *, solo=None) -> list | None:
+def listas_para_cerrar(org, ahora, *, solo=None, mirar=False) -> list | None:
     """[(orden, revision)] que dio por buenas, o None si no se pudo saber
     cuales esperan medicion (y entonces no se cierra ninguna).
 
@@ -321,7 +342,7 @@ def listas_para_cerrar(org, ahora, *, solo=None) -> list | None:
     """
     from campo import revision_del_cierre as RC
 
-    todas = revisadas(org, ahora, solo=solo)
+    todas = revisadas(org, ahora, solo=solo, mirar=mirar)
     if todas is None:
         return None
     return [(o, r) for o, r in todas if r["veredicto"] == RC.CERRAR]
@@ -537,11 +558,27 @@ def cerrar_esta_orden(orden, *, ahora=None) -> dict:
 
 
 def cerrar_lo_revisado(org, *, ahora=None) -> dict:
-    """La fase. `{"cierre_de_lo_revisado": {...}}` para el resumen del ciclo."""
+    """La fase. `{"cierre_de_lo_revisado": {...}}` para el resumen del ciclo.
+
+    ES LA RED DE ATRAS DE LAS FOTOS, Y HASTA HOY NO LO ERA  --  10/11/2026
+    ----------------------------------------------------------------------
+    `mirar_las_que_faltan` decia por escrito que la red de atras eran «la
+    tarea por foto y el ciclo horario». La tarea por foto no reintenta, y
+    esta fase --el ciclo horario-- no la llamaba. El unico camino que miraba
+    fotos era el inmediato, al llegar el reporte: si ahi el motor no
+    contestaba, esa foto no se miraba nunca mas.
+
+    Medido en la OT #200: `medicion_al_salir` fallo con un ReadTimeout a las
+    15:17 y a las 16:33 la orden seguia esperando a una persona, sin nada
+    pendiente que pudiera destrabarla.
+
+    `mirar=True` solo aca. El disparo inmediato ya mira por su cuenta en
+    `revisar_el_cierre_ya`, y el comando de diagnostico no debe escribir.
+    """
     from campo import revision_del_cierre as RC
 
     ahora = ahora or timezone.now()
-    listas = listas_para_cerrar(org, ahora)
+    listas = listas_para_cerrar(org, ahora, mirar=True)
     motivo = puertas(org)
     if listas is None:
         motivo = motivo or "no se pudo saber que ordenes esperan la medicion"
@@ -567,6 +604,9 @@ def cerrar_lo_revisado(org, *, ahora=None) -> dict:
     #  proposito: si el ciclo se corta a la mitad, lo que se pierde es el aviso,
     #  no un cierre.
     devueltas = 0
+    #  SIN `mirar`: `listas_para_cerrar`, arriba, ya miro las fotos de estas
+    #  mismas candidatas. Pedirlo de nuevo seria una consulta por orden para
+    #  no encontrar nada.
     todas = revisadas(org, ahora) or []
     for orden, revision in todas:
         if revision["veredicto"] == RC.CERRAR:

@@ -582,6 +582,15 @@ def _mirar_y_anotar(evidencia) -> dict:
 #: el ciclo horario vuelve a revisar.
 MAX_FOTOS_EN_EL_MOMENTO = 12
 
+#: Cuantas veces se intenta mirar UNA foto antes de dejarla para una persona.
+#: Cada intento deja su fila (append-only), asi que contarlas es contar los
+#: intentos. Tres porque lo que se esta esquivando es un fallo transitorio de
+#: red --el ReadTimeout de la OT #200--: si tres pasadas separadas por una
+#: hora fallan, el problema no es el momento y reintentar mas solo le pega al
+#: motor. Agotado el tope, el punto de la inspeccion dice que esa foto no se
+#: pudo mirar y la orden espera a una persona, que es el desenlace correcto.
+INTENTOS_POR_FOTO = 3
+
 
 def mirar_las_que_faltan(orden) -> dict:
     """Las fotos de esta orden que todavia no tienen analisis, mirADAS AHORA.
@@ -646,10 +655,45 @@ def mirar_las_que_faltan(orden) -> dict:
     if not ultima:
         return {"miradas": 0, "faltaban": 0}
 
-    ya = set(AnalisisDeEvidencia.objects
-             .filter(org=orden.org, evidencia_id__in=[e.id for e in ultima.values()])
-             .values_list("evidencia_id", flat=True))
-    faltan = [e for e in ultima.values() if e.id not in ya]
+    #  UNA FILA DE UN INTENTO FALLIDO NO ES UN ANALISIS  --  10/11/2026, #200
+    #
+    #  EL CASO, MEDIDO EN PRODUCCION. La foto de `medicion_al_salir` de la OT
+    #  #200 quedo con esta fila:
+    #
+    #      ia 15:17:31 v1  motivo=no se pudo hablar con el motor (ReadTimeout)
+    #
+    #  Texto vacio: el motor no contesto. La version anterior contaba
+    #  CUALQUIER fila como «ya mirada», asi que esa foto no volvio a mirarse
+    #  nunca. A las 16:33 --una hora y cuarto despues-- la orden seguia
+    #  esperando a una persona, y nada iba a destrabarla: no habia tarea
+    #  pendiente que terminar.
+    #
+    #  El docstring de arriba decia «la red de atras es la tarea por foto y
+    #  el ciclo horario». `analizar_evidencia` no reintenta --devuelve el
+    #  motivo y termina-- y el ciclo horario no llamaba a esta funcion. La
+    #  red no existia. Eso es lo que CLAUDE.md §6 llama codigo construido que
+    #  no corre, con el agravante de estar prometido por escrito.
+    #
+    #  CON TOPE, y por eso no basta con mirar el texto: si el motor esta
+    #  caido de verdad, reintentar sin limite le pega a cada pasada del ciclo
+    #  y por cada foto. Agotado el tope, la foto queda sin texto, el punto
+    #  dice que no se pudo mirar y la orden espera a una persona -- que es el
+    #  desenlace correcto para un fallo que ya no es transitorio.
+    #
+    #  APPEND-ONLY: cada intento suma una fila, nunca pisa la anterior, asi
+    #  que contarlas ES contar los intentos (ver `analisis_de_evidencia.py`).
+    filas = (AnalisisDeEvidencia.objects
+             .filter(org=orden.org,
+                     evidencia_id__in=[e.id for e in ultima.values()])
+             .values_list("evidencia_id", "texto"))
+    mirada, intentos = set(), {}
+    for evidencia_id, texto in filas:
+        intentos[evidencia_id] = intentos.get(evidencia_id, 0) + 1
+        if (texto or "").strip():
+            mirada.add(evidencia_id)
+    faltan = [e for e in ultima.values()
+              if e.id not in mirada
+              and intentos.get(e.id, 0) < INTENTOS_POR_FOTO]
 
     miradas = 0
     for evidencia in faltan[:MAX_FOTOS_EN_EL_MOMENTO]:
