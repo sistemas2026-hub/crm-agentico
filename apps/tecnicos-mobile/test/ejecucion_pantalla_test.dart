@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:campo/core/sync/sync_queue_service.dart';
 import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/ejecucion/datos_de_ejecucion.dart';
@@ -822,6 +824,66 @@ void main() {
       );
       expect(find.text('Se descuenta de tu kit y sube cuando haya señal'),
           findsOneWidget);
+    });
+  });
+
+  /// UN SOLO BOTÓN, LAS DOS FUENTES (09/11/2026).
+  ///
+  /// El usuario, probando la app: «en test de velocidad solo sale para elegir
+  /// captura, deben ser ambos pero en un solo botón».
+  ///
+  /// Antes la plantilla decidía cuál era la ÚNICA: con una captura no se podía
+  /// fotografiar la pantalla de otro aparato, y con una foto normal no se
+  /// podía usar la que el técnico ya tenía sacada.
+  group('10. La imagen de una evidencia se elige de dónde sale', () {
+    testWidgets('el botón abre una hoja con las dos opciones',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+
+      //  El botón ya no nombra una fuente: abre una elección.
+      final Finder boton = find.text('AGREGAR LA FOTO').first;
+      expect(boton, findsOneWidget);
+
+      await t.tap(boton);
+      await t.pumpAndSettle();
+
+      //  Las dos, siempre. Y dicen el gesto, no el aparato.
+      expect(find.text('Tomar una foto ahora'), findsOneWidget);
+      expect(find.text('Elegir una que ya tengo'), findsOneWidget);
+    });
+
+    testWidgets('cerrar la hoja sin elegir no hace nada',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('AGREGAR LA FOTO').first);
+      await t.pumpAndSettle();
+      expect(find.text('Tomar una foto ahora'), findsOneWidget);
+
+      //  Cerrar no es un error: el técnico se arrepintió.
+      await t.binding.handlePopRoute();
+      await t.pumpAndSettle();
+      expect(find.text('Tomar una foto ahora'), findsNothing);
+    });
+
+    /// LA MARCA QUE REEMPLAZA A LA PROHIBICIÓN.
+    ///
+    /// Abrir la galería a todos los requisitos solo es honesto si queda
+    /// registrado de dónde salió cada imagen. Eso ocurre dentro de la captura
+    /// misma, que llama al plugin de la cámara: no se puede montar en este
+    /// arnés. Se mide el archivo, y por eso se dice.
+    test('la evidencia guarda de dónde salió la imagen', () {
+      final String fuente =
+          File('lib/features/ejecucion/ejecucion_screen.dart').readAsStringSync();
+
+      expect(fuente, contains("'de_galeria': esDeGaleria(fuente)"));
+      //  Y el botón pasa por la elección, no por una fuente fija.
+      expect(fuente, contains('_elegirDeDondeSaleLaFoto(reqId, req)'));
+      expect(fuente, isNot(contains('fuente: fuenteDeLaEvidencia(req)')));
     });
   });
 }

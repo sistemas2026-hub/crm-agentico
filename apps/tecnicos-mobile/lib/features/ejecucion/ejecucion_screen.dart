@@ -241,6 +241,42 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _triggerSavedBanner();
   }
 
+  /// La hoja que ofrece las dos fuentes (09/11/2026).
+  ///
+  /// El usuario: «deben ser ambos pero en un solo botón». La plantilla ya no
+  /// decide SI se puede usar la galería --se puede siempre-- sino cuál se
+  /// ofrece primero: para una captura de pantalla, la galería; para el resto,
+  /// la cámara. Un toque menos en el caso frecuente de cada requisito.
+  ///
+  /// Si la hoja se cierra sin elegir, no pasa nada: cerrar no es un error.
+  Future<void> _elegirDeDondeSaleLaFoto(
+      String requisitoId, Map<String, dynamic>? requisito) async {
+    final ImageSource primera = fuenteDeLaEvidencia(requisito);
+    final ImageSource segunda = laOtraFuente(primera);
+
+    final ImageSource? elegida = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (BuildContext hoja) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (final ImageSource f in <ImageSource>[primera, segunda])
+              ListTile(
+                leading: Icon(f == ImageSource.camera
+                    ? Icons.camera_alt_outlined
+                    : Icons.photo_library_outlined),
+                title: Text(textoDeLaOpcion(f)),
+                onTap: () => Navigator.of(hoja).pop(f),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (elegida == null) return;
+    await _tomarFoto(requisitoId, fuente: elegida);
+  }
+
   Future<void> _tomarFoto(String requisitoId,
       {ImageSource fuente = ImageSource.camera}) async {
     if (_orgId == null || _profileId == null) return;
@@ -264,7 +300,21 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       //
       // Nunca lanza y nunca tarda mas de su plazo: una evidencia no se pierde
       // ni se demora porque el GPS no fije. Ver `UbicacionDeCaptura`.
-      final Map<String, dynamic> metadatos = await UbicacionDeCaptura.tomar();
+      final Map<String, dynamic> metadatos = <String, dynamic>{
+        ...await UbicacionDeCaptura.tomar(),
+        // DE DÓNDE SALIÓ LA IMAGEN (09/11/2026). Desde que el botón ofrece las
+        // dos fuentes, una evidencia puede no haberse tomado en el momento, y
+        // quien revisa el cierre no tiene cómo saberlo mirándola.
+        //
+        // Es la contrapartida de abrir la galería a todos los requisitos:
+        // antes esa diferencia se defendía prohibiéndola, y el precio lo
+        // pagaba el técnico cuando la cámara no servía para ese requisito.
+        // Ahora se defiende diciendo la verdad sobre cada imagen.
+        //
+        // Va en los metadatos, que ya es un mapa libre que viaja con la
+        // evidencia junto con la ubicación de captura.
+        'de_galeria': esDeGaleria(fuente),
+      };
 
       final tempFile = File(foto.path);
       // El id se genera ANTES de copiar el archivo porque el archivo se llama
@@ -2123,17 +2173,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                   borderRadius: AppRadius.brTarjeta,
                 ),
               ),
-              //  EL BOTÓN DICE LO QUE VA A PASAR. «Tomar fotografía» abriendo
-              //  la galería deja al técnico buscando la cámara que no se abre.
+              //  UN SOLO BOTÓN PARA LAS DOS (09/11/2026, el usuario: «en test
+              //  de velocidad solo sale para elegir captura, deben ser ambos
+              //  pero en un solo botón»). El botón ya no nombra una fuente:
+              //  abre la elección, y por eso dice «agregar».
               icon: Icon(
-                hasFoto
-                    ? Icons.replay
-                    : (esCaptura ? Icons.photo_library : Icons.camera_alt),
+                hasFoto ? Icons.replay : Icons.add_a_photo_outlined,
                 size: 18,
               ),
               label: Text(textoDelBoton(
                   yaHayFoto: hasFoto, esCaptura: esCaptura)),
-              onPressed: () => _tomarFoto(reqId, fuente: fuenteDeLaEvidencia(req)),
+              onPressed: () => _elegirDeDondeSaleLaFoto(reqId, req),
             ),
           ),
         ],
