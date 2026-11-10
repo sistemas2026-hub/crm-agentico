@@ -73,8 +73,25 @@ class TestLoQueNoSeInterpreta:
     @pytest.mark.parametrize("texto", [
         "", "   ", "None", "none", "NULL", "nan", "-", "n/a", "S/N",
     ])
-    def test_los_vacios_del_proveedor(self, texto):
-        assert cc.leer(texto) == (None, None)
+    def test_los_vacios_del_proveedor(self, texto, caplog):
+        #  QUE MIDE EL `caplog`, Y POR QUE HIZO FALTA (10/11/2026).
+        #
+        #  Esta prueba afirmaba solo `(None, None)`, que es el valor por
+        #  DEFECTO de `leer`: una mutacion que borraba la lista `AUSENTES`
+        #  entera la dejo en verde --ninguno de estos nueve textos matchea
+        #  ningun regex, asi que caen igual al final--. Era la misma
+        #  supervivencia que el modulo ya tenia escrita para "0,0" el
+        #  05/11/2026, extendida a los nueve.
+        #
+        #  Lo que SOLO esta lista produce es el silencio: cortar antes de
+        #  llegar al log. Sin ella, cada campo vacio del proveedor emite
+        #  «coordenadas con forma no reconocida» -- y hay 2.982 clientes con
+        #  el campo vacio, medido el 10/11/2026: 2.982 lineas por pasada
+        #  avisando de un formato nuevo que no existe.
+        with caplog.at_level("INFO"):
+            assert cc.leer(texto) == (None, None)
+        assert caplog.records == [], (
+            "un vacio conocido no es un formato nuevo: no se registra")
 
     @pytest.mark.parametrize("texto", [
         "10,9108,-74,8186",                      # coma decimal: cuatro numeros
@@ -84,7 +101,6 @@ class TestLoQueNoSeInterpreta:
         "lat 10.9108 lng -74.8186",              # con palabras
         "https://maps.google.com/?q=10.9,-74.8",  # un enlace pegado
         "10.9108;-74.8186",                      # punto y coma
-        "10.9108 -74.8186",                      # solo espacio
     ])
     def test_una_forma_no_medida_sale_AUSENTE_y_no_adivinada(self, texto):
         #  LA REGLA DEL MODULO. Varias de estas se podrian "arreglar" con una
@@ -110,10 +126,147 @@ class TestLoQueNoSeInterpreta:
     @pytest.mark.parametrize("valor", [
         None, 0, 10.9108, [10.9, -74.8], {"lat": 10.9}, True,
     ])
-    def test_lo_que_no_es_texto_no_se_interpreta(self, valor):
+    def test_lo_que_no_es_texto_no_se_interpreta(self, valor, caplog):
         #  Llega de una API ajena: puede venir cualquier cosa, y ninguna de
         #  estas es la forma medida.
-        assert cc.leer(valor) == (None, None)
+        #
+        #  El `caplog` por la misma razon que arriba (10/11/2026): afirmar solo
+        #  `(None, None)` dejaba pasar una mutacion que cambiaba el `isinstance`
+        #  por `crudo = str(crudo)`. `str(10.9108)` es "10.9108", un numero
+        #  suelto que ningun regex reconoce, asi que el resultado era el mismo y
+        #  la prueba no lo veia. Lo que cambia es el log: la version aflojada
+        #  registra una silueta por cada valor que no es texto.
+        with caplog.at_level("INFO"):
+            assert cc.leer(valor) == (None, None)
+        assert caplog.records == [], (
+            "esto no es un formato nuevo del proveedor: es otro tipo de dato")
+
+
+class TestLasFormasMedidasEl10De11:
+    """TRES FORMAS MAS, Y POR QUE SE AGREGAN (10/11/2026).
+
+    El modulo decia: «el dia que aparezca otra forma, el camino es MEDIRLA y
+    agregarla aca con su fecha, no aflojar el parseo por si acaso». Aparecieron.
+
+    Medido sobre los 4.644 clientes que sirve la API: 591 tenian el dato y el
+    parser no lo leia, asi que la pantalla decia «sin ubicacion» teniendo la
+    casa. Por forma:
+
+        435  DD°DD'DD.D"a DD°DD'DD.D"a   grados-minutos-segundos
+        134  DD.DDDD -DD.DDDD            separados por ESPACIO, no por coma
+          4  DD.DDDDDD°a, DD.DDDDDD°a    decimal con el hemisferio en la letra
+          4  aa. DDa # Da-DD             una direccion de calle: NO es coordenada
+          4  --DD.DDDD                   doble signo: basura
+
+    Se agregan las tres primeras --573 clientes-- y las dos ultimas siguen
+    saliendo ausentes, que es la verdad: de una direccion de calle no se deduce
+    un punto, y eso ya esta decidido en `dia_publicado.py` (no se geocodifica).
+    """
+
+    def test_grados_minutos_segundos_la_forma_de_435_clientes(self):
+        #  Convertido a mano: 10 + 52/60 + 30.1/3600 = 10.875027...
+        lat, lng = cc.leer("10°52\'30.1\"N 74°55\'20.2\"W")
+        assert lat == pytest.approx(10.875028, abs=1e-6)
+        #  El hemisferio W es el que pone el signo: el numero viene SIN signo.
+        assert lng == pytest.approx(-74.922278, abs=1e-6)
+
+    def test_el_hemisferio_decide_el_signo_y_no_el_orden(self):
+        #  La letra dice cual es cual, asi que invertido tambien se lee bien.
+        #  No es adivinar: el dato lo trae escrito.
+        derecho = cc.leer("10°52\'30.1\"N 74°55\'20.2\"W")
+        al_reves = cc.leer("74°55\'20.2\"W 10°52\'30.1\"N")
+        assert al_reves == derecho
+        #  Y EL VALOR, no solo la igualdad. Medido el 10/11/2026: desconectar
+        #  la rama de DMS dejaba esta prueba en verde, porque
+        #  `(None, None) == (None, None)` es verdadero y entonces decia que el
+        #  hemisferio seguia decidiendo el signo cuando ya no decidia nada.
+        assert al_reves == pytest.approx((10.875028, -74.922278), abs=1e-6)
+
+    def test_dos_latitudes_juntas_no_se_adivinan(self):
+        #  Sin una longitud no hay punto, y poner una al azar seria inventar
+        #  media coordenada.
+        assert cc.leer("10°52\'30.1\"N 11°55\'20.2\"S") == (None, None)
+
+    def test_el_sur_y_el_oeste_son_negativos(self):
+        lat, lng = cc.leer("10°00\'00\"S 74°00\'00\"E")
+        assert lat == pytest.approx(-10.0)
+        assert lng == pytest.approx(74.0)
+
+    @pytest.mark.parametrize("texto", [
+        "10°99\'00\"N 74°00\'00\"W",    # 99 minutos no existen
+        "10°00\'99\"N 74°00\'00\"W",    # 99 segundos tampoco
+    ])
+    def test_minutos_o_segundos_imposibles_salen_ausentes(self, texto):
+        #  60 minutos son un grado: pasar de ahi es un dato roto, y corregirlo
+        #  por las nuestras moveria la casa sin que nadie se enterara.
+        assert cc.leer(texto) == (None, None)
+
+    def test_separados_por_espacio_la_forma_de_134_clientes(self):
+        #  Hasta hoy esta estaba en la lista de «no se adivina», por no estar
+        #  medida. Lo esta: 134 casos, y el signo del segundo componente lo
+        #  trae el propio texto.
+        assert cc.leer("10.9108 -74.8186") == (10.9108, -74.8186)
+
+    def test_el_espacio_de_mas_tampoco_molesta(self):
+        #  Dos de los casos medidos traen doble espacio.
+        assert cc.leer("10.9108  -74.8186") == (10.9108, -74.8186)
+
+    def test_el_doble_signo_sigue_siendo_basura(self):
+        #  Cuatro casos medidos. `--74` no es -74 ni 74: es un dato que alguien
+        #  escribio mal, y elegir uno de los dos es inventar.
+        #
+        #  CUAL ES LA RED, MEDIDO (10/11/2026). Esta prueba sobrevivio a
+        #  aflojar el `-?` a `-*` en los dos patrones: con el regex abierto,
+        #  `--74.8186` MATCHEA, y lo que lo ataja es el `float()` de `_partir`
+        #  --su `ValueError`--. O sea que la red no era la que el comentario del
+        #  modulo decia. Las dos juntas son cinturon y tirantes, y esta prueba
+        #  ahora dice cual es cual.
+        assert cc.leer("10.9108 --74.8186") == (None, None)
+        assert cc.leer("10.9108,--74.8186") == (None, None)
+        #  El tramo del regex, afirmado aparte: un solo signo y no dos.
+        assert cc._PAR_ESPACIO.match("10.9108 --74.8186") is None
+        assert cc._PAR.match("10.9108,--74.8186") is None
+        #  Y la segunda red, la que de verdad trabajo cuando el regex aflojo.
+        with pytest.raises(ValueError):
+            float("--74.8186")
+
+    def test_decimal_con_el_hemisferio_en_letra(self):
+        #  Los dos numeros vienen POSITIVOS y la letra dice el signo. Leerlo
+        #  ignorando la letra pondria la casa en el otro lado del planeta.
+        assert cc.leer("10.910800°N, 74.818600°W") == (10.9108, -74.8186)
+        assert cc.leer("10.910800°N,74.818600°W") == (10.9108, -74.8186)
+
+    def test_un_signo_que_contradice_a_la_letra_sale_ausente(self):
+        #  `-10.9°N` dice dos cosas opuestas. No se elige una.
+        assert cc.leer("-10.910800°N, 74.818600°W") == (None, None)
+
+    def test_la_direccion_de_calle_sigue_sin_ser_un_punto(self, caplog):
+        #  Cuatro casos medidos. De una direccion no se deduce una coordenada,
+        #  y geocodificarla es justo lo que el modulo decidio no hacer.
+        #
+        #  Y SE REGISTRA COMO FORMA DESCONOCIDA, que es la diferencia con los
+        #  vacios de arriba: un vacio es normal y calla; una direccion en el
+        #  campo de coordenadas es un dato mal cargado del que alguien tiene
+        #  que enterarse. Sin esta parte la prueba era un marcador de
+        #  intencion: ninguna de las 24 mutaciones de la pasada del 10/11/2026
+        #  la mataba.
+        with caplog.at_level("INFO"):
+            assert cc.leer("Cl. 45c # 3D-21") == (None, None)
+        siluetas = [getattr(r, "forma", "") for r in caplog.records]
+        assert "aa. DDa # Da-DD" in siluetas, (
+            "la forma se registra, para que alguien la vea; el valor no")
+        assert not any("45c" in s for s in siluetas), "y sin el domicilio"
+
+        assert cc.leer("Cra. 12b # 4-33") == (None, None)
+
+    def test_las_formas_nuevas_tambien_pasan_por_los_limites_del_planeta(self):
+        #  La validacion comun no se saltea por entrar por otra puerta.
+        assert cc.leer("91°00\'00\"N 74°00\'00\"W") == (None, None)
+        assert cc.leer("91.5 -74.8") == (None, None)
+
+    def test_el_cero_exacto_tampoco_pasa_por_las_formas_nuevas(self):
+        assert cc.leer("0°00\'00\"N 0°00\'00\"E") == (None, None)
+        assert cc.leer("0.0 0.0") == (None, None)
 
 
 class TestNoFiltraElDomicilio:
