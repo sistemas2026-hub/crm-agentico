@@ -93,13 +93,31 @@ def guardar_ubicacion(orden, *, latitud, longitud, profile) -> dict:
         return {"guardada": False, "codigo": "coordenada_invalida",
                 "detalle": "la ubicacion recibida no es un punto del planeta"}
 
-    tenant = _tenant_de(orden)
+    #  LO QUE SIGUE VA DENTRO DE UN `try` Y NO ES CEREMONIA (10/11/2026,
+    #  hallazgo de una revision de PII). Esta funcion promete no levantar, y
+    #  tres llamadas quedaban afuera --la empresa, el serial y el servicio--;
+    #  cualquiera de las tres toca la base o la ficha congelada y puede
+    #  reventar. Una excepcion que sale de aca llega a DRF como 500, y el
+    #  archivo de al lado ya tiene escrito lo que pasa entonces: `con DEBUG
+    #  encendido la pagina de error de Django devolvia la coordenada en el
+    #  cuerpo` (`campo/ubicacion_views.py`). No se depende de que DEBUG este
+    #  apagado para que el domicilio no salga en una respuesta HTTP.
+    try:
+        tenant = _tenant_de(orden)
+        actor = _nombre_de(profile)
+        serial = telemetria.serial_de(orden)
+        servicio = telemetria.servicio_de(orden)
+    except Exception as e:                                      # noqa: BLE001
+        logger.warning("ubicacion_al_isp: no se pudo leer la orden (%s)",
+                       type(e).__name__)
+        return {"guardada": False, "codigo": "sin_empresa",
+                "detalle": type(e).__name__}
+
     if not tenant:
         return {"guardada": False, "codigo": "sin_empresa",
                 "detalle": "sin saber de que empresa es la orden no se le "
                            "escribe al ISP"}
 
-    actor = _nombre_de(profile)
     if not actor:
         #  LA PUERTA HUMANA EXIGE UN ACTOR, y uno de verdad: es la evidencia
         #  de que detras de la escritura hay una persona y no el sistema
@@ -112,10 +130,8 @@ def guardar_ubicacion(orden, *, latitud, longitud, profile) -> dict:
     #  cliente puede tener mas de uno-- y la ubicacion terminaria escrita en
     #  el equipo equivocado sin que nadie se entere.
     identificadores = {}
-    serial = telemetria.serial_de(orden)
     if serial:
         identificadores["sn_onu"] = serial
-    servicio = telemetria.servicio_de(orden)
     if servicio:
         identificadores["id_servicio"] = servicio
     if not identificadores:

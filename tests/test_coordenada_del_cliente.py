@@ -97,8 +97,20 @@ class Registro:
         fila = self.filas.get(clave)
         if fila is None:
             self.filas[clave] = {"intentos": 1, "estado": "ejecutando",
-                                 "respuesta": None}
+                                 "respuesta": None, "huella": argumentos_hash}
             return {"decision": "ejecutar", "fila": self.filas[clave]}
+        #  LA HUELLA SE COMPARA PRIMERO, COMO EN LA TABLA REAL (10/11/2026).
+        #
+        #  El andamio modelaba la regla de `fallida` y OMITIA esta, con un
+        #  comentario que afirmaba fidelidad a `db.py`. Y es la que rompia la
+        #  capacidad: `reclamar` compara `argumentos_hash` ANTES que
+        #  `exitosa` y antes que `fallida`, asi que una clave fija con otra
+        #  coordenada salia `CLAVE_REUTILIZADA` y el reintento no existia.
+        #  Lo encontro una auditoria de frontera; las ocho secciones en verde
+        #  no podian verlo porque reintentaban con la MISMA coordenada.
+        if fila.get("huella") not in (None, argumentos_hash):
+            return {"decision": "rechazada", "fila": fila,
+                    "codigo": "CLAVE_REUTILIZADA"}
         if fila["estado"] == "exitosa":
             return {"decision": "repetida", "fila": fila}
         #  LA FALLIDA, COMO LA TRATA LA TABLA REAL: no se reintenta salvo que
@@ -132,7 +144,14 @@ class Proveedor:
         self.permisos.append(frontera.permiso_vigente())
         if self.rompe_en and herramienta.nombre == self.rompe_en:
             raise RuntimeError("el proveedor rechazo la escritura")
-        return {"ok": True}
+        #  EL ECO DEL PROVEEDOR, COMO ES DE VERDAD (10/11/2026). Antes esto
+        #  devolvia {"ok": True} --un acuse corto-- y por eso las ocho
+        #  secciones en verde no podian ver que ese cuerpo se guardaba entero
+        #  en `operaciones_externas.respuesta`. Uno de los dos destinos es un
+        #  PUT sobre el RECURSO DEL CLIENTE, y su serializer contesta la ficha.
+        return {"id_servicio": "5832", "coordenadas": "10.910800,-74.818600",
+                "cedula": "1.234.567-8", "password_servicio": "NO-DEBE-QUEDAR",
+                "telefono": "3001234567"}
 
     @property
     def nombres(self) -> list[str]:
@@ -240,9 +259,53 @@ proveedor2 = Proveedor()
 with escenario(registro, proveedor2):
     r2 = guardar()
 afirmar(r2.estado == coord.GUARDADA,
-        f"al reintentar queda completa (estado={r2.estado})")
+        f"con el MISMO punto, al reintentar queda completa (estado={r2.estado})")
 afirmar(proveedor2.nombres == ["escribir_ubicacion_del_servicio"],
-        f"solo se reintento EL QUE FALTABA: {proveedor2.nombres}")
+        f"y solo se reintento EL QUE FALTABA: {proveedor2.nombres}")
+
+# ---------------------------------------------------------------------------
+seccion("4b. el reintento CON OTRO PUNTO -- el caso de campo")
+#  ESTE ES EL CASO REAL Y ES EL QUE ESTABA ROTO. El boton re-lee el GPS en cada
+#  toque, y a 6 decimales (~11 cm) dos lecturas seguidas casi nunca coinciden.
+#  Con la clave fija, el segundo toque salia CLAVE_REUTILIZADA y la orden
+#  quedaba bloqueada PARA SIEMPRE --la fila exitosa no vence--. La seccion 4 no
+#  podia verlo porque reintentaba con la misma coordenada.
+registro, proveedor = Registro(), Proveedor(
+    rompe_en="escribir_ubicacion_del_servicio")
+with escenario(registro, proveedor):
+    r = guardar()
+afirmar(r.estado == coord.PARCIAL, "el primer toque queda a medias")
+
+proveedor3 = Proveedor()
+with escenario(registro, proveedor3):
+    #  El tecnico se corrio tres metros, que es lo que la propia app le pide
+    #  cuando la precision es mala.
+    r3 = guardar(lat=10.9108234, lng=-74.8186567)
+afirmar(r3.estado == coord.GUARDADA,
+        f"con OTRO punto el segundo toque TAMBIEN completa (estado={r3.estado}, "
+        f"motivo={r3.motivo})")
+afirmar("escribir_ubicacion_del_servicio" in proveedor3.nombres,
+        f"y el que faltaba se escribe: {proveedor3.nombres}")
+
+# ---------------------------------------------------------------------------
+seccion("4b. el ECO DEL PROVEEDOR no queda guardado")
+registro, proveedor = Registro(), Proveedor()
+with escenario(registro, proveedor):
+    r = guardar()
+afirmar(r.estado == coord.GUARDADA, "la escritura salio bien")
+guardado = repr(sorted(registro.filas.items()))
+#  EL EFECTO: lo que queda en la fila de idempotencia. Ese valor se escribe
+#  TAL CUAL en la base, en claro y sin truncar, y por este camino no corre
+#  ninguna lista blanca --vive en el bucle del modelo, y esta ruta no pasa por
+#  ahi--. Afirmar "no se loguea" no alcanzaba: la fuga no era el log.
+for prohibido, que_es in (("10.910800", "la coordenada"),
+                          ("NO-DEBE-QUEDAR", "una contrasena del servicio"),
+                          ("1.234.567-8", "la cedula"),
+                          ("3001234567", "el telefono")):
+    afirmar(prohibido not in guardado,
+            f"{que_es} del eco del proveedor NO queda en la fila guardada")
+afirmar("escrita" in guardado,
+        "y si queda un acuse, que es lo unico que este flujo necesita")
 
 # ---------------------------------------------------------------------------
 seccion("5. lo que NO es una coordenada no llega al proveedor")

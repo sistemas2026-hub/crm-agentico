@@ -128,8 +128,15 @@ class GuardarUbicacionDelCliente {
     if (r.codigo == 200 && estado == 'parcial') {
       return const ResultadoDeGuardado(
         EstadoDeGuardado.parcial,
+        //  NO DICE «no se repite lo que ya salio», y se quito a
+        //  proposito (10/11/2026). Con el MISMO punto es verdad --la
+        //  clave es la misma y el que ya salio vuelve como repetida--,
+        //  pero el boton re-lee el GPS en cada toque: si el tecnico se
+        //  movio, el punto nuevo se escribe en los DOS lados. Eso es lo
+        //  que corresponde --quiere ESE punto-- y no lo que la frase
+        //  prometia.
         'Quedó guardada en un sistema y en el otro no. Volvé a tocar para '
-            'completar: no se repite lo que ya salió.',
+            'completar.',
       );
     }
     if (r.codigo == 200) {

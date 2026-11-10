@@ -212,19 +212,64 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
         args = _argumentos(herr, str(ident), lat, lng)
 
         def _hacer():
-            return ejecutor_http.ejecutar(
+            ejecutor_http.ejecutar(
                 herr, args, tenant,
                 variables_tenant=config.variables_tenant)
+            #  LO QUE SE GUARDA ES UN ACUSE, NO EL CUERPO DEL PROVEEDOR
+            #  (10/11/2026, hallazgo de una revision de PII).
+            #
+            #  Lo que devuelve este `_hacer` termina, tal cual, en
+            #  `asistente.operaciones_externas.respuesta`, en claro y sin
+            #  truncar (`idempotencia.ejecutar` -> `db.py`,
+            #  `json.dumps(respuesta)`). Por este camino NO corre ninguna
+            #  lista blanca --esa vive en el bucle del modelo, y esta ruta no
+            #  pasa por ahi-- asi que lo que conteste el proveedor se guarda
+            #  entero.
+            #
+            #  Y una de las dos escrituras es un PUT sobre el RECURSO DEL
+            #  CLIENTE: su serializer trae 34 campos, entre ellos la
+            #  coordenada que acabamos de escribir, y el del cliente completo
+            #  llega a traer cuatro contrasenas y la cedula. Guardar ese eco
+            #  convertiria la unica tabla propia de este flujo en el unico
+            #  lugar del sistema donde el domicilio queda escrito de nuestro
+            #  lado -- justo lo que toda esta capacidad trata de no hacer.
+            #
+            #  NO SE PIERDE NADA: `_escribir` nunca lee `res.respuesta`; lo
+            #  unico que `repetida` tiene que contestar es "ya estaba
+            #  escrita", y eso sale del ESTADO de la fila.
+            return {"escrita": True}
 
         try:
             with frontera.humana(tenant, herr.nombre, actor=actor,
                                  evidencia=origen, origen=origen):
-                #  UNA CLAVE POR DESTINO. Con una sola para los dos, un exito
-                #  a medias no se puede reintentar: el que fallo volveria como
-                #  'repetida' por culpa del que si salio.
+                #  LA CLAVE POR OMISION, Y ESO ES LO CORRECTO ACA.
+                #
+                #  Antes fijaba `clave={origen}|{herramienta}`, copiando a
+                #  `cierre_por_validacion`, y ROMPIA LA CAPACIDAD. Medido el
+                #  10/11/2026 por una auditoria de frontera: la clave fija no
+                #  lleva la huella de los argumentos, pero `reclamar` la
+                #  compara igual Y LA COMPARA PRIMERO --`db.py`, antes de
+                #  `exitosa` y antes de `fallida`--. Como el boton re-lee el
+                #  GPS en cada toque y esto escribe 6 decimales (~11 cm), dos
+                #  lecturas seguidas casi nunca dan la misma cadena: el
+                #  segundo toque llegaba con otra huella y la misma clave, y
+                #  salia `CLAVE_REUTILIZADA`. El tecnico veia «proba de nuevo
+                #  en un momento» y no iba a andar NUNCA -- la fila `exitosa`
+                #  no vence.
+                #
+                #  POR QUE ACA SI Y EN EL CIERRE NO. Alla el texto cambia
+                #  entre intentos --una foto mas, otro nombre-- y eso NO es
+                #  otra operacion: el ticket recibiria el mensaje dos veces.
+                #  Aca una coordenada distinta SI es otra operacion: el
+                #  tecnico se corrio tres metros y quiere ESE punto. Y el
+                #  mismo punto dos veces sigue dando la misma clave, asi que
+                #  el doble toque sigue protegido.
+                #
+                #  Sigue habiendo una clave POR DESTINO, porque el nombre de
+                #  la herramienta entra en la clave por omision: un exito a
+                #  medias reintenta solo el que falta.
                 res = idempotencia.ejecutar(
                     tenant, herr.nombre, args, origen, _hacer,
-                    clave=f"{origen}|{herr.nombre}",
                     #  REINTENTAR LO QUE FALLO, Y ACA SI (10/11/2026).
                     #
                     #  Por omision una operacion 'fallida' no se vuelve a

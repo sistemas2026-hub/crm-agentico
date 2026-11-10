@@ -91,6 +91,24 @@ R1_INTERNO = {
 
 R2_REGISTRO_EXTERNO = {
     "actualizar_estado_ticket",
+    #  LA UBICACION DEL CLIENTE  --  10/11/2026. Las dos son R2 por el
+    #  mismo criterio que `actualizar_sn_onu`, que esta aca abajo: NO
+    #  actuan sobre el equipo en la casa. Escriben un campo de REGISTRO
+    #  --la coordenada-- y no reinician, no reconfiguran y no
+    #  interrumpen el servicio de nadie. El efecto es "el campo queda en
+    #  este valor", no "sumar un hecho", asi que repetirlo no acumula.
+    #
+    #  NO SON R1 aunque el que decide sea una persona: salen a dos
+    #  sistemas de terceros, y lo escrito ahi no se deshace desde aca.
+    #  NO SON R3/R4 aunque el dato sea sensible: el domicilio es PII y
+    #  esa es una preocupacion de privacidad --que se trata en el camino,
+    #  no con la clase de riesgo-- y no de reversibilidad operativa.
+    #
+    #  Lo que SI tienen de propio: el que las llama es un tecnico parado
+    #  en la puerta, por `frontera.humana()`. Entraron al catalogo sin
+    #  clase y esta guarda las encontro.
+    "guardar_coordenada_onu_smartolt",
+    "guardar_coordenada_cliente_wisphub",
     #  30/09/2026. El nombre invita a leerla como R3 y no lo es: NO actua sobre
     #  la ONT/ONU en la casa del cliente. Escribe UN campo --'sn_onu'-- en la
     #  ficha del cliente de WispHub, con 'PUT /api/clientes/{id_servicio}/'. Es
