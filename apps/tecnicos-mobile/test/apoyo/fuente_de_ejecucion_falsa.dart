@@ -30,6 +30,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     this.sinIdentidad = false,
     this.sinOrden = false,
     this.sinContexto = false,
+    this.correccionJson,
   })  : campos = campos ?? camposTipicos,
         requisitos = requisitos ?? requisitosTipicos,
         valores = valores ?? <String, dynamic>{},
@@ -42,6 +43,10 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
   /// cliente no tiene serial cargado, o SmartOLT no contestó al despachar--.
   /// La pantalla tiene que seguir siendo usable, no llenarse de guiones.
   final bool sinContexto;
+
+  /// Lo que el supervisor devolvio para rehacer, como lo guarda la base
+  /// (JSON en texto). Nulo = la orden no viene devuelta.
+  final String? correccionJson;
 
   /// Los pasos del protocolo de la plantilla. Vacío es una plantilla sin pasos.
   final List<Map<String, dynamic>> pasos;
@@ -151,6 +156,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
   static Map<String, dynamic> evidencia({
     required String requisitoId,
     String estado = 'confirmada',
+    DateTime? capturadaEn,
   }) =>
       <String, dynamic>{
         'id': 'ev_$requisitoId',
@@ -158,6 +164,10 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
         'archivo_path': '/datos/evidencias/$requisitoId.jpg',
         'subida_estado': estado,
         'mime_type': 'image/jpeg',
+        //  Milisegundos, como los guarda `cola_evidencias`. La usa el
+        //  checklist para saber si una foto es de esta vuelta.
+        if (capturadaEn != null)
+          'capturada_en': capturadaEn.millisecondsSinceEpoch,
       };
 
   static Map<String, dynamic> material({
@@ -190,6 +200,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
         'tipo_nombre': 'Instalación FTTH',
         'tipo_codigo': 'ftth_instalacion',
         'schema_version': 1,
+        'correccion_json': correccionJson,
         // La ficha que el motor congeló al despachar. Los valores son los
         // de la orden 1849 tal como están en producción, no inventados: si
         // el formato que manda SmartOLT cambia ('-21.19 dBm' como texto, no

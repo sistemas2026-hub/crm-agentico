@@ -1190,7 +1190,28 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     exigeFirma: _exigeFirma,
     hayFirma: _hayFirma,
     firmaSinSubir: _firmaSinSubir,
+    //  LO QUE EL SUPERVISOR PIDIO REHACER (09/11/2026). Sin esto el checklist
+    //  daba por buena la foto vieja, dejaba cerrar, y el servidor rechazaba el
+    //  cierre con CORRECCION_PENDIENTE: la orden no salia nunca de devuelta y
+    //  el cambio quedaba en la cola. Ver `LoDevuelto`.
+    devuelto: _loDevuelto,
   );
+
+  /// Que pidio rehacer el supervisor en la vuelta que corre, y cuando.
+  LoDevuelto get _loDevuelto {
+    final Map<String, dynamic>? orden = _orden;
+    if (orden == null) return LoDevuelto.nada;
+    final DevolucionDeValidacion? d =
+        DevolucionDeValidacion.desdeJson(orden['correccion_json']);
+    //  Sin requisitos el resultado es el mismo que `LoDevuelto.nada` --nada
+    //  exige foto nueva--, asi que no se distingue: una guarda que no cambia
+    //  nada es una guarda que nadie puede probar.
+    if (d == null) return LoDevuelto.nada;
+    return LoDevuelto(
+      requisitos: d.requisitos.toSet(),
+      desde: d.devueltaEn,
+    );
+  }
 
   Future<void> _abrirFirma() async {
     final requisito = _requisitoDeFirma;

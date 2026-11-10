@@ -253,4 +253,184 @@ void main() {
       expect(cierre.hayPendienteDeSubir, isTrue);
     });
   });
+
+  /// LA FOTO VIEJA NO CIERRA UNA ORDEN DEVUELTA (09/11/2026).
+  ///
+  /// El usuario: «solo me notifica una sola vez que la orden fue devuelta;
+  /// después la mando y ya no notifica, pero la orden sigue apareciendo otra
+  /// vez». Y al mismo tiempo: «queda en enviando cambios al servidor y después
+  /// salen 5 cambios pendientes, y sigue así».
+  ///
+  /// Era un solo defecto. El servidor exige evidencia NUEVA para lo que se
+  /// pidió rehacer (`validador.py`, CORRECCION_PENDIENTE: «la anterior queda
+  /// en el historial pero no alcanza»). El checklist de la aplicación no
+  /// miraba la vuelta en ninguna línea: daba por satisfecho el requisito con
+  /// la foto vieja y dejaba tocar «Finalizar». El cierre salía, el servidor lo
+  /// rechazaba, la orden no salía nunca de devuelta --y no volvía a avisar,
+  /// porque no había una devolución nueva--.
+  group('una orden devuelta exige foto nueva', () {
+    final DateTime devueltaEn = DateTime(2026, 11, 9, 10, 0);
+
+    Map<String, dynamic> foto(String requisito, DateTime cuando) =>
+        <String, dynamic>{
+          'requisito_id': requisito,
+          'capturada_en': cuando.millisecondsSinceEpoch,
+        };
+
+    List<Map<String, dynamic>> requisitos() => <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'foto_roseta',
+            'titulo': 'Foto de la roseta',
+            'obligatorio': true,
+          },
+          <String, dynamic>{
+            'id': 'foto_ont',
+            'titulo': 'Foto de la ONT',
+            'obligatorio': true,
+          },
+        ];
+
+    CierreDeOrden conFotos(
+      List<Map<String, dynamic>> fotos, {
+      LoDevuelto devuelto = LoDevuelto.nada,
+    }) =>
+        CierreDeOrden.evaluar(
+          camposObligatoriosSinLlenar: const <String>[],
+          requisitosDeFoto: requisitos(),
+          fotosCapturadas: fotos,
+          materialesRegistrados: const <Map<String, dynamic>>[],
+          exigeFirma: false,
+          hayFirma: false,
+          devuelto: devuelto,
+        );
+
+    test('EL DEFECTO: con la foto de antes de la devolución, NO se puede cerrar',
+        () {
+      final cierre = conFotos(
+        <Map<String, dynamic>>[
+          foto('foto_roseta', devueltaEn.subtract(const Duration(hours: 3))),
+          foto('foto_ont', devueltaEn.subtract(const Duration(hours: 3))),
+        ],
+        devuelto: LoDevuelto(
+          requisitos: const <String>{'foto_roseta'},
+          desde: devueltaEn,
+        ),
+      );
+
+      expect(cierre.puedeCerrar, isFalse,
+          reason: 'el servidor lo iba a rechazar igual, y nadie se enteraba');
+    });
+
+    test('con la foto rehecha después de la devolución, sí', () {
+      final cierre = conFotos(
+        <Map<String, dynamic>>[
+          foto('foto_roseta', devueltaEn.add(const Duration(minutes: 20))),
+          foto('foto_ont', devueltaEn.subtract(const Duration(hours: 3))),
+        ],
+        devuelto: LoDevuelto(
+          requisitos: const <String>{'foto_roseta'},
+          desde: devueltaEn,
+        ),
+      );
+
+      expect(cierre.puedeCerrar, isTrue);
+    });
+
+    /// Lo que NO se pidió rehacer se satisface con la de cualquier vuelta:
+    /// mandar a repetir una foto que nadie objetó sería rehacer trabajo bueno,
+    /// y es la misma regla que aplica el servidor.
+    test('lo que nadie objetó NO hay que repetirlo', () {
+      final cierre = conFotos(
+        <Map<String, dynamic>>[
+          foto('foto_roseta', devueltaEn.add(const Duration(minutes: 20))),
+          //  Esta es vieja, y está bien que lo sea.
+          foto('foto_ont', devueltaEn.subtract(const Duration(days: 2))),
+        ],
+        devuelto: LoDevuelto(
+          requisitos: const <String>{'foto_roseta'},
+          desde: devueltaEn,
+        ),
+      );
+
+      expect(cierre.puedeCerrar, isTrue);
+    });
+
+    /// EL SERVIDOR LO EXIGE AUNQUE SEA OPCIONAL: «if not obligatorio and eid
+    /// not in a_corregir: continue». Si acá solo contaran las obligatorias,
+    /// una foto opcional devuelta dejaria cerrar y el servidor rechazaria el
+    /// cierre -- el mismo defecto, por otra puerta.
+    test('una foto OPCIONAL que se pidio rehacer tambien bloquea', () {
+      final cierre = CierreDeOrden.evaluar(
+        camposObligatoriosSinLlenar: const <String>[],
+        requisitosDeFoto: <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'foto_extra',
+            'titulo': 'Foto adicional',
+            'obligatorio': false,
+          },
+        ],
+        fotosCapturadas: <Map<String, dynamic>>[
+          foto('foto_extra', devueltaEn.subtract(const Duration(hours: 5))),
+        ],
+        materialesRegistrados: const <Map<String, dynamic>>[],
+        exigeFirma: false,
+        hayFirma: false,
+        devuelto: LoDevuelto(
+          requisitos: const <String>{'foto_extra'},
+          desde: devueltaEn,
+        ),
+      );
+
+      expect(cierre.puedeCerrar, isFalse);
+    });
+
+    test('sin devolución, todo sigue como antes', () {
+      final cierre = conFotos(<Map<String, dynamic>>[
+        foto('foto_roseta', devueltaEn.subtract(const Duration(days: 5))),
+        foto('foto_ont', devueltaEn.subtract(const Duration(days: 5))),
+      ]);
+
+      expect(cierre.puedeCerrar, isTrue);
+    });
+
+    /// FAIL-CLOSED. Sin hora no se puede distinguir lo nuevo de lo viejo, y
+    /// dejar pasar lo que el servidor va a rechazar es lo que produjo este
+    /// defecto.
+    test('sin hora de devolución, o sin hora de captura, se pide igual', () {
+      final sinHoraDeDevolucion = conFotos(
+        <Map<String, dynamic>>[foto('foto_roseta', devueltaEn), foto('foto_ont', devueltaEn)],
+        devuelto: const LoDevuelto(
+          requisitos: <String>{'foto_roseta'},
+          desde: null,
+        ),
+      );
+      expect(sinHoraDeDevolucion.puedeCerrar, isFalse);
+
+      final sinHoraDeCaptura = conFotos(
+        <Map<String, dynamic>>[
+          <String, dynamic>{'requisito_id': 'foto_roseta'},
+          foto('foto_ont', devueltaEn),
+        ],
+        devuelto: LoDevuelto(
+          requisitos: const <String>{'foto_roseta'},
+          desde: devueltaEn,
+        ),
+      );
+      expect(sinHoraDeCaptura.puedeCerrar, isFalse);
+    });
+
+    test('la tomada en el mismo instante de la devolución cuenta como nueva', () {
+      //  El borde: `isBefore` es estricto a proposito, para no descartar una
+      //  foto por milisegundos de reloj.
+      final cierre = conFotos(
+        <Map<String, dynamic>>[foto('foto_roseta', devueltaEn), foto('foto_ont', devueltaEn)],
+        devuelto: LoDevuelto(
+          requisitos: const <String>{'foto_roseta'},
+          desde: devueltaEn,
+        ),
+      );
+
+      expect(cierre.puedeCerrar, isTrue);
+    });
+  });
 }

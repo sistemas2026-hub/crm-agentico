@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:campo/core/sync/sync_queue_service.dart';
@@ -1024,6 +1025,127 @@ void main() {
       //  Y «qué se hizo» se responde con lo que el técnico acaba de aprobar.
       expect(cierre['respuestas']['solucion'],
           contains('Roseta / Conector'));
+    });
+  });
+
+  /// EL CABLEADO DE LA ORDEN DEVUELTA (09/11/2026).
+  ///
+  /// El usuario: «la mando y ya no notifica, pero la orden sigue apareciendo
+  /// otra vez», y al mismo tiempo cinco cambios que no bajaban de la cola.
+  ///
+  /// La regla vive en `cierre_de_orden.dart` y se prueba ahí sin pantalla.
+  /// Esto mide el cable: que la pantalla le pase al checklist lo que el
+  /// supervisor pidió rehacer. Sin él, la regla existe y no se aplica.
+  group('12. Una orden devuelta no cierra con la foto vieja', () {
+    final DateTime devueltaEn = DateTime(2026, 11, 9, 10, 0);
+
+    String correccion() => jsonEncode(<String, dynamic>{
+          'vuelta': 2,
+          'requisitos': <String>['foto_power_meter'],
+          'observacion': 'No se ve la lectura.',
+          'devuelta_en': devueltaEn.toIso8601String(),
+        });
+
+    //  Los requisitos del fixture no vienen marcados como obligatorios, asi
+    //  que no bloquean nada: para medir el cierre hacen falta los suyos.
+    List<Map<String, dynamic>> requisitosObligatorios() => <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'foto_power_meter',
+            'titulo': 'Foto del power meter',
+            'tipo': 'foto',
+            'obligatorio': true,
+          },
+          <String, dynamic>{
+            'id': 'foto_roseta',
+            'titulo': 'Foto de la roseta',
+            'tipo': 'foto',
+            'obligatorio': true,
+          },
+        ];
+
+    FuenteDeEjecucionFalsa devuelta({required bool rehecha}) =>
+        FuenteDeEjecucionFalsa(
+          correccionJson: correccion(),
+          requisitos: requisitosObligatorios(),
+          valores: <String, dynamic>{
+            'tipo_intervencion': 'Roseta / Conector',
+            'potencia_rx': '-18.4',
+          },
+          evidencias: <Map<String, dynamic>>[
+            FuenteDeEjecucionFalsa.evidencia(
+              requisitoId: 'foto_power_meter',
+              capturadaEn: rehecha
+                  ? devueltaEn.add(const Duration(minutes: 30))
+                  : devueltaEn.subtract(const Duration(hours: 4)),
+            ),
+            //  Esta nadie la objetó: su foto vieja sigue valiendo.
+            FuenteDeEjecucionFalsa.evidencia(
+              requisitoId: 'foto_roseta',
+              capturadaEn: devueltaEn.subtract(const Duration(days: 2)),
+            ),
+            FuenteDeEjecucionFalsa.evidencia(
+              requisitoId: 'firma_cliente',
+              capturadaEn: devueltaEn.subtract(const Duration(days: 2)),
+            ),
+          ],
+          materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+        );
+
+    testWidgets('EL DEFECTO: con la foto de antes, Finalizar no cierra',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = devuelta(rehecha: false);
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+
+      //  Ni siquiera llega al resumen: el checklist lo frena antes.
+      expect(find.text('Antes de finalizar, revisá'), findsNothing);
+      expect(fuente.transiciones, isEmpty,
+          reason: 'el servidor lo iba a rechazar igual, y nadie se enteraba');
+    });
+
+    testWidgets('rehecha después de la devolución, cierra', (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = devuelta(rehecha: true);
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Está bien, finalizar'));
+      await t.pumpAndSettle();
+
+      expect(fuente.transiciones, hasLength(1));
+    });
+
+    testWidgets('sin devolución, la foto vieja sigue valiendo', (WidgetTester t) async {
+      //  La orden que nadie devolvió no puede volverse mas exigente.
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = FuenteDeEjecucionFalsa(
+        requisitos: requisitosObligatorios(),
+        valores: <String, dynamic>{
+          'tipo_intervencion': 'Roseta / Conector',
+          'potencia_rx': '-18.4',
+        },
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(
+            requisitoId: 'foto_power_meter',
+            capturadaEn: devueltaEn.subtract(const Duration(days: 9)),
+          ),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
+        ],
+        materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+      );
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      expect(find.text('Antes de finalizar, revisá'), findsOneWidget);
     });
   });
 }

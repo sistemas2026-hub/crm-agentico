@@ -63,6 +63,77 @@ class RequisitoDeCierre {
 /// Determinista a propósito. Un checklist cuyo contenido cambia de orden o
 /// aparece y desaparece según el caso obliga a leerlo entero cada vez; uno
 /// estable se mira de un vistazo, que es lo que alguien hace parado en una
+/// LO QUE SE DEVOLVIÓ PARA REHACER, Y SI YA SE REHIZO (09/11/2026).
+///
+/// EL DEFECTO, REPORTADO POR EL USUARIO
+/// -------------------------------------
+/// «Solo me notifica una sola vez que la orden fue devuelta; después la mando
+/// y ya no notifica, pero la orden sigue apareciendo otra vez.»
+///
+/// Y arriba, al mismo tiempo: «queda en enviando cambios al servidor y después
+/// salen 5 cambios pendientes, y sigue así».
+///
+/// POR QUÉ PASABA LO MISMO DOS VECES
+/// ----------------------------------
+/// El servidor exige, para un requisito que el supervisor pidió rehacer,
+/// **evidencia nueva de esta vuelta**: `services/validador.py` responde
+/// `CORRECCION_PENDIENTE` con «la anterior queda en el historial pero no
+/// alcanza». La aplicación no sabía nada de eso --su checklist no miraba la
+/// vuelta en ninguna línea-- así que daba por satisfecho el requisito con la
+/// foto vieja y dejaba tocar «Finalizar».
+///
+/// Entonces: el técnico cierra, el servidor rechaza, la orden NUNCA sale de
+/// devuelta, y no vuelve a avisar porque no hay una devolución nueva --la
+/// clave del aviso es la orden y su vuelta, y la vuelta no cambió--. Visto
+/// desde el teléfono: «la mando y vuelve a aparecer».
+///
+/// LA REGLA, IGUAL QUE EN EL SERVIDOR
+/// -----------------------------------
+/// - Un requisito que NO se pidió rehacer se satisface con la evidencia de
+///   cualquier vuelta. Volver a pedir una foto que nadie objetó sería mandar
+///   al técnico a rehacer trabajo bueno.
+/// - Uno que SÍ se pidió exige una tomada DESPUÉS de la devolución.
+///
+/// SE COMPARA POR FECHA Y NO POR NÚMERO DE VUELTA, y es a propósito: la
+/// evidencia local no guarda en qué vuelta se tomó --sí guarda `capturada_en`,
+/// y la devolución trae `devueltaEn`--. Para lo que decide esto son
+/// equivalentes: una foto tomada después de que te devolvieron el trabajo es
+/// una foto de esta vuelta.
+///
+/// FAIL-CLOSED donde no se sabe: sin hora de devolución no se puede distinguir
+/// lo nuevo de lo viejo, y entonces el requisito devuelto se da por pendiente.
+/// Dejar pasar lo que el servidor va a rechazar es lo que produjo este
+/// defecto.
+class LoDevuelto {
+  const LoDevuelto({required this.requisitos, required this.desde});
+
+  /// Qué pidió rehacer el supervisor. Vacío cuando la orden no viene devuelta.
+  final Set<String> requisitos;
+
+  /// Cuándo la devolvió. Nulo si no se sabe.
+  final DateTime? desde;
+
+  static const LoDevuelto nada = LoDevuelto(requisitos: <String>{}, desde: null);
+
+  /// Si este requisito exige una foto nueva.
+  bool exigeNueva(Object? requisitoId) =>
+      requisitoId != null && requisitos.contains(requisitoId);
+
+  /// Si esta foto sirve para un requisito que se pidió rehacer.
+  ///
+  /// `capturada_en` son milisegundos desde época, como los guarda
+  /// `cola_evidencias`.
+  bool esDeEstaVuelta(Map<String, dynamic> foto) {
+    final DateTime? devuelta = desde;
+    if (devuelta == null) return false;
+    final Object? crudo = foto['capturada_en'];
+    final int? ms = crudo is int ? crudo : int.tryParse('${crudo ?? ''}');
+    //  Sin hora de captura no se puede afirmar que es nueva.
+    if (ms == null) return false;
+    return !DateTime.fromMillisecondsSinceEpoch(ms).isBefore(devuelta);
+  }
+}
+
 /// vereda.
 class CierreDeOrden {
   const CierreDeOrden(this.requisitos);
@@ -97,6 +168,7 @@ class CierreDeOrden {
     required bool exigeFirma,
     required bool hayFirma,
     bool firmaSinSubir = false,
+    LoDevuelto devuelto = LoDevuelto.nada,
   }) {
     final lineas = <RequisitoDeCierre>[];
 
@@ -120,10 +192,18 @@ class CierreDeOrden {
     //    decide `obligatorio`, que viene del servidor.
     final pendientes = <dynamic>[
       for (final req in requisitosDeFoto)
-        if (!_tieneFoto(req, fotosCapturadas)) req,
+        if (!_tieneFoto(req, fotosCapturadas, devuelto)) req,
     ];
+    //  LO DEVUELTO BLOQUEA AUNQUE NO SEA OBLIGATORIO (09/11/2026). Es lo
+    //  que hace el servidor: «if not obligatorio and eid not in a_corregir:
+    //  continue» --o sea, lo que se pidio rehacer se valida igual--. Si acá
+    //  solo contaran las obligatorias, una foto opcional devuelta dejaria
+    //  cerrar y el servidor rechazaria el cierre, que es el defecto que esto
+    //  viene a arreglar.
     final obligatoriasPendientes = pendientes
-        .where((req) => (req as Map)['obligatorio'] == true)
+        .where((req) =>
+            (req as Map)['obligatorio'] == true ||
+            devuelto.exigeNueva(req['id']))
         .length;
 
     if (requisitosDeFoto.isEmpty) {
@@ -234,9 +314,20 @@ class CierreDeOrden {
     );
   }
 
-  static bool _tieneFoto(dynamic requisito, List<Map<String, dynamic>> fotos) {
+  static bool _tieneFoto(
+    dynamic requisito,
+    List<Map<String, dynamic>> fotos,
+    LoDevuelto devuelto,
+  ) {
     final Object? id = (requisito as Map)['id'];
     if (id == null) return false;
-    return fotos.any((f) => f['requisito_id'] == id);
+    final Iterable<Map<String, dynamic>> suyas =
+        fotos.where((f) => f['requisito_id'] == id);
+    //  Lo que no se pidio rehacer se satisface con la de cualquier vuelta:
+    //  mandar a repetir una foto que nadie objeto seria rehacer trabajo bueno.
+    if (!devuelto.exigeNueva(id)) return suyas.isNotEmpty;
+    //  Lo que si, exige una tomada DESPUES de la devolucion. Es la misma regla
+    //  que el servidor hace cumplir con CORRECCION_PENDIENTE.
+    return suyas.any(devuelto.esDeEstaVuelta);
   }
 }
