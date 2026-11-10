@@ -196,6 +196,17 @@ class CampoDelFormulario {
   final ReferenciaDeFicha? referencia;
 
   bool get esSeleccion => tipo == 'seleccion';
+
+  /// Una respuesta en palabras, declarada así por la plantilla.
+  ///
+  /// Se compara contra el tipo EXACTO y no contra «lo que no es otra cosa»: un
+  /// campo de fecha, o uno de un tipo que esta versión no conoce, se DIBUJA
+  /// como texto --ver el comentario de [tipo]-- pero no por eso su respuesta
+  /// se puede deducir de otro lado. Ver `repartirElCierre`, que es quien usa
+  /// esta diferencia: dar por respondido lo que nadie respondió es peor que
+  /// preguntarlo de más.
+  bool get esTextoLibre => tipo == 'texto';
+
   bool get esBooleano => tipo == 'booleano';
   bool get esNumero =>
       tipo == 'decimal' || tipo == 'entero' || tipo == 'numero' ||

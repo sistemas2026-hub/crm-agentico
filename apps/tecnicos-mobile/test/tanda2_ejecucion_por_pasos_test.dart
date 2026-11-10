@@ -83,6 +83,18 @@ Map<String, dynamic> _seguimientoConCierre() => <String, dynamic>{
       },
     };
 
+/// Aprueba el resumen que «Finalizar» muestra desde el 09/11/2026.
+///
+/// Tolerante: si el resumen no salió --el checklist bloqueó antes, o la hoja
+/// ya se cerró-- no hace nada, así una prueba que verifica que NO se cierra
+/// no se vuelve verde por accidente.
+Future<void> confirmarElResumen(WidgetTester t) async {
+  final Finder ok = find.text('Está bien, finalizar');
+  if (ok.evaluate().isEmpty) return;
+  await t.tap(ok);
+  await t.pumpAndSettle();
+}
+
 void main() {
   group('A · los pasos son los de la plantilla', () {
     test('a1 · en orden del protocolo; lo suelto va a «Otros datos»; la firma no', () {
@@ -206,21 +218,22 @@ void main() {
 
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
+      await confirmarElResumen(t);
       expect(find.text('No hay materiales registrados en esta orden'), findsOneWidget);
       await t.tap(find.text('Sí, no utilicé materiales'));
       await t.pumpAndSettle();
 
-      expect(find.text('Cierre del trabajo'), findsOneWidget);
-      await t.enterText(find.byType(TextField).last, 'Se cambió el conector');
-      await t.pumpAndSettle();
-      await t.tap(find.text('GUARDAR Y FINALIZAR'));
-      await t.pumpAndSettle();
+      //  LA HOJA DEL CIERRE YA NO SALE (09/11/2026, el usuario: «ese
+      //  ultimo formulario no deberia salir»). Su unica pregunta era de
+      //  texto, y eso el resumen ya lo responde.
+      expect(find.text('Cierre del trabajo'), findsNothing);
 
       expect(f.reportes, hasLength(1));
       expect(f.reportes.single['id'], 'seg-ot-1-cierre-r7');
       expect(f.reportes.single['momento'], 'cierre');
       final Map<String, dynamic> r = f.reportes.single['respuestas'] as Map<String, dynamic>;
-      expect(r['nota_cierre'], 'Se cambió el conector');
+      //  El reporte viaja igual, con lo que el tecnico aprobo en el resumen.
+      expect(r['nota_cierre'], contains('Roseta / Conector'));
       expect((r['__plataforma'] as Map)['sin_material_confirmado'], isTrue);
       expect(f.transiciones, hasLength(1), reason: 'y la orden queda finalizada');
     });
@@ -233,22 +246,22 @@ void main() {
 
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
+      await confirmarElResumen(t);
       expect(find.text('No hay materiales registrados en esta orden'), findsNothing);
-      await t.enterText(find.byType(TextField).last, 'Se cambió el conector');
-      await t.pumpAndSettle();
-      await t.tap(find.text('GUARDAR Y FINALIZAR'));
-      await t.pumpAndSettle();
       expect((f.reportes.single['respuestas'] as Map).containsKey('__plataforma'), isFalse);
     });
 
-    testWidgets('cerrar la hoja del cierre no finaliza', (WidgetTester t) async {
+    /// Antes esto cerraba la hoja del cierre con su ✕. Esa hoja ya no sale
+    /// cuando el resumen responde todo, asi que lo que se mide ahora es su
+    /// equivalente: «Corregir» no escribe nada ni finaliza.
+    testWidgets('corregir el resumen no finaliza', (WidgetTester t) async {
       _pantallaAlta(t);
       final FuenteDeEjecucionFalsa f = lista(conMaterial: true);
       await t.pumpWidget(_app(f));
       await t.pumpAndSettle();
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
-      await t.tap(find.byTooltip('Cerrar'));
+      await t.tap(find.text('Corregir'));
       await t.pumpAndSettle();
       expect(f.reportes, isEmpty);
       expect(f.transiciones, isEmpty);
@@ -263,6 +276,7 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
+      await confirmarElResumen(t);
       expect(find.text('Cierre del trabajo'), findsNothing);
       expect(f.reportes, hasLength(1));
       expect(f.transiciones, hasLength(1));
@@ -277,6 +291,7 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
+      await confirmarElResumen(t);
       expect(f.transiciones, hasLength(1));
     });
   });

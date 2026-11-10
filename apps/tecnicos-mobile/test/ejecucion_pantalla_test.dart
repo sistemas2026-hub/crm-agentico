@@ -358,6 +358,30 @@ void main() {
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
 
+      //  EL RESUMEN, ANTES DE CERRAR (09/11/2026, pedido del usuario). Y
+      //  trae lo que el tecnico cargo: si omitiera un campo, estaria
+      //  aprobando algo que no vio.
+      expect(find.text('Antes de finalizar, revisá'), findsOneWidget);
+      expect(find.text('Roseta / Conector'), findsWidgets);
+      expect(find.text('-18.4 dBm'), findsWidgets);
+      //  Y no cerro todavia: el resumen es una pregunta, no un aviso.
+      expect(fuente.transiciones, isEmpty);
+
+      //  CORREGIR NO CIERRA, y es la mitad del pedido: «el tecnico revisa el
+      //  resumen y corrige o finaliza si esta todo bien». Un boton que
+      //  dijera «corregir» y cerrara igual seria peor que no tenerlo.
+      await t.tap(find.text('Corregir'));
+      await t.pumpAndSettle();
+      expect(fuente.transiciones, isEmpty);
+      expect(find.text('Antes de finalizar, revisá'), findsNothing,
+          reason: 'vuelve a la pantalla, donde cada campo esta donde se lleno');
+
+      //  Y nada se deshizo: lo cargado sigue ahi, se vuelve a finalizar.
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Está bien, finalizar'));
+      await t.pumpAndSettle();
+
       expect(fuente.transiciones, hasLength(1));
       expect(fuente.transiciones.first['estado'], 'completada_pendiente_sync');
       expect(fuente.transiciones.first['revision_base'], 7,
@@ -884,6 +908,122 @@ void main() {
       //  Y el botón pasa por la elección, no por una fuente fija.
       expect(fuente, contains('_elegirDeDondeSaleLaFoto(reqId, req)'));
       expect(fuente, isNot(contains('fuente: fuenteDeLaEvidencia(req)')));
+    });
+  });
+
+  /// EL CIERRE NO ABRE UN SEGUNDO FORMULARIO (09/11/2026).
+  ///
+  /// El usuario, después de ver el resumen andando: «ese último formulario no
+  /// debería salir... solo el botón de que el servicio queda funcionando, en
+  /// el mismo resumen, y desde ahí sí finaliza».
+  ///
+  /// El mínimo que pide el backend trae dos cosas distintas: «qué se hizo
+  /// para resolverlo», que el técnico ya cargó y el resumen muestra, y «¿el
+  /// servicio quedó funcionando?», que no está en ningún otro lado y es una
+  /// declaración de una persona.
+  group('11. Finalizar: una sola hoja', () {
+    /// El seguimiento que devuelve el servidor cuando el tipo de trabajo no
+    /// declara su propio cierre. Copiado de
+    /// `campo/services/seguimiento_campo.py`, MINIMO.
+    Map<String, dynamic> minimoDelBackend() => <String, dynamic>{
+          'formularios': <String, dynamic>{
+            'cierre': <String, dynamic>{
+              'campos': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 'solucion',
+                  'titulo': 'Qué se hizo para resolverlo',
+                  'tipo': 'texto',
+                },
+                <String, dynamic>{
+                  'id': 'servicio_validado',
+                  'titulo': '¿El servicio quedó funcionando?',
+                  'tipo': 'booleano',
+                  'declaracion': true,
+                },
+              ],
+              'evidencias': <Map<String, dynamic>>[],
+            },
+          },
+        };
+
+    FuenteDeEjecucionFalsa conCierre() {
+      //  Lo mismo que «conValores» del grupo 5: todo respondido, con sus
+      //  fotos, su firma y su material, para que el checklist deje cerrar y
+      //  lo que se mida sea el cierre y no una validacion.
+      final FuenteDeEjecucionFalsa f = FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{
+          'tipo_intervencion': 'Roseta / Conector',
+          'potencia_rx': '-18.4',
+        },
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_power_meter'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
+        ],
+        materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+      );
+      f.seguimientoDado = minimoDelBackend();
+      return f;
+    }
+
+    testWidgets('la declaración se pregunta DENTRO del resumen',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = conCierre();
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+
+      expect(find.text('Antes de finalizar, revisá'), findsOneWidget);
+      expect(find.text('¿El servicio quedó funcionando?'), findsOneWidget);
+      //  Y lo que el resumen ya responde NO se vuelve a preguntar.
+      expect(find.text('Qué se hizo para resolverlo'), findsNothing);
+    });
+
+    testWidgets('EL DEFECTO: no se abre una segunda hoja de cierre',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = conCierre();
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Está bien, finalizar'));
+      await t.pumpAndSettle();
+
+      //  La hoja del reporte tiene su propio título. Si apareciera, serían
+      //  dos pantallas seguidas otra vez.
+      expect(find.text('Cierre del trabajo'), findsNothing);
+      expect(fuente.transiciones, hasLength(1));
+    });
+
+    testWidgets('lo declarado y lo deducido viajan en el reporte de cierre',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      final FuenteDeEjecucionFalsa fuente = conCierre();
+      await t.pumpWidget(app(fuente));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+
+      //  El interruptor arranca APAGADO: una declaración que viniera en «sí»
+      //  seria el sistema afirmando algo que nadie afirmo.
+      await t.tap(find.byType(SwitchListTile));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Está bien, finalizar'));
+      await t.pumpAndSettle();
+
+      final List<Map<String, dynamic>> reportes = fuente.reportes;
+      expect(reportes, isNotEmpty);
+      final Map<String, dynamic> cierre = reportes.last;
+      expect(cierre['respuestas']['servicio_validado'], isTrue);
+      //  Y «qué se hizo» se responde con lo que el técnico acaba de aprobar.
+      expect(cierre['respuestas']['solucion'],
+          contains('Roseta / Conector'));
     });
   });
 }

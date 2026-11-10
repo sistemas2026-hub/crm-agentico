@@ -19,6 +19,7 @@ import '../trabajo/trabajo_vista.dart';
 import 'campo_del_formulario.dart';
 import 'cierre_de_orden.dart';
 import 'datos_de_ejecucion.dart';
+import 'resumen_para_finalizar.dart';
 import 'widgets/consumo_de_material.dart';
 import 'widgets/firma_del_cliente.dart';
 import '../../core/sync/sync_presentacion.dart';
@@ -403,6 +404,35 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       return;
     }
 
+    // 0. EL RESUMEN, ANTES DE NADA (09/11/2026). El usuario: «para cerrar el
+    //    caso debería mostrar mejor un resumen de lo realizado, y así el
+    //    técnico revisa el resumen y corrige o finaliza si está todo bien».
+    //
+    //    Va primero --antes de la pregunta del material y antes del formulario
+    //    de cierre-- porque es el momento en que todavía se puede corregir sin
+    //    deshacer nada. «Corregir» vuelve a la pantalla, donde cada campo está
+    //    donde se llenó: si el resumen tuviera sus propios campos editables
+    //    habría dos lugares para escribir lo mismo, que es justo el problema
+    //    que esto viene a resolver.
+    //    Lo que el cierre todavia tiene que preguntar se reparte en tres
+    //    (ver `repartirElCierre`): lo que hay que DECLARAR --si el servicio
+    //    quedo funcionando-- va dentro del resumen; lo que el resumen ya
+    //    responde se llena con el; y si la empresa declaro alguna pregunta
+    //    que no es ni una cosa ni la otra, esa se sigue pidiendo en su hoja.
+    final Map<String, dynamic>? formularioDeCierre = _formularioDe('cierre');
+    final PreguntasDelCierre preguntas = repartirElCierre(
+      formularioDeCierre == null
+          ? const <CampoDelFormulario>[]
+          : CampoDelFormulario.normalizar(
+              _listaDe(formularioDeCierre, 'campos'),
+              const <String, dynamic>{},
+            ),
+    );
+
+    final Map<String, dynamic>? delResumen = await _revisarElResumen(preguntas);
+    if (delResumen == null) return;
+    if (!mounted) return;
+
     // Todo satisfecho: transicionar localmente a completada_pendiente_sync.
     final revisionBase = _orden!['revision'] as int? ?? 0;
 
@@ -427,16 +457,23 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     //    y una orden devuelta —revisión nueva— sí lleva el suyo.
     final String idCierre = 'seg-${widget.ordenId}-cierre-r$revisionBase';
     if (!await _fuente.existeReporte(idCierre)) {
-      final Map<String, dynamic>? formulario = _formularioDe('cierre');
-      if (formulario != null) {
-        final Map<String, dynamic>? respuestas = await _pedirCierre(formulario);
-        if (!mounted) return;
-        if (respuestas == null) return;
+      if (formularioDeCierre != null) {
+        //  LA HOJA SOLO SI QUEDA ALGO QUE PREGUNTAR (09/11/2026, el usuario:
+        //  «ese ultimo formulario no deberia salir»). Con el minimo del
+        //  backend no queda nada: el resumen lo responde entero.
+        Map<String, dynamic>? respuestas = delResumen;
+        if (!preguntas.alcanzaConElResumen) {
+          final Map<String, dynamic>? extra =
+              await _pedirCierre(formularioDeCierre);
+          if (!mounted) return;
+          if (extra == null) return;
+          respuestas = <String, dynamic>{...delResumen, ...extra};
+        }
         await _encolarPorDefecto(
           widget.ordenId,
           'cierre',
           <String, dynamic>{
-            ...respuestas,
+            ...respuestas!,
             // Dato de plataforma: viaja aparte de las respuestas (ver la
             // cola). La plantilla no lo declara y el servidor lo rechazaría
             // como respuesta.
@@ -513,7 +550,138 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           if (x is Map) Map<String, dynamic>.from(x),
       ];
 
-  /// La hoja del cierre: la misma de los reportes, con «Guardar y finalizar».
+  /// Muestra lo cargado, pregunta lo único que falta, y finaliza desde ahí
+  /// (09/11/2026).
+  ///
+  /// El usuario, después de ver el resumen andando: «ese último formulario no
+  /// debería salir... solo el botón de que el servicio queda funcionando, en
+  /// el mismo resumen, y desde ahí sí finaliza».
+  ///
+  /// Devuelve las respuestas del cierre, o `null` si tocó «Corregir» o cerró
+  /// la hoja --las dos cosas significan lo mismo: no finalizar todavía, y nada
+  /// se deshace--.
+  ///
+  /// Las cuentas de fotos, material y firma no se recalculan acá: salen del
+  /// mismo checklist que decide si se puede cerrar. Dos cuentas distintas del
+  /// mismo hecho terminan contradiciéndose, y entonces el resumen diría una
+  /// cosa y el botón haría otra.
+  Future<Map<String, dynamic>?> _revisarElResumen(
+      PreguntasDelCierre preguntas) async {
+    final List<LineaDeResumen> lineas =
+        resumenParaFinalizar(_camposNormalizados);
+
+    //  Las declaraciones arrancan sin responder: una que viniera en «sí» por
+    //  omisión sería el sistema afirmando algo que nadie afirmó, que es justo
+    //  lo que el backend evita marcándolas como declaración.
+    final Map<String, bool> declarado = <String, bool>{
+      for (final CampoDelFormulario c in preguntas.declaraciones) c.id: false,
+    };
+
+    final bool? listo = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext hoja) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) redibujar) =>
+            SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text('Antes de finalizar, revisá',
+                    style: AppTypography.tituloChico),
+                const SizedBox(height: AppSpacing.sm),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        //  Sin ningún campo respondido se dice, en vez de
+                        //  mostrar un resumen en blanco que parece un error.
+                        if (lineas.isEmpty)
+                          Text(
+                            'Este trabajo no tiene datos cargados para revisar.',
+                            style: AppTypography.cuerpoChico,
+                          ),
+                        for (final LineaDeResumen l in lineas)
+                          Padding(
+                            padding:
+                                const EdgeInsets.only(bottom: AppSpacing.sm),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(l.titulo,
+                                    style: AppTypography.etiquetaChica),
+                                Text(l.valor, style: AppTypography.cuerpo),
+                              ],
+                            ),
+                          ),
+                        //  Lo que no es una respuesta escrita sino una cuenta:
+                        //  sale del checklist, que es el que decide si cierra.
+                        for (final RequisitoDeCierre r in _cierre.requisitos)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(
+                              r.detalle.isEmpty
+                                  ? r.titulo
+                                  : '${r.titulo}: ${r.detalle}',
+                              style: AppTypography.cuerpoChico,
+                            ),
+                          ),
+                        //  LO ÚNICO QUE TODAVÍA HAY QUE PREGUNTAR. Acá y no en
+                        //  otra pantalla: es el pedido del usuario, y además
+                        //  es lo que se afirma MIRANDO el resumen de arriba.
+                        for (final CampoDelFormulario c
+                            in preguntas.declaraciones)
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(c.titulo, style: AppTypography.cuerpo),
+                            value: declarado[c.id] ?? false,
+                            onChanged: (bool v) =>
+                                redibujar(() => declarado[c.id] = v),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(hoja).pop(false),
+                        child: const Text('Corregir'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(hoja).pop(true),
+                        child: const Text('Está bien, finalizar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (listo != true) return null;
+
+    //  Lo declarado, más lo que el resumen ya responde. Ver `cierreDeducido`:
+    //  no inventa texto, repite lo que el técnico acaba de aprobar.
+    final String delResumen = cierreDeducido(lineas);
+    return <String, dynamic>{
+      ...declarado,
+      for (final CampoDelFormulario c in preguntas.sePuedenDeducir)
+        c.id: delResumen,
+    };
+  }
+
   Future<Map<String, dynamic>?> _pedirCierre(Map<String, dynamic> formulario) async {
     await _contarFotos('cierre');
     _fotosDeHoja.value = _fotosDelBorrador;

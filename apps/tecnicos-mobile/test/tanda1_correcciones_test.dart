@@ -73,6 +73,18 @@ void _pantallaAlta(WidgetTester t) {
   addTearDown(t.view.resetDevicePixelRatio);
 }
 
+/// Aprueba el resumen que «Finalizar» muestra desde el 09/11/2026.
+///
+/// Tolerante: si el resumen no salió --el checklist bloqueó antes, o la hoja
+/// ya se cerró-- no hace nada, así una prueba que verifica que NO se cierra
+/// no se vuelve verde por accidente.
+Future<void> confirmarElResumen(WidgetTester t) async {
+  final Finder ok = find.text('Está bien, finalizar');
+  if (ok.evaluate().isEmpty) return;
+  await t.tap(ok);
+  await t.pumpAndSettle();
+}
+
 void main() {
   final DateTime ahora = DateTime(2026, 10, 17, 10, 0);
 
@@ -333,6 +345,7 @@ void main() {
       expect(fondoDeLaFranja(t), AppColors.surfaceContainerHigh);
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
+      await confirmarElResumen(t);
       expect(fondoDeLaFranja(t), AppColors.errorContainer);
     });
 
@@ -353,6 +366,7 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Finalizar'));
       await t.pumpAndSettle();
+      await confirmarElResumen(t);
 
       expect(find.textContaining('Éxito'), findsNothing);
       expect(find.text('Trabajo terminado en campo'), findsOneWidget);
