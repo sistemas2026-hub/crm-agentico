@@ -1610,6 +1610,34 @@ def _resumen_de_accion(herramienta, argumentos: dict) -> str:
     return f"{herramienta.nombre}({pares})"
 
 
+def _resumen_para_el_modelo(herramienta, argumentos: dict) -> str:
+    """
+    El resumen de una accion propuesta, SIN lo que el modelo no puso.
+
+    El resumen completo es para quien aprueba (ve el serial del equipo que se va
+    a reiniciar) y se guarda tal cual. Al modelo le llega lo mismo en el resultado
+    de la propuesta y lo repite al cliente: medido el 09/11/2026, dos mensajes en
+    30 dias le dijeron al cliente "reinicio de tu equipo (HWTC...)". Ese resultado
+    lo arma el motor, asi que no pasa por la lista blanca del rol ni por
+    'nunca_revelar'.
+
+    Se quitan los argumentos INYECTADOS desde la sesion (el serial, el id de
+    servicio): el modelo nunca los vio ni los pidio, y si falta alguno la
+    plantilla no se puede armar y queda el nombre de la accion, que alcanza para
+    decir que se pidio.
+    """
+    visibles = {k: v for k, v in argumentos.items()
+                if k not in (herramienta.inyectados_obligatorios or [])}
+    if herramienta.plantilla_resumen:
+        try:
+            return herramienta.plantilla_resumen.format(**visibles)
+        except (KeyError, IndexError):
+            pass
+    pares = ", ".join(f"{k}={v}" for k, v in visibles.items())
+    nombre = herramienta.nombre.replace("_", " ")
+    return f"{nombre} ({pares})" if pares else nombre
+
+
 def _politica_de(config, tenant, herramienta, argumentos):
     """El veredicto de la politica declarada, o None si no declara ninguna.
 
@@ -1748,6 +1776,8 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
         return _no_se_propone(herramienta, veredicto)
 
     resumen = _resumen_de_accion(herramienta, argumentos)
+    # Lo que ve el MODELO no lleva lo que se inyecto de la sesion (el serial del equipo).
+    resumen_modelo = _resumen_para_el_modelo(herramienta, argumentos)
     extra = {}
     if herramienta.irreversible:
         #  M06-A: la aprobacion de una irreversible se ata a la accion EXACTA.
@@ -1778,10 +1808,10 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
         # Habia una equivalente viva: el modelo recibe ESA y no una copia
         # (T12). Si recibiera una nueva, le hablaria al cliente de una accion
         # que nadie va a aprobar, mientras la que espera sigue sin resolverse.
-        return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
+        return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen_modelo,
                 "ya_propuesta": True,
                 "instruccion_interna": f"Esto YA estaba propuesto y sigue "
-                    f"esperando aprobacion ({resumen}). No lo propongas otra "
+                    f"esperando aprobacion ({resumen_modelo}). No lo propongas otra "
                     f"vez ni digas que se hizo: decile a quien pregunta que ya "
                     f"quedo pedido y que todavia falta que alguien lo apruebe."}
     if _tiene_autonomia_ganada(tenant, herramienta, rol):
@@ -1789,16 +1819,16 @@ def _ejecutar_propuesta_de_accion(herramienta, sesion, argumentos_modelo: dict,
         #  ejecuta apenas termina el turno, por la misma cadena que una
         #  aprobacion, y si una guarda la frena vuelve a la cola de una
         #  persona. Por eso se dice "quedo pedido", nunca "ya se hizo".
-        return {"accion_id": accion_id, "estado": "en_curso", "resumen": resumen,
+        return {"accion_id": accion_id, "estado": "en_curso", "resumen": resumen_modelo,
                 "instruccion_interna": f"Esta accion se ejecuta automaticamente "
                     f"apenas termines de responder, si las comprobaciones de "
-                    f"seguridad lo permiten ({resumen}). Decile que ya quedo "
+                    f"seguridad lo permiten ({resumen_modelo}). Decile que ya quedo "
                     f"pedido y que en unos minutos se comprueba el resultado. NO "
                     f"digas que ya se hizo ni que funciono: eso lo confirma la "
                     f"verificacion."}
-    return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen,
+    return {"accion_id": accion_id, "estado": "pendiente", "resumen": resumen_modelo,
            "instruccion_interna": f"Decile a quien te pidio esto que la accion "
-               f"quedo pendiente de aprobacion ({resumen}) -- todavia NO se "
+               f"quedo pendiente de aprobacion ({resumen_modelo}) -- todavia NO se "
                f"ejecuto, no confirmes que ya se hizo. Alguien tiene que "
                f"aprobarla desde la pantalla correspondiente."}
 
