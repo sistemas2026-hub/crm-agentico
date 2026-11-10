@@ -34,6 +34,7 @@ class AvisoDeInicio {
     required this.titulo,
     required this.detalle,
     required this.gravedad,
+    this.lleva = DondeSeResuelve.enNingunLado,
   });
 
   final String titulo;
@@ -41,6 +42,34 @@ class AvisoDeInicio {
 
   /// `alta` pide acción hoy; `media` se puede resolver al cerrar la jornada.
   final GravedadDeAviso gravedad;
+
+  /// A dónde se va para resolverlo (09/11/2026).
+  ///
+  /// El usuario, con la campana ya andando: «ponle al aviso, cuando se le dé
+  /// clic, direcciones igual» --como ya hacen los avisos de la plataforma, que
+  /// llevan a su orden--. Un aviso que dice que algo está mal y no lleva a
+  /// donde se arregla obliga a buscarlo a mano, y eso es lo que el técnico no
+  /// va a hacer parado en la calle.
+  final DondeSeResuelve lleva;
+}
+
+/// Dónde se resuelve una alerta.
+///
+/// Acá se decide A QUÉ lugar corresponde cada una, que es la regla y se
+/// prueba sin pantalla. Cómo se llega --cambiar de sección, pedirle a la cola
+/// que mande-- lo sabe el contenedor, y eso no vive en este archivo.
+enum DondeSeResuelve {
+  /// La pantalla de materiales: el kit, lo que no cuadra, lo que falta
+  /// devolver.
+  materiales,
+
+  /// La cola de sincronización. No es una pantalla: es pedirle que mande
+  /// ahora lo que tiene guardado.
+  sincronizacion,
+
+  /// No hay a dónde ir, y entonces el aviso no se dibuja como tocable: un
+  /// toque que no hace nada se siente como una aplicación rota.
+  enNingunLado,
 }
 
 enum GravedadDeAviso {
@@ -156,10 +185,11 @@ class ResumenDeInicio {
         titulo: sinSubir == 1
             ? '1 registro sin enviar'
             : '$sinSubir registros sin enviar',
-        detalle: 'Suben solos cuando haya señal. No hace falta esperar acá.',
+        detalle: 'Tocá para mandarlos ahora. Si no, suben solos cuando haya señal.',
         // Media y no alta: no se pierde nada, sube solo. Marcarlo en rojo
         // enseñaría a ignorar los rojos.
         gravedad: GravedadDeAviso.media,
+        lleva: DondeSeResuelve.sincronizacion,
       ));
     }
 
@@ -171,6 +201,7 @@ class ResumenDeInicio {
             : '$mutacionesEnConflicto cambios rechazados',
         detalle: 'El servidor no los aceptó. Hay que revisarlos.',
         gravedad: GravedadDeAviso.alta,
+        lleva: DondeSeResuelve.sincronizacion,
       ));
     }
 
@@ -196,6 +227,7 @@ class ResumenDeInicio {
               : '${jornada.diferencias} materiales no cuadran',
           detalle: 'Hay que explicar qué pasó antes de cerrar la jornada.',
           gravedad: GravedadDeAviso.alta,
+          lleva: DondeSeResuelve.materiales,
         ));
       }
       // Los motivos del servidor se muestran tal cual: los escribió quien
@@ -206,6 +238,7 @@ class ResumenDeInicio {
             titulo: 'Un equipo sin ubicar',
             detalle: motivo,
             gravedad: GravedadDeAviso.alta,
+            lleva: DondeSeResuelve.materiales,
           ));
         }
       }

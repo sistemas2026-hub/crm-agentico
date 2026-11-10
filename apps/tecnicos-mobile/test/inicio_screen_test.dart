@@ -631,100 +631,34 @@ void main() {
     });
   });
 
-  group('11. Los problemas, y sólo los problemas', () {
-    testWidgets('Sin nada roto, el día no empieza en rojo',
+  /// LAS ALERTAS DE LA JORNADA SE FUERON A LA CAMPANA (09/11/2026).
+  ///
+  /// El usuario, viendo la campana ya andando: «hay un aviso que dice para
+  /// resolver hoy y un mensaje en rojo, ¿por qué no se pone igual en
+  /// notificación?». Eligió un solo lugar para todo lo que avisa.
+  ///
+  /// QUÉ PRUEBA QUÉ, DESPUÉS DE LA MUDANZA
+  /// --------------------------------------
+  /// Las cuatro pruebas que vivían acá afirmaban dos cosas a la vez: QUÉ se
+  /// avisa y que se DIBUJARA en Inicio. Lo primero ya lo prueba
+  /// `resumen_de_inicio_test.dart` sobre la función pura --gravedad, orden,
+  /// las dos colas sumadas, el conflicto-- y no hace falta montar una
+  /// pantalla para eso. Lo segundo cambió de lugar: ahora se dibuja en el
+  /// panel de la campana, y lo mide `campana_de_avisos_test.dart`.
+  ///
+  /// Lo que queda acá es lo único que esta pantalla todavía decide: que NO
+  /// las dibuje.
+  group('11. Los problemas ya no se dibujan en Inicio', () {
+    testWidgets('ni las alertas de la jornada ni los avisos de la plataforma',
         (WidgetTester tester) async {
       _pantallaAlta(tester);
       final banco = _Banco(filas: <Map<String, dynamic>>[
         _orden(id: '1', numero: 1, estado: 'asignada'),
       ]);
-      await tester.pumpWidget(banco.app(resumen: _sync(), jornada: _jornada()));
-      await tester.pumpAndSettle();
-
-      // Desde el 29/10/2026 las alertas tienen su bloque, y desde el
-      // 09/11/2026 se llama «Para resolver hoy»: los avisos de la plataforma
-      // se mudaron a la campana del encabezado.
-      expect(find.text('Para resolver hoy'), findsNothing);
-      await banco.cerrar();
-    });
-
-    /// LOS AVISOS DE LA PLATAFORMA NO ESTÁN EN DOS LADOS (09/11/2026).
-    ///
-    /// El usuario, al ver la campana nueva andando: «la campana sale, pero aún
-    /// sigue saliendo la tarjeta de aviso abajo». Estaban en los dos lugares a
-    /// la vez.
-    ///
-    /// Se afirma sobre el widget y no sobre un texto porque la lista puede
-    /// venir vacía, y entonces un `findsNothing` sobre su contenido pasaría
-    /// sin medir nada. Lo que no puede volver es el bloque.
-    testWidgets('la lista de avisos no vuelve a Inicio: vive en la campana',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco(filas: <Map<String, dynamic>>[
-        _orden(id: '1', numero: 1, estado: 'asignada'),
-      ]);
+      //  Con tres registros sin enviar y un material que no cuadra: antes
+      //  esto dibujaba dos alertas en la pantalla.
       await tester.pumpWidget(banco.app(
-        resumen: _sync(pendientes: 3),
-        jornada: _jornada(),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(NotificacionesScreen), findsNothing);
-      //  Y las alertas de la jornada --que son otra cosa-- siguen a la vista.
-      expect(find.text('Para resolver hoy'), findsOneWidget);
-      await banco.cerrar();
-    });
-
-    testWidgets('Lo que espera señal se avisa, pero no como alarma',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(resumen: _sync(pendientes: 3)));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Para resolver hoy'), findsOneWidget);
-      expect(find.text('3 registros sin enviar'), findsOneWidget);
-      expect(
-        find.text('Suben solos cuando haya señal. No hace falta esperar acá.'),
-        findsOneWidget,
-      );
-      await banco.cerrar();
-    });
-
-    testWidgets('Los movimientos de material también cuentan como sin enviar',
-        (WidgetTester tester) async {
-      // Viven en otra cola. Sin sumarlos, la pantalla diría "todo enviado"
-      // justo el día que el técnico registró consumo sin señal.
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(
-        resumen: _sync(pendientes: 1),
-        jornada: _jornada(sinSubir: 2),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('3 registros sin enviar'), findsOneWidget);
-      await banco.cerrar();
-    });
-
-    testWidgets('Un cambio rechazado sí es grave: no se arregla solo',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(resumen: _sync(conflicto: 1)));
-      await tester.pumpAndSettle();
-
-      expect(find.text('1 cambio rechazado'), findsOneWidget);
-      expect(find.text('El servidor no los aceptó. Hay que revisarlos.'),
-          findsOneWidget);
-      await banco.cerrar();
-    });
-
-    testWidgets('Un material que no cuadra se avisa cuando el servidor objeta',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(
+        resumen: _sync(pendientes: 3, conflicto: 1),
         jornada: _jornada(
           diferencias: 2,
           motivos: <String>['Faltan 2 unidades sin explicar.'],
@@ -732,77 +666,14 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('2 materiales no cuadran'), findsOneWidget);
-      await banco.cerrar();
-    });
-
-    testWidgets('Pero no por faltar material que todavía no toca devolver',
-        (WidgetTester tester) async {
-      // El contador de diferencias es mayor que cero desde la mañana: falta
-      // devolver el kit entero. Un rojo diario deja de leerse.
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(jornada: _jornada(diferencias: 2)));
-      await tester.pumpAndSettle();
-
-      // Desde el 29/10/2026 las alertas tienen su bloque, y desde el
-      // 09/11/2026 se llama «Para resolver hoy»: los avisos de la plataforma
-      // se mudaron a la campana del encabezado.
+      expect(find.byType(NotificacionesScreen), findsNothing);
       expect(find.text('Para resolver hoy'), findsNothing);
-      await banco.cerrar();
-    });
-
-    testWidgets('Un equipo sin ubicar se muestra con el motivo del servidor',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(
-        jornada: _jornada(motivos: <String>[
-          'El equipo con serie 48575448A9B0C1 no se instaló ni volvió a bodega.',
-        ]),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Un equipo sin ubicar'), findsOneWidget);
-      expect(find.textContaining('48575448A9B0C1'), findsOneWidget);
-      await banco.cerrar();
-    });
-
-    testWidgets('Lo grave se ve antes que lo que puede esperar',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(
-        resumen: _sync(pendientes: 5),
-        jornada: _jornada(
-          diferencias: 1,
-          motivos: <String>['Faltan 2 unidades sin explicar.'],
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      final double grave = tester.getTopLeft(find.text('1 material no cuadra')).dy;
-      final double espera = tester.getTopLeft(find.text('5 registros sin enviar')).dy;
-      expect(grave, lessThan(espera));
-      await banco.cerrar();
-    });
-
-    testWidgets('Una jornada cerrada no sigue reclamando',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(
-        jornada: _jornada(diferencias: 3, cerrada: true),
-      ));
-      await tester.pumpAndSettle();
-
-      // Desde el 29/10/2026 las alertas tienen su bloque, y desde el
-      // 09/11/2026 se llama «Para resolver hoy»: los avisos de la plataforma
-      // se mudaron a la campana del encabezado.
-      expect(find.text('Para resolver hoy'), findsNothing);
+      expect(find.text('3 registros sin enviar'), findsNothing);
+      expect(find.text('2 materiales no cuadran'), findsNothing);
       await banco.cerrar();
     });
   });
+
 
   group('12. Sin señal se sigue trabajando', () {
     testWidgets('La cola dice que se guarda igual', (WidgetTester tester) async {
@@ -1027,67 +898,16 @@ void main() {
     });
   });
 
-  group('13. Los avisos, de a dos (29/10/2026)', () {
-    // El usuario: «el aviso redúcelo, que muestre dos, y si quiere ver más que
-    // arrastre un scroll independiente; y esa alerta operativa puede ir
-    // también en aviso».
-    testWidgets('las alertas van dentro de Avisos: se ven dos y el resto se desliza',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(
-        resumen: _sync(pendientes: 3, conflicto: 1),
-        jornada: _jornada(
-          diferencias: 2,
-          motivos: <String>['Faltan 2 unidades sin explicar.'],
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      final Finder recuadro = find.byKey(const ValueKey<String>('alertas-de-la-jornada'));
-      expect(find.text('Para resolver hoy'), findsOneWidget);
-      expect(recuadro, findsOneWidget);
-      expect(find.text('Deslizá dentro del recuadro para ver el otro'), findsOneWidget);
-
-      // El orden lo decide `ResumenDeInicio` (lo grave primero): la prueba no
-      // lo supone, mide cuáles quedan adentro del recuadro y cuál debajo.
-      const List<String> alertas = <String>[
-        '3 registros sin enviar',
-        '1 cambio rechazado',
-        '2 materiales no cuadran',
-      ];
-      final Rect caja = tester.getRect(recuadro);
-      bool aLaVista(String a) =>
-          find.text(a).evaluate().isNotEmpty &&
-          tester.getRect(find.text(a)).bottom <= caja.bottom + 0.5;
-      final List<String> antes = alertas.where(aLaVista).toList();
-      expect(antes, hasLength(2), reason: 'se ven dos, enteras');
-      final String faltante = alertas.firstWhere((String a) => !antes.contains(a));
-
-      final Offset saludoAntes = tester.getTopLeft(find.text('Hola, Carlos'));
-      await tester.drag(recuadro, const Offset(0, -300));
-      await tester.pumpAndSettle();
-
-      expect(aLaVista(faltante), isTrue, reason: 'deslizando adentro aparece la tercera');
-      expect(tester.getTopLeft(find.text('Hola, Carlos')), saludoAntes,
-          reason: 'el scroll es del recuadro: la pantalla no se movió');
-      await banco.cerrar();
-    });
-
-    testWidgets('con una o dos no hay recuadro ni «deslizá»',
-        (WidgetTester tester) async {
-      _pantallaAlta(tester);
-      final banco = _Banco();
-      await tester.pumpWidget(banco.app(resumen: _sync(pendientes: 3, conflicto: 1)));
-      await tester.pumpAndSettle();
-
-      expect(find.text('3 registros sin enviar'), findsOneWidget);
-      expect(find.text('1 cambio rechazado'), findsOneWidget);
-      expect(find.byKey(const ValueKey<String>('alertas-de-la-jornada')), findsNothing);
-      expect(find.textContaining('Deslizá dentro del recuadro'), findsNothing);
-      await banco.cerrar();
-    });
-  });
+  //  ACA ESTABA EL GRUPO 13 (29/10/2026 - 09/11/2026): las alertas de la
+  //  jornada de a dos, con su recuadro deslizable, dentro de Inicio.
+  //
+  //  Se fue con el bloque. Las alertas ahora viven en el panel de la campana
+  //  (09/11/2026, el usuario: un solo lugar para todo lo que avisa) y el
+  //  desplazamiento lo da el panel, que ya tiene su alto maximo y su scroll:
+  //  dos recuadros deslizables, uno dentro del otro, es peor que uno.
+  //
+  //  Que la alerta se vea, y antes que los avisos, lo mide
+  //  campana_de_avisos_test.dart. Que Inicio ya no las dibuje, el grupo 11.
 
   group('14. El inventario lleva a Materiales (29/10/2026)', () {
     testWidgets('tocarlo abre Materiales', (WidgetTester tester) async {

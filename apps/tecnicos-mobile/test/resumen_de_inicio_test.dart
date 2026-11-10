@@ -339,4 +339,90 @@ void main() {
       expect(resumen.avisos, isEmpty);
     });
   });
+
+  /// A DÓNDE LLEVA CADA ALERTA (09/11/2026).
+  ///
+  /// El usuario, con la campana ya andando: «ponle al aviso, cuando se le dé
+  /// clic, direcciones igual» --como ya hacen los avisos de la plataforma, que
+  /// llevan a su orden--. Un aviso que dice que algo está mal y no lleva a
+  /// donde se arregla obliga a buscarlo a mano, y eso es lo que nadie hace
+  /// parado en la calle.
+  ///
+  /// Qué lugar le toca a cada una es una regla y se prueba acá, sin pantalla.
+  /// Cómo se llega lo sabe el contenedor.
+  group('Dónde se resuelve cada alerta', () {
+    test('lo que no subió se resuelve mandándolo', () {
+      final resumen = ResumenDeInicio.armar(
+        trabajos: <TrabajoVista>[trabajo(id: 'a')],
+        movimientosSinSubir: 2,
+        ahora: ahora,
+      );
+
+      expect(resumen.avisos.single.lleva, DondeSeResuelve.sincronizacion);
+      //  Y el detalle invita a tocarlo: antes decía «suben solos, no hace
+      //  falta esperar acá», que es lo contrario.
+      expect(resumen.avisos.single.detalle, contains('Tocá'));
+    });
+
+    test('un cambio rechazado también va a la cola', () {
+      final resumen = ResumenDeInicio.armar(
+        trabajos: <TrabajoVista>[trabajo(id: 'a')],
+        mutacionesEnConflicto: 1,
+        ahora: ahora,
+      );
+
+      expect(resumen.avisos.single.lleva, DondeSeResuelve.sincronizacion);
+    });
+
+    test('el material que no cuadra lleva a Materiales', () {
+      final resumen = ResumenDeInicio.armar(
+        trabajos: const <TrabajoVista>[],
+        jornada: jornada(
+          diferencias: 2,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
+        ahora: ahora,
+      );
+
+      expect(resumen.avisos.first.lleva, DondeSeResuelve.materiales);
+    });
+
+    test('el equipo sin ubicar también: es material', () {
+      final resumen = ResumenDeInicio.armar(
+        trabajos: const <TrabajoVista>[],
+        jornada: jornada(
+          diferencias: 1,
+          motivos: <String>['La serie ABC123 no aparece.'],
+        ),
+        ahora: ahora,
+      );
+
+      final AvisoDeInicio serie = resumen.avisos.firstWhere(
+        (AvisoDeInicio a) => a.titulo.contains('equipo'),
+      );
+      expect(serie.lleva, DondeSeResuelve.materiales);
+    });
+
+    /// Ninguna alerta puede quedarse sin destino por descuido: la que no lleva
+    /// a ningún lado se dibuja sin flecha y sin reaccionar al toque, y eso
+    /// tiene que ser una decisión, no un olvido.
+    test('ninguna de las que se arman hoy queda sin destino', () {
+      final resumen = ResumenDeInicio.armar(
+        trabajos: <TrabajoVista>[trabajo(id: 'a')],
+        movimientosSinSubir: 2,
+        mutacionesEnConflicto: 1,
+        jornada: jornada(
+          diferencias: 2,
+          motivos: <String>['Faltan 2 unidades.', 'La serie ABC123 no aparece.'],
+        ),
+        ahora: ahora,
+      );
+
+      expect(resumen.avisos, isNotEmpty);
+      for (final AvisoDeInicio a in resumen.avisos) {
+        expect(a.lleva, isNot(DondeSeResuelve.enNingunLado),
+            reason: 'la alerta «${a.titulo}» no dice dónde se resuelve');
+      }
+    });
+  });
 }

@@ -1437,11 +1437,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           ),
         for (final dynamic r in paso.evidencias)
           if (r is Map) _buildEvidenciaRequisito(Map<String, dynamic>.from(r)),
-        DexterAccionRapida(
-          texto: 'Registrar material usado',
-          icono: Icons.inventory_2_outlined,
-          alTocar: _abrirConsumoDeMaterial,
-        ),
+        // ACÁ ESTABA «Registrar material usado» (09/11/2026). El usuario,
+        // sobre la app en uso: «debajo de las fotos sale registrar material, y
+        // más abajo sale material en esta orden; también, igual, para que
+        // arriba».
+        //
+        // Eran dos puertas a la misma hoja --las dos llamaban a
+        // `_abrirConsumoDeMaterial`-- y esta era la peor de las dos: un botón
+        // suelto que no dice qué llevás registrado, así que para saberlo había
+        // que bajar igual hasta el otro bloque. El bloque «Materiales en esta
+        // orden» tiene la lista Y su botón «Agregar material»: no se perdió
+        // ninguna forma de llegar, se perdió el viaje.
       ],
     );
   }

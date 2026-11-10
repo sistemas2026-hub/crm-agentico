@@ -233,55 +233,20 @@ class _InicioScreenState extends State<InicioScreen> {
               // sin escribir en ningún ticket. Arriba, junto al saludo: es lo
               // que cambia el día.
               ..._novedad(),
-              // LOS AVISOS VAN PRIMERO, Y SOLO SI HAY ALGUNO
-              // -------------------------------------------
-              // Un trabajo devuelto es lo más urgente que puede haber en esta
-              // pantalla: hay que volver a una casa donde el técnico ya estuvo.
-              // Debajo del avance del día quedaría después de un scroll, que
-              // es como no estar. El bloque se esconde solo cuando no hay
-              // nada, así que no agrega ruido los días normales.
+              // LOS AVISOS Y LAS ALERTAS, TODO EN LA CAMPANA (09/11/2026)
+              // ---------------------------------------------------------
+              // Acá vivían los avisos de la plataforma y, desde el 29/10, las
+              // alertas de la jornada. Primero se mudaron los avisos; el
+              // usuario miró el resultado y preguntó por qué las alertas no
+              // iban al mismo lugar: «hay un aviso que dice para resolver hoy
+              // y un mensaje en rojo, por qué no se pone igual en
+              // notificación». Eligió un solo lugar para todo.
               //
-              // LOS AVISOS DE LA PLATAFORMA SE MUDARON A LA CAMPANA
-              // (09/11/2026, el usuario: «la campana sale, pero aún sigue
-              // saliendo la tarjeta de aviso abajo»). Estaban en los dos
-              // lados a la vez.
-              //
-              // Lo que QUEDA acá son las alertas de la jornada --«5 materiales
-              // no cuadran»--, que no son lo mismo: un aviso de la plataforma
-              // cuenta algo que pasó --te devolvieron un trabajo, te asignaron
-              // una orden-- y vive en la campana con los demás; una alerta de
-              // la jornada es un problema de HOY que alguien tiene que
-              // resolver antes de cerrar, y por eso sigue a la vista, sin
-              // tener que abrir nada.
-              //
-              // Se ven dos; el resto deslizando dentro del recuadro, para que
-              // la pantalla no crezca con cada alerta y lo que sigue --el
-              // trabajo-- quede a la vista. Sin alertas no se dibuja nada: un
-              // bloque que dice «todo bien» todos los días enseña a no mirar
-              // esa parte de la pantalla.
-              if (resumen.avisos.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.lg),
-                  child: DexterBloque(
-                    titulo: 'Para resolver hoy',
-                    icono: Icons.error_outline,
-                    children: <Widget>[
-                      ListaConScrollPropio(
-                        filas: <Widget>[
-                          for (final AvisoDeInicio aviso in resumen.avisos)
-                            Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: AppSpacing.sm),
-                              child: _FilaDeAviso(aviso: aviso),
-                            ),
-                        ],
-                        visibles: 2,
-                        claveDelRecuadro:
-                            const ValueKey<String>('alertas-de-la-jornada'),
-                      ),
-                    ],
-                  ),
-                ),
+              // Lo que se pierde, y queda dicho porque es real: una alerta de
+              // la jornada --«5 materiales no cuadran»-- ahora hay que abrir
+              // la campana para verla, y se puede cerrar el día sin mirarla.
+              // Por eso el número de la campana SUMA las alertas: mientras
+              // haya una sin resolver, la campana no baja a cero.
               // Un solo ritmo entre bloques. Antes los tres primeros iban a
               // `md` y los de abajo a `lg`: la mitad superior se veia
               // apretada contra la inferior sin que nada lo justificara.
@@ -1100,61 +1065,6 @@ class _InicioScreenState extends State<InicioScreen> {
 }
 
 /// Un aviso, pintado según su gravedad.
-class _FilaDeAviso extends StatelessWidget {
-  const _FilaDeAviso({required this.aviso});
-
-  final AvisoDeInicio aviso;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool grave = aviso.gravedad == GravedadDeAviso.alta;
-    final Color color = grave ? AppColors.error : AppColors.onSurfaceVariant;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: grave
-            ? AppColors.errorContainer
-            : AppColors.surfaceContainerLowest,
-        borderRadius: AppRadius.brTarjeta,
-        boxShadow: AppTheme.sombraNivel1,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(
-            grave ? Icons.warning_amber_rounded : Icons.cloud_upload_outlined,
-            size: 18,
-            color: grave ? AppColors.onErrorContainer : color,
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  aviso.titulo,
-                  style: AppTypography.etiquetaGrande.copyWith(
-                    color: grave ? AppColors.onErrorContainer : AppColors.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  aviso.detalle,
-                  style: AppTypography.cuerpoChico.copyWith(
-                    color: grave ? AppColors.onErrorContainer : color,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Uno de los tres números del kit.
 /// Una celda de la rejilla táctica del diseño: la cifra grande arriba y el
 /// rótulo en mayúsculas abajo, sobre su propia superficie.

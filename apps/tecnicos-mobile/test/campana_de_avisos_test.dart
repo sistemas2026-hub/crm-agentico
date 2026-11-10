@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:campo/core/widgets/campana_de_avisos.dart';
 import 'package:campo/core/widgets/dexter_app_header.dart';
+import 'package:campo/features/inicio/fila_de_aviso.dart';
+import 'package:campo/features/inicio/resumen_de_inicio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -97,6 +101,132 @@ void main() {
       await tester.tap(find.byType(CampanaDeAvisos));
       await tester.pumpAndSettle();
       expect(toques, 1);
+    });
+  });
+
+  /// LAS ALERTAS DE LA JORNADA TAMBIÉN VIVEN ACÁ (09/11/2026).
+  ///
+  /// El usuario, viendo la campana andando: «hay un aviso que dice para
+  /// resolver hoy y un mensaje en rojo, ¿por qué no se pone igual en
+  /// notificación?». Eligió un solo lugar para todo lo que avisa.
+  ///
+  /// Lo que se pierde con eso, y por eso está escrito: una alerta de la
+  /// jornada ya no está a la vista, hay que abrir la campana. El precio se
+  /// paga con el número, que las suma: mientras haya una sin resolver, la
+  /// campana no baja a cero. Si el número dejara de sumarlas, mudarlas
+  /// adentro sería hacerlas invisibles.
+  group('Las alertas de la jornada en la campana', () {
+    testWidgets('el número suma los avisos y las alertas',
+        (WidgetTester tester) async {
+      //  2 avisos de la plataforma + 3 alertas de hoy = 5.
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: DexterAppHeader(
+            empresa: 'Rapilink',
+            conexion: EstadoConexion.conRed,
+            notificacionesSinLeer: 2 + 3,
+            onAvisos: () {},
+          ),
+        ),
+      ));
+      expect(find.text('5'), findsOneWidget);
+    });
+
+    /// EL PEDIDO: «ponle al aviso, cuando se le dé clic, direcciones igual».
+    testWidgets('la alerta que lleva a algún lado se toca y avisa',
+        (WidgetTester tester) async {
+      int toques = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: FilaDeAviso(
+            aviso: const AvisoDeInicio(
+              titulo: '2 materiales no cuadran',
+              detalle: 'Hay que explicar qué pasó antes de cerrar la jornada.',
+              gravedad: GravedadDeAviso.alta,
+              lleva: DondeSeResuelve.materiales,
+            ),
+            alTocar: () => toques++,
+          ),
+        ),
+      ));
+
+      expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+      await tester.tap(find.byType(FilaDeAviso));
+      await tester.pumpAndSettle();
+      expect(toques, 1);
+    });
+
+    /// Y la que no lleva a ningún lado no finge que sí: un toque que no hace
+    /// nada se siente como una aplicación rota, y la flecha lo promete.
+    testWidgets('la que no lleva a ningún lado no tiene flecha',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: FilaDeAviso(
+            aviso: AvisoDeInicio(
+              titulo: 'Algo informativo',
+              detalle: 'No hay nada que hacer con esto.',
+              gravedad: GravedadDeAviso.media,
+            ),
+          ),
+        ),
+      ));
+
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
+    });
+
+    testWidgets('el panel las dibuja, y antes que los avisos',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (BuildContext ctx) => CampanaDeAvisos(
+              sinLeer: 2,
+              onTap: () => mostrarPanelDeAvisos(
+                ctx,
+                contenido: (BuildContext _) => Column(
+                  children: const <Widget>[
+                    Text('2 materiales no cuadran'),
+                    Text('Te devolvieron la OT #188'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
+
+      await tester.tap(find.byType(CampanaDeAvisos));
+      await tester.pumpAndSettle();
+
+      final double alerta =
+          tester.getTopLeft(find.text('2 materiales no cuadran')).dy;
+      final double aviso =
+          tester.getTopLeft(find.text('Te devolvieron la OT #188')).dy;
+      expect(alerta, lessThan(aviso),
+          reason: 'lo que hay que resolver hoy va antes que lo que ya pasó');
+    });
+
+    /// EL CABLEADO DEL CONTENEDOR.
+    ///
+    /// Las dos cosas que lo sostienen --que el panel reciba las alertas y que
+    /// el número las sume-- viven en `app_shell.dart`, y montarlo con una
+    /// jornada descuadrada pide una base local de verdad: esa prueba no entra
+    /// en este arnés. Mientras tanto se mide el archivo, y se dice.
+    ///
+    /// Sin el primer cable el panel se abre sin las alertas; sin el segundo,
+    /// mudarlas adentro las vuelve invisibles, que es lo único que esta
+    /// mudanza no puede hacer.
+    test('el contenedor le pasa las alertas al panel y las suma al número', () {
+      final String fuente =
+          File('lib/features/shell/app_shell.dart').readAsStringSync();
+
+      expect(fuente, contains('for (final AvisoDeInicio aviso in _alertasDeHoy)'));
+      expect(fuente, contains('alTocar: _comoSeResuelve(aviso)'));
+      expect(
+        fuente,
+        contains('notificacionesSinLeer: _avisosSinLeer + _alertasDeHoy.length'),
+      );
     });
   });
 

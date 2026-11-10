@@ -34,7 +34,10 @@ import '../notificaciones/notificaciones_screen.dart';
 import '../auth/login_screen.dart';
 import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/detalle_orden_screen.dart';
+import '../inicio/fila_de_aviso.dart';
+import '../materiales/estado_de_jornada.dart';
 import '../inicio/inicio_screen.dart';
+import '../inicio/resumen_de_inicio.dart';
 import '../inicio/labor_de_hoy.dart';
 import '../inicio/novedad_de_cuadrilla.dart';
 import '../materiales/materiales_screen.dart';
@@ -391,6 +394,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Cuántos avisos sin leer, para el punto de la barra inferior.
   int _avisosSinLeer = 0;
 
+  /// Las alertas de la jornada que hoy exigen algo. Ver `_leerAlertasDeHoy`.
+  List<AvisoDeInicio> _alertasDeHoy = const <AvisoDeInicio>[];
+
   StreamSubscription<LocalDatabaseChangeEvent>? _suscripcionAvisos;
 
   /// El número de soporte de la empresa. `null` si no lo configuró.
@@ -519,6 +525,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } catch (_) {
       // Un problema leyendo la base no puede tumbar el contenedor.
     }
+    await _leerAlertasDeHoy();
+  }
+
+  /// Las alertas de la jornada: «5 materiales no cuadran», «3 registros sin
+  /// enviar» (09/11/2026).
+  ///
+  /// Vivían dentro de la pantalla de Inicio. El usuario pidió un solo lugar
+  /// para todo lo que avisa, así que ahora entran al panel de la campana y
+  /// suman al número.
+  ///
+  /// Se calculan acá y no se piden a Inicio porque esa pantalla puede no
+  /// estar construida --el contenedor solo arma las secciones visitadas-- y
+  /// entonces la campana diría cero mientras hay un descuadre. `armar` es una
+  /// función pura y `EstadoDeJornada.leer()` es estático: no hace falta nada
+  /// de esa pantalla.
+  Future<void> _leerAlertasDeHoy() async {
+    try {
+      final EstadoDeJornada? jornada = await EstadoDeJornada.leer();
+      final SyncSummary? s = _resumen;
+      final ResumenDeInicio resumen = ResumenDeInicio.armar(
+        trabajos: widget.dependencias.ordenes.trabajos,
+        jornada: jornada,
+        movimientosSinSubir:
+            (s?.mutacionesPendientes ?? 0) + (jornada?.sinSubir ?? 0),
+        evidenciasSinSubir: s?.evidenciasPendientes ?? 0,
+        mutacionesEnConflicto: s?.mutacionesConflicto ?? 0,
+        ahora: DateTime.now(),
+      );
+      if (mounted) setState(() => _alertasDeHoy = resumen.avisos);
+    } catch (_) {
+      // Leer la jornada no puede tumbar el contenedor. Sin ella el panel
+      // muestra solo los avisos de la plataforma, que es lo que había antes.
+    }
   }
 
   void _alCambiarOrdenes() {
@@ -627,11 +666,59 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Al cerrarse se recuenta: adentro pudo marcar avisos como leídos, y la
   /// chapita roja tiene que reflejarlo sin esperar al siguiente evento de la
   /// base.
+  /// Qué hace tocar una alerta de la jornada, o nulo si no lleva a ningún
+  /// lado (09/11/2026).
+  ///
+  /// El usuario: «ponle al aviso, cuando se le dé clic, direcciones igual».
+  /// A DÓNDE corresponde ir lo decide `DondeSeResuelve`, que se prueba sin
+  /// pantalla; acá vive solo CÓMO se llega, que es lo único que esta clase
+  /// sabe hacer.
+  ///
+  /// Las dos cierran el panel primero: si no, la pantalla de destino quedaría
+  /// detrás del velo y el técnico la vería gris.
+  VoidCallback? _comoSeResuelve(AvisoDeInicio aviso) {
+    switch (aviso.lleva) {
+      case DondeSeResuelve.materiales:
+        return () {
+          Navigator.of(context).maybePop();
+          setState(() {
+            _seccion = SeccionCampo.materiales;
+            _visitadas.add(SeccionCampo.materiales);
+          });
+        };
+      case DondeSeResuelve.sincronizacion:
+        //  Solo si de verdad se puede mandar ahora. Un botón que promete
+        //  sincronizar sin red deja al técnico tocando algo que no pasa nada,
+        //  y es la misma regla que ya aplica la franja de arriba.
+        if (!SyncPresentacion.puedeSincronizarAhora(_resumen)) return null;
+        return () {
+          Navigator.of(context).maybePop();
+          widget.dependencias.sincronizarAhora();
+        };
+      case DondeSeResuelve.enNingunLado:
+        return null;
+    }
+  }
+
   Future<void> _abrirAvisos() async {
     await mostrarPanelDeAvisos(
       context,
       contenido: (BuildContext _) => NotificacionesScreen(
         ocultarSiVacio: false,
+        // LO DE HOY VA PRIMERO (09/11/2026). Un aviso de la plataforma cuenta
+        // algo que pasó; una alerta de la jornada es algo que hay que
+        // resolver antes de cerrar el día. Si las dos están en el mismo
+        // panel, el orden es lo único que las distingue.
+        primeros: <Widget>[
+          for (final AvisoDeInicio aviso in _alertasDeHoy)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: FilaDeAviso(
+                aviso: aviso,
+                alTocar: _comoSeResuelve(aviso),
+              ),
+            ),
+        ],
         alAbrirOrden: widget.dependencias.abrirOrdenPorId == null
             ? null
             : (String ordenId) {
@@ -855,7 +942,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             // `local_notificaciones` para el punto de la barra de abajo, y es
             // el que se usa. Una campana con una cifra inventada enseña, en
             // dos días, a no mirar la campana.
-            notificacionesSinLeer: _avisosSinLeer,
+            // SUMA LAS ALERTAS DE HOY (09/11/2026). Mientras haya un
+            // descuadre de material sin explicar, la campana no baja a cero:
+            // es lo que reemplaza al bloque rojo que estaba a la vista en
+            // Inicio. Sin esto, mudarlas adentro del panel las volvería
+            // invisibles.
+            notificacionesSinLeer: _avisosSinLeer + _alertasDeHoy.length,
             onAvisos: _abrirAvisos,
             onPerfil: _abrirPerfil,
           ),

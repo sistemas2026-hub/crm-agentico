@@ -742,4 +742,86 @@ void main() {
     });
   });
 
+  /// EL MATERIAL, EN UN SOLO LUGAR (09/11/2026).
+  ///
+  /// El usuario, sobre la app en uso: «debajo de las fotos sale registrar
+  /// material, y más abajo sale material en esta orden; también, igual, para
+  /// que arriba».
+  ///
+  /// Eran dos puertas a la misma hoja --las dos llamaban a
+  /// `_abrirConsumoDeMaterial`-- y la de arriba era la peor: un botón suelto
+  /// que no dice qué llevás registrado, así que para saberlo había que bajar
+  /// igual hasta el otro bloque.
+  ///
+  /// Se mide sobre lo DIBUJADO, no sobre el archivo: lo que no puede volver a
+  /// pasar es que el técnico vea dos entradas.
+  group('9. El material no está en dos lugares', () {
+    //  UN PASO SOLO EXISTE SI ALGO LO REFERENCIA. `pasosDeEjecucion` descarta
+    //  el paso que no tiene ningún campo ni ninguna foto con `paso: <id>`, y
+    //  sin pasos la pantalla no dibuja la vista donde vivía el botón de más.
+    //  La primera versión de esta prueba no los enganchaba: pasaba en verde
+    //  con el botón viejo puesto, medido con la mutación.
+    FuenteDeEjecucionFalsa conPasosYFotos() => FuenteDeEjecucionFalsa(
+          pasos: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'p1',
+              'titulo': 'Diagnóstico',
+              'descripcion': 'Medí la potencia al llegar.',
+            },
+          ],
+          campos: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'potencia_rx',
+              'titulo': 'Potencia óptica al llegar',
+              'tipo': 'decimal',
+              'unidad': 'dBm',
+              'paso': 'p1',
+            },
+          ],
+          requisitos: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'foto_ont',
+              'titulo': 'Foto de la ONT',
+              'tipo': 'foto',
+              'paso': 'p1',
+            },
+          ],
+        );
+
+    testWidgets('una sola entrada para registrar material', (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(conPasosYFotos()));
+      await t.pumpAndSettle();
+
+      //  EL CONTROL, PRIMERO: si el paso no se dibuja, lo de abajo no mide
+      //  nada --el botón viejo tampoco estaría--. Es lo que pasó en la
+      //  primera versión de esta prueba, y lo descubrió la mutación.
+      expect(find.text('Diagnóstico'), findsWidgets);
+      expect(find.text('Foto de la ONT'), findsWidgets);
+
+      //  EL DEFECTO: este botón vivía dentro del paso, debajo de las fotos,
+      //  además del bloque de abajo.
+      expect(find.text('Registrar material usado'), findsNothing);
+
+      //  Y la que queda es la que además muestra lo registrado.
+      expect(find.text('Materiales en esta orden'), findsOneWidget);
+      expect(find.text('Agregar material'), findsOneWidget);
+    });
+
+    testWidgets('el bloque que queda dice qué llevás registrado',
+        (WidgetTester t) async {
+      pantallaAlta(t);
+      await t.pumpWidget(app(conPasosYFotos()));
+      await t.pumpAndSettle();
+
+      //  Sin material todavía, lo dice en vez de quedarse mudo: un bloque
+      //  vacío y sin explicación se lee como algo que no cargó.
+      expect(
+        find.text('Todavía no registraste material en este trabajo.'),
+        findsOneWidget,
+      );
+      expect(find.text('Se descuenta de tu kit y sube cuando haya señal'),
+          findsOneWidget);
+    });
+  });
 }
