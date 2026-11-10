@@ -41,6 +41,7 @@ descripcion de la herramienta en el YAML del tenant.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
 
 import requests
@@ -87,6 +88,65 @@ def _a_fecha(valor):
     return None
 
 
+#: Cuanto vale la foto de un puerto. En una caida masiva escriben a la vez los
+#: clientes del MISMO puerto, y cada conversacion preguntaba lo mismo: con un
+#: minuto, un puerto caido cuesta una llamada por minuto y no una por cliente.
+SEGUNDOS_CACHE_PUERTO = 60
+#: El maximo documentado de 'page_size' (1-100). Medido el 10/11/2026: un 200
+#: no da error, se recorta a 100 sin avisar.
+PAGINA = 100
+#: Un puerto GPON tiene hasta 128 equipos: dos paginas. Tres dan margen sin
+#: convertir un puerto raro en un barrido.
+PAGINAS_MAXIMAS = 3
+
+_cache_puerto: dict = {}
+
+
+def _onus_del_puerto(base_url, headers, olt_id, board, port):
+    """
+    Las ONUs de UN puerto, con solo estado, serial y hora del ultimo cambio.
+    None si no se pudo leer.
+
+    HASTA EL 10/11/2026 bajaba el inventario ENTERO sin paginar (~11,7 MB, con
+    nombre, direccion y contacto de toda la base) y filtraba aca. Ese export
+    tiene un cupo propio de 15 por hora que BLOQUEA al pasarse (documentado por
+    SmartOLT), y esta herramienta se llama desde cada conversacion cuyo puerto
+    esta caido: en una caida masiva, la llamada 16 de la hora dejaba sin dato
+    a todos justo cuando mas hacia falta. Ahora pide solo el puerto, paginado
+    (no consume ese cupo) y con 'fields' (sin datos de nadie), y lo guarda un
+    minuto.
+    """
+    clave = (base_url, str(olt_id), str(board), str(port))
+    ahora = time.monotonic()
+    guardado = _cache_puerto.get(clave)
+    if guardado and ahora - guardado[0] < SEGUNDOS_CACHE_PUERTO:
+        return guardado[1]
+
+    filas: list = []
+    pagina, paginas = 1, 1
+    try:
+        while pagina <= min(paginas, PAGINAS_MAXIMAS):
+            r = requests.get(
+                f"{base_url}/api/onu/get_all_onus_details", headers=headers,
+                timeout=TIMEOUT_SEGUNDOS,
+                params={"olt_id": olt_id, "board": board, "port": port,
+                        "fields": "status,last_status_change,sn",
+                        "page": pagina, "page_size": PAGINA})
+            r.raise_for_status()
+            cuerpo = r.json() or {}
+            filas.extend(o for o in (cuerpo.get("onus") or []) if isinstance(o, dict))
+            try:
+                paginas = int(cuerpo.get("total_pages") or 1)
+            except (TypeError, ValueError):
+                paginas = 1
+            pagina += 1
+    except Exception as e:
+        registrar("incidentes", "no se pudo correlacionar por tiempo", error=e)
+        return None
+    _cache_puerto[clave] = (ahora, filas)
+    return filas
+
+
 def _caidas_simultaneas(base_url, headers, olt_id, board, port, sn_onu):
     """
     Cuantas ONUs del MISMO puerto se cayeron junto con esta, y desde cuando.
@@ -105,19 +165,9 @@ def _caidas_simultaneas(base_url, headers, olt_id, board, port, sn_onu):
     Devuelve (cuantos, desde) o (0, None) si no se pudo saber. Nunca lanza:
     esto ENRIQUECE el veredicto de SmartOLT, no lo reemplaza.
     """
-    try:
-        r = requests.get(f"{base_url}/api/onu/get_all_onus_details",
-                         headers=headers, timeout=TIMEOUT_SEGUNDOS * 4)
-        r.raise_for_status()
-        onus = r.json().get("onus") or []
-    except Exception as e:
-        registrar("incidentes", "no se pudo correlacionar por tiempo", error=e)
+    del_puerto = _onus_del_puerto(base_url, headers, olt_id, board, port)
+    if del_puerto is None:
         return 0, None
-
-    del_puerto = [o for o in onus
-                  if str(o.get("olt_id")) == str(olt_id)
-                  and str(o.get("board")) == str(board)
-                  and str(o.get("port")) == str(port)]
     caidas = [(o, _a_fecha(o.get("last_status_change"))) for o in del_puerto
               if (o.get("status") or "") != "Online"]
     caidas = [(o, f) for o, f in caidas if f is not None]
@@ -162,7 +212,9 @@ def detectar(herramienta, argumentos: dict, tenant: str | None = None,
         return r
 
     r = _detalle_de(sn_onu)
-    if not r.ok:
+    # Solo ante un rechazo del identificador (10/11/2026): un 429 o un 5xx no
+    # dicen que el serial este mal, y el reintento tapaba el error real.
+    if ejecutor_http.es_rechazo_de_identificador(r.status_code):
         # Mismo reintento que ejecutor_http.ejecutar(): 68 de 4.966 ONUs de
         # Rapilink solo responden con el serial en su forma hexadecimal
         # (verificado en vivo, agosto 2026) -- sin esto, esos clientes
@@ -172,6 +224,8 @@ def detectar(herramienta, argumentos: dict, tenant: str | None = None,
         alternativo = ejecutor_http._gpon_hex(sn_onu)
         if alternativo and alternativo != sn_onu:
             r = _detalle_de(alternativo)
+    if r.status_code == 429:
+        raise ejecutor_http.LimiteDelProveedor(r)
     r.raise_for_status()
     # get_onu_details envuelve todo bajo 'onu_details' -- verificado en vivo
     # (18/08/2026), no es un objeto plano como get_onu_status/get_onu_signal.
@@ -189,6 +243,8 @@ def detectar(herramienta, argumentos: dict, tenant: str | None = None,
 
     r2 = requests.get(f"{base_url}/api/system/get_outage_pons/{olt_id}",
                       headers=headers, timeout=TIMEOUT_SEGUNDOS)
+    if r2.status_code == 429:
+        raise ejecutor_http.LimiteDelProveedor(r2)
     r2.raise_for_status()
     datos = r2.json().get("response", {})
 

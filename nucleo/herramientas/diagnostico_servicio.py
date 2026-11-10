@@ -221,7 +221,7 @@ def _vecinos_en_los(base_url: str, headers: dict, serial: str) -> dict:
                 params={"olt_id": olt, "board": placa, "port": puerto,
                         "status": "los",
                         "fields": "status,last_status_change,sn",
-                        "page": pagina, "page_size": 200})
+                        "page": pagina, "page_size": 100})   # maximo documentado; 200 se recorta
             r.raise_for_status()
             cuerpo = r.json() or {}
             filas.extend(cuerpo.get("onus") or [])

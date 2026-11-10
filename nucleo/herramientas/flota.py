@@ -183,6 +183,13 @@ def caidas_por_pon(herramienta, argumentos: dict, tenant: str | None = None,
     #  2. Las caidas de cada una. Si una falla, falla todo.
     secciones: list[dict] = []
     consultadas = 0
+    #  LO QUE SMARTOLT NO PUDO VER (10/11/2026). 'get_outage_pons' trae, ademas
+    #  de las secciones, las OLTs que no pudo alcanzar y los PONs cuyos datos
+    #  estan viejos (verificado en vivo ese dia: las dos claves vienen siempre).
+    #  Se descartaban, y una OLT sin energia se leia como "sin caidas". Se
+    #  juntan las de toda la flota y viajan al Supervisor.
+    inalcanzables: list = []
+    pons_viejos = 0
     for olt in olts:
         olt_id = _id_de(olt)
         if olt_id is None:
@@ -191,6 +198,13 @@ def caidas_por_pon(herramienta, argumentos: dict, tenant: str | None = None,
                 "con un id inventado")
         crudo = _pedir(f"{base_url}/api/system/get_outage_pons/{olt_id}",
                        headers, f"get_outage_pons/{olt_id}")
+        respuesta = crudo.get("response") if isinstance(crudo, dict) else None
+        if isinstance(respuesta, dict):
+            inalcanzables.extend(respuesta.get("unreachable_olts") or [])
+            viejos = respuesta.get("stale")
+            viejos = viejos.get("pon_count") if isinstance(viejos, dict) else None
+            if isinstance(viejos, int) and not isinstance(viejos, bool):
+                pons_viejos += viejos
         for seccion in _secciones_de(crudo):
             #  EL OLT VA DENTRO DE CADA PON, y esto no es un detalle de
             #  estilo: 'operaciones/fuentes_adaptadores.py::_resumir_pons'
@@ -227,5 +241,7 @@ def caidas_por_pon(herramienta, argumentos: dict, tenant: str | None = None,
 
     registrar("flota", "caidas por PON leidas de la flota",
               olts=consultadas, secciones=len(secciones))
-    return {"response": {"sections": secciones},
+    return {"response": {"sections": secciones,
+                         "unreachable_olts": inalcanzables,
+                         "stale": {"pon_count": pons_viejos}},
             "olts_consultadas": consultadas}

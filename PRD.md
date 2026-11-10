@@ -1025,6 +1025,25 @@ lo diría sin cambiar nada más.
 
 **Lo que la reabre:** que el dueño del producto decida otra cosa. Ninguna sesión la reabre por su cuenta; una medición que muestre daño (recontacto o satisfacción que empeoran con una acción autónoma) se corrige devolviendo **esa acción** a aprobación, no reinstalando la persona en todo.
 
+### 8.19 DECISIÓN — la integración con SmartOLT, revisada contra su API de octubre 2026 (10/11/2026)
+
+**Qué lo originó:** SmartOLT reescribió su documentación («Updated October 2026»: eventos en tiempo real, acciones asíncronas, historial de estado, búsqueda por MAC, cupos nuevos). Se revisó la integración en tres pasadas —el contrato documentado, el mapa de cada llamada del código, y una revisión en contra de las propuestas— y se midió en vivo lo que decidía algo (`cli/medir_smartolt_octubre.py`, solo lectura; resultados en la skill `smartolt-api`). La revisión encontró que lo más urgente no eran las funciones nuevas sino defectos de hoy.
+
+**Lo que se corrigió:**
+- **Una verificación solo se cerraba si el cliente volvía a escribir.** Si el reinicio andaba y el cliente no contestaba —el caso feliz—, la conversación no se cerraba nunca y la herramienta perdía la autonomía ganada (3 sin resolver de más de una hora). Ahora el reloj del motor las mide a los 15 minutos del plazo con la sesión guardada (`nucleo/seguimiento/verificaciones_vencidas.py`): confirmada, la conversación puede cerrarse; sin efecto, pasa a una persona y la herramienta pierde la autonomía.
+- **`activar_catv` y `cambiar_tipo_onu` daban la acción por hecha con un HTTP 200.** La documentación nueva dice que `enable_catv` puede quedar en cola (`queued: true`). Ahora releen `catv` después (configuración, `verificacion:`), y con eso **pueden ganar autonomía**, que antes era imposible (`efecto_no_verificable`). El prompt de soporte dejaba de contradecir a la herramienta: decía «cuéntale que ya quedó activado».
+- **En una caída masiva se podía agotar el acceso a SmartOLT.** `consultar_incidente_red` bajaba el inventario entero (11,7 MB, con datos de toda la base) en cada conversación del puerto caído, y ese export tiene un cupo propio de 15 por hora que bloquea. Ahora pide solo el puerto, paginado y sin datos de clientes, con un minuto de memoria: un puerto caído cuesta una consulta por minuto, no una por cliente. El inventario por nombre pasó de cada 5 minutos a cada hora, y la prueba de conexión de Ajustes dejó de usar el export.
+- **El reintento con el serial hexadecimal corría ante cualquier error**, también en escrituras, y su 400 tapaba el error real (un 5xx que pudo haber reiniciado el equipo quedaba como un 400 permanente). Ahora solo ante un rechazo del identificador. Un 429 es su propio error: el agente no reintenta en el turno y la auditoría lo cuenta aparte (`LIMITE_DEL_PROVEEDOR`).
+- **Una OLT inalcanzable se leía como «sin caídas»**: la herramienta de flota descartaba `unreachable_olts` y `stale`, y la detección salteaba la marca. Ahora una OLT inalcanzable abre una situación con riesgo alto en el Supervisor.
+- **La estabilidad del enlace** pasó al historial de estado (0,3 s contra ~10 s; antes contaba la ventana desde la última caída y no desde ahora, solo veía 10 eventos y fallaba con las ONUs de serial hexadecimal). Si SmartOLT no tiene datos de la mitad de la ventana, no afirma «estable».
+- Los sondeos del Supervisor llevan una demora al azar (pedido del proveedor) y las páginas piden 100, el máximo (200 se recortaba sin avisar).
+
+**Lo que se agregó:** `--buscar-mac` en `cli/proponer_sn_onu.py`: la OLT dice detrás de qué ONU vio la MAC que WispHub tiene del cliente. Es una tercera señal para los clientes sin serial: confirma o desmiente lo propuesto y propone para revisión; la escritura sigue siendo de una persona.
+
+**Lo que se decidió no hacer, con su número:** la detección de ONUs suspendidas (medido: 2 en toda la red) y la alerta de batería de la OLT (una de las dos OLT no reporta tensión). Las acciones masivas asíncronas: Dexter actúa de a un cliente.
+
+**Lo que queda para después, con lo que hace falta:** el receptor de eventos (webhook) para enterarse de una caída sin sondear. Se verificó que la clave de Rapilink sirve para eventos. Va en el motor, al lado del webhook de WhatsApp, empezando por `pon.*` y `olt.*` (que no traen datos de clientes), guardando el evento antes de responder y con el sondeo como respaldo. Es un objetivo propio.
+
 ---
 
 ## 9. Despliegue

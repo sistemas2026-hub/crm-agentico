@@ -385,6 +385,53 @@ def mac_del_equipo(sn_onu: str) -> str:
     return cola_hex(json.dumps(partes, ensure_ascii=False))
 
 
+#: search_by_mac (10/11/2026): la OLT dice detras de que ONU aprendio una MAC.
+#: Limites documentados POR CUENTA: con olt_id, 1 cada 10 s y 100 por hora.
+SEGUNDOS_ENTRE_BUSQUEDAS_MAC = 11
+MAXIMO_BUSQUEDAS_MAC_POR_CORRIDA = 90
+
+
+def buscar_onu_por_mac(mac_cpe: str) -> tuple[str, str]:
+    """
+    (serial, como) de la ONU detras de la cual la OLT aprendio esta MAC.
+
+    Verificado en vivo el 10/11/2026: con la 'mac_cpe' de WispHub de un
+    cliente con serial conocido devolvio UNA coincidencia, su ONU, en 3,6 s; con
+    una MAC imposible, cero y 'verified: true'. Es una consulta a la tabla de
+    la OLT, asi que SOLO ve equipos encendidos: un vacio con un equipo caido no
+    dice nada, y por eso 'como' distingue los casos.
+
+      ("SERIAL", "una")      una coincidencia, en alguna OLT
+      ("", "ninguna")        las OLTs contestaron y nadie tiene esa MAC
+      ("", "varias")         mas de una ONU: no se elige
+      ("", "sin_respuesta")  alguna OLT no contesto, o la consulta fallo
+    """
+    if len(cola_hex(mac_cpe)) < 12:
+        return "", "sin_mac"
+    for olt_id in OLT_IDS:
+        try:
+            r = requests.get(f"{SMARTOLT_BASE_URL}/api/onu/search_by_mac", headers=SMARTOLT_HEADERS,
+                             params={"mac_address": mac_cpe, "olt_id": olt_id}, timeout=120)
+        except requests.RequestException:
+            return "", "sin_respuesta"
+        if r.status_code == 429:
+            espera = int(r.headers.get("Retry-After") or 60)
+            print(f"    [search_by_mac] el proveedor pidio esperar {espera} s")
+            time.sleep(min(espera, 900))
+            return "", "sin_respuesta"
+        cuerpo = r.json() if r.ok else {}
+        time.sleep(SEGUNDOS_ENTRE_BUSQUEDAS_MAC)
+        if not cuerpo.get("verified"):
+            return "", "sin_respuesta"
+        coincidencias = [m for m in (cuerpo.get("matches") or []) if isinstance(m, dict)]
+        if len(coincidencias) > 1:
+            return "", "varias"
+        if coincidencias:
+            m = coincidencias[0]
+            return str(m.get("sn") or m.get("onu_external_id") or "").upper(), "una"
+    return "", "ninguna"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--csv", help="Si se pasa, ademas guarda el reporte en este archivo CSV")
@@ -401,6 +448,15 @@ def main() -> None:
                         "MAC. No sirve para blindar la carga entera, solo para "
                         "confirmar una parte. Apagado por defecto: tarda horas y el "
                         "proveedor pide no usar ese endpoint en bulk.")
+    ap.add_argument("--buscar-mac", action="store_true",
+                    help="Pregunta a la OLT detras de que ONU vio la mac_cpe de cada "
+                         "cliente (search_by_mac, nuevo en octubre 2026). Tercera "
+                         "señal: confirma o desmiente lo propuesto, y propone para "
+                         "REVISION a quien no tenia candidato. Lento a proposito "
+                         "(1 cada 10 s, hasta 90 por corrida: el cupo es de 100 por "
+                         "hora para toda la cuenta). Solo ve equipos encendidos.")
+    ap.add_argument("--buscar-mac-max", type=int, default=MAXIMO_BUSQUEDAS_MAC_POR_CORRIDA,
+                    help="Cuantas busquedas por MAC hacer como mucho en esta corrida.")
     ap.add_argument("--verificar-ip", action="store_true",
                     help="Cruza la IP de WispHub contra get_onu_full_status_info "
                          "para cada candidato -- mas lento (~10s por candidato), "
@@ -831,6 +887,42 @@ def main() -> None:
              f"{desmentidos}, sin respuesta {mudos}")
         print()
 
+    # --- la OLT dice de quien es la MAC, solo si se pidio (10/11/2026) -----
+    # Una TERCERA señal, independiente del nombre y de la heuristica del
+    # desfase: la tabla de la OLT. No reemplaza a las otras y no escribe: lo
+    # que propone sola queda en un nivel propio, para que lo mire una persona
+    # (aplicar_sn_onu.py solo escribe 'alta_confianza').
+    if args.buscar_mac:
+        con_mac = [i for i, f in enumerate(filas)
+                   if len(cola_hex(por_id.get(f[0], {}).get("mac_cpe") or "")) >= 12]
+        tope = max(0, min(args.buscar_mac_max, MAXIMO_BUSQUEDAS_MAC_POR_CORRIDA))
+        con_mac = con_mac[:tope]
+        print(f"[buscar-mac] {len(con_mac)} clientes con MAC en WispHub (tope "
+              f"{tope} por corrida, ~{len(con_mac) * 25 // 60} min)")
+        resumen_mac: dict[str, int] = {}
+        for n, i in enumerate(con_mac, 1):
+            id_servicio, nombre_wh, sn, nombre_so, nivel, motivo = filas[i]
+            encontrado, como = buscar_onu_por_mac(por_id[id_servicio]["mac_cpe"])
+            if como == "una" and encontrado in seriales_ya_usados and not args.validar:
+                como = "de_otro_cliente"
+            resumen_mac[como] = resumen_mac.get(como, 0) + 1
+            propuesto = sn.upper() if sn and "," not in sn else ""
+            if como == "una" and propuesto == encontrado:
+                filas[i] = (id_servicio, nombre_wh, sn, nombre_so, "alta_confianza",
+                            "CONFIRMADO por la OLT: vio la MAC de WispHub detras de esta ONU")
+            elif como == "una" and propuesto:
+                filas[i] = (id_servicio, nombre_wh, sn, nombre_so, "ambiguo",
+                            f"DESMENTIDO por la OLT: la MAC de WispHub esta detras de "
+                            f"{encontrado}, no de este candidato")
+            elif como == "una":
+                filas[i] = (id_servicio, nombre_wh, encontrado, nombre_so, "por_mac_olt",
+                            "la OLT vio la MAC de WispHub detras de esta ONU (sin otra "
+                            "señal que lo corrobore: revisar)")
+            if n % 10 == 0:
+                print(f"    {n}/{len(con_mac)}...")
+        print(f"[buscar-mac] {resumen_mac}")
+        print()
+
     if args.validar:
         print("=" * 72)
         print("  VALIDACION -- cada propuesta contra el serial real")
@@ -844,7 +936,7 @@ def main() -> None:
             d[1] += propuso
             d[2] += acierto
         print(f"{'nivel':<18}{'casos':>8}{'propone':>10}{'acierta':>10}{'precision':>12}")
-        for nivel in ("alta_confianza", "solo_mac", "revisar_mac", "revisar_typo",
+        for nivel in ("alta_confianza", "por_mac_olt", "solo_mac", "revisar_mac", "revisar_typo",
                      "ambiguo", "sin_candidato"):
             if nivel not in por_nivel:
                 continue
@@ -862,7 +954,7 @@ def main() -> None:
     # orden del reporte. 'confirmado_ip' primero porque se comprobo contra el
     # equipo; 'solo_mac' abajo de 'alta_confianza' porque la MAC sola acierta
     # 7 de cada 10 (ver candidatos_por_mac).
-    _NIVELES = ("confirmado_ip", "alta_confianza", "solo_mac", "revisar_typo",
+    _NIVELES = ("confirmado_ip", "alta_confianza", "por_mac_olt", "solo_mac", "revisar_typo",
                "revisar_mac", "revisar_ip_no_coincide", "revisar_tokens",
                "ambiguo", "sin_candidato")
 

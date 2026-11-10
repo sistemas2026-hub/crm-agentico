@@ -188,6 +188,46 @@ def desde_smartolt(snapshot, ahora) -> list[Senal]:
     datos = snapshot.datos if isinstance(snapshot.datos, dict) else {}
     senales: list[Senal] = []
 
+    #  LO QUE SMARTOLT NO PUDO VER (10/11/2026). Las dos marcas ya existian en
+    #  el resumen, pero el bucle de abajo las salteaba por empezar con '_': una
+    #  OLT inalcanzable --sin energia, sin enlace de gestion-- se leia como "sin
+    #  caidas". Ahora son señales.
+    inalcanzables = datos.get("_olts_inalcanzables")
+    if isinstance(inalcanzables, dict) and inalcanzables.get("cuantas"):
+        n = inalcanzables["cuantas"]
+        #  Una situacion propia y no una nota: es la parte de la red que no se
+        #  ve, y tiene que verla alguien. Topologia 'olt' para que abra.
+        senales.append(Senal(
+            fuente=Fuente.SMARTOLT,
+            tipo_situacion=SituacionOperativa.OTRA,
+            dimension="olt", clave_dimension="inalcanzable",
+            hecho=f"SmartOLT no alcanza {n} OLT(s)",
+            interpretacion=("esa parte de la red no se puede ver: que no muestre "
+                            "caidas no prueba que este sana. Suele ser falta de "
+                            "energia en el nodo o del enlace de gestion"),
+            riesgo=Riesgo.ALTO,
+            recomendacion="verificar energia y enlace de gestion de la OLT",
+            evidencia=[_observacion(Fuente.SMARTOLT, f"{n} OLT(s) inalcanzables",
+                                    snapshot.capturado_en)],
+            observada_en=snapshot.dato_en or snapshot.capturado_en))
+    viejos = datos.get("_pons_sin_datos_frescos")
+    if isinstance(viejos, dict) and viejos.get("cuantos"):
+        #  Esto si es una nota, como la lectura inconclusa: no describe una
+        #  falla, describe que el dato de esos PONs no es de ahora.
+        senales.append(Senal(
+            fuente=Fuente.SMARTOLT,
+            tipo_situacion=SituacionOperativa.OTRA,
+            dimension="fuente", clave_dimension=Fuente.SMARTOLT,
+            hecho=f"SmartOLT tiene datos viejos de {viejos['cuantos']} PON(s)",
+            interpretacion=("lo que diga de esos PONs puede no ser de ahora: un "
+                            "vacio ahi no prueba que esten sanos"),
+            riesgo=Riesgo.INFORMATIVO,
+            recomendacion="volver a consultar en el proximo ciclo",
+            evidencia=[_observacion(Fuente.SMARTOLT, "PONs con datos viejos",
+                                    snapshot.capturado_en)],
+            observada_en=snapshot.dato_en or snapshot.capturado_en,
+            concluyente=False))
+
     for clave, fila in sorted(datos.items()):
         #  Las claves que empiezan con '_' son metadatos del resumen, no PONs.
         if clave.startswith("_") or not isinstance(fila, dict):

@@ -903,6 +903,35 @@ Clasificación: `Very good`, `Warning`, `Critical`, `-`.
 cantidad de puertos, **no dice la banda**: que un tipo sea de una sola banda
 es un dato de la empresa (ver SPEC/objetivos/supervisor-aplica-las-correcciones.md).
 
+## La API cambió en octubre 2026 — lo que se midió el 10/11/2026
+
+La documentación se reescribió ("Updated October 2026": eventos en tiempo real,
+`async=1`, bulk de hasta 10.000, historial de estado, MACs). El OpenAPI pasó a
+**131 rutas** más un `x-webhooks`. Se midió con `cli/medir_smartolt_octubre.py`
+(solo GET, 13 llamadas, la clave sale del entorno y no se imprime):
+
+| Qué | Resultado medido |
+|---|---|
+| Cupo | `X-RateLimit-Limit: 1000`, quedaban 866 al empezar (producción ya había gastado 134 en la hora) |
+| `page_size=200` | **HTTP 200 y se recorta a 100 sin avisar** (`page_size` devuelto = 100). El máximo documentado es 1–100 |
+| `get_outage_pons` | Trae siempre `sections`, `stale`, `total_pons`, `unreachable_olts`. Aparece `alert_kind: "full_outage"` **dentro de la sección `partial_los`**: el tipo que usa el aviso sale de la sección, no del `alert_kind` |
+| `get_event_stream?events=pon.outage_started` | **HTTP 200 con `url` y `expires_in: 900`**: la clave de Rapilink sirve para eventos (la doc dice que solo las "client API keys" pueden). La URL lleva un token: no se loguea |
+| `administrative_status=disabled` | 2 ONUs en la OLT 3, 0 en la 4. Filtra sin `Deprecation`. `get_onu_details` trae `administrative_status` |
+| `get_olts_uptime_and_env_temperature` | OLT 3: `power_state` y `voltage` en `null` (no reporta); OLT 4: `normal`, 53,22 V |
+| `search_by_mac` | Con la `mac_cpe` de WispHub (formato `aa:bb:cc:dd:ee:ff`) de un cliente con serial: **1 coincidencia, su ONU, 3,6 s**. MAC imposible: 0 coincidencias, `verified: true`. Precisión sobre 10 clientes con serial conocido, de cinco tramos distintos de la base: **10 de 10 la ONU correcta**. Solo ve equipos encendidos (busca en la tabla de la OLT). Ese día faltaba el serial en **392 de 4.199** activos (no los 1.299 de agosto) |
+| `get_onu_status_history` | 0,3 s, `timezone` en la respuesta. Períodos: `{status, from, to, seconds, cause}` con `status` en `online, offline, power_fail, los` (visto el 10/11) y `cause` `null`. **Una ONU en LOS dio 400 con la forma corta del serial y 200 con la hexadecimal** |
+
+Lo que la doc dice y NO se midió todavía (hipótesis): que `enable_catv` sin
+`async` puede devolver `queued: true` (aceptada, no hecha) y 409 `onu_busy`;
+que `get_all_onus_details` sin paginar tiene un cupo propio de **15 por hora
+que bloquea**; que más de 15 llamadas por segundo bloquea **todas** 10 s; el
+formato del 429 (`violation_type`, `retry_after`, `Retry-After`); que los
+eventos `onu.*` traen `name`, `address` y `contact` sin forma de excluirlos
+(los `pon.*` y `olt.*` no); el webhook (Standard Webhooks, secreto `whsec_`,
+reintentos hasta 5 días y después se apaga).
+
+Lo que cambió en Dexter por esto: ver PRD §8.19.
+
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 
 - Si hay dirección/contacto poblados en algún registro real (el que se leyó

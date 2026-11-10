@@ -4,31 +4,26 @@
  GUARDA DEL RESUMEN DE ESTABILIDAD DEL ENLACE
 ================================================================================
 
-Por que existe
---------------
 El caso que esta herramienta atiende es el mas facil de dar por bueno sin
 serlo: el cliente dice "a veces anda mal", el agente mide y todo da perfecto
--- porque midio justo cuando estaba andando. La unica evidencia esta en el
-historial de caidas, y contarlo es aritmetica: cuantos eventos entran en la
-ventana, cual causa domina, si eso alcanza para llamarlo inestable. Eso es
-codigo (PRD 12.5), y el codigo necesita guarda.
+-- porque midio justo cuando estaba andando. La evidencia esta en el historial,
+y contarlo es codigo (PRD 12.5).
 
-Lo que se protege aca, en orden de importancia:
+Desde el 10/11/2026 el historial sale de get_onu_status_history. Lo que se
+protege aca, en orden de importancia:
 
-  - Que una ausencia de datos NUNCA se lea como "el enlace esta estable". Es
-    el mismo error que ya costo caro con "no pude ver los dispositivos" vs
-    "no hay nadie conectado".
-  - Que el historial se parsee en LAS DOS formas en que el proveedor lo
-    manda (diccionario indexado por numero, o lista). Asumir una sola es
-    como se rompen estas integraciones en silencio.
-  - Que la ventana excluya de verdad lo viejo: un puerto acumula equipos que
-    se cayeron hace meses, y contarlos hincha el numero hasta volverlo inutil.
+  - Que una ausencia de datos NUNCA se lea como "estable": si SmartOLT no sabe
+    que paso en buena parte de la ventana, se dice eso (la trampa del
+    'online_percent' de 99,99 % con 21 dias sin datos, 13/10/2026).
+  - Que un equipo caido todo el dia no salga como "sin caidas".
+  - Que una caida sea pasar de online a caido: LOS y despues offline son UNA.
+  - Que un reinicio de la OLT no cuente como caida del cliente.
+  - Que la forma hexadecimal del serial se pruebe solo ante un rechazo del
+    identificador, y un 429 salga como su propio error.
 
-No hace falta red: se prueban las funciones de conteo con historiales
-armados a mano.
+Sin red: la parte pura con historiales armados con la forma medida en vivo, y
+el despacho con `requests.get` sustituido.
 
-Uso
----
     py -3.13 tests/test_estabilidad.py
 ================================================================================
 """
@@ -37,11 +32,14 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nucleo.herramientas.estabilidad import (  # noqa: E402
-    CAIDAS_PARA_INESTABLE, VENTANA_HORAS, _a_fecha, _eventos)
+from nucleo.herramientas import estabilidad                   # noqa: E402
+from nucleo.herramientas import http as ejecutor_http         # noqa: E402
+from nucleo.herramientas.estabilidad import (                 # noqa: E402
+    CAIDAS_PARA_INESTABLE, VENTANA_HORAS, resumir_historial)
 
 fallos: list[str] = []
 
@@ -52,45 +50,110 @@ def comprobar(condicion, descripcion):
         fallos.append(descripcion)
 
 
-print("\nformas en que llega el historial")
-como_dict = {"10": {"Cause": "ONT Re-register", "Offline at": "2026-08-21 14:13:32-05:00"},
-             "09": {"Cause": "ONT LOSi/LOBi alarm", "Offline at": "2026-08-21 13:28:24-05:00"}}
-como_lista = list(como_dict.values())
-comprobar(len(_eventos(como_dict)) == 2, "diccionario indexado por numero: se leen los dos")
-comprobar(len(_eventos(como_lista)) == 2, "lista: se leen los dos")
-comprobar(_eventos(None) == [] and _eventos("texto") == [],
-          "una forma inesperada no revienta, devuelve vacio")
+DIA = 24 * 3600
 
-# El orden importa: el dict viene con '10' primero en el JSON del proveedor,
-# pero ordenado por clave el mas viejo queda primero y el mas reciente ultimo,
-# que es de donde sale 'ultima_caida'.
-comprobar(_eventos(como_dict)[-1]["Cause"] == "ONT Re-register",
-          "el mas reciente queda ultimo (de ahi sale 'ultima_caida')")
 
-print("\nfechas")
-comprobar(_a_fecha("2026-08-21 14:13:33-05:00") is not None, "el formato real se parsea")
-for basura in (None, "", "   ", "ayer", 12345):
-    comprobar(_a_fecha(basura) is None, f"no se inventa una fecha con {basura!r}")
+def historial(periodos, conocidos=DIA):
+    """La forma medida el 10/11/2026 (claves de un periodo: cause, from,
+    seconds, status, to)."""
+    return {"status": True, "detail": "transitions", "timezone": "America/Bogota",
+            "periods": [{"status": s, "from": f"2026-11-09 {h}", "to": "x", "seconds": 60,
+                         "cause": c} for s, h, c in periodos],
+            "summary": {"known_seconds": conocidos, "online_percent": 99.9,
+                        "interruptions": 0, "seconds": {}}}
 
-print("\nlos umbrales estan declarados y son conservadores")
+
+print("\nlo que se cuenta")
+r = resumir_historial(historial([
+    ("online", "08:00:00", None), ("los", "09:00:00", None), ("online", "09:10:00", None),
+    ("los", "10:00:00", None), ("offline", "10:05:00", None), ("online", "10:30:00", None),
+    ("power_fail", "12:00:00", None), ("online", "12:20:00", None),
+    ("los", "15:00:00", None), ("online", "15:05:00", None)]))
+comprobar(r["caidas_en_ventana"] == 4, f"cuatro caidas: LOS y despues offline son UNA ({r})")
+comprobar(r["enlace_inestable"] is True, "con 3 o mas, inestable")
+comprobar(r["causa_dominante"] == estabilidad.CAUSAS["los"] and r["veces_la_causa_dominante"] == 3,
+          "la causa dominante se nombra legible: perdida de señal, 3 veces")
+comprobar(r["ultima_caida"] == "2026-11-09 15:00:00 (America/Bogota)",
+          "la ultima caida va con la zona que declara la respuesta")
+
+r = resumir_historial(historial([
+    ("online", "08:00:00", None), ("offline", "09:00:00", "olt_reboot"), ("online", "09:05:00", None)]))
+comprobar(r["caidas_en_ventana"] == 0, "un reinicio de la OLT no es una caida del cliente")
+
+r = resumir_historial(historial([("online", "08:00:00", None), ("power_fail", "09:00:00", None),
+                                 ("online", "09:30:00", None)]))
+comprobar(r["enlace_inestable"] is False and r["caidas_en_ventana"] == 1,
+          "una sola caida no es inestable (puede ser un corte de luz)")
+
+print("\nla ausencia de datos no se lee como estable")
+r = resumir_historial(historial([("online", "08:00:00", None)], conocidos=DIA * 0.3))
+comprobar(r["enlace_inestable"] is False and "no tiene datos" in r["motivo"]
+          and "caidas_en_ventana" not in r,
+          "con 30% de la ventana conocida: se dice que no hay datos, no 'cero caidas'")
+r = resumir_historial({"periods": [], "summary": {}})
+comprobar("no tiene datos" in r["motivo"], "una respuesta vacia tampoco afirma nada")
+r = resumir_historial(historial([("los", "00:00:00", None)]))
+comprobar(r["caidas_en_ventana"] == 0 and "caido desde antes" in r["motivo"],
+          "caido todo el dia: no sale como 'sin caidas', sale como caida que sigue")
+r = resumir_historial(historial([("online", "00:00:00", None)]))
+comprobar(r["motivo"] == "sin caidas registradas en la ventana", "sano todo el dia: sin caidas")
+
+print("\nlos umbrales")
 comprobar(VENTANA_HORAS == 24, "la ventana es de un dia")
-comprobar(CAIDAS_PARA_INESTABLE >= 3,
-          "hacen falta 3 o mas caidas: dos pueden ser un corte de luz y su vuelta")
+comprobar(CAIDAS_PARA_INESTABLE >= 3, "hacen falta 3 o mas caidas")
 
-print("\nlo medido en vivo el 21/08/2026 (ONU de prueba)")
-# Nueve caidas, ocho por perdida optica. Se rehace el conteo con el mismo
-# historial para fijar que el resultado sea ese y no otro.
-real = {}
-for i in range(1, 10):
-    real["%02d" % i] = {"Cause": "ONT LOSi/LOBi alarm",
-                        "Offline at": "2026-08-21 %02d:00:00-05:00" % (8 + i)}
-real["10"] = {"Cause": "ONT Re-register", "Offline at": "2026-08-21 17:26:10-05:00"}
-evs = _eventos(real)
-comprobar(len(evs) == 10, "los diez eventos se leen")
-opticas = sum(1 for e in evs if "LOSi" in e["Cause"])
-comprobar(opticas == 9, "se cuentan las alarmas opticas, no la causa mas reciente")
-comprobar(evs[-1]["Cause"] == "ONT Re-register",
-          "y el 're-register' mas reciente NO borra el patron de atras")
+print("\nel despacho: endpoint, forma hexadecimal y 429")
+pedidos: list[str] = []
+respuestas: list = []
+
+
+class Resp:
+    def __init__(self, codigo, cuerpo=None, cabeceras=None):
+        self.status_code, self._cuerpo, self.headers = codigo, cuerpo or {}, cabeceras or {}
+
+    def json(self):
+        return self._cuerpo
+
+
+def falso_get(url, headers=None, timeout=None, **kw):
+    pedidos.append(url.rsplit("/api/", 1)[-1])
+    return respuestas.pop(0)
+
+
+estabilidad.requests.get = falso_get
+herr = SimpleNamespace(nombre="consultar_estabilidad_enlace", base_url="https://olt.ejemplo.test",
+                       base_url_ref=None, auth_ref=None, auth_esquema="", auth_header="X-Token",
+                       reintentar_identificador_como={"sn_onu": "gpon_hex"})
+ejecutor_http.base_url_de = lambda h, v: "https://olt.ejemplo.test"
+ejecutor_http.headers_de = lambda h, t: {}
+
+respuestas[:] = [Resp(400), Resp(200, historial([("online", "00:00:00", None)]))]
+r = estabilidad.resumir(herr, {"sn_onu": "DC90E681213E"})
+comprobar(pedidos == ["onu/get_onu_status_history/DC90E681213E",
+                      "onu/get_onu_status_history/44433930E681213E"],
+          f"lee el historial, y ante un 400 prueba la forma hexadecimal ({pedidos})")
+comprobar(r["motivo"] == "sin caidas registradas en la ventana", "y resume lo que trajo")
+
+pedidos.clear()
+respuestas[:] = [Resp(503)]
+try:
+    estabilidad.resumir(herr, {"sn_onu": "DC90E681213E"})
+    comprobar(False, "un 503 no se disfraza de dato")
+except estabilidad.ErrorEstabilidad:
+    comprobar(pedidos == ["onu/get_onu_status_history/DC90E681213E"],
+              "un 503 es un error y NO reintenta con el otro serial")
+
+pedidos.clear()
+respuestas[:] = [Resp(429, cabeceras={"Retry-After": "120"})]
+try:
+    estabilidad.resumir(herr, {"sn_onu": "DC90E681213E"})
+    comprobar(False, "un 429 levanta")
+except ejecutor_http.LimiteDelProveedor as e:
+    comprobar(e.retry_after == "120" and len(pedidos) == 1,
+              "un 429 es su propio error, con el Retry-After, sin reintento")
+
+comprobar(estabilidad.resumir(herr, {})["motivo"].startswith("no hay una ONU"),
+          "sin serial no se consulta nada")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s):")

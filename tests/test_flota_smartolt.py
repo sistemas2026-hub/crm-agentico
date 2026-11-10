@@ -188,6 +188,27 @@ class CadenaDeFlota(unittest.TestCase):
         self.assertEqual(pons, [], "sin caidas = sin PONs, no sin secciones")
         self.assertEqual(salida["olts_consultadas"], 1)
 
+    def test_4b_lo_que_SmartOLT_no_pudo_ver_viaja_al_Supervisor(self):
+        """
+        10/11/2026: 'unreachable_olts' y 'stale' vienen en el sobre real
+        (verificado en vivo) y se descartaban: una OLT sin energia se leia como
+        "sin caidas". Se juntan los de toda la flota.
+        """
+        def sobre(inalcanzables, viejos):
+            s = _sobre_outage([])
+            s["response"]["unreachable_olts"] = inalcanzables
+            s["response"]["stale"] = {"pon_count": viejos, "subscribers": 0}
+            return s
+
+        with _Entorno([
+            ("get_olts", _Respuesta({"olts": [{"id": 3}, {"id": 7}]})),
+            ("get_outage_pons/3", _Respuesta(sobre(["9"], 2))),
+            ("get_outage_pons/7", _Respuesta(sobre([], 1))),
+        ]):
+            salida = flota.caidas_por_pon(_herramienta(), {})
+        self.assertEqual(salida["response"]["unreachable_olts"], ["9"])
+        self.assertEqual(salida["response"]["stale"], {"pon_count": 3})
+
     def test_5_una_OLT_que_no_contesta_invalida_la_lectura_COMPLETA(self):
         """
         El corazon del bloque: no se devuelve lo que trajeron las otras.

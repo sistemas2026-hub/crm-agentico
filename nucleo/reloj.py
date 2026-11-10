@@ -153,7 +153,7 @@ from nucleo.config import fuente
 from nucleo.observabilidad import alertas as alertas_operativas
 from nucleo.observabilidad.registro import registrar
 from nucleo.seguridad import interruptor
-from nucleo.seguimiento import importacion, importacion_io, operativo
+from nucleo.seguimiento import importacion, importacion_io, operativo, verificaciones_vencidas
 
 # Cuando se intento importar por ultima vez en cada tenant. Vive en memoria a
 # proposito: no es un checkpoint de "hasta donde llegue" -- eso no existe, la
@@ -493,6 +493,7 @@ def una_pasada(seco: bool = False) -> list[dict]:
             # daba el aviso.
             saltado = {"omitido": "autonomia detenida", "motivo": porque}
             r["vencimientos"] = dict(saltado)
+            r["verificaciones"] = dict(saltado)
             r["importacion"] = dict(saltado)
             r["alertas"] = dict(saltado)
             registrar("reloj", "trabajo omitido por el interruptor", tenant=tenant)
@@ -524,6 +525,19 @@ def una_pasada(seco: bool = False) -> list[dict]:
             registrar("reloj", "el cierre de inactivas de la IA fallo",
                       tenant=tenant, error=e)
 
+        # LAS VERIFICACIONES QUE EL CLIENTE NO VUELVE A ABRIR (10/11/2026).
+        # Antes solo se resolvian en el turno siguiente del cliente; si no
+        # volvia a escribir, la conversacion no se cerraba nunca y la
+        # herramienta perdia su autonomia. Ver verificaciones_vencidas.py.
+        # Va antes de la importacion: es barata y destraba los cierres.
+        try:
+            r["verificaciones"] = verificaciones_vencidas.barrer(
+                config, tenant, simular=seco)
+        except (Exception, SystemExit) as e:                     # noqa: BLE001
+            r["verificaciones"] = {"error": f"{type(e).__name__}: {e}"}
+            registrar("reloj", "las verificaciones vencidas fallaron",
+                      tenant=tenant, error=e)
+
         try:
             r["importacion"] = _importacion(config, tenant, seco, ahora)
         except (Exception, SystemExit) as e:                     # noqa: BLE001
@@ -550,6 +564,7 @@ def una_pasada(seco: bool = False) -> list[dict]:
                   credenciales=r.get("credenciales"),
                   vencimientos=_solo_contadores(r.get("vencimientos")),
                   inactivas_ia=_solo_contadores(r.get("inactivas_ia")),
+                  verificaciones=_solo_contadores(r.get("verificaciones")),
                   importacion=_solo_contadores(r.get("importacion")),
                   alertas=_solo_contadores(r.get("alertas")))
         salida.append(r)

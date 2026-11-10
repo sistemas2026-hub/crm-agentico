@@ -89,7 +89,9 @@ PERMITIDAS = {
     "nucleo/canales/api.py::_inventario_onu",
     "nucleo/herramientas/agregado.py::_contar",
     "nucleo/herramientas/estabilidad.py::resumir",
-    "nucleo/herramientas/incidentes.py::_caidas_simultaneas",
+    # Desde el 10/11/2026 la lectura del puerto vive en su propia funcion
+    # (paginada y con cache), no dentro de _caidas_simultaneas.
+    "nucleo/herramientas/incidentes.py::_onus_del_puerto",
     "nucleo/herramientas/incidentes.py::detectar",
     "nucleo/herramientas/incidentes.py::_detalle_de",
     "nucleo/herramientas/localidades.py::sincronizar",

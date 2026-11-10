@@ -6341,8 +6341,14 @@ def diagnostico_smartolt():
     import requests
 
     try:
+        # PAGINADO, UNA FILA, SOLO EL SERIAL (10/11/2026). Pedia el export
+        # entero (11,7 MB con datos de toda la base) para contestar "la clave
+        # sirve": ademas de pesado, gastaba del cupo de 15 por hora del export
+        # sin paginar, que comparte con las rutas que lo necesitan. Paginado no
+        # toca ese cupo, y 'total_items' dice cuantas ONU ve la clave.
         r = requests.get(f"{base_url}/api/onu/get_all_onus_details",
-                         headers={"X-Token": api_key}, timeout=10)
+                         headers={"X-Token": api_key}, timeout=10,
+                         params={"page": 1, "page_size": 1, "fields": "sn"})
     except requests.exceptions.SSLError:
         return jsonify({"ok": False, "detalle": "El dominio no tiene HTTPS valido -- revisa la URL."})
     except requests.exceptions.ConnectionError:
@@ -6364,8 +6370,11 @@ def diagnostico_smartolt():
         # nombre y direccion del cliente por ONU (ver tabla de riesgo en la
         # skill smartolt-api) -- un chequeo de conexion no tiene que devolver
         # datos de clientes al navegador. La cantidad alcanza para confirmar
-        # que la clave sirve.
-        cantidad = len(cuerpo_resp) if isinstance(cuerpo_resp, list) else 1
+        # que la clave sirve. Salia SIEMPRE "1 ONU(s)": el cuerpo es un dict y
+        # se contaba como uno. 'total_items' es el numero real.
+        cantidad = cuerpo_resp.get("total_items") if isinstance(cuerpo_resp, dict) else None
+        if not isinstance(cantidad, int):
+            return jsonify({"ok": True, "detalle": "Conexion correcta."})
         return jsonify({"ok": True,
                         "detalle": f"Conexion correcta -- {cantidad} ONU(s) visibles con esta clave."})
     if r.status_code in (401, 403):
@@ -6619,11 +6628,19 @@ SIN_ONU_VINCULADA = "onu_no_vinculada"
 SERIAL_DESACTUALIZADO = "serial_desactualizado"
 
 # Cuanto vale el inventario de ONU antes de volver a pedirlo. La consulta trae
-# 4.909 equipos en 11,7 MB y tarda 2 s: cara para hacerla al abrir cada ticket,
-# barata una vez cada cinco minutos. Solo se paga cuando un serial NO responde,
-# que es el 13 % de los casos.
+# 4.909 equipos en 11,7 MB y tarda 2 s: cara para hacerla al abrir cada ticket.
+# Solo se paga cuando un serial NO responde, que es el 13 % de los casos.
+#
+# UNA HORA Y NO CINCO MINUTOS (10/11/2026). Ese export sin paginar tiene un
+# cupo propio de 15 por hora que BLOQUEA al pasarse (documentado por
+# SmartOLT), y lo comparten otras rutas. Cada cinco minutos podian ser 12 de
+# las 15. Para proponer el equipo de un cliente por su nombre, una foto de
+# hace una hora sirve igual: un cliente no cambia de nombre en la OLT.
 _onus_por_olt: dict = {}
-SEGUNDOS_INVENTARIO_ONU = 300.0
+SEGUNDOS_INVENTARIO_ONU = 3600.0
+# Y un fallo tambien se recuerda: sin esto, cada ficha que se abria volvia a
+# intentarlo y a gastar del mismo cupo.
+SEGUNDOS_FALLO_INVENTARIO = 600.0
 
 # Que porcentaje de las palabras del nombre tiene que coincidir para proponer
 # una ONU. No es un numero elegido a ojo: medido contra los cuatro casos
@@ -7060,8 +7077,10 @@ def _inventario_onu(config, tenant: str) -> list:
     """
     ahora = time.monotonic()
     entrada = _onus_por_olt.get(tenant)
-    if entrada and (ahora - entrada[0]) < SEGUNDOS_INVENTARIO_ONU:
-        return entrada[1]
+    if entrada:
+        vigencia = SEGUNDOS_INVENTARIO_ONU if entrada[1] else SEGUNDOS_FALLO_INVENTARIO
+        if (ahora - entrada[0]) < vigencia:
+            return entrada[1]
 
     herr = next((h for h in config.herramientas
                  if h.nombre in _HERRAMIENTAS_EQUIPO), None)
@@ -7082,6 +7101,7 @@ def _inventario_onu(config, tenant: str) -> list:
         onus = (r.json() or {}).get("onus") or []
     except Exception as e:                                  # noqa: BLE001
         registrar("enlaces", "no se pudo leer el inventario de ONU", error=e)
+        _onus_por_olt[tenant] = (ahora, [])
         return []
     _onus_por_olt[tenant] = (ahora, onus)
     return onus

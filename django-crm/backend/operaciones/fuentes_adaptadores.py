@@ -517,6 +517,12 @@ def _resumir_pons(crudo) -> tuple[dict, object]:
         resumen["_olts_inalcanzables"] = {
             "cuantas": len(inalcanzables) if isinstance(inalcanzables, list)
             else 1}
+    #  Y un PON con datos viejos tampoco es un PON sano (10/11/2026): SmartOLT
+    #  lo dice en 'stale' cuando lleva rato sin leer los estados de esa OLT.
+    viejos = cuerpo.get("stale")
+    viejos = viejos.get("pon_count") if isinstance(viejos, dict) else None
+    if isinstance(viejos, int) and not isinstance(viejos, bool) and viejos > 0:
+        resumen["_pons_sin_datos_frescos"] = {"cuantos": viejos}
 
     return resumen, mas_reciente
 

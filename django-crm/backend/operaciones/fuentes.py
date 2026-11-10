@@ -158,6 +158,18 @@ def _vacio_es_inconcluso(lectura: Lectura, estado_fuente: FuenteEstado,
 #  REGISTRO DE UNA LECTURA
 # =============================================================================
 
+#: Tope de la demora al azar entre consultas de una fuente (ver registrar).
+DEMORA_MAXIMA_SEGUNDOS = 60
+
+
+def demora_al_azar(frecuencia_segundos: int) -> float:
+    """Entre 0 y el 10 % de la frecuencia, con tope de un minuto."""
+    import random
+
+    tope = min(DEMORA_MAXIMA_SEGUNDOS, max(0, int(frecuencia_segundos or 0)) * 0.1)
+    return random.uniform(0, tope)
+
+
 def registrar(estado_fuente: FuenteEstado, lectura: Lectura, *,
               inicio, ahora=None, ejecucion_id=None) -> FuenteSnapshot:
     """
@@ -209,9 +221,15 @@ def registrar(estado_fuente: FuenteEstado, lectura: Lectura, *,
         #  fuente estuvo caida dos horas, encadenar desde el vencimiento viejo
         #  dispararia una ráfaga de consultas para "ponerse al dia" contra un
         #  tercero que acaba de volver.
+        #
+        #  Y CON UNA DEMORA AL AZAR (10/11/2026): SmartOLT pide no consultar
+        #  "exactamente cada 5 minutos", para que muchos sistemas no le peguen
+        #  a la vez. Hasta el 10 % de la frecuencia, con tope de un minuto:
+        #  corre la hora, no la cadencia.
         estado_fuente.proxima_consulta_en = (
             ahora + timezone.timedelta(
-                seconds=estado_fuente.frecuencia_segundos))
+                seconds=estado_fuente.frecuencia_segundos
+                + demora_al_azar(estado_fuente.frecuencia_segundos)))
 
         #  Un exito es haber podido PREGUNTAR, no haber encontrado algo: una
         #  fuente vacia contesto perfectamente. Lo que rompe la racha es no

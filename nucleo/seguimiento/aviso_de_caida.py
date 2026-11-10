@@ -50,9 +50,12 @@ from nucleo.seguimiento import buscar_cliente
 
 EVENTO = "caida_masiva"
 TIMEOUT_SEGUNDOS = 30
-#: 200 por pagina y hasta 10 paginas: un puerto GPON tiene como mucho 128
-#: equipos; mas que esto es un filtro que se ignoro, y se corta.
-PAGINA = 200
+#: 100 por pagina y hasta 10 paginas: un puerto GPON tiene como mucho 128
+#: equipos; mas que esto es un filtro que se ignoro, y se corta. Era 200: el
+#: maximo documentado es 100 y, medido el 10/11/2026, SmartOLT recorta a 100
+#: sin avisar. Funcionaba porque se seguian las paginas, pero el numero
+#: prometia algo que no pasaba.
+PAGINA = 100
 PAGINAS_MAXIMAS = 10
 
 

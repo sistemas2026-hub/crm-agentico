@@ -1103,3 +1103,31 @@ def test_58_funcional_12_ONT_una_situacion_15_ONT_cuatro_tickets(org_a):
                      TipoEvento.SENAL_AUSENTE, TipoEvento.CAMBIO_ESTADO,
                      TipoEvento.VERIFICACION, TipoEvento.CIERRE):
         assert esperado in tipos, esperado
+
+
+# =============================================================================
+#  LO QUE SMARTOLT NO PUDO VER  --  10/11/2026
+# =============================================================================
+
+def test_una_OLT_inalcanzable_abre_una_situacion_y_no_se_lee_como_sana(org_a):
+    #  La marca existia en el resumen desde antes, pero el bucle la salteaba por
+    #  empezar con '_': una OLT sin energia se leia como "sin caidas".
+    snap = _captura(org_a, pons={"_olts_inalcanzables": {"cuantas": 1}})
+    senales = deteccion.desde_smartolt(snap, timezone.now())
+
+    olt = [s for s in senales if s.dimension == "olt"]
+    assert len(olt) == 1 and olt[0].concluyente
+    assert olt[0].riesgo == Riesgo.ALTO
+    assert "no alcanza 1 OLT" in olt[0].hecho
+    #  Y abre de verdad: una nota en las vivas no la veria nadie.
+    situacion = svc.abrir(org_a, olt[0])
+    assert situacion.pk is not None
+
+
+def test_PONs_con_datos_viejos_son_una_nota_no_una_falla(org_a):
+    snap = _captura(org_a, pons={"_pons_sin_datos_frescos": {"cuantos": 3}})
+    senales = deteccion.desde_smartolt(snap, timezone.now())
+
+    assert len(senales) == 1
+    assert senales[0].dimension == "fuente" and not senales[0].concluyente
+    assert "datos viejos de 3 PON" in senales[0].hecho

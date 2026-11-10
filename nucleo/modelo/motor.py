@@ -4218,6 +4218,20 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                                       f"ya estaba en curso, esperala; si no, "
                                       f"deci que un colaborador lo va a revisar."}
                         codigo_error = e.resultado.codigo
+                    except ejecutor_http.LimiteDelProveedor:
+                        # El proveedor pidio esperar (429, 10/11/2026). Con un
+                        # cupo por HORA, reintentar en este turno no trae
+                        # informacion nueva (CLAUDE.md §4): lo que corresponde
+                        # es decirlo y seguir con lo que se pueda preguntar.
+                        salida = {"error": "LIMITE_DEL_PROVEEDOR",
+                                  "instruccion_interna":
+                                      "El sistema externo pidio esperar antes de "
+                                      "consultar de nuevo. NO vuelvas a llamar esta "
+                                      "herramienta en esta conversacion ahora. Segui "
+                                      "con lo que el cliente te pueda contar, y si "
+                                      "el dato hace falta, deci que lo revisa un "
+                                      "colaborador."}
+                        codigo_error = "LIMITE_DEL_PROVEEDOR"
                     except Exception as e:
                         # No tumba el turno: el modelo recibe un error legible y
                         # puede decirle al cliente que hubo un problema, en vez de

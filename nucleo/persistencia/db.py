@@ -1450,6 +1450,40 @@ def verificacion_pendiente_de(tenant: str, conversation_id: str) -> dict | None:
         return None
 
 
+def verificaciones_vencidas(tenant: str, margen_segundos: int, limite: int) -> list[dict]:
+    """
+    Las verificaciones pendientes cuyo plazo ya paso hace mas de
+    'margen_segundos', con lo que hace falta para volver a medir sin el
+    cliente: la identidad y los identificadores tecnicos que guardo la
+    conversacion (10/11/2026, reloj).
+
+    El margen deja primero a la conversacion: si el cliente escribe, su turno
+    la resuelve con la nota al modelo; el reloj solo toma las que nadie va a
+    resolver porque el cliente no volvio.
+
+    Levanta si no puede leer: quien llama es el reloj, que aisla cada trabajo
+    y lo dice en su informe. Una lista vacia por un error se leeria como "no
+    habia nada que cerrar".
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select v.id, v.herramienta, v.conversation_id, v.intentos,
+                      v.max_intentos, v.medicion_previa,
+                      c.id_cliente, c.nombre_cliente, c.datos_sesion, c.estado
+                 from asistente.verificaciones_accion v
+                 join asistente.conversations c
+                   on c.organization_id = v.organization_id
+                  and c.id = v.conversation_id
+                where v.organization_id = %s
+                  and v.estado = 'VERIFICACION_PENDIENTE'
+                  and now() >= v.ejecutada_en
+                                + make_interval(secs => v.espera_segundos + %s)
+                order by v.ejecutada_en
+                limit %s""",
+            (org, int(margen_segundos), int(limite)))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def resolver_verificacion(tenant: str, verificacion_id: str, estado: str,
                           por_que: str, medicion_posterior: dict | None,
                           intentos: int) -> None:

@@ -138,6 +138,61 @@ def _gpon_hex(valor: str) -> str | None:
 _TRANSFORMACIONES = {"gpon_hex": _gpon_hex}
 
 
+def es_rechazo_de_identificador(http_status: int) -> bool:
+    """Lo que devuelve un proveedor cuando no reconoce el identificador del
+    equipo: 400 (SmartOLT, 'specify_valid_field') o 404. Es lo UNICO que
+    justifica probar la otra escritura del serial: un 429, un 5xx o un 409 no
+    dicen que el identificador este mal."""
+    return http_status in (400, 404)
+
+
+def alternativas_de(herramienta, argumentos: dict) -> dict:
+    """La misma conversion que usa el ejecutor, para los ejecutores propios
+    (estabilidad, incidentes) que llaman con `requests` directo."""
+    return _alternativas(herramienta, argumentos)
+
+
+class LimiteDelProveedor(requests.HTTPError):
+    """
+    El proveedor contesto 429: se paso el cupo de llamadas (10/11/2026).
+
+    Es un HTTPError con su respuesta, asi que quien clasifica por codigo
+    (nucleo/relevo/efectos_externos.py) lo sigue viendo como transitorio. Lo
+    que agrega es un tipo propio: el motor le dice al modelo que no reintente
+    en este turno (con un cupo por HORA, esperar dentro de la conversacion es
+    esperar hasta una hora) y la auditoria lo cuenta aparte en vez de mezclarlo
+    con "no se pudo completar la consulta".
+
+    El mensaje es fijo: ni la URL ni el cuerpo, que traen el serial del equipo.
+    """
+
+    def __init__(self, respuesta):
+        self.http_status = 429
+        self.retry_after = respuesta.headers.get("Retry-After")
+        super().__init__("el proveedor pidio esperar (429)", response=respuesta)
+
+
+#: Por debajo de esta fraccion del cupo de la hora se avisa en el log. Con un
+#: cupo de 1.000 (medido el 10/11/2026), son 100 llamadas: margen para ver
+#: venir el corte antes de que frene a todos.
+FRACCION_CUPO_BAJO = 0.10
+
+
+def _vigilar_cupo(herramienta, respuesta) -> None:
+    """Deja dicho en el log cuando el cupo de llamadas del proveedor se esta
+    acabando. Solo si el proveedor manda las cabeceras: sin ellas no se
+    inventa nada. Nunca levanta."""
+    try:
+        limite = int(respuesta.headers.get("X-RateLimit-Limit") or 0)
+        quedan = int(respuesta.headers.get("X-RateLimit-Remaining") or -1)
+    except (TypeError, ValueError, AttributeError):
+        return
+    if limite > 0 and 0 <= quedan < limite * FRACCION_CUPO_BAJO:
+        registrar("http", "el cupo de llamadas del proveedor se esta acabando",
+                  herramienta=herramienta.nombre, quedan=quedan, limite=limite,
+                  reinicia_en=respuesta.headers.get("X-RateLimit-Reset"))
+
+
 def _alternativas(herramienta, argumentos: dict) -> dict:
     """Los argumentos con su identificador ya convertido, o {} si no hay
     ninguna transformacion aplicable. No muta el original."""
@@ -260,6 +315,7 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
                                 json=args, timeout=TIMEOUT_SEGUNDOS)
 
     r = _pedir(argumentos)
+    _vigilar_cupo(herramienta, r)
 
     # Un identificador con dos escrituras validas: si la primera no le sirve a
     # la API, se prueba la otra ANTES de dar el dato por inexistente. Ver
@@ -267,14 +323,23 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
     # cuyo equipo esta registrado con la otra forma se quedan sin diagnostico
     # y el error no dice por que. Un solo reintento, y solo si la
     # transformacion produjo algo distinto.
-    if not r.ok:
+    #
+    # SOLO ANTE UN RECHAZO DEL IDENTIFICADOR (10/11/2026). Reintentaba ante
+    # cualquier respuesta no-ok, POST incluido: un 429, un 5xx o un 409
+    # 'onu_busy' salian una segunda vez con el otro serial, y el 400 de ese
+    # segundo intento TAPABA el error real -- un 5xx (que pudo haber reiniciado
+    # el equipo) quedaba registrado como un 400 permanente.
+    if es_rechazo_de_identificador(r.status_code):
         alternativos = _alternativas(herramienta, argumentos)
         if alternativos:
             registrar("http", "fallo con el identificador original, reintentando con la "
                               "forma alternativa",
                       herramienta=herramienta.nombre, http_status=r.status_code)
             r = _pedir(alternativos)
+            _vigilar_cupo(herramienta, r)
 
+    if r.status_code == 429:
+        raise LimiteDelProveedor(r)
     r.raise_for_status()
     crudo = r.json()
 

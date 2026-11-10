@@ -307,8 +307,19 @@ def test_11_consultar_corre_la_proxima_hacia_adelante(org_a):
     f.refresh_from_db()
     assert f.proxima_consulta_en is not None
     #  Desde AHORA y no desde el vencimiento viejo: encadenar desde el vencido
-    #  dispararia una rafaga para "ponerse al dia" contra un tercero.
-    assert abs((f.proxima_consulta_en - ahora).total_seconds() - 900) < 2
+    #  dispararia una rafaga para "ponerse al dia" contra un tercero. Con la
+    #  demora al azar (10/11/2026): entre 900 y 900 + un minuto.
+    segundos = (f.proxima_consulta_en - ahora).total_seconds()
+    assert 900 - 2 < segundos < 900 + fuentes.DEMORA_MAXIMA_SEGUNDOS + 2
+
+
+def test_11b_la_demora_al_azar_no_pasa_del_10_por_ciento_ni_de_un_minuto():
+    #  SmartOLT pide no consultar en horas fijas; la demora corre la hora, no
+    #  la cadencia.
+    for _ in range(200):
+        assert 0 <= fuentes.demora_al_azar(300) <= 30
+        assert 0 <= fuentes.demora_al_azar(3600) <= 60
+    assert fuentes.demora_al_azar(0) == 0
 
 
 def test_12_una_fuente_caida_mucho_tiempo_no_genera_una_rafaga(org_a):
@@ -899,6 +910,21 @@ def test_48_smartolt_conserva_una_OLT_inalcanzable(org_a):
 
     snap = fuentes.ultimo_snapshot(org_a, Fuente.SMARTOLT)
     assert snap.datos["_olts_inalcanzables"]["cuantas"] == 1
+
+
+def test_48b_smartolt_conserva_los_PONs_con_datos_viejos(org_a):
+    #  10/11/2026: 'stale' viene en el sobre real (verificado en vivo), y un
+    #  PON con datos viejos no es un PON sano.
+    sobre = {"resultado": {"response": {
+        "sections": [], "unreachable_olts": [], "stale": {"pon_count": 3}}}}
+    _fuente(org_a, Fuente.SMARTOLT, ventana_inconclusa_segundos=0)
+
+    with _con_motor(Motor(RespuestaFalsa(200, sobre))):
+        fuentes.sondear(org_a)
+
+    snap = fuentes.ultimo_snapshot(org_a, Fuente.SMARTOLT)
+    assert snap.datos["_pons_sin_datos_frescos"] == {"cuantos": 3}
+    assert "_olts_inalcanzables" not in snap.datos
 
 
 def test_49_smartolt_con_dos_OLTs_pregunta_por_las_dos(org_a):
