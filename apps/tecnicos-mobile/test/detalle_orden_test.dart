@@ -368,7 +368,11 @@ void main() {
       expect(find.text('Estado del equipo'), findsOneWidget);
       expect(find.text('Potencia RX ONT Actual'), findsOneWidget);
       expect(find.text('ATENUACIÓN ALTA'), findsOneWidget);
-      expect(find.text('ONT SERIAL'), findsOneWidget);
+      //  Era 'ONT SERIAL' hasta el 10/11/2026. El serial se quedo en la
+      //  franja del encabezado --que ademas lo deja copiar-- y esta tarjeta
+      //  muestra lo que la franja no tiene: el estado del equipo y cuando
+      //  cambio por ultima vez.
+      expect(find.text('EQUIPO'), findsOneWidget);
       await base.cerrar();
     });
 

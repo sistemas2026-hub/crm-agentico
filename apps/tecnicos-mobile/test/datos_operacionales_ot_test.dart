@@ -147,9 +147,14 @@ void main() {
       pantallaAlta(t);
       await montar(t, orden());
 
+      //  LA CAJA, EN UN SOLO LUGAR A LA VEZ  --  10/11/2026
+      //  Estaba en TRES: la franja, la telemetria y esta tarjeta. Ahora
+      //  «Datos tecnicos» aparece solo cuando la telemetria NO se dibuja, que
+      //  es el caso de esta orden --su ficha del equipo no esta disponible, y
+      //  esta tarjeta lee `contexto['cto']` crudo--. Las dos juntas, nunca.
       expect(find.text('Caja de distribución'), findsOneWidget);
-      // El serial salió de «Datos técnicos» el 18/10/2026: está en la franja
-      // del servicio, arriba, y en la tarjeta del equipo.
+      expect(find.text('CAJA / CTO'), findsNothing,
+          reason: 'sin ficha del equipo no hay telemetria que la repita');
       expect(find.text('Serial del equipo del cliente'), findsNothing);
       // findsWidgets y no findsOneWidget: con la bandera de demostración
       // encendida, la matriz de telemetría de ejemplo repite estos valores.

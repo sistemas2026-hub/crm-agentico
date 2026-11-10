@@ -578,14 +578,24 @@ void main() {
       pantallaAlta(t);
       await montar(t, orden());
 
-      // 'board/port' y nada mas: asi lo rotula el propio SmartOLT al
-      // agrupar una caida ({'label': '1/3', 'board': '1', 'port': '3'}). El
-      // numero de ONU es su posicion DENTRO del puerto, no parte del puerto.
-      expect(find.text('0/10'), findsOneWidget);
-      expect(find.text('0/10/5'), findsNothing);
+      // El numero de ONU se ve acá, en la planta: es su posicion DENTRO
+      // del puerto, no parte del identificador del puerto.
       expect(find.text('ONU en el puerto'), findsOneWidget);
       expect(find.text('5'), findsOneWidget);
-      expect(find.text('PUERTO PON'), findsOneWidget);
+
+      //  EL PUERTO SE MUDO A LA FRANJA  --  10/11/2026
+      //  Estaba en esta pantalla DOS veces, acá y en la franja del
+      //  encabezado, y el usuario lo señalo. Se quedo arriba porque lo pidio
+      //  ahí por nombre. La garantia no cambia y es la que importa:
+      //  'board/port' y nada mas --asi lo rotula el propio SmartOLT al
+      //  agrupar una caida: {'label': '1/3', 'board': '1', 'port': '3'}--.
+      //  Lo que cambia es que ahora esta a un toque.
+      expect(find.text('0/10'), findsNothing, reason: 'la franja esta plegada');
+      await t.tap(find.byIcon(Icons.expand_more));
+      await t.pumpAndSettle();
+      expect(find.text('Puerto PON'), findsOneWidget);
+      expect(find.text('0/10'), findsOneWidget);
+      expect(find.text('0/10/5'), findsNothing);
     });
 
     testWidgets('Sin caja cargada se dice, no se inventa una',
@@ -631,8 +641,18 @@ void main() {
 
       expect(find.text('OLT'), findsNothing);
       expect(find.text('Zona de red'), findsNothing);
-      expect(find.text('Dato no disponible'), findsOneWidget,
-          reason: 'el puerto tampoco está, y la tarjeta lo dice');
+
+      //  LO QUE SE PERDIO AL MUDAR EL PUERTO, DICHO  --  10/11/2026
+      //  La tarjeta vieja, sin dato, decia «Dato no disponible». La franja no
+      //  puede decir eso: omite la fila. Entonces sin puerto no aparece NADA,
+      //  ni etiqueta ni guion, que es la regla de esta prueba --una etiqueta
+      //  con un guion al lado ocupa el mismo lugar y no informa nada-- pero es
+      //  una garantia MENOS que antes: el tecnico ya no lee que el dato no
+      //  esta cargado, simplemente no lo ve.
+      await t.tap(find.byIcon(Icons.expand_more));
+      await t.pumpAndSettle();
+      expect(find.text('Puerto PON'), findsNothing);
+      expect(find.text('Dato no disponible'), findsNothing);
     });
   });
 

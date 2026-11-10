@@ -652,7 +652,24 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   GrupoDeFicha(
                     titulo: 'Para entender la falla',
                     children: <Widget?>[
-                      _datosTecnicos(trabajo),
+                      //  «Datos tecnicos» SOLO CUANDO NO HAY TELEMETRIA
+                      //  --  10/11/2026
+                      //
+                      //  Esta tarjeta ya solo existia por la caja --el serial y
+                      //  la IP salieron el 18/10-- y la caja tambien esta en la
+                      //  telemetria: era el TERCER lugar del mismo dato en una
+                      //  sola pantalla. Pero borrarla perdia un caso, y lo
+                      //  encontro una guarda: `_datosTecnicos` lee
+                      //  `contexto['cto']` crudo, asi que mostraba la caja
+                      //  incluso cuando la ficha del equipo NO esta disponible
+                      //  --y ahi la telemetria no se dibuja--.
+                      //
+                      //  Entonces se queda, con la condicion invertida de la de
+                      //  abajo: las dos nunca aparecen juntas, y la caja no
+                      //  desaparece de ninguna orden.
+                      if (!(trabajo.contextoDisponible ||
+                          widget.mostrarDatosFuturos))
+                        _datosTecnicos(trabajo),
                       // La telemetria se ve cuando la orden trae una lectura del
                       // equipo, aunque no haya modo demostracion: la señal
                       // optica es un dato REAL desde que el motor la consulta al
@@ -2847,61 +2864,47 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          // El serial va SOLO en su fila: doce caracteres no entran en media
-          // pantalla sin partirse, y es la única llave con la que se llega a
-          // SmartOLT -- si se corta, no sirve para buscar nada.
+          // ESTA TARJETA ERA EL SERIAL, Y PASO A SER EL EQUIPO  --  10/11/2026
+          //
+          // El serial se quedo en la franja del encabezado, que ademas lo deja
+          // COPIAR, y repetirlo acá era el mismo dato dos veces en una
+          // pantalla. Lo que la franja no tiene es lo que esta tarjeta sabe: en
+          // que estado esta el equipo y CUANDO cambio por ultima vez.
+          //
+          // El ultimo cambio no es un adorno: es el sello discreto con el que
+          // se prueba un reinicio --decision congelada del proyecto, porque la
+          // condicion de exito NO puede ser una mejora del ping--. Si esta
+          // tarjeta hubiera desaparecido con el serial, se iba con ella.
           _CajaDato(
-            titulo: 'ONT SERIAL',
-            valor: trabajo.serialOnu.isNotEmpty
-                ? trabajo.serialOnu
-                : (widget.mostrarDatosFuturos ? FieldMockData.serialOnt : '—'),
+            titulo: 'EQUIPO',
+            valor: trabajo.estadoOnu.isNotEmpty ? trabajo.estadoOnu : 'Sin lectura',
             detalle: trabajo.estadoOnu.isNotEmpty
-                ? 'Equipo ${trabajo.estadoOnu}'
-                : 'Sin lectura',
+                ? 'lo que ve la OLT'
+                : 'la OLT no respondio',
             detalleSecundario: _ultimoCambioDelEquipo(trabajo),
           ),
           const SizedBox(height: AppSpacing.sm),
-          // CAMPO-DATA-011, ya no es de ejemplo: el puerto PON y la caja
-          // entran a la ficha desde el 25/09/2026 (api.py::_estado_equipo,
-          // con lista blanca -- esa respuesta trae el nombre del cliente).
+          // EL PUERTO PON SALIO DE ACA  --  10/11/2026
           //
-          // DOS TARJETAS Y NO UNA. Estaban juntas bajo «PUERTO PON / CAJA» y
-          // se leía mal: el valor grande era el puerto y la caja quedaba
-          // debajo como si fuera su detalle. Son dos datos distintos, de dos
-          // cosas distintas de la red, y cada uno puede faltar por su cuenta.
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: _CajaDato(
-                  titulo: 'PUERTO PON',
-                  valor: trabajo.puertoPon.isNotEmpty
-                      ? trabajo.puertoPon
-                      : (widget.mostrarDatosFuturos
-                            ? FieldMockData.puertoPon
-                            : '—'),
-                  // 'board/port'. El número de ONU va aparte: es su posición
-                  // DENTRO del puerto, no parte del identificador.
-                  detalle: trabajo.puertoPon.isNotEmpty
-                      ? 'tarjeta / puerto'
-                      : 'Dato no disponible',
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              // La CAJA puede venir vacía y es normal, no un fallo: medido, el
-              // cliente de la orden 1849 no la tiene cargada en SmartOLT. Se
-              // dice, en vez de dibujar una que no existe.
-              Expanded(
-                child: _CajaDato(
-                  titulo: 'CAJA / CTO',
-                  valor: trabajo.cajaDeDistribucion.isNotEmpty
-                      ? trabajo.cajaDeDistribucion
-                      : '—',
-                  detalle: trabajo.cajaDeDistribucion.isNotEmpty
-                      ? 'caja de distribución'
-                      : 'Sin caja cargada',
-                ),
-              ),
-            ],
+          // Estaba en esta tarjeta Y en la franja del encabezado, en la misma
+          // pantalla, y el usuario lo señaló. Se queda arriba: lo pidió ahí por
+          // nombre, con el resto de lo que le preguntan por radio. El formato
+          // sigue siendo 'board/port' y el número de ONU sigue aparte, abajo:
+          // es su posición DENTRO del puerto, no parte del identificador.
+          //
+          // La CAJA se queda acá, y no en la franja, porque esta tarjeta sabe
+          // decir que falta: venir vacía es normal, no un fallo --medido el
+          // 25/09/2026, el cliente de la orden 1849 no la tiene cargada en
+          // SmartOLT--. La franja omitiría la fila, y «no está cargada» se
+          // leería igual que «la app no la trajo».
+          _CajaDato(
+            titulo: 'CAJA / CTO',
+            valor: trabajo.cajaDeDistribucion.isNotEmpty
+                ? trabajo.cajaDeDistribucion
+                : '—',
+            detalle: trabajo.cajaDeDistribucion.isNotEmpty
+                ? 'caja de distribución'
+                : 'Sin caja cargada',
           ),
           const SizedBox(height: AppSpacing.sm),
           _potenciaOptica(trabajo),

@@ -95,7 +95,13 @@ void main() {
       await t.pumpAndSettle();
 
       expect(find.text('ZTEGC0A1B2C3'), findsOneWidget);
-      expect(find.text('CTO 56'), findsOneWidget);
+      //  LA CAJA SALIO DE LA FRANJA  --  10/11/2026
+      //  El pedido del usuario para esta franja era nombre, telefono, IP,
+      //  puerto y los niveles. La caja la habia puesto otra sesion, y su lugar
+      //  es la tarjeta de telemetria, que cuando falta dice «Sin caja
+      //  cargada» --acá se omitiria la fila, y el tecnico no distingue «no
+      //  esta cargada» de «la app no la trajo»--.
+      expect(find.text('CTO 56'), findsNothing);
       expect(find.textContaining('al despachar'), findsOneWidget);
 
       await t.tap(find.byTooltip('Copiar IP'));

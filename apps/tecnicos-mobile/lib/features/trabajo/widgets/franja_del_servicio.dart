@@ -109,8 +109,16 @@ class _FranjaDelServicioState extends State<FranjaDelServicio> {
                 if (ticket.isNotEmpty) _fila('Ticket', '#$ticket'),
                 if (serial.isNotEmpty) _fila('Serial', serial, copiar: true),
                 if (ip.isNotEmpty) _fila('IP', ip, copiar: true),
-                if (t.cajaDeDistribucion.trim().isNotEmpty)
-                  _fila('Caja', t.cajaDeDistribucion),
+                //  LA CAJA NO VA ACA  --  10/11/2026
+                //
+                //  Estuvo, y salio. El pedido del usuario para esta franja era
+                //  nombre, telefono, IP, puerto y los niveles: la caja la puso
+                //  otra sesion. Y su lugar es la tarjeta de telemetria, que
+                //  cuando falta dice «Sin caja cargada» --puesto el 25/09/2026
+                //  con medicion, porque el cliente de la orden 1849 no la tiene
+                //  en SmartOLT--. Aca no se podria decir: esta franja omite la
+                //  fila vacia, y el tecnico no distingue «no esta cargada» de
+                //  «la app no la trajo».
                 if (t.puertoPon.trim().isNotEmpty) _fila('Puerto PON', t.puertoPon),
                 if (t.potenciaOptica.isNotEmpty)
                   _fila(
