@@ -44,21 +44,42 @@ from __future__ import annotations
 
 #: Los doce de plataforma. Cada codigo ES su propia categoria base (§3.5).
 #: El orden es el de la pantalla: primero donde estuvo la falla, de la casa del
-#: cliente hacia la red; despues lo que no es una falla.
+#: cliente hacia la red y despues la configuracion, que no esta en ningun tramo
+#: fisico; despues lo que no era una falla de la red.
+#:
+#: Los nombres llevan tildes desde el 10/11/2026: son lo que lee el operador.
+#: Lo que se guarda y se cuenta es el CODIGO, asi que corregir un nombre no
+#: toca ninguna fila ni ninguna metrica.
 BASE: dict[str, str] = {
     "equipo_cliente": "Equipo del cliente",
-    "fibra_acometida": "Fibra o acometida",
-    "red_distribucion": "Red de distribucion",
-    "red_central": "Red central",
     "wifi_cliente": "WiFi del cliente",
-    "facturacion": "Facturacion",
-    "configuracion": "Configuracion",
+    "fibra_acometida": "Fibra o acometida",
+    "red_distribucion": "Red de distribución",
+    "red_central": "Red central",
+    "configuracion": "Configuración",
+    "facturacion": "Facturación",
     "solicitud_comercial": "Solicitud comercial",
-    "resuelto_por_cliente": "Lo resolvio el cliente",
+    "resuelto_por_cliente": "Lo resolvió el cliente",
+    "sin_respuesta_cliente": "El cliente no respondió",
     "falso_positivo_ia": "Falso positivo de la IA",
-    "sin_respuesta_cliente": "El cliente no respondio",
     "otro": "Otro",
 }
+
+#: Las categorias que son una FALLA, en algun tramo del servicio. La pantalla
+#: las agrupa aparte (10/11/2026): con los doce en una sola grilla el operador
+#: no veia que la lista tiene dos preguntas distintas -- donde fallo, o que
+#: necesitaba si no era una falla --, y la grilla los leia mezclados.
+#: Un codigo propio cae en el grupo de su categoria base (I16).
+FALLAS = frozenset({
+    "equipo_cliente", "wifi_cliente", "fibra_acometida",
+    "red_distribucion", "red_central", "configuracion",
+})
+
+#: Los que no se pueden cerrar sin nota. 'otro' no dice nada por si solo: la
+#: columna existe para contar que paso, y un 'otro' sin una linea que lo
+#: explique es un cierre que no cuenta nada (10/11/2026). Un propio con
+#: categoria 'otro' no entra: ya tiene un nombre que dice que es.
+EXIGEN_NOTA = frozenset({"otro"})
 
 #: El que escribe el barrido por plazo (T16). No es una eleccion: es lo que
 #: significa que el cliente dejara de contestar.
@@ -140,21 +161,55 @@ def catalogo(config=None) -> list[dict]:
 
     Cada entrada dice de donde viene. La pantalla no tiene por que mostrarlo,
     pero quien depura por que un codigo aparece o no, si.
+
+    'grupo', 'categoria_nombre' y 'exige_nota' (10/11/2026) son para que la
+    pantalla agrupe, nombre la categoria de un propio y pida la nota sin
+    llevar su propia copia de esas reglas: la que valida al cerrar es esta.
     """
     ocultos = _ocultos_de(config)
-    salida = [{"codigo": c, "nombre": n, "categoria_base": c,
-               "origen": "plataforma"}
+    salida = [_entrada(c, n, c, "plataforma")
               for c, n in BASE.items() if c not in ocultos]
     for d in _propios_de(config):
         codigo = (getattr(d, "codigo", "") or "").strip()
         if not codigo or es_base(codigo):
             continue
-        salida.append({
-            "codigo": codigo,
-            "nombre": (getattr(d, "nombre", "") or "").strip() or codigo,
-            "categoria_base": (getattr(d, "categoria_base", "") or "").strip(),
-            "origen": "tenant"})
+        salida.append(_entrada(
+            codigo,
+            (getattr(d, "nombre", "") or "").strip() or codigo,
+            (getattr(d, "categoria_base", "") or "").strip(),
+            "tenant"))
     return salida
+
+
+def _entrada(codigo: str, nombre: str, categoria: str, origen: str) -> dict:
+    return {"codigo": codigo, "nombre": nombre, "categoria_base": categoria,
+            "categoria_nombre": BASE.get(categoria, ""),
+            "grupo": grupo_de(categoria),
+            "exige_nota": exige_nota(codigo),
+            "origen": origen}
+
+
+def grupo_de(categoria: str) -> str:
+    """'falla' o 'otra_cosa': a cual de las dos preguntas responde."""
+    return "falla" if categoria in FALLAS else "otra_cosa"
+
+
+def exige_nota(codigo: str) -> bool:
+    return (codigo or "").strip() in EXIGEN_NOTA
+
+
+def validar_nota(codigo: str, nota: str | None) -> None:
+    """
+    ValueError si este codigo no se puede cerrar con esta nota.
+
+    Va en el motor y no solo en la pantalla: la pantalla es una de las
+    puertas (tambien estan el CLI de G8 y completar un desenlace despues), y
+    una regla que vive en una sola puerta es una sugerencia.
+    """
+    if exige_nota(codigo) and not (nota or "").strip():
+        raise ValueError(
+            "con 'Otro' la nota es obligatoria: sin ella el cierre no dice "
+            "que paso")
 
 
 def categoria_de(codigo: str, config=None) -> str | None:

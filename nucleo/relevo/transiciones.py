@@ -840,6 +840,8 @@ def adoptar_de_legado(tenant: str, conversation_id: str, *, decision: str,
         raise ValueError(f"'{decision}' no lleva nota de cierre")
     if nota and len(nota) > catalogo.MAX_NOTA:
         raise ValueError(f"la nota supera {catalogo.MAX_NOTA} caracteres")
+    if codigo:
+        catalogo.validar_nota(codigo, nota)
 
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
 
@@ -1051,6 +1053,9 @@ def cerrar(tenant: str, conversation_id: str, *, por: str,
             raise ValueError(
                 "un cierre manual exige codigo de desenlace (§3.5, T17)")
         codigo, categoria = catalogo.resolver_para_cerrar(desenlace, config)
+        # Solo cuando elige una persona: el plazo escribe su codigo solo, y
+        # nunca lleva nota.
+        catalogo.validar_nota(codigo, nota)
     elif por == "plazo":
         if desenlace and desenlace != catalogo.POR_PLAZO:
             raise ValueError(
@@ -1243,6 +1248,7 @@ def completar_desenlace(tenant: str, conversation_id: str, *, desenlace: str,
     nota = (nota or "").strip() or None
     if nota and len(nota) > catalogo.MAX_NOTA:
         raise ValueError(f"la nota supera {catalogo.MAX_NOTA} caracteres")
+    catalogo.validar_nota(codigo, nota)
     nombre, usuario = db.validar_autor(operador_nombre, operador_id)
 
     def cuerpo(cur, org, f):

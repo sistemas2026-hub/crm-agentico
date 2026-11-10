@@ -36,8 +36,8 @@
     estadoUnico = undefined,
     // Tomar / Soltar: una sola accion.
     marcandoAtendida = false, errorAtender = '', onAtender,
-    // Cerrar la conversacion.
-    resolviendo = false, errorResolver = '', onResolver,
+    // Cerrar la conversacion. `cerrando`: el panel de cierre esta abierto.
+    resolviendo = false, errorResolver = '', onResolver, cerrando = false,
     // Reasignar (solo ADMIN). El formulario escribe en la pagina.
     reasignando = $bindable(false),
     destinoReasignar = $bindable(''),
@@ -153,6 +153,11 @@
         Escalada a {areas[conversacion.area_destino] || conversacion.area_destino}
       </span>
     {/if}
+    <!-- LOS GESTOS, EN UN SOLO GRUPO (10/11/2026). Sueltos en la fila, el
+         ultimo que no entraba bajaba solo a la linea de abajo: «Resuelto»
+         quedaba huerfano debajo del estado. Juntos, si no entran bajan los
+         cuatro, alineados a la derecha. -->
+    <span class="aviso-acciones">
     <!-- Tomar el caso, y soltarlo. Son el mismo boton porque son el mismo
          gesto en dos sentidos, y porque tener dos ("Atender" / "Soltar")
          obligaria a mirar cual esta activo para saber quien lo tiene. -->
@@ -180,9 +185,11 @@
           <span class="aviso-empuje" aria-hidden="true"></span>
         {/if}
       {:else}
+        <!-- Mientras se cierra, la accion de ese momento es el cierre:
+             «Tomar» en tinta competia con «Cerrar el caso» del panel. -->
         <button
           type="button"
-          class="v2-btn v2-btn-ink aviso-atender"
+          class="v2-btn aviso-atender {cerrando ? 'v2-btn-sm v2-btn-quiet' : 'v2-btn-ink'}"
           title="Te hacés cargo: pasa a «En atención» y sale de «Por atender». No le envía nada al cliente, y se puede soltar."
           onclick={() => onAtender?.()}
           disabled={marcandoAtendida}
@@ -236,12 +243,16 @@
            es justo el contexto que hace que alguien se anime a cerrar un
            caso que resolvio por telefono. -->
       <span class="con-ayuda">
+        <!-- Abre y cierra el panel, y mientras esta abierto se ve apretado:
+             es el gesto que se esta haciendo. -->
         <button
           type="button"
           class="v2-btn v2-btn-sm aviso-resolver"
+          class:aviso-resolver-activo={cerrando}
           onclick={() => onResolver?.()}
           disabled={resolviendo}
           aria-busy={resolviendo}
+          aria-expanded={cerrando}
           aria-describedby="ayuda-resolver"
         >
           <!-- «Resuelto» a secas (29/10/2026): «Marcar como resuelta» era el
@@ -258,6 +269,7 @@
         </span>
       </span>
     {/if}
+    </span>
     {/if}
     <!-- Cerrada: sin la marca verde «Resuelta» que iba acá (04/11/2026). La
          línea de estado ya dice «Cerrada · la resolvió…», y el verde se
@@ -450,6 +462,17 @@
     flex: none;
   }
 
+  /* El grupo es el que se empuja a la derecha; adentro, los 'auto' de cada
+     boton ya no tienen espacio que repartir. */
+  .aviso-acciones {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-left: auto;
+  }
+
   /* Sin margin-left:auto a proposito: el hermano de la izquierda ya empuja al
      grupo a la derecha, y un segundo 'auto' los separaria a los extremos. */
   .aviso-empuje {
@@ -593,7 +616,8 @@
     font-weight: 600;
   }
 
-  .aviso-resolver:hover:not(:disabled) {
+  .aviso-resolver:hover:not(:disabled),
+  .aviso-resolver-activo {
     background: var(--bandeja-ok);
     color: #fff;
   }

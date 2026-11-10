@@ -13,7 +13,14 @@
  * paso -- y esa columna existe justo para poder contar lo que paso.
  */
 
-/** @typedef {{codigo: string, nombre: string, categoria_base: string, origen: string}} Desenlace */
+/**
+ * `grupo`, `categoria_nombre` y `exige_nota` los agrega el motor desde el
+ * 10/11/2026 (nucleo/relevo/desenlaces.py::catalogo). Opcionales a proposito:
+ * un motor anterior no los manda, y la pantalla tiene que seguir cerrando.
+ *
+ * @typedef {{codigo: string, nombre: string, categoria_base: string, origen: string,
+ *   grupo?: string, categoria_nombre?: string, exige_nota?: boolean}} Desenlace
+ */
 
 /** Cuanto texto admite la nota. Lo mismo que el motor (§3.3). */
 export const MAX_NOTA = 500;
@@ -49,8 +56,12 @@ export async function cargarDesenlaces(traer) {
 export function motivoParaNoCerrar({ codigo, nota = '', catalogo }) {
   if (!catalogo.length) return 'No hay códigos de cierre configurados.';
   if (!codigo) return 'Elegí en qué terminó el caso.';
-  if (!catalogo.some((d) => d.codigo === codigo)) return 'Ese código ya no está en el catálogo.';
+  const elegido = catalogo.find((d) => d.codigo === codigo);
+  if (!elegido) return 'Ese código ya no está en el catálogo.';
   if (nota.length > MAX_NOTA) return `La nota no puede pasar de ${MAX_NOTA} caracteres.`;
+  // «Otro» sin una línea que lo explique no cuenta nada (10/11/2026). El
+  // motor lo rechaza igual; esto es para decirlo antes de apretar.
+  if (elegido.exige_nota && !nota.trim()) return `Con «${elegido.nombre}», contá qué pasó en la nota.`;
   return '';
 }
 
@@ -75,8 +86,47 @@ export function cuerpoDeCierre({ codigo, nota = '' }) {
  * mostrarla al lado del nombre. Vacia para los codigos base, que son su propia
  * categoria y repetirla solo haria ruido ("Facturación · facturacion").
  *
+ * Con su NOMBRE cuando el motor lo manda: "red_distribucion" al lado de
+ * "Poste 17" es un identificador, no algo que se lee.
+ *
  * @param {Desenlace} d
  */
 export function categoriaVisible(d) {
-  return d.origen === 'tenant' && d.categoria_base !== d.codigo ? d.categoria_base : '';
+  if (d.origen !== 'tenant' || d.categoria_base === d.codigo) return '';
+  return d.categoria_nombre || d.categoria_base;
+}
+
+/** Los dos grupos del panel, en orden. La clave es la que manda el motor. */
+export const GRUPOS = /** @type {const} */ ([
+  { clave: 'falla', titulo: 'Dónde estuvo la falla' },
+  { clave: 'otra_cosa', titulo: 'No era una falla de la red' }
+]);
+
+/**
+ * El catalogo partido en las dos preguntas que contesta (10/11/2026): dónde
+ * fallo, o qué necesitaba el cliente si no era una falla. En una sola grilla
+ * de doce se leian mezcladas, y el orden del motor --de la casa del cliente
+ * hacia la red-- se perdia porque la grilla lo recorria de costado.
+ *
+ * Respeta el orden del motor dentro de cada grupo y no deja ninguno vacio.
+ * Si el motor no manda `grupo` (uno anterior a este cambio), devuelve UN
+ * grupo sin titulo con todo: inventar a que grupo va cada codigo seria tener
+ * una segunda copia de la regla, y la regla vive en el motor.
+ *
+ * @param {Desenlace[]} catalogo
+ * @returns {{clave: string, titulo: string, desenlaces: Desenlace[]}[]}
+ */
+export function agruparDesenlaces(catalogo) {
+  if (!catalogo.some((d) => d.grupo)) {
+    return catalogo.length ? [{ clave: 'todos', titulo: '', desenlaces: catalogo }] : [];
+  }
+  const conocidos = new Set(GRUPOS.map((g) => g.clave));
+  return GRUPOS.map((g) => ({
+    ...g,
+    // Un grupo que este motor todavia no conoce no se pierde: va al segundo,
+    // que es el de "no era una falla de la red".
+    desenlaces: catalogo.filter((d) =>
+      g.clave === 'otra_cosa' ? !conocidos.has(d.grupo ?? '') || d.grupo === g.clave : d.grupo === g.clave
+    )
+  })).filter((g) => g.desenlaces.length);
 }

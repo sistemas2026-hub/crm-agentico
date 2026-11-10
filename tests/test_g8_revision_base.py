@@ -363,7 +363,7 @@ try:
     c_cierre = conversacion(caso_id=str(uuid.uuid4()))
     r = T.adoptar_de_legado(TEN, c_cierre, decision="cerrar_con_desenlace",
                             operador_id=OP_ID, operador_nombre=OP,
-                            desenlace="otro")
+                            desenlace="configuracion")
     f = fila_de(c_cierre)
     revisar(r.aplicada and f["estado"] == "cerrada" and f["relevo_version"] == 1,
             "'cerrar_con_desenlace' cierra y adopta (B6)")

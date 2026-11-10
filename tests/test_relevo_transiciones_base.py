@@ -216,7 +216,7 @@ try:
     T.escalar(TENANT, c2)
     T.tomar(TENANT, c2, operador_id=ANA[0], operador_nombre=ANA[1])
     r5 = T.resolver(TENANT, c2, operador_id=ANA[0], operador_nombre=ANA[1],
-                    desenlace="otro")
+                    desenlace="configuracion")
     e = estado(c2)
     comprobar(r5.aplicada and e[4] == "cerrada" and e[8] is True and e[2] is None,
               f"resolver: cerrada, atendida_manual, asignacion liberada ({e})")
@@ -289,7 +289,7 @@ try:
     e = estado(leg)
     comprobar(e[5] is False and e[6] is False and e[3] == 0, "devolver en legado: solo las banderas")
     T.resolver(TENANT, leg, operador_id=ANA[0], operador_nombre=ANA[1],
-               desenlace="otro")
+               desenlace="configuracion")
     e = estado(leg)
     comprobar(e[4] == "cerrada" and e[8] is True and e[3] == 0, "resolver en legado: como siempre")
     comprobar(eventos(leg) == [], "el legado no genera ningun evento")
@@ -991,7 +991,7 @@ try:
             c3 = escalar_con("573000000122",
                              antes=lambda conv: T.resolver(TENANT, conv, operador_id=ANA[0],
                                                            operador_nombre=ANA[1],
-                                                           desenlace="otro"))
+                                                           desenlace="configuracion"))
             comprobar(externos12 == [] and estado(c3)[4] == "cerrada",
                       f"cerrada antes del efecto: ni ticket ni caso ({externos12})")
 

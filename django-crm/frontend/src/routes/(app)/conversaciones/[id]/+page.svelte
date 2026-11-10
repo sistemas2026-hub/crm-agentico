@@ -1049,6 +1049,12 @@
   async function resolver() {
     if (resolviendo || conversacion.estado === 'cerrada') return;
     errorResolver = '';
+    // «Resuelto» abre y cierra el panel (10/11/2026): se ve apretado mientras
+    // está abierto, y un botón apretado que no se suelta confunde.
+    if (panelCierre) {
+      panelCierre = false;
+      return;
+    }
     panelCierre = true;
     if (!catalogoDesenlaces.length) {
       const r = await cargarDesenlaces(fetch);
@@ -1921,6 +1927,7 @@
     {estadoUnico}
     {marcandoAtendida} {errorAtender} onAtender={marcarAtendida}
     {resolviendo} {errorResolver} onResolver={resolver}
+    cerrando={panelCierre && conversacion.estado !== 'cerrada'}
     bind:reasignando bind:destinoReasignar bind:motivoReasignar
     {guardandoReasignar} {errorReasignar} onReasignar={reasignar}
   />

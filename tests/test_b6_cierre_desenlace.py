@@ -176,6 +176,26 @@ revisar(desenlaces.categoria_de("inventado") is None,
         "un codigo desconocido no resuelve a nada",
         "None NO es 'otro'. Tratarlo como 'otro' seria inventar una respuesta.")
 
+# Lo que la pantalla necesita para agrupar y pedir la nota sale de aca, no de
+# una copia en el frontend (10/11/2026).
+revisar([d["grupo"] for d in base] == ["falla"] * 6 + ["otra_cosa"] * 6,
+        "las seis fallas primero, despues lo que no era una falla")
+revisar([d["codigo"] for d in base if d["exige_nota"]] == ["otro"],
+        "solo 'otro' exige nota")
+revisar(all("ó" in d["nombre"] for d in base
+            if d["codigo"] in ("red_distribucion", "configuracion",
+                               "facturacion", "resuelto_por_cliente",
+                               "sin_respuesta_cliente")),
+        "y los nombres llevan tilde: es lo que lee el operador")
+try:
+    desenlaces.validar_nota("otro", "  ")
+    revisar(False, "'otro' sin nota se rechaza")
+except ValueError:
+    revisar(True, "'otro' sin nota se rechaza")
+desenlaces.validar_nota("otro", "lo resolvio el vecino")
+desenlaces.validar_nota("facturacion", None)
+revisar(True, "y con nota, o con otro codigo, pasa")
+
 
 class _D:
     def __init__(self, codigo, nombre, categoria_base):
@@ -200,6 +220,10 @@ revisar(desenlaces.categoria_de("fibra_poste_17", c_propio) == "red_distribucion
         "ponen nombres distintos a la misma falla.")
 revisar(len(desenlaces.catalogo(c_propio)) == 13,
         "y se suma al catalogo, sin reemplazar la base")
+propio = desenlaces.catalogo(c_propio)[-1]
+revisar(propio["grupo"] == "falla"
+        and propio["categoria_nombre"] == "Red de distribución",
+        "y cae en el grupo de su categoria, que viaja con su nombre")
 
 revisar(desenlaces.problemas([_D("x", "X", "")], []),
         "sin categoria_base la config no carga (I16)")
@@ -307,7 +331,12 @@ revisar(evs[0]["actor_nombre"] == OP and str(evs[0]["actor_usuario_id"]) == OP_I
 for caso, kw in (("sin codigo", {"desenlace": ""}),
                  ("con un codigo que no existe", {"desenlace": "inventado"}),
                  ("con una nota larguisima", {"desenlace": "otro",
-                                              "nota": "x" * 501})):
+                                              "nota": "x" * 501}),
+                 # 10/11/2026: un 'otro' sin una linea que lo explique es un
+                 # cierre que no cuenta nada, y se rechaza en el motor.
+                 ("con 'otro' y sin nota", {"desenlace": "otro"}),
+                 ("con 'otro' y una nota en blanco", {"desenlace": "otro",
+                                                      "nota": "   "})):
     c = conversacion()
     antes = fila_de(c)
     try:
@@ -396,7 +425,7 @@ revisar(not r.aplicada and r.motivo == "accion_viva",
 revisar(fila_de(c) == antes, "y la conversacion sigue abierta")
 
 # El manual SI: T17 dice "de inmediato".
-r = T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro")
+r = T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion")
 revisar(r.aplicada, "el cierre manual procede igual (T17: de inmediato)")
 estados = {str(f["id"]): f["estado"] for f in admin.execute(
     "select id, estado from asistente.acciones_propuestas where conversation_id = %s",
@@ -426,7 +455,7 @@ r = T.cerrar(TEN, c, por="plazo")
 revisar(not r.aplicada and r.motivo == "verificacion_pendiente",
         f"una verificacion sin resolver frena el cierre automatico ({r.motivo})")
 revisar(T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP,
-                   desenlace="otro").aplicada,
+                   desenlace="configuracion").aplicada,
         "y no frena al operador")
 
 
@@ -462,7 +491,7 @@ revisar(eventos_de(c)[0]["datos"].get("ticket_pendiente") is True,
 
 # Sin caso no se encola nada: no hay nada que cerrar.
 c = conversacion(control="humano", control_motivo="escalada")
-T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro")
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion")
 revisar(sincronizaciones(c) == [], "sin caso no encola nada")
 revisar(eventos_de(c)[0]["datos"].get("ticket_pendiente") is None,
         "y sin ticket no avisa de ninguno")
@@ -470,9 +499,9 @@ revisar(eventos_de(c)[0]["datos"].get("ticket_pendiente") is None,
 # La misma transicion reintentada no encola dos veces.
 c = conversacion(caso_id=str(uuid.uuid4()))
 clave_sync = f"b6sync-{uuid.uuid4()}"
-T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro",
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion",
            clave=clave_sync)
-T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro",
+T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion",
            clave=clave_sync)
 revisar(len(sincronizaciones(c)) == 1,
         f"un reintento de la misma transicion encola UNA vez ({len(sincronizaciones(c))})",
@@ -498,7 +527,7 @@ c = conversacion()
 antes = fila_de(c)
 T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla"))
 try:
-    T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro")
+    T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion")
     revisar(False, "si algo falla antes del commit, el cierre entero se deshace")
 except Exception:
     revisar(True, "si algo falla antes del commit, el cierre entero se deshace")
@@ -512,7 +541,7 @@ c = conversacion()
 a = accion(c, "pendiente")
 T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla"))
 try:
-    T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro")
+    T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion")
 except Exception:
     pass
 finally:
@@ -533,7 +562,7 @@ revisar(len(eventos_de(c)) == 1, f"un solo evento ({len(eventos_de(c))})")
 revisar(fila_de(c)["relevo_version"] == 2, "y una sola version")
 
 # Ya cerrada.
-r3 = T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="otro")
+r3 = T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="configuracion")
 revisar(not r3.aplicada and r3.motivo == "ya_cerrada",
         f"una ya cerrada responde 'ya_cerrada' ({r3.motivo})")
 revisar(fila_de(c)["desenlace_codigo"] == "wifi_cliente",
@@ -580,7 +609,7 @@ try:
     c = conversacion()
     antes = fila_de(c)
     r = T.resolver(otro_ten, c, operador_id=OP_ID, operador_nombre=OP,
-                   desenlace="otro")
+                   desenlace="configuracion")
     revisar(not r.aplicada, f"otra empresa no puede cerrar esta ({r.motivo})")
     revisar(fila_de(c) == antes, "y la conversacion no cambia")
 finally:
@@ -651,7 +680,7 @@ revisar(fila_de(c) == antes, "y la conversacion no se toco",
 
 try:
     T.adoptar_de_legado(TEN, c, decision="seguir_humano", operador_id=OP_ID,
-                        operador_nombre=OP, desenlace="otro")
+                        operador_nombre=OP, desenlace="configuracion")
     revisar(False, "las otras decisiones NO aceptan desenlace")
 except ValueError:
     revisar(True, "las otras decisiones NO aceptan desenlace")
@@ -728,7 +757,7 @@ revisar(fila_de(c)["relevo_version"] == antes["relevo_version"],
 # Tampoco sobre una que se cerro CON desenlace.
 c = conversacion()
 T.resolver(TEN, c, operador_id=OP_ID, operador_nombre=OP, desenlace="red_central")
-r = T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+r = T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id=OP_ID,
                           operador_nombre=OP)
 revisar(not r.aplicada and r.motivo == "ya_completado",
         "un cierre manual ya trae desenlace: no se completa")
@@ -737,7 +766,7 @@ revisar(fila_de(c)["desenlace_codigo"] == "red_central", "y se conserva")
 # Ni sobre el del plazo, que lo puso la plataforma.
 c = conversacion()
 T.cerrar(TEN, c, por="plazo")
-T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id=OP_ID,
                       operador_nombre=OP)
 revisar(fila_de(c)["desenlace_codigo"] == "sin_respuesta_cliente",
         "el desenlace del plazo tampoco se pisa")
@@ -745,7 +774,7 @@ revisar(fila_de(c)["desenlace_codigo"] == "sin_respuesta_cliente",
 # --- una abierta se cierra, no se completa --------------------------------
 c = conversacion()
 antes = fila_de(c)
-r = T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+r = T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id=OP_ID,
                           operador_nombre=OP)
 revisar(not r.aplicada and r.motivo == "no_esta_cerrada",
         f"una conversacion ABIERTA no se completa ({r.motivo})")
@@ -758,7 +787,7 @@ for oid, onombre, caso in ((OP_ID, "", "sin nombre"), ("", OP, "sin id"),
                            ("no-es-uuid", OP, "con un id que no es uuid")):
     antes = fila_de(c)
     try:
-        T.completar_desenlace(TEN, c, desenlace="otro", operador_id=oid,
+        T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id=oid,
                               operador_nombre=onombre)
         revisar(False, f"se rechaza completar {caso}")
     except Exception:
@@ -789,7 +818,7 @@ revisar(fila_de(c)["desenlace_codigo"] is None,
 antes = fila_de(c)
 T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla"))
 try:
-    T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+    T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id=OP_ID,
                           operador_nombre=OP)
     revisar(False, "si falla el evento, el desenlace no queda escrito")
 except Exception:
@@ -838,7 +867,7 @@ try:
     c = conversacion(atendida_manual=True)
     T.cerrar(TEN, c, por="cliente")
     antes = fila_de(c)
-    r = T.completar_desenlace(otro_ten, c, desenlace="otro", operador_id=OP_ID,
+    r = T.completar_desenlace(otro_ten, c, desenlace="configuracion", operador_id=OP_ID,
                               operador_nombre=OP)
     revisar(not r.aplicada, f"otra empresa no puede completarla ({r.motivo})")
     revisar(fila_de(c) == antes, "y la conversacion no cambia")
@@ -888,7 +917,7 @@ c = conversacion(relevo_version=0, atendida_manual=True)
 T.cerrar(TEN, c, por="cliente")
 antes = fila_de(c)
 try:
-    T.completar_desenlace(TEN, c, desenlace="otro", operador_id="",
+    T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id="",
                           operador_nombre=OP)
     revisar(False, "sobre legado tampoco se completa sin actor")
 except Exception:
@@ -898,7 +927,7 @@ revisar(fila_de(c) == antes and eventos_de(c) == [], "y no cambia nada")
 # Si falla el evento, el desenlace tampoco queda. En la MISMA transaccion.
 T._gancho_antes_del_commit = lambda: (_ for _ in ()).throw(RuntimeError("falla"))
 try:
-    T.completar_desenlace(TEN, c, desenlace="otro", operador_id=OP_ID,
+    T.completar_desenlace(TEN, c, desenlace="configuracion", operador_id=OP_ID,
                           operador_nombre=OP)
     revisar(False, "sobre legado, si falla el evento se deshace el desenlace")
 except Exception:
