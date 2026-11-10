@@ -235,6 +235,61 @@ def test_los_dos_numeros_de_la_potencia_salen_juntos(org_a):
     assert "al salir: foto=" in texto
 
 
+def test_EL_NUMERO_ESCRITO_SALE_DE_VERDAD(org_a):
+    """La primera version leyo `_cierre_de_esta_vuelta` como si fuera un dict
+    --es un EventoTrabajo-- e imprimio «escrito=None» para toda orden. Pasaba
+    en verde contra la guarda de arriba, que solo miraba la linea de la foto,
+    y me hizo perseguir una causa que no era."""
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+    from campo.models import EvidenciaTrabajo
+
+    from campo.models import (EventoTrabajo, OrdenTrabajo, WorkType,
+                              WorkTypeVersion)
+
+    wt = WorkType.objects.create(org=org_a, codigo="pqnc9811",
+                                 nombre="Soporte", labor="correctivo")
+    v = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"pasos": [],
+                 "campos": [{"id": "potencia_al_salir", "tipo": "decimal",
+                             "titulo": "Medición al salir",
+                             "reglas": {"min": -60, "max": -8}}],
+                 "evidencias": [{"id": "medicion_al_salir", "tipo": "foto",
+                                 "titulo": "Foto del medidor al salir",
+                                 "obligatorio": True}]})
+    orden = OrdenTrabajo.objects.create(
+        org=org_a, numero=9811, tipo_trabajo_version=v,
+        cliente_nombre="MARIO SABANAGRANDE",
+        estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+        estado_validacion=OrdenTrabajo.PENDIENTE,
+        origen_sistema="manual", contexto={},
+        datos={"potencia_al_salir": "-40.0"}, vuelta=1)
+    EventoTrabajo.objects.create(
+        org=org_a, orden=orden, tipo="cierre_campo",
+        datos={"vuelta": 1, "sin_material_confirmado": True,
+               "respuestas": {"solucion": "se cambia conector APC",
+                              "servicio_validado": "Hecho",
+                              "potencia_al_salir": "-40.0"}})
+    foto = EvidenciaTrabajo.objects.create(
+        org=org_a, orden_trabajo=orden, requisito_id="medicion_al_salir",
+        vuelta=1, sha256="sal9811".ljust(64, "x")[:64],
+        storage_key="k/sal9811", nombre_original="m.jpg",
+        mime_type="image/jpeg", bytes=1,
+        estado_archivo=EvidenciaTrabajo.RECIBIDO)
+    AnalisisDeEvidencia.objects.create(
+        org=org_a, evidencia=foto, vuelta=1, origen=AnalisisDeEvidencia.IA,
+        texto="Pantalla del medidor: 1550 nm, -50.00 dBm. MUESTRA: si ATENCION: no")
+
+    texto = _correr(org_a, ot=[9811])
+
+    assert "escrito=-40.0" in texto, texto
+    assert "foto=-50.0" in texto, texto
+    #  Y el veredicto de la comparacion, que es lo que decide: 10 dBm contra
+    #  una tolerancia de 3 no coinciden.
+    assert "coinciden=False" in texto, texto
+
+
 def test_una_orden_que_no_existe_se_nombra(org_a):
     texto = _correr(org_a, ot=[9999])
 

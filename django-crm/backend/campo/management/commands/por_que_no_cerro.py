@@ -198,15 +198,33 @@ class Command(BaseCommand):
             try:
                 from campo import potencia_de_la_foto as PF
 
-                cierre = RC._cierre_de_esta_vuelta(orden) or {}
-                respuestas = (cierre.get("respuestas") or {}) if isinstance(cierre, dict) else {}
-                for campo_id, requisito, cuando in (
-                        (RC.CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
-                        (RC.CAMPO_AL_SALIR, "medicion_al_salir", "al salir")):
-                    de_la_foto = PF.uno_solo(RC._texto_de_la_foto(orden, requisito))
-                    escrito = respuestas.get(campo_id)
-                    self.stdout.write(
-                        f"  {cuando}: foto={de_la_foto}   escrito={escrito}")
+                #  LAS MISMAS LLAMADAS QUE `_potencia`, no una copia parecida.
+                #  La primera version leyo `_cierre_de_esta_vuelta` como si
+                #  fuera un dict --es un EventoTrabajo-- e imprimio
+                #  «escrito=None» para toda orden. Un diagnostico que mide por
+                #  su cuenta miente justo cuando mas se lo necesita.
+                cierre = RC._cierre_de_esta_vuelta(orden)
+                if cierre is None:
+                    self.stdout.write("  no hay reporte de cierre de esta vuelta")
+                else:
+                    respuestas = RC._lo_que_escribio_el_tecnico(orden, cierre)
+                    for campo_id, requisito, cuando in (
+                            (RC.CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
+                            (RC.CAMPO_AL_SALIR, "medicion_al_salir", "al salir")):
+                        escrito = RC._a_numero(respuestas.get(campo_id))
+                        bruto = PF.uno_solo(RC._texto_de_la_foto(orden, requisito))
+                        limites = RC._lo_que_el_tecnico_PODRIA_escribir(orden, campo_id)
+                        creible = RC._lectura_creible(bruto, limites)
+                        linea = (f"  {cuando}: foto={bruto}  escrito={escrito}  "
+                                 f"limites={limites}  creible={creible}")
+                        if not creible:
+                            linea += "  -> la foto se DESCARTA, no se compara"
+                        elif escrito is None or bruto is None:
+                            linea += "  -> falta un lado, NO SE COMPARA (el punto no aparece)"
+                        else:
+                            ok, por_que = PF.comparar(bruto, escrito)
+                            linea += f"  -> coinciden={ok} ({por_que})"
+                        self.stdout.write(linea)
             except Exception as e:                               # noqa: BLE001
                 self.stdout.write(f"  no se pudo leer ({type(e).__name__})")
 
