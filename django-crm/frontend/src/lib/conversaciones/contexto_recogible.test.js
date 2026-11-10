@@ -43,6 +43,17 @@ describe('la columna de contexto en pantalla ancha', () => {
     }
   });
 
+  it('en ancha hay UN botón para recoger y expandir, no dos (10/11/2026)', () => {
+    /* Estaban el de la cabecera y el del panel, haciendo lo mismo. El del
+       panel queda solo en angosta, donde el panel es un cajón que tapa la
+       cabecera y hace falta cerrarlo desde adentro. */
+    const i = pagina.indexOf('class="v2-btn v2-btn-sm info-cerrar"');
+    const antes = pagina.slice(Math.max(0, i - 200), i);
+    expect(antes).toMatch(/\{#if !pantallaAncha\}\s*<button\s+type="button"\s*$/);
+    // Y el de la cabecera alterna en ancha: recoge si está abierto, expande si no.
+    expect(pagina).toMatch(/if \(pantallaAncha\) recogerContexto\(!contextoRecogido\);/);
+  });
+
   it('la columna lleva la clase y la regla que la recoge', () => {
     expect(pagina).toMatch(/class:recogida=\{contextoRecogido\}/);
     expect(pagina).toMatch(/@media \(min-width: 1241px\)\s*\{\s*\.info\.recogida\s*\{\s*display:\s*none/);

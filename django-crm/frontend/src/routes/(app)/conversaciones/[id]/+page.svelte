@@ -50,8 +50,7 @@
     Smile,
     Mic,
     Image as ImageIcon,
-    FileText,
-    PanelRightClose
+    FileText
   } from '@lucide/svelte';
 
   /** @type {{ data: any }} */
@@ -2072,23 +2071,24 @@
   class:recogida={contextoRecogido}
   aria-label="Contexto de la conversación"
 >
-  <!-- Solo ícono (10/11/2026), con el nombre en 'aria-label' y 'title'. Sigue
-       siendo el ícono del panel y no una cruz en ancha (04/11/2026): la cruz
-       se lee como cerrar algo para siempre, y esto se vuelve a abrir desde la
-       cabecera. En angosta es un cajón encima del hilo, y ahí sí se cierra. -->
-  <button
-    type="button"
-    class="v2-btn v2-btn-sm info-cerrar"
-    onclick={() => (pantallaAncha ? recogerContexto(true) : (contextoAbierto = false))}
-    aria-label={pantallaAncha ? 'Ocultar el panel de contexto' : 'Cerrar el panel de contexto'}
-    title={pantallaAncha ? 'Ocultar el panel de contexto' : 'Cerrar el panel de contexto'}
-  >
-    {#if pantallaAncha}
-      <PanelRightClose size={16} aria-hidden="true" />
-    {:else}
+  <!-- UN SOLO BOTÓN EN ANCHA (10/11/2026). Había dos que hacían lo mismo: el
+       de la cabecera y este. En ancha queda solo el de la cabecera, que
+       alterna recoger/expandir y cambia de ícono, siempre en el mismo lugar.
+       En angosta el panel es un cajón ENCIMA del hilo que tapa la cabecera, y
+       ahí sí hace falta cerrarlo desde adentro: con una cruz, porque es un
+       cajón que se cierra. Solo ícono, con el nombre en 'aria-label' y
+       'title'. -->
+  {#if !pantallaAncha}
+    <button
+      type="button"
+      class="v2-btn v2-btn-sm info-cerrar"
+      onclick={() => (contextoAbierto = false)}
+      aria-label="Cerrar el panel de contexto"
+      title="Cerrar el panel de contexto"
+    >
       <X size={16} aria-hidden="true" />
-    {/if}
-  </button>
+    </button>
+  {/if}
 
   <ContextTabs
     pestanas={pestanasContexto}
