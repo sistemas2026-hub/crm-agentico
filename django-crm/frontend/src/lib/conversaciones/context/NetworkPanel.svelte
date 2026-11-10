@@ -28,6 +28,7 @@
   import { lineaDeAccion } from '$lib/conversaciones/red.js';
   import { medicionDe, enlaceCaido, potenciaAtenuada, numeroODinero } from '$lib/conversaciones/optica.js';
   import { lecturaOptica } from '$lib/conversaciones/lectura-optica.svelte.js';
+  import { onMount } from 'svelte';
 
   let {
     acciones = [],
@@ -82,16 +83,35 @@
   let consultando = $state(false);
   let errorConsulta = $state('');
 
-  async function consultarAhora() {
+  /** El botón: la lectura completa, sin la memoria de cinco minutos.
+      'profundo=1' suma la consulta de ~10 s que trae temperatura, MAC y
+      perfil. Va SOLO acá, en el botón: quien lo aprieta está esperando. */
+  const consultarAhora = () =>
+    consultar(`/api/conversaciones/${conversacionId}/optica?forzar=1&profundo=1`);
+
+  /* AL ABRIR LA PESTAÑA (10/11/2026). Hasta ese día el equipo se leía solo si
+     la conversación estaba en manos de una persona; en el resto la pestaña
+     abría en «Sin consultar» y había que apretar el botón. Pero abrir Equipo
+     ES la intención de mirarlo: es una consulta puntual, no un bucle, que es
+     lo que SmartOLT pide evitar. Se lee la versión LIVIANA (estado, señal y
+     datos del equipo, ~0,5 s cada una) y SIN 'forzar': el motor guarda la
+     respuesta cinco minutos, así que ir y volver entre pestañas no vuelve a
+     salir al proveedor. Solo si no hay nada que mostrar todavía, y solo si el
+     motivo es que nadie la pidió: 'sin_equipo' o 'sin_herramienta' no se
+     arreglan consultando. */
+  onMount(() => {
+    if (!conversacionId || consultandoAlAbrir || lectura?.disponible) return;
+    if ((optica?.motivo ?? 'no_consultada') !== 'no_consultada') return;
+    consultar(`/api/conversaciones/${conversacionId}/optica`);
+  });
+
+  /** @param {string} url */
+  async function consultar(url) {
     if (consultando || !conversacionId) return;
     consultando = true;
     errorConsulta = '';
     try {
-      // 'profundo=1' suma la consulta de ~10 s que trae temperatura, MAC y
-      // perfil. Va SOLO acá, en el botón: quien lo aprieta está esperando.
-      const r = await fetch(
-        `/api/conversaciones/${conversacionId}/optica?forzar=1&profundo=1`
-      );
+      const r = await fetch(url);
       const cuerpo = await r.json();
       if (!r.ok) throw new Error(cuerpo?.error || 'No se pudo consultar el equipo.');
       manual = cuerpo;
@@ -600,7 +620,7 @@
     <p class="eq-pie">
       Firmware no lo devuelve ningún endpoint del sistema de red.
     </p>
-  {:else if consultandoAlAbrir}
+  {:else if consultandoAlAbrir || consultando}
     <p class="panel-consultando" role="status">Consultando el equipo en el sistema de red…</p>
   {:else}
     <p class="vacio">{MOTIVO[lectura?.motivo] ?? 'Sin consultar.'}</p>
@@ -743,8 +763,7 @@
   <p class="panel-nota">
     Estas mediciones se leen del sistema del ISP en el momento y no se guardan
     acá: por eso cada una viene con la hora en que se leyó. Se consultan solas
-    cuando la conversación está en manos de una persona; en el resto, con el
-    botón.
+    al abrir esta pestaña; el botón trae además temperatura, MAC y perfil.
   </p>
 </section>
 

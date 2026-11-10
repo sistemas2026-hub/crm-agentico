@@ -180,9 +180,10 @@ export async function load({ fetch, cookies, params, locals, depends }) {
      externo que pide no consultarlo en bucle, así que no se hace en cada
      apertura: se hace cuando una persona tiene el caso en la mano, que es
      cuando el diagnóstico se usa para decidir. Mientras la lleva el
-     asistente, la pestaña Equipo abre con el botón "Consultar ahora" y nadie
-     paga la espera. El motor cachea cinco minutos, así que recargar la
-     pantalla no vuelve a salir al proveedor.
+     asistente, la lectura sale cuando alguien ABRE la pestaña Equipo
+     (NetworkPanel, desde el 10/11/2026): abrir la conversación no paga la
+     espera, mirar el equipo sí. El motor cachea cinco minutos, así que
+     recargar la pantalla no vuelve a salir al proveedor.
 
      El ticket de BottleCRM solo se pide si esta conversacion escalo: depende
      de 'caso_id'. La mayoria de las conversaciones (las que el bot resuelve

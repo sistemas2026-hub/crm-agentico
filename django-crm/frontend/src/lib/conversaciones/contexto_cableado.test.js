@@ -401,6 +401,24 @@ describe('el panel de red no ejecuta ni inventa', () => {
     expect(sinComentarios.slice(Math.max(0, i - 700), i)).toMatch(/consultarAhora/);
   });
 
+  it('al abrir la pestaña Equipo se lee sola, y es la lectura LIVIANA', () => {
+    /* 10/11/2026: antes la pestaña abria en «Sin consultar» salvo que la
+       conversacion estuviera en manos de una persona. Abrir Equipo ya es la
+       intencion de mirarlo. Lo que no puede pasar es que esa lectura
+       automatica sea la profunda (~10 s, el proveedor pide no usarla sola)
+       ni que salte la memoria de cinco minutos del motor ('forzar'). */
+    const sinComentarios = red.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const alAbrir = sinComentarios.match(/onMount\(\(\) => \{([\s\S]*?)\n  \}\);/);
+    expect(alAbrir, 'no se encontro la lectura al abrir').not.toBeNull();
+    const cuerpo = alAbrir[1];
+    expect(cuerpo).toMatch(/consultar\(`\/api\/conversaciones\/\$\{conversacionId\}\/optica`\)/);
+    expect(cuerpo).not.toMatch(/profundo|forzar/);
+    // Solo cuando nadie la pidio: 'sin_equipo' o 'sin_herramienta' no se
+    // arreglan consultando, y si ya hay una lectura no se repite.
+    expect(cuerpo).toMatch(/no_consultada/);
+    expect(cuerpo).toMatch(/lectura\?\.disponible/);
+  });
+
   it('el proxy reenvia TODOS los parametros que la pantalla manda', () => {
     /* NACE DE UN FALLO EN PRODUCCION (22/09/2026). 'profundo=1' se agrego en
        el motor y en el panel, pero el proxy de SvelteKit reenvia una LISTA de
@@ -462,7 +480,9 @@ describe('el panel de red no ejecuta ni inventa', () => {
        prueba quiere proteger. */
     const prosa = visible.replace(/\s+/g, ' ');
     expect(prosa).toMatch(/no se guardan acá/i);
-    expect(prosa).toMatch(/en manos de una persona/i);
+    // Desde el 10/11/2026 se consulta sola al abrir la pestaña, no solo
+    // cuando la conversación está en manos de una persona.
+    expect(prosa).toMatch(/solas al abrir esta pestaña/i);
   });
 });
 
