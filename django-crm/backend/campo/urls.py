@@ -193,6 +193,12 @@ urlpatterns = [
     # Volver a medir la señal AHORA. La de la ficha es de cuando se armo la
     # orden, y despues de mover un conector eso ya no contesta nada.
     path("trabajos/<uid:pk>/medir-senal/", views.MedirSenalView.as_view(), name="trabajo_medir_senal"),
+    #  LA UBICACION DE LA CASA, que no es la del tecnico (10/11/2026).
+    #  La ruta ubicacion/ de mas arriba es donde esta el telefono y se
+    #  pisa cada 90 segundos; esta se escribe en los sistemas del ISP y queda.
+    path("trabajos/<uid:pk>/ubicacion-del-cliente/",
+         ubicacion_views.UbicacionDelClienteView.as_view(),
+         name="ubicacion_del_cliente"),
 
     # RESTAURADAS  --  estas ocho desaparecieron en 59cf2a6 junto con sus vistas.
     # El frontend nunca dejo de llamar a 'programar' y 'reprogramar'

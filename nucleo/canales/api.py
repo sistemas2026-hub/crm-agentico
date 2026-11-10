@@ -78,6 +78,7 @@ from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import borrador
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguimiento import cierre_por_validacion
+from nucleo.seguimiento import coordenada_del_cliente
 from nucleo.seguimiento import nota_en_el_ticket
 from nucleo.seguridad import interruptor
 from nucleo.seguridad import listas_blancas
@@ -5369,6 +5370,100 @@ def interno_cerrar_caso_de_propuesta(propuesta_id: str):
     #  mismo -- y porque de eso depende si conviene reintentar.
     codigo_http = 200 if resultado.cerrado else 409
     return jsonify(resultado.como_dict()), codigo_http
+
+
+@app.post("/interno/orden/<orden_id>/guardar-ubicacion")
+def interno_guardar_ubicacion_de_orden(orden_id: str):
+    """
+    Deja escrita, en los sistemas del ISP, la ubicacion que tomo un tecnico.
+
+    RUTA PROPIA Y NO `/interno/herramienta/<nombre>`, por la misma razon que
+    `cerrar-ticket`: esa es la puerta AUTONOMA, y una escritura externa por
+    ahi esta bloqueada hoy por Autonomia 2 (`frontera.py` ->
+    `autonomia2.veredicto()`). El boton habria andado en local y fallado SOLO
+    en produccion, con un sintoma que no senala la causa. Aca el que decidio
+    es una persona parada en la puerta de la casa, asi que la puerta que
+    corresponde es `humana()`, con la orden como evidencia.
+
+    EL CONTRATO ES ANGOSTO a proposito: la ubicacion, quien la tomo y con que
+    se identifica al cliente en cada sistema. Nada mas. El nombre de cada
+    campo del proveedor NO se acepta desde afuera -- sale de la configuracion
+    del tenant, que es lo unico que sabe como se llama en cada sistema.
+
+    El `origen` lo arma el motor con el id de la orden y no se acepta del
+    cuerpo: es la base de la clave idempotente, y una clave que el cliente
+    elige es una clave que el cliente puede repetir mal.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"latitud", "longitud", "actor", "identificadores"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({
+            "error": f"esta ruta solo acepta {sorted(permitidos)}. No acepta "
+                     f"{sobra}: como se llama cada campo lo dice la "
+                     f"configuracion del tenant, no quien llama."}), 400
+
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        #  SIN ACTOR NO HAY PUERTA HUMANA. `frontera.humana()` lo exige, pero
+        #  se corta aca para que el motivo sea legible y no un 500.
+        return jsonify({"error": "Falta 'actor': la puerta humana necesita "
+                                 "saber quien decidio."}), 400
+
+    identificadores = cuerpo.get("identificadores") or {}
+    if not isinstance(identificadores, dict) or not all(
+            isinstance(k, str) for k in identificadores):
+        return jsonify({"error": "'identificadores' tiene que ser un objeto "
+                                 "con los identificadores del cliente."}), 400
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+
+    resultado = coordenada_del_cliente.guardar(
+        config, tenant, actor=actor,
+        identificadores={k: str(v) for k, v in identificadores.items()
+                         if v is not None},
+        latitud=cuerpo.get("latitud"), longitud=cuerpo.get("longitud"),
+        origen=f"coordenada_de_orden:{orden_id}")
+
+    #  LOS CODIGOS, Y POR QUE CADA UNO:
+    #    200  quedo escrita en todos los sistemas que la saben recibir.
+    #    207  PARCIAL: uno si y otro no. Es 2xx porque ALGO se escribio y no
+    #         se deshace; el cuerpo dice cual falta, y volver a llamar
+    #         reintenta solo ese.
+    #    400  la peticion esta mal: no es una coordenada, o falta con que
+    #         identificar al cliente.
+    #    409  el sistema decidio no ejecutarla (interruptor, o el tenant no
+    #         declara ninguna herramienta). La peticion estaba bien.
+    #    502  el proveedor fallo de verdad.
+    codigos = {
+        coordenada_del_cliente.GUARDADA: 200,
+        coordenada_del_cliente.PARCIAL: 207,
+        coordenada_del_cliente.COORDENADA_INVALIDA: 400,
+        coordenada_del_cliente.FALTA_IDENTIFICADOR: 400,
+        coordenada_del_cliente.BLOQUEADO_POR_INTERRUPTOR: 409,
+        coordenada_del_cliente.SIN_HERRAMIENTA: 409,
+        coordenada_del_cliente.FALLO: 502,
+    }
+    cuerpo_resp = {
+        "estado": resultado.estado,
+        "motivo": resultado.motivo,
+        "referencia": resultado.referencia,
+        #  SIN LA COORDENADA EN LA RESPUESTA: quien llamo ya la tiene, y
+        #  devolverla la pone en un log mas de los que hagan falta.
+        "destinos": [{"herramienta": d.herramienta, "ok": d.ok,
+                      "detalle": d.detalle, "repetida": d.repetida}
+                     for d in resultado.destinos],
+    }
+    return jsonify(cuerpo_resp), codigos.get(resultado.estado, 500)
 
 
 @app.post("/interno/orden/<orden_id>/cerrar-ticket")
