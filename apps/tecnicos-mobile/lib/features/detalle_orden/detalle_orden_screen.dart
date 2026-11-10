@@ -25,6 +25,7 @@ import '../trabajo/estado_trabajo.dart';
 import '../trabajo/orden_operativo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
+import 'guardar_ubicacion_del_cliente.dart';
 import 'comprobar_conexion.dart';
 import '../trabajo/widgets/franja_del_servicio.dart';
 import 'diagnostico_de_campo.dart';
@@ -1079,18 +1080,40 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
+            //  RUTA GPS, O GUARDARLA SI NO HAY  --  10/11/2026.
+            //
+            //  Antes, sin coordenada, este boton quedaba apagado y no habia
+            //  nada mas que hacer: la casa seguia sin ubicar para siempre.
+            //  Medido contra la instancia real del ISP, de 5.186 equipos solo
+            //  10 tienen coordenada --0,19 %--, asi que el boton apagado era
+            //  lo que veia casi todo el mundo.
+            //
+            //  El tecnico ESTA en la puerta: es el unico momento en que
+            //  alguien puede dejar ese dato bien. Con coordenada el boton
+            //  navega, como siempre; sin ella la ofrece guardar, y NUNCA
+            //  pisa una que ya se pueda leer.
             Expanded(
-              child: DexterAccionRapida(
-                icono: Icons.directions,
-                texto: 'Ruta GPS',
-                alTocar: SalirDeLaApp.uriDeMapa(
-                          latitud: trabajo.latitud,
-                          longitud: trabajo.longitud,
-                        ) ==
-                        null
-                    ? null
-                    : () => _navegar(trabajo),
-              ),
+              child: SalirDeLaApp.uriDeMapa(
+                        latitud: trabajo.latitud,
+                        longitud: trabajo.longitud,
+                      ) !=
+                      null
+                  ? DexterAccionRapida(
+                      icono: Icons.directions,
+                      texto: 'Ruta GPS',
+                      alTocar: () => _navegar(trabajo),
+                    )
+                  : DexterAccionRapida(
+                      icono: Icons.add_location_alt,
+                      texto: _guardandoUbicacion
+                          ? 'Guardando…'
+                          : 'Guardar ubicación',
+                      alTocar: (widget.acciones.guardarUbicacionDelCliente ==
+                                  null ||
+                              _guardandoUbicacion)
+                          ? null
+                          : () => _guardarUbicacion(trabajo),
+                    ),
             ),
           ],
         ),
@@ -1105,6 +1128,35 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   Future<void> _llamar(TrabajoVista trabajo) async {
     final bool pudo = await widget.salir.llamar(trabajo.telefono);
     if (!pudo && mounted) _avisar('No se pudo abrir el marcador de este equipo.');
+  }
+
+  /// Mientras la ubicacion esta viajando. Sin esto, dos toques seguidos
+  /// mandan dos veces.
+  bool _guardandoUbicacion = false;
+
+  Future<void> _guardarUbicacion(dynamic trabajo) async {
+    final accion = widget.acciones.guardarUbicacionDelCliente;
+    if (accion == null || _guardandoUbicacion) return;
+    setState(() => _guardandoUbicacion = true);
+    ResultadoDeGuardado resultado;
+    try {
+      resultado = await accion(trabajo.id as String);
+    } catch (_) {
+      //  El tecnico esta en la calle: nada de esto puede tumbarle la
+      //  pantalla.
+      resultado = const ResultadoDeGuardado(
+        EstadoDeGuardado.rechazada,
+        'No se pudo guardar la ubicación. Probá de nuevo.',
+      );
+    }
+    if (!mounted) return;
+    setState(() => _guardandoUbicacion = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(resultado.mensaje)),
+    );
+    //  Con la ubicacion ya escrita, la orden del telefono sigue sin tenerla
+    //  hasta la proxima bajada. Se dice en el mismo aviso en vez de dejar al
+    //  tecnico tocando un boton que no cambia de texto.
   }
 
   Future<void> _navegar(TrabajoVista trabajo) async {

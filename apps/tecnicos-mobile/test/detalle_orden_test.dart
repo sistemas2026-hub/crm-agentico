@@ -708,7 +708,33 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Llamar Cliente'), findsOneWidget);
-      expect(find.text('Ruta GPS'), findsOneWidget);
+      await base.cerrar();
+    });
+
+    testWidgets('sin coordenada el botón OFRECE GUARDARLA, en vez de morirse', (
+      WidgetTester tester,
+    ) async {
+      //  CAMBIO DE CONDUCTA DEL 10/11/2026, y esta prueba cambió con él.
+      //
+      //  Antes este botón decía «Ruta GPS» y quedaba apagado: la casa seguía
+      //  sin ubicar para siempre y no había nada más que hacer. Medido contra
+      //  la instancia real del ISP, de 5.186 equipos solo 10 tienen
+      //  coordenada --0,19 %--, así que el botón muerto era lo que veía casi
+      //  todo el mundo.
+      //
+      //  El técnico ESTÁ en la puerta: es el único momento en que alguien
+      //  puede dejar ese dato bien. La orden de esta prueba no trae
+      //  coordenada, así que lo que corresponde es ofrecer guardarla.
+      _pantallaAlta(tester);
+      final base = _BaseFalsa(<Map<String, dynamic>>[_orden(estado: 'en_sitio')]);
+      await tester.pumpWidget(_app(base));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Guardar ubicación'), findsOneWidget);
+      //  Y NO las dos a la vez: son el mismo lugar de la pantalla, y ofrecer
+      //  navegar a una casa que no se sabe dónde está es el botón muerto de
+      //  antes con otro nombre.
+      expect(find.text('Ruta GPS'), findsNothing);
       await base.cerrar();
     });
   });

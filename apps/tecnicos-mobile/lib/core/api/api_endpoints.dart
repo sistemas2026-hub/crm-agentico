@@ -123,6 +123,14 @@ class ApiEndpoints {
   static String trabajoMedirSenal(String id) =>
       '$baseUrl/api/campo/trabajos/$id/medir-senal/';
 
+  /// Dejar escrita la ubicacion de la CASA en los sistemas del ISP.
+  ///
+  /// No confundir con `/api/campo/ubicacion/`, que es donde esta el TECNICO:
+  /// esa se pisa cada 90 segundos y no sale de Dexter. Esta queda, y la usa
+  /// despues cualquiera que busque esa casa.
+  static String trabajoUbicacionDelCliente(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/ubicacion-del-cliente/';
+
   /// Volver a pedir la ficha del equipo cuando al crear la orden no llegó.
   static String trabajoRefrescarFicha(String id) =>
       '$baseUrl/api/campo/trabajos/$id/ficha/refrescar/';

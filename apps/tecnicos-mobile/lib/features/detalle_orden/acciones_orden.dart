@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
+import 'guardar_ubicacion_del_cliente.dart';
 
 import '../../core/storage/local_database.dart';
 import '../../core/storage/secure_storage_service.dart';
@@ -21,6 +22,7 @@ class AccionesOrden {
     required this.sincronizar,
     this.probarConexion,
     this.medirSenal,
+    this.guardarUbicacionDelCliente,
     this.refrescarFicha,
   });
 
@@ -50,6 +52,18 @@ class AccionesOrden {
   /// Una medicion que se ejecuta cuando el tecnico ya se fue mide un momento
   /// que a nadie le importa, y llega con cara de respuesta a lo que pregunto.
   final Future<MedicionDeSenal> Function(String ordenId)? medirSenal;
+
+  /// Deja escrita la ubicacion de la CASA en los sistemas del ISP.
+  ///
+  /// Toma la posicion del telefono y la manda. Se ofrece SOLO cuando la orden
+  /// no trae una coordenada utilizable --decision del usuario, 10/11/2026--:
+  /// la que ya esta cargada y se puede leer no se pisa nunca.
+  ///
+  /// Nulo donde no este cableado, y entonces el boton no se dibuja: es la
+  /// misma costura que `medirSenal`, y sirve para probar la pantalla sin GPS
+  /// ni red.
+  final Future<ResultadoDeGuardado> Function(String ordenId)?
+      guardarUbicacionDelCliente;
 
   /// Volver a pedir la ficha del equipo (niveles, estado, serial).
   ///
@@ -90,6 +104,42 @@ class AccionesOrden {
         await sincronizacion.procesarCola();
       },
       sincronizar: sincronizacion.procesarCola,
+      guardarUbicacionDelCliente: (String ordenId) async {
+        //  La lectura del GPS NO se escribe de nuevo aca:
+        //  `GuardarUbicacionDelCliente` usa `UbicacionDeCaptura.tomar()`, que
+        //  ya resuelve el plazo, el permiso y los tres motivos de fallo.
+        final accion = GuardarUbicacionDelCliente(
+          enviar: (double lat, double lng) async {
+            try {
+              final Response<dynamic> r =
+                  await ApiClient().dio.post<dynamic>(
+                        ApiEndpoints.trabajoUbicacionDelCliente(ordenId),
+                        data: <String, dynamic>{
+                          'latitud': lat,
+                          'longitud': lng,
+                        },
+                      );
+              return (
+                codigo: r.statusCode ?? 0,
+                cuerpo: (r.data as Map<String, dynamic>?) ??
+                    <String, dynamic>{},
+              );
+            } on DioException catch (e) {
+              //  UN 4xx NO ES UN FALLO DE RED, y la diferencia la necesita el
+              //  tecnico: el cuerpo trae por que, y «probá de nuevo» seria
+              //  mentira si el interruptor esta detenido.
+              final int? codigo = e.response?.statusCode;
+              if (codigo == null) rethrow;
+              return (
+                codigo: codigo,
+                cuerpo: (e.response?.data as Map<String, dynamic>?) ??
+                    <String, dynamic>{},
+              );
+            }
+          },
+        );
+        return accion.ejecutar();
+      },
       medirSenal: (String ordenId) async {
         try {
           final Response<dynamic> r = await ApiClient().dio.post<dynamic>(
