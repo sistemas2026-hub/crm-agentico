@@ -482,6 +482,131 @@ mensaje de "no tengo internet" violaría la guía del proveedor de cachear y no
 repetir. Si se quiere esta regla, es un trabajo periódico con caché
 (`Herramienta.cache_segundos` del plan), no una herramienta conversacional.
 
+## Coordenadas GPS de una ONU — lectura y ESCRITURA (medido 10/11/2026)
+
+SmartOLT **sí** deja escribir coordenadas, y el endpoint existe en la instancia
+de Rapilink: `POST /api/onu/update_location_details/{onu_external_id}`, cuerpo de
+**FORMULARIO**. Acepta nueve parámetros: `zone`, `odb`, `odb_port`, `name`,
+`address_or_comment`, `contact`, `latitude`, `longitude`, `seal_number`.
+
+Cómo se probó que la ruta existe SIN escribir nada — el 405 no sirve de
+discriminador (ya lo dice la sección de CATV), el 400 sí:
+
+    POST /api/onu/update_location_details/ZZZZ00000000  -> 400 specify_valid_field
+    POST /api/onu/update_gps_coordinates/ZZZZ00000000   -> 405 "Unknown method"
+    POST /api/onu/update_coordinates/ZZZZ00000000       -> 405 "Unknown method"
+
+Una ruta que NO existe da 405 incluso con POST; la que existe da un 400 que
+**nombra el parámetro**. **El identificador se valida PRIMERO**: con un id
+imposible, `latitude=10.9`, `latitude=BASURA` y el cuerpo vacío devuelven los
+tres el mismo `specify_valid_field`, así que el formato del campo no se puede
+sondear sin una ONU real.
+
+### ⚠️ UN CUERPO JSON SE IGNORA EN SILENCIO
+
+Medido sobre `check_bulk_task_status` (endpoint de solo consulta, con un id
+inexistente):
+
+| Cuerpo | Resultado |
+|---|---|
+| `x-www-form-urlencoded` | `200` |
+| `multipart/form-data` | `200` |
+| **`application/json`** | **`400`, idéntico al de no mandar cuerpo** |
+
+El motor manda `json=args` por defecto (`nucleo/herramientas/http.py`), así que
+**toda herramienta de SmartOLT con cuerpo necesita `multipart: true`** — sin eso
+SmartOLT no lee ni un parámetro. Vale para `update_location_details`,
+`change_onu_type` y cualquier otra con body.
+
+**Dos campos separados, string**: `latitude` y `longitude`. No existe ningún
+campo combinado en los 86 de `get_onu_details` ni en los 3 del endpoint de GPS.
+(Ojo: WispHub hace lo contrario — un solo campo `coordenadas` con `"lat,lon"`.
+Quien escriba en los dos lados tiene que convertir.)
+
+### La respuesta del detalle envuelve los 86 campos en `onu_details`
+
+`GET /api/onu/get_onu_details/{sn}` devuelve `{onu_details: {...86...}, status,
+response_code}`. Buscar el objeto por otros nombres (`onu`, `data`, `response`)
+devuelve la envoltura de 3 claves y una lectura que parece vacía: pasó el
+10/11/2026 y costó una pasada entera, porque el guardarraíl dijo «esta ONU no
+tiene coordenada» cuando sí la tenía.
+
+### Cómo se lee, y cómo se ve el VACÍO
+
+`GET /api/onu/get_all_onus_gps_coordinates` devuelve
+`unique_external_id`/`latitude`/`longitude` de **TODA** la flota (5.186 filas =
+el total exacto de `get_all_onus_details`), **sin una sola PII**, en 0,4 s.
+Distribución medida, idéntica en los dos endpoints:
+
+| Valor | ONUs |
+|---|---|
+| `null` | 5.082 |
+| `""` (cadena vacía) | 94 (todas autorizadas entre 2021-04 y 2023-06) |
+| coordenada real | **10** (0,19 %, todas desde 2024-11) |
+
+**Nunca `0` ni `"0,0"`.** Pero hay DOS formas de vacío, así que la condición «no
+tiene coordenada» es `v is None or str(v).strip() == ""`: un chequeo que solo
+mire `None` deja 94 ONUs del lado equivocado.
+
+### ESCRITURA PARCIAL: aplica y NO pisa (medido en vivo)
+
+Escritura real autorizada por el usuario sobre la ONU del servicio de prueba
+5832, cruzada antes contra WispHub por `sn_onu` para no tocar la ONU de otro
+cliente:
+
+    POST update_location_details/HWTCA6FB5263   latitude=<ultimo decimal movido>
+                                                longitude=<igual>   -> 200
+    GET get_onu_details/HWTCA6FB5263  -> latitude quedo en el valor nuevo
+                                         UNICO campo que cambio de los 86
+                                         zone_name, name, onu_type_name, vlan intactos
+    POST ... latitude=<original>  -> restaurado y verificado
+
+**Mandar solo `latitude`+`longitude` es seguro**: no vacía `zone`, `name`,
+`address` ni `odb`. Eso importaba porque en la flota hay 1.353 ONUs con
+`address` y 2.237 con `odb_name` que un pisado se habría llevado.
+
+⚠️ **POR QUÉ EL VALOR TIENE QUE SER DISTINTO, y no el mismo.** La primera pasada
+escribió el valor que la ONU YA tenía y midió «0 campos cambiaron». Parece la
+respuesta y no lo es: con un valor idéntico, «nada cambió» es exactamente lo que
+se vería si la API hubiera IGNORADO la llamada — y el 200 no desempata, porque
+está medido arriba que SmartOLT devuelve 200 de eco ante un cuerpo que no leyó.
+Una prueba que no distingue «funcionó» de «no hizo nada» no prueba nada. Mover
+el último decimal (misma ubicación, ~1 cm) separa las dos preguntas: que APLICÓ
+se ve en el campo, y que NO PISÓ se ve en el diff.
+
+**NUNCA mandar `seal_number`.** El proveedor documenta que si ese campo falla
+devuelve 500 y «the other location details of the same request may already be
+saved»: el endpoint **no es atómico**, y ese es el parámetro que lo rompe. Un
+error de este endpoint se trata como posible aplicación parcial.
+
+### El filtro `zone` FALLA ABIERTO — el proveedor documenta un 400 que no ocurre
+
+En `get_all_onus_gps_coordinates`, método del valor imposible:
+
+    ?olt_id=99999        -> 400 "OLT with ID 99999 was not found." (olt_not_found)
+    ?zone=NO_EXISTE      -> 200 con las 5.186 ONUs   <-- SE IGNORA
+    ?zone=CACARAMOA 2    -> 200 con 10, las mismas que get_all_onus_details ubica ahi
+
+`zone` se aplica con un nombre válido y devuelve la flota ENTERA con uno
+inválido. La doc oficial afirma «it returns a 400 when no Zone was found for the
+provided zone name»: es falso. Un nombre mal escrito produce «todas las ONUs»
+presentado como «las de esa zona». Nunca pasar un valor de texto libre: validar
+antes contra `get_zones`. `olt_id` sí valida.
+
+### Qué entra al catálogo, y qué no
+
+- **Lectura:** `get_onu_details/{sn_onu}` con lista blanca **solo**
+  `latitude`+`longitude`. El registro trae `name` y `address` del cliente, y
+  además `password`: todo lo demás se queda afuera.
+- **Escritura:** `update_location_details`, `multipart: true`, `irreversible`
+  → solo por `frontera.critica()`. Los dos argumentos van **calculados desde
+  código** (la ubicación del técnico), nunca propuestos por el modelo, y la
+  herramienta **no expone** los otros siete parámetros: `name`,
+  `address_or_comment` y `contact` son PII y `zone`/`odb`/`odb_port` son
+  inventario de red.
+- **No entra** `get_all_onus_gps_coordinates` como herramienta conversacional:
+  5 llamadas/hora y 5.186 filas. Sirve como trabajo periódico con caché.
+
 ## `reboot` ejecutado en vivo (14/08/2026) — contrato confirmado, y el tiempo de recuperación medido
 
 Probado contra la ONU de prueba (`CDTC505AE4AB`, descripción "PRUEBA", la

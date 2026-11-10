@@ -908,6 +908,100 @@ recurso obvio que fallaba con 500 mientras la via real era un sub-recurso
 distinto— cualquiera de estos puede comportarse distinto a lo que el nombre
 sugiere. Ninguno se prueba sin plan concreto y autorizacion explicita.
 
+## El campo `coordenadas`: lo medido (10/11/2026)
+
+Medido contra produccion (`api.wisphub.io`) para decidir si un tecnico puede
+guardar el GPS del cliente desde la app de campo. Cliente de prueba: 5832.
+
+**Un solo campo, texto libre, `"lat,lon"`.** No hay `lat`/`lon` separados, ni
+numeros: es una cadena. Viene en la respuesta de LISTA (54 campos) y en la de
+DETALLE (34 campos) -- a diferencia de `usuario`, aqui los dos endpoints
+coinciden. `/api/clientes/{id}/perfil/` (33 campos: nombre, cedula, direccion,
+telefono...) **NO trae coordenadas**: el GPS vive en el recurso del SERVICIO,
+no en el del cliente.
+
+**El vacio es `""`, nunca `null` ni `"0,0"`.** Medido sobre 4.644 filas de
+lista: 2.982 con cadena vacia, 0 con la clave ausente, 0 con `null`, 0 con
+`"0,0"`. La condicion "este cliente no tiene coordenadas" es cadena vacia o
+cadena que no parsea.
+
+**El campo NO esta validado: guarda cualquier texto.** En 2.700 filas
+muestreadas convivian cuatro formas distintas y una basura:
+
+| Forma | Cuantas (de 2.700) |
+|---|---|
+| `lat,lon` decimal, 5 a 15 decimales por componente | ~1.350 |
+| grados-minutos-segundos (`10°52'...N 74°55'...W`) | 257 |
+| `lat -lon` separados por ESPACIO, sin coma | ~105 |
+| direcciones de calle (`Cl. 45c # 3D-21`) | 6 |
+| un `--74.xxx` con doble signo menos | 1 |
+
+Por eso un lector no puede asumir `split(",")`: hay que parsear defensivamente
+y tratar lo no parseable como "sin coordenadas". Y confirmado por el lado de
+escritura: un `POST /api/clientes/agregar-cliente/32278/` con
+`{"coordenadas": "ESTO_NO_ES_UNA_COORDENADA"}` y sin los tres requeridos
+devolvio `400 {"ip":[...],"usuario_rb":[...],"plan_internet":[...]}` --
+**ni una palabra sobre `coordenadas`**: el serializer la acepta como texto.
+
+**Escritura: `PUT /api/clientes/{id}/` es la via documentada y alcanzable.**
+`OPTIONS /api/clientes/{id}/` -> `Allow: GET, PUT, PATCH, DELETE, HEAD, OPTIONS`.
+La coleccion sigue siendo `GET, HEAD, OPTIONS`. No existe sub-ruta de accion:
+`/api/clientes/{id}/coordenadas/` y `/api/clientes/editar-cliente/{id}/` dan 404.
+El `PUT` del spec (`Clientes/paths/retrieve_servicio.yaml`, bajar aparte: el
+`openapi.yaml` principal solo trae `$ref`) lista `coordenadas` como string
+junto a los otros 30 campos del servicio. La clave de API **no esta bloqueada
+por permiso**: el `PUT` llega a la validacion de negocio (400 de dominio), no
+a un 403.
+
+**`PATCH` con un dict anidado revienta con 500.** `PATCH {"plan_internet":
+{"id": 999999999}}` -> **500** (pagina HTML), sin cambiar nada. El mismo cuerpo
+por `PUT` -> `400 {"detail":"No se encontro el plan de internet"}`. Y `PATCH {}`
+-> `200` devolviendo el objeto entero, con los 34 campos intactos: PATCH no
+esta roto, lo rompe el dict anidado. `PATCH` tambien ignora claves que no
+existen (200, sin cambios).
+
+**El eco de PATCH/PUT no prueba nada** (ya documentado para tickets y estado de
+cliente): las dos respuestas devuelven el objeto completo. Toda comprobacion se
+hizo con un `GET` posterior y un diff campo por campo contra un respaldo previo.
+
+**Trampas al armar un `PUT` completo** -- el detalle que se LEE no se puede
+reenviar tal cual:
+
+- `estado` se lee como texto (`"Gratis"`, `"Activo"`) y el `PUT` lo quiere
+  entero (0 instalacion, 1 activo, 2 suspendido, 3 cancelado, 4 gratis).
+- `plan_internet`, `router`, `tecnico`, `zona`, `modelo_antena`, `sectorial`
+  se leen como objetos (`{"id":..., "nombre":...}`, y `router` trae ademas
+  `falla_general`) y el `PUT` los quiere como `{"id": N}`.
+- el detalle devuelve los cuatro campos de contrasena: un `PUT` de objeto
+  completo los reenviaria. Razon de peso para escribir SOLO `coordenadas`.
+
+### VERIFICADO el 10/11/2026: el PUT parcial APLICA y NO PISA
+
+Lo que arriba quedaba pendiente ya se midio, con escritura real autorizada por
+el usuario sobre el servicio de prueba **5832**:
+
+    PUT /api/clientes/5832/   {"coordenadas": "<valor con el ultimo decimal movido>"}
+      -> 200
+    GET /api/clientes/5832/   -> `coordenadas` quedo en el valor nuevo
+                                 unico campo que cambio de los 34
+                                 19 campos con valor antes, 19 despues
+    PUT /api/clientes/5832/   {"coordenadas": "<valor original>"}  -> restaurado
+
+**Mandar solo `coordenadas` es seguro**: no vacia ninguno de los otros 33
+campos. No hace falta leer y reenviar el objeto completo --que ademas obligaria
+a convertir `estado` a entero y los anidados a `{"id": N}`, y reenviaria las
+cuatro contrasenas--.
+
+⚠️ **POR QUE EL VALOR TIENE QUE SER DISTINTO, y no el mismo.** La primera
+pasada de esta misma prueba (en SmartOLT, misma sesion) escribio el valor que el
+registro YA tenia y midio «0 campos cambiaron». Parece la respuesta y no lo es:
+con un valor identico, «nada cambio» es exactamente lo que se veria si la API
+hubiera IGNORADO la llamada --y el 200 no desempata, porque ya esta medido que
+estas APIs devuelven 200 de eco ante un cuerpo que no leyeron--. Una prueba que
+no distingue «funciono» de «no hizo nada» no prueba nada. Mover el ultimo
+decimal (misma ubicacion, ~10 cm) deja las dos preguntas separadas: que APLICO
+se ve en el campo, y que NO PISO se ve en el diff.
+
 ## Antes de dar por buena una integracion
 
 - [ ] Cada filtro del catalogo tiene `verificado_el`
