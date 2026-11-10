@@ -19,6 +19,7 @@ import '../trabajo/trabajo_vista.dart';
 import 'campo_del_formulario.dart';
 import 'cierre_de_orden.dart';
 import 'datos_de_ejecucion.dart';
+import 'pasos_del_trabajo.dart';
 import 'resumen_para_finalizar.dart';
 import 'widgets/consumo_de_material.dart';
 import 'widgets/firma_del_cliente.dart';
@@ -1508,13 +1509,30 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                       ),
                       const SizedBox(height: AppSpacing.lg),
                     ],
-                    // COMPROBAR CONEXION, SIN SALIR DE LA INTERVENCION. Antes
-                    // vivia solo en la ficha.
-                    if (_conexion() case final Widget bloque) ...<Widget>[
-                      bloque,
-                      const SizedBox(height: AppSpacing.lg),
+                    // LOS BLOQUES DEL FINAL, SOLO EN EL ULTIMO PASO
+                    // ---------------------------------------------
+                    // (09/11/2026) El usuario: «si le dan en 1 diagnostico,
+                    // que solo le muestre lo que esta en diagnostico; quitar
+                    // la comprobacion de conexion y materiales en esta orden,
+                    // esos campos que solo salgan en solucion».
+                    //
+                    // Antes se dibujaban SIEMPRE debajo del paso, asi que
+                    // parado en el paso 1 el tecnico veia su diagnostico y
+                    // ademas dos cosas que no le tocan todavia -- y el paso
+                    // dejaba de significar algo, porque igual habia que bajar
+                    // por todo.
+                    //
+                    // Cual es «el ultimo» lo decide esElPasoDeCierre, y no
+                    // el nombre del paso: ver el porque ahi.
+                    if (_vanLosBloquesDelFinal) ...<Widget>[
+                      // COMPROBAR CONEXION, SIN SALIR DE LA INTERVENCION.
+                      // Antes vivia solo en la ficha.
+                      if (_conexion() case final Widget bloque) ...<Widget>[
+                        bloque,
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
+                      _bloqueDeMateriales(),
                     ],
-                    _bloqueDeMateriales(),
                     if (_pasos.isEmpty) _evidencias(),
                     _checklistDeCierre(),
                     if (widget.mostrarDatosFuturos) ...[
@@ -1540,6 +1558,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         pasos: _pasosDelProtocolo,
       );
 
+  /// Si en el paso donde esta parado el tecnico van los bloques del final:
+  /// comprobar la conexion y el material usado. Ver esElPasoDeCierre.
+  bool get _vanLosBloquesDelFinal => esElPasoDeCierre(
+        indice: _pasoActual,
+        total: _pasos.length,
+      );
+
   /// Si a un paso no le falta nada de lo obligatorio.
   bool _pasoCompleto(PasoDeEjecucion paso) {
     final bool faltaDato = CampoDelFormulario.normalizar(
@@ -1553,79 +1578,79 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     return !faltaDato && !faltaFoto;
   }
 
-  /// Los pasos, de a uno por fila: el que se está haciendo, resaltado; los
-  /// completos, con su tilde. Tocar uno lo abre.
+  /// La línea de pasos (09/11/2026, el usuario: «hacer que la interfaz sea
+  /// más creativa»).
+  ///
+  /// Antes era una lista vertical: una tarjeta por paso, apiladas, que con
+  /// tres pasos se comía media pantalla antes de llegar al primer campo. Y
+  /// repetía arriba el título del paso que el contenido ya encabeza.
+  ///
+  /// Ahora es un renglón: un círculo por paso --con su número, o un ✓ cuando
+  /// está completo-- unidos por una línea que se pinta a medida que avanza.
+  /// Se ve de un vistazo cuántos faltan y cuáles quedaron a medias, que es lo
+  /// que la lista no mostraba sin leerla entera.
+  ///
+  /// Cada círculo sigue siendo tocable, con su objetivo táctil completo: el
+  /// técnico salta al paso que quiera, como antes.
   Widget _selectorDePasos() {
     final List<PasoDeEjecucion> pasos = _pasos;
     final int actual = _pasoActual.clamp(0, pasos.length - 1);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Text(
-          'PASOS DEL TRABAJO',
-          style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        for (int i = 0; i < pasos.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: Material(
-              color: i == actual
-                  ? AppColors.primary
-                  : AppColors.surfaceContainerLowest,
-              borderRadius: AppRadius.brTarjeta,
-              child: InkWell(
-                borderRadius: AppRadius.brTarjeta,
-                onTap: () => setState(() => _pasoActual = i),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    minHeight: AppSpacing.objetivoTactil,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                      vertical: AppSpacing.xs,
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Icon(
-                          _pasoCompleto(pasos[i])
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          size: 20,
-                          color: i == actual
-                              ? AppColors.onPrimary
-                              : (_pasoCompleto(pasos[i])
-                                  ? AppColors.secondary
-                                  : AppColors.outline),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            '${i + 1}. ${pasos[i].titulo}',
-                            style: AppTypography.cuerpo.copyWith(
-                              color: i == actual
-                                  ? AppColors.onPrimary
-                                  : AppColors.onSurface,
-                              fontWeight: i == actual
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
+
+    return Semantics(
+      container: true,
+      label: 'Paso ${actual + 1} de ${pasos.length}: ${pasos[actual].titulo}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              for (int i = 0; i < pasos.length; i++) ...<Widget>[
+                if (i > 0)
+                  Expanded(
+                    child: Container(
+                      height: 3,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        //  La línea hasta el paso actual va pintada: es el
+                        //  camino recorrido, no una decoración.
+                        color: i <= actual
+                            ? AppColors.primary
+                            : AppColors.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
+                _CirculoDePaso(
+                  numero: i + 1,
+                  estado: estadoDelPaso(
+                    indice: i,
+                    actual: actual,
+                    completo: _pasoCompleto(pasos[i]),
+                  ),
+                  alTocar: () => setState(() => _pasoActual = i),
                 ),
+              ],
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          //  El nombre del paso donde está parado. Los otros no se escriben:
+          //  con cuatro pasos los títulos no entran en un renglón, y cortarlos
+          //  --«Diagn… Soluc… Otros…»-- no dice nada.
+          Text(
+            '${actual + 1}. ${pasos[actual].titulo}',
+            style: AppTypography.tituloChico,
+          ),
+          if (pasos[actual].descripcion.isNotEmpty)
+            Text(
+              pasos[actual].descripcion,
+              style: AppTypography.cuerpoChico.copyWith(
+                color: AppColors.onSurfaceVariant,
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
-
-  /// El paso que se está haciendo: su instrucción, sus datos, sus fotos y el
-  /// material, en un mismo lugar.
   Widget _pasoEnCurso() {
     final List<PasoDeEjecucion> pasos = _pasos;
     final int actual = _pasoActual.clamp(0, pasos.length - 1);
@@ -2355,6 +2380,78 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Un paso en la línea de arriba de la ejecución (09/11/2026).
+///
+/// Mide 40 px --el objetivo táctil del diseño-- aunque el círculo dibujado sea
+/// de 28: el técnico lo toca con guante, en una escalera, y un blanco de 28 px
+/// se falla.
+class _CirculoDePaso extends StatelessWidget {
+  const _CirculoDePaso({
+    required this.numero,
+    required this.estado,
+    required this.alTocar,
+  });
+
+  final int numero;
+  final EstadoDelPaso estado;
+  final VoidCallback alTocar;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enCurso = estado == EstadoDelPaso.enCurso;
+    final bool hecho = estado == EstadoDelPaso.hecho;
+
+    final Color fondo = enCurso
+        ? AppColors.primary
+        : (hecho ? AppColors.secondaryContainer : AppColors.surfaceContainerLowest);
+    final Color tinta = enCurso
+        ? AppColors.onPrimary
+        : (hecho ? AppColors.onSecondary : AppColors.outline);
+
+    return Semantics(
+      button: true,
+      selected: enCurso,
+      label: hecho ? 'Paso $numero, completo' : 'Paso $numero',
+      excludeSemantics: true,
+      child: InkResponse(
+        onTap: alTocar,
+        radius: 24,
+        child: SizedBox(
+          width: AppSpacing.objetivoTactil,
+          height: AppSpacing.objetivoTactil,
+          child: Center(
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: fondo,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: enCurso
+                      ? AppColors.primary
+                      : (hecho ? AppColors.secondary : AppColors.outlineVariant),
+                  width: 1.5,
+                ),
+              ),
+              child: Center(
+                child: hecho
+                    ? Icon(Icons.check, size: 16, color: tinta)
+                    : Text(
+                        '$numero',
+                        style: AppTypography.etiquetaGrande.copyWith(
+                          color: tinta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

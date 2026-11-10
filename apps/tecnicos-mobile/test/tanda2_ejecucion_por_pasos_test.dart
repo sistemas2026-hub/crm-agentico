@@ -149,8 +149,13 @@ void main() {
       await t.pumpWidget(_app(porPasos()));
       await t.pumpAndSettle();
 
-      expect(find.text('PASOS DEL TRABAJO'), findsOneWidget);
+      //  La linea de pasos (09/11/2026): un circulo por paso, y el nombre
+      //  SOLO del que esta abierto. Los otros titulos no se escriben: con
+      //  cuatro pasos no entran en un renglon, y cortarlos no dice nada.
+      expect(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Paso 2(, completo)?$')), findsOneWidget);
       expect(find.text('1. Diagnóstico'), findsOneWidget);
+      expect(find.text('2. Solución'), findsNothing);
       expect(find.textContaining('Medición al llegar'), findsWidgets);
       expect(find.textContaining('Qué se cambió'), findsNothing);
       expect(find.text('Finalizar'), findsNothing);
@@ -170,16 +175,38 @@ void main() {
       _pantallaAlta(t);
       await t.pumpWidget(_app(porPasos()));
       await t.pumpAndSettle();
-      await t.tap(find.text('2. Solución'));
+      //  Se toca el circulo del paso, no su titulo: el titulo del paso que
+      //  no esta abierto ya no se dibuja.
+      await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 2(, completo)?$')));
       await t.pumpAndSettle();
+      expect(find.text('2. Solución'), findsOneWidget);
       expect(find.textContaining('Qué se cambió'), findsWidgets);
+    });
+
+    /// EL PEDIDO, EN LA PANTALLA (09/11/2026): «si le dan en 1 diagnostico,
+    /// que solo le muestre lo que esta en diagnostico; quitar la comprobacion
+    /// de conexion y materiales en esta orden».
+    testWidgets('en el primer paso no salen los bloques del final', (WidgetTester t) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(porPasos()));
+      await t.pumpAndSettle();
+
+      //  Paso 1: solo lo del paso 1.
+      expect(find.text('1. Diagnóstico'), findsOneWidget);
+      expect(find.text('Materiales en esta orden'), findsNothing);
+      expect(find.text('Comprobar conexión'), findsNothing);
+
+      //  Y en el ultimo si: es cuando se sabe que material se uso.
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      expect(find.text('Materiales en esta orden'), findsOneWidget);
     });
 
     testWidgets('sin pasos en la plantilla, la pantalla de siempre', (WidgetTester t) async {
       _pantallaAlta(t);
       await t.pumpWidget(_app(FuenteDeEjecucionFalsa()));
       await t.pumpAndSettle();
-      expect(find.text('PASOS DEL TRABAJO'), findsNothing);
+      expect(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')), findsNothing);
       // El encabezado, y la línea del checklist que lleva el mismo nombre.
       expect(find.text('Datos del trabajo'), findsWidgets);
       expect(find.text('Finalizar'), findsOneWidget);
