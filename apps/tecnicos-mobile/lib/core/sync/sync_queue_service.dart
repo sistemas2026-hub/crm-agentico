@@ -10,6 +10,7 @@ import '../api/api_client.dart';
 import '../api/api_endpoints.dart';
 import '../storage/local_database.dart';
 import '../storage/secure_storage_service.dart';
+import 'motivo_del_rechazo.dart';
 import 'una_pasada_a_la_vez.dart';
 
 enum SyncStatus { idle, syncing, error, success }
@@ -1529,8 +1530,15 @@ class SyncQueueService {
             orgId: orgId,
             profileId: profileId,
             estado: 'error_validacion',
-            errorMensaje:
-                dioErr.response?.data?['error']?.toString() ?? dioErr.message,
+            //  EL MOTIVO REAL, Y NO EL MENSAJE DE DIO (10/11/2026). Esta
+            //  linea leia `data['error']`, una clave que este backend NO
+            //  manda en un 400: manda `{"guardado": false, "errores": {...}}`
+            //  con el nombre del campo que la plantilla no tiene. El `??`
+            //  tapaba el hueco con «Http status error [400]», asi que el
+            //  tecnico veia «9 cambios necesitan que alguien lo revise» sin
+            //  una sola pista de que revisar.
+            errorMensaje: motivoDelRechazo(dioErr.response?.data,
+                respaldo: dioErr.message),
           );
         } else if (status == 401 || status == 403) {
           // Error de autenticación persistente tras intento de refresh
@@ -1552,13 +1560,19 @@ class SyncQueueService {
           );
         } else if (status == 409) {
           // Conflicto de revisión (STALE_WORK_ORDER) u operación en curso
-          final code = dioErr.response?.data?['code'] ?? '';
+          //  IGUAL QUE ARRIBA, Y CON MAS PERDIDA (10/11/2026): se leia
+          //  `data['code']`, que tampoco existe. El servidor manda
+          //  `detalle` con los campos exactos en que choco la revision
+          //  --«Conflicto de concurrencia en campos: ['x']»-- y de todo eso
+          //  quedaba guardada la palabra `STALE_WORK_ORDER`, que no dice ni
+          //  en que campo ni contra que.
           await _localDb.updateMutacionEstado(
             id: m['id'],
             orgId: orgId,
             profileId: profileId,
             estado: 'conflicto',
-            errorMensaje: code.isNotEmpty ? code : 'STALE_WORK_ORDER',
+            errorMensaje: motivoDelRechazo(dioErr.response?.data,
+                respaldo: 'STALE_WORK_ORDER'),
           );
         } else {
           // Errores reintentables: 408 (Timeout), 429 (Rate limit), 5xx, timeouts de red, caídas de socket
