@@ -6853,6 +6853,45 @@ _CAMPOS_DE_EQUIPO = frozenset({
 })
 
 
+# UN SERIAL QUE LA OLT NO CONOCE NO SE VUELVE A PREGUNTAR CADA VEZ (09/11/2026).
+#
+# Cuando WispHub tiene un serial viejo o mal cargado, SmartOLT contesta 400 a las tres
+# lecturas, y cada una se repite con la "forma alternativa": seis llamadas para un
+# resultado que no cambia. Medido en el log del motor: el Supervisor recorre sus 15
+# casos varias veces por hora y cada pasada pagaba esas seis llamadas por cada serial
+# malo. SOLO se recuerda un rechazo DEFINITIVO de la OLT (400/404) en TODAS las
+# herramientas: un timeout o una caida de red nunca se guardan, porque ahi si puede
+# haber un dato la proxima vez. La clave lleva el serial: al corregirlo en WispHub la
+# entrada deja de aplicar sola.
+SEGUNDOS_SERIAL_DESCONOCIDO = 600
+_MAX_SERIALES_DESCONOCIDOS = 500
+_seriales_desconocidos: dict[tuple[str, str], float] = {}
+_seriales_desconocidos_lock = threading.Lock()
+
+
+def _serial_ya_desconocido(tenant: str, sn_onu: str) -> bool:
+    with _seriales_desconocidos_lock:
+        desde = _seriales_desconocidos.get((tenant, sn_onu))
+        if desde is None:
+            return False
+        if (time.monotonic() - desde) >= SEGUNDOS_SERIAL_DESCONOCIDO:
+            del _seriales_desconocidos[(tenant, sn_onu)]
+            return False
+        return True
+
+
+def _recordar_serial_desconocido(tenant: str, sn_onu: str) -> None:
+    with _seriales_desconocidos_lock:
+        if len(_seriales_desconocidos) >= _MAX_SERIALES_DESCONOCIDOS:
+            _seriales_desconocidos.pop(next(iter(_seriales_desconocidos)))
+        _seriales_desconocidos[(tenant, sn_onu)] = time.monotonic()
+
+
+def _rechazo_definitivo(e: Exception) -> bool:
+    respuesta = getattr(e, "response", None)
+    return getattr(respuesta, "status_code", None) in (400, 404)
+
+
 def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
     """
     Estado y niveles opticos del equipo, o {} si no se pudo leer.
@@ -6863,11 +6902,15 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
     automatico, una tarjeta vacia no se arregla sola.
     """
     salida = {}
+    if _serial_ya_desconocido(tenant, sn_onu):
+        return {}
     por_nombre = {h.nombre: h for h in config.herramientas}
+    intentadas = rechazadas = 0
     for nombre in _HERRAMIENTAS_EQUIPO:
         herr = por_nombre.get(nombre)
         if herr is None:
             continue
+        intentadas += 1
         try:
             datos = ejecutor_http.ejecutar(
                 herr, {"sn_onu": sn_onu}, tenant,
@@ -6880,8 +6923,12 @@ def _estado_equipo(config, sn_onu: str, tenant: str) -> dict:
                                and isinstance(v, (str, int, float, bool))
                                and v != ""})
         except Exception as e:
+            if _rechazo_definitivo(e):
+                rechazadas += 1
             registrar("enlaces", "la herramienta de equipo no respondio",
                       herramienta=nombre, error=e)
+    if intentadas and rechazadas == intentadas and not salida:
+        _recordar_serial_desconocido(tenant, sn_onu)
     return _con_zona_declarada(salida, config)
 
 
