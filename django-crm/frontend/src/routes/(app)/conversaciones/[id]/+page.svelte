@@ -2072,18 +2072,21 @@
   class:recogida={contextoRecogido}
   aria-label="Contexto de la conversación"
 >
+  <!-- Solo ícono (10/11/2026), con el nombre en 'aria-label' y 'title'. Sigue
+       siendo el ícono del panel y no una cruz en ancha (04/11/2026): la cruz
+       se lee como cerrar algo para siempre, y esto se vuelve a abrir desde la
+       cabecera. En angosta es un cajón encima del hilo, y ahí sí se cierra. -->
   <button
     type="button"
     class="v2-btn v2-btn-sm info-cerrar"
     onclick={() => (pantallaAncha ? recogerContexto(true) : (contextoAbierto = false))}
+    aria-label={pantallaAncha ? 'Ocultar el panel de contexto' : 'Cerrar el panel de contexto'}
+    title={pantallaAncha ? 'Ocultar el panel de contexto' : 'Cerrar el panel de contexto'}
   >
-    <!-- «Ocultar panel» y no «✕ Recoger» (04/11/2026): la cruz se lee como
-         cerrar algo para siempre, y esto se vuelve a abrir con «Contexto».
-         En angosta es un cajón encima del hilo, y ahí sí se cierra. -->
     {#if pantallaAncha}
-      <PanelRightClose size={14} aria-hidden="true" /> Ocultar panel
+      <PanelRightClose size={16} aria-hidden="true" />
     {:else}
-      <X size={14} aria-hidden="true" /> Cerrar
+      <X size={16} aria-hidden="true" />
     {/if}
   </button>
 
@@ -2283,8 +2286,11 @@
   .info-cerrar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    width: fit-content;
+    justify-content: center;
+    /* Cuadrado: solo ícono (10/11/2026). */
+    width: 32px;
+    height: 32px;
+    padding: 0;
     margin: 8px 8px 0 auto;
   }
   @media (min-width: 1241px) {

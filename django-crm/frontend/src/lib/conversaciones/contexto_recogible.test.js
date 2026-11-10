@@ -21,6 +21,28 @@ describe('la columna de contexto en pantalla ancha', () => {
     expect(regla.slice(0, 80)).not.toMatch(/display:\s*none/);
   });
 
+  it('los dos botones del panel son de solo ícono, y con nombre (10/11/2026)', () => {
+    /* Sin texto a la vista, el nombre tiene que estar igual: un botón de
+       solo ícono sin aria-label es mudo para un lector de pantalla, y sin
+       title nadie sabe qué hace hasta apretarlo. */
+    const boton = (fuente, clase) => {
+      const i = fuente.indexOf(clase);
+      return fuente.slice(fuente.lastIndexOf('<button', i), fuente.indexOf('</button>', i));
+    };
+    for (const [fuente, clase] of [[cabecera, 'contexto-toggle'], [pagina, 'info-cerrar']]) {
+      const b = boton(fuente, clase);
+      expect(b, clase).toMatch(/aria-label=/);
+      expect(b, clase).toMatch(/title=/);
+      // El contenido: lo que hay después del '>' que cierra la etiqueta de
+      // apertura, que en los dos va solo en su renglón (el onclick lleva un
+      // '=>', así que no se puede cortar en el primer '>').
+      const contenido = b.split(/\n\s*>\s*\r?\n/)[1] ?? '';
+      const texto = contenido.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '')
+        .replace(/\{[^}]*\}/g, '').trim();
+      expect(texto, `${clase} no tiene texto visible`).toBe('');
+    }
+  });
+
   it('la columna lleva la clase y la regla que la recoge', () => {
     expect(pagina).toMatch(/class:recogida=\{contextoRecogido\}/);
     expect(pagina).toMatch(/@media \(min-width: 1241px\)\s*\{\s*\.info\.recogida\s*\{\s*display:\s*none/);

@@ -13,7 +13,7 @@
    * fueron el 04/11/2026: el estado se dice una sola vez, en la línea de
    * HandoffControls (lib/conversaciones/estado-unico.js).
    */
-  import { ArrowLeft, Phone, User, PanelRight } from '@lucide/svelte';
+  import { ArrowLeft, Phone, User, PanelRightOpen, PanelRightClose } from '@lucide/svelte';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import { telefonoLegible } from '$lib/conversaciones/formato.js';
 
@@ -166,13 +166,23 @@
   <!-- Solo aparece cuando la columna de contexto no cabe al lado. Ahí se
        abre como panel, no se pierde: el ticket y la documentación siguen a
        un clic. -->
+  <!-- Solo ícono (10/11/2026): el texto «Contexto» ocupaba ancho de la
+       cabecera para algo que el ícono del panel ya dice. El nombre sigue en
+       'aria-label' (lector de pantalla) y en 'title' (al pasar el mouse), y
+       el ícono cambia según si el panel está abierto o no. -->
   <button
     type="button"
-    class="v2-btn v2-btn-sm contexto-toggle"
+    class="v2-btn v2-btn-sm contexto-toggle boton-icono"
     onclick={() => onAlternarContexto?.()}
     aria-expanded={contextoAbierto}
+    aria-label={contextoAbierto ? 'Ocultar el panel de contexto' : 'Mostrar el panel de contexto'}
+    title={contextoAbierto ? 'Ocultar el panel de contexto' : 'Mostrar el panel de contexto'}
   >
-    <PanelRight size={14} /> Contexto
+    {#if contextoAbierto}
+      <PanelRightClose size={16} aria-hidden="true" />
+    {:else}
+      <PanelRightOpen size={16} aria-hidden="true" />
+    {/if}
   </button>
 </header>
 
@@ -317,6 +327,14 @@
   .contexto-toggle {
     display: inline-flex;
     flex: none;
+  }
+  /* Cuadrado y con el ícono al centro: un botón de solo ícono con el
+     relleno de uno de texto queda angosto y desparejo. */
+  .boton-icono {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
   }
 
   /* Debajo de 1240px las tres columnas ahogan el hilo. El contexto deja de
