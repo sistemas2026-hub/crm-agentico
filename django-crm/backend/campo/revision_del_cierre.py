@@ -221,11 +221,41 @@ def _que_rehacer(puntos, esquema, orden=None) -> list[str]:
         if declarada and REQUISITO_AL_SALIR not in salida:
             salida.append(REQUISITO_AL_SALIR)
 
+    #  Y LA MEDICION CUYO NUMERO NO CUADRA CON LA FOTO  --  09/11/2026
+    #
+    #  El usuario, probando con una orden nueva: «escribi unos niveles
+    #  diferentes en la foto y vio el error pero no la devolvio». Y era
+    #  cierto las dos veces: el punto `potencia` lo decia con los dos numeros
+    #  en la mano, y esta lista no tenia nada que pedir, asi que
+    #  `atender_la_que_no_cierra` salia por su `if not requisitos`.
+    #
+    #  EL PUNTO SIGUE VALIENDO None, NUNCA False, y eso no cambia: la regla
+    #  del 31/10 --una lectura que un modelo hizo de una pantalla
+    #  fotografiada no frena a un tecnico-- es sobre el VEREDICTO. Esto es
+    #  otra cosa: nombrar algo concreto que rehacer. Es exactamente el mismo
+    #  camino que ya recorren las fotos con «MUESTRA: no», cuyo punto
+    #  tampoco puede decir que no y aun asi se piden.
+    #
+    #  LO QUE PROTEGE DE UNA MALA LECTURA DEL MODELO, y por eso alcanza:
+    #  `_lectura_creible` descarta lo que el tecnico no habria podido
+    #  escribir --el «-2.10» que en realidad era «-21.0» sale por ahi-- y
+    #  `PF.comparar` perdona hasta 3 dBm. Lo que queda es una pantalla que se
+    #  leyo bien y un numero que no salio de ella.
+    declaradas = {e.get("id") for e in (esquema or {}).get("evidencias") or []
+                  if isinstance(e, dict) and e.get("id")}
+    for p in puntos:
+        if p.get("clave") != "potencia":
+            continue
+        for requisito in p.get("rehacer") or []:
+            #  SOLO SI LA PLANTILLA LA DECLARA, igual que el rango y las
+            #  fotos de abajo: una devolucion que pide algo que el formulario
+            #  no tiene deja al tecnico dando vueltas sin poder cumplirla.
+            if requisito in declaradas and requisito not in salida:
+                salida.append(requisito)
+
     #  Y LAS FOTOS QUE MUESTRAN OTRA COSA. Ver `_fotos_que_muestran_otra_cosa`
     #  para por que solo esas y no las que el modelo no supo leer.
     if orden is not None:
-        declaradas = {e.get("id") for e in (esquema or {}).get("evidencias") or []
-                      if isinstance(e, dict) and e.get("id")}
         for requisito in _fotos_que_muestran_otra_cosa(orden):
             #  Solo lo que la plantilla declara: pedir rehacer algo que el
             #  formulario no tiene deja al tecnico sin poder cumplirlo. Mismo
@@ -581,7 +611,7 @@ def _potencia(orden, cierre):
         #  asi que si estan los dos se miran los dos y gana la peor noticia.
         pares = ((CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
                  (CAMPO_AL_SALIR, "medicion_al_salir", "al salir"))
-        dudas, vistos = [], 0
+        dudas, vistos, rehacer = [], 0, []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
             de_la_foto = PF.uno_solo(_texto_de_la_foto(orden, requisito))
@@ -599,12 +629,19 @@ def _potencia(orden, cierre):
             ok, por_que = PF.comparar(de_la_foto, escrito)
             if ok is False:
                 dudas.append(f"{cuando}, {por_que}")
+                #  QUE FOTO ES, para que la devolucion pueda nombrarla. Igual
+                #  que `checklist` lleva `faltan`: el punto sabe cual de las
+                #  dos mediciones no cuadra, y recalcularlo en `_que_rehacer`
+                #  seria copiar esta comparacion --con su tolerancia y su
+                #  filtro de lecturas imposibles-- en un segundo lugar.
+                rehacer.append(requisito)
         if not vistos:
             return None
         if dudas:
             return _punto("potencia", None,
                           "La foto y el reporte no dicen lo mismo: "
-                          + "; ".join(dudas) + ".")
+                          + "; ".join(dudas) + ".",
+                          rehacer=rehacer)
         return _punto("potencia", True,
                       "La potencia que muestra la foto coincide con la que "
                       "reporto el tecnico.")
