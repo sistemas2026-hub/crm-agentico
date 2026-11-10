@@ -670,10 +670,42 @@ def _potencia(orden, cierre):
                         or {}).get("evidencias") or [])
                       if isinstance(e, dict) and e.get("id")}
         dudas, vistos, rehacer, sin_mirar, ilegibles = [], 0, [], [], []
+        sin_analizar = []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
             texto_foto = _texto_de_la_foto(orden, requisito)
             de_la_foto = PF.uno_solo(texto_foto)
+
+            #  LA FOTO QUE TODAVIA NADIE MIRO  --  10/11/2026, OT #200
+            #
+            #  EL CASO, MEDIDO EN VIVO. El usuario escribio -18.0 al salir y
+            #  la pantalla marcaba -21.0. El panel mostro, en la misma
+            #  tarjeta: «? Revisá las fotos: 1 no se pudieron mirar» Y
+            #  «✓ La potencia que muestra la foto coincide con la que reportó
+            #  el tecnico». La que no se pudo mirar era justamente la de
+            #  salida: el Supervisor reviso antes de que la cola la
+            #  analizara, nadie comparo esos dos numeros, y el punto afirmo
+            #  en verde una coincidencia que solo valia para la de llegada.
+            #
+            #  TRES AUSENCIAS DISTINTAS, Y HASTA HOY SOLO DOS SE DECIAN:
+            #    - `ilegibles`  la foto se miro y no se lee ningun numero
+            #    - `sin_mirar`  se leyo algo que no puede salir de ese medidor
+            #    - esta        no hay analisis todavia: nadie la miro
+            #  La tercera salia por el `continue` de abajo sin dejar rastro, y
+            #  el texto del punto hablaba de «la potencia» como si fueran una.
+            #
+            #  NO SE DEVUELVE AL TECNICO, y es deliberado: la foto esta
+            #  subida y es obligatoria. Que la cola no la haya mirado todavia
+            #  es un problema del sistema, no algo que el pueda rehacer. Por
+            #  eso no entra en `rehacer` --`_que_rehacer` nunca la vera-- y
+            #  solo cambia lo que se puede SABER. Cuando la cola termine, la
+            #  pasada siguiente del ciclo la compara y la orden cierra sola.
+            #
+            #  EXIGE EL NUMERO ESCRITO: sin el no hay nada que verificar y el
+            #  checklist ya reclama la foto por su cuenta.
+            if (escrito is not None and not texto_foto.strip()
+                    and requisito in declaradas):
+                sin_analizar.append(cuando)
 
             #  UNA FOTO DE MEDICION QUE NO DEJA LEER NINGUN NUMERO NO SIRVE
             #  --  10/11/2026, pregunta del usuario
@@ -753,6 +785,10 @@ def _potencia(orden, cierre):
             nota = (" La medición " + " ni ".join(sin_mirar)
                     + " no se pudo verificar: lo que se leyó en esa foto no "
                       "puede salir de ese medidor.")
+        if sin_analizar:
+            nota += (" La medición " + " ni ".join(sin_analizar)
+                     + " todavía no se pudo comparar: esa foto no se ha "
+                       "revisado.")
         if dudas:
             return _punto("potencia", None,
                           "La foto y el reporte no dicen lo mismo: "
@@ -761,6 +797,22 @@ def _potencia(orden, cierre):
                           rehacer=rehacer)
         if ilegibles:
             return _punto("potencia", None, ilegible + nota, rehacer=rehacer)
+        #  NI `True` NI EL TEXTO DE SIEMPRE SI FALTO MIRAR UNA  --  OT #200
+        #
+        #  «La potencia coincide» con una sola de las dos verificadas es la
+        #  afirmacion que el panel mostro en verde mientras la discrepancia
+        #  real pasaba sin que nadie la midiera. `None` es «miralo vos», que
+        #  es exactamente lo que se sabe.
+        #
+        #  NO LO FRENA POR UNA OPINION (31/10): aca no hay opinion de un
+        #  modelo, hay un dato que falta. Y no traba nada que no estuviera
+        #  trabado: el punto de las fotos ya cuenta esa misma foto en «no se
+        #  pudieron mirar». La diferencia es que esto no depende de que ese
+        #  otro punto siga contandola.
+        if sin_analizar:
+            return _punto("potencia", None,
+                          "Solo se pudo comparar una de las dos mediciones."
+                          + nota)
         return _punto("potencia", True,
                       "La potencia que muestra la foto coincide con la que "
                       "reporto el tecnico." + nota)
