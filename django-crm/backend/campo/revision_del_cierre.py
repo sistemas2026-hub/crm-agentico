@@ -611,7 +611,7 @@ def _potencia(orden, cierre):
         #  asi que si estan los dos se miran los dos y gana la peor noticia.
         pares = ((CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
                  (CAMPO_AL_SALIR, "medicion_al_salir", "al salir"))
-        dudas, vistos, rehacer = [], 0, []
+        dudas, vistos, rehacer, sin_mirar = [], 0, [], []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
             de_la_foto = PF.uno_solo(_texto_de_la_foto(orden, requisito))
@@ -622,6 +622,20 @@ def _potencia(orden, cierre):
             if not _lectura_creible(de_la_foto,
                                     _lo_que_el_tecnico_PODRIA_escribir(
                                         orden, campo)):
+                #  PERO EL DESCARTE SE DICE  --  09/11/2026, OT #217
+                #
+                #  Medido dos veces (OT #212 y #217): la pantalla marca
+                #  «-21.0» y el modelo lee «-2.10» --le mueve el punto
+                #  decimal--. El filtro hace lo correcto y la tira, pero el
+                #  punto salia diciendo «la potencia coincide» a secas, sin
+                #  que nadie pudiera saber que de las dos mediciones solo se
+                #  habia mirado UNA. La de salida pasaba sin verificar y el
+                #  texto no lo delataba.
+                #
+                #  No cambia el veredicto: una foto mal leida no puede frenar
+                #  a un tecnico (31/10). Cambia lo que se puede saber.
+                if de_la_foto is not None and escrito is not None:
+                    sin_mirar.append(cuando)
                 de_la_foto = None
             if escrito is None or de_la_foto is None:
                 continue
@@ -637,14 +651,19 @@ def _potencia(orden, cierre):
                 rehacer.append(requisito)
         if not vistos:
             return None
+        nota = ""
+        if sin_mirar:
+            nota = (" La medición " + " ni ".join(sin_mirar)
+                    + " no se pudo verificar: lo que se leyó en esa foto no "
+                      "puede salir de ese medidor.")
         if dudas:
             return _punto("potencia", None,
                           "La foto y el reporte no dicen lo mismo: "
-                          + "; ".join(dudas) + ".",
+                          + "; ".join(dudas) + "." + nota,
                           rehacer=rehacer)
         return _punto("potencia", True,
                       "La potencia que muestra la foto coincide con la que "
-                      "reporto el tecnico.")
+                      "reporto el tecnico." + nota)
     except Exception:                                            # noqa: BLE001
         #  NO TUMBA LA REVISION, por lo mismo que `_fotos`: algo que se
         #  agrega no puede romper lo que ya decide si una orden se cierra.
