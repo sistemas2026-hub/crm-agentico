@@ -327,8 +327,9 @@ def clasificar(*, org, profile, material, tipo, cantidad, serie="") -> tuple[str
             faltante = cantidad - disponible
             return (
                 MovimientoDeMaterial.DESCUADRE,
-                f"Se registraron {cantidad} {material.unidad} y según el kit "
-                f"había {disponible}. Faltan {faltante}. El consumo se guarda "
+                f"Se registraron {a_texto(cantidad)} {material.unidad} y según "
+                f"el kit había {a_texto(disponible)}. Faltan "
+                f"{a_texto(faltante)}. El consumo se guarda "
                 f"igual —ya ocurrió— pero el kit no cuadra: puede ser material "
                 f"que se entregó sin acta.",
             )

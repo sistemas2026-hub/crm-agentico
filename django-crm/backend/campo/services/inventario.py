@@ -559,6 +559,10 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
     porque el material ya volvio, y la fila queda marcada como no protegida
     (ver `_clave_de_hecho`).
     """
+    #  Adentro y no arriba: `materiales` importa este modulo, y un
+    #  import arriba cerraria el ciclo. Ver `saldo_de`.
+    from campo.services.materiales import a_texto
+
     if ubicacion_destino is None:
         raise DespachoInvalido("Una devolucion necesita decir a que bodega vuelve.")
 
@@ -647,8 +651,9 @@ def recibir_devolucion(*, org, profile_origen, ubicacion_destino, lineas,
                     cantidad=falta,
                     serie=serie,
                     motivo=(
-                        f"Al recibir se esperaban {esperado} y volvieron "
-                        f"{cantidad}. Falta por explicar: {falta}."
+                        f"Al recibir se esperaban {a_texto(esperado)} y "
+                        f"volvieron {a_texto(cantidad)}. Falta por "
+                        f"explicar: {a_texto(falta)}."
                         + (f" Nota de quien recibio: {notas}" if notas else "")
                     ),
                     idempotency_key=_clave_de_hecho(

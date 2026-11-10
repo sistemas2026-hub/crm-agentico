@@ -103,6 +103,10 @@ def reservar(*, org, ubicacion, material, cantidad=None, serie="", orden=None,
     hecho que ya ocurrio en la calle. Es una promesa, y una promesa que no se
     puede cumplir es peor que no hacerla -- el tecnico se entera en la bodega.
     """
+    #  Adentro y no arriba: `materiales` importa este modulo, y un
+    #  import arriba cerraria el ciclo. Ver `saldo_de`.
+    from campo.services.materiales import a_texto
+
     serie = (serie or "").strip()
     cant = Decimal("1") if serie else Decimal(str(cantidad or 0))
     if cant <= CERO:
@@ -138,10 +142,11 @@ def reservar(*, org, ubicacion, material, cantidad=None, serie="", orden=None,
     disponible = libre(ubicacion, material)
     if cant > disponible:
         raise ReservaInvalida(
-            f"No alcanza: en '{ubicacion.nombre}' quedan {disponible} libres de "
-            f"{material.codigo} y se piden {cant}. Hay "
-            f"{existencia(ubicacion, material)} en total, "
-            f"{reservado(ubicacion, material)} ya comprometidos."
+            f"No alcanza: en '{ubicacion.nombre}' quedan "
+            f"{a_texto(disponible)} libres de {material.codigo} y se piden "
+            f"{a_texto(cant)}. Hay "
+            f"{a_texto(existencia(ubicacion, material))} en total, "
+            f"{a_texto(reservado(ubicacion, material))} ya comprometidos."
         )
 
     return ReservaDeMaterial.objects.create(
@@ -428,6 +433,10 @@ def cerrar_conteo(conteo, *, profile=None):
     se ve en que su `ajuste` queda vacio: el conteo dice tambien lo que estaba
     bien, que es informacion.
     """
+    #  Adentro y no arriba: `materiales` importa este modulo, y un
+    #  import arriba cerraria el ciclo. Ver `saldo_de`.
+    from campo.services.materiales import a_texto
+
     if conteo.estado != ConteoFisico.BORRADOR:
         raise ConteoInvalido("Este conteo ya estaba cerrado.")
 
@@ -464,8 +473,9 @@ def cerrar_conteo(conteo, *, profile=None):
                                        material.id),
                 motivo=(
                     f"Conteo fisico del {conteo.iniciado_en.date()}: contado "
-                    f"{linea.cantidad_contada}, el sistema decia {segun_sistema}. "
-                    f"Diferencia {diferencia}."
+                    f"{a_texto(linea.cantidad_contada)}, el sistema decia "
+                    f"{a_texto(segun_sistema)}. "
+                    f"Diferencia {a_texto(diferencia)}."
                     + (f" Motivo de quien conto: {linea.motivo}"
                        if linea.motivo else
                        " SIN MOTIVO DECLARADO: la diferencia quedo sin explicar.")
