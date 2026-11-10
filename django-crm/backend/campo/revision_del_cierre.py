@@ -665,10 +665,45 @@ def _potencia(orden, cierre):
         #  asi que si estan los dos se miran los dos y gana la peor noticia.
         pares = ((CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
                  (CAMPO_AL_SALIR, "medicion_al_salir", "al salir"))
-        dudas, vistos, rehacer, sin_mirar = [], 0, [], []
+        declaradas = {e.get("id") for e in
+                      ((getattr(orden.tipo_trabajo_version, "esquema", None)
+                        or {}).get("evidencias") or [])
+                      if isinstance(e, dict) and e.get("id")}
+        dudas, vistos, rehacer, sin_mirar, ilegibles = [], 0, [], [], []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
-            de_la_foto = PF.uno_solo(_texto_de_la_foto(orden, requisito))
+            texto_foto = _texto_de_la_foto(orden, requisito)
+            de_la_foto = PF.uno_solo(texto_foto)
+
+            #  UNA FOTO DE MEDICION QUE NO DEJA LEER NINGUN NUMERO NO SIRVE
+            #  --  10/11/2026, pregunta del usuario
+            #
+            #  «y si sale borrosa o movida y no se pueden leer los datos, por
+            #  que no la devolveria». El 06/11 se decidio no devolver por una
+            #  foto borrosa, y ese motivo sigue en pie para las demas: «4 de 4
+            #  fotos piden una mirada» sobre fotos oscuras de un trabajo bien
+            #  hecho, y mandar al tecnico de vuelta por una OPINION es caro.
+            #
+            #  Pero esta foto es otra cosa, y la distincion que faltaba es la
+            #  del PROPOSITO. La del daño encontrado, borrosa, igual muestra
+            #  algo. La del medidor tiene un solo trabajo: que se lea un
+            #  numero. Si no se lee, no sirve para nada -- y eso no es una
+            #  opinion del modelo, es que la expresion regular de
+            #  `potencia_de_la_foto` no encontro un dBm. La plantilla de la
+            #  empresa ya lo declara: «Basta con que el numero se lea».
+            #
+            #  SOLO SI LA FOTO EXISTE Y SE MIRO. `_texto_de_la_foto` devuelve
+            #  "" cuando no hay analisis, y eso es «todavia nadie la miro»,
+            #  nunca «no se lee».
+            #
+            #  TAMBIEN SIN NUMERO ESCRITO, a diferencia de `sin_mirar`: ahi
+            #  faltan las dos cosas y la foto sigue siendo obligatoria. Lo que
+            #  no se puede es acusar de una DISCREPANCIA que no se midio.
+            if (de_la_foto is None and texto_foto.strip()
+                    and requisito in declaradas):
+                ilegibles.append(cuando)
+                if requisito not in rehacer:
+                    rehacer.append(requisito)
             #  UNA LECTURA IMPOSIBLE NO SE COMPARA, se descarta. Ver
             #  `_lectura_creible`: no se "corrige" lo que el modelo leyo
             #  --eso seria inventar el dato-- se deja de opinar sobre una
@@ -703,8 +738,16 @@ def _potencia(orden, cierre):
                 #  seria copiar esta comparacion --con su tolerancia y su
                 #  filtro de lecturas imposibles-- en un segundo lugar.
                 rehacer.append(requisito)
-        if not vistos:
+        #  EL PUNTO APARECE TAMBIEN SIN UNA SOLA COMPARACION cuando hay una
+        #  foto ilegible. Antes `vistos == 0` se iba en silencio, y ese era
+        #  justo el caso del usuario: las dos fotos sin numero legible, nada
+        #  que comparar, y la orden cerrando como si estuviera todo bien.
+        if not vistos and not ilegibles:
             return None
+        ilegible = ""
+        if ilegibles:
+            ilegible = ("La foto del medidor " + " ni la de ".join(ilegibles)
+                        + " no deja leer ningún número.")
         nota = ""
         if sin_mirar:
             nota = (" La medición " + " ni ".join(sin_mirar)
@@ -713,8 +756,11 @@ def _potencia(orden, cierre):
         if dudas:
             return _punto("potencia", None,
                           "La foto y el reporte no dicen lo mismo: "
-                          + "; ".join(dudas) + "." + nota,
+                          + "; ".join(dudas) + "." + nota
+                          + ((" " + ilegible) if ilegible else ""),
                           rehacer=rehacer)
+        if ilegibles:
+            return _punto("potencia", None, ilegible + nota, rehacer=rehacer)
         return _punto("potencia", True,
                       "La potencia que muestra la foto coincide con la que "
                       "reporto el tecnico." + nota)

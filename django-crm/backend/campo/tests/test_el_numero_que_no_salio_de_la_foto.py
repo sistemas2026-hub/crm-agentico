@@ -203,19 +203,30 @@ def test_una_LECTURA_IMPOSIBLE_sigue_sin_devolver(org_a):
     assert r["sugeridas"] == [], r["sugeridas"]
 
 
-def test_una_foto_SIN_NINGUN_NUMERO_no_devuelve_nada(org_a):
-    """EL OTRO LADO DEL MISMO RIESGO.
+def test_una_foto_SIN_NINGUN_NUMERO_SI_SE_PIDE_REHACER(org_a):
+    """INVERTIDA EL 10/11/2026 POR DECISION DEL USUARIO. Lo que afirmaba,
+    con su motivo tal como estaba escrito:
 
-    Si el modelo no pudo leer un numero, no hay nada que comparar, y «no se
-    sabe» no puede valer lo mismo que «no cuadra»: eso devolveria una orden
-    por una foto borrosa.
+        «Si el modelo no pudo leer un numero, no hay nada que comparar, y "no
+         se sabe" no puede valer lo mismo que "no cuadra": eso devolveria una
+         orden por una foto borrosa.»
 
-    POR QUE ESTA GUARDA EXISTE, dicho por una medicion: la mutacion que
-    cambia `ok is False` por `ok is not True` SOBREVIVE sola, y no porque
-    falte una guarda -- es equivalente, porque el `continue` de arriba hace
-    que `PF.comparar` nunca devuelva None. Mutando las DOS a la vez, muere.
-    Esta guarda sostiene el invariante desde el lado que importa: que una
-    foto ilegible no mande a nadie a rehacer nada.
+    El usuario: «pero y si sale borrosa o movida y si no se puede leer los
+    datos, por que no la devolveria». La distincion que faltaba es el
+    PROPOSITO de la foto: la del daño encontrado, borrosa, igual muestra
+    algo; la del medidor tiene un solo trabajo --que se lea un numero-- y si
+    no se lee no sirve para nada. El caso entero vive en
+    `test_la_foto_del_medidor_que_no_se_lee.py`.
+
+    POR QUE SE INVIRTIO EN VEZ DE BORRARSE. Esta guarda sostenia ademas un
+    invariante medido: la mutacion que cambia `ok is False` por
+    `ok is not True` sobrevive sola --es equivalente, porque el `continue` de
+    arriba hace que `PF.comparar` nunca devuelva None-- y lo que la mata es
+    afirmar que «no se sabe» no vale lo mismo que «no cuadra». ESO NO
+    CAMBIO: una foto ilegible se pide rehacer, pero por el camino de
+    `ilegibles`, nunca diciendo que los dos numeros no coinciden. La segunda
+    afirmacion de abajo es la que ahora lo sostiene; borrar esta guarda
+    habria dejado ese invariante sin dueño.
     """
     orden = _orden(org_a, 309, al_llegar="-21.0", al_salir="-20.0")
     _foto(orden, "medicion_al_llegar",
@@ -225,7 +236,9 @@ def test_una_foto_SIN_NINGUN_NUMERO_no_devuelve_nada(org_a):
 
     r = _revision(orden)
 
-    assert "medicion_al_llegar" not in r["sugeridas"], r["sugeridas"]
+    assert "medicion_al_llegar" in r["sugeridas"], r["sugeridas"]
+    p = next(x for x in r["puntos"] if x["clave"] == "potencia")
+    assert "no dicen lo mismo" not in p["texto"], p["texto"]
 
 
 def test_no_se_pide_una_foto_que_la_PLANTILLA_NO_DECLARA(org_a):
