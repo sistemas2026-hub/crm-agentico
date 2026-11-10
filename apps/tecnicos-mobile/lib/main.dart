@@ -8,9 +8,15 @@ import 'core/storage/secure_storage_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/shell/app_shell.dart';
+import 'core/acciones/selector_de_fotos.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  //  LA GALERIA LA MUESTRA EL SISTEMA, NO GOOGLE FOTOS (09/11/2026, el
+  //  usuario: «solo salen las imagenes de Google Fotos, no esta mostrando las
+  //  fotos de la galeria reciente»). Ver selector_de_fotos.dart.
+  usarElSelectorDelSistema();
 
   final storage = SecureStorageService();
 

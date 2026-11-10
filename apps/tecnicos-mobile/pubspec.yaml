@@ -51,6 +51,10 @@ dependencies:
   uuid: ^4.6.0
   connectivity_plus: ^7.3.1
   image_picker: ^1.2.3
+  #  Directas para poder pedirle a Android su selector del sistema en vez del
+  #  de Google Fotos. Ver `core/acciones/selector_de_fotos.dart`.
+  image_picker_android: ^0.8.13
+  image_picker_platform_interface: ^2.10.0
   crypto: ^3.0.7
   intl: ^0.20.3
   path_provider: ^2.1.6
