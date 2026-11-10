@@ -44,8 +44,14 @@ describe('el panel de cierre', () => {
     expect(sinMarcas(html.slice(0, html.indexOf('<fieldset')))).not.toMatch(/Se cierra la conversación/);
   });
 
-  it('«Cerrar el caso» es el botón principal', () => {
-    expect(html).toMatch(/<button[^>]*class="[^"]*v2-btn-ink[^"]*"[^>]*type="submit"|<button[^>]*type="submit"[^>]*class="[^"]*v2-btn-ink/);
+  it('«Cerrar el caso» lleva el verde del cierre, no la tinta de «Tomar»', () => {
+    const boton = html.match(/<button[^>]*type="submit"[^>]*>|<button[^>]*class="[^"]*boton-cerrar[^>]*>/)?.[0] ?? '';
+    expect(boton).toMatch(/boton-cerrar/);
+    expect(boton).not.toMatch(/v2-btn-ink/);
+  });
+
+  it('las opciones son fichas: la radio queda para el teclado, sin el punto a la vista', () => {
+    expect(html).toMatch(/class="radio-oculta/);
   });
 
   it('la nota dice que es opcional mientras no se eligió «Otro»', () => {
@@ -70,6 +76,22 @@ describe('la barra de acciones mientras se cierra', () => {
     const html = dibuja({});
     const grupo = html.slice(html.indexOf('aviso-acciones'));
     expect(sinMarcas(grupo)).toMatch(/Tomar.*Resuelto/);
+  });
+
+  it('«Reasignar» y «Escalar a un área» se ven como botones, no como texto suelto', () => {
+    const html = dibuja({ esAdmin: true, operadores: [{ usuario_id: 'u2', nombre: 'Ana' }], areas: { noc: 'NOC' } });
+    for (const rotulo of ['Reasignar', 'Escalar a un área']) {
+      const i = html.indexOf(rotulo);
+      const boton = html.slice(html.lastIndexOf('<button', i), i);
+      expect(boton, rotulo).toMatch(/aviso-secundario/);
+      expect(boton, rotulo).not.toMatch(/v2-btn-quiet/);
+    }
+    // Y una línea separa los gestos del relevo de «Resuelto».
+    expect(html).toMatch(/aviso-separador/);
+  });
+
+  it('sin ningún gesto de relevo antes, no hay línea delante de «Resuelto»', () => {
+    expect(dibuja({ escalada: false, iaEnPausa: false })).not.toMatch(/aviso-separador/);
   });
 
   it('cerrado el panel: «Resuelto» sin apretar y «Tomar» en tinta', () => {

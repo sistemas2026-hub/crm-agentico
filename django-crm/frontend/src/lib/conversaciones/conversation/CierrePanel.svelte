@@ -25,6 +25,7 @@
    * cliente hacia la red-- no se veía. Ahora cada grupo es una fila de
    * fichas que se lee de izquierda a derecha, en ese orden.
    */
+  import { CircleCheck, Check, Wrench, MessagesSquare } from '@lucide/svelte';
   import {
     MAX_NOTA,
     motivoParaNoCerrar,
@@ -57,8 +58,15 @@
     if (!impedimento) onCerrar?.({ codigo, nota });
   }}
 >
-  <h3 class="titulo" id="cierre-titulo">¿En qué terminó?</h3>
-  <p class="instruccion">Elegí qué le pasaba al cliente. Con esto se cuenta dónde fallamos más.</p>
+  <!-- El encabezado lleva el verde y el ícono de «Resuelto»: es el mismo
+       gesto, y así se ve de dónde salió el panel (10/11/2026). -->
+  <div class="cabeza">
+    <span class="cabeza-icono" aria-hidden="true"><CircleCheck size={16} /></span>
+    <div>
+      <h3 class="titulo" id="cierre-titulo">¿En qué terminó?</h3>
+      <p class="instruccion">Elegí qué le pasaba al cliente. Con esto se cuenta dónde fallamos más.</p>
+    </div>
+  </div>
 
   {#if errorCatalogo}
     <p class="aviso-mal">{errorCatalogo}</p>
@@ -66,12 +74,20 @@
 
   {#each grupos as g (g.clave)}
     <fieldset class="grupo">
-      {#if g.titulo}<legend class="grupo-titulo">{g.titulo}</legend>{/if}
+      {#if g.titulo}
+        <legend class="grupo-titulo">
+          {#if g.clave === 'falla'}<Wrench size={13} aria-hidden="true" />{:else}<MessagesSquare size={13} aria-hidden="true" />{/if}
+          {g.titulo}
+        </legend>
+      {/if}
       <div class="opciones">
         {#each g.desenlaces as d (d.codigo)}
           {@const categoria = categoriaVisible(d)}
+          <!-- La radio sigue ahí, para el teclado y el lector de pantalla;
+               lo que se ve es la ficha, con un tilde cuando está elegida. -->
           <label class="opcion" class:elegida={codigo === d.codigo}>
-            <input type="radio" name="desenlace" value={d.codigo} bind:group={codigo} />
+            <input class="radio-oculta" type="radio" name="desenlace" value={d.codigo} bind:group={codigo} />
+            {#if codigo === d.codigo}<Check size={13} aria-hidden="true" />{/if}
             <span>{d.nombre}</span>
             {#if categoria}<span class="categoria">· {categoria}</span>{/if}
           </label>
@@ -108,7 +124,7 @@
       </button>
       <button
         type="submit"
-        class="v2-btn v2-btn-sm v2-btn-ink"
+        class="v2-btn v2-btn-sm boton-cerrar"
         disabled={!!impedimento || guardando}
         aria-busy={guardando}
         aria-describedby={impedimento && !guardando ? 'cierre-impedimento' : undefined}
@@ -122,22 +138,50 @@
 </form>
 
 <style>
+  /* El verde de «Resuelto» en el borde y el encabezado: el panel se lee como
+     parte de ese gesto, y no como una caja gris más entre el hilo y la
+     barra (10/11/2026). Mezclado con el borde de siempre para que no grite. */
   .cierre {
-    border: 1px solid var(--bandeja-borde);
+    --cierre-verde: var(--bandeja-ok);
+    --cierre-verde-suave: color-mix(in srgb, var(--bandeja-ok) 8%, var(--bandeja-superficie));
+    border: 1px solid color-mix(in srgb, var(--cierre-verde) 40%, var(--bandeja-borde));
     border-radius: 8px;
-    padding: 14px 16px;
     margin-top: 10px;
-    background: var(--bandeja-superficie-suave);
+    background: var(--bandeja-superficie);
+    overflow: hidden;
+    padding-bottom: 14px;
+  }
+  .cabeza {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--cierre-verde-suave);
+    border-bottom: 1px solid color-mix(in srgb, var(--cierre-verde) 25%, var(--bandeja-borde));
+  }
+  .cabeza-icono {
+    display: inline-flex;
+    margin-top: 1px;
+    color: var(--cierre-verde);
   }
   .titulo {
     margin: 0;
-    font-size: 15px;
+    font-family: var(--bandeja-titulo);
+    font-size: 17px;
     font-weight: 650;
+    line-height: 1.2;
   }
   .instruccion {
-    margin: 2px 0 14px;
+    margin: 2px 0 0;
     font-size: 12.5px;
     color: var(--bandeja-texto-2);
+  }
+  .cierre > :not(.cabeza) {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+  .cierre > .grupo:first-of-type {
+    margin-top: 14px;
   }
 
   .grupo {
@@ -147,10 +191,16 @@
     min-width: 0;
   }
   .grupo-titulo {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 0;
-    margin-bottom: 6px;
-    font-size: 11.5px;
-    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--bandeja-texto);
+  }
+  .grupo-titulo :global(svg) {
     color: var(--bandeja-texto-2);
   }
 
@@ -165,37 +215,58 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 10px 5px 8px;
-    border: 1px solid var(--bandeja-borde);
-    border-radius: var(--bandeja-radio-sm);
+    position: relative;
+    padding: 6px 12px;
+    border: 1px solid var(--bandeja-borde-fuerte);
+    border-radius: 999px;
     background: var(--bandeja-superficie);
     font-size: 12.5px;
     line-height: 1.3;
     cursor: pointer;
+    transition:
+      border-color 0.12s ease,
+      background-color 0.12s ease;
   }
-  .opcion input {
+  /* Fuera de la vista pero en el orden del teclado y para el lector de
+     pantalla: se elige con las flechas como cualquier grupo de radios. */
+  .radio-oculta {
+    position: absolute;
+    inset: 0;
     margin: 0;
-    accent-color: var(--bandeja-humano);
+    opacity: 0;
+    cursor: pointer;
   }
   .opcion:hover {
-    border-color: var(--bandeja-texto-3);
+    border-color: var(--bandeja-texto-2);
   }
-  /* Elegida: borde, fondo y texto a la vez. Con solo un fondo apenas más
-     claro, la única señal era el punto de la radio. */
+  /* Elegida: relleno, borde y tilde a la vez. Con solo un fondo apenas más
+     claro, la única señal era el punto de la radio. Marino, que es el color
+     de una acción de una persona en esta pantalla, no el verde del cierre:
+     elegir no es todavía cerrar. */
   .opcion.elegida {
-    border-color: var(--bandeja-humano);
-    background: var(--bandeja-humano-fondo);
-    color: var(--bandeja-humano);
+    border-color: var(--bandeja-accion);
+    background: var(--bandeja-accion);
+    color: var(--bandeja-superficie);
     font-weight: 600;
+    padding-left: 9px;
   }
-  .opcion:has(input:focus-visible) {
+  .opcion:has(.radio-oculta:focus-visible) {
     outline: 2px solid var(--bandeja-humano);
-    outline-offset: 1px;
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .opcion {
+      transition: none;
+    }
   }
   .categoria {
     font-size: 11.5px;
     font-weight: 400;
     color: var(--bandeja-texto-2);
+  }
+  .opcion.elegida .categoria {
+    color: inherit;
+    opacity: 0.8;
   }
 
   .campo-nota {
@@ -246,6 +317,26 @@
     /* `.v2-btn` hereda el tamaño de letra: sin esto salían a 16px, más
        grandes que los de la barra de arriba (medido en el navegador). */
     font-size: 12px;
+  }
+  /* Verde, como «Resuelto» y el encabezado: es la misma acción terminada.
+     La tinta queda para «Tomar», que es otra; con las dos en tinta se leían
+     como el mismo tipo de botón. */
+  .boton-cerrar {
+    border: 1px solid var(--cierre-verde);
+    background: var(--cierre-verde);
+    color: var(--bandeja-superficie);
+    font-weight: 650;
+  }
+  .boton-cerrar:hover:not(:disabled) {
+    border-color: var(--cierre-verde);
+    background: var(--cierre-verde);
+    color: var(--bandeja-superficie);
+    filter: brightness(0.92);
+  }
+  .boton-cerrar:disabled {
+    border-color: var(--bandeja-borde-fuerte);
+    background: var(--bandeja-superficie-suave);
+    color: var(--bandeja-texto-3);
   }
   .impedimento {
     font-size: 12px;

@@ -18,7 +18,7 @@
    * porque está físicamente en este bloque; su lugar se reconsidera en la fase
    * visual, no ahora.
    */
-  import { TriangleAlert, CircleCheck, UserCheck, Bot } from '@lucide/svelte';
+  import { TriangleAlert, CircleCheck, UserCheck, Bot, ArrowLeftRight, ArrowUpRight } from '@lucide/svelte';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import { estadoDeLaConversacion, cierreDe } from '$lib/conversaciones/estado-unico.js';
 
@@ -92,6 +92,15 @@
   /* Cerrada, la línea es lo único: quién la tomó, el motivo, el caso del CRM
      y «Resuelta» en verde eran historia, y contaban una conversación viva. */
   const cerrada = $derived(conversacion.estado === 'cerrada');
+
+  /* Hay algún gesto de relevo antes de «Resuelto»: entonces va la línea que
+     los separa. Sin ninguno, una línea delante de un solo botón no separa
+     nada. */
+  const hayRelevo = $derived(
+    !cerrada &&
+      ((escalada && !atendida && (esMia || !asignadaA || (esAdmin && gobernada && operadores.length > 0))) ||
+        puedeEscalar)
+  );
 </script>
 
   <!-- El icono dice QUÉ tipo de situación es, y no era así: el triángulo de
@@ -168,7 +177,7 @@
       {#if esMia}
         <button
           type="button"
-          class="v2-btn v2-btn-sm aviso-atender"
+          class="v2-btn v2-btn-sm aviso-atender aviso-secundario"
           title="Devuelve el caso a «Por atender» para que lo tome otra persona. Sigue en manos del equipo, no vuelve a la IA."
           onclick={() => onAtender?.()}
           disabled={marcandoAtendida}
@@ -189,23 +198,24 @@
              «Tomar» en tinta competia con «Cerrar el caso» del panel. -->
         <button
           type="button"
-          class="v2-btn aviso-atender {cerrando ? 'v2-btn-sm v2-btn-quiet' : 'v2-btn-ink'}"
+          class="v2-btn v2-btn-sm aviso-atender {cerrando ? 'aviso-secundario' : 'v2-btn-ink'}"
           title="Te hacés cargo: pasa a «En atención» y sale de «Por atender». No le envía nada al cliente, y se puede soltar."
           onclick={() => onAtender?.()}
           disabled={marcandoAtendida}
           aria-busy={marcandoAtendida}
         >
-          <CircleCheck size={13} />
+          <UserCheck size={13} aria-hidden="true" />
           {marcandoAtendida ? 'Tomando…' : 'Tomar'}
         </button>
       {/if}
       {#if esAdmin && gobernada && operadores.length}
         <button
           type="button"
-          class="v2-btn v2-btn-sm v2-btn-quiet aviso-atender"
+          class="v2-btn v2-btn-sm aviso-atender aviso-secundario"
           onclick={() => { reasignando = !reasignando; errorReasignar = ''; }}
           aria-expanded={reasignando}
         >
+          <ArrowLeftRight size={13} aria-hidden="true" />
           Reasignar
         </button>
       {/if}
@@ -225,11 +235,12 @@
     {#if puedeEscalar}
       <button
         type="button"
-        class="v2-btn v2-btn-sm v2-btn-quiet"
+        class="v2-btn v2-btn-sm aviso-secundario"
         title="Pasarla a otra área con lo que validaste: queda sin dueño y marcada para esa área"
         onclick={() => (escalando = !escalando)}
         aria-expanded={escalando}
       >
+        <ArrowUpRight size={13} aria-hidden="true" />
         Escalar a un área
       </button>
     {/if}
@@ -242,6 +253,7 @@
            ese tarda casi un segundo en aparecer, no sale con el teclado, y
            es justo el contexto que hace que alguien se anime a cerrar un
            caso que resolvio por telefono. -->
+      {#if hayRelevo}<span class="aviso-separador" aria-hidden="true"></span>{/if}
       <span class="con-ayuda">
         <!-- Abre y cierra el panel, y mientras esta abierto se ve apretado:
              es el gesto que se esta haciendo. -->
@@ -460,6 +472,31 @@
   .aviso-atender {
     margin-left: auto;
     flex: none;
+  }
+
+  /* TRES PESOS, TRES SIGNIFICADOS (10/11/2026). «Reasignar» y «Escalar a un
+     área» iban como texto suelto (v2-btn-quiet) y se confundían con los
+     rótulos de la línea: no se veía que eran botones. Ahora:
+       tinta   lo que se hace al entrar (Tomar)
+       borde   los demás gestos del relevo, cada uno con su ícono
+       verde   cerrar, separado por una línea: es otra decisión */
+  /* El borde entero y no solo el color: con un `border-width: 0` de otra hoja
+     delante, el color solo no dibujaba nada (medido en el navegador). */
+  .aviso-secundario {
+    border: 1px solid var(--bandeja-borde-fuerte);
+    background: var(--bandeja-superficie);
+    color: var(--bandeja-texto);
+  }
+  .aviso-secundario[aria-expanded='true'] {
+    border-color: var(--bandeja-humano);
+    background: var(--bandeja-humano-fondo);
+    color: var(--bandeja-humano);
+  }
+  .aviso-separador {
+    align-self: stretch;
+    width: 1px;
+    margin: 4px 2px;
+    background: var(--bandeja-borde-fuerte);
   }
 
   /* El grupo es el que se empuja a la derecha; adentro, los 'auto' de cada
