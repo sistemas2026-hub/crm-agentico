@@ -153,7 +153,7 @@ def preparar():
                      $$""")
         c.execute("drop table if exists asistente.ejecuciones")
         #  La migracion que se esta probando, tal cual.
-        sql = (RAIZ / "supabase" / "202610302200_ejecuciones.sql").read_text(
+        sql = (RAIZ / "supabase" / "202611101201_ejecuciones.sql").read_text(
             encoding="utf-8")
         c.execute(sql)
         c.execute("delete from public.organization")

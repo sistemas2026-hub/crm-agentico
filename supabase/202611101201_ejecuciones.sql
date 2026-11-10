@@ -67,7 +67,7 @@
 --  'tx xid8 default pg_current_xact_id()' y el indice por (organization_id, tx,
 --  id). Es la misma garantia de entrega del flujo incremental: ordenar por
 --  identificador de transaccion y no entregar nada que todavia pueda tener
---  transacciones por delante. Ver 202610291700_tool_calls_cursor.sql.
+--  transacciones por delante. Ver 202611101200_tool_calls_cursor.sql.
 --
 --  COMO SE REVIERTE
 --  ----------------

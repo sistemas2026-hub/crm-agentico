@@ -99,4 +99,4 @@ create index if not exists tool_calls_cursor_idx
 comment on column asistente.tool_calls.tx is
   'Identificador de transaccion (xid8) para el cursor de eventos. NULL en las '
   'filas anteriores al 29/10/2026: esas se leen por la foto de /centro-mando, '
-  'no por el flujo incremental. Ver 202610291700_tool_calls_cursor.sql.';
+  'no por el flujo incremental. Ver 202611101200_tool_calls_cursor.sql.';

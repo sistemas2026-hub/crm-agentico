@@ -99,7 +99,7 @@ def preparar():
                        duracion_ms integer,
                        creado_en timestamptz not null default now())""")
         #  La migracion que se esta probando, tal cual.
-        sql = (RAIZ / "supabase" / "202610291700_tool_calls_cursor.sql").read_text(
+        sql = (RAIZ / "supabase" / "202611101200_tool_calls_cursor.sql").read_text(
             encoding="utf-8")
         c.execute(sql)
         c.execute("delete from asistente.tool_calls")
