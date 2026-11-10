@@ -190,6 +190,51 @@ def test_el_texto_libre_de_un_evento_no_sale(org_a):
 #  4) LO QUE NO EXISTE SE DICE
 # ---------------------------------------------------------------------------
 
+def test_sin_ninguna_esperando_mira_LAS_DEVUELTAS(org_a):
+    """La primera corrida en produccion dijo «No hay ordenes terminadas en
+    campo esperando validacion» y se fue: la orden del usuario estaba DEVUELTA,
+    y su bitacora --lo unico que podia explicar por que se devolvia otra vez--
+    no se imprimio."""
+    from campo.cierre_por_el_supervisor import EVENTO_DEVUELTA
+    from campo.models import EventoTrabajo, OrdenTrabajo
+
+    orden = _orden(org_a, 9808, vuelta=2)
+    orden.estado_operativo = OrdenTrabajo.CORRECCION_REQUERIDA
+    orden.estado_validacion = OrdenTrabajo.REQUIERE_CORRECCION
+    orden.save(update_fields=["estado_operativo", "estado_validacion"])
+    EventoTrabajo.objects.create(org=org_a, orden=orden, tipo=EVENTO_DEVUELTA,
+                                 datos={"requisitos": ["foto_ont"]})
+
+    texto = _correr(org_a)
+
+    assert "OT #9808" in texto
+    assert "Supervisor DEVOLVIO" in texto
+    assert "BITACORA" in texto
+
+
+def test_una_foto_SIN_ANALIZAR_se_nombra(org_a):
+    """Una foto sin fila de analisis no aparece en el veredicto ni como «no se
+    pudo mirar»: el punto entero se cae. Desde afuera eso se ve igual que todo
+    bien, y es el bug del 09/11 por la manana."""
+    _orden(org_a, 9809, vuelta=1)
+
+    texto = _correr(org_a, ot=[9809])
+
+    assert "FOTOS Y LO QUE EL MODELO VIO" in texto
+    assert "SIN ANALISIS" in texto
+
+
+def test_los_dos_numeros_de_la_potencia_salen_juntos(org_a):
+    """Lo que devolvio la orden del usuario: el numero escrito contra el de la
+    foto. Verlos en lineas separadas obliga a cruzarlos a mano."""
+    _orden(org_a, 9810, vuelta=1)
+
+    texto = _correr(org_a, ot=[9810])
+
+    assert "POTENCIA: LA FOTO CONTRA LO ESCRITO" in texto
+    assert "al salir: foto=" in texto
+
+
 def test_una_orden_que_no_existe_se_nombra(org_a):
     texto = _correr(org_a, ot=[9999])
 

@@ -85,7 +85,8 @@ class Command(BaseCommand):
 
         from campo import revision_del_cierre as RC
         from campo import cierre_por_el_supervisor as CS
-        from campo.models import EventoTrabajo, OrdenTrabajo
+        from campo.models import (AnalisisDeEvidencia, EventoTrabajo,
+                                  EvidenciaTrabajo, OrdenTrabajo)
         from campo.services.cierre_en_isp import EVENTO_CERRADO, EVENTO_NO_CERRADO
 
         try:
@@ -107,8 +108,32 @@ class Command(BaseCommand):
                 estado_validacion__in=(OrdenTrabajo.PENDIENTE,
                                        OrdenTrabajo.REQUIERE_REVISION),
             ).order_by("-numero")[:max(1, opciones["ultimas"])])
+            if not ordenes:
+                #  LA QUE NO CIERRA PUEDE NO ESTAR ESPERANDO NADA  --  09/11
+                #
+                #  Primera corrida en produccion: «No hay ordenes terminadas
+                #  en campo esperando validacion», y la orden del usuario
+                #  estaba DEVUELTA. El sintoma no era «no cierra» sino «se
+                #  devuelve otra vez cada vez que el tecnico la manda», y con
+                #  el fallback vacio el comando no mostraba ni la bitacora.
+                self.stdout.write(
+                    "Ninguna esperando validacion. Se miran las ultimas que el "
+                    "Supervisor DEVOLVIO:")
+                vistos, elegidos = set(), []
+                for oid in (EventoTrabajo.objects
+                            .filter(org=org, tipo=CS.EVENTO_DEVUELTA)
+                            .order_by("-created_at")
+                            .values_list("orden_id", flat=True)):
+                    if oid in vistos:
+                        continue
+                    vistos.add(oid)
+                    elegidos.append(oid)
+                    if len(elegidos) >= max(1, opciones["ultimas"]):
+                        break
+                ordenes = list(base.filter(id__in=elegidos).order_by("-numero"))
         if not ordenes:
-            self.stdout.write("No hay ordenes terminadas en campo esperando validacion.")
+            self.stdout.write("No hay ordenes terminadas en campo esperando "
+                              "validacion, ni devueltas por el Supervisor.")
             return
 
         motivo_puertas = CS.puertas(org)
@@ -135,6 +160,55 @@ class Command(BaseCommand):
             self.stdout.write(f"BITACORA ({len(eventos)} eventos)")
             for ev in eventos:
                 self.stdout.write(f"  {_hora(ev.created_at)}  {ev.tipo}{_datos(ev.datos)}")
+
+            #  LAS FOTOS, QUE ES LO QUE DECIDE. Una foto sin fila de analisis
+            #  no aparece en el veredicto ni como «no se pudo mirar»: el punto
+            #  entero se cae, y desde afuera eso se ve igual que todo bien.
+            self.stdout.write("")
+            self.stdout.write("FOTOS Y LO QUE EL MODELO VIO")
+            evidencias = list(EvidenciaTrabajo.objects
+                              .filter(org=org, orden_trabajo=orden)
+                              .order_by("vuelta", "recibida_en_servidor"))
+            por_evidencia = {}
+            for a in (AnalisisDeEvidencia.objects
+                      .filter(org=org, evidencia_id__in=[e.id for e in evidencias])
+                      .order_by("created_at")):
+                por_evidencia.setdefault(a.evidencia_id, []).append(a)
+            if not evidencias:
+                self.stdout.write("  (ninguna)")
+            for e in evidencias:
+                filas = por_evidencia.get(e.id) or []
+                marca = (f"{len(filas)} analisis" if filas
+                         else "SIN ANALISIS -- nadie la miro")
+                self.stdout.write(
+                    f"  v{e.vuelta}  {e.requisito_id}  [{e.estado_archivo}]  {marca}")
+                for a in filas:
+                    cabeza = (a.texto or "").strip().replace("\n", " ")[:200]
+                    detalle = (f" motivo={a.motivo}" if a.motivo else "")
+                    self.stdout.write(
+                        f"        {a.origen} {_hora(a.created_at)} "
+                        f"v{a.vuelta} atencion={a.pide_atencion}{detalle}")
+                    if cabeza:
+                        self.stdout.write(f"          {cabeza}")
+
+            #  LOS DOS NUMEROS DE LA POTENCIA, UNO AL LADO DEL OTRO. Son
+            #  numeros de un instrumento, no texto del tecnico.
+            self.stdout.write("")
+            self.stdout.write("POTENCIA: LA FOTO CONTRA LO ESCRITO")
+            try:
+                from campo import potencia_de_la_foto as PF
+
+                cierre = RC._cierre_de_esta_vuelta(orden) or {}
+                respuestas = (cierre.get("respuestas") or {}) if isinstance(cierre, dict) else {}
+                for campo_id, requisito, cuando in (
+                        (RC.CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
+                        (RC.CAMPO_AL_SALIR, "medicion_al_salir", "al salir")):
+                    de_la_foto = PF.uno_solo(RC._texto_de_la_foto(orden, requisito))
+                    escrito = respuestas.get(campo_id)
+                    self.stdout.write(
+                        f"  {cuando}: foto={de_la_foto}   escrito={escrito}")
+            except Exception as e:                               # noqa: BLE001
+                self.stdout.write(f"  no se pudo leer ({type(e).__name__})")
 
             self.stdout.write("")
             self.stdout.write("DONDE SE CAE")
