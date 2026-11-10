@@ -32,8 +32,12 @@ QUE PROTEGE DE UNA MALA LECTURA DEL MODELO
 Dos cosas que ya existian, y por eso esto no necesita una tercera:
   · `_lectura_creible` descarta lo que el tecnico no habria podido escribir
     -- el «-2.10» que en realidad era «-21.0» sale por ahi;
-  · `PF.comparar` perdona hasta TOLERANCIA_DBM (3.0).
+  · `PF.comparar` perdona hasta TOLERANCIA_DBM.
 Decision del usuario, preguntado entre 3 dBm, ~6 dBm o no devolver: 3 dBm.
+BAJADA A 2.0 el 10/11/2026 con la OT #200 en la mano: la diferencia que el
+usuario puso a proposito para ver la devolucion ---18.0 escrito, -21.0 en la
+pantalla-- medía exactamente 3.0 y caia del lado de adentro. El motivo largo
+esta junto a la constante.
 
 QUE AFIRMA ESTA GUARDA
 ----------------------
@@ -178,15 +182,40 @@ def test_la_de_SALIDA_tambien(org_a):
 # ---------------------------------------------------------------------------
 
 def test_dentro_de_la_TOLERANCIA_no_se_pide_nada(org_a):
-    """2 dBm de diferencia: por debajo de TOLERANCIA_DBM (3.0). Un medidor y
-    una foto de su pantalla no tienen por que dar el mismo decimal."""
-    orden = _orden(org_a, 303, al_llegar="-28.0", al_salir="-20.0")
+    """1 dBm de diferencia. Un medidor y una foto de su pantalla no tienen
+    por que dar el mismo decimal.
+
+    ANTES MEDIA 2.0, que con el valor nuevo es el BORDE EXACTO. Una guarda
+    parada justo en el `<=` es la que dejo pasar la OT #200: pasa o falla por
+    el detalle que no esta midiendo. El borde se afirma aparte, abajo.
+    """
+    orden = _orden(org_a, 303, al_llegar="-29.0", al_salir="-20.0")
     _foto(orden, "medicion_al_llegar", _pantalla("-30.0"))
     _foto(orden, "medicion_al_salir", _pantalla("-20.0"))
 
     r = _revision(orden)
 
     assert r["sugeridas"] == [], r["sugeridas"]
+
+
+def test_EL_BORDE_DE_LA_TOLERANCIA_esta_donde_se_decidio(org_a):
+    """Clava el numero que el usuario eligio el 10/11, y de los dos lados.
+
+    La OT #200 no se devolvio porque 3.0 caia adentro. Si alguien vuelve a
+    subir la tolerancia, esta guarda lo dice en vez de dejar que se descubra
+    con una orden real meses despues.
+    """
+    from campo.potencia_de_la_foto import TOLERANCIA_DBM, comparar
+
+    assert TOLERANCIA_DBM == 2.0
+
+    #  Justo adentro: sigue siendo "la misma lectura".
+    assert comparar(-30.0, -28.0)[0] is True
+    #  Un decimal afuera: ya no.
+    assert comparar(-30.0, -27.9)[0] is False
+    #  Y EL CASO DEL USUARIO, que antes pasaba: -21.0 en la pantalla, -18.0
+    #  escrito. Con 3.0 esto valia True.
+    assert comparar(-21.0, -18.0)[0] is False
 
 
 def test_una_LECTURA_IMPOSIBLE_sigue_sin_devolver(org_a):

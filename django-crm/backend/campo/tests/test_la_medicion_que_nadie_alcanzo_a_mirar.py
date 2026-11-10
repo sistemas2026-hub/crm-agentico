@@ -165,15 +165,15 @@ def test_CUANDO_LA_FOTO_SI_SE_MIRO_la_discrepancia_aparece(org_a):
     POR QUE NO USA EL -18.0 DE LA OT #200  --  medido al escribir esto
     ------------------------------------------------------------------
     Esta guarda nacio con el caso tal cual --foto -21.0, escrito -18.0-- y
-    salio en rojo: `TOLERANCIA_DBM` vale 3.0 y la comparacion es `<=`, asi
-    que esos dos numeros COINCIDEN para el sistema. La diferencia del usuario
-    caia exactamente en el borde.
+    salio en rojo: `TOLERANCIA_DBM` valia 3.0 y la comparacion es `<=`, asi
+    que esos dos numeros COINCIDIAN para el sistema. La diferencia del
+    usuario caia exactamente en el borde. Ese hallazgo se trato aparte y
+    termino en la tolerancia bajada a 2.0.
 
-    Son dos cosas distintas y conviene no confundirlas: que la foto no se
-    haya mirado es el bug que este archivo cierra; que 3.0 dBm sea mucho o
-    poco es una decision de la empresa, con la tolerancia a la vista. Si
-    alguna vez baja, esta guarda sigue valiendo -- mide 9 dBm de diferencia,
-    no el borde.
+    Esta guarda mide 9 dBm de diferencia a proposito, lejos de cualquier
+    borde: lo que afirma es que nombrar la foto que nadie miro no tape la
+    deteccion, no donde esta el limite. El limite lo clava
+    `test_EL_BORDE_DE_LA_TOLERANCIA_esta_donde_se_decidio`.
     """
     orden = _orden(org_a, 9924, al_salir_escrito="-12.0",
                    texto_al_salir="Medidor óptico Rouhan, pantalla legible: "

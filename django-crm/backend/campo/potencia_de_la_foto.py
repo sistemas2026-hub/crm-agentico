@@ -61,13 +61,30 @@ MAXIMO = -1.0
 
 #:  Cuanto pueden diferir las dos lecturas y seguir siendo "la misma".
 #:
-#:  POR QUE 3 dBm. Dos instrumentos distintos en el mismo punto no dan el
-#:  mismo numero: el medidor de mano del tecnico y lo que el escribe redondean
-#:  distinto, y la foto se saca en un momento y el dato se anota en otro. Tres
-#:  dBm es media escala de las que la guia usa para clasificar un enlace, asi
-#:  que una diferencia mayor ya no es ruido de medicion: o la foto es de otro
-#:  punto, o el numero escrito no salio de esa pantalla.
-TOLERANCIA_DBM = 3.0
+#:  POR QUE EXISTE UNA TOLERANCIA. Dos instrumentos distintos en el mismo
+#:  punto no dan el mismo numero: el medidor de mano del tecnico y lo que el
+#:  escribe redondean distinto, y la foto se saca en un momento y el dato se
+#:  anota en otro. Sin margen, toda orden volveria por el ultimo decimal.
+#:
+#:  DE 3.0 A 2.0  --  decision del usuario, 10/11/2026, OT #200
+#:  -----------------------------------------------------------
+#:  El 09/11 se eligio 3.0 entre tres opciones (3 dBm, ~6 dBm, o no
+#:  devolver), y esto la reabre con la medicion que faltaba: el usuario
+#:  cerro la OT #200 escribiendo -18.0 con la pantalla marcando -21.0, A
+#:  PROPOSITO, para ver la devolucion. No llego. Son exactamente 3.0 y la
+#:  comparacion es `<=`, asi que para el sistema esos dos numeros eran el
+#:  mismo. La diferencia que el usuario considera reportable caia justo del
+#:  lado de adentro.
+#:
+#:  Elegido con el costo a la vista: en potencia optica 3 dB es la mitad de
+#:  la senal, y 2.0 sigue perdonando el redondeo del tecnico y la lectura
+#:  imprecisa del modelo. Si aparecen devoluciones por ruido de medicion,
+#:  el numero a mirar es cuantas ordenes caen entre 2.0 y 3.0.
+#:
+#:  NO ES LO QUE ARREGLA LA MALA LECTURA DEL MODELO. Eso es otra cosa --el
+#:  punto decimal corrido, medido 3 de 7 veces el 10/11-- y se ataca leyendo
+#:  la foto dos veces, no moviendo este numero.
+TOLERANCIA_DBM = 2.0
 
 
 def niveles(texto: str) -> list[float]:
