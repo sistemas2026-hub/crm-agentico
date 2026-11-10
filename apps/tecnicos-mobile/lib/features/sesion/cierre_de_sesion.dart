@@ -73,6 +73,21 @@ class CierreDeSesion {
     }
   }
 
+  /// Vuelve a poner en la cola lo que el servidor rechazó, y dice cuántos.
+  ///
+  /// La identidad se resuelve igual que en `evaluar()`: sin ella no hay a quién
+  /// pertenecen esas filas, y mover las de otro técnico del mismo teléfono
+  /// sería peor que no mover nada. Por eso devuelve 0 en vez de adivinar.
+  Future<int> reencolarRechazados() async {
+    final orgId = await _almacenamiento.getOrgId();
+    final profileId = await _almacenamiento.getProfileId();
+    if (orgId == null || orgId.isEmpty ||
+        profileId == null || profileId.isEmpty) {
+      return 0;
+    }
+    return _ciclo.reencolarRechazadas(orgId: orgId, profileId: profileId);
+  }
+
   /// Mira el estado antes de tocar nada. No borra.
   Future<ResultadoDeCierre> evaluar() async {
     final orgId = await _almacenamiento.getOrgId();

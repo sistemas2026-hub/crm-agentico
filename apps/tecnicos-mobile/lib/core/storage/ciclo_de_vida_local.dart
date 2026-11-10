@@ -179,6 +179,26 @@ class CicloDeVidaLocal {
     'suspender': 'suspensión',
   };
 
+  // -- Reintentar lo rechazado ------------------------------------------
+
+  /// Devuelve a la cola lo que el servidor RECHAZO. Responde cuántos movió.
+  ///
+  /// Existe porque `sincronizar` no los toca: un `conflicto` (409) y un
+  /// `error_validacion` (400) salen del reintento automático a propósito, y
+  /// hasta el 10/11/2026 NADA los devolvía a `pendiente`. El porqué completo,
+  /// y por qué la clave de idempotencia se renueva acá y en ningún otro lado,
+  /// está en `LocalDatabase.reencolarRechazadas`.
+  Future<int> reencolarRechazadas({
+    required String orgId,
+    required String profileId,
+    String? soloId,
+  }) =>
+      _db.reencolarRechazadas(
+        orgId: orgId,
+        profileId: profileId,
+        soloId: soloId,
+      );
+
   // -- Contar -----------------------------------------------------------
 
   Future<ResumenPendientes> pendientesDe({
@@ -222,7 +242,26 @@ class CicloDeVidaLocal {
       final accion = _nombreDeAccion[tipo] ?? tipo.replaceAll('_', ' ');
       // Sin número de orden no se inventa uno: la orden puede haberse
       // descargado y borrado, y "OT #null" es peor que no decir el número.
-      detalle.add(numero == null ? 'Una orden · $accion' : 'OT #$numero · $accion');
+      final String linea =
+          numero == null ? 'Una orden · $accion' : 'OT #$numero · $accion';
+
+      //  EL RECHAZO SE DICE CON SU MOTIVO  --  10/11/2026.
+      //
+      //  Esta lista decía solo «OT #4832 · cierre», y con eso el técnico no
+      //  puede distinguir lo que está esperando señal de lo que el servidor ya
+      //  RECHAZO y no va a salir nunca solo. Son dos cosas distintas y la
+      //  segunda necesita que alguien haga algo.
+      //
+      //  El motivo que se muestra es el que manda el servidor --el campo que
+      //  la plantilla no tiene, los campos en que chocó la revisión--, que es
+      //  lo único accionable que hay acá.
+      final String estado = (m['estado'] ?? '').toString();
+      final String motivo = (m['error_mensaje'] ?? '').toString().trim();
+      final bool rechazada =
+          estado == 'conflicto' || estado == 'error_validacion';
+      detalle.add(rechazada && motivo.isNotEmpty
+          ? '$linea · el servidor lo rechazó: $motivo'
+          : (rechazada ? '$linea · el servidor lo rechazó' : linea));
     }
     if (evidencias > 0) {
       detalle.add(evidencias == 1 ? '1 fotografía' : '$evidencias fotografías');

@@ -52,6 +52,7 @@ class HojaDePendientes extends StatefulWidget {
     super.key,
     required this.pendientes,
     required this.sincronizar,
+    this.reencolarRechazadas,
   });
 
   final ResumenPendientes pendientes;
@@ -59,10 +60,23 @@ class HojaDePendientes extends StatefulWidget {
   /// Intenta subir lo que falta. Devuelve lo que quedó pendiente después.
   final Future<ResumenPendientes> Function() sincronizar;
 
+  /// Devuelve a la cola lo que el servidor RECHAZO, y responde cuántos movió.
+  ///
+  /// POR QUE ES UN CAMINO APARTE Y NO «Sincronizar ahora» (10/11/2026):
+  /// sincronizar no toca un `conflicto` ni un `error_validacion` --salen del
+  /// reintento automático a propósito, porque repetirlos tal cual es un
+  /// bucle--. Sin este botón el aviso «necesitan que alguien lo revise»
+  /// mandaba a revisar sin que existiera el cómo: el técnico tocaba
+  /// «Sincronizar ahora», veía «Enviando cambios» y volvía al mismo número.
+  ///
+  /// Opcional: donde no se pase, la hoja se comporta como antes.
+  final Future<int> Function()? reencolarRechazadas;
+
   static Future<SalidaDePendientes?> mostrar(
     BuildContext context, {
     required ResumenPendientes pendientes,
     required Future<ResumenPendientes> Function() sincronizar,
+    Future<int> Function()? reencolarRechazadas,
   }) {
     return showModalBottomSheet<SalidaDePendientes>(
       context: context,
@@ -74,6 +88,7 @@ class HojaDePendientes extends StatefulWidget {
       builder: (_) => HojaDePendientes(
         pendientes: pendientes,
         sincronizar: sincronizar,
+        reencolarRechazadas: reencolarRechazadas,
       ),
     );
   }
@@ -89,6 +104,50 @@ class _HojaDePendientesState extends State<HojaDePendientes> {
   /// Se enciende cuando un intento de sincronizar no logró vaciar la cola.
   /// Recién entonces se ofrece salir sin subir.
   bool _falloElIntento = false;
+
+  /// Lo que dejó el último reintento de los rechazados. Se muestra tal cual:
+  /// «no había ninguno» es una respuesta, no un error.
+  String? _dichoDelReintento;
+
+  /// Vuelve a poner en la cola lo que el servidor rechazó y lo manda.
+  ///
+  /// Dice CUANTOS movió antes de intentar, porque cero y tres son dos
+  /// respuestas distintas y la pantalla no puede hacerlas parecer la misma.
+  Future<void> _volverAIntentarRechazados() async {
+    final Future<int> Function()? reencolar = widget.reencolarRechazadas;
+    if (reencolar == null) return;
+
+    setState(() {
+      _sincronizando = true;
+      _dichoDelReintento = null;
+    });
+
+    int movidas = 0;
+    try {
+      movidas = await reencolar();
+    } catch (_) {
+      //  Un fallo al escribir en la base del teléfono no puede tumbar esta
+      //  hoja: el técnico tiene que poder salir de acá.
+      movidas = 0;
+    }
+    if (!mounted) return;
+
+    if (movidas == 0) {
+      setState(() {
+        _sincronizando = false;
+        _dichoDelReintento = 'No había ningún cambio rechazado para reintentar.';
+      });
+      return;
+    }
+
+    setState(() {
+      _dichoDelReintento = movidas == 1
+          ? '1 cambio vuelve a la cola. Mandándolo…'
+          : '$movidas cambios vuelven a la cola. Mandándolos…';
+      _sincronizando = false;
+    });
+    await _intentarSincronizar();
+  }
 
   Future<void> _intentarSincronizar() async {
     setState(() {
@@ -203,11 +262,40 @@ class _HojaDePendientesState extends State<HojaDePendientes> {
                 ],
               ),
             ),
-            if (_falloElIntento) ...<Widget>[
+            if (_dichoDelReintento != null) ...<Widget>[
               const SizedBox(height: 12),
               Text(
-                'No se pudo subir todo. Puede ser que no haya señal acá.',
+                _dichoDelReintento!,
+                style: AppTypography.cuerpoChico,
+              ),
+            ],
+            if (_falloElIntento) ...<Widget>[
+              const SizedBox(height: 12),
+              //  EL TEXTO CULPABA A LA SEÑAL  --  10/11/2026.
+              //
+              //  Decía «Puede ser que no haya señal acá» pase lo que pase. Con
+              //  la red en verde y el servidor rechazando, eso manda a buscar
+              //  señal a quien ya la tiene, y el cambio no iba a salir ni
+              //  parado en la antena. Ahora la frase depende de lo que la
+              //  lista de arriba dice de verdad.
+              Text(
+                widget.reencolarRechazadas != null
+                    ? 'No se pudo subir todo. Lo que dice «el servidor lo '
+                        'rechazó» no es falta de señal: no va a salir solo.'
+                    : 'No se pudo subir todo. Puede ser que no haya señal acá.',
                 style: AppTypography.cuerpoChico.copyWith(color: AppColors.error),
+              ),
+            ],
+            if (_falloElIntento && widget.reencolarRechazadas != null) ...<Widget>[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton(
+                  onPressed:
+                      _sincronizando ? null : _volverAIntentarRechazados,
+                  child: const Text('Volver a intentar los rechazados'),
+                ),
               ),
             ],
             const SizedBox(height: 18),

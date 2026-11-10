@@ -3545,7 +3545,7 @@ class LocalDatabase {
     final db = await database;
     return await db.rawQuery(
       '''
-      SELECT m.id, m.tipo, m.orden_id, m.estado, o.numero
+      SELECT m.id, m.tipo, m.orden_id, m.estado, m.error_mensaje, o.numero
       FROM cola_mutaciones m
       LEFT JOIN local_ordenes o
         ON o.id = m.orden_id AND o.org_id = m.org_id AND o.profile_id = m.profile_id
@@ -3555,6 +3555,101 @@ class LocalDatabase {
     ''',
       [orgId, profileId],
     );
+  }
+
+  /// Devuelve a la cola los cambios que el servidor RECHAZO, para que se
+  /// vuelvan a intentar. Responde cuántos movió.
+  ///
+  /// POR QUE HACIA FALTA  --  10/11/2026, reportado por el usuario: «los
+  /// cambios no se envían desde la app, quedan ahí acumulándose», con la
+  /// pastilla en «9 cambios necesitan que alguien lo revise» y la red en
+  /// verde.
+  ///
+  /// Un `conflicto` (409) y un `error_validacion` (400) salen del reintento
+  /// automático A PROPOSITO: repetirlos tal cual es un bucle, porque nada va
+  /// a cambiar. Pero hasta hoy NADA los devolvía a `pendiente` --el único
+  /// método que escribe ese estado, `registrarFalloMutacion`, tiene un solo
+  /// llamador y es la rama de 5xx--, así que el aviso mandaba a revisar y no
+  /// existía ni el dónde ni el cómo. Quedaban para siempre, contados y sin
+  /// salida.
+  ///
+  /// LA CLAVE DE IDEMPOTENCIA SE RENUEVA, Y ES LO CONTRARIO DE LA REGLA
+  /// GENERAL. Normalmente una clave nueva por intento es un identificador
+  /// único y no una clave idempotente, y está prohibido. Acá se renueva
+  /// porque SIN ESO EL REINTENTO NO EXISTE: medido el 10/11/2026 en
+  /// `campo/services/idempotencia.py`, el servidor guarda la respuesta de
+  /// todo lo que devuelve menos de 500 --los 400 y los 409 incluidos--, así
+  /// que reenviar con la misma clave devuelve el rechazo viejo sin volver a
+  /// evaluar nada.
+  ///
+  /// Y es seguro EXACTAMENTE PARA ESTOS DOS ESTADOS, no en general: un 400 o
+  /// un 409 explícito prueba que el servidor evaluó y NO aplicó nada, así que
+  /// no hay efecto que se pueda duplicar. Para un timeout, un 5xx o un
+  /// `error_auth` no vale --ahí no se sabe si la operación salió-- y por eso
+  /// el `where` nombra los dos estados en vez de decir «lo que no está
+  /// pendiente».
+  ///
+  /// La revisión se actualiza a la que el teléfono tiene AHORA de esa orden:
+  /// un 409 nace justamente de mandar una revisión vieja, y reintentar con la
+  /// misma volvería a chocar. Esto hace que el cambio del técnico PISE el del
+  /// servidor, que es lo que el técnico pidió al tocar el botón.
+  Future<int> reencolarRechazadas({
+    required String orgId,
+    required String profileId,
+    String? soloId,
+  }) async {
+    final db = await database;
+    final List<Map<String, Object?>> filas = await db.query(
+      'cola_mutaciones',
+      columns: <String>['id', 'orden_id'],
+      where: "org_id = ? AND profile_id = ? "
+          "AND estado IN ('conflicto', 'error_validacion')"
+          "${soloId != null ? ' AND id = ?' : ''}",
+      whereArgs: <Object?>[orgId, profileId, ?soloId],
+    );
+    if (filas.isEmpty) return 0;
+
+    int movidas = 0;
+    for (final Map<String, Object?> fila in filas) {
+      final String id = fila['id'] as String;
+      final String ordenId = (fila['orden_id'] as String?) ?? '';
+
+      //  La revisión que el teléfono tiene ahora. Si la orden ya no está
+      //  local, se deja la que tenía: no se inventa un número.
+      int? revisionDeAhora;
+      if (ordenId.isNotEmpty) {
+        final List<Map<String, Object?>> ord = await db.query(
+          'local_ordenes',
+          columns: <String>['revision'],
+          where: 'id = ? AND org_id = ? AND profile_id = ?',
+          whereArgs: <Object?>[ordenId, orgId, profileId],
+          limit: 1,
+        );
+        if (ord.isNotEmpty) revisionDeAhora = ord.first['revision'] as int?;
+      }
+
+      await db.update(
+        'cola_mutaciones',
+        <String, Object?>{
+          'estado': 'pendiente',
+          'reintentos': 0,
+          'next_attempt_at': 0,
+          //  Clave nueva: ver el porqué arriba. Sin esto el servidor
+          //  contesta con la copia del rechazo y el botón no hace nada.
+          'idempotency_key': const Uuid().v4(),
+          //  El motivo viejo se borra: si vuelve a fallar, el que quede
+          //  tiene que ser el de ESTE intento y no el del anterior.
+          'error_mensaje': null,
+          'revision_base': ?revisionDeAhora,
+        },
+        where: 'id = ? AND org_id = ? AND profile_id = ?',
+        whereArgs: <Object?>[id, orgId, profileId],
+      );
+      movidas++;
+    }
+
+    _notifyChange(orgId: orgId, profileId: profileId, tabla: 'cola_mutaciones');
+    return movidas;
   }
 
   /// Las órdenes que tienen datos escritos y todavía sin subir.

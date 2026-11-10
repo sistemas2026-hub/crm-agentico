@@ -832,6 +832,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final despues = await ciclo.evaluar();
         return despues.pendientes;
       },
+      //  La salida del callejón (10/11/2026): «Sincronizar ahora» no mueve un
+      //  cambio que el servidor rechazó, así que sin esto el aviso «necesitan
+      //  que alguien lo revise» no tenía ningún cómo.
+      reencolarRechazadas: ciclo.reencolarRechazados,
     );
     if (!mounted || eleccion == null || eleccion == SalidaDePendientes.cancelar) {
       return;
