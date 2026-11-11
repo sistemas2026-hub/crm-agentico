@@ -1182,64 +1182,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// SE PREGUNTA PRIMERO Y SE MIDE DESPUES: al reves, el tecnico espera medio
   /// minuto la señal y recien entonces se entera de que tambien tiene que
   /// escribir algo. Devuelve `null` si se arrepintio.
-  Future<String?> _pedirElMotivo() async {
-    final TextEditingController texto = TextEditingController();
-    final String? motivo = await showDialog<String>(
-      context: context,
-      builder: (BuildContext ctx) {
-        return StatefulBuilder(
-          builder: (BuildContext ctx, StateSetter redibujar) {
-            final bool alcanza =
-                texto.text.trim().length >= _minimoDelMotivo;
-            return AlertDialog(
-              title: const Text('Corregir la ubicación'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Text(
-                    'Esta orden ya tiene una ubicación y la vas a reemplazar '
-                    'por donde estás ahora. Contá por qué, para que después '
-                    'se entienda.',
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: texto,
-                    autofocus: true,
-                    maxLines: 2,
-                    maxLength: 200,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      hintText: 'El pin caía en la otra cuadra',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (_) => redibujar(() {}),
-                  ),
-                ],
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Cancelar'),
-                ),
-                FilledButton(
-                  //  APAGADO HASTA QUE HAYA ALGO QUE LEER. El servidor lo
-                  //  rechaza igual; esto evita que el tecnico se entere
-                  //  despues de esperar el GPS.
-                  onPressed: alcanza
-                      ? () => Navigator.of(ctx).pop(texto.text.trim())
-                      : null,
-                  child: const Text('Corregir'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    texto.dispose();
-    return motivo;
-  }
+  Future<String?> _pedirElMotivo() => showDialog<String>(
+        context: context,
+        builder: (BuildContext ctx) =>
+            const MotivoDeLaCorreccion(minimo: _minimoDelMotivo),
+      );
 
   Future<void> _corregirUbicacion(dynamic trabajo) async {
     final String? motivo = await _pedirElMotivo();
@@ -4058,6 +4005,91 @@ class _MedidaOptica extends StatelessWidget {
           Text(detalle, style: AppTypography.labelCaption),
         ],
       ),
+    );
+  }
+}
+
+
+/// Por que se cambia una ubicacion que ya estaba.
+///
+/// ES UN WIDGET PROPIO Y NO UN `StatefulBuilder`  --  11/11/2026, y costo un
+/// crash en la mano del tecnico: `'_dependents.isEmpty': is not true`.
+///
+/// La version anterior creaba el `TextEditingController` afuera del dialogo y
+/// lo soltaba con `dispose()` apenas `showDialog` devolvia. Pero el dialogo
+/// todavia se esta desmontando en ese momento --su animacion de salida sigue
+/// corriendo-- y el `TextField` sigue escuchando al controlador. Soltarlo ahi
+/// es sacarle la silla a alguien que todavia esta sentado.
+///
+/// Con un `State` propio, el controlador nace y muere con el widget que lo
+/// usa, y Flutter garantiza el orden. No es una preferencia de estilo: es la
+/// unica forma en que el ciclo de vida lo maneja quien sabe cuando termina.
+class MotivoDeLaCorreccion extends StatefulWidget {
+  //  PUBLICO PARA PODER PROBARLO. Era privado y el crash del controlador
+  //  llego a la mano de un tecnico: ninguna prueba podia montarlo.
+  const MotivoDeLaCorreccion({super.key, required this.minimo});
+
+  /// Lo mas corto que el servidor acepta. Si la pantalla dejara mandar menos,
+  /// el rechazo llegaria del otro lado y el tecnico habria esperado el GPS
+  /// para nada.
+  final int minimo;
+
+  @override
+  State<MotivoDeLaCorreccion> createState() => MotivoDeLaCorreccionState();
+}
+
+class MotivoDeLaCorreccionState extends State<MotivoDeLaCorreccion> {
+  final TextEditingController _texto = TextEditingController();
+
+  @override
+  void dispose() {
+    _texto.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool alcanza = _texto.text.trim().length >= widget.minimo;
+    return AlertDialog(
+      title: const Text('Corregir la ubicación'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'Esta orden ya tiene una ubicación y la vas a reemplazar por '
+            'donde estás ahora. Contá por qué, para que después se entienda.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _texto,
+            autofocus: true,
+            maxLines: 2,
+            maxLength: 200,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'El pin caía en la otra cuadra',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          //  APAGADO HASTA QUE HAYA ALGO QUE LEER. El servidor lo rechaza
+          //  igual; esto evita que el tecnico se entere despues de esperar
+          //  el GPS.
+          onPressed: alcanza
+              ? () => Navigator.of(context).pop(_texto.text.trim())
+              : null,
+          child: const Text('Corregir'),
+        ),
+      ],
     );
   }
 }
