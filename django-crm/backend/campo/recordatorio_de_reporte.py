@@ -17,13 +17,35 @@ ejecucion que la regla da por VENCIDAS reciben un aviso en el telefono de
 quienes la tienen asignada --«⏱ OT #12: 38 min sin reportar»--, y queda en el
 log del dia de su cuadrilla.
 
-UNO POR ATRASO, NO UNO CADA 5 MINUTOS
--------------------------------------
-La clave del aviso lleva la REFERENCIA de la regla: el ultimo reporte (o la
-entrada en ejecucion). Mientras el tecnico no reporte, la referencia no cambia
-y la clave tampoco: un solo aviso. Cuando reporta, la referencia se mueve; si
-vuelve a pasar la ventana, es otro atraso y otro aviso. La clave se reclama
-por clave primaria (`AvisoEnviado`), no con un `select` previo.
+INSISTE HASTA QUE LLEGA EL REPORTE, NO UNO CADA 5 MINUTOS  --  11/11/2026
+------------------------------------------------------------------------
+Hasta el 11/11 era UNO POR ATRASO, y el usuario midio que eso no alcanza: «si
+despues del reporte no mandan nada queda asi, no vuelve a notificar». Un aviso
+que se manda una vez y no se repite se pierde entre las notificaciones del
+telefono, y la orden se queda igual.
+
+La clave del aviso lleva la REFERENCIA de la regla --el ultimo reporte, o la
+entrada en ejecucion-- MAS que recordatorio es: `...|2`, `...|3`. El primero
+no lleva sufijo, y eso no es inconsistencia: conserva la clave vieja para que
+el deploy no re-disparara el aviso 1 de cada orden ya notificada.
+
+Cual toca lo decide `cual_recordatorio()` sobre los minutos desde la
+referencia, en una REJILLA FIJA (ventana, ventana+cada, ventana+2*cada...), no
+encadenado al aviso anterior. Por eso es idempotente sin consultar nada: la
+misma pasada, repetida, calcula el mismo numero y la clave ya esta tomada. Y
+no acumula deriva: un worker que se atrasa no corre la rejilla.
+
+Cuando el tecnico reporta, la referencia se mueve y la cuenta vuelve a cero:
+eso es lo que APAGA la insistencia, sin que nadie borre nada.
+
+La clave se reclama por clave primaria (`AvisoEnviado`), no con un `select`
+previo.
+
+EL PISO DE PRECISION NO ES LA CONFIGURACION, ES BEAT
+----------------------------------------------------
+`recordar_reportes` corre cada 5 minutos (`crm/celery.py`). Con la repeticion
+en 15, el segundo aviso sale entre el minuto 45 y el 50, no a los 45 exactos.
+Un valor mas chico que 5 no lo hace mas fino.
 
 LO QUE NO SE RECUERDA
 ---------------------
@@ -33,6 +55,16 @@ LO QUE NO SE RECUERDA
   desde hace dos semanas no es un atraso de hoy, es una orden sin cerrar, y
   avisarla a las 2 de la mañana del dia del deploy seria ruido.
 - Si la empresa lo apago (`ConfiguracionDeSeguimiento.recordar_al_tecnico`).
+- Volver a insistir, si la empresa puso la repeticion en 0: ahi es uno por
+  atraso, como era antes del 11/11.
+
+NO PASA POR LA AUTONOMIA NI POR EL MODELO
+-----------------------------------------
+Esto es codigo, no una decision del Supervisor como agente: no lee el nivel de
+autonomia, no consulta el interruptor y no llama al motor. Se enciende y se
+apaga con la casilla de la empresa, y nada mas. Que la pantalla lo agrupe bajo
+«lo que el Supervisor hace solo» es el nombre del grupo, no una capacidad del
+agente.
 
 Sin datos del cliente: el numero de la orden y los minutos.
 ================================================================================
