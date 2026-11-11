@@ -187,28 +187,35 @@ describe('el filtro local no es la verificación', () => {
 });
 
 describe('el hook ya no decide por su cuenta', () => {
-  it('hooks.server.js no tiene su propio decodificador', async () => {
+  // Desde el 11/11/2026 la sesión vive en $lib/server/sesion.js y el hook
+  // solo la llama; las dos guardas siguen, sobre el archivo que decide.
+  const leer = async (ruta) => {
     const fs = await import('node:fs');
-    const fuente = fs.readFileSync(new URL('../../../hooks.server.js', import.meta.url), 'utf8');
-    expect(fuente).not.toContain('function decodeJwtPayload');
+    return fs.readFileSync(new URL(ruta, import.meta.url), 'utf8');
+  };
+
+  it('ni el hook ni la sesión tienen su propio decodificador', async () => {
+    expect(await leer('../../../hooks.server.js')).not.toContain('function decodeJwtPayload');
+    expect(await leer('../sesion.js')).not.toContain('function decodeJwtPayload');
+  });
+
+  it('el hook atiende la sesión, y la espera', async () => {
+    const hook = await leer('../../../hooks.server.js');
+    expect(hook).toMatch(/await\s+atenderSesion\s*\(\s*event\s*\)/);
   });
 
   it('y la sesión se arma llamando a la verificación', async () => {
-    const fs = await import('node:fs');
-    const fuente = fs.readFileSync(new URL('../../../hooks.server.js', import.meta.url), 'utf8');
-    expect(fuente).toContain('verificarToken');
+    const fuente = await leer('../sesion.js');
 
     // TODAS las llamadas tienen que estar AWAITED, no alguna. Sin await,
-    // jwtPayload es una Promise --siempre verdadera-- y la guarda de ruta
+    // el resultado es una Promise --siempre verdadera-- y la guarda de ruta
     // deja pasar cualquier cookie.
     //
     // Se cuentan los sitios de llamada y se exige que cada uno lleve await.
-    // Buscar la cadena 'await verifyTokenLocally(' no alcanzaba: con quitarle
-    // el await a UNA de las dos, la otra dejaba la prueba en verde -- medido
-    // con una mutacion.
-    const llamadas = [...fuente.matchAll(/(await\s+)?verifyTokenLocally\s*\(/g)]
-      .filter((m) => !fuente.slice(0, m.index).endsWith('function ') &&
-                     !/function\s+$/.test(fuente.slice(0, m.index)));
+    // Buscar la cadena 'await ...(' no alcanzaba: con quitarle el await a UNA
+    // de dos, la otra dejaba la prueba en verde -- medido con una mutacion.
+    const llamadas = [...fuente.matchAll(/(await\s+)?verificarTokenDetallado\s*\(/g)]
+      .filter((m) => !/(function\s+|import\s*\{[^}]*)$/.test(fuente.slice(0, m.index)));
     expect(llamadas.length).toBeGreaterThan(0);
     expect(llamadas.filter((m) => !m[1]).map((m) => m[0])).toEqual([]);
   });

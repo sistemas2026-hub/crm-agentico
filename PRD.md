@@ -1110,6 +1110,27 @@ Dos personas abriendo un chat ocupaban más hilos de los que había; la cola de 
 
 **Lo que la reabre:** que el log de acceso siga mostrando lecturas de la Bandeja por encima de un segundo con el pool activo (buscar `[plazo]` en el log del frontend y `/conversaciones` en el del motor), o que el pooler rechace conexiones (el `max_size` del pool por proceso tiene que caber en el `default_pool_size` de Supavisor).
 
+### 8.22 DECISIÓN — La sesión de la plataforma no se cierra sola: solo la cierra un rechazo del backend (11/11/2026)
+
+**El error que la originó.** Reportado por el usuario: *"se cierra sesión en la plataforma después de un tiempo"*. No era el refresh token venciendo (dura catorce días y se rota en cada uso): leyendo `hooks.server.js` aparecieron dos caminos que **borraban las cookies** sin que ninguna credencial hubiera vencido, y los dos se activan justo al cumplirse la hora del access token, cuando la Bandeja sondea cada 8 s y abrir una conversación dispara varias lecturas a la vez:
+
+| Camino | Qué pasaba |
+|---|---|
+| **La carrera de la rotación** | El backend rota el refresh en cada uso y pone el anterior en lista negra al instante. El primer pedido que llegaba con el access vencido renovaba; cualquier otro que ya había salido del navegador con las cookies viejas —y llegaba un instante después— renovaba con el refresh quemado, recibía 401 y el código borraba las tres cookies, **las recién emitidas incluidas**. La deduplicación «en vuelo» solo cubría los pedidos que se solapaban con el primero |
+| **La demora tratada como rechazo** | Si el backend no contestaba la verificación en 8 s se renovaba a ciegas; si tampoco contestaba la renovación, se borraban las cookies. Una Bandeja lenta (§8.21) a la hora en punto era un cierre de sesión |
+
+Ninguna prueba podía verlo: el hook no se puede importar fuera de SvelteKit, así que doscientas líneas de autenticación corrían sin una sola prueba.
+
+**Lo que se decidió y se construyó** (`django-crm/frontend/src/lib/server/sesion.js`; el hook queda de dos líneas y la llama):
+
+1. **El proceso recuerda tres minutos qué refresh rotó y qué par salió en su lugar.** Quien llega con el refresh viejo recibe los mismos tokens nuevos, sin ir al backend. Es lo que el backend no puede hacer —su lista negra es inmediata y eso está bien— y no afloja nada: el que presenta el refresh viejo es el mismo navegador, el único que lo tuvo.
+2. **Se renueva dos minutos antes de vencer**, en un pedido que todavía tiene sesión: los pedidos que lleguen con el access viejo durante la rotación lo tienen vigente y no necesitan renovar nada. Si esa renovación anticipada falla, la sesión vigente sigue valiendo lo que le queda.
+3. **«Sin respuesta» ≠ «inválido».** La verificación ahora dice cuál de las dos fue (`verificarTokenDetallado`). Sin respuesta del backend no se renueva a ciegas ni se borra nada: el pedido falla con **503** («la plataforma no responde; tu sesión sigue abierta») y el siguiente vuelve a intentar con las mismas cookies. Sigue siendo fail-closed —sin respuesta no hay sesión en *ese* pedido—; lo que ya no hay es destrucción de credenciales que todavía valen. **Solo un 401/403 explícito del backend cierra la sesión.**
+
+Guarda: `sesion.test.js` recorre `atenderSesion()` entera con el backend doblado, reproduce la carrera (el segundo pedido llega con el refresh ya quemado) y la demora, y afirma sobre las cookies y la respuesta; verificada hacia atrás con dos mutaciones (sin la memoria de rotación, cae la de la carrera; tratando la demora como rechazo, cae la de la demora). El rechazo legítimo sigue cerrando la sesión y sigue probado.
+
+**Lo que no se hizo.** No se tocó el backend ni la rotación: la lista negra inmediata es la garantía contra un refresh robado y se queda. No se midió en producción —el log del frontend tiene la línea `Token refresh failed:` con `status=401` para el camino 1 y con `ECONNABORTED`/`ECONNREFUSED` para el 2; desde este cambio el rechazo se registra como `sesion_refresh_rechazado`—. **Lo que la reabre:** que una sesión se cierre sin que el log muestre un `sesion_refresh_rechazado` justo antes.
+
 ---
 
 ## 9. Despliegue

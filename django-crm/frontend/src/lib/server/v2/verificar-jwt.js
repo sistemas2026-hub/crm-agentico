@@ -110,6 +110,12 @@ export function motivoDeRechazoLocal(token) {
 }
 
 /**
+ * @typedef {{ estado: 'valido', payload: any }
+ *         | { estado: 'invalido', payload: null, motivo: string }
+ *         | { estado: 'sin_respuesta', payload: null }} Verificacion
+ */
+
+/**
  * ¿El backend reconoce este token? Devuelve el payload verificado, o null.
  *
  * FAIL-CLOSED: si el backend no responde, no se puede afirmar que el token sea
@@ -120,13 +126,35 @@ export function motivoDeRechazoLocal(token) {
  * @returns {Promise<any|null>}
  */
 export async function verificarToken(token) {
-  if (!token) return null;
+  return (await verificarTokenDetallado(token)).payload;
+}
+
+/**
+ * La misma verificación, diciendo POR QUÉ no hay sesión cuando no la hay.
+ *
+ * «Inválido» y «sin respuesta» son dos cosas distintas y hasta el 11/11/2026
+ * se devolvían igual (null). La diferencia importa aguas arriba: ante un
+ * token inválido corresponde renovar, y si la renovación también falla,
+ * cerrar la sesión. Ante un backend que no contesta no corresponde ninguna
+ * de las dos: renovar gasta el refresh token a ciegas, y cerrar la sesión
+ * convierte una demora del backend en un cierre de sesión para la persona —
+ * que es exactamente lo que pasaba. Sigue siendo fail-closed: sin respuesta
+ * no hay sesión en ESTE pedido; lo que no hay es destrucción de credenciales
+ * que todavía valen.
+ *
+ * @param {string} token
+ * @returns {Promise<Verificacion>}
+ */
+export async function verificarTokenDetallado(token) {
+  if (!token) return { estado: 'invalido', payload: null, motivo: 'vacio' };
 
   const motivo = motivoDeRechazoLocal(token);
-  if (motivo) return null;
+  if (motivo) return { estado: 'invalido', payload: null, motivo };
 
   const recordado = verificados.get(token);
-  if (recordado && recordado.hasta > Date.now()) return recordado.payload;
+  if (recordado && recordado.hasta > Date.now()) {
+    return { estado: 'valido', payload: recordado.payload };
+  }
 
   const yaPedido = enVuelo.get(token);
   if (yaPedido) return yaPedido;
@@ -138,22 +166,26 @@ export async function verificarToken(token) {
         timeout: 8000,
         validateStatus: (s) => s === 200 || s === 401 || s === 403
       });
-      if (r.status !== 200) return null;
+      if (r.status !== 200) {
+        return /** @type {Verificacion} */ ({ estado: 'invalido', payload: null, motivo: `http_${r.status}` });
+      }
 
       // El backend acepto el token: la firma es autentica y recien AHORA los
       // claims valen. De aca en mas se pueden leer sin miedo.
       const { payload } = leerSinVerificar(token) ?? {};
-      if (!payload) return null;
+      if (!payload) return /** @type {Verificacion} */ ({ estado: 'invalido', payload: null, motivo: 'malformado' });
 
       const exp = typeof payload.exp === 'number' ? payload.exp * 1000 : 0;
       verificados.set(token, {
         hasta: Math.min(Date.now() + TTL_CACHE_MS, exp),
         payload
       });
-      return payload;
+      return /** @type {Verificacion} */ ({ estado: 'valido', payload });
     } catch {
       // Sin respuesta no hay verificacion, y sin verificacion no hay sesion.
-      return null;
+      // Un 5xx cae aca tambien (validateStatus no lo acepta): el backend
+      // existe pero no pudo decidir, que para este pedido es lo mismo.
+      return /** @type {Verificacion} */ ({ estado: 'sin_respuesta', payload: null });
     } finally {
       enVuelo.delete(token);
     }
