@@ -18,11 +18,20 @@ cerrada por Autonomia 2 (`frontera.py`, `autonomia2.veredicto()`): por ese
 camino el boton fallaria SOLO en produccion, con un sintoma que no senala la
 causa.
 
-EL ORDEN NO ES CASUAL, y lo decidio el usuario el 10/11/2026: **primero el
-equipo**. Es donde el dato falta de verdad (0,19 % contra 50 %), asi que es el
-que define si la accion sirvio. Si el equipo falla no se intenta el servicio:
-dejar escrito solo el segundo produciria dos sistemas que se contradicen sin
-que nadie lo sepa.
+EL ORDEN LO DECIDIO EL USUARIO, y se corrigio el 11/11/2026 despues de la
+primera prueba de campo: **primero el SERVICIO, que es el que manda**. Si esa
+escritura falla, la accion fallo y el equipo no se intenta -- dejar escrito
+solo el segundo produciria dos sistemas que se contradicen sin que nadie lo
+sepa.
+
+El EQUIPO va despues y es el que puede faltar: hay ordenes sin serial de ONU
+--la ficha se congela al despachar y a veces el equipo no estaba cargado-- y
+eso no puede impedir que la casa quede ubicada donde si se puede. Si el equipo
+no aplica, o falla, el resultado NO es un fracaso: el dato ya esta en el lugar
+que importa.
+
+(La version anterior tenia el orden al reves, porque el equipo es donde el
+dato mas falta: 0,19 % contra 50 %. Que falte mas no lo vuelve el que manda.)
 
 CADA DESTINO TIENE SU PROPIA CLAVE DE IDEMPOTENCIA, y eso es lo que hace
 reintentable un exito a medias: si el equipo se escribio y el servicio no,
@@ -316,25 +325,26 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
                                   res.codigo or res.decision or "no ejecutada")
         return DestinoEscrito(herr.nombre, True)
 
-    #  PRIMERO EL EQUIPO. Si FALLA, el servicio no se intenta --dejar escrito
-    #  solo el segundo produce dos sistemas que se contradicen--. Pero si NO
-    #  APLICA, se saltea y se sigue: son dos cosas distintas.
-    if equipo is not None:
-        d = _escribir(equipo)
+    #  PRIMERO EL SERVICIO, QUE ES EL QUE MANDA. Si falla, el equipo no se
+    #  intenta: dejar escrito solo el segundo produce dos sistemas que se
+    #  contradicen. Si no aplica, se saltea --son dos cosas distintas--.
+    if servicio is not None:
+        d = _escribir(servicio)
         destinos.append(d)
         if not d.ok and not d.no_aplica:
             return ResultadoCoordenada(FALLO, d.detalle,
                                        referencia=origen, destinos=destinos)
 
-    if servicio is not None:
-        d = _escribir(servicio)
+    #  DESPUES EL EQUIPO, y aca un fallo NO tumba la accion: el dato ya quedo
+    #  donde importa. Se informa como PARCIAL para que el boton pueda
+    #  completarlo despues --cada destino tiene su propia clave-- pero la casa
+    #  ya esta ubicada.
+    if equipo is not None:
+        d = _escribir(equipo)
         destinos.append(d)
         if not d.ok and not d.no_aplica:
-            #  PARCIAL Y NO FALLO, y la diferencia importa: lo que se escribio
-            #  NO se deshace --no hay con que-- y volver a tocar el boton
-            #  reintenta solo este, porque el otro tiene su propia clave.
             return ResultadoCoordenada(
-                PARCIAL, f"{servicio.nombre}: {d.detalle}",
+                PARCIAL, f"{equipo.nombre}: {d.detalle}",
                 referencia=origen, destinos=destinos)
 
     #  SI NO SE PUDO INTENTAR NINGUNO, eso si es un problema de la peticion:

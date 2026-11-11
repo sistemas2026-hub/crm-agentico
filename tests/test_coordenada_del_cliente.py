@@ -199,15 +199,17 @@ def guardar(config=None, actor="Laura Gomez", ident=None, lat=LAT, lng=LNG,
 
 
 # ---------------------------------------------------------------------------
-seccion("1. las dos escrituras salen, EL EQUIPO PRIMERO")
+seccion("1. las dos escrituras salen, EL SERVICIO PRIMERO")
 registro, proveedor = Registro(), Proveedor()
 with escenario(registro, proveedor):
     r = guardar()
 afirmar(r.estado == coord.GUARDADA,
         f"queda guardada (estado={r.estado}, motivo={r.motivo})")
-afirmar(proveedor.nombres == ["escribir_ubicacion_del_equipo",
-                              "escribir_ubicacion_del_servicio"],
-        f"el equipo PRIMERO y el servicio despues: {proveedor.nombres}")
+#  EL SERVICIO PRIMERO: es el que manda (decision del usuario, 11/11/2026).
+#  El equipo va despues y es el que puede faltar o fallar sin tumbar la accion.
+afirmar(proveedor.nombres == ["escribir_ubicacion_del_servicio",
+                              "escribir_ubicacion_del_equipo"],
+        f"el servicio PRIMERO y el equipo despues: {proveedor.nombres}")
 afirmar(all(p is not None for p in proveedor.permisos),
         "las dos salieron con un permiso de la frontera abierto")
 afirmar(len(registro.filas) == 2,
@@ -217,8 +219,8 @@ afirmar(len(set(registro.filas)) == 2, "y las dos claves son distintas")
 # ---------------------------------------------------------------------------
 seccion("2. cada proveedor recibe los nombres que DECLARA")
 if len(proveedor.llamadas) == 2:
-    _, args_equipo = proveedor.llamadas[0]
-    _, args_serv = proveedor.llamadas[1]
+    _, args_serv = proveedor.llamadas[0]
+    _, args_equipo = proveedor.llamadas[1]
     afirmar(args_equipo.get("latitude") == "10.910800"
             and args_equipo.get("longitude") == "-74.818600",
             f"el equipo: dos campos separados -> {args_equipo}")
@@ -233,25 +235,25 @@ if len(proveedor.llamadas) == 2:
             "cada uno con SU identificador")
 
 # ---------------------------------------------------------------------------
-seccion("3. si el EQUIPO falla, el servicio NI SE INTENTA")
-registro, proveedor = Registro(), Proveedor(
-    rompe_en="escribir_ubicacion_del_equipo")
-with escenario(registro, proveedor):
-    r = guardar()
-afirmar(r.estado == coord.FALLO, f"la accion fallo (estado={r.estado})")
-afirmar(proveedor.nombres == ["escribir_ubicacion_del_equipo"],
-        f"UNA sola llamada, la del equipo: {proveedor.nombres}")
-afirmar(not r.escribio_algo, "y no quedo nada escrito en ningun lado")
-
-# ---------------------------------------------------------------------------
-seccion("4. si falla el SERVICIO, es PARCIAL y el equipo no se repite")
+seccion("3. si el SERVICIO falla, el equipo NI SE INTENTA")
 registro, proveedor = Registro(), Proveedor(
     rompe_en="escribir_ubicacion_del_servicio")
 with escenario(registro, proveedor):
     r = guardar()
+afirmar(r.estado == coord.FALLO, f"la accion fallo (estado={r.estado})")
+afirmar(proveedor.nombres == ["escribir_ubicacion_del_servicio"],
+        f"UNA sola llamada, la del servicio: {proveedor.nombres}")
+afirmar(not r.escribio_algo, "y no quedo nada escrito en ningun lado")
+
+# ---------------------------------------------------------------------------
+seccion("4. si falla el EQUIPO, es PARCIAL: el dato ya quedo donde importa")
+registro, proveedor = Registro(), Proveedor(
+    rompe_en="escribir_ubicacion_del_equipo")
+with escenario(registro, proveedor):
+    r = guardar()
 afirmar(r.estado == coord.PARCIAL,
         f"parcial, no fallo: lo escrito no se deshace (estado={r.estado})")
-afirmar(r.escribio_algo, "el equipo si quedo escrito")
+afirmar(r.escribio_algo, "el servicio si quedo escrito, que es el que manda")
 
 #  El reintento: con el MISMO origen, el equipo vuelve como 'repetida' y el
 #  servicio se intenta de nuevo. Eso es lo que hace reintentable el parcial.
@@ -260,7 +262,7 @@ with escenario(registro, proveedor2):
     r2 = guardar()
 afirmar(r2.estado == coord.GUARDADA,
         f"con el MISMO punto, al reintentar queda completa (estado={r2.estado})")
-afirmar(proveedor2.nombres == ["escribir_ubicacion_del_servicio"],
+afirmar(proveedor2.nombres == ["escribir_ubicacion_del_equipo"],
         f"y solo se reintento EL QUE FALTABA: {proveedor2.nombres}")
 
 # ---------------------------------------------------------------------------
@@ -271,7 +273,7 @@ seccion("4b. el reintento CON OTRO PUNTO -- el caso de campo")
 #  quedaba bloqueada PARA SIEMPRE --la fila exitosa no vence--. La seccion 4 no
 #  podia verlo porque reintentaba con la misma coordenada.
 registro, proveedor = Registro(), Proveedor(
-    rompe_en="escribir_ubicacion_del_servicio")
+    rompe_en="escribir_ubicacion_del_equipo")
 with escenario(registro, proveedor):
     r = guardar()
 afirmar(r.estado == coord.PARCIAL, "el primer toque queda a medias")
@@ -284,7 +286,7 @@ with escenario(registro, proveedor3):
 afirmar(r3.estado == coord.GUARDADA,
         f"con OTRO punto el segundo toque TAMBIEN completa (estado={r3.estado}, "
         f"motivo={r3.motivo})")
-afirmar("escribir_ubicacion_del_servicio" in proveedor3.nombres,
+afirmar("escribir_ubicacion_del_equipo" in proveedor3.nombres,
         f"y el que faltaba se escribe: {proveedor3.nombres}")
 
 # ---------------------------------------------------------------------------
@@ -345,6 +347,9 @@ seccion("7. un destino sin identificador NO APLICA, y no frena al otro")
 #  nuevo en un momento» para siempre.
 registro, proveedor = Registro(), Proveedor()
 with escenario(registro, proveedor):
+    #  EL CASO REAL DE LA PRIMERA PRUEBA DE CAMPO: la OT #255 no tiene serial
+    #  de ONU y si tiene servicio. Es justo el que manda, asi que la casa
+    #  queda ubicada igual.
     r = guardar(ident={"id_servicio": "5832"})          # sin el del equipo
 afirmar(r.estado == coord.GUARDADA,
         f"se escribe donde SI se puede (estado={r.estado}, motivo={r.motivo})")
