@@ -543,6 +543,28 @@ def _lo_que_el_tecnico_PODRIA_escribir(orden, campo_id):
     return min(mn, mx), max(mn, mx)
 
 
+#: Que campo del formulario verifica cada foto de medicion. El mapeo ya
+#: estaba repartido en `_potencia` y en el diagnostico; se nombra una vez.
+FOTO_DEL_CAMPO = {"medicion_al_llegar": CAMPO_AL_LLEGAR,
+                  "medicion_al_salir": CAMPO_AL_SALIR}
+
+
+def limites_de_la_foto(orden, requisito_id: str):
+    """`(piso, techo)` que la empresa declaro para la medicion de ESA foto, o
+    `None` si esa foto no es de medicion o la plantilla no los declara.
+
+    PARA QUE SE EXPONE  --  11/11/2026, OT #201
+    --------------------------------------------
+    Hasta hoy este rango servia solo para DESCARTAR, despues de que el modelo
+    leyera. `inspeccion_visual` lo usa ahora ANTES, en el pie de la foto: ver
+    `que_tenia_que_mostrar`.
+    """
+    campo_id = FOTO_DEL_CAMPO.get(requisito_id)
+    if not campo_id:
+        return None
+    return _lo_que_el_tecnico_PODRIA_escribir(orden, campo_id)
+
+
 def _lectura_creible(valor, limites):
     """Si ese numero puede ser la medicion que se pidio.
 
@@ -716,6 +738,16 @@ def mediciones_para_releer(orden, cierre=None) -> list[str]:
         if not textos:
             #  Nadie la miro todavia. La mira `mirar_las_que_faltan` por su
             #  camino de siempre; releer no es lo que falta aca.
+            continue
+        #  SI EL MODELO YA SE REPITIO, NO SE RELEE MAS  --  11/11, OT #201
+        #
+        #  Esa foto se miro CUATRO veces y las cuatro leyeron «-2.10». El
+        #  tope de 3 existe para un fallo transitorio de red; esto es otra
+        #  cosa: el modelo es CONSISTENTE leyendo mal, y una lectura mas no
+        #  va a decir algo distinto. Dos lecturas iguales ya contestaron la
+        #  pregunta que la tercera venia a hacer.
+        crudos = [v for v in (PF.uno_solo(t) for t in textos) if v is not None]
+        if len(crudos) >= 2 and crudos[-1] == crudos[-2]:
             continue
         limites = _lo_que_el_tecnico_PODRIA_escribir(orden, campo)
         valor, _discordaron = _numero_de_la_foto(textos, limites)

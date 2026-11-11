@@ -211,13 +211,31 @@ class Command(BaseCommand):
                     for campo_id, requisito, cuando in (
                             (RC.CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
                             (RC.CAMPO_AL_SALIR, "medicion_al_salir", "al salir")):
+                        #  TODAS LAS LECTURAS, Y LA QUE EL SISTEMA USA
+                        #  --  11/11/2026, OT #201
+                        #
+                        #  Este bloque mostraba `PF.uno_solo` sobre UNA sola
+                        #  lectura --la ultima-- y desde la doble lectura eso
+                        #  ya no es lo que `_potencia` hace. En la vuelta 1 de
+                        #  la #201 la diferencia era visible: cuatro lecturas,
+                        #  dos de -21.0 y dos de -2.10, y el comando imprimia
+                        #  «foto=-2.1» como si fuera el dato. Un diagnostico
+                        #  que calcula por su cuenta miente justo cuando mas
+                        #  se lo necesita -- ya paso una vez en este mismo
+                        #  bloque, con `_cierre_de_esta_vuelta`.
                         escrito = RC._a_numero(respuestas.get(campo_id))
-                        bruto = PF.uno_solo(RC._texto_de_la_foto(orden, requisito))
+                        lecturas = RC._lecturas_de_la_foto(orden, requisito)
+                        crudos = [PF.uno_solo(t) for t in lecturas]
                         limites = RC._lo_que_el_tecnico_PODRIA_escribir(orden, campo_id)
-                        creible = RC._lectura_creible(bruto, limites)
+                        bruto, discordaron = RC._numero_de_la_foto(lecturas,
+                                                                   limites)
                         linea = (f"  {cuando}: foto={bruto}  escrito={escrito}  "
-                                 f"limites={limites}  creible={creible}")
-                        if not creible:
+                                 f"limites={limites}  "
+                                 f"lecturas={crudos or 'ninguna'}")
+                        if discordaron:
+                            linea += ("  -> DOS LECTURAS CREIBLES DISTINTAS, "
+                                      "no se compara")
+                        elif bruto is None and crudos:
                             linea += "  -> la foto se DESCARTA, no se compara"
                         elif escrito is None or bruto is None:
                             linea += "  -> falta un lado, NO SE COMPARA (el punto no aparece)"
@@ -225,6 +243,11 @@ class Command(BaseCommand):
                             ok, por_que = PF.comparar(bruto, escrito)
                             linea += f"  -> coinciden={ok} ({por_que})"
                         self.stdout.write(linea)
+                        #  Y SI SE VA A RELEER, decirlo: es la pregunta que
+                        #  sigue cuando una medicion no se pudo verificar.
+                        if requisito in RC.mediciones_para_releer(orden, cierre):
+                            self.stdout.write("      (esta foto se vuelve a "
+                                              "leer en la proxima pasada)")
             except Exception as e:                               # noqa: BLE001
                 self.stdout.write(f"  no se pudo leer ({type(e).__name__})")
 

@@ -196,11 +196,54 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
                      "que se pedian no se pueden leer.")
         else:
             marca = ""
+        #  EL RANGO QUE LA EMPRESA DECLARO, ANTES DE LEER  --  11/11/2026
+        #
+        #  EL CASO, MEDIDO EN LA OT #201. La foto de `medicion_al_salir` se
+        #  miro CUATRO veces y las cuatro leyeron «-2.10 dBm» donde la
+        #  pantalla dice «-21.0». Una hasta lo subraya: «punto decimal
+        #  visible». El modelo no duda: esta seguro de su error.
+        #
+        #  POR QUE ESTO Y NO MAS RELECTURAS. El 11/11 por la manana se
+        #  construyo la doble lectura, que ataca VARIANZA --el modelo que se
+        #  equivoca distinto cada vez-- y la #201 mostro que lo de esta
+        #  pantalla es SESGO: lee igual de mal todas las veces. Releer no
+        #  puede arreglar un sesgo; darle la magnitud que espera, si. (En la
+        #  vuelta 1 de esa misma orden SI hubo varianza --2 lecturas de -21.0
+        #  y 2 de -2.10 de la misma foto-- asi que la doble lectura sigue
+        #  sirviendo; las dos cosas no se reemplazan.)
+        #
+        #  ES GUIA, NO GARANTIA (PRD 7.4). El codigo sigue descartando lo que
+        #  no puede salir de ese medidor; esto solo le da al modelo la
+        #  oportunidad de no equivocarse. Y se le pide VERIFICAR, nunca
+        #  ajustar: un prompt que diga «tiene que estar entre X e Y» invita a
+        #  inventar un numero que encaje, que es peor que leer mal.
+        #
+        #  SALE DE LA PLANTILLA DE LA EMPRESA (CLAUDE.md §3.3): Rapilink
+        #  declara -60 a -8 en ese campo. Otra empresa con otro instrumento
+        #  declara otra cosa y el pie cambia solo.
+        rango = ""
+        try:
+            from campo.revision_del_cierre import limites_de_la_foto
+
+            limites = limites_de_la_foto(evidencia.orden_trabajo,
+                                         evidencia.requisito_id)
+        except Exception:                                        # noqa: BLE001
+            limites = None
+        if limites:
+            piso, techo = limites
+            rango = (f" Esta empresa declara que una lectura valida de este "
+                     f"medidor va de {piso:.1f} a {techo:.1f} dBm. Si el "
+                     f"numero que lees cae fuera de ese rango, volve a mirar "
+                     f"la posicion del punto decimal antes de contestar: es "
+                     f"el error mas comun al leer estas pantallas. NO cambies "
+                     f"el numero para que encaje --si despues de mirarlo otra "
+                     f"vez seguis leyendo lo mismo, escribi lo que ves--.")
+
         if instrucciones:
             return (f"Esta foto tenia que mostrar: {titulo or evidencia.requisito_id}. "
-                    f"{instrucciones}{marca}")
+                    f"{instrucciones}{marca}{rango}")
         if titulo:
-            return f"Esta foto tenia que mostrar: {titulo}.{marca}"
+            return f"Esta foto tenia que mostrar: {titulo}.{marca}{rango}"
         break
     return ""
 

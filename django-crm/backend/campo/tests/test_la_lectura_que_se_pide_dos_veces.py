@@ -387,12 +387,25 @@ def test_LA_PRIMERA_PASADA_VA_ANTES_Y_LA_SEGUNDA_LA_VE(org_a):
 def test_EL_TOPE_TAMBIEN_FRENA_LA_RELECTURA(org_a):
     """Una foto que el modelo lee mal tres veces deja de releerse y espera a
     una persona. Sin esto, una pantalla que el modelo nunca va a leer bien
-    hace una llamada por foto en cada pasada del ciclo, para siempre."""
+    hace una llamada por foto en cada pasada del ciclo, para siempre.
+
+    POR QUE LAS LECTURAS SON DISTINTAS ENTRE SI  --  11/11/2026, tarde
+    ------------------------------------------------------------------
+    Nacio con tres «-2.10» iguales y ese mismo dia se puso en rojo al
+    agregarse el corte por repeticion (OT #201: dos lecturas iguales cierran
+    la pregunta, ver `test_el_rango_que_el_modelo_no_sabia`). No era un
+    defecto del corte: con lecturas iguales esta guarda ya no medía el TOPE,
+    la frenaba el corte antes de llegar a él, y habría seguido en verde con
+    el tope roto.
+
+    Tres lecturas distintas y todas imposibles dejan el corte fuera de
+    juego, que es lo que hace falta para que lo unico que frene sea el tope.
+    """
     from campo.tasks import INTENTOS_POR_FOTO, mirar_las_que_faltan
 
     assert INTENTOS_POR_FOTO == 3
-    orden = _orden(org_a, 9964,
-                   lecturas_al_salir=("-2.10",) * INTENTOS_POR_FOTO)
+    distintas = ("-2.10", "-3.10", "-4.10")
+    orden = _orden(org_a, 9964, lecturas_al_salir=distintas)
 
     with mock.patch("campo.tasks._mirar_y_anotar") as mirar:
         r = mirar_las_que_faltan(orden)
@@ -401,8 +414,7 @@ def test_EL_TOPE_TAMBIEN_FRENA_LA_RELECTURA(org_a):
     assert mirar.call_count == 0, mirar.call_args_list
 
     #  Y UNO MENOS TODAVIA SE RELEE: sin esto un tope en 0 pasaria igual.
-    orden2 = _orden(org_a, 9965,
-                    lecturas_al_salir=("-2.10",) * (INTENTOS_POR_FOTO - 1))
+    orden2 = _orden(org_a, 9965, lecturas_al_salir=distintas[:2])
     with mock.patch("campo.tasks._mirar_y_anotar") as mirar2:
         mirar2.return_value = {"estado": "ok", "motivo": ""}
         assert mirar_las_que_faltan(orden2)["relecturas"] == 1
