@@ -1267,6 +1267,28 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(resultado.mensaje)),
     );
+
+    //  Y SE VUELVE A BAJAR LA ORDEN  --  11/11/2026.
+    //
+    //  El usuario: «sale un mensaje de cordenadas guardadas pero sigue el
+    //  boton de obtener cordenadas». Tenia razon y era medio arreglo: el
+    //  SERVIDOR si actualiza la orden, pero la copia del telefono es la que
+    //  dibuja esta pantalla, y esa no se enteraba hasta la proxima
+    //  sincronizacion. El tecnico leia «guardada» y veia todo igual -- que es
+    //  como se aprende a desconfiar de un aviso.
+    //
+    //  Se baja en vez de parchear la copia local a mano: asi lo que se dibuja
+    //  es lo que el servidor TIENE, no lo que el telefono cree haber mandado.
+    //  Si las dos cosas difieren, gana la de verdad y se ve.
+    if (resultado.algoQuedoEscrito) {
+      try {
+        await widget.acciones.sincronizar();
+      } catch (_) {
+        //  La ubicacion YA quedo escrita. Que no se pueda refrescar ahora es
+        //  molesto, no grave: se ve en la proxima bajada. No se le muestra un
+        //  error que contradiga el aviso anterior.
+      }
+    }
     //  Con la ubicacion ya escrita, la orden del telefono sigue sin tenerla
     //  hasta la proxima bajada. Se dice en el mismo aviso en vez de dejar al
     //  tecnico tocando un boton que no cambia de texto.
