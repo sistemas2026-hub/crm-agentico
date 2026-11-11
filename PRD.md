@@ -111,7 +111,7 @@ Dexter tiene **tres tipos de usuario**: el **cliente final** del ISP (por WhatsA
 |---|---|---|---|
 | **Atención por WhatsApp** | Cliente final | Un router deriva a especialistas: **soporte técnico** (diagnóstico de "no tengo internet" en 11 ramas con WispHub y SmartOLT, reinicio remoto, agendamiento de visita), **facturación** (estado de cuenta, comprobante de pago), **ventas** (cobertura, planes curados, solicitud). Cada especialista verifica identidad; las notas de voz se transcriben; una guardia revisa el texto antes de enviarlo; el escalamiento a persona tiene 10 motivos y el pedido explícito lo detecta el código | `nucleo/` (§8.8–§8.10c) |
 | **Asistente web** | Colaborador | Soporte, facturación, administración (consultas agregadas, informes Excel/PDF), configuración guiada de sistemas nuevos | `/asistente`, `/configuracion-guiada` |
-| **Bandeja** | Operador | El relevo IA ↔ persona: control, asignación, tomar y devolver, aprobar acciones, ventana de 24 h, plantillas, rótulos, reincidencia, carga del equipo | `/conversaciones` (§8.11, §8.16) |
+| **Bandeja** | Operador | El relevo IA ↔ persona: control, asignación, tomar y devolver, aprobar acciones, ventana de 24 h, plantillas, rótulos, reincidencia, carga del equipo; no leídos, etiquetas por chat, respuestas rápidas con «/», búsqueda en los mensajes; ubicación, contacto y reacción del cliente | `/conversaciones` (§8.11, §8.16, §8.20) |
 | **Tickets y casos** | Operador | CRM con importación y conciliación horaria con WispHub, área por departamento, alta de tickets en WispHub, calidad (encuesta de cierre por WhatsApp) | `/tickets` (§8.14, §8.15) |
 | **Supervisor y Despacho** | Coordinador / NOC | Detecta situaciones de red, clasifica la labor de cada ticket, arma de madrugada la jornada de cada cuadrilla por zona y labor, propone material del día por bodega y kit, revisa el cierre de cada orden y le recuerda al técnico lo vencido | `/supervisor-noc` |
 | **App de campo** | Técnico | Órdenes del día en el orden del Supervisor, trabajo sin señal, novedades de un toque, cierre con fotos, material recibido y escaneo de equipos | `apps/tecnicos-mobile` (Flutter) |
@@ -1043,6 +1043,39 @@ lo diría sin cambiar nada más.
 **Lo que se decidió no hacer, con su número:** la detección de ONUs suspendidas (medido: 2 en toda la red) y la alerta de batería de la OLT (una de las dos OLT no reporta tensión). Las acciones masivas asíncronas: Dexter actúa de a un cliente.
 
 **Lo que queda para después, con lo que hace falta:** el receptor de eventos (webhook) para enterarse de una caída sin sondear. Se verificó que la clave de Rapilink sirve para eventos. Va en el motor, al lado del webhook de WhatsApp, empezando por `pon.*` y `olt.*` (que no traen datos de clientes), guardando el evento antes de responder y con el sondeo como respaldo. Es un objetivo propio.
+
+### 8.20 DECISIÓN — Lo que la Bandeja tomó de WhatsApp Business (11/11/2026)
+
+**El error que la originó.** Revisando la Bandeja contra otros programas de chat (pedido del usuario, 11/11/2026), aparecieron dos clases de huecos. La primera era un defecto: la **ubicación**, la **tarjeta de contacto** y la **reacción** del cliente llegaban vacías o como «no puedo leer», y el cliente quedaba sin respuesta. La segunda eran funciones de trabajo que el equipo tenía que suplir de memoria: saber qué no leyó nadie, marcar un chat, repetir los mismos textos y encontrar un mensaje viejo.
+
+**Lo que se construyó:**
+
+1. **Ubicación, contacto y reacción.** El canal los convierte en un aviso de texto fijo (`nucleo/canales/avisos.py`) que el turno sí entiende.
+   - La ubicación lleva nombre, dirección y coordenadas. La pantalla ofrece «Ver en el mapa», un enlace que abre la persona (no pasa datos a un tercero por sí solo).
+   - Del contacto van solo el nombre y los teléfonos, hasta 5.
+   - La reacción cita el mensaje reaccionado, que se busca **solo en el chat de quien reacciona**.
+   - Ninguno de los tres avisos se usa para buscar en la documentación ni se guarda en `unanswered_queries`, porque no son preguntas y llevan datos.
+2. **No leídos.** La columna `conversations.leida_hasta` (migración `202611111200`) se cuenta por chat. Abrir el chat lo marca leído.
+   - Un mensaje del cliente que llega mientras alguien tiene el chat abierto **no nace leído**: la marca retrocede en la misma transacción.
+3. **Etiquetas del equipo.** Se aplican por chat, con color, desde un catálogo editable en Ajustes → Bandeja (`Conversaciones.etiquetas_del_equipo`). La tabla `etiquetas_de_chat` (migración `202611111201`) tiene RLS forzado y es fail-closed: una etiqueta que no está en el catálogo no se guarda.
+4. **Respuestas rápidas con «/».** El catálogo se edita en Ajustes → Bandeja (`Conversaciones.respuestas_rapidas`): atajo, texto de hasta 1.000 caracteres y un máximo de 100 por empresa.
+5. **Búsqueda en el contenido de los mensajes.** Admite de 3 a 100 caracteres y devuelve hasta 30 resultados.
+   - Filtra por la vista de canales **antes** del tope; si no, 30 mensajes de prueba escondían el real.
+   - Medido: 35 ms de mediana sobre 2.000 mensajes sembrados. No está medido con el volumen de producción.
+
+**Decisiones tomadas en el camino**, del auditor independiente (H5 y H6):
+
+- **Los no leídos se muestran solo cuando hay una persona en el caso**, es decir con el chat «Por atender» o «En atención». Un chat que la IA atiende no le pide nada a nadie, y marcarlo en negrita entrena a ignorar la negrita. La regla vive en el frontend (`lib/conversaciones/lectura.js`), al lado de la que decide las pestañas, porque «persona en el caso» no existe en el motor. Copiarla sería una segunda definición de las pestañas. La cuenta del motor sigue siendo la cruda.
+- **Una reacción sin conversación abierta no abre ninguna y no se contesta.** Antes, un 👍 a «¡Gracias por escribirnos!» abría una conversación nueva y la IA la contestaba. Si la consulta falla, la reacción va al turno como hasta hoy: perder una respuesta es peor que contestar un 👍 de más.
+
+**Orden de despliegue, obligatorio.** Las dos migraciones van por el ledger **antes** del push. El listado, los mensajes y «leída» las leen, y sin ellas responden 500: la Bandeja entera cae. A propósito, no se hizo tolerante a una migración ausente. La config no hace falta cargarla, porque los tres campos nuevos nacen vacíos.
+
+**Lo que queda abierto.**
+
+- Si la autorización de tratamiento (RNF-01) cubre los datos de un **tercero**, es decir el teléfono de una tarjeta de contacto que el cliente comparte y que llega al modelo. Es pregunta para el dueño.
+- La búsqueda con el volumen real de mensajes.
+
+**Lo que la reabre:** una medición de que la negrita en los chats de la IA hace falta, o que una empresa pida que una reacción tardía abra caso.
 
 ---
 
