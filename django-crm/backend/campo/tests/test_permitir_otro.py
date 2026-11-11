@@ -132,6 +132,37 @@ def test_b3_una_plantilla_que_no_existe_no_revienta(org_a):
         _correr(org_a, tipo, "que_encontro")
 
 
+def test_a5_una_plantilla_QUE_EL_EDITOR_NO_SABE_CREAR_tambien_se_publica(org_a):
+    #  EL CASO REAL, y el que rompio en produccion el 11/11/2026. La v16 de
+    #  `correctivo_fibra` tiene un campo de tipo `decimal`, que `componer`
+    #  --el validador del EDITOR-- no acepta: esa plantilla no se hizo con el
+    #  editor. El primer intento pasaba por `plantillas.publicar` y cortaba
+    #  con «'decimal' no esta disponible», rechazando la plantilla ENTERA.
+    #
+    #  Un comando que habilita una opcion no puede exigir que el formulario
+    #  sea reconstruible por otra herramienta.
+    tipo = WorkType.objects.create(org=org_a, codigo='con_decimal',
+                                   nombre='Con decimal', activo=True)
+    WorkTypeVersion.objects.create(
+        work_type=tipo, version=16, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={'campos': [
+            {'id': 'potencia_al_llegar', 'titulo': 'Potencia al llegar',
+             'tipo': 'decimal'},
+            dict(SELECCION_CON_REGLAS),
+        ], 'evidencias': []})
+
+    _correr(org_a, tipo, 'que_encontro', aplicar=True)
+
+    vs = list(WorkTypeVersion.objects.filter(work_type=tipo).order_by('version'))
+    assert [v.version for v in vs] == [16, 17], 'publica igual'
+    campos = {c['id']: c for c in vs[-1].esquema['campos']}
+    assert campos['que_encontro'].get('permite_otro') is True
+    #  Y EL DECIMAL SIGUE SIENDO DECIMAL. El otro final malo de recomponer era
+    #  que «arreglara» el tipo de un campo que hoy funciona.
+    assert campos['potencia_al_llegar']['tipo'] == 'decimal'
+
+
 # --------------------------------------------------------------------------- #
 # C. La otra forma del dato
 # --------------------------------------------------------------------------- #

@@ -41,7 +41,6 @@ class Command(BaseCommand):
                             help="publicar (sin esto, solo dice qué haría)")
 
     def handle(self, *args, **opciones):
-        from campo import plantillas
         from campo.models import WorkType, WorkTypeVersion
         from common.models import Org
 
@@ -121,12 +120,45 @@ class Command(BaseCommand):
             self.stdout.write("  Nada más cambia. Agregá --aplicar.")
             return
 
-        #  `publicar` recompone y REVALIDA el esquema entero --«dos guardas que
-        #  no confian una en la otra»-- y no crea version si nada cambio.
-        version, cambio = plantillas.publicar(tipo, esquema)
-        if not cambio:
-            self.stdout.write("  el esquema quedó igual: no se publicó nada.")
-            return
+        #  SE COPIA EL ESQUEMA VIGENTE, NO SE RECOMPONE  --  11/11/2026.
+        #
+        #  El primer intento llamaba a `plantillas.publicar`, que pasa la
+        #  definicion por `componer`. Contra produccion eso corto con
+        #  «'decimal' no esta disponible»: la v16 de `correctivo_fibra` tiene
+        #  campos que el EDITOR no sabe crear, porque esa plantilla no se hizo
+        #  con el editor. `componer` es el validador de lo que entra POR AHI,
+        #  y un esquema que lleva meses en produccion no entra por ahi.
+        #
+        #  Recomponerlo tenia dos finales y los dos malos: o rechaza la
+        #  plantilla entera --lo que paso-- o la «arregla» cambiandole tipos a
+        #  campos que hoy funcionan. Un comando que habilita una opcion no
+        #  puede reescribir el formulario de paso.
+        #
+        #  LA GUARDA QUE REEMPLAZA A `componer` ES MAS ESTRECHA Y MAS FUERTE
+        #  para este caso: se compara el esquema nuevo contra el vigente y se
+        #  exige que la UNICA diferencia sea la bandera. `componer` valida que
+        #  el esquema sea construible; esto valida que no se toco nada mas,
+        #  que es exactamente lo que este comando promete.
+        import copy
+        import json
+
+        control = copy.deepcopy(vigente.esquema or {})
+        for c in (control.get("campos") or []):
+            if c.get("id") == opciones["campo"]:
+                c["permite_otro"] = True
+            r = c.get("reglas") or {}
+            if r.get("options") and not c.get("opciones"):
+                c["opciones"] = list(r["options"])
+        if json.dumps(esquema, sort_keys=True) != json.dumps(control,
+                                                             sort_keys=True):
+            raise CommandError(
+                "el esquema nuevo difiere del vigente en algo mas que la "
+                "bandera: no se publica nada")
+
+        version = WorkTypeVersion.objects.create(
+            work_type=tipo, version=vigente.version + 1,
+            schema_version=vigente.schema_version,
+            estado=WorkTypeVersion.PUBLICADA, esquema=esquema)
         self.stdout.write("")
         self.stdout.write(f"  PUBLICADA la v{version.version}.")
         self.stdout.write("")
