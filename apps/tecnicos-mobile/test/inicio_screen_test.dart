@@ -140,11 +140,27 @@ class _Banco {
     List<NovedadLocal> novedades = const <NovedadLocal>[],
     Future<void> Function(String, String, String)? onAvisarNovedad,
     Future<void> Function(String)? onYaSegui,
+    //  CON CUANTAS ARRANCO EL DIA, DECLARADO  --  11/11/2026.
+    //
+    //  En produccion esto lo sella `SelloDelArranque` leyendo la sesion y
+    //  escribiendo en SQLite. En una prueba de widget ese camino devuelve
+    //  null --no hay sesion-- y entonces la nota «arrancó con N» no apareceria
+    //  nunca: una guarda sobre un numero que el entorno apaga no afirma nada.
+    //
+    //  `null` a proposito es el caso «todavia no se sello», que tambien hay
+    //  que poder probar.
+    int? arrancoCon,
   }) =>
       MaterialApp(
         theme: AppTheme.lightTheme,
         home: Scaffold(
           body: InicioScreen(
+            sellador: ({
+              required int abiertas,
+              required int cerradasHoy,
+              DateTime? ahora,
+            }) async =>
+                arrancoCon,
             ordenes: ordenes,
             nombreTecnico: 'Carlos',
             resumenSincronizacion: resumen,
@@ -282,11 +298,18 @@ void main() {
         _orden(id: '2', numero: 2, estado: 'correccion_requerida'),
         _orden(id: '3', numero: 3, estado: 'completada_campo'),
       ]);
-      await tester.pumpWidget(banco.app());
+      //  EL DIA TUVO TRES, y ahora eso se declara en vez de deducirse de la
+      //  lista descargada. Antes salia de `trabajos.length`, que es el
+      //  historial del telefono: por eso la pantalla llego a decir «arrancó
+      //  con 38» con dos ordenes en la mano.
+      await tester.pumpWidget(banco.app(arrancoCon: 3));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Carlos'), findsWidgets);
+      //  «1 de 3» POR RESTA: el dia tuvo 3, quedan 2 abiertas, cerro 1. No se
+      //  cuenta por fecha de cierre -- ese es el dato que puede faltar.
       expect(find.text('1 de 3'), findsOneWidget);
+      expect(find.textContaining('arrancó con 3'), findsOneWidget);
       // El porcentaje y la linea '2 pendientes' se fueron con la rejilla del
       // diseño, que dice lo mismo con mas claridad: tres celdas con el total,
       // las que estan en curso y las que faltan. Lo que esta prueba cuida
@@ -302,6 +325,79 @@ void main() {
       await banco.cerrar();
     });
 
+    testWidgets('CON CUANTAS ARRANCO EL DIA sale del sello, no del historial',
+        (WidgetTester tester) async {
+      //  EL DEFECTO QUE ESTA GUARDA MATA  --  11/11/2026. La pantalla decia
+      //  «2 asignadas · arrancó con 38»: el 38 era `trabajos.length`, todo el
+      //  historial que el telefono tenia descargado. Aca el telefono tiene
+      //  SEIS ordenes en la lista --cuatro cerradas de dias anteriores-- y el
+      //  dia sello SIETE. Si algo volviera a leer la lista, este numero seria
+      //  6 y no 7.
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'en_sitio'),
+        _orden(id: '3', numero: 3, estado: 'cerrada'),
+        _orden(id: '4', numero: 4, estado: 'cerrada'),
+        _orden(id: '5', numero: 5, estado: 'cerrada'),
+        _orden(id: '6', numero: 6, estado: 'cerrada'),
+      ]);
+
+      await tester.pumpWidget(banco.app(arrancoCon: 7));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('arrancó con 7'), findsOneWidget,
+          reason: 'el dia lo dice el sello');
+      expect(find.textContaining('arrancó con 6'), findsNothing,
+          reason: 'seis es el historial descargado, que es el defecto');
+      //  Y LA BARRA CUENTA POR RESTA: el dia tuvo 7, quedan 2 abiertas.
+      expect(find.text('5 de 7'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('SIN SELLO no hay nota, y las cifras siguen cerrando',
+        (WidgetTester tester) async {
+      //  El primer build de la jornada, antes de que la escritura async
+      //  conteste -- y tambien el telefono donde SQLite falla. Antes de esto
+      //  la pantalla no tenia nota, asi que no mostrarla es volver a como
+      //  estaba: una cifra sobre el dia no justifica un hueco en rojo.
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'cerrada'),
+      ]);
+
+      await tester.pumpWidget(banco.app(arrancoCon: null));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('arrancó con'), findsNothing);
+      //  Y lo que se ve es lo que se sabe: una abierta.
+      expect(find.text('ASIGNADAS'), findsOneWidget);
+      expect(find.text('0 de 1'), findsOneWidget,
+          reason: 'sin sello el dia es lo que queda, y no se inventa nada');
+      await banco.cerrar();
+    });
+
+    testWidgets('UN SELLO MENOR QUE LO ABIERTO no puede dar una cifra absurda',
+        (WidgetTester tester) async {
+      //  Un sello viejo contra una lista que crecio: puede pasar si el
+      //  despacho asigna ordenes y la escritura del sello todavia no fue.
+      //  Sin el piso, «asignadas» seria mayor que el dia entero y la barra
+      //  diria «-1 de 2».
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'asignada'),
+        _orden(id: '3', numero: 3, estado: 'asignada'),
+      ]);
+
+      await tester.pumpWidget(banco.app(arrancoCon: 2));
+      await tester.pumpAndSettle();
+
+      expect(find.text('0 de 3'), findsOneWidget,
+          reason: 'el dia no puede tener menos que lo que esta abierto');
+      expect(find.textContaining('arrancó con'), findsNothing,
+          reason: 'y entonces la nota no dice nada nuevo');
+      await banco.cerrar();
+    });
+
     testWidgets('Un trabajo hecho y sin subir ya cuenta como hecho',
         (WidgetTester tester) async {
       // Decirle pendiente le diría al técnico que todavía tiene que ir.
@@ -309,7 +405,7 @@ void main() {
         _orden(id: '1', numero: 1, estado: 'completada_pendiente_sync'),
         _orden(id: '2', numero: 2, estado: 'asignada'),
       ]);
-      await tester.pumpWidget(banco.app());
+      await tester.pumpWidget(banco.app(arrancoCon: 2));
       await tester.pumpAndSettle();
 
       expect(find.text('1 de 2'), findsOneWidget);
@@ -331,7 +427,7 @@ void main() {
         _orden(id: '3', numero: 3, estado: 'asignada'),
         _orden(id: '4', numero: 4, estado: 'completada_campo'),
       ]);
-      await tester.pumpWidget(banco.app());
+      await tester.pumpWidget(banco.app(arrancoCon: 4));
       await tester.pumpAndSettle();
 
       int cifraDe(String rotulo) {
@@ -369,6 +465,7 @@ void main() {
       //  baja en cada cierre, «1 de 4» pasaria a «2 de 2» y nunca
       //  llegaria a 4 de 4.
       expect(find.text('1 de 4'), findsOneWidget);
+      expect(find.textContaining('arrancó con 4'), findsOneWidget);
       await banco.cerrar();
     });
 
