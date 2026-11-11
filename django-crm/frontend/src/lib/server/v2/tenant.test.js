@@ -15,7 +15,7 @@ const { envMock } = vi.hoisted(() => ({
 vi.mock('$env/dynamic/private', () => ({ env: envMock }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
-const { tenantDeLaSesion, destinoDelAsistente } =
+const { tenantDeLaSesion, destinoDelAsistente, olvidarTenantsRecordados, TENANT_RECORDADO_MS } =
   await import('./tenant.js');
 
 const CONFIGURADO = {
@@ -31,6 +31,54 @@ function fetchQueDevuelve(respuesta) {
 beforeEach(() => {
   for (const k of Object.keys(envMock)) delete envMock[k];
   Object.assign(envMock, CONFIGURADO);
+  // El módulo recuerda la empresa de cada organización entre requests
+  // (11/11/2026); las pruebas comparten el módulo, así que cada una arranca
+  // sin recuerdos.
+  olvidarTenantsRecordados();
+});
+
+describe('una pregunta por empresa cada tanto, no una por request (11/11/2026)', () => {
+  it('EL EFECTO: el segundo request de la misma organización no vuelve al motor', async () => {
+    const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'rapilink' }) });
+    expect(await tenantDeLaSesion({ org: { id: 'org-1' } }, fetch)).toBe('rapilink');
+    const otroRequest = /** @type {any} */ ({ org: { id: 'org-1' } });
+    expect(await tenantDeLaSesion(otroRequest, fetch)).toBe('rapilink');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // Y lo deja en los locals del nuevo request, como si lo hubiera preguntado.
+    expect(otroRequest.tenant).toBe('rapilink');
+  });
+
+  it('cada organización se recuerda por separado', async () => {
+    const fetch = vi.fn(async (/** @type {string} */ url) => ({
+      ok: true,
+      json: async () => ({ tenant: url.endsWith('/org-1') ? 'rapilink' : 'otra' })
+    }));
+    expect(await tenantDeLaSesion({ org: { id: 'org-1' } }, fetch)).toBe('rapilink');
+    expect(await tenantDeLaSesion({ org: { id: 'org-2' } }, fetch)).toBe('otra');
+    expect(await tenantDeLaSesion({ org: { id: 'org-1' } }, fetch)).toBe('rapilink');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('un null NO se recuerda: la empresa recién configurada no espera a que venza nada', async () => {
+    const sinAsistente = fetchQueDevuelve({ ok: false, status: 404, json: async () => ({}) });
+    expect(await tenantDeLaSesion({ org: { id: 'org-nueva' } }, sinAsistente)).toBeNull();
+    const yaConfigurada = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'nueva' }) });
+    expect(await tenantDeLaSesion({ org: { id: 'org-nueva' } }, yaConfigurada)).toBe('nueva');
+    expect(yaConfigurada).toHaveBeenCalledTimes(1);
+  });
+
+  it('lo recordado vence', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = fetchQueDevuelve({ ok: true, json: async () => ({ tenant: 'rapilink' }) });
+      await tenantDeLaSesion({ org: { id: 'org-1' } }, fetch);
+      vi.advanceTimersByTime(TENANT_RECORDADO_MS + 1);
+      await tenantDeLaSesion({ org: { id: 'org-1' } }, fetch);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('de qué empresa son los datos de quien inició sesión', () => {

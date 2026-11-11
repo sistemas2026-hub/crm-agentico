@@ -69,6 +69,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 import unicodedata
 import uuid
 from contextlib import contextmanager
@@ -248,6 +250,99 @@ SEGUNDOS_CONEXION = 30
 # de fingir que el numero es un tope total.
 SEGUNDOS_CONEXION_GATE = 3
 
+# ----------------------------------------------------------------------------
+#  EL POOL DE CONEXIONES  --  11/11/2026
+#
+#  Hasta hoy cada sesion() abria una conexion nueva a Postgres y la cerraba al
+#  salir. Medido contra un Postgres local con 600 conversaciones: abrir la
+#  sesion (conectar, resolver la organizacion, bajar de rol) cuesta 32 ms y la
+#  consulta de la cola de la Bandeja ejecuta en 6 ms. O sea: de cada lectura,
+#  mas de dos tercios eran el apreton de manos, y la Bandeja hace tres por
+#  vuelta cada 8 s, mas dos por conversacion abierta cada 5 s, mas diez al
+#  abrir una. En produccion ademas se pasa por el pooler (Supavisor), que es
+#  otra ida y vuelta por conexion.
+#
+#  Ahora las conexiones se reutilizan. Lo que NO cambia es la garantia de
+#  aislamiento: 'set local role' y 'set_config(..., true)' viven y mueren con
+#  la transaccion, y sesion() siempre la termina (commit o rollback) antes de
+#  devolver la conexion. Una conexion que vuelve al pool esta en el rol con el
+#  que se conecto y sin tenant fijado -- lo mide tests/test_pool_conexiones_base.py.
+#
+#  'prepare_threshold=None' no es opcional: psycopg prepara en el servidor una
+#  sentencia que ve repetirse, y detras de un pooler en modo transaccion la
+#  siguiente transaccion puede caer en OTRO backend que no la conoce. Con
+#  conexiones de un solo uso nunca se llegaba a repetir nada; con un pool, si.
+#
+#  'check' hace un SELECT 1 al entregar: si el pooler reinicio y la conexion
+#  guardada esta muerta, se descarta en silencio en vez de fallar la lectura.
+#
+#  El camino del INTERRUPTOR no usa el pool: pide un connect_timeout corto y
+#  un statement_timeout acotado para fallar cerrado rapido, y esa garantia se
+#  da con una conexion propia (ver SEGUNDOS_CONEXION_GATE).
+#
+#  Sin el paquete psycopg_pool, o con DB_POOL=0, se vuelve a una conexion por
+#  sesion -- mas lento, nunca roto. Un pool por DSN: las pruebas con base
+#  efimera cambian DBNAME en caliente y cada base tiene el suyo.
+# ----------------------------------------------------------------------------
+POOL_MAXIMO = int(os.environ.get("DB_POOL_MAXIMO", "16") or 16)
+_POOLS: dict = {}
+_POOLS_CANDADO = threading.Lock()
+_pool_avisado = False
+
+
+def _pool():
+    """El pool del DSN actual, o None si no hay que usarlo (y por que, una vez al log)."""
+    global _pool_avisado
+    if (os.environ.get("DB_POOL") or "").strip().lower() in ("0", "no", "false"):
+        return None
+    clave = dsn()
+    pool = _POOLS.get(clave)
+    if pool is not None:
+        return pool
+    with _POOLS_CANDADO:
+        pool = _POOLS.get(clave)
+        if pool is not None:
+            return pool
+        try:
+            from psycopg_pool import ConnectionPool
+        except ImportError:
+            if not _pool_avisado:
+                _pool_avisado = True
+                registrar("persistencia", "sin psycopg_pool: una conexion por sesion")
+            return None
+        # min_size=0: las conexiones se abren cuando hacen falta y se cierran
+        # solas tras 'max_idle' sin uso. Con un minimo, el pool las reabre en
+        # segundo plano aunque nadie las pida -- y contra una base que ya no
+        # existe (las pruebas con base efimera la borran) se queda
+        # reintentando y traba la salida del proceso. Medido el 11/11/2026.
+        pool = ConnectionPool(
+            clave, min_size=0, max_size=POOL_MAXIMO, open=True,
+            kwargs={"row_factory": dict_row, "prepare_threshold": None,
+                    "connect_timeout": SEGUNDOS_CONEXION},
+            check=ConnectionPool.check_connection,
+            max_idle=300, max_lifetime=1800, timeout=SEGUNDOS_CONEXION,
+            name="dexter")
+        _POOLS[clave] = pool
+        return pool
+
+
+def cerrar_pools() -> None:
+    """Cierra los pools abiertos. Para el apagado ordenado y las pruebas."""
+    with _POOLS_CANDADO:
+        for pool in _POOLS.values():
+            try:
+                pool.close(timeout=2)
+            except Exception:
+                pass
+        _POOLS.clear()
+
+
+# Al salir del proceso los pools se cierran de forma ordenada: sin esto, el
+# recolector los cierra en el desmontaje del interprete y espera 5 s por cada
+# hilo del pool.
+import atexit                                                      # noqa: E402
+atexit.register(cerrar_pools)
+
 
 # -----------------------------------------------------------------------------
 #  LOS DOS ROLES A LOS QUE ESTE MODULO PUEDE BAJAR  (paso 10.12)
@@ -295,8 +390,14 @@ def sesion(tenant: str, connect_timeout: int = SEGUNDOS_CONEXION,
     igual. Va como 'set local', asi que vive y muere con esta transaccion y no
     toca a nadie mas.
     """
-    con = psycopg.connect(dsn(), connect_timeout=connect_timeout,
-                          row_factory=dict_row)
+    # Del pool cuando es el runtime normal; propia cuando se pide el timeout
+    # corto del interruptor (ver EL POOL DE CONEXIONES, mas arriba).
+    pool = _pool() if connect_timeout == SEGUNDOS_CONEXION else None
+    if pool is not None:
+        con = pool.getconn(timeout=connect_timeout)
+    else:
+        con = psycopg.connect(dsn(), connect_timeout=connect_timeout,
+                              row_factory=dict_row)
     try:
         with con.cursor() as cur:
             if connect_timeout != SEGUNDOS_CONEXION:
@@ -327,7 +428,13 @@ def sesion(tenant: str, connect_timeout: int = SEGUNDOS_CONEXION,
         con.rollback()
         raise
     finally:
-        con.close()
+        # La transaccion YA termino (commit o rollback): el rol y el tenant
+        # locales murieron con ella. Al pool vuelve una conexion limpia; la
+        # propia se cierra como siempre.
+        if pool is not None:
+            pool.putconn(con)
+        else:
+            con.close()
 
 
 def estado_de_conversacion_abierta(tenant: str, canal: str,
@@ -734,6 +841,10 @@ def ultima_actividad(tenant: str, canal: str | None = None,
                   c.motivo_escalamiento, c.caso_id, c.etiqueta, c.caso_manual,
                   c.actualizado_en, c.id_cliente, c.nombre_cliente,
                   c.escalada_en, c.resumen,
+                  -- Cuando nacio: la bandeja por chat ordena las
+                  -- conversaciones de un numero por esto. Viaja en la misma
+                  -- fila y no en una segunda consulta (11/11/2026).
+                  c.creado_en,
                   -- Guarda anti-limbo (proyeccion.py, banda 'sin_gestion'):
                   -- un ticket abierto es una accion de resolucion registrada.
                   c.ticket_operativo,

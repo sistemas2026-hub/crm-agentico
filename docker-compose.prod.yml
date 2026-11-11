@@ -477,6 +477,16 @@ services:
     # CONTROL DE CONCURRENCIA en api.py). Se sube cuando se mida CPU
     # saturada o cuando haga falta una segunda replica por disponibilidad.
     #
+    # DIECISEIS HILOS, NO OCHO (11/11/2026). Los hilos son los que absorben
+    # la espera, y se agotaban: abrir UNA conversacion en la Bandeja eran
+    # diez pedidos al motor a la vez (ocho de la base y dos que salen al
+    # sistema del ISP y tardan segundos), mas la cola cada 8 s por cada
+    # pestaña abierta, mas los turnos de WhatsApp. Con ocho, dos personas
+    # abriendo un chat ya ponian en cola al resto. Mismo proceso, mismo
+    # modelo de concurrencia: lo que cambia es cuantas esperas caben a la vez.
+    # El pool de la base (DB_POOL_MAXIMO, nucleo/persistencia/db.py) va a la
+    # par: 16.
+    #
     # EL REGISTRO DE ACCESO VA SIN QUERY STRING (%(U)s y no %(r)s, D20). El
     # formato por defecto escribe la URL entera, y el alta del webhook es
     # GET /canales/whatsapp/<tenant>?hub.verify_token=<secreto>: el token
@@ -487,7 +497,7 @@ services:
       --config python:nucleo.canales.gunicorn_conf
       --bind 0.0.0.0:5000
       --workers 1
-      --threads 8
+      --threads 16
       --timeout 180
       --access-logfile -
       --access-logformat '%(h)s %(t)s "%(m)s %(U)s" %(s)s %(b)s %(L)s'

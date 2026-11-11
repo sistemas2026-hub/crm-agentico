@@ -34,6 +34,21 @@ export async function tenantDeLaSesion(locals, fetch) {
   const base = env.PRIVATE_ASISTENTE_URL;
   if (!base) return null;
 
+  // Y UNA POR EMPRESA CADA TANTO, NO UNA POR REQUEST  --  11/11/2026
+  // ---------------------------------------------------------------
+  // La Bandeja sondea la cola cada 8 s y la conversación abierta cada 5 s, y
+  // cada uno de esos requests volvía a preguntarle al motor de qué empresa es
+  // la organización: la mitad de lo que el motor atendía por la Bandeja era
+  // esta pregunta, cuya respuesta no cambia. Se recuerda por organización
+  // durante TENANT_RECORDADO_MS. Solo se recuerda una respuesta POSITIVA: un
+  // null (motor caído, empresa sin asistente) se vuelve a preguntar, así una
+  // empresa recién configurada no espera a que venza nada.
+  const recordado = _recordados.get(orgId);
+  if (recordado && recordado.hasta > Date.now()) {
+    if (locals) locals.tenant = recordado.slug;
+    return recordado.slug;
+  }
+
   // UNA SOLA PREGUNTA AL MOTOR POR REQUEST  --  04/11/2026
   // ------------------------------------------------------
   // El comentario de arriba decía que `hooks.server.js` dejaba el tenant en
@@ -67,6 +82,7 @@ export async function tenantDeLaSesion(locals, fetch) {
       const slug = datos?.tenant;
       if (!slug) return null;
       if (locals) locals.tenant = slug;
+      _recordados.set(orgId, { slug, hasta: Date.now() + TENANT_RECORDADO_MS });
       return slug;
     } catch {
       // El motor caído o lento no puede convertirse en «servile los datos de
@@ -84,6 +100,17 @@ export async function tenantDeLaSesion(locals, fetch) {
 /** Cuánto se espera al motor por el tenant. Una tarjeta del hub tiene 4 s
  *  (settings.js::PLAZO_MOTOR_MS): esto va DENTRO de ese presupuesto. */
 export const PLAZO_TENANT_MS = 3000;
+
+/** Cuánto se recuerda la empresa de una organización sin volver a preguntar.
+ *  Es un dato que en la práctica no cambia; cinco minutos acotan cuánto
+ *  tardaría en notarse si cambiara. */
+export const TENANT_RECORDADO_MS = 5 * 60 * 1000;
+/** @type {Map<string, { slug: string, hasta: number }>} */
+const _recordados = new Map();
+/** Olvida lo recordado. Para las pruebas, que comparten el módulo. */
+export function olvidarTenantsRecordados() {
+  _recordados.clear();
+}
 
 /**
  * A qué motor hablarle y de qué empresa son los datos, en una sola llamada.

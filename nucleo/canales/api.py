@@ -6630,11 +6630,9 @@ def conversaciones():
     # fila por conversacion.
     por_numero = (request.args.get("por_numero") or "").strip().lower() in ("1", "true", "si")
     if por_numero:
-        try:
-            nacimientos = persistencia.creado_en_de(tenant, [f["id"] for f in salida])
-        except Exception as e:
-            registrar("conversaciones", "no se pudo agrupar por chat", error=e)
-            return jsonify({"error": "No se pudo leer las conversaciones."}), 500
+        # 'creado_en' ya viene en cada fila (ultima_actividad): antes se iba a
+        # buscar en una segunda consulta, que era una sesion mas por vuelta.
+        nacimientos = {str(f["id"]): f["creado_en"] for f in salida if f.get("creado_en")}
         salida = proyeccion.agrupar_por_numero(salida, nacimientos)
     salida.sort(key=proyeccion.orden_de_cola)
 

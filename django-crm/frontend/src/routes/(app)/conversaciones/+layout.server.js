@@ -2,6 +2,15 @@ import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { rolDeSesion } from '$lib/server/v2/operadores.js';
+import { leerConPlazo } from '$lib/server/v2/plazo.js';
+
+/* LA COLA NO ESPERA SIN FIN (11/11/2026). SvelteKit no cambia de pantalla
+   hasta que este load termina, y esta lectura no tenía plazo: un motor
+   ocupado --sus hilos los comparten los turnos de WhatsApp y las diez
+   lecturas de cada conversación que se abre-- dejaba la Bandeja «cargando»
+   sin decir nada. Con plazo, la pantalla aparece y dice que el asistente
+   tarda; el sondeo de 8 s vuelve a pedir la cola solo. */
+const PLAZO_COLA_MS = 10000;
 
 /**
  * Server load: lista las conversaciones del asistente con clientes finales
@@ -62,10 +71,17 @@ export async function load({ fetch, depends, locals }) {
     /* `por_numero=1` (21/10/2026, contrato §4.5): cada fila operativa es un
        CHAT -- todas las conversaciones de un mismo número --, agrupado por el
        motor una sola vez. La pantalla no reimplementa la agrupación. */
-    const resp = await fetch(
+    const resp = await leerConPlazo(
+      fetch,
       `${baseUrl}/conversaciones?tenant=${encodeURIComponent(tenant)}&por_numero=1&cerradas_dias=${CERRADAS_DIAS}`,
-      { headers: headersMotor() });
-    const datos = await resp.json();
+      { headers: headersMotor() },
+      PLAZO_COLA_MS,
+      'cola de conversaciones');
+    if (!resp) {
+      return { conversaciones: [], yo, sondeadoEn,
+               error: 'El asistente está tardando en contestar. La cola se vuelve a pedir sola en unos segundos.' };
+    }
+    const datos = resp.cuerpo ?? {};
     if (!resp.ok) {
       return { conversaciones: [], yo, sondeadoEn, error: datos.error || 'No se pudo cargar las conversaciones' };
     }

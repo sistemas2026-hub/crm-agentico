@@ -13,6 +13,10 @@ flask
 # El extra [binary] trae la libpq compilada: sin el, la imagen necesitaria
 # gcc y libpq-dev para construirlo, que no estan en python:3.13-slim.
 psycopg[binary]
+# El pool de conexiones del motor (nucleo/persistencia/db.py, EL POOL DE
+# CONEXIONES). Sin el paquete el motor arranca igual y abre una conexion por
+# sesion, que es lo que hacia hasta el 11/11/2026: mas lento, nunca roto.
+psycopg_pool
 
 # DeepSeek, qwen, glm y kimi hablan la API de OpenAI: nucleo/modelo/cliente.py
 # los atiende a todos con ClienteCompatibleOpenAI. El import es PEREZOSO, dentro
