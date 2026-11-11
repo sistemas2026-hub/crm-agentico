@@ -68,6 +68,12 @@ class DestinoEscrito:
     ok: bool
     detalle: str = ""
     repetida: bool = False
+    #: El sistema no sabe de este cliente: la orden no trae con que
+    #: identificarlo ahi. NO ES UN FALLO -- es un destino que no aplica, y la
+    #: diferencia decide si se intenta el otro. Medido el 11/11/2026: la OT
+    #: #255 no tiene serial de ONU y si tiene servicio, y cortar en el primero
+    #: dejaba la casa sin ubicar en los DOS lados pudiendo escribir en uno.
+    no_aplica: bool = False
 
 
 @dataclass
@@ -206,9 +212,13 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
     def _escribir(herr) -> DestinoEscrito:
         ident = identificadores.get(herr.parametros_de_coordenada.identificador)
         if not ident:
+            #  NO APLICA, y no falla. Hay ordenes sin serial de ONU --la ficha
+            #  se congela al despachar y a veces el equipo no estaba cargado--
+            #  y eso no puede impedir escribir donde SI se puede.
             return DestinoEscrito(
                 herr.nombre, False,
-                f"falta '{herr.parametros_de_coordenada.identificador}'")
+                f"la orden no trae '{herr.parametros_de_coordenada.identificador}'",
+                no_aplica=True)
         args = _argumentos(herr, str(ident), lat, lng)
 
         def _hacer():
@@ -306,25 +316,34 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
                                   res.codigo or res.decision or "no ejecutada")
         return DestinoEscrito(herr.nombre, True)
 
-    #  PRIMERO EL EQUIPO. Si falla, el servicio NO se intenta: ver la cabecera.
+    #  PRIMERO EL EQUIPO. Si FALLA, el servicio no se intenta --dejar escrito
+    #  solo el segundo produce dos sistemas que se contradicen--. Pero si NO
+    #  APLICA, se saltea y se sigue: son dos cosas distintas.
     if equipo is not None:
         d = _escribir(equipo)
         destinos.append(d)
-        if not d.ok:
-            return ResultadoCoordenada(
-                FALTA_IDENTIFICADOR if d.detalle.startswith("falta ") else FALLO,
-                d.detalle, referencia=origen, destinos=destinos)
+        if not d.ok and not d.no_aplica:
+            return ResultadoCoordenada(FALLO, d.detalle,
+                                       referencia=origen, destinos=destinos)
 
     if servicio is not None:
         d = _escribir(servicio)
         destinos.append(d)
-        if not d.ok:
+        if not d.ok and not d.no_aplica:
             #  PARCIAL Y NO FALLO, y la diferencia importa: lo que se escribio
             #  NO se deshace --no hay con que-- y volver a tocar el boton
             #  reintenta solo este, porque el otro tiene su propia clave.
             return ResultadoCoordenada(
-                PARCIAL,
-                f"{servicio.nombre}: {d.detalle}",
+                PARCIAL, f"{servicio.nombre}: {d.detalle}",
                 referencia=origen, destinos=destinos)
+
+    #  SI NO SE PUDO INTENTAR NINGUNO, eso si es un problema de la peticion:
+    #  la orden no trae con que identificar al cliente en ningun sistema.
+    if not any(d.ok for d in destinos):
+        return ResultadoCoordenada(
+            FALTA_IDENTIFICADOR,
+            "; ".join(d.detalle for d in destinos) or
+            "la orden no trae con que identificar al cliente",
+            referencia=origen, destinos=destinos)
 
     return ResultadoCoordenada(GUARDADA, referencia=origen, destinos=destinos)

@@ -335,12 +335,30 @@ afirmar(r.estado == coord.BLOQUEADO_POR_INTERRUPTOR and not proveedor.llamadas,
         f"({r.estado}, {len(proveedor.llamadas)})")
 
 # ---------------------------------------------------------------------------
-seccion("7. sin identificador no se inventa nada")
+seccion("7. un destino sin identificador NO APLICA, y no frena al otro")
+#  LA PRUEBA ANTERIOR BENDECIA EL DEFECTO. Afirmaba «falta el del equipo: no se
+#  escribe nada», y eso es justo lo que rompio la primera prueba de campo
+#  (11/11/2026): la OT #255 no tiene serial de ONU --la ficha se congela al
+#  despachar y el equipo no estaba cargado-- y si tiene servicio. El motor
+#  cortaba en el equipo y la casa quedaba sin ubicar en LOS DOS lados,
+#  pudiendo escribir en uno. 400 al telefono, y el tecnico leyendo «proba de
+#  nuevo en un momento» para siempre.
 registro, proveedor = Registro(), Proveedor()
 with escenario(registro, proveedor):
-    r = guardar(ident={"id_servicio": "5832"})          # falta el del equipo
+    r = guardar(ident={"id_servicio": "5832"})          # sin el del equipo
+afirmar(r.estado == coord.GUARDADA,
+        f"se escribe donde SI se puede (estado={r.estado}, motivo={r.motivo})")
+afirmar(proveedor.nombres == ["escribir_ubicacion_del_servicio"],
+        f"solo el destino que aplica: {proveedor.nombres}")
+afirmar(any(d.no_aplica for d in r.destinos),
+        "y el otro queda marcado como que no aplica, no como fallado")
+
+#  Y AL REVES: si no se puede intentar NINGUNO, eso si es un problema.
+registro, proveedor = Registro(), Proveedor()
+with escenario(registro, proveedor):
+    r = guardar(ident={})
 afirmar(r.estado == coord.FALTA_IDENTIFICADOR and not proveedor.llamadas,
-        f"falta el del equipo: no se escribe nada ({r.estado}, "
+        f"sin ningun identificador no se escribe nada ({r.estado}, "
         f"{len(proveedor.llamadas)} llamadas)")
 
 # ---------------------------------------------------------------------------
