@@ -159,6 +159,31 @@ class UbicacionDelClienteView(APIView):
         #    409  el sistema decidio no escribir (el interruptor);
         #    502  el ISP fallo de verdad, y reintentar tiene sentido.
         if resultado.get("guardada"):
+            #  Y LA ORDEN TAMBIEN, o el mapa sigue diciendo «sin ubicacion»
+            #  (11/11/2026, visto en la primera prueba de campo: la coordenada
+            #  quedo escrita en el ISP y la pantalla no cambio).
+            #
+            #  La orden congela la ficha del cliente al despachar, asi que no
+            #  se entera sola de nada que pase despues. Hasta la proxima
+            #  bajada el tecnico veia el punto escrito del otro lado y su
+            #  propia pantalla sin ubicar.
+            #
+            #  Se escribe DESPUES del ISP y no antes: si el ISP rechaza, la
+            #  orden no puede quedar afirmando un punto que no se guardo en
+            #  ningun lado.
+            try:
+                orden.gps_lat = lat
+                orden.gps_lng = lng
+                orden.save(update_fields=["gps_lat", "gps_lng"])
+            except Exception as e:                       # noqa: BLE001
+                #  Lo que importaba --que el ISP la tenga-- ya paso. Que la
+                #  copia local no se actualice es molesto, no grave: se
+                #  recupera en la proxima bajada o con
+                #  `completar_coordenadas`. No se le devuelve un error al
+                #  tecnico por esto.
+                logger.warning(
+                    "ubicacion_del_cliente: el ISP la tiene pero la orden no "
+                    "se pudo actualizar (%s)", type(e).__name__)
             return Response(resultado, status=status.HTTP_200_OK)
         codigo = resultado.get("codigo") or ""
         de_quien_llama = {"coordenada_invalida", "sin_identificador",
