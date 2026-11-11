@@ -154,6 +154,58 @@ export async function guardarRotulosBandeja(locals, fetch, rotulos) {
 }
 
 /**
+ * Las respuestas rápidas de la empresa (11/11/2026): los textos que el
+ * compositor inserta con «/atajo». `null` si no hay asistente; no lanza, por
+ * lo mismo que `leerAjustesBandeja`.
+ *
+ * @returns {Promise<{ atajo: string, texto: string }[] | null>}
+ */
+export async function leerRespuestasRapidas(locals, fetch) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const resp = await fetch(
+      `${cfg.baseUrl}/configuracion/bandeja/respuestas-rapidas?tenant=${encodeURIComponent(cfg.tenant)}`,
+      { headers: headersMotor() }
+    );
+    if (!resp.ok) return null;
+    const datos = await resp.json();
+    return Array.isArray(datos?.respuestas_rapidas) ? datos.respuestas_rapidas : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reemplaza la lista entera: lo que no viene, se borra. Manda SIEMPRE la
+ * lista, aunque esté vacía: el motor rechaza la ausencia del campo para que
+ * un formulario que lo olvide no borre todo sin pedirlo. El formato del
+ * atajo, el largo y los repetidos los valida el motor; su mensaje pasa tal
+ * cual.
+ *
+ * @param {{ atajo: string, texto: string }[]} respuestas
+ */
+export async function guardarRespuestasRapidas(locals, fetch, respuestas) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) {
+    throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  }
+  if (!Array.isArray(respuestas)) {
+    throw new Error('Las respuestas rápidas tienen que ir como una lista.');
+  }
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/bandeja/respuestas-rapidas`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, respuestas_rapidas: respuestas })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(datos.error || 'El asistente rechazó el cambio.');
+  }
+  return datos;
+}
+
+/**
  * Cuántos días mira el aviso de reincidencia (29/10/2026). 0 lo apaga. El
  * rango lo valida el motor y su mensaje se deja pasar.
  *

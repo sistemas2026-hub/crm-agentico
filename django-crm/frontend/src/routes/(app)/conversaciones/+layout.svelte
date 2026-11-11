@@ -27,7 +27,9 @@
    *
    * Las pestanas, el buscador y el filtro trabajan sobre lo ya cargado: la
    * bandeja entra en una pagina y filtrar del lado del cliente es instantaneo,
-   * sin un viaje de red por cada clic.
+   * sin un viaje de red por cada clic. La UNICA excepcion es «En mensajes»
+   * (11/11/2026): con 3 letras o mas el buscador ademas le pregunta al motor
+   * por el contenido de todos los mensajes, que la cola no tiene cargado.
    */
   import { page } from '$app/state';
   import { invalidate } from '$app/navigation';
@@ -48,6 +50,11 @@
   import QueueSearch from '$lib/conversaciones/cola/QueueSearch.svelte';
   import QueueFilters from '$lib/conversaciones/cola/QueueFilters.svelte';
   import ConversationList from '$lib/conversaciones/cola/ConversationList.svelte';
+  import {
+    crearBuscadorMensajes,
+    resultadosDeLaVista,
+    SIN_BUSQUEDA
+  } from '$lib/conversaciones/busqueda-mensajes.js';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -121,6 +128,29 @@
   // de hace un mes ya resuelto.
   let filtro = $state('por-atender');
   let busqueda = $state('');
+
+  /* BUSCAR EN LOS MENSAJES (11/11/2026). El filtro de `visibles` sigue
+     siendo local e instantáneo, y solo ve el último mensaje de cada chat
+     cargado. Con 3 letras o más se pregunta ADEMÁS al motor por el contenido
+     de todos los mensajes, 300 ms después de la última tecla y cancelando el
+     pedido anterior. Va por la ruta del servidor (/api/conversaciones/buscar),
+     que pone la empresa de la sesión. Ver lib/conversaciones/busqueda-mensajes.js. */
+  let busquedaMensajes = $state(
+    /** @type {import('$lib/conversaciones/busqueda-mensajes.js').EstadoBusqueda} */ ({ ...SIN_BUSQUEDA })
+  );
+  const buscadorMensajes = crearBuscadorMensajes({
+    buscar: async (q, signal) => {
+      const resp = await fetch(`/api/conversaciones/buscar?q=${encodeURIComponent(q)}`, { signal });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(datos?.error || 'el asistente no contestó');
+      return datos;
+    },
+    alCambiar: (e) => (busquedaMensajes = e)
+  });
+  $effect(() => {
+    buscadorMensajes.pedir(busqueda);
+  });
+  $effect(() => () => buscadorMensajes.cancelar());
 
   /* El logo de la empresa se cargó pero el archivo no se pudo mostrar. No es
      lo mismo que no tener logo: acá SÍ hay una URL y falló. Se separa para
@@ -597,6 +627,8 @@
       {visibles} {conversaciones} error={data.error} {busqueda}
       {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {slaToma}
       areas={data.areas ?? {}}
+      busquedaMensajes={busquedaMensajes.estado === 'inactivo' ? null : busquedaMensajes}
+      resultadosMensajes={resultadosDeLaVista(busquedaMensajes.resultados, vista)}
     />
   </aside>
 

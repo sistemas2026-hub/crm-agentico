@@ -4,7 +4,9 @@ import {
   leerAjustesBandeja,
   guardarRotulosBandeja,
   leerRotulosBandeja,
-  guardarReincidencia
+  guardarReincidencia,
+  leerRespuestasRapidas,
+  guardarRespuestasRapidas
 } from '$lib/server/v2/bandeja-config.js';
 
 /** Prefijo de los campos del formulario de rótulos: `rotulo:<clave>`. */
@@ -12,13 +14,17 @@ const PREFIJO_ROTULO = 'rotulo:';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ fetch, locals }) {
-  const [ajustes, rotulos] = await Promise.all([
+  const [ajustes, rotulos, respuestasRapidas] = await Promise.all([
     leerAjustesBandeja(locals, fetch),
-    leerRotulosBandeja(locals, fetch)
+    leerRotulosBandeja(locals, fetch),
+    leerRespuestasRapidas(locals, fetch)
   ]);
   return {
     ajustes,
     rotulos,
+    // null = el asistente no contestó (la sección no ofrece editar); [] = la
+    // empresa todavía no guardó ninguna.
+    respuestasRapidas,
     // El motor no tiene identidad propia: quien decide si esto se puede
     // editar es el CRM, mismo criterio que /settings/asistente. Esto es la
     // afordancia (esconder el boton); la accion vuelve a comprobarlo, porque
@@ -157,5 +163,37 @@ export const actions = {
       return fail(400, { reincidencia: { error: err?.message || 'No se pudo guardar.' } });
     }
     return { reincidenciaGuardada: true };
+  },
+
+  /* LAS RESPUESTAS RÁPIDAS (11/11/2026): la lista entera, como los rótulos.
+     El formulario manda los renglones como pares `rr_atajo` / `rr_texto` en
+     el mismo orden; un renglón vacío se descarta en el motor, y uno a medio
+     llenar vuelve con un mensaje que lo nombra -- no se pierde en silencio. */
+  async respuestas({ fetch, request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, {
+        respuestas: { error: 'Solo un administrador puede cambiar las respuestas rápidas.' }
+      });
+    }
+    const form = await request.formData();
+    const atajos = form.getAll('rr_atajo').map((v) => v.toString());
+    const textos = form.getAll('rr_texto').map((v) => v.toString());
+    if (atajos.length !== textos.length) {
+      return fail(400, {
+        respuestas: { error: 'El formulario llegó incompleto. Recargá la página y volvé a intentar.' }
+      });
+    }
+    const respuestas = atajos.map((atajo, i) => ({ atajo: atajo.trim(), texto: textos[i].trim() }));
+    try {
+      await guardarRespuestasRapidas(locals, fetch, respuestas);
+    } catch (/** @type {any} */ err) {
+      // Lo escrito NO se pierde: el panel sigue abierto con sus renglones
+      // (SettingsFormPanel no cierra ante un rechazo) y el mensaje del motor
+      // nombra el que falló.
+      return fail(400, {
+        respuestas: { error: err?.message || 'No se pudieron guardar las respuestas rápidas.' }
+      });
+    }
+    return { respuestasGuardadas: true };
   }
 };

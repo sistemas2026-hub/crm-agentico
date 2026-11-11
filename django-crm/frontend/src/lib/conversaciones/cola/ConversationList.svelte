@@ -19,6 +19,7 @@
    */
   import QueueEmptyState from '$lib/conversaciones/cola/QueueEmptyState.svelte';
   import ConversationRow from '$lib/conversaciones/cola/ConversationRow.svelte';
+  import MessageSearchResults from '$lib/conversaciones/cola/MessageSearchResults.svelte';
 
   let {
     // Ya filtrada y ordenada por el layout.
@@ -38,7 +39,15 @@
     areas = {},
     /** El plazo de toma del tenant, en minutos. Se propaga tal cual: la
         lista no lo interpreta. */
-    slaToma = 0
+    slaToma = 0,
+    /* «En mensajes» (11/11/2026): lo que el motor encontró en el contenido
+       de los mensajes, ya resuelto por el layout. null = no se buscó. Va
+       DEBAJO de las filas y dentro del mismo scroll; nunca reemplaza a la
+       cola ni a su hueco. */
+    /** @type {import('$lib/conversaciones/busqueda-mensajes.js').EstadoBusqueda | null} */
+    busquedaMensajes = null,
+    /** Los resultados ya filtrados por la vista de canales del layout. */
+    resultadosMensajes = []
   } = $props();
 </script>
 
@@ -53,6 +62,9 @@
     {#each visibles as c (c.id)}
       <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {areas} {slaToma} />
     {/each}
+  {/if}
+  {#if busquedaMensajes && !error}
+    <MessageSearchResults busqueda={busquedaMensajes} resultados={resultadosMensajes} {abierta} />
   {/if}
 </div>
 

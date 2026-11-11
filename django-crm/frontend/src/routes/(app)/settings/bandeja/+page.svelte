@@ -32,13 +32,35 @@
   import SettingsCrumb from '$lib/v2/components/SettingsCrumb.svelte';
   import StatCard from '$lib/v2/components/StatCard.svelte';
   import SettingsFormPanel from '$lib/v2/components/SettingsFormPanel.svelte';
-  import { Timer, Activity, PlugZap, Tag } from '@lucide/svelte';
+  import { Timer, Activity, PlugZap, Tag, MessageSquareText } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
   let editando = $state(false);
   let editandoRotulos = $state(false);
+
+  /* RESPUESTAS RÁPIDAS (11/11/2026). Se edita la lista entera, como los
+     rótulos: los renglones viven acá mientras se edita, y el motor recibe la
+     lista completa al guardar. Cada renglón lleva una clave propia porque el
+     atajo se está escribiendo -- no sirve para identificarlo. */
+  let editandoRespuestas = $state(false);
+  /** @type {{ clave: number, atajo: string, texto: string }[]} */
+  let filasRespuestas = $state([]);
+  let proximaClave = 0;
+  function agregarFila() {
+    filasRespuestas = [...filasRespuestas, { clave: proximaClave++, atajo: '', texto: '' }];
+  }
+  function abrirRespuestas() {
+    filasRespuestas = (data.respuestasRapidas ?? []).map((/** @type {any} */ r) => ({
+      clave: proximaClave++,
+      atajo: r.atajo,
+      texto: r.texto
+    }));
+    // Un renglón vacío al final: crear la primera no pide un clic más.
+    agregarFila();
+    editandoRespuestas = true;
+  }
 
   /* Los rótulos de motivos, etiquetas y casos (29/10/2026). Las claves son
      identificadores y la Bandeja las mostraba sin tildes; acá cada empresa
@@ -409,11 +431,162 @@
           Sólo un administrador puede cambiar estos valores.
         </p>
       {/if}
+
+      <!-- ── RESPUESTAS RÁPIDAS (11/11/2026) ─────────────────────────────── -->
+      {#if data.respuestasRapidas}
+        {#if editandoRespuestas}
+          <div class="rr-panel">
+            <SettingsFormPanel
+              title="Respuestas rápidas"
+              action="?/respuestas"
+              error={form?.respuestas?.error}
+              submitLabel="Guardar respuestas"
+              oncancel={() => (editandoRespuestas = false)}
+              ondone={() => (editandoRespuestas = false)}
+            >
+              {#snippet fields()}
+                <p class="v2-hint v2-sfp-wide">
+                  El atajo es lo que se escribe después de la barra: minúsculas, números,
+                  «-» y «_», sin espacios ni tildes. En el texto, <code>{'{nombre}'}</code> se
+                  cambia por el primer nombre del cliente; si no se conoce, se quita.
+                </p>
+                {#each filasRespuestas as fila, i (fila.clave)}
+                  <div class="v2-sfp-wide rr-fila">
+                    <div class="v2-field">
+                      <label for="rr-atajo-{fila.clave}">Atajo</label>
+                      <div class="rr-atajo-campo">
+                        <span aria-hidden="true">/</span>
+                        <input
+                          id="rr-atajo-{fila.clave}"
+                          class="v2-input"
+                          name="rr_atajo"
+                          maxlength="30"
+                          autocomplete="off"
+                          bind:value={fila.atajo}
+                          placeholder="saludo"
+                        />
+                      </div>
+                    </div>
+                    <div class="v2-field">
+                      <label for="rr-texto-{fila.clave}">Texto</label>
+                      <textarea
+                        id="rr-texto-{fila.clave}"
+                        class="v2-input"
+                        name="rr_texto"
+                        rows="2"
+                        maxlength="1000"
+                        bind:value={fila.texto}
+                        placeholder="Hola {'{nombre}'}, gracias por escribirnos. ¿En qué te ayudo?"
+                      ></textarea>
+                    </div>
+                    <button
+                      type="button"
+                      class="v2-btn v2-btn-sm v2-btn-quiet rr-quitar"
+                      aria-label="Quitar la respuesta {fila.atajo ? '/' + fila.atajo : i + 1}"
+                      onclick={() => (filasRespuestas = filasRespuestas.filter((f) => f !== fila))}
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                {/each}
+                <div class="v2-sfp-wide">
+                  <button type="button" class="v2-btn v2-btn-sm" onclick={agregarFila}>
+                    Agregar otra
+                  </button>
+                </div>
+              {/snippet}
+            </SettingsFormPanel>
+          </div>
+        {:else}
+          <div class="v2-card rotulos-resumen">
+            <p class="titulo"><MessageSquareText size={14} /> Respuestas rápidas</p>
+            <p class="cuerpo">
+              Textos guardados que se insertan escribiendo <code>/</code> y el atajo en la caja
+              de respuesta de una conversación. <kbd class="v2-kbd">Enter</kbd> o <kbd class="v2-kbd">Tab</kbd> elige,
+              <kbd class="v2-kbd">Esc</kbd> cierra la lista.
+            </p>
+            {#if data.respuestasRapidas.length}
+              <ul class="rr-resumen">
+                {#each data.respuestasRapidas as r (r.atajo)}
+                  <li><code>/{r.atajo}</code> <span>{r.texto}</span></li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="cuerpo apagado">
+                Todavía no hay ninguna: escribir «/» en una conversación no abre nada.
+              </p>
+            {/if}
+            {#if form?.respuestasGuardadas}<p class="v2-hint">Guardado.</p>{/if}
+            {#if data.can_edit}
+              <button class="v2-btn v2-btn-sm" onclick={abrirRespuestas}>
+                {data.respuestasRapidas.length ? 'Editar respuestas' : 'Crear respuestas'}
+              </button>
+            {/if}
+          </div>
+        {/if}
+      {/if}
     </div>
   </div>
 {/if}
 
 <style>
+  /* ── respuestas rápidas ─────────────────────────────────────────────── */
+  .rr-panel {
+    margin-top: 16px;
+  }
+  .rr-fila {
+    display: grid;
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--v2-line-soft);
+  }
+  .rr-atajo-campo {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--v2-mono, ui-monospace, monospace);
+  }
+  .rr-quitar {
+    margin-top: 22px;
+  }
+  .rr-resumen {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12.5px;
+  }
+  .rr-resumen li {
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+  }
+  .rr-resumen code {
+    flex: none;
+    font-family: var(--v2-mono, ui-monospace, monospace);
+    font-size: 12px;
+  }
+  .rr-resumen span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--v2-slate);
+  }
+  @media (max-width: 640px) {
+    .rr-fila {
+      grid-template-columns: 1fr;
+    }
+    .rr-quitar {
+      margin-top: 0;
+      justify-self: start;
+    }
+  }
+
   /* El umbral guardado y el efectivo difieren: es un aviso, no una ayuda. */
   .aviso-acotado {
     border-left: 3px solid var(--v2-clay);

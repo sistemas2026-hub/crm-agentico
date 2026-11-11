@@ -17,7 +17,11 @@ vi.mock('$lib/server/v2/bandeja-config.js', () => ({
   leerAjustesBandeja: (...a) => leerAjustesBandeja(...a),
   guardarRotulosBandeja: (...a) => guardarRotulosBandeja(...a),
   leerRotulosBandeja: (...a) => leerRotulosBandeja(...a),
-  guardarReincidencia: (...a) => guardarReincidencia(...a)
+  guardarReincidencia: (...a) => guardarReincidencia(...a),
+  // Las respuestas rápidas (11/11/2026) se cargan en el mismo load; tienen su
+  // propia prueba en respuestas-servidor.test.js.
+  leerRespuestasRapidas: async () => [],
+  guardarRespuestasRapidas: vi.fn()
 }));
 
 const { actions, load } = await import('./+page.server.js');

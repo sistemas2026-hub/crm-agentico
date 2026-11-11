@@ -2035,6 +2035,7 @@
       onElegirPlantilla={elegirPlantilla} onEnviarPlantilla={enviarPlantilla}
       onIntervenir={intervenir}
       onDevolver={devolverAIA} {devolviendoAIA} {errorDevolver}
+      respuestasRapidas={data.respuestas_rapidas ?? []}
     />
   {/if}
 </section>

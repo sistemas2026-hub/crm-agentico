@@ -2,9 +2,11 @@
   /**
    * El buscador de la cola.
    *
-   * Escribe en `busqueda`, que vive en el layout: el filtrado entero se
+   * Escribe en `busqueda`, que vive en el layout: el filtrado de la cola se
    * deriva allá (`visibles`) sobre lo ya cargado, sin un viaje de red por
-   * tecla. Acá no hay ningún algoritmo de búsqueda -- solo el campo.
+   * tecla, y la búsqueda en el contenido de los mensajes («En mensajes»,
+   * 11/11/2026) también se dispara allá, con espera entre teclas. Acá no hay
+   * ningún algoritmo de búsqueda -- solo el campo.
    */
   import { Search, X } from '@lucide/svelte';
 

@@ -219,6 +219,11 @@ export async function load({ fetch, cookies, params, locals, depends }) {
 
   return { conversacion: datos.conversacion, mensajes: datos.mensajes, caso, owners, herramientas, diagnostico, casos,
     relevo, equipo, sincronizaciones, acciones, yo, rol, operadores, fichaCliente, cuenta, optica,
+    /* RESPUESTAS RÁPIDAS (11/11/2026): los textos de «/atajo» del compositor.
+       Vienen en la MISMA respuesta del hilo --el motor las agrega al lado de
+       los mensajes--, así que abrir una conversación no paga una ida más. Son
+       de la empresa: viajan una vez por apertura y no cada 8 s con la cola. */
+    respuestas_rapidas: Array.isArray(datos.respuestas_rapidas) ? datos.respuestas_rapidas : [],
     // Sin el chat no se sabe si esta es la última del número: 'agrupa: false'
     // no ofrece escribirle a una cerrada a ciegas.
     chat: chat ?? { tramos: [], hay_anteriores: false, antes: null,

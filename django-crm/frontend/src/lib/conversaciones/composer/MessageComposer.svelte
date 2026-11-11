@@ -18,7 +18,16 @@
    * Por eso son muchas props. Es a proposito: mecanico y equivalente antes que
    * elegante y distinto.
    */
+  import { tick } from 'svelte';
   import { Send, X, Paperclip, Smile, Mic, Image as ImageIcon, FileText, Bot } from '@lucide/svelte';
+  import {
+    consultaDeBarra,
+    filtrarRespuestas,
+    insertarRespuesta,
+    primerNombre,
+    resolverNombre,
+    teclaDeLaLista
+  } from '../respuestas-rapidas.js';
 
   let {
     // --- lo que se ve
@@ -82,8 +91,70 @@
     //     escribe como en una escalada, pero sin «Devolver a la IA» (no hay
     //     nada que devolver todavía) ni adjuntos (el motor solo continúa el
     //     chat con texto o plantilla).
-    chatCerrado = false
+    chatCerrado = false,
+    // --- RESPUESTAS RÁPIDAS (11/11/2026): los textos de «/atajo» de la
+    //     empresa, ya leídos por la carga de la conversación. Vacía = el «/»
+    //     no abre nada, y el compositor ofrece ir a crearlas.
+    /** @type {{atajo: string, texto: string}[]} */
+    respuestasRapidas = [],
+    enlaceAjustesRespuestas = '/settings/bandeja'
   } = $props();
+
+  /* ── RESPUESTAS RÁPIDAS ─────────────────────────────────────────────────
+     Escribir «/» al empezar una palabra abre la lista; lo que sigue a la
+     barra la filtra. La lógica --qué palabra, qué coincide, cómo queda el
+     texto-- vive en respuestas-rapidas.js y tiene sus pruebas: acá solo se
+     sigue el cursor y se dibuja.
+
+     LO QUE NO PUEDE PASAR: que Enter mande «/sal» al cliente cuando quien
+     escribe estaba eligiendo «/saludo». Con la lista abierta, Enter y Tab
+     eligen; Enter vuelve a enviar recién cuando la lista se cierra (Esc, o
+     una palabra que no coincide con ninguna).
+
+     No se ofrece en la nota interna --es texto para el equipo, no para el
+     cliente-- ni donde no se puede escribir. */
+  const uid = $props.id();
+  const idLista = `rr-lista-${uid}`;
+  const idOpcion = (/** @type {number} */ i) => `rr-opcion-${uid}-${i}`;
+  /** Dónde está el cursor. null = al final, que es lo que vale antes de
+      que la persona toque el cuadro (y lo que dibuja el servidor). */
+  let posCursor = $state(/** @type {number|null} */ (null));
+  /** La barra cuya lista se cerró con Esc. Se reabre al empezar otra. */
+  let descartadaEn = $state(/** @type {number|null} */ (null));
+  let activa = $state(0);
+
+  const admiteRespuestas = $derived(
+    modo !== 'nota' && !bloqueadoPorIA && !bloqueadoPorVentana && !enviando
+  );
+  const consulta = $derived(
+    admiteRespuestas ? consultaDeBarra(entrada, posCursor ?? entrada.length) : null
+  );
+  const consultaViva = $derived(!!consulta && consulta.desde !== descartadaEn);
+  const sugeridas = $derived(consulta ? filtrarRespuestas(respuestasRapidas, consulta.filtro) : []);
+  const listaAbierta = $derived(consultaViva && sugeridas.length > 0);
+  const indiceActivo = $derived(Math.min(activa, Math.max(0, sugeridas.length - 1)));
+  const nombreCliente = $derived(primerNombre(conversacion?.nombre_cliente));
+
+  /** @param {Event} e */
+  function leerCursor(e) {
+    const campo = /** @type {HTMLTextAreaElement} */ (e.currentTarget);
+    posCursor = campo.selectionStart;
+    if (!consultaDeBarra(campo.value, campo.selectionStart ?? campo.value.length)) {
+      descartadaEn = null;
+    }
+  }
+
+  /** @param {{atajo: string, texto: string}} r */
+  async function elegirRespuesta(r) {
+    if (!consulta || !r) return;
+    const nuevo = insertarRespuesta(entrada, consulta, r, nombreCliente);
+    entrada = nuevo.texto;
+    posCursor = nuevo.cursor;
+    activa = 0;
+    await tick();
+    campoTexto?.focus();
+    campoTexto?.setSelectionRange(nuevo.cursor, nuevo.cursor);
+  }
 
   /* QUÉ DICE LA BANDA, y de qué color. Sale del estado real --quién controla,
      qué modo está elegido, si la ventana está abierta-- y no de un texto
@@ -588,12 +659,67 @@
            «Intervenir», y con la ventana cerrada es «Elegir plantilla» en la
            barra. Un «Enviar» muerto que parece vivo competía con las dos. -->
       <div class="escribir">
+      <!-- RESPUESTAS RÁPIDAS (11/11/2026). Sobre el cuadro, como los menús de
+           emoji y adjuntar: plano, filete de 1px, sin sombra. El foco NUNCA
+           sale del cuadro --la opción activa se anuncia con
+           aria-activedescendant--, así que se sigue escribiendo para filtrar
+           sin tener que volver. -->
+      {#if listaAbierta}
+        <div class="rr">
+          <p class="rr-cabeza" aria-hidden="true">
+            <span>Respuestas rápidas</span>
+            <span class="rr-teclas"
+              ><kbd>↑</kbd><kbd>↓</kbd> elegir · <kbd>Enter</kbd> insertar · <kbd>Esc</kbd> cerrar</span
+            >
+          </p>
+          <ul class="rr-lista" id={idLista} role="listbox" aria-label="Respuestas rápidas">
+            {#each sugeridas as r, i (r.atajo)}
+              <li
+                id={idOpcion(i)}
+                class="rr-opcion"
+                class:rr-activa={i === indiceActivo}
+                role="option"
+                aria-selected={i === indiceActivo}
+                tabindex="-1"
+                onmousedown={(e) => e.preventDefault()}
+                onmouseenter={() => (activa = i)}
+                onclick={() => elegirRespuesta(r)}
+              >
+                <span class="rr-atajo">/{r.atajo}</span>
+                <span class="rr-texto">{resolverNombre(r.texto, nombreCliente)}</span>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {:else if consultaViva && !respuestasRapidas.length}
+        <!-- Sin respuestas guardadas el «/» no abre nada, pero dice dónde se
+             crean: la función existe aunque la empresa todavía no la use. -->
+        <p class="rr rr-pista">
+          No hay respuestas rápidas guardadas.
+          <a href={enlaceAjustesRespuestas}>Crearlas en Ajustes → Bandeja</a>
+        </p>
+      {:else if consultaViva && consulta?.filtro}
+        <p class="rr rr-pista" role="status">
+          Ninguna respuesta rápida coincide con «/{consulta.filtro}» · Enter envía el texto tal cual
+        </p>
+      {/if}
       <textarea
         data-privado
         class="compositor-texto"
         class:texto-inerte={bloqueadoPorVentana || bloqueadoPorIA}
         bind:this={campoTexto}
         bind:value={entrada}
+        role={respuestasRapidas.length ? 'combobox' : undefined}
+        aria-autocomplete={respuestasRapidas.length ? 'list' : undefined}
+        aria-expanded={respuestasRapidas.length ? listaAbierta : undefined}
+        aria-controls={listaAbierta ? idLista : undefined}
+        aria-activedescendant={listaAbierta ? idOpcion(indiceActivo) : undefined}
+        oninput={(e) => {
+          activa = 0;
+          leerCursor(e);
+        }}
+        onkeyup={leerCursor}
+        onclick={leerCursor}
         onpaste={(e) => onPegar?.(e)}
         rows={bloqueadoPorVentana || bloqueadoPorIA ? 1 : 2}
         placeholder={bloqueadoPorIA
@@ -609,6 +735,20 @@
               : 'Continuar la conversación…'}
         disabled={enviando || bloqueadoPorVentana || bloqueadoPorIA}
         onkeydown={(e) => {
+          // Con la lista de respuestas rápidas abierta, las teclas son de la
+          // lista: Enter y Tab ELIGEN y no envían. Va antes del Enter de
+          // abajo a propósito -- mandarle «/sal» al cliente es el error.
+          const deLaLista = teclaDeLaLista(e, listaAbierta, indiceActivo, sugeridas.length);
+          if (deLaLista) {
+            e.preventDefault();
+            if (deLaLista.accion === 'mover') activa = deLaLista.activa;
+            else if (deLaLista.accion === 'elegir') elegirRespuesta(sugeridas[indiceActivo]);
+            else {
+              e.stopPropagation();
+              descartadaEn = consulta?.desde ?? null;
+            }
+            return;
+          }
           // Enter envia, Shift+Enter hace salto de linea: es lo que la mano
           // ya espera de un chat.
           if (e.key === 'Enter' && !e.shiftKey) {
@@ -1313,11 +1453,111 @@
      termina lo escrito. Si la columna es tan angosta que el cuadro quedaría
      por debajo de 220px, el botón baja entero a su renglón, a la derecha. */
   .escribir {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
     justify-content: flex-end;
     gap: 8px;
+  }
+
+  /* --- respuestas rápidas (11/11/2026) -----------------------------------
+     Encima del cuadro y de su mismo ancho, como un renglón más del
+     compositor: superficie plana, filete de 1px, el radio de la Bandeja.
+     Sin sombra a propósito -- se separa del hilo por el filete, como todo lo
+     demás de esta pantalla. La opción activa se marca con el fondo suave, no
+     con un borde lateral. */
+  .rr {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 4px);
+    z-index: 6;
+    margin: 0;
+    background: var(--bandeja-superficie);
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio);
+  }
+
+  .rr-cabeza {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--bandeja-borde);
+    font-size: 11px;
+    color: var(--bandeja-texto-2);
+  }
+
+  .rr-teclas {
+    color: var(--bandeja-texto-3);
+    white-space: nowrap;
+  }
+
+  .rr-teclas kbd {
+    font-family: var(--bandeja-mono);
+    font-size: 10px;
+    padding: 0 3px;
+    border: 1px solid var(--bandeja-borde);
+    border-radius: var(--bandeja-radio-sm);
+    background: var(--bandeja-superficie-suave);
+  }
+
+  .rr-lista {
+    list-style: none;
+    margin: 0;
+    padding: 4px;
+    max-height: 232px;
+    overflow-y: auto;
+  }
+
+  .rr-opcion {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: var(--bandeja-radio-sm);
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+
+  .rr-opcion.rr-activa {
+    background: var(--bandeja-superficie-suave);
+  }
+
+  .rr-atajo {
+    flex: none;
+    font-family: var(--bandeja-mono);
+    font-size: 12px;
+    color: var(--bandeja-texto);
+  }
+
+  .rr-texto {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--bandeja-texto-2);
+  }
+
+  .rr-pista {
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+  }
+
+  .rr-pista a {
+    color: var(--bandeja-accion);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  @container (max-width: 420px) {
+    .rr-teclas {
+      display: none;
+    }
   }
   .escribir > .compositor-texto {
     flex: 1 1 220px;
