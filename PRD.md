@@ -1082,6 +1082,34 @@ lo diría sin cambiar nada más.
 
 **Lo que la reabre:** una medición de que la negrita en los chats de la IA hace falta, o que una empresa pida que una reacción tardía abra caso.
 
+### 8.21 DECISIÓN — La Bandeja no paga una conexión por lectura, ni ocho viajes por conversación (11/11/2026)
+
+**El error que la originó.** Reportado por el usuario: *"a veces demora en cargar la bandeja y conversación"*. El «a veces» era la pista: no era un costo fijo sino **contención**. Medido en el código y contra un Postgres local con 600 conversaciones y 15.000 mensajes:
+
+| Qué | Medido |
+|---|---|
+| La consulta de la cola, ejecutándose en Postgres | **6 ms** |
+| Abrir la sesión (conectar, resolver la organización, bajar de rol), que cada lectura pagaba porque `sesion()` abría una conexión nueva cada vez | **32 ms** |
+| Lecturas al motor por vuelta de la cola, cada 8 s por pestaña | 3 sesiones + la pregunta «¿de qué empresa es esta organización?», que el frontend repetía en **cada** request |
+| Lecturas al abrir una conversación | **8 al motor en paralelo** (una sesión cada una) + 3 a sistemas externos que tardan segundos |
+| Hilos del motor | 8, compartidos con los turnos de WhatsApp |
+| El `load` de la cola | **sin plazo**: SvelteKit no cambia de pantalla hasta que termina |
+
+Dos personas abriendo un chat ocupaban más hilos de los que había; la cola de la tercera esperaba detrás, sin plazo, y la Bandeja quedaba «cargando» sin decir nada.
+
+**Lo que se decidió y se construyó:**
+
+1. **Un pool de conexiones en el motor** (`nucleo/persistencia/db.py`, «EL POOL DE CONEXIONES»). La garantía de aislamiento no se afloja: el rol y el tenant son locales a la transacción, que `sesion()` siempre termina antes de devolver la conexión. `tests/test_pool_conexiones_base.py` lo mide contra Postgres real: lo que vuelve al pool está en el rol de conexión, sin tenant y sin transacción, también después de una sesión que falla; y la siguiente sesión de otra empresa sobre la misma conexión ve solo lo suyo. El camino del interruptor sigue con conexión propia y timeout corto (falla cerrado rápido). Sin el paquete, o con `DB_POOL=0`, vuelve a una conexión por sesión. **Medido:** la sesión baja de 32 a 12 ms; cada lectura de una conversación, de ~40 a ~15 ms.
+2. **Una lectura menos por vuelta de la cola**: cuándo nació cada conversación viaja en la misma fila, no en una segunda consulta.
+3. **El frontend recuerda cinco minutos de qué empresa es cada organización** (`lib/server/v2/tenant.js`). Solo recuerda respuestas positivas: una empresa recién configurada no espera a que venza nada. Era la mitad de lo que el motor atendía por la Bandeja.
+4. **El `load` de la cola tiene plazo** (10 s) y lo dice; el sondeo de 8 s la vuelve a pedir solo.
+5. **El motor pasa de 8 a 16 hilos** (`docker-compose.prod.yml`). Mismo proceso y mismo modelo de concurrencia que decidió §8.17 (D4): lo que cambia es cuántas esperas caben a la vez. El pool va a la par (`DB_POOL_MAXIMO`, 16).
+6. **Abrir una conversación es un solo viaje al motor** (`GET /conversaciones/<id>/apertura`): los ocho paneles que salen de la base llegan en una respuesta y ocupan un hilo, no ocho. Las rutas viejas siguen, con una sola definición de cada cuerpo, para que convivan frontend y motor de versiones distintas durante un despliegue: si el motor no conoce `apertura`, la página vuelve a las ocho lecturas. Un panel que falla llega en `null` y el resto igual; sin el hilo, 500 como hoy. Guardas: `tests/test_apertura_conversacion.py` (cada clave es byte a byte el cuerpo de su ruta; ninguna lectura se duplica) y `[id]/apertura-carga.test.js`.
+
+**Lo que no se hizo, y por qué.** No se cambió el sondeo por WebSocket ni por eventos: es otro objetivo y el costo que había era de conexiones y de hilos, no de frecuencia. No se midió en producción: el log de acceso del motor lleva la duración de cada pedido (`%(L)s`), y esa es la medición que confirma o desmiente esto después del despliegue.
+
+**Lo que la reabre:** que el log de acceso siga mostrando lecturas de la Bandeja por encima de un segundo con el pool activo (buscar `[plazo]` en el log del frontend y `/conversaciones` en el del motor), o que el pooler rechace conexiones (el `max_size` del pool por proceso tiene que caber en el `default_pool_size` de Supavisor).
+
 ---
 
 ## 9. Despliegue
