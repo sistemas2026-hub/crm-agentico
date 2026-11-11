@@ -27,7 +27,57 @@ No toca campos de sí/no. Un «Otro» en «¿probaste el servicio con el cliente
 le da salida a quien no quiere contestar, que es lo contrario de lo que se
 busca. El comando exige nombrar el campo: no hay modo «marcá todos».
 """
+import copy
+
 from django.core.management.base import BaseCommand, CommandError
+
+#: El nombre exacto que la app y el servidor reconocen. No es una etiqueta
+#: cualquiera: `CampoDelFormulario.otro` y `validador.OTRO` comparan contra
+#: esta palabra, asi que «otro» o «OTRO» no sirven.
+OTRO = "Otro"
+
+
+def _con_otro(lista) -> list:
+    """La lista con «Otro» al final y una sola vez. Lo que hace `componer`."""
+    return [o for o in lista if o != OTRO] + [OTRO]
+
+
+def _marcar(campo: dict) -> None:
+    """Habilita «Otro» en un campo de seleccion, sobre el campo recibido.
+
+    LAS TRES COSAS JUNTAS, y la tercera es la que faltaba  --  11/11/2026.
+    Las dos primeras se publicaron a produccion y «Otro» NO APARECIA:
+
+      1. la bandera `permite_otro`, que es lo que la app mira para dibujar el
+         campo de texto que acompaña a la opcion;
+      2. las opciones en `opciones`, porque `componer` las lee de ahi;
+      3. **la opcion «Otro» DENTRO de la lista**, que es de donde el tecnico
+         elige. Sin esto la app no la dibuja --lee `reglas.options` con
+         prioridad (`campo_del_formulario.dart:244`)-- y el servidor la
+         rechazaria con «Opcion invalida» (`validador._validar_reglas`).
+
+    Quien agrega «Otro» a la lista en el camino normal es `componer`
+    (`plantillas.py:519`). Este comando NO recompone a proposito --la v16 de
+    `correctivo_fibra` tiene campos que el editor no sabe crear-- asi que la
+    parte de `componer` que si corresponde la hace aca, y nada mas.
+
+    SE USA EN LOS DOS LADOS: el esquema que se publica y el control con el que
+    se compara. Antes eran dos bucles escritos aparte, y el segundo se escribio
+    copiando el primero con su defecto adentro: la guarda bendijo el error en
+    vez de atraparlo. Una sola funcion no puede divergir de si misma.
+    """
+    campo["permite_otro"] = True
+
+    reglas = campo.get("reglas") or {}
+    if reglas.get("options"):
+        reglas["options"] = _con_otro(reglas["options"])
+        campo["reglas"] = reglas
+    #  `componer` lee de `opciones`; la app lee de `reglas.options`. Las dos
+    #  quedan con lo mismo para que no importe quien lea despues.
+    if campo.get("opciones"):
+        campo["opciones"] = _con_otro(campo["opciones"])
+    elif reglas.get("options"):
+        campo["opciones"] = list(reglas["options"])
 
 
 class Command(BaseCommand):
@@ -57,8 +107,13 @@ class Command(BaseCommand):
         if vigente is None:
             raise CommandError("esa plantilla no tiene ninguna versión publicada")
 
-        esquema = dict(vigente.esquema or {})
-        campos = [dict(c) for c in (esquema.get("campos") or [])]
+        #  COPIA PROFUNDA, y no es precaucion de mas: `dict(c)` es
+        #  superficial, asi que `c["reglas"]` seguia siendo EL MISMO dict que
+        #  el de la version vigente. Agregarle «Otro» ahi mutaba el esquema
+        #  publicado en memoria, y el control --que se arma despues-- se
+        #  habria comparado contra lo ya mutado: siempre igual, siempre verde.
+        esquema = copy.deepcopy(vigente.esquema or {})
+        campos = esquema.get("campos") or []
         objetivo = next((c for c in campos if c.get("id") == opciones["campo"]), None)
         if objetivo is None:
             ids = [c.get("id") for c in campos]
@@ -90,30 +145,37 @@ class Command(BaseCommand):
                 "ese campo no tiene opciones: «Otro» solo tiene sentido donde "
                 "hay una lista de la que elegir")
 
-        if objetivo.get("permite_otro"):
+        #  «YA LO TIENE» SE MIDE POR LA LISTA, NO POR LA BANDERA, y esto es
+        #  lo que permite reparar lo que quedo a medio hacer.
+        #
+        #  El 11/11/2026 este comando publico cuatro versiones con
+        #  `permite_otro: true` y SIN «Otro» en la lista. Con la pregunta
+        #  anterior --solo la bandera-- esas cuatro plantillas quedaban
+        #  inarreglables por este camino: el comando contestaba «ya lo tiene»
+        #  y se iba, mientras el tecnico seguia sin ver la opcion.
+        #
+        #  Completo es: la bandera puesta Y la opcion en la lista de la que se
+        #  elige. Cualquier otra combinacion es un trabajo a medias que hay
+        #  que terminar.
+        lista_actual = ((objetivo.get("reglas") or {}).get("options")
+                        or objetivo.get("opciones") or [])
+        if objetivo.get("permite_otro") and OTRO in lista_actual:
             self.stdout.write("  YA lo tiene: no hay nada que publicar.")
             return
+        if objetivo.get("permite_otro"):
+            self.stdout.write(
+                "  A MEDIO HACER: la bandera está y la opción «Otro» NO está "
+                "en la lista.")
+            self.stdout.write(
+                "  El técnico no la ve. Esto lo repara publicando una versión "
+                "con la opción adentro.")
 
-        objetivo["permite_otro"] = True
-
-        #  LAS OPCIONES SE NORMALIZAN ANTES DE PUBLICAR, y sin esto el comando
-        #  rompe justo al aplicar (11/11/2026, lo encontro la prueba y no la
-        #  corrida -- por una vez).
-        #
-        #  `componer` las lee de `opciones` (`plantillas.py:507`), pero una
-        #  plantilla puede tenerlas en `reglas.options`. Republicar un esquema
-        #  de esa forma las PIERDE, y `componer` corta con «necesita al menos
-        #  dos opciones». El simulacro pasaba igual: la diferencia aparece
-        #  recien al publicar.
         #  SOLO EL CAMPO NOMBRADO, y esto se corrigio despues de verlo en
         #  produccion (11/11/2026): el bucle recorria TODOS y le agrego la
         #  clave a `servicio_probado_con_el_cliente`, que nadie pidio tocar.
         #  Era inocuo --el lector mira las dos claves-- pero el comando promete
         #  que nada mas cambia, y cambiaba.
-        r = objetivo.get("reglas") or {}
-        if r.get("options") and not objetivo.get("opciones"):
-            objetivo["opciones"] = list(r["options"])
-
+        _marcar(objetivo)
         esquema["campos"] = campos
 
         if not opciones["aplicar"]:
@@ -121,6 +183,13 @@ class Command(BaseCommand):
             self.stdout.write("  SIMULACRO: se publicaría la "
                               f"v{vigente.version + 1} con «Otro» habilitado "
                               f"en '{opciones['campo']}'.")
+            #  LA LISTA, IMPRESA  --  lo que el técnico va a ver. El simulacro
+            #  decía «Otro habilitado» y la opción no llegaba a la lista: una
+            #  salida que describe la intención y no el resultado no sirve para
+            #  revisar nada.
+            lista = ((objetivo.get("reglas") or {}).get("options")
+                     or objetivo.get("opciones") or [])
+            self.stdout.write(f"  La lista queda: {lista}")
             self.stdout.write("  Nada más cambia. Agregá --aplicar.")
             return
 
@@ -143,17 +212,12 @@ class Command(BaseCommand):
         #  exige que la UNICA diferencia sea la bandera. `componer` valida que
         #  el esquema sea construible; esto valida que no se toco nada mas,
         #  que es exactamente lo que este comando promete.
-        import copy
         import json
 
         control = copy.deepcopy(vigente.esquema or {})
         for c in (control.get("campos") or []):
-            if c.get("id") != opciones["campo"]:
-                continue
-            c["permite_otro"] = True
-            r = c.get("reglas") or {}
-            if r.get("options") and not c.get("opciones"):
-                c["opciones"] = list(r["options"])
+            if c.get("id") == opciones["campo"]:
+                _marcar(c)
         if json.dumps(esquema, sort_keys=True) != json.dumps(control,
                                                              sort_keys=True):
             raise CommandError(
