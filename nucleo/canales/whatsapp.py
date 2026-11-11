@@ -114,6 +114,71 @@ def estado_de_ventana(ultimo_entrante, ahora=None) -> dict:
 # {id, mime_type, caption} dentro de la clave que se llama igual que el tipo.
 TIPOS_CON_ARCHIVO = ("image", "audio", "video", "document", "sticker", "voice")
 
+# Cuantos contactos de una misma tarjeta se traducen. Meta deja mandar varios
+# juntos; mas de unos pocos ya no es "el numero de mi esposa para coordinar la
+# visita" sino una agenda, y no hace falta pasarsela entera al modelo.
+CONTACTOS_MAXIMOS = 5
+
+
+def _numero_legible(valor) -> str | None:
+    """Una coordenada como texto corto: seis decimales son ~10 cm, sobra."""
+    try:
+        return f"{float(valor):.6f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return None
+
+
+def texto_de_ubicacion(ubicacion: dict) -> str:
+    """
+    Lo que el cliente compartio con «Ubicacion», como texto para el hilo y el
+    modelo (11/11/2026).
+
+    Hasta hoy llegaba solo el aviso «[El cliente compartio su ubicacion]» y las
+    coordenadas se perdian: nadie del equipo podia verlas y el modelo no podia
+    usarlas. Para un ISP es el dato que lleva al tecnico a la casa.
+
+    Las coordenadas van escritas con la palabra 'coordenadas' delante a
+    proposito: la Bandeja las reconoce en ese formato para ofrecer «Ver en el
+    mapa». Sin coordenadas legibles devuelve '' y el llamador cae al aviso de
+    siempre, que no inventa nada.
+    """
+    lat = _numero_legible((ubicacion or {}).get("latitude"))
+    lng = _numero_legible((ubicacion or {}).get("longitude"))
+    if lat is None or lng is None:
+        return ""
+    partes = [str(p).strip() for p in ((ubicacion or {}).get("name"),
+                                       (ubicacion or {}).get("address")) if p and str(p).strip()]
+    partes.append(f"coordenadas {lat}, {lng}")
+    return "[El cliente compartio su ubicacion: " + " · ".join(partes) + "]"
+
+
+def texto_de_contactos(contactos: list) -> str:
+    """
+    Una tarjeta de contacto, como texto (11/11/2026). Antes el cliente recibia
+    «no puedo leer ese tipo de archivo» por mandar el numero de quien va a
+    estar en la casa, y el mensaje no se guardaba.
+
+    Solo nombre y telefonos: la tarjeta de WhatsApp puede traer correo,
+    direccion, empresa y cumpleaños de un TERCERO, y nada de eso hace falta
+    para coordinar una visita.
+    """
+    piezas = []
+    for c in (contactos or [])[:CONTACTOS_MAXIMOS]:
+        if not isinstance(c, dict):
+            continue
+        nombre = ((c.get("name") or {}).get("formatted_name") or "").strip()
+        telefonos = [str(t.get("phone") or t.get("wa_id") or "").strip()
+                     for t in (c.get("phones") or []) if isinstance(t, dict)]
+        telefonos = [t for t in telefonos if t]
+        if not nombre and not telefonos:
+            continue
+        piezas.append(" — ".join(p for p in (nombre, ", ".join(telefonos)) if p))
+    if not piezas:
+        return ""
+    sobran = len(contactos or []) - CONTACTOS_MAXIMOS
+    cola = f" (y {sobran} mas)" if sobran > 0 else ""
+    return "[El cliente compartio un contacto: " + "; ".join(piezas) + cola + "]"
+
 
 class ErrorWhatsApp(Exception):
     """
@@ -318,12 +383,30 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                 # el cliente recibia "no puedo leer ese tipo de archivo" por
                 # tocar "Excelente". 'contexto' es el mensaje al que responde:
                 # con eso se sabe si es la respuesta a una encuesta.
+                # UBICACION, CONTACTO Y REACCION (11/11/2026): igual que el
+                # boton, se leian como vacio. La ubicacion llegaba sin sus
+                # coordenadas, y el contacto y la reaccion le devolvian al
+                # cliente «no puedo leer ese tipo de archivo» -- por un 👍.
+                reaccion = None
                 if tipo == "button":
                     texto = (m.get("button") or {}).get("text") or ""
                 elif tipo == "interactive":
                     inter = m.get("interactive") or {}
                     texto = ((inter.get("button_reply") or inter.get("list_reply") or {})
                              .get("title") or "")
+                elif tipo == "location":
+                    texto = texto_de_ubicacion(m.get("location") or {})
+                elif tipo == "contacts":
+                    texto = texto_de_contactos(m.get("contacts") or [])
+                elif tipo == "reaction":
+                    # El texto lo arma api.py, que puede buscar a QUE mensaje
+                    # reacciono: un 👍 a «¿Te registro la solicitud?» es un si,
+                    # y sin el mensaje el modelo no lo sabe. Emoji vacio = el
+                    # cliente QUITO su reaccion.
+                    r = m.get("reaction") or {}
+                    reaccion = {"emoji": (r.get("emoji") or "").strip(),
+                                "a": r.get("message_id")}
+                    texto = ""
                 else:
                     texto = (m.get("text") or {}).get("body", "") if tipo == "text" else ""
                 salida.append({
@@ -349,6 +432,7 @@ def mensajes_entrantes(cuerpo: dict) -> list[dict]:
                     "tipo": tipo,
                     "texto": texto,
                     "contexto": (m.get("context") or {}).get("id"),
+                    "reaccion": reaccion,
                     # El pie de foto es texto del cliente: "mira como quedo"
                     # dice tanto como la foto misma.
                     "descripcion": adjunto.get("caption", ""),

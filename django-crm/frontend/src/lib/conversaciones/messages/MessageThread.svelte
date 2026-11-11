@@ -12,11 +12,12 @@
    * exporta `alFinal()` y el padre lo llama con `bind:this` — es la misma
    * llamada que antes era local, no una señal nueva.
    */
-  import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock, Bot, UserRound, User } from '@lucide/svelte';
+  import { TriangleAlert, RotateCcw, Paperclip, Lock, Check, CheckCheck, Clock, Bot, UserRound, User, MapPin } from '@lucide/svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
   import CorregirAgente from '$lib/components/manual/CorregirAgente.svelte';
   import { autorDe, burbujaClase, extension, hora, ENTREGA_TEXTO } from '../formato.js';
   import { partirMensaje, resumir } from './analisis-imagen.js';
+  import { ubicacionCompartida } from './ubicacion.js';
   import { agruparMensajes } from './agrupar.js';
 
   let {
@@ -368,6 +369,18 @@
                      burbuja, el salto y la sangría del propio marcado contaban
                      como texto. -->
                 <div class="burbuja-texto">{item.m.contenido}</div>
+                <!-- LA UBICACIÓN, A UN CLIC DEL MAPA (11/11/2026). Solo en lo
+                     que escribió el CLIENTE con «Ubicación» de WhatsApp: el
+                     motor la guarda con un formato fijo, y un enlace armado con
+                     cualquier texto sería uno que nadie verificó. -->
+                {#if item.m.rol === 'user'}
+                  {@const lugar = ubicacionCompartida(item.m.contenido)}
+                  {#if lugar}
+                    <a class="ubicacion-enlace" href={lugar.mapa} target="_blank" rel="noreferrer">
+                      <MapPin size={13} /> Ver en el mapa
+                    </a>
+                  {/if}
+                {/if}
               {/if}
             {:else if !(item.m.adjuntos ?? []).length}
               <div class="no-representable">
@@ -1045,6 +1058,26 @@
 
   .adjunto-doc:hover {
     border-color: var(--v2-slate);
+  }
+
+  /* Con la forma de un adjunto: es lo que el cliente mandó, no un botón de
+     la pantalla. */
+  .ubicacion-enlace {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--v2-line);
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--bandeja-humano);
+    text-decoration: none;
+  }
+
+  .ubicacion-enlace:hover {
+    border-color: var(--bandeja-humano);
   }
 
   .adjunto-doc-datos {

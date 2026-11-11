@@ -11273,6 +11273,32 @@ _AVISO_ADJUNTO = {
 }
 
 
+# Cuanto del mensaje reaccionado se cita: alcanza para saber que pregunta
+# contesta el 👍 sin repetirle al modelo un parrafo que ya tiene en el hilo.
+CITA_DE_REACCION_MAXIMA = 160
+
+
+def _texto_de_reaccion(tenant: str, reaccion: dict) -> str:
+    """
+    «[El cliente reacciono con 👍 a: «...»]». Si el mensaje no se encuentra
+    (es de antes de guardar wamids, o la base no contesta) se dice sin la cita:
+    la reaccion sola sigue siendo algo que el cliente hizo, y no se inventa a
+    que.
+    """
+    emoji = reaccion.get("emoji")
+    try:
+        citado = persistencia.contenido_de_wamid(tenant, reaccion.get("a"))
+    except Exception as e:
+        registrar("whatsapp", "no se pudo leer el mensaje reaccionado", tenant=tenant, error=e)
+        citado = None
+    citado = " ".join((citado or "").split())
+    if len(citado) > CITA_DE_REACCION_MAXIMA:
+        citado = citado[:CITA_DE_REACCION_MAXIMA].rstrip() + "…"
+    if citado:
+        return f"[El cliente reacciono con {emoji} a: «{citado}»]"
+    return f"[El cliente reacciono con {emoji} a un mensaje]"
+
+
 def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
     """
     Si el mensaje es una solicitud de baja o alta de avisos, la resuelve y
@@ -11610,6 +11636,16 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         texto = entrante.get("texto", "")
         descripcion = entrante.get("descripcion", "")
         tipo = entrante.get("tipo", "")
+
+        # UNA REACCION ES UNA RESPUESTA (11/11/2026). Hasta hoy un 👍 caia al
+        # «no puedo leer ese tipo de archivo». Ahora llega al turno con el
+        # mensaje al que reacciono, que es lo que le da sentido. Quitar una
+        # reaccion (emoji vacio) no pide nada: no se contesta.
+        if tipo == "reaction":
+            reaccion = entrante.get("reaccion") or {}
+            if not reaccion.get("emoji"):
+                return
+            texto = _texto_de_reaccion(tenant, reaccion)
 
         # LA VOZ SE TRANSCRIBE ANTES DEL TURNO, y por eso se baja aca y no en
         # _guardar_adjunto: el agente tiene que poder leer lo que el cliente

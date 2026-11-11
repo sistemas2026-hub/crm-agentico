@@ -2198,6 +2198,26 @@ _RANGO_ENTREGA = {"pendiente": 0, "enviado": 1, "entregado": 2, "leido": 3,
                   "fallido": 4}
 
 
+def contenido_de_wamid(tenant: str, wamid: str) -> str | None:
+    """
+    El texto del mensaje de esta empresa que lleva ese wamid, o None.
+
+    Existe para las reacciones (11/11/2026): Meta dice A QUE mensaje reacciono
+    el cliente solo por su wamid, y un 👍 se entiende distinto segun lo que se
+    le habia preguntado. Lo que sale de aca va al modelo como contexto del
+    turno, igual que el resto del hilo de esa misma conversacion.
+    """
+    if not wamid:
+        return None
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select contenido from asistente.messages
+               where organization_id = %s and wamid = %s and contenido is not null
+               limit 1""", (org, wamid))
+        fila = cur.fetchone()
+    return fila["contenido"] if fila else None
+
+
 def marcar_entrega(tenant: str, wamid: str, estado: str,
                    error: str | None = None) -> ResultadoEntrega:
     """
