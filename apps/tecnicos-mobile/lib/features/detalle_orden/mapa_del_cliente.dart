@@ -30,6 +30,7 @@ class MapaDelCliente extends StatelessWidget {
     required this.longitud,
     this.alto = 180,
     this.etiqueta,
+    this.alCorregir,
   });
 
   final double latitud;
@@ -38,6 +39,14 @@ class MapaDelCliente extends StatelessWidget {
 
   /// Que se nombra en el aviso de abajo. Normalmente la direccion.
   final String? etiqueta;
+
+  /// Corregir el punto, cuando el que esta no es la casa.
+  ///
+  /// VA SOBRE EL MAPA Y NO EN LA FILA DE BOTONES: es aca donde el tecnico VE
+  /// que el pin cayo en otra cuadra, y es el unico momento en que alguien se
+  /// da cuenta. Un boton de corregir en otra pantalla es un boton que nadie
+  /// toca.
+  final VoidCallback? alCorregir;
 
   /// Zoom de barrio: se ven las casas vecinas y la esquina mas cercana, que
   /// es lo que hace reconocible un punto. Mas cerca y no se sabe donde esta;
@@ -101,6 +110,34 @@ class MapaDelCliente extends StatelessWidget {
                 ),
               ],
             ),
+            if (alCorregir != null)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Material(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(AppRadius.chico),
+                  child: InkWell(
+                    onTap: alCorregir,
+                    borderRadius: BorderRadius.circular(AppRadius.chico),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(Icons.edit_location_alt,
+                              size: 16, color: Colors.white),
+                          SizedBox(width: 5),
+                          Text('Corregir',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             if (etiqueta != null && etiqueta!.trim().isNotEmpty)
               Positioned(
                 left: 0,

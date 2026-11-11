@@ -62,7 +62,10 @@ class AccionesOrden {
   /// Nulo donde no este cableado, y entonces el boton no se dibuja: es la
   /// misma costura que `medirSenal`, y sirve para probar la pantalla sin GPS
   /// ni red.
-  final Future<ResultadoDeGuardado> Function(String ordenId)?
+  /// [motivo] va solo cuando se CORRIGE una que ya existia: el servidor la
+  /// exige en ese caso --si no, una correccion sin explicacion queda sin
+  /// quien la responda-- y la ignora cuando se llena un vacio.
+  final Future<ResultadoDeGuardado> Function(String ordenId, String motivo)?
       guardarUbicacionDelCliente;
 
   /// Volver a pedir la ficha del equipo (niveles, estado, serial).
@@ -104,12 +107,12 @@ class AccionesOrden {
         await sincronizacion.procesarCola();
       },
       sincronizar: sincronizacion.procesarCola,
-      guardarUbicacionDelCliente: (String ordenId) async {
+      guardarUbicacionDelCliente: (String ordenId, String motivo) async {
         //  La lectura del GPS NO se escribe de nuevo aca:
         //  `GuardarUbicacionDelCliente` usa `UbicacionDeCaptura.tomar()`, que
         //  ya resuelve el plazo, el permiso y los tres motivos de fallo.
         final accion = GuardarUbicacionDelCliente(
-          enviar: (double lat, double lng) async {
+          enviar: (double lat, double lng, String elMotivo) async {
             try {
               final Response<dynamic> r =
                   await ApiClient().dio.post<dynamic>(
@@ -117,6 +120,8 @@ class AccionesOrden {
                         data: <String, dynamic>{
                           'latitud': lat,
                           'longitud': lng,
+                          if (elMotivo.trim().isNotEmpty)
+                            'motivo': elMotivo.trim(),
                         },
                       );
               return (
@@ -138,7 +143,7 @@ class AccionesOrden {
             }
           },
         );
-        return accion.ejecutar();
+        return accion.ejecutar(motivo: motivo);
       },
       medirSenal: (String ordenId) async {
         try {

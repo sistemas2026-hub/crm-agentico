@@ -1088,6 +1088,14 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             latitud: lat!,
             longitud: lng!,
             etiqueta: trabajo.direccion,
+            //  CORREGIR SOLO DONDE YA HAY UN PUNTO: pisar uno es una
+            //  decision --alguien dijo que el que estaba era peor-- y el
+            //  servidor exige el motivo. Llenar un vacio no pide nada, y
+            //  para eso esta el otro boton.
+            alCorregir: (widget.acciones.guardarUbicacionDelCliente == null ||
+                    _guardandoUbicacion)
+                ? null
+                : () => _corregirUbicacion(trabajo),
           ),
           const SizedBox(height: AppSpacing.sm),
         ],
@@ -1164,13 +1172,88 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   /// mandan dos veces.
   bool _guardandoUbicacion = false;
 
-  Future<void> _guardarUbicacion(dynamic trabajo) async {
+  /// Lo mas corto que el servidor acepta como motivo. Si la pantalla dejara
+  /// mandar menos, el rechazo llegaria del otro lado y el tecnico habria
+  /// esperado el GPS para nada.
+  static const int _minimoDelMotivo = 10;
+
+  /// Pide por que se cambia un punto que ya estaba, antes de tocar el GPS.
+  ///
+  /// SE PREGUNTA PRIMERO Y SE MIDE DESPUES: al reves, el tecnico espera medio
+  /// minuto la señal y recien entonces se entera de que tambien tiene que
+  /// escribir algo. Devuelve `null` si se arrepintio.
+  Future<String?> _pedirElMotivo() async {
+    final TextEditingController texto = TextEditingController();
+    final String? motivo = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) {
+        return StatefulBuilder(
+          builder: (BuildContext ctx, StateSetter redibujar) {
+            final bool alcanza =
+                texto.text.trim().length >= _minimoDelMotivo;
+            return AlertDialog(
+              title: const Text('Corregir la ubicación'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'Esta orden ya tiene una ubicación y la vas a reemplazar '
+                    'por donde estás ahora. Contá por qué, para que después '
+                    'se entienda.',
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: texto,
+                    autofocus: true,
+                    maxLines: 2,
+                    maxLength: 200,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(
+                      hintText: 'El pin caía en la otra cuadra',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => redibujar(() {}),
+                  ),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  //  APAGADO HASTA QUE HAYA ALGO QUE LEER. El servidor lo
+                  //  rechaza igual; esto evita que el tecnico se entere
+                  //  despues de esperar el GPS.
+                  onPressed: alcanza
+                      ? () => Navigator.of(ctx).pop(texto.text.trim())
+                      : null,
+                  child: const Text('Corregir'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    texto.dispose();
+    return motivo;
+  }
+
+  Future<void> _corregirUbicacion(dynamic trabajo) async {
+    final String? motivo = await _pedirElMotivo();
+    if (motivo == null || !mounted) return;
+    await _guardarUbicacion(trabajo, motivo: motivo);
+  }
+
+  Future<void> _guardarUbicacion(dynamic trabajo, {String motivo = ''}) async {
     final accion = widget.acciones.guardarUbicacionDelCliente;
     if (accion == null || _guardandoUbicacion) return;
     setState(() => _guardandoUbicacion = true);
     ResultadoDeGuardado resultado;
     try {
-      resultado = await accion(trabajo.id as String);
+      resultado = await accion(trabajo.id as String, motivo);
     } catch (_) {
       //  El tecnico esta en la calle: nada de esto puede tumbarle la
       //  pantalla.

@@ -62,13 +62,16 @@ class GuardarUbicacionDelCliente {
   });
 
   /// Manda la ubicacion al servidor. Responde el codigo HTTP y el cuerpo.
+  /// [motivo] viaja solo cuando se esta CORRIGIENDO un punto que ya existia.
+  /// El servidor lo exige en ese caso y lo ignora en el otro: llenar un vacio
+  /// no tiene nada que justificar.
   final Future<({int codigo, Map<String, dynamic> cuerpo})> Function(
-      double latitud, double longitud) enviar;
+      double latitud, double longitud, String motivo) enviar;
 
   /// De donde sale la posicion. Por omision, el GPS del telefono.
   final Future<Map<String, dynamic>> Function()? tomarUbicacion;
 
-  Future<ResultadoDeGuardado> ejecutar() async {
+  Future<ResultadoDeGuardado> ejecutar({String motivo = ''}) async {
     final Map<String, dynamic> lectura = await (tomarUbicacion != null
         ? tomarUbicacion!()
         //  TREINTA SEGUNDOS, Y NO LOS CINCO DE UNA FOTO (10/11/2026).
@@ -130,7 +133,7 @@ class GuardarUbicacionDelCliente {
 
     final ({int codigo, Map<String, dynamic> cuerpo}) r;
     try {
-      r = await enviar(lat, lng);
+      r = await enviar(lat, lng, motivo);
     } catch (_) {
       //  Sin red, el servidor caido, un plazo vencido: para el tecnico es el
       //  mismo caso, y ninguno deja la ubicacion escrita.
@@ -171,6 +174,11 @@ class GuardarUbicacionDelCliente {
         'sin_identificador' =>
           'Esta orden no trae con qué identificar al cliente en el sistema '
               'del ISP.',
+        //  El servidor rechaza una correccion sin motivo. Si la pantalla
+        //  llega a mandarla igual, el tecnico tiene que leer por que y no un
+        //  «proba de nuevo» que no lo va a arreglar nunca.
+        'motivo_requerido' =>
+          'Para cambiar una ubicación que ya estaba hay que decir por qué.',
         _ => 'No se pudo guardar. Probá de nuevo en un momento.',
       },
     );

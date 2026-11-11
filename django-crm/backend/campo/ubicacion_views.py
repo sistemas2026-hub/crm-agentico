@@ -33,6 +33,35 @@ logger = logging.getLogger(__name__)
 #: Fuera de esto no es la Tierra: es un error de la aplicacion o una prueba.
 LIMITES = {"latitud": (-90.0, 90.0), "longitud": (-180.0, 180.0)}
 
+#: Lo mas corto que se acepta como motivo para pisar una ubicacion.
+#:
+#: No es un numero elegido por elegir: con menos de esto entra «mal», «no» o
+#: un punto, y una justificacion que se satisface con tres letras no es una
+#: justificacion -- es un boton con un paso de mas. Tampoco se pide un parrafo:
+#: el tecnico escribe parado en la calle, con una mano.
+_MINIMO_DEL_MOTIVO = 10
+
+
+def _anotar(orden, profile, tipo: str, datos: dict) -> None:
+    """Deja el rastro en la orden. Nunca levanta y no ensucia la transaccion.
+
+    El `atomic` propio es un savepoint: sin el, un INSERT que falla rompe la
+    transaccion de la vista y la respuesta se pierde DESPUES, por una
+    bitacora. La ubicacion ya quedo escrita en el ISP; perder el rastro es
+    aceptable, perder la respuesta no. Mismo criterio que
+    `nota_al_isp._anotar_evento`.
+    """
+    from django.db import transaction
+
+    try:
+        from campo.models import EventoTrabajo
+
+        with transaction.atomic():
+            EventoTrabajo.objects.create(org=orden.org, orden=orden, tipo=tipo,
+                                         profile=profile, datos=datos or {})
+    except Exception:                                           # noqa: BLE001
+        logger.warning("ubicacion_del_cliente: no se pudo anotar %s", tipo)
+
 
 def _coordenada(datos, nombre):
     """El valor como float, o `None` si falta o no es un numero del rango."""
@@ -148,6 +177,31 @@ class UbicacionDelClienteView(APIView):
                             "planeta"},
                 status=status.HTTP_400_BAD_REQUEST)
 
+        #  CORREGIR NO ES LLENAR, Y LA DIFERENCIA LA HACE CUMPLIR EL SERVIDOR
+        #  (11/11/2026, pedido del usuario: «cuando el tecnico le presione
+        #  para corregir si esta mala, en este caso si tiene que pedir
+        #  justificacion en texto»).
+        #
+        #  Si la orden YA tiene un punto, lo que llega lo PISA: alguien
+        #  decidio que el que estaba era peor que este. Esa decision tiene que
+        #  quedar con su motivo, y tiene que ser obligatoria ACA y no solo en
+        #  la pantalla -- si la regla vive en el telefono, en tres meses van a
+        #  existir correcciones sin motivo y nadie va a saber por que se movio
+        #  una casa.
+        #
+        #  Llenar un vacio no pide nada: no hay decision que justificar, no se
+        #  pierde nada, y pedir un texto ahi solo enseña a escribir «ok» para
+        #  destrabar el boton -- que es como una justificacion obligatoria
+        #  deja de significar algo.
+        corrige = orden.gps_lat is not None and orden.gps_lng is not None
+        motivo = str(request.data.get("motivo") or "").strip()
+        if corrige and len(motivo) < _MINIMO_DEL_MOTIVO:
+            return Response(
+                {"guardada": False, "codigo": "motivo_requerido",
+                 "detalle": "esta orden ya tiene una ubicación: para "
+                            "cambiarla hay que decir por qué"},
+                status=status.HTTP_400_BAD_REQUEST)
+
         resultado = ubicacion_al_isp.guardar_ubicacion(
             orden, latitud=lat, longitud=lng,
             profile=getattr(request, "profile", None))
@@ -175,6 +229,15 @@ class UbicacionDelClienteView(APIView):
                 orden.gps_lat = lat
                 orden.gps_lng = lng
                 orden.save(update_fields=["gps_lat", "gps_lng"])
+                #  EL RASTRO, Y SIN LA COORDENADA. Que se corrigio, quien y
+                #  por que: eso es lo que alguien va a buscar dentro de seis
+                #  meses. Donde quedo la casa ya esta en la orden y en el
+                #  ISP; repetirlo aca solo agrega un lugar mas con el
+                #  domicilio de una persona.
+                _anotar(orden, getattr(request, "profile", None),
+                        "ubicacion_corregida" if corrige
+                        else "ubicacion_registrada",
+                        {"motivo": motivo} if corrige else {})
             except Exception as e:                       # noqa: BLE001
                 #  Lo que importaba --que el ISP la tenga-- ya paso. Que la
                 #  copia local no se actualice es molesto, no grave: se

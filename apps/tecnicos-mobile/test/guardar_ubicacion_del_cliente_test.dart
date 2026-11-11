@@ -37,6 +37,7 @@ void main() {
   ({
     GuardarUbicacionDelCliente accion,
     List<List<double>> enviados,
+    List<String> motivos,
   }) armar({
     Map<String, dynamic>? gps,
     int codigo = 200,
@@ -44,12 +45,15 @@ void main() {
     bool rompe = false,
   }) {
     final List<List<double>> enviados = <List<double>>[];
+    final List<String> motivos = <String>[];
     return (
       enviados: enviados,
+      motivos: motivos,
       accion: GuardarUbicacionDelCliente(
         tomarUbicacion: () async => gps ?? lectura(),
-        enviar: (double la, double lo) async {
+        enviar: (double la, double lo, String motivo) async {
           enviados.add(<double>[la, lo]);
+          motivos.add(motivo);
           if (rompe) throw Exception('se corto la red');
           return (codigo: codigo, cuerpo: cuerpo ?? <String, dynamic>{});
         },
@@ -156,6 +160,38 @@ void main() {
         dichos.add((await a.accion.ejecutar()).mensaje);
       }
       expect(dichos.toSet(), hasLength(3), reason: 'tres motivos, tres frases');
+    });
+  });
+
+  group('C2 · el motivo de una corrección', () {
+    test('c2a · el motivo viaja tal cual al servidor', () async {
+      //  Una correccion pisa un punto que ya estaba: alguien decidio que el
+      //  anterior era peor. Esa decision tiene que llegar con su motivo, y el
+      //  servidor la rechaza sin el.
+      final a = armar(cuerpo: <String, dynamic>{'codigo': 'guardada'});
+      await a.accion.ejecutar(motivo: 'El pin caia en la otra cuadra');
+
+      expect(a.motivos.single, 'El pin caia en la otra cuadra');
+    });
+
+    test('c2b · llenar un vacío no manda motivo', () async {
+      //  No hay nada que justificar, y pedir un texto ahi solo enseña a
+      //  escribir «ok» para destrabar el boton.
+      final a = armar(cuerpo: <String, dynamic>{'codigo': 'guardada'});
+      await a.accion.ejecutar();
+
+      expect(a.motivos.single, isEmpty);
+    });
+
+    test('c2c · un rechazo por falta de motivo se dice con esas palabras',
+        () async {
+      final a = armar(
+          codigo: 400, cuerpo: <String, dynamic>{'codigo': 'motivo_requerido'});
+      final r = await a.accion.ejecutar();
+
+      //  «Proba de nuevo» seria mentira: no va a andar hasta que escriba algo.
+      expect(r.mensaje.toLowerCase(), contains('por qué'));
+      expect(r.mensaje.toLowerCase(), isNot(contains('probá de nuevo')));
     });
   });
 
