@@ -1105,8 +1105,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     )
                   : DexterAccionRapida(
                       icono: Icons.add_location_alt,
+                      //  DICE QUE ESPERA LA SEÑAL, no «guardando»: lo que
+                      //  tarda es el GPS --hasta treinta segundos en frio-- y
+                      //  medio minuto diciendo «guardando» parece colgado.
                       texto: _guardandoUbicacion
-                          ? 'Guardando…'
+                          ? 'Buscando señal…'
                           : 'Guardar ubicación',
                       alTocar: (widget.acciones.guardarUbicacionDelCliente ==
                                   null ||

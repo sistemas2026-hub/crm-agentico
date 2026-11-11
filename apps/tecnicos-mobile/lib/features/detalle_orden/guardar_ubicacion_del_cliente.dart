@@ -69,8 +69,24 @@ class GuardarUbicacionDelCliente {
   final Future<Map<String, dynamic>> Function()? tomarUbicacion;
 
   Future<ResultadoDeGuardado> ejecutar() async {
-    final Map<String, dynamic> lectura =
-        await (tomarUbicacion ?? UbicacionDeCaptura.tomar)();
+    final Map<String, dynamic> lectura = await (tomarUbicacion != null
+        ? tomarUbicacion!()
+        //  TREINTA SEGUNDOS, Y NO LOS CINCO DE UNA FOTO (10/11/2026).
+        //
+        //  El plazo de `UbicacionDeCaptura` esta pensado para acompanar
+        //  una captura: ahi el GPS ya viene caliente porque la camara lo
+        //  estaba usando, y esperar mas «compra desconfianza». Aca es al
+        //  reves: el tecnico abrio la ficha y toco un boton, el GPS puede
+        //  estar arrancando de cero, y eso tarda entre treinta segundos y
+        //  un minuto ESTE DONDE ESTE -- medido el 10/11/2026 en la
+        //  primera prueba real: a cielo abierto y sin techo, los cinco
+        //  segundos se agotaban igual y el mensaje mandaba a salir
+        //  afuera a alguien que ya estaba afuera.
+        //
+        //  Treinta es lo que tarda un arranque frio tipico. Mas seria
+        //  dejar al tecnico mirando un boton sin saber si pasa algo; por
+        //  eso el boton muestra «Buscando señal…» mientras tanto.
+        : UbicacionDeCaptura.tomar(plazo: const Duration(seconds: 30)));
 
     final double? lat = (lectura['lat'] as num?)?.toDouble();
     final double? lng = (lectura['lng'] as num?)?.toDouble();

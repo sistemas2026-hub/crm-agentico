@@ -46,7 +46,15 @@ class UbicacionDeCaptura {
   ///
   /// Nunca lanza. En el peor caso devuelve el equipo y el motivo por el que
   /// no hay coordenadas.
-  static Future<Map<String, dynamic>> tomar() async {
+  ///
+  /// [plazo] permite esperar mas que el de una foto. Ver la nota de
+  /// `_plazo`: cinco segundos son la frontera para quien acaba de
+  /// apretar el obturador, con el GPS ya caliente porque la camara lo
+  /// venia usando. Un GPS que arranca de cero --la app recien abierta,
+  /// o recien instalada-- tarda entre treinta segundos y un minuto
+  /// estes donde estes, asi que quien lo use en frio tiene que decirlo
+  /// y avisarle a la persona que espere.
+  static Future<Map<String, dynamic>> tomar({Duration? plazo}) async {
     if (overrideParaPruebas != null) return overrideParaPruebas!();
 
     final Map<String, dynamic> datos = <String, dynamic>{
@@ -71,9 +79,9 @@ class UbicacionDeCaptura {
       }
 
       final Position p = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
+        locationSettings: LocationSettings(
           accuracy: LocationAccuracy.high,
-          timeLimit: _plazo,
+          timeLimit: plazo ?? _plazo,
         ),
       );
 
