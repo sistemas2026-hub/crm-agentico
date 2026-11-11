@@ -189,6 +189,41 @@ try:
     mensaje(org, cerrada, "user", minutos=1)
     comprobar(no_leidos(db, cerrada) == 0, "una cerrada cuenta 0 aunque tenga mensajes sin leer")
 
+    # LA CARRERA DEL TURNO (11/11/2026, auditoria H3). El mensaje del cliente se
+    # guarda DESPUES del turno con creado_en = cuando LLEGO. Si alguien abrio el
+    # chat mientras el modelo pensaba, leida_hasta quedaba POSTERIOR al mensaje
+    # y este nacia «leido» sin que nadie lo hubiera visto. Por la funcion REAL
+    # (db.registrar_mensaje), con el mismo orden que api.atender_turno.
+    print("\n== B2. un mensaje del cliente que llega durante el turno no nace leido ==")
+    from datetime import datetime, timedelta, timezone             # noqa: E402
+    NC = "573100000020"
+    carrera, _ = db.registrar_mensaje(TENANT, "whatsapp", NC, "cliente_final", "user", "hola",
+                                      creado_en=datetime.now(timezone.utc) - timedelta(minutes=10),
+                                      origen="cliente")
+    llego_en = datetime.now(timezone.utc) - timedelta(seconds=5)   # llega el mensaje, empieza el turno
+    db.marcar_leida(TENANT, carrera, True)                          # alguien abre el chat mientras tanto
+    comprobar(no_leidos(db, carrera) == 0, "abrir el chat deja 0")
+    version = q("select relevo_version from asistente.conversations where id = %s", (carrera,))[0][0]
+    cid, _ = db.registrar_mensaje(TENANT, "whatsapp", NC, "cliente_final", "user", "sigo sin internet",
+                                  creado_en=llego_en, origen="cliente")
+    comprobar(cid == carrera, "el mensaje cae en la misma conversacion")
+    comprobar(no_leidos(db, carrera) == 1,
+              f"EL EFECTO: el mensaje guardado despues del turno CUENTA como no leido ({no_leidos(db, carrera)})")
+    marca = q("select leida_hasta, relevo_version from asistente.conversations where id = %s", (carrera,))[0]
+    comprobar(marca[0] == llego_en - timedelta(milliseconds=1) and marca[1] == version,
+              "la marca queda justo antes del mensaje, sin mover relevo_version", f"{marca} / {llego_en}")
+    db.registrar_mensaje(TENANT, "whatsapp", NC, "cliente_final", "assistant", "ya reviso",
+                         creado_en=llego_en - timedelta(seconds=1), origen="ia")
+    comprobar(q("select leida_hasta from asistente.conversations where id = %s", (carrera,))[0][0]
+              == llego_en - timedelta(milliseconds=1),
+              "una respuesta del asistente no toca la marca")
+    db.marcar_leida(TENANT, carrera, True)
+    leida = q("select leida_hasta from asistente.conversations where id = %s", (carrera,))[0][0]
+    db.registrar_mensaje(TENANT, "whatsapp", NC, "cliente_final", "user", "gracias", origen="cliente")
+    comprobar(q("select leida_hasta from asistente.conversations where id = %s", (carrera,))[0][0] == leida
+              and no_leidos(db, carrera) == 1,
+              "sin carrera (el mensaje es posterior a la marca) la marca no se mueve y cuenta igual")
+
     # ======================================================================
     print("\n== C. la marca es del chat ==")
     N = "573100000010"

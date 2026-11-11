@@ -646,11 +646,30 @@ def registrar_mensaje(tenant: str, canal: str, usuario_externo: str,
                   creado_en, latencia_ms, tokens_entrada, tokens_salida,
                   costo_usd, modelo, llamadas_modelo, origen)
                values (%s, %s, %s, %s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s, %s)
-               returning id""",
+               returning id, creado_en""",
             (org, conv, rol, contenido, creado_en, latencia_ms,
              tokens_entrada, tokens_salida, costo_usd, modelo,
              llamadas_modelo, origen))
-        mensaje = cur.fetchone()["id"]
+        insertado = cur.fetchone()
+        mensaje = insertado["id"]
+
+        if rol == "user":
+            # UN MENSAJE DEL CLIENTE NO NACE LEIDO (11/11/2026, auditoria H3).
+            # El de arriba se guarda DESPUES del turno con 'creado_en' = cuando
+            # LLEGO. Si alguien abrio el chat mientras el modelo pensaba,
+            # marcar_leida dejo leida_hasta = now(), POSTERIOR a ese sello, y
+            # el mensaje quedaba contado como leido sin que nadie lo hubiera
+            # visto: no estaba en la pantalla cuando se abrio. Se corre la
+            # marca a justo antes del mensaje, en la MISMA transaccion. Solo
+            # si la marca lo tapa: una anterior ya lo cuenta. No toca
+            # 'actualizado_en' ni 'relevo_version' (igual que marcar_leida:
+            # leer no es una transicion del relevo).
+            cur.execute(
+                """update asistente.conversations
+                      set leida_hasta = %s::timestamptz - interval '1 millisecond'
+                    where id = %s and organization_id = %s
+                      and leida_hasta >= %s::timestamptz""",
+                (insertado["creado_en"], conv, org, insertado["creado_en"]))
 
         return str(conv), str(mensaje)
 
