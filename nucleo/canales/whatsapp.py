@@ -50,6 +50,7 @@ import re
 import requests
 
 from nucleo.observabilidad.registro import ref_proveedor, registrar
+from nucleo.canales import avisos
 from nucleo.seguridad import secretos
 
 API_BASE_POR_DEFECTO = "https://graph.facebook.com"
@@ -149,7 +150,7 @@ def texto_de_ubicacion(ubicacion: dict) -> str:
     partes = [str(p).strip() for p in ((ubicacion or {}).get("name"),
                                        (ubicacion or {}).get("address")) if p and str(p).strip()]
     partes.append(f"coordenadas {lat}, {lng}")
-    return "[El cliente compartio su ubicacion: " + " · ".join(partes) + "]"
+    return f"{avisos.UBICACION}: " + " · ".join(partes) + "]"
 
 
 def texto_de_contactos(contactos: list) -> str:
@@ -177,7 +178,7 @@ def texto_de_contactos(contactos: list) -> str:
         return ""
     sobran = len(contactos or []) - CONTACTOS_MAXIMOS
     cola = f" (y {sobran} mas)" if sobran > 0 else ""
-    return "[El cliente compartio un contacto: " + "; ".join(piezas) + cola + "]"
+    return f"{avisos.CONTACTO}: " + "; ".join(piezas) + cola + "]"
 
 
 class ErrorWhatsApp(Exception):

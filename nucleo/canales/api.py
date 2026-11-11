@@ -47,7 +47,7 @@ from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
 from nucleo.canales import en_vuelo
-from nucleo.canales import media, transcripcion, vision, whatsapp
+from nucleo.canales import avisos, media, transcripcion, vision, whatsapp
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
@@ -11447,7 +11447,7 @@ _AVISO_ADJUNTO = {
 CITA_DE_REACCION_MAXIMA = 160
 
 
-def _texto_de_reaccion(tenant: str, reaccion: dict) -> str:
+def _texto_de_reaccion(tenant: str, reaccion: dict, de: str) -> str:
     """
     «[El cliente reacciono con 👍 a: «...»]». Si el mensaje no se encuentra
     (es de antes de guardar wamids, o la base no contesta) se dice sin la cita:
@@ -11456,7 +11456,8 @@ def _texto_de_reaccion(tenant: str, reaccion: dict) -> str:
     """
     emoji = reaccion.get("emoji")
     try:
-        citado = persistencia.contenido_de_wamid(tenant, reaccion.get("a"))
+        # Solo del chat de quien reacciona: ver contenido_de_wamid.
+        citado = persistencia.contenido_de_wamid(tenant, reaccion.get("a"), "whatsapp", de)
     except Exception as e:
         registrar("whatsapp", "no se pudo leer el mensaje reaccionado", tenant=tenant, error=e)
         citado = None
@@ -11464,8 +11465,8 @@ def _texto_de_reaccion(tenant: str, reaccion: dict) -> str:
     if len(citado) > CITA_DE_REACCION_MAXIMA:
         citado = citado[:CITA_DE_REACCION_MAXIMA].rstrip() + "…"
     if citado:
-        return f"[El cliente reacciono con {emoji} a: «{citado}»]"
-    return f"[El cliente reacciono con {emoji} a un mensaje]"
+        return f"{avisos.REACCION} {emoji} a: «{citado}»]"
+    return f"{avisos.REACCION} {emoji} a un mensaje]"
 
 
 def _atendio_baja_o_alta(config, tenant: str, de: str, texto: str) -> bool:
@@ -11814,7 +11815,7 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
             reaccion = entrante.get("reaccion") or {}
             if not reaccion.get("emoji"):
                 return
-            texto = _texto_de_reaccion(tenant, reaccion)
+            texto = _texto_de_reaccion(tenant, reaccion, de)
 
         # LA VOZ SE TRANSCRIBE ANTES DEL TURNO, y por eso se baja aca y no en
         # _guardar_adjunto: el agente tiene que poder leer lo que el cliente

@@ -205,6 +205,26 @@ try:
                       for x in db.buscar_en_mensajes(TENANT_A, "frente a mi casa")),
               "y al reves: la primera no ve ninguna fila de la segunda")
 
+    # La cita de una REACCION (11/11/2026, revisor de PII H2): el mensaje al
+    # que reacciono el cliente se busca SOLO en su propio chat. Va aca porque
+    # esta base ya tiene dos empresas y dos chats de la misma; armar otra
+    # efimera para tres consultas costaria un ledger entero.
+    print("\n-- la cita de una reaccion, solo del propio chat --")
+    m_bot = msj(TENANT_A, ana, "¿Te registro la solicitud?", rol="assistant", hace_min=0)
+    q("update asistente.messages set wamid = 'wamid.ANA' where id = %s", (m_bot,))
+    comprobar(db.contenido_de_wamid(TENANT_A, "wamid.ANA", "whatsapp", "573001")
+              == "¿Te registro la solicitud?",
+              "desde el chat de Ana, la cita aparece")
+    comprobar(db.contenido_de_wamid(TENANT_A, "wamid.ANA", "whatsapp", "573002") is None,
+              "desde OTRO chat de la misma empresa, no")
+    comprobar(db.contenido_de_wamid(TENANT_B, "wamid.ANA", "whatsapp", "573001") is None,
+              "desde la otra empresa con el mismo numero, tampoco")
+    comprobar(db.contenido_de_wamid(TENANT_A, "wamid.ANA", "web", "573001") is None,
+              "ni con el mismo numero en otro canal")
+    comprobar(db.contenido_de_wamid(TENANT_A, None, "whatsapp", "573001") is None
+              and db.contenido_de_wamid(TENANT_A, "wamid.ANA", "whatsapp", "") is None,
+              "sin wamid o sin remitente no se busca nada")
+
     print("\n-- tope --")
     muchos = conv(TENANT_A, "573099", "Carla")
     q("""insert into asistente.messages (organization_id, conversation_id, rol, contenido, origen, creado_en)

@@ -66,6 +66,7 @@ from nucleo.modelo import tuteo
 from nucleo.seguimiento import resumen as resumen_previo
 from nucleo.relevo import autorizacion as autorizacion_relevo
 from nucleo.persistencia import db as persistencia
+from nucleo.canales import avisos
 from nucleo.habilidades import catalogo as catalogo_habilidades
 from nucleo.observabilidad import consumo
 from nucleo.recuperacion.prompt import construir_system
@@ -3539,7 +3540,14 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
     # La condicion existe para poder migrar rol por rol y volver atras sin
     # tocar codigo: un rol que no declara la herramienta sigue funcionando
     # exactamente como funcionaba.
-    if any(getattr(h, "consulta_documentacion", False) for h in herramientas):
+    #
+    # Y TAMPOCO con un aviso del canal (11/11/2026): una ubicacion, un
+    # contacto o una reaccion no son una pregunta para la documentacion, y
+    # llevan coordenadas o el telefono de un tercero que no tienen por que ir
+    # al proveedor de embeddings ni quedar en 'unanswered_queries'. Se trata
+    # como si no se hubiera buscado: sin registro y sin el corte de RF-07.
+    if (any(getattr(h, "consulta_documentacion", False) for h in herramientas)
+            or avisos.es_aviso_con_datos(mensaje)):
         fragmentos, mejor = [], None
         _corpus_es_herramienta = True
     else:

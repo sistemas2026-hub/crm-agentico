@@ -121,8 +121,9 @@ try:
     api._transcribir_si_es_voz = lambda *a, **k: {}
     api._analizar_si_es_imagen = lambda *a, **k: {}
     api.consumo.estado_del_gasto = lambda c, t: {"accion": "seguir"}
-    api.persistencia.contenido_de_wamid = lambda t, w: (
-        buscados.append(w) or ("¿Te interesa que registre la solicitud?" if w == "w.NUESTRO" else None))
+    api.persistencia.contenido_de_wamid = lambda t, w, canal, de: (
+        buscados.append((w, canal, de))
+        or ("¿Te interesa que registre la solicitud?" if w == "w.NUESTRO" else None))
 
     def procesar(mensaje):
         turnos.clear(); textos.clear()
@@ -143,14 +144,15 @@ try:
 
     procesar({"id": "w.R", "type": "reaction", "reaction": {"message_id": "w.NUESTRO", "emoji": "👍"}})
     revisar(turnos == ["[El cliente reacciono con 👍 a: «¿Te interesa que registre la solicitud?»]"]
-            and not textos and buscados[-1] == "w.NUESTRO",
-            "un 👍 va al turno con el mensaje al que reacciono", f"{turnos} {textos}")
+            and not textos and buscados[-1] == ("w.NUESTRO", "whatsapp", "573001112233"),
+            "un 👍 va al turno con el mensaje al que reacciono, buscado SOLO en el chat de quien "
+            "reacciona (revisor de PII, H2)", f"{turnos} {textos} {buscados}")
 
     procesar({"id": "w.R2", "type": "reaction", "reaction": {"message_id": "w.VIEJO", "emoji": "❤️"}})
     revisar(turnos == ["[El cliente reacciono con ❤️ a un mensaje]"],
             "si el mensaje no se encuentra, se dice sin cita (no se inventa a que)", f"{turnos}")
 
-    def rompe(t, w):
+    def rompe(t, w, canal, de):
         raise RuntimeError("la base no contesta")
     api.persistencia.contenido_de_wamid = rompe
     procesar({"id": "w.R3", "type": "reaction", "reaction": {"message_id": "w.NUESTRO", "emoji": "👍"}})
@@ -162,7 +164,7 @@ try:
             "QUITAR una reaccion no despierta al modelo ni le contesta nada", f"{turnos} {textos}")
 
     largo = "x" * 400
-    api.persistencia.contenido_de_wamid = lambda t, w: largo
+    api.persistencia.contenido_de_wamid = lambda t, w, canal, de: largo
     procesar({"id": "w.R5", "type": "reaction", "reaction": {"message_id": "w.L", "emoji": "👍"}})
     revisar(turnos and len(turnos[0]) < 220 and turnos[0].endswith("…»]"),
             "un mensaje largo se cita recortado", f"{len(turnos[0]) if turnos else None}")
@@ -173,6 +175,44 @@ try:
 finally:
     for obj, nombre, original in originales:
         setattr(obj, nombre, original)
+
+
+print("\n3. Los avisos no se buscan en la documentacion (revisor de PII, H1)")
+
+from nucleo.canales import avisos                         # noqa: E402
+from nucleo.modelo import motor                           # noqa: E402
+
+armados = [
+    whatsapp.texto_de_ubicacion({"latitude": 4.6, "longitude": -74.08}),
+    whatsapp.texto_de_contactos([{"name": {"formatted_name": "Pedro"}, "phones": [{"phone": "300"}]}]),
+    api._AVISO_ADJUNTO["location"],
+]
+originales = [(api.persistencia, "contenido_de_wamid", api.persistencia.contenido_de_wamid)]
+try:
+    api.persistencia.contenido_de_wamid = lambda t, w, canal, de: "hola"
+    armados.append(api._texto_de_reaccion(TENANT, {"emoji": "👍", "a": "w"}, "573001112233"))
+finally:
+    for obj, nombre, original in originales:
+        setattr(obj, nombre, original)
+revisar(all(avisos.es_aviso_con_datos(t) for t in armados),
+        "lo que arma el canal se reconoce como aviso: si un lado cambia el texto, esto lo dice",
+        f"{armados}")
+revisar(not avisos.es_aviso_con_datos("mis coordenadas son 10.9, -74.7")
+        and not avisos.es_aviso_con_datos("[El cliente envio una foto]")
+        and not avisos.es_aviso_con_datos(None),
+        "lo que escribe el cliente, o una foto, sigue siendo una pregunta")
+
+# Que el motor lo use donde decide buscar: se mira la fuente porque recorrer
+# motor.responder exige montar el turno entero. Si alguien saca la condicion,
+# las coordenadas vuelven a ir al proveedor de embeddings.
+import inspect                                            # noqa: E402
+fuente = inspect.getsource(motor)
+# La del TURNO, que busca con el mensaje del cliente; la otra llamada a
+# recuperar() es la herramienta de documentacion, que busca con la consulta
+# que arma el modelo.
+i = fuente.index("nombre_rol, mensaje)")
+revisar("avisos.es_aviso_con_datos(mensaje)" in fuente[max(0, i - 900):i],
+        "el motor no llama a recuperar() con un aviso del canal")
 
 
 print()

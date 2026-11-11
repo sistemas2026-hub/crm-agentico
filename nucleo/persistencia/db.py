@@ -2334,22 +2334,30 @@ _RANGO_ENTREGA = {"pendiente": 0, "enviado": 1, "entregado": 2, "leido": 3,
                   "fallido": 4}
 
 
-def contenido_de_wamid(tenant: str, wamid: str) -> str | None:
+def contenido_de_wamid(tenant: str, wamid: str, canal: str,
+                       usuario_externo: str) -> str | None:
     """
-    El texto del mensaje de esta empresa que lleva ese wamid, o None.
+    El texto del mensaje que lleva ese wamid, o None -- SOLO si es del mismo
+    chat (canal + numero) de quien reacciona.
 
     Existe para las reacciones (11/11/2026): Meta dice A QUE mensaje reacciono
     el cliente solo por su wamid, y un 👍 se entiende distinto segun lo que se
     le habia preguntado. Lo que sale de aca va al modelo como contexto del
-    turno, igual que el resto del hilo de esa misma conversacion.
+    turno. Acotado al chat y no solo a la empresa (revisor de PII, H2): un
+    wamid de la conversacion de OTRO cliente metido en este turno le podria
+    repetir a uno lo que se le dijo al otro. WhatsApp hoy no deja reaccionar
+    fuera del propio chat; la base no depende de eso.
     """
-    if not wamid:
+    if not wamid or not usuario_externo:
         return None
     with sesion(tenant) as (cur, org):
         cur.execute(
-            """select contenido from asistente.messages
-               where organization_id = %s and wamid = %s and contenido is not null
-               limit 1""", (org, wamid))
+            """select m.contenido from asistente.messages m
+               join asistente.conversations c
+                 on c.id = m.conversation_id and c.organization_id = m.organization_id
+               where m.organization_id = %s and m.wamid = %s and m.contenido is not null
+                 and c.canal = %s and c.usuario_externo = %s
+               limit 1""", (org, wamid, canal, usuario_externo))
         fila = cur.fetchone()
     return fila["contenido"] if fila else None
 
