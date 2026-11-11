@@ -2373,6 +2373,23 @@ casos:
     espera:
       no_intenta: [reportar_comprobante_pago]
 
+  # "YA PAGUE": LOS DATOS SE PIDEN DE UNA VEZ, NO DESPUES DE UN "QUIERES QUE LO REVISEN?".
+  #
+  # Visto el 11/11/2026: el cliente dijo "ya pague la factura, por que no tengo
+  # servicio?", el agente contesto "si ya la pagaste..." y pregunto si queria que un
+  # colaborador lo revisara; con el "si" recien pidio monto y fecha. Un turno de mas.
+  #
+  # LIMITE: el cliente de prueba esta al dia (sin factura pendiente), asi que esto NO
+  # reproduce la conversacion real; mide solo lo que se puede medir con el: que no
+  # registre un comprobante sin datos y que no repita la pregunta que solo admite un si.
+  # La conversacion con deuda se comprueba a mano con un cliente que la tenga.
+  - nombre: ya pague no se responde con una pregunta que solo admite un si
+    rol: facturacion_cliente
+    mensajes: ["ya pague la factura, por que no tengo servicio?"]
+    espera:
+      no_intenta: [reportar_comprobante_pago]
+      responde_sin: ["quieres que un colaborador", "si ya la pagaste"]
+
   # UN DESGLOSE QUE LA API NO PUEDE DAR SE DICE, NO SE ARMA.
   #
   # 'zona' es el caso canonico: la API de clientes lo IGNORA en silencio y
