@@ -616,6 +616,20 @@ class _InicioScreenState extends State<InicioScreen> {
                   valor: '$total',
                   rotulo: 'Asignadas',
                   colorDelValor: AppColors.primary,
+                  //  CON CUANTAS ARRANCO EL DIA  --  11/11/2026, mejora 2.
+                  //
+                  //  La cifra de arriba es la del dia COMPLETO --incluye las
+                  //  que ya cerro-- y por eso no baja a medida que avanza.
+                  //  Decirlo saca la duda de encima: sin esta linea, un
+                  //  tecnico que cerro tres de ocho ve un 8 y no sabe si son
+                  //  las que le quedan o las de la jornada.
+                  //
+                  //  LO QUE ESTA LINEA NO PUEDE DECIR, y queda dicho: si el
+                  //  despacho le REASIGNA una orden a otro, el total baja y
+                  //  esto bajaria con el. Para afirmar el arranque real
+                  //  habria que guardarlo al abrir la jornada --una columna
+                  //  en `local_jornada`-- y eso es otra decision.
+                  nota: total == 0 ? null : 'arrancó con $total',
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
@@ -1075,6 +1089,7 @@ class _CeldaDeCifra extends StatelessWidget {
     this.fondo = AppColors.surfaceContainerLowest,
     this.colorDelValor = AppColors.onSurface,
     this.colorDelRotulo = AppColors.onSurfaceVariant,
+    this.nota,
   });
 
   final String valor;
@@ -1083,10 +1098,14 @@ class _CeldaDeCifra extends StatelessWidget {
   final Color colorDelValor;
   final Color colorDelRotulo;
 
+  /// Una linea chica debajo del rotulo. `null` y no se dibuja nada: una celda
+  /// con un hueco reservado se ve rota al lado de las que no lo tienen.
+  final String? nota;
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: '$rotulo: $valor',
+      label: nota == null ? '$rotulo: $valor' : '$rotulo: $valor, $nota',
       excludeSemantics: true,
       child: Container(
         padding:
@@ -1108,6 +1127,15 @@ class _CeldaDeCifra extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: AppTypography.labelCaption.copyWith(color: colorDelRotulo),
             ),
+            if (nota != null)
+              Text(
+                nota!,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.labelCaption
+                    .copyWith(color: AppColors.outline),
+              ),
           ],
         ),
       ),
