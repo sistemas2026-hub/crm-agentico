@@ -913,6 +913,101 @@ def reincidencia_de(tenant: str, conversation_id: str, dias: int) -> dict | None
     return {"dias": int(dias), "total": sum(int(f["n"]) for f in filas), "por_caso": por_caso}
 
 
+#: Cuantos resultados devuelve la busqueda en mensajes. Es una lista que se
+#: lee debajo de la cola, no un reporte: si lo buscado aparece en mas, hace
+#: falta una palabra mas, no una pagina mas.
+BUSQUEDA_MENSAJES_TOPE = 30
+#: Cuanto texto alrededor de la coincidencia viaja a la pantalla.
+FRAGMENTO_LARGO = 120
+#: Que filas se buscan: lo que se ve en el hilo de la Bandeja. Lista CERRADA a
+#: proposito: si algun dia se guarda un rol nuevo -- el resultado de una
+#: herramienta, un prompt de sistema --, no aparece en el buscador hasta que
+#: alguien decida que debe. 'humano' es el legado de antes de 'origen'.
+ROLES_BUSCABLES = ("user", "assistant", "humano", "nota")
+
+
+def _patron_ilike(q: str) -> str:
+    """'q' como patron de ILIKE que busca el texto LITERAL.
+
+    '%' y '_' son comodines de LIKE y '\\' es su escape: sin esto, buscar
+    «50%» encontraria cualquier mensaje con un 50, y «_» cualquier caracter.
+    El escape va primero, o se escaparian los escapes recien puestos."""
+    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _fragmento(texto: str, q: str, largo: int = FRAGMENTO_LARGO) -> str:
+    """~'largo' caracteres alrededor de la primera coincidencia, con «…» donde
+    se corto. La coincidencia queda en el primer tercio: lo que se lee primero
+    es lo que vino antes, para entender de que se hablaba."""
+    texto = " ".join((texto or "").split())
+    if len(texto) <= largo:
+        return texto
+    pos = texto.lower().find(q.lower())
+    if pos < 0:
+        # ILIKE y lower() no doblan igual cada letra del mundo; si no se
+        # encuentra aca, se muestra el principio en vez de inventar un corte.
+        pos = 0
+    desde = max(0, min(pos - largo // 3, len(texto) - largo))
+    hasta = desde + largo
+    return ("…" if desde > 0 else "") + texto[desde:hasta].strip() + ("…" if hasta < len(texto) else "")
+
+
+def buscar_en_mensajes(tenant: str, q: str, limite: int = BUSQUEDA_MENSAJES_TOPE) -> list[dict]:
+    """
+    Los mensajes de la empresa que contienen 'q', los mas recientes primero
+    (11/11/2026). Lo usa el buscador de la Bandeja, que hasta hoy solo miraba
+    el ULTIMO mensaje de cada conversacion ya cargada: «Buscar ... o mensaje»
+    prometia mas de lo que hacia.
+
+    Acotada por organizacion dos veces, como todo este modulo: el
+    'organization_id = %s' explicito y la RLS de 'app_backend' con el tenant
+    fijado por sesion(). Con el tenant equivocado, cero filas.
+
+    ILIKE sin indice: recorre los mensajes de la empresa. Es la decision de
+    hoy -- un indice de trigramas pide una extension de Postgres, y eso es una
+    decision de despliegue, no de esta funcion. Ver el tiempo medido en
+    tests/test_busqueda_mensajes_base.py.
+
+    Devuelve el FRAGMENTO, no el mensaje entero: lo que la pantalla necesita
+    para decidir si abrir la conversacion. Las notas internas entran --quien
+    busca es del equipo-- y viajan marcadas con su rol.
+    """
+    limite = max(1, min(int(limite), BUSQUEDA_MENSAJES_TOPE))
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            # PRIMERO LOS 30 MENSAJES, DESPUES SUS CONVERSACIONES. Escrita como
+            # un join directo, el planificador -- con la RLS de por medio --
+            # eligio un nested loop con las conversaciones afuera y recorrio
+            # la tabla de mensajes UNA VEZ POR CONVERSACION: medido el
+            # 11/11/2026 contra 200.000 mensajes, 4 recorridos de 256 ms =
+            # 1.026 ms. El CTE materializado obliga a un solo recorrido y a
+            # unir solo las 30 filas que quedan.
+            """with hallados as materialized (
+                 select m.id, m.conversation_id, m.rol, m.creado_en, m.contenido
+                 from asistente.messages m
+                 where m.organization_id = %s
+                   and m.rol = any(%s)
+                   and m.contenido ilike %s escape '\\'
+                 order by m.creado_en desc, m.id
+                 limit %s
+               )
+               select h.id as mensaje_id, h.conversation_id, h.rol, h.creado_en,
+                      h.contenido, c.nombre_cliente, c.usuario_externo, c.estado, c.canal
+               from hallados h
+               join asistente.conversations c
+                 on c.id = h.conversation_id and c.organization_id = %s
+               order by h.creado_en desc, h.id""",
+            (org, list(ROLES_BUSCABLES), _patron_ilike(q), limite, org))
+        filas = cur.fetchall()
+    salida = []
+    for f in filas:
+        f = dict(f)
+        f["fragmento"] = _fragmento(f.pop("contenido") or "", q)
+        f["es_nota"] = f.get("rol") == "nota"
+        salida.append(f)
+    return salida
+
+
 def mensajes_de(tenant: str, conversation_id: str) -> dict:
     """
     El encabezado de una conversacion puntual (para el detalle de la

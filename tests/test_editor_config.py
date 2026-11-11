@@ -43,6 +43,7 @@ from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa:
                                   _mutar_marcas_precio,
                                   _mutar_persona, _mutar_rol_de_entrada,
                                   _mutar_rotulos_bandeja,
+                                  _mutar_respuestas_rapidas,
                                   _mutar_casos_manual, _fundir_rotulos_de_casos,
                                   claves_sin_rotulo,
                                   _validar,
@@ -830,6 +831,73 @@ def prueba_rotulos_de_casos() -> None:
               "sin rotulos, claves_sin_rotulo las cuenta todas")
 
 
+def prueba_respuestas_rapidas() -> None:
+    """
+    Las respuestas rapidas de la Bandeja (11/11/2026): «/atajo» en el
+    compositor inserta un texto guardado.
+
+    Lo que se protege: que el atajo se normalice a lo que el compositor
+    compara (sin barra, en minusculas), que una fila a medio llenar no se
+    pierda en silencio, que no haya dos con el mismo atajo, que el formato y
+    el largo los valide el MISMO schema que carga el YAML, y que mandar la
+    lista vacia las borre.
+    """
+    print("\n-- respuestas rapidas de la Bandeja --")
+    doc = documento_base()
+    _mutar_respuestas_rapidas(doc, [
+        {"atajo": " /Saludo ", "texto": "  Hola {nombre}, ¿en qué te ayudo? "},
+        {"atajo": "", "texto": ""},          # renglon vacio del formulario
+        {"atajo": "reinicio", "texto": "Desconectá el equipo 30 segundos."},
+    ])
+    rr = doc["conversaciones"].get("respuestas_rapidas", [])
+    comprobar([r["atajo"] for r in rr] == ["saludo", "reinicio"],
+              "el atajo se guarda sin barra y en minusculas; el renglon vacio se descarta")
+    comprobar(rr[0]["texto"] == "Hola {nombre}, ¿en qué te ayudo?",
+              "el texto se guarda recortado y con {nombre} intacto")
+    cfg = _validar(TENANT, doc)
+    comprobar([r.atajo for r in cfg.conversaciones.respuestas_rapidas] == ["saludo", "reinicio"],
+              "y el documento valida con el mismo validador que usa el motor")
+
+    lanza("texto sin atajo se rechaza en vez de perderse",
+          lambda: _mutar_respuestas_rapidas(documento_base(), [{"atajo": "", "texto": "algo"}]))
+    lanza("atajo sin texto se rechaza",
+          lambda: _mutar_respuestas_rapidas(documento_base(), [{"atajo": "hola", "texto": " "}]))
+    lanza("dos con el mismo atajo se rechazan (aunque difieran en mayusculas o barra)",
+          lambda: _mutar_respuestas_rapidas(documento_base(), [
+              {"atajo": "hola", "texto": "a"}, {"atajo": "/HOLA", "texto": "b"}]))
+
+    for malo, que in (("con espacio", "un atajo con espacios"),
+                      ("atención", "un atajo con tilde"),
+                      ("x" * 31, "un atajo de mas de 30 caracteres"),
+                      ("-hola", "un atajo que empieza con guion")):
+        d = documento_base()
+        _mutar_respuestas_rapidas(d, [{"atajo": malo, "texto": "t"}])
+        lanza(f"{que} lo rechaza el schema", lambda d=d: _validar(TENANT, d))
+    d = documento_base()
+    # Texto de verdad y no "x" * 1001: una cadena repetida sin espacios la
+    # agarra antes el barrido de credenciales, y la prueba pasaria por el
+    # motivo equivocado.
+    _mutar_respuestas_rapidas(d, [{"atajo": "largo", "texto": "Hola que tal. " * 80}])
+    lanza("un texto de mas de 1000 caracteres lo rechaza el schema", lambda: _validar(TENANT, d))
+    d = documento_base()
+    _mutar_respuestas_rapidas(d, [{"atajo": f"r{i}", "texto": "t"} for i in range(101)])
+    lanza("mas de 100 respuestas las rechaza el schema", lambda: _validar(TENANT, d))
+
+    # Repetidas que entran por el YAML (no por el editor) tambien se rechazan.
+    d = documento_base()
+    d.setdefault("conversaciones", {})["respuestas_rapidas"] = [
+        {"atajo": "hola", "texto": "a"}, {"atajo": "hola", "texto": "b"}]
+    lanza("repetidas por el YAML las rechaza el schema", lambda: _validar(TENANT, d))
+
+    _mutar_respuestas_rapidas(doc, [])
+    comprobar("respuestas_rapidas" not in doc["conversaciones"],
+              "una lista vacia borra las respuestas")
+    comprobar(_validar(TENANT, documento_base()).conversaciones.respuestas_rapidas == [],
+              "una empresa que nunca las configuro valida con la lista vacia")
+    lanza("una fila que no es {atajo, texto} se rechaza",
+          lambda: _mutar_respuestas_rapidas(documento_base(), ["solo texto"]))
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -851,6 +919,7 @@ if __name__ == "__main__":
     prueba_marcas_de_precio()
     prueba_rotulos_bandeja()
     prueba_rotulos_de_casos()
+    prueba_respuestas_rapidas()
 
     print("\n" + "=" * 70)
     if fallos:

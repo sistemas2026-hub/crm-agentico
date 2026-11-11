@@ -4879,6 +4879,53 @@ def configuracion_bandeja_rotulos_guardar():
     return jsonify(_rotulos_de(config))
 
 
+def _respuestas_rapidas_de(config) -> list[dict]:
+    """Las respuestas rapidas de la empresa, en el orden en que se guardaron."""
+    return [{"atajo": r.atajo, "texto": r.texto}
+            for r in config.conversaciones.respuestas_rapidas]
+
+
+@app.get("/configuracion/bandeja/respuestas-rapidas")
+def configuracion_bandeja_respuestas_rapidas():
+    """Los textos que se insertan con «/atajo» en el compositor (11/11/2026)."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify({"respuestas_rapidas": _respuestas_rapidas_de(config)})
+
+
+@app.put("/configuracion/bandeja/respuestas-rapidas")
+def configuracion_bandeja_respuestas_rapidas_guardar():
+    """
+    Reemplaza la lista entera de respuestas rapidas (11/11/2026). Endpoint
+    propio por lo mismo que los rotulos: la pantalla edita la lista completa y
+    no tiene por que conocer las guardas de PUT /configuracion/bandeja.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    respuestas = cuerpo.get("respuestas_rapidas")
+    if respuestas is None:
+        # AUSENTE no es «borrarlas todas»: un formulario que olvido el campo
+        # dejaria a la empresa sin respuestas sin que nadie lo pidiera. Para
+        # vaciar la lista se manda una lista vacia.
+        return jsonify({"error": "Falta el campo 'respuestas_rapidas'. Para borrarlas "
+                                 "todas hay que mandar una lista vacía."}), 400
+    try:
+        config = editor.guardar_respuestas_rapidas(tenant, respuestas)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"respuestas_rapidas": _respuestas_rapidas_de(config)})
+
+
 @app.get("/configuracion/canales")
 def configuracion_canales():
     """
@@ -6600,6 +6647,55 @@ def conversaciones():
                     "canal_whatsapp": canal_whatsapp})
 
 
+#: Los limites de lo que se busca. Menos de 3 letras («de», «ok») coincide con
+#: media base y no ayuda a encontrar nada; mas de 100 ya no es una busqueda,
+#: es un mensaje pegado.
+BUSQUEDA_MINIMO, BUSQUEDA_MAXIMO = 3, 100
+
+
+@app.get("/conversaciones/buscar")
+def conversaciones_buscar():
+    """
+    BUSCAR EN LO QUE SE ESCRIBIO  --  11/11/2026
+
+    El buscador de la Bandeja decia «Buscar conversación, cliente o mensaje…»
+    y del mensaje solo miraba el ULTIMO de cada conversacion ya cargada. Un
+    operador que buscaba «poste caído» para encontrar el chat de la semana
+    pasada no lo encontraba, y la pantalla no decia por que.
+
+    Devuelve los 30 mensajes mas recientes que contienen 'q', con un fragmento
+    alrededor de la coincidencia y la identidad VISIBLE de la conversacion --
+    la misma que ya muestra la cola, nada que la pantalla no tenga.
+
+    PRIVACIDAD: 'q' es texto que escribio un cliente o se escribio sobre el --
+    un nombre, una cedula, una direccion. NO va a ningun log: ni aca, ni en el
+    registro de acceso (va en la query string, y gunicorn registra %(U)s, la
+    ruta sin la query; ver docker-compose.prod.yml). Un error se registra por
+    tipo, sin el termino (CLAUDE.md §5).
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    q = " ".join((request.args.get("q") or "").split())
+    if not (BUSQUEDA_MINIMO <= len(q) <= BUSQUEDA_MAXIMO):
+        return jsonify({"error": f"La búsqueda tiene que tener entre {BUSQUEDA_MINIMO} y "
+                                 f"{BUSQUEDA_MAXIMO} caracteres.",
+                        "codigo": "busqueda_fuera_de_rango"}), 400
+    try:
+        resultados = persistencia.buscar_en_mensajes(tenant, q)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("conversaciones", "fallo al buscar en mensajes", error=e)
+        return jsonify({"error": "No se pudo buscar en los mensajes."}), 500
+    for r in resultados:
+        # El mismo criterio que la cola, para que la pantalla esconda las de
+        # prueba con la misma vista que ya eligio arriba.
+        r["canal_operativo"] = r.get("canal") in canales.REALES
+    return jsonify({"resultados": resultados,
+                    "tope": persistencia.BUSQUEDA_MENSAJES_TOPE})
+
+
 @app.get("/tenant-de-organizacion/<organization_id>")
 def tenant_de_organizacion(organization_id):
     """
@@ -7359,6 +7455,18 @@ def conversaciones_mensajes(id_conversacion):
     sesion_guardada = conv.pop("datos_sesion", None) or {}
     conv["equipo"] = {c: sesion_guardada.get(c) for c in Sesion.CAMPOS_PERSISTIBLES
                       if sesion_guardada.get(c)}
+
+    # RESPUESTAS RAPIDAS (11/11/2026): viajan con la conversacion y no con la
+    # cola. La cola se relee cada 8 s y la lista no cambia en el turno; aca
+    # llega una vez por apertura, sin una llamada mas al motor, que es cuando
+    # el compositor la necesita. Al lado del hilo y no dentro de 'conversacion':
+    # es de la empresa, no de esta conversacion. Sin config, lista vacia -- el
+    # «/» no abre nada y el hilo se lee igual.
+    try:
+        resultado["respuestas_rapidas"] = _respuestas_rapidas_de(_config_de(tenant))
+    except Exception as e:
+        registrar("conversaciones", "no se pudieron leer las respuestas rapidas", error=e)
+        resultado["respuestas_rapidas"] = []
 
     return jsonify(resultado)
 

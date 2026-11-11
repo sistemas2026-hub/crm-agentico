@@ -1511,6 +1511,57 @@ def _mutar_rotulos_bandeja(doc: dict, rotulos: dict) -> None:
         conv.pop("rotulos", None)
 
 
+def guardar_respuestas_rapidas(tenant: str, respuestas: list) -> TenantConfig:
+    """
+    Las respuestas rapidas de la Bandeja (11/11/2026): los textos que una
+    persona inserta escribiendo «/atajo» en el compositor.
+
+    Reemplaza la lista entera, como los rotulos: la pantalla edita la lista
+    completa y lo que no manda, se borra. El formato del atajo, el largo del
+    texto y que no se repitan los valida el schema (RespuestaRapida y
+    Conversaciones.respuestas_rapidas), que es la misma regla para el YAML y
+    para esta pantalla; aca se normaliza y se da un mensaje que nombra la fila.
+    """
+    if not isinstance(respuestas, list):
+        raise ErrorEdicion("las respuestas rápidas tienen que venir como una lista.")
+    return _editar(tenant, lambda doc: _mutar_respuestas_rapidas(doc, respuestas))
+
+
+def _mutar_respuestas_rapidas(doc: dict, respuestas: list) -> None:
+    """
+    Una fila con atajo y texto vacios es un renglon que el formulario dejo sin
+    llenar, no un error: se descarta. Una con UNO de los dos vacio si es un
+    error -- quien escribio un texto sin atajo no lo va a poder usar nunca, y
+    descartarlo en silencio seria perderle lo que escribio.
+
+    El atajo se guarda en minusculas y sin la barra: «/Saludo» es lo que
+    alguien escribe pensando en como se usa, y lo que quiso decir es 'saludo'.
+    """
+    limpias: list[dict] = []
+    vistos: set[str] = set()
+    for i, r in enumerate(respuestas, start=1):
+        if not isinstance(r, dict):
+            raise ErrorEdicion(f"la respuesta {i} no tiene la forma {{atajo, texto}}.")
+        atajo = str(r.get("atajo") or "").strip().lstrip("/").strip().lower()
+        texto = str(r.get("texto") or "").strip()
+        if not atajo and not texto:
+            continue
+        if not atajo:
+            raise ErrorEdicion(f"la respuesta {i} tiene texto pero no atajo: sin atajo no se puede usar.")
+        if not texto:
+            raise ErrorEdicion(f"el atajo '/{atajo}' no tiene texto.")
+        if atajo in vistos:
+            raise ErrorEdicion(f"el atajo '/{atajo}' está dos veces: elegir uno dependería del orden.")
+        vistos.add(atajo)
+        limpias.append({"atajo": atajo, "texto": texto})
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    if limpias:
+        conv["respuestas_rapidas"] = limpias
+    else:
+        conv.pop("respuestas_rapidas", None)
+
+
 def guardar_parrilla_canales(tenant: str, canales: list[str]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_parrilla_canales(doc, canales))
 

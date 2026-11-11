@@ -3252,6 +3252,57 @@ class Desenlaces(Base):
     ocultos: list[str] = Field(default_factory=list)
 
 
+# El atajo se escribe despues de una barra en el compositor («/saludo»), asi
+# que es lo que entra en una palabra: minusculas, digitos, guion y guion bajo.
+# Sin espacios ni tildes a proposito -- el filtro de la lista compara lo que
+# va despues de la barra con el atajo, y una tilde que el teclado escribe de
+# una forma y la configuracion guarda de otra haria que «/atencion» no
+# encuentre «atención».
+ATAJO_RESPUESTA = re.compile(r"[a-z0-9][a-z0-9_-]{0,29}")
+#: Cuanto puede medir el texto de una respuesta rapida. Un mensaje de WhatsApp
+#: admite 4096, pero esto es un texto que se reutiliza: uno de mil caracteres
+#: ya es un instructivo, y un instructivo va como documento o plantilla.
+RESPUESTA_RAPIDA_MAXIMO = 1000
+#: Cuantas puede tener una empresa. La lista viaja con cada apertura de una
+#: conversacion: el tope es lo que la mantiene en kilobytes.
+RESPUESTAS_RAPIDAS_MAXIMO = 100
+
+
+class RespuestaRapida(Base):
+    """
+    Un texto guardado que se inserta escribiendo «/atajo» en el compositor de
+    la Bandeja (11/11/2026), como las respuestas rapidas de WhatsApp Business.
+
+    Es de cada empresa porque es texto que lee SU cliente, con SU tono: el
+    saludo, el horario, como se reinicia un equipo. '{nombre}' en el texto se
+    reemplaza por el primer nombre del cliente cuando se conoce; lo resuelve
+    la pantalla, que es la que tiene la conversacion abierta.
+    """
+    atajo: str
+    texto: str
+
+    @field_validator("atajo")
+    @classmethod
+    def _atajo_valido(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not ATAJO_RESPUESTA.fullmatch(v):
+            raise ValueError(
+                f"el atajo '{v}' no sirve: hasta 30 caracteres, en minúsculas, "
+                "sin espacios ni tildes (letras, números, '-' y '_').")
+        return v
+
+    @field_validator("texto")
+    @classmethod
+    def _texto_valido(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("una respuesta rápida sin texto no inserta nada.")
+        if len(v) > RESPUESTA_RAPIDA_MAXIMO:
+            raise ValueError(
+                f"el texto tiene {len(v)} caracteres; el máximo es {RESPUESTA_RAPIDA_MAXIMO}.")
+        return v
+
+
 class Conversaciones(Base):
     """
     Configuracion de la bandeja de conversaciones con clientes finales.
@@ -3289,6 +3340,27 @@ class Conversaciones(Base):
     # Vacio = se cierra sin preguntar (comportamiento viejo). Se declara por
     # empresa porque es texto que lee un cliente, y el tono es de cada una.
     pregunta_antes_de_cerrar: str = ""
+    # RESPUESTAS RAPIDAS (11/11/2026): textos guardados que una persona inserta
+    # escribiendo «/atajo» en el compositor. Quien atiende escribe veinte veces
+    # por turno el mismo saludo y el mismo «reinicie el equipo»; tipearlo cada
+    # vez es tiempo y es la puerta de la falta de ortografia frente al cliente.
+    # Son de la empresa y se editan en Ajustes → Bandeja. Vacia = el «/» no
+    # abre nada. El atajo es unico: dos con el mismo nombre harian que elegir
+    # uno dependa del orden de la lista.
+    respuestas_rapidas: list[RespuestaRapida] = Field(default_factory=list)
+
+    @field_validator("respuestas_rapidas")
+    @classmethod
+    def _respuestas_unicas(cls, v: list[RespuestaRapida]) -> list[RespuestaRapida]:
+        if len(v) > RESPUESTAS_RAPIDAS_MAXIMO:
+            raise ValueError(
+                f"hay {len(v)} respuestas rápidas; el máximo es {RESPUESTAS_RAPIDAS_MAXIMO}.")
+        vistos: set[str] = set()
+        for r in v:
+            if r.atajo in vistos:
+                raise ValueError(f"el atajo '/{r.atajo}' está repetido.")
+            vistos.add(r.atajo)
+        return v
 
 
 class Manual(Base):
