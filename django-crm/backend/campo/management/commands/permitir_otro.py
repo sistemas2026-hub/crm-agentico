@@ -105,10 +105,14 @@ class Command(BaseCommand):
         #  de esa forma las PIERDE, y `componer` corta con «necesita al menos
         #  dos opciones». El simulacro pasaba igual: la diferencia aparece
         #  recien al publicar.
-        for c in campos:
-            r = c.get("reglas") or {}
-            if r.get("options") and not c.get("opciones"):
-                c["opciones"] = list(r["options"])
+        #  SOLO EL CAMPO NOMBRADO, y esto se corrigio despues de verlo en
+        #  produccion (11/11/2026): el bucle recorria TODOS y le agrego la
+        #  clave a `servicio_probado_con_el_cliente`, que nadie pidio tocar.
+        #  Era inocuo --el lector mira las dos claves-- pero el comando promete
+        #  que nada mas cambia, y cambiaba.
+        r = objetivo.get("reglas") or {}
+        if r.get("options") and not objetivo.get("opciones"):
+            objetivo["opciones"] = list(r["options"])
 
         esquema["campos"] = campos
 
@@ -144,8 +148,9 @@ class Command(BaseCommand):
 
         control = copy.deepcopy(vigente.esquema or {})
         for c in (control.get("campos") or []):
-            if c.get("id") == opciones["campo"]:
-                c["permite_otro"] = True
+            if c.get("id") != opciones["campo"]:
+                continue
+            c["permite_otro"] = True
             r = c.get("reglas") or {}
             if r.get("options") and not c.get("opciones"):
                 c["opciones"] = list(r["options"])

@@ -99,6 +99,31 @@ def test_a4_correrlo_dos_veces_no_publica_una_tercera(org_a):
     assert WorkTypeVersion.objects.filter(work_type=tipo).count() == 2
 
 
+def test_a6_NO_TOCA_LOS_OTROS_CAMPOS(org_a):
+    #  Visto en produccion el 11/11/2026: la normalizacion de opciones
+    #  recorria TODOS los campos y le agrego la clave a uno que nadie pidio
+    #  tocar. Era inocuo --el lector mira las dos claves-- pero el comando
+    #  promete que nada mas cambia.
+    otro = {"id": "servicio_probado", "titulo": "Probado",
+            "tipo": "seleccion", "reglas": {"options": ["Hecho", "No aplica"]}}
+    tipo = WorkType.objects.create(org=org_a, codigo="dos_campos",
+                                   nombre="Dos", activo=True)
+    WorkTypeVersion.objects.create(
+        work_type=tipo, version=1, schema_version=1,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [dict(SELECCION_CON_REGLAS), dict(otro)],
+                 "evidencias": []})
+
+    _correr(org_a, tipo, "que_encontro", aplicar=True)
+
+    nueva = WorkTypeVersion.objects.get(work_type=tipo, version=2)
+    campos = {c["id"]: c for c in nueva.esquema["campos"]}
+    assert campos["que_encontro"].get("permite_otro") is True
+    #  EL OTRO, IDENTICO. Ni la bandera ni la clave de opciones.
+    assert campos["servicio_probado"] == otro, (
+        f"se toco un campo que nadie pidio: {campos['servicio_probado']}")
+
+
 # --------------------------------------------------------------------------- #
 # B. Lo que se niega a hacer
 # --------------------------------------------------------------------------- #
