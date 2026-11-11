@@ -68,14 +68,20 @@ class Command(BaseCommand):
                 f"Los que hay: {ids}")
 
         self.stdout.write(f"  {tipo.codigo}: vigente es la v{vigente.version}")
+        #  LAS OPCIONES VIVEN EN DOS LUGARES, y el codigo real lo sabe:
+        #  `reglas.options` o `opciones` (`plantillas.py:687`). Mirar una
+        #  sola dio «0 opciones» en un campo que SI las tiene, medido el
+        #  11/11/2026 con `que_encontro` de `correctivo_fibra`.
+        reglas = objetivo.get("reglas") or {}
+        opciones = list(reglas.get("options") or objetivo.get("opciones") or [])
         self.stdout.write(f"  campo '{objetivo.get('id')}' — tipo "
                           f"'{objetivo.get('tipo')}', "
-                          f"{len(objetivo.get('opciones') or [])} opciones")
+                          f"{len(opciones)} opciones")
 
         #  NO SE MARCA UN CAMPO QUE NO ES DE SELECCION. Un `permite_otro` en un
         #  campo de texto o numerico no significa nada y el validador lo
         #  rechazaria despues, cuando ya se publico una version de mas.
-        if not (objetivo.get("opciones") or []):
+        if not opciones:
             raise CommandError(
                 "ese campo no tiene opciones: «Otro» solo tiene sentido donde "
                 "hay una lista de la que elegir")
