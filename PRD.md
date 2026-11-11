@@ -1070,10 +1070,15 @@ lo diría sin cambiar nada más.
 
 **Orden de despliegue, obligatorio.** Las dos migraciones van por el ledger **antes** del push. El listado, los mensajes y «leída» las leen, y sin ellas responden 500: la Bandeja entera cae. A propósito, no se hizo tolerante a una migración ausente. La config no hace falta cargarla, porque los tres campos nuevos nacen vacíos.
 
-**Lo que queda abierto.**
+**El teléfono de un tercero no sale al proveedor del modelo** (decidido por el dueño el 11/11/2026, el mismo día). La autorización de tratamiento (RNF-01) la firma el cliente y cubre **sus** datos. La persona de una tarjeta de contacto no firmó nada, y que el cliente la comparta no equivale a que esa persona autorice.
 
-- Si la autorización de tratamiento (RNF-01) cubre los datos de un **tercero**, es decir el teléfono de una tarjeta de contacto que el cliente comparte y que llega al modelo. Es pregunta para el dueño.
-- La búsqueda con el volumen real de mensajes.
+- **Qué recibe el modelo:** el nombre y los últimos 4 dígitos («número terminado en 4567»). Le alcanza para responder con naturalidad, y hoy ninguna herramienta usa un teléfono ajeno.
+- **Qué ve el equipo:** el número entero, que queda guardado y aparece en la Bandeja. Ahí lo usa la empresa dentro de su propia operación, sin mandarlo a un tercero.
+- **Dónde se recorta:** en `nucleo/modelo/cliente.py::chat`, por donde pasa **toda** llamada a cualquier proveedor. Desde la base, el número vuelve al modelo por el historial, los resúmenes y la cita de una reacción, así que no alcanza con recortarlo donde se arma el aviso.
+- **Lo que no toca:** el número que escribe el propio cliente es suyo y pasa entero.
+- **Guarda:** `tests/test_contacto_sin_telefono_al_modelo.py`.
+
+**Lo que queda abierto:** la búsqueda con el volumen real de mensajes.
 
 **Lo que la reabre:** una medición de que la negrita en los chats de la IA hace falta, o que una empresa pida que una reacción tardía abra caso.
 

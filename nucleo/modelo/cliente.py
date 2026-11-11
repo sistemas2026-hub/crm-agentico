@@ -40,6 +40,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from nucleo.canales import avisos
+
 
 # =============================================================================
 #  RESPUESTA NORMALIZADA
@@ -466,6 +468,32 @@ def resolver(referencia: str) -> tuple[str, str]:
     return "ollama", referencia
 
 
+def _sin_telefonos_de_terceros(mensajes: list[dict]) -> list[dict]:
+    """
+    Todo lo que sale hacia un proveedor pasa por 'chat', y por eso el telefono
+    de una tarjeta de contacto se recorta ACA y no donde se arma el aviso: el
+    numero entero queda guardado para la Bandeja, y desde la base vuelve al
+    modelo por el historial, el resumen o la cita de una reaccion. Ver
+    avisos.sin_telefonos_de_terceros.
+
+    Copia: la lista del llamador (el historial en memoria) queda intacta. El
+    contenido puede ser texto o, en vision, una lista de partes.
+    """
+    salida = []
+    for m in mensajes:
+        contenido = m.get("content") if isinstance(m, dict) else None
+        if isinstance(contenido, str) and avisos.CONTACTO in contenido:
+            m = {**m, "content": avisos.sin_telefonos_de_terceros(contenido)}
+        elif isinstance(contenido, list):
+            partes = [({**p, "text": avisos.sin_telefonos_de_terceros(p["text"])}
+                       if isinstance(p, dict) and isinstance(p.get("text"), str)
+                       else p)
+                      for p in contenido]
+            m = {**m, "content": partes}
+        salida.append(m)
+    return salida
+
+
 def chat(referencia_modelo: str, mensajes: list[dict],
          tools: list | None = None, temperatura: float = 0.1,
          timeout: float = TIMEOUT_POR_DEFECTO,
@@ -483,6 +511,7 @@ def chat(referencia_modelo: str, mensajes: list[dict],
     """
     proveedor, modelo = resolver(referencia_modelo)
     cli = obtener(proveedor)
+    mensajes = _sin_telefonos_de_terceros(mensajes)
     try:
         return cli.chat(modelo, mensajes, tools, temperatura, timeout,
                         razonamiento=razonamiento)
