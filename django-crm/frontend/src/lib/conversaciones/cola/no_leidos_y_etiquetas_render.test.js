@@ -37,22 +37,39 @@ const fila = (c, extra = {}) =>
     }).body
   );
 
+/* Desde el 11/11/2026 (H5) el contador y la negrita se ven solo con una
+   persona en el caso: pedida o en atención. Las filas de abajo están pedidas. */
+const PEDIDA = { escalada_a_humano: true };
+
 describe('no leídos en la fila', () => {
   it('con mensajes sin leer: el número, la frase para el lector y el nombre en negrita', () => {
-    const html = fila({ no_leidos: 3 });
+    const html = fila({ ...PEDIDA, no_leidos: 3 });
     expect(html).toMatch(/class="no-leidos[^"]*"/);
     expect(texto(html)).toMatch(/3 sin leer/);
     expect(html).toMatch(/class="quien[^"]*sin-leer/);
   });
 
   it('sin nada sin leer: ni contador ni negrita', () => {
-    const html = fila({ no_leidos: 0 });
+    const html = fila({ ...PEDIDA, no_leidos: 0 });
     expect(html).not.toMatch(/no-leidos/);
     expect(html).not.toMatch(/sin-leer/);
   });
 
   it('más de 99 se escribe «99+»: el contador no ensancha la fila', () => {
-    expect(texto(fila({ no_leidos: 140 }))).toMatch(/99\+/);
+    expect(texto(fila({ ...PEDIDA, no_leidos: 140 }))).toMatch(/99\+/);
+  });
+
+  it('en atención (tomada por alguien) también se ven', () => {
+    const html = fila({ tomada_por: 'Ana', no_leidos: 2 });
+    expect(texto(html)).toMatch(/2 sin leer/);
+    expect(html).toMatch(/class="quien[^"]*sin-leer/);
+  });
+
+  it('EL EFECTO (H5): una fila que lleva la IA no tiene contador ni negrita, aunque el motor cuente 3', () => {
+    const html = fila({ no_leidos: 3 });
+    expect(html).not.toMatch(/no-leidos/);
+    expect(html).not.toMatch(/sin-leer/);
+    expect(texto(html)).not.toMatch(/sin leer/);
   });
 });
 

@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from 'svelte/server';
 import ConversationHeader from './ConversationHeader.svelte';
+import { ofreceMarcarNoLeida } from '../lectura.js';
 import CatalogoDeEtiquetas from '../etiquetas/CatalogoDeEtiquetas.svelte';
 
 const catalogo = [
@@ -26,6 +27,22 @@ describe('marcar como no leída', () => {
 
   it('sin la acción no se dibuja', () => {
     expect(dibujar({})).not.toMatch(/Marcar como no leída/);
+  });
+
+  /* H5 (11/11/2026): la pantalla pasa la acción solo donde el contador se va
+     a ver -- `onMarcarNoLeida={ofreceNoLeida ? marcarNoLeida : undefined}` en
+     routes/(app)/conversaciones/[id]/+page.svelte --. */
+  /** @param {any[]} cola */
+  const comoLaPantalla = (cola) =>
+    dibujar({ onMarcarNoLeida: ofreceMarcarNoLeida(cola, conversacion) ? () => {} : undefined });
+
+  it('un chat que lleva la IA no ofrece «Marcar como no leída»', () => {
+    expect(comoLaPantalla([{ ...conversacion, no_leidos: 2 }])).not.toMatch(/Marcar como no leída/);
+  });
+
+  it('uno pedido para una persona, o en atención, sí', () => {
+    expect(comoLaPantalla([{ ...conversacion, escalada_a_humano: true }])).toMatch(/aria-label="Marcar como no leída"/);
+    expect(comoLaPantalla([{ ...conversacion, tomada_por: 'Ana' }])).toMatch(/aria-label="Marcar como no leída"/);
   });
 
   it('si no se pudo, lo dice', () => {

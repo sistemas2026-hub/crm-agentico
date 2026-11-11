@@ -65,7 +65,7 @@
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
   import { plazoDeToma, textoDePlazo } from '$lib/conversaciones/sla.js';
   import { ventanaUrge, comoRestante } from '$lib/conversaciones/ventana.js';
-  import { noLeidos } from '$lib/conversaciones/lectura.js';
+  import { noLeidosVisibles } from '$lib/conversaciones/lectura.js';
   import { etiquetasDeFila, recortar } from '$lib/conversaciones/etiquetas.js';
   import EtiquetaChip from '$lib/conversaciones/etiquetas/EtiquetaChip.svelte';
 
@@ -239,8 +239,10 @@
 
   /* NO LEÍDOS (11/11/2026), como WhatsApp Business: el número de mensajes del
      cliente que nadie del equipo abrió, y el nombre en negrita. Lo cuenta el
-     motor (db.ultima_actividad) y, en un chat, suma sus abiertas. */
-  const sinLeer = $derived(noLeidos(c));
+     motor (db.ultima_actividad) y, en un chat, suma sus abiertas. Se MUESTRA
+     solo con una persona en el caso (H5): en «Lleva la IA» ni número ni
+     negrita. La regla vive en lectura.js, una sola vez. */
+  const sinLeer = $derived(noLeidosVisibles(c));
 
   /* Las etiquetas del equipo: dos a la vista y «+N». Más empujarían el resto
      de las marcas fuera de la columna; todas se ven en la conversación. */

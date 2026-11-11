@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { noLeidos, ultimoDelCliente, filaDelChat, debeMarcarLeida } from './lectura.js';
+import {
+  noLeidos,
+  noLeidosVisibles,
+  hayPersonaEnElCaso,
+  ofreceMarcarNoLeida,
+  ultimoDelCliente,
+  filaDelChat,
+  debeMarcarLeida
+} from './lectura.js';
+import { PREDICADOS } from './cola/pestanas.js';
 
 /**
  * Cuándo la conversación avisa que se leyó (11/11/2026). Lo que se protege:
@@ -31,6 +40,70 @@ describe('lo que se lee', () => {
     expect(filaDelChat(cola, 'x')?.id).toBe('a');
     expect(filaDelChat(cola, 'b')?.id).toBe('b');
     expect(filaDelChat(cola, 'z')).toBeNull();
+  });
+});
+
+/**
+ * Lo que se MUESTRA (11/11/2026, decisión de producto H5): contador, negrita y
+ * filtro «No leídas» solo con una persona en el caso -- la misma regla que las
+ * pestañas «Por atender» y «En atención». En «Lleva la IA», nada.
+ */
+describe('los no leídos se muestran solo con una persona en el caso', () => {
+  const abierta = { estado: 'abierta', no_leidos: 3 };
+  const pedida = { ...abierta, escalada_a_humano: true };
+  const marcada = { ...abierta, necesita_atencion_humana: true };
+  const sinGestion = { ...abierta, banda_nombre: 'sin_gestion' };
+  const tomada = { ...abierta, tomada_por: 'Ana' };
+  const escribio = { ...abierta, atendida: true };
+  const deLaIA = { ...abierta };
+
+  it('pedida para una persona (escalada, marcada o sin gestión): se muestran', () => {
+    for (const c of [pedida, marcada, sinGestion]) expect(noLeidosVisibles(c)).toBe(3);
+  });
+
+  it('en atención (tomada, o una persona ya escribió): se muestran', () => {
+    for (const c of [tomada, escribio]) expect(noLeidosVisibles(c)).toBe(3);
+  });
+
+  it('EL EFECTO: la lleva la IA -- nadie la pidió ni la tomó --: 0, aunque el motor cuente 3', () => {
+    expect(noLeidos(deLaIA)).toBe(3);
+    expect(noLeidosVisibles(deLaIA)).toBe(0);
+  });
+
+  it('un chat de la IA con OTRA abierta pedida del mismo número: se muestran (mira el chat entero)', () => {
+    expect(noLeidosVisibles({ ...deLaIA, abiertas: [{ estado: 'abierta', escalada_a_humano: true }] })).toBe(3);
+  });
+
+  it('es exactamente la regla de las pestañas: visible si y solo si «Por atender» o «En atención»', () => {
+    const casos = [pedida, marcada, sinGestion, tomada, escribio, deLaIA,
+      { ...pedida, estado: 'cerrada' }, { ...tomada, estado: 'cerrada' }];
+    for (const c of casos) {
+      const enPestanaConPersona = PREDICADOS['por-atender'](c) || PREDICADOS['en-atencion'](c);
+      expect(hayPersonaEnElCaso(c)).toBe(enPestanaConPersona);
+      if (PREDICADOS['lleva-ia'](c)) expect(noLeidosVisibles(c)).toBe(0);
+    }
+  });
+
+  it('sin fila, nada', () => {
+    expect(hayPersonaEnElCaso(null)).toBe(false);
+    expect(noLeidosVisibles(undefined)).toBe(0);
+  });
+});
+
+describe('«Marcar como no leída» solo donde el contador se ve', () => {
+  it('se ofrece con una persona en el caso, mirando la fila del CHAT en la cola', () => {
+    const cola = [{ id: 'rep', ids: ['vieja', 'rep'], estado: 'abierta', tomada_por: 'Ana' }];
+    expect(ofreceMarcarNoLeida(cola, { id: 'vieja', estado: 'abierta' })).toBe(true);
+  });
+
+  it('en un chat que lleva la IA no se ofrece', () => {
+    const cola = [{ id: 'c1', estado: 'abierta', no_leidos: 2 }];
+    expect(ofreceMarcarNoLeida(cola, { id: 'c1', estado: 'abierta' })).toBe(false);
+  });
+
+  it('si la cola no tiene el chat, decide la conversación misma', () => {
+    expect(ofreceMarcarNoLeida([], { id: 'c1', estado: 'abierta', escalada_a_humano: true })).toBe(true);
+    expect(ofreceMarcarNoLeida(undefined, { id: 'c1', estado: 'abierta' })).toBe(false);
   });
 });
 

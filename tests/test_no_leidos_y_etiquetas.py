@@ -19,7 +19,11 @@ Dos funciones nuevas de la Bandeja, como WhatsApp Business:
              equipo abrio. Lo que se protege aca: que la fila AGRUPADA sume los
              de todas sus abiertas (el cliente puede haber escrito en la que no
              es la urgente), y que la ruta de «no leida» no tome un "false" en
-             texto por verdadero.
+             texto por verdadero. La cuenta es la de siempre en TODO chat:
+             desde el 11/11/2026 (auditoria H5) la pantalla los MUESTRA solo
+             con una persona en el caso -- la regla de las pestañas «Por
+             atender»/«En atencion», que vive en estado.js --, y eso se prueba
+             alla: django-crm/frontend/src/lib/conversaciones/lectura.test.js.
 
   ETIQUETAS  las que pone una persona al chat. Lo que se protege: que una
              clave fuera del catalogo de la empresa se rechace ENTERA antes de

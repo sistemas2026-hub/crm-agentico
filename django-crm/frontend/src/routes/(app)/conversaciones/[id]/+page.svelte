@@ -33,7 +33,13 @@
   import { itemsDelChat } from '$lib/conversaciones/chat.js';
   import { estadoDeLaConversacion, cierreDe } from '$lib/conversaciones/estado-unico.js';
   import { estadoDeDevolucion } from '$lib/conversaciones/devolucion.js';
-  import { noLeidos, ultimoDelCliente, filaDelChat, debeMarcarLeida } from '$lib/conversaciones/lectura.js';
+  import {
+    noLeidos,
+    ultimoDelCliente,
+    filaDelChat,
+    debeMarcarLeida,
+    ofreceMarcarNoLeida
+  } from '$lib/conversaciones/lectura.js';
   import {
     sesionDeGrabacion,
     soltarRecursosDelCompositor
@@ -1195,6 +1201,11 @@
   });
   let marcandoNoLeida = $state(false);
   let avisoLectura = $state('');
+  /* «Marcar como no leída» solo donde el contador se va a ver (H5,
+     11/11/2026): con una persona en el caso. En un chat que lleva la IA no
+     dejaría nada en negrita. Marcar LEÍDA al abrir sigue igual: usa la cuenta
+     cruda, porque que alguien lo vio es cierto lo lleve quien lo lleve. */
+  const ofreceNoLeida = $derived(ofreceMarcarNoLeida(data.conversaciones, conversacion));
 
   async function intentarMarcarLeida() {
     // Recién marcada «no leída», la cola nueva va a decir que tiene no leídos
@@ -2062,7 +2073,7 @@
     {guardandoEtiquetas}
     {errorEtiquetas}
     onCambiarEtiquetas={cambiarEtiquetas}
-    onMarcarNoLeida={marcarNoLeida}
+    onMarcarNoLeida={ofreceNoLeida ? marcarNoLeida : undefined}
     {marcandoNoLeida}
     {avisoLectura}
   />

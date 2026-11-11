@@ -55,7 +55,7 @@
     resultadosDeLaVista,
     SIN_BUSQUEDA
   } from '$lib/conversaciones/busqueda-mensajes.js';
-  import { noLeidos } from '$lib/conversaciones/lectura.js';
+  import { noLeidosVisibles } from '$lib/conversaciones/lectura.js';
   import { contarEtiquetas, tieneEtiqueta } from '$lib/conversaciones/etiquetas.js';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
@@ -393,7 +393,10 @@
 
   /* Lo que muestran los dos filtros nuevos, contado sobre la PESTAÑA actual
      por lo mismo que los motivos (11/11/2026). */
-  let nNoLeidas = $derived(deLaPestana(base, filtro).filter((c) => noLeidos(c) > 0).length);
+  /* «No leídas» cuenta lo que la fila MUESTRA (H5, 11/11/2026): solo chats
+     con una persona en el caso. Contar los que lleva la IA daría un filtro con
+     cifra que, puesto, lista filas sin ningún número a la vista. */
+  let nNoLeidas = $derived(deLaPestana(base, filtro).filter((c) => noLeidosVisibles(c) > 0).length);
   let etiquetasCola = $derived(contarEtiquetas(deLaPestana(base, filtro), catalogoEtiquetas, etiqueta));
 
   /* Los chips de motivo ya no se recortan a cuatro con un «+N más»
@@ -451,7 +454,7 @@
           (/** @type {any} */ x) => String(x.asignada_a_usuario_id ?? '') === filtroOperador));
     }
     if (motivo) lista = lista.filter((/** @type {any} */ c) => c.motivo_escalamiento === motivo);
-    if (soloNoLeidas) lista = lista.filter((/** @type {any} */ c) => noLeidos(c) > 0);
+    if (soloNoLeidas) lista = lista.filter((/** @type {any} */ c) => noLeidosVisibles(c) > 0);
     if (etiqueta) lista = lista.filter((/** @type {any} */ c) => tieneEtiqueta(c, etiqueta));
 
     const q = busqueda.trim().toLowerCase();
