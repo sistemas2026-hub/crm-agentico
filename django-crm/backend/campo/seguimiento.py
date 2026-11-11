@@ -53,6 +53,12 @@ from common.models import Org, Profile
 #: cada empresa lo cambia en su fila.
 MINUTOS_PARA_REPORTAR = 30
 
+#: Cada cuanto se REPITE el recordatorio mientras no llega el reporte.
+#: Lo pidio el usuario el 11/11/2026 con estos numeros: «primer reporte a
+#: los 30 minutos y si no recibe a los 15». Los 30 son
+#: `MINUTOS_PARA_REPORTAR`; estos son los 15.
+MINUTOS_ENTRE_RECORDATORIOS = 15
+
 
 class ConfiguracionDeSeguimiento(BaseModel):
     """Cada cuanto tiene que reportar un trabajo abierto, por empresa."""
@@ -91,6 +97,27 @@ class ConfiguracionDeSeguimiento(BaseModel):
             "Si el Supervisor le manda un recordatorio al teléfono del "
             "técnico cuando su orden pasa la ventana sin reporte. Uno "
             "por atraso: un reporte nuevo empieza otro."
+        ),
+    )
+
+    #: 11/11/2026: el recordatorio INSISTE hasta que llega el reporte.
+    #:
+    #: El usuario: «el supervisor notifica solo la primera vez que no han
+    #: reportado pero si despues del reporte no mandan nada queda asi no
+    #: vuelve a notificar. Hay que poner que notifique hasta recibir el
+    #: reporte: primer reporte a los 30 minutos y si no recibe a los 15, y
+    #: si no recibe asi hasta recibir».
+    #:
+    #: EN CERO SE COMPORTA COMO ANTES: un solo aviso por atraso. Existe
+    #: porque la insistencia es una decision de procedimiento de cada
+    #: empresa, no del motor (CLAUDE.md §3.3), y porque apagarla tiene que
+    #: ser posible sin tocar codigo el dia que moleste.
+    repetir_recordatorio_cada_minutos = models.PositiveSmallIntegerField(
+        default=MINUTOS_ENTRE_RECORDATORIOS,
+        help_text=(
+            "Cada cuántos minutos se vuelve a avisar mientras el técnico "
+            "sigue sin reportar. En 0 se avisa una sola vez por atraso, "
+            "como antes."
         ),
     )
 

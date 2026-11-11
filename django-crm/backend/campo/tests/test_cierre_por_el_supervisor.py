@@ -260,15 +260,39 @@ def test_m_sin_la_medicion_que_espera_no_la_cierra(abierto, orden, monkeypatch):
 
 
 def test_c_la_pantalla_ya_no_habilita_el_cierre(admin_client, user_client, org_a):
+    """EL `==` ES EXACTO A PROPOSITO, no por comodidad: lo que esta guarda
+    cuida es que la pantalla NO exponga una casilla para que el Supervisor
+    cierre solo --eso se delega desde su chat, con actor y motivo (auditoria
+    de frontera, 30/10/2026)-- y un `in` dejaria pasar el campo que venga.
+
+    Cuando se agrega un campo legitimo, se agrega ACA tambien: que el test
+    obligue a pasar por esta linea es la mitad del valor que tiene.
+    `repetir_recordatorio_cada_minutos` entro el 11/11/2026.
+    """
     URL = "/api/campo/seguimiento/configuracion/"
-    assert admin_client.get(URL).json() == {"recordar_al_tecnico": True}
+    ESPERADO = {"recordar_al_tecnico": True,
+                "repetir_recordatorio_cada_minutos": 15}
+    assert admin_client.get(URL).json() == ESPERADO
     r = admin_client.put(URL, {"recordar_al_tecnico": False,
                                "supervisor_cierra_solo": True}, format="json")
-    assert r.status_code == 200 and r.json() == {"recordar_al_tecnico": False}
+    assert r.status_code == 200 and r.json() == {
+        **ESPERADO, "recordar_al_tecnico": False}
     assert admin_client.put(URL, {"recordar_al_tecnico": "si"},
                             format="json").status_code == 400
     assert user_client.put(URL, {"recordar_al_tecnico": True},
                            format="json").status_code in (403, 404)
+
+    #  EL CAMPO NUEVO SE VALIDA COMO NUMERO, no como booleano. El modelo es
+    #  `PositiveSmallIntegerField`: sin tope, un 70000 revienta en la base
+    #  con un 500 en vez de decir que el numero no sirve.
+    for malo in ("quince", -1, 70000, True, 1.5):
+        assert admin_client.put(
+            URL, {"repetir_recordatorio_cada_minutos": malo},
+            format="json").status_code == 400, malo
+    r = admin_client.put(URL, {"repetir_recordatorio_cada_minutos": 0},
+                         format="json")
+    assert r.status_code == 200 and r.json()[
+        "repetir_recordatorio_cada_minutos"] == 0
 
 
 def test_l_programacion_dice_por_que_no_pudo_y_el_log_que_la_cerro(

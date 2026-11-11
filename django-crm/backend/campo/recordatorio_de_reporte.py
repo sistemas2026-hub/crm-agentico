@@ -50,6 +50,42 @@ def recuerda_al_tecnico(org) -> bool:
     return True if fila is None else bool(fila.recordar_al_tecnico)
 
 
+def cada_cuanto_insiste(org) -> int:
+    """Minutos entre un recordatorio y el siguiente. 0 = uno solo."""
+    from campo.seguimiento import (MINUTOS_ENTRE_RECORDATORIOS,
+                                   ConfiguracionDeSeguimiento)
+
+    fila = ConfiguracionDeSeguimiento.objects.filter(org=org).first()
+    if fila is None:
+        return MINUTOS_ENTRE_RECORDATORIOS
+    return int(fila.repetir_recordatorio_cada_minutos or 0)
+
+
+def cual_recordatorio(minutos, ventana, cada) -> int:
+    """Que numero de recordatorio toca a esta altura del atraso.
+
+    LA CUENTA, CON LOS NUMEROS DEL USUARIO (ventana 30, cada 15):
+
+        minuto 30  ->  1     el primero, el que ya existia
+        minuto 44  ->  1     todavia no pasaron 15 del anterior
+        minuto 45  ->  2
+        minuto 60  ->  3     y asi hasta que reporte
+
+    ES LO QUE HACE QUE EL AVISO SE REPITA, y no una cuenta decorativa: este
+    numero entra en la CLAVE de idempotencia (`avisos.avisar_sin_reporte`).
+    Mientras devuelva lo mismo, la clave ya esta tomada y no sale nada; en
+    cuanto sube, es un aviso nuevo. Sin esto la clave solo lleva la
+    referencia, que no se mueve hasta que el tecnico reporta -- que es
+    exactamente por que hasta hoy avisaba una sola vez.
+
+    LA TAREA CORRE CADA 5 MINUTOS, asi que el aviso 2 sale entre el minuto
+    45 y el 50. El retraso es del muestreo, no de la cuenta.
+    """
+    if cada <= 0:
+        return 1
+    return 1 + max(0, int(minutos) - int(ventana)) // int(cada)
+
+
 def recordar_para(org, *, ahora=None) -> dict:
     """Recorre las ordenes en ejecucion de UNA empresa y avisa las vencidas.
     `{"vencidas": n, "avisadas": n}`: avisadas son las que reclamaron su clave
@@ -66,6 +102,7 @@ def recordar_para(org, *, ahora=None) -> dict:
     zona = R._zona_de(org)
     hoy = ahora.astimezone(zona).date()
     config = SS.configuracion_de(org)
+    cada = cada_cuanto_insiste(org)
     for orden in (OrdenTrabajo.objects.filter(org=org, estado_operativo__in=SS.EN_EJECUCION)
                   .prefetch_related("asignaciones__profile")):
         s = SS.calcular(orden, ahora=ahora, config=config)
@@ -75,6 +112,13 @@ def recordar_para(org, *, ahora=None) -> dict:
         if referencia is None or referencia.astimezone(zona).date() != hoy:
             continue
         salida["vencidas"] += 1
-        if avisos.avisar_sin_reporte(orden, s["minutos_desde_la_referencia"], s["referencia"]):
+        #  `SS.configuracion_de` devuelve una TUPLA
+        #  `(minutos_para_reportar, minutos_contacto_reciente)`, no la fila.
+        #  La primera version leyo `config.minutos_para_reportar` y reviento
+        #  toda llamada que llegaba a avisar -- diez guardas en rojo de una.
+        cual = cual_recordatorio(s["minutos_desde_la_referencia"],
+                                 config[0], cada)
+        if avisos.avisar_sin_reporte(orden, s["minutos_desde_la_referencia"],
+                                     s["referencia"], cual=cual):
             salida["avisadas"] += 1
     return salida

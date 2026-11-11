@@ -293,25 +293,39 @@ def avisar_jornada_publicada(org, nuevas_por_perfil: dict, fecha) -> None:
         )
 
 
-def avisar_sin_reporte(orden, minutos, referencia: str) -> bool:
+def avisar_sin_reporte(orden, minutos, referencia: str, *, cual: int = 1) -> bool:
     """El recordatorio al tecnico (30/10/2026, `campo/recordatorio_de_reporte.py`):
     «⏱ OT #12: 38 min sin reportar». Devuelve si ESTA llamada lo mando.
 
-    UNO POR ATRASO. La clave lleva la referencia de la regla, y se reclama
-    ANTES de escribir la notificacion y en la misma transaccion: la tarea mira
-    cada 5 minutos, y sin el reclamo cada vuelta dejaria otra notificacion
-    igual en la campanita del tecnico. El push sale despues, fuera de la
-    transaccion, con la misma fila (`registro`).
+    UNO POR ATRASO Y POR RECORDATORIO. La clave lleva la referencia de la
+    regla y CUAL recordatorio es, y se reclama ANTES de escribir la
+    notificacion y en la misma transaccion: la tarea mira cada 5 minutos, y
+    sin el reclamo cada vuelta dejaria otra notificacion igual en la
+    campanita del tecnico. El push sale despues, fuera de la transaccion, con
+    la misma fila (`registro`).
+
+    `cual` LO CALCULA `recordatorio_de_reporte.cual_recordatorio` y es lo que
+    hace que el aviso se repita: la referencia no se mueve hasta que el
+    tecnico reporta, asi que sin este numero la clave era siempre la misma y
+    solo salia el primer aviso (11/11/2026, pedido del usuario).
+
+    EL PRIMERO CONSERVA LA CLAVE VIEJA, sin sufijo. No es cosmetica: el dia
+    del deploy hay ordenes vencidas que YA recibieron su aviso con esa clave,
+    y ponerle sufijo a todas haria que el primer recordatorio saliera de
+    nuevo para cada una. Un duplicado en el telefono de cada tecnico, el
+    mismo minuto, por una migracion.
     """
     perfiles = _asignados(orden)
     if not perfiles:
         return False
-    contenido = {"orden_numero": orden.numero, "minutos": minutos}
+    contenido = {"orden_numero": orden.numero, "minutos": minutos,
+                 "recordatorio": cual}
+    sufijo = "" if cual <= 1 else f"|{cual}"
     try:
         with transaction.atomic():
             registro = AvisoEnviado.objects.create(
                 org=orden.org,
-                clave=f"{CLAVE_SIN_REPORTE}|{orden.id}|{referencia}"[:200])
+                clave=f"{CLAVE_SIN_REPORTE}|{orden.id}|{referencia}{sufijo}"[:200])
             avisos_por_perfil = _notificar(
                 perfiles, VERBO_SIN_REPORTE, entity=orden,
                 entity_name=f"OT #{orden.numero}", link=f"/ot/{orden.id}",

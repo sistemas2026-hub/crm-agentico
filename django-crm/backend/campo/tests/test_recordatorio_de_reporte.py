@@ -108,14 +108,27 @@ def test_r1_vencida_hoy_un_aviso_y_la_vuelta_siguiente_no_repite(
         avisos.VERBO_SIN_REPORTE,
         "⏱ OT #4321: 40 min sin reportar. Mandá un avance desde la app.",
         f"/ot/{orden.id}")
-    assert m["contenido"] == {"orden_numero": 4321, "minutos": 40}
+    #  `recordatorio` desde el 11/11/2026: cual de la serie es. Lo lleva el
+    #  push para que se pueda saber, desde afuera, cuantas veces se insistio.
+    assert m["contenido"] == {"orden_numero": 4321, "minutos": 40,
+                              "recordatorio": 1}
     n = Notification.objects.get(recipient=user_profile, verb=avisos.VERBO_SIN_REPORTE)
     assert str(n.id) == m["aviso_id"], "el push es LA notificacion, no una copia"
     crudo = json.dumps(m, ensure_ascii=False)
     assert "Beatriz" not in crudo and "Calle 50" not in crudo
 
-    #  Cinco minutos despues, el mismo atraso: ni push ni notificacion nueva.
-    r2 = RR.recordar_para(org, ahora=mediodia + dt.timedelta(minutes=5))
+    #  TRES MINUTOS DESPUES, Y POR QUE TRES Y NO CINCO  --  11/11/2026
+    #
+    #  Desde que el recordatorio INSISTE (cada 15 minutos por omision, ver
+    #  `cual_recordatorio`), «la vuelta siguiente» tiene que caer DENTRO del
+    #  mismo intervalo para medir lo que este caso mide: que no se avisa dos
+    #  veces por lo mismo. Con cinco el atraso llega a 45 --exactamente el
+    #  segundo recordatorio-- y lo que fallaria no es el reclamo de la clave
+    #  sino la eleccion del momento.
+    #
+    #  Que a los 45 SI vuelva a avisar lo afirma
+    #  `test_recordatorio_que_insiste.py`, que es donde vive esa pregunta.
+    r2 = RR.recordar_para(org, ahora=mediodia + dt.timedelta(minutes=3))
     assert r2 == {"vencidas": 1, "avisadas": 0}
     assert len(fcm) == 1
     assert Notification.objects.filter(recipient=user_profile,
