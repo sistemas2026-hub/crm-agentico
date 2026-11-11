@@ -374,11 +374,32 @@ def punto_de_la_revision(orden):
     """
     from campo.models import AnalisisDeEvidencia
 
-    analisis = list(AnalisisDeEvidencia.objects.filter(
+    todas = list(AnalisisDeEvidencia.objects.filter(
         org=orden.org, evidencia__orden_trabajo=orden,
         vuelta=orden.vuelta).order_by("created_at"))
-    if not analisis:
+    if not todas:
         return None
+
+    #  LA ULTIMA DE CADA FOTO, NO TODAS LAS FILAS  --  11/11/2026, OT #200
+    #
+    #  La tabla es append-only: cada intento suma una fila. Contarlas todas
+    #  hacia que un intento FALLIDO pesara para siempre, aunque el siguiente
+    #  hubiera leido la foto bien.
+    #
+    #  MEDIDO EN LA OT #200, y es el caso que deja ver por que importa:
+    #      ia 10/11 15:17:31  motivo=no se pudo hablar con el motor (ReadTimeout)
+    #      ia 10/11 18:14:45  «Medidor Rouhan; pantalla legible: 1550 nm...»
+    #  El reintento del 10/11 hizo su trabajo y el punto seguia diciendo
+    #  «1 no se pudieron mirar». Sin esto, reintentar no sirve de nada aca:
+    #  ninguna mirada posterior puede limpiar el intento que fallo.
+    #
+    #  MISMO CRITERIO QUE EL RESTO DEL CIERRE: `_fotos_que_muestran_otra_cosa`
+    #  y `mirar_las_que_faltan` ya se quedan con la ultima por evidencia. Este
+    #  punto era el unico que las sumaba.
+    ultimo = {}
+    for a in todas:
+        ultimo[a.evidencia_id] = a
+    analisis = list(ultimo.values())
 
     mirados = [a for a in analisis if a.texto]
     sin_mirar = [a for a in analisis if not a.texto]

@@ -128,12 +128,25 @@ def _potencia(orden):
 
 def test_NO_DICE_QUE_COINCIDE_SI_SOLO_MIRO_UNA(org_a):
     """Lo que el panel mostro en verde el 10/11. Si esta guarda vuelve a
-    permitir ese texto, la OT #200 vuelve a pasar sin que nadie lo note."""
+    permitir ese texto, la OT #200 vuelve a pasar sin que nadie lo note.
+
+    LO QUE CAMBIA ES EL TEXTO, NO EL VEREDICTO  --  corregido el 11/11
+    -------------------------------------------------------------------
+    La primera version de esta guarda exigia `ok is None`, y la de
+    `test_la_medicion_que_nadie_miro.py::test_LA_ORDEN_SIGUE_CERRANDO`
+    (09/11) se puso en rojo: el limite «informa, no frena» es deliberado,
+    porque con el modelo moviendo el punto decimal 3 de cada 7 veces,
+    frenar por cada medicion sin verificar deja de cerrar casi todo. La
+    afirmacion de mas estaba en la FRASE --«la potencia» en singular-- y ahi
+    es donde se arregla: el punto nombra cual coincidio.
+    """
     _, punto = _potencia(_orden(org_a, 9921))
 
     assert punto is not None, "el punto desaparecio en vez de decir la verdad"
-    assert punto["ok"] is None, punto
-    assert "coincide" not in punto["texto"].lower(), punto["texto"]
+    #  La frase que no puede volver: habla de las dos habiendo mirado una.
+    assert "la potencia que muestra la foto coincide" not in \
+        punto["texto"].lower(), punto["texto"]
+    assert "al llegar" in punto["texto"], punto["texto"]
 
 
 def test_Y_DICE_CUAL_FALTO(org_a):

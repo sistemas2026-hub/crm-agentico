@@ -670,7 +670,7 @@ def _potencia(orden, cierre):
                         or {}).get("evidencias") or [])
                       if isinstance(e, dict) and e.get("id")}
         dudas, vistos, rehacer, sin_mirar, ilegibles = [], 0, [], [], []
-        sin_analizar = []
+        sin_analizar, verificadas = [], []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
             texto_foto = _texto_de_la_foto(orden, requisito)
@@ -761,6 +761,7 @@ def _potencia(orden, cierre):
             if escrito is None or de_la_foto is None:
                 continue
             vistos += 1
+            verificadas.append(cuando)
             ok, por_que = PF.comparar(de_la_foto, escrito)
             if ok is False:
                 dudas.append(f"{cuando}, {por_que}")
@@ -809,10 +810,37 @@ def _potencia(orden, cierre):
         #  trabado: el punto de las fotos ya cuenta esa misma foto en «no se
         #  pudieron mirar». La diferencia es que esto no depende de que ese
         #  otro punto siga contandola.
-        if sin_analizar:
-            return _punto("potencia", None,
-                          "Solo se pudo comparar una de las dos mediciones."
-                          + nota)
+        #  LO QUE SE ARREGLA ES EL TEXTO, NO EL VEREDICTO  --  11/11/2026
+        #
+        #  La OT #200, releida: el modelo volvio a escribir «-2.10» donde la
+        #  pantalla dice «-21.0», la lectura se descarto con razon, y el
+        #  punto salio «La potencia que muestra la foto coincide con la que
+        #  reporto el tecnico» con la nota pegada atras. Esa frase habla de
+        #  «la potencia» como si fueran una sola, y se compararon una de dos.
+        #
+        #  SE PROBO BAJAR EL VEREDICTO A `None` Y LAS GUARDAS LO FRENARON, y
+        #  tenian razon: `test_LA_ORDEN_SIGUE_CERRANDO` (09/11) dice que el
+        #  limite es deliberado --«informa, no frena»-- porque con el modelo
+        #  moviendo el punto decimal 3 de cada 7 veces, frenar por cada
+        #  lectura descartada deja de cerrar casi todas las ordenes. Eso es
+        #  peor que el problema. No se reabre sin una medicion que mueva ese
+        #  numero, y la de hoy no lo mueve: lo confirma.
+        #
+        #  Nombrar CUAL coincidio dice la verdad entera sin frenar nada, y
+        #  deja el texto bien de los dos lados: la nota ya explica la que no.
+        #
+        #  QUIEN SI FRENA, cuando corresponde: el punto de las fotos, que
+        #  cuenta la que no tiene texto, y el checklist. Una foto sin analisis
+        #  ademas se reintenta (`mirar_las_que_faltan`), asi que esa ausencia
+        #  es transitoria -- razon de mas para que no frene nada aca.
+        if sin_analizar or sin_mirar:
+            cuales = (("La medición " + " y la ".join(verificadas)
+                       + (" coincide con su foto." if len(verificadas) == 1
+                          else " coinciden con su foto."))
+                      if verificadas else
+                      "Ninguna medición se pudo verificar contra su foto.")
+            return _punto("potencia", True if verificadas else None,
+                          cuales + nota)
         return _punto("potencia", True,
                       "La potencia que muestra la foto coincide con la que "
                       "reporto el tecnico." + nota)
