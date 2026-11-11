@@ -19,6 +19,8 @@ base: se doblan.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 from pathlib import Path
 
@@ -103,11 +105,17 @@ originales += [(api.whatsapp, "enviar_texto", api.whatsapp.enviar_texto),
                (api.whatsapp, "marcar_leido", api.whatsapp.marcar_leido),
                (api.encuesta, "responder_boton", api.encuesta.responder_boton),
                (api.consumo, "estado_del_gasto", api.consumo.estado_del_gasto),
-               (api.persistencia, "contenido_de_wamid", api.persistencia.contenido_de_wamid)]
+               (api.persistencia, "contenido_de_wamid", api.persistencia.contenido_de_wamid),
+               (api.persistencia, "estado_de_conversacion_abierta",
+                api.persistencia.estado_de_conversacion_abierta)]
+#: Lo que pregunta el canal antes de llevar una reaccion al turno (H6).
+consultas_abierta: list = []
+HORAS_INACTIVIDAD = 24
 
 
 class Config:
-    pass
+    class limites:
+        horas_inactividad_cierra = HORAS_INACTIVIDAD
 
 
 try:
@@ -124,6 +132,10 @@ try:
     api.persistencia.contenido_de_wamid = lambda t, w, canal, de: (
         buscados.append((w, canal, de))
         or ("¿Te interesa que registre la solicitud?" if w == "w.NUESTRO" else None))
+    # Por defecto el chat TIENE una conversacion abierta: es el caso de todas
+    # las reacciones de abajo hasta el bloque H6.
+    api.persistencia.estado_de_conversacion_abierta = lambda t, canal, de, horas=None: (
+        consultas_abierta.append((canal, de, horas)) or {"conversation_id": "c-abierta"})
 
     def procesar(mensaje):
         turnos.clear(); textos.clear()
@@ -168,6 +180,44 @@ try:
     procesar({"id": "w.R5", "type": "reaction", "reaction": {"message_id": "w.L", "emoji": "👍"}})
     revisar(turnos and len(turnos[0]) < 220 and turnos[0].endswith("…»]"),
             "un mensaje largo se cita recortado", f"{len(turnos[0]) if turnos else None}")
+
+    # H6 (11/11/2026, auditoria): un 👍 a la despedida, con el chat ya cerrado,
+    # abria una conversacion nueva que la IA contestaba. Decision: sin una
+    # conversacion abierta, la reaccion no abre ninguna y no se contesta.
+    revisar(consultas_abierta and consultas_abierta[-1] == ("whatsapp", "573001112233", HORAS_INACTIVIDAD),
+            "pregunta por la abierta de ESE chat, con el mismo plazo de inactividad que usa el turno",
+            f"{consultas_abierta[-1:]}")
+    api.persistencia.contenido_de_wamid = lambda t, w, canal, de: (
+        buscados.append((w, canal, de)) or "¡Gracias por escribirnos! Que tengas buen dia.")
+    api.persistencia.estado_de_conversacion_abierta = lambda t, canal, de, horas=None: None
+    buscados.clear()
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        procesar({"id": "w.R6", "type": "reaction", "reaction": {"message_id": "w.ADIOS", "emoji": "👍"}})
+    log = salida.getvalue()
+    revisar(turnos == [] and textos == [],
+            "EL EFECTO: un 👍 sin conversacion abierta no llega al turno ni recibe respuesta",
+            f"{turnos} {textos}")
+    revisar(buscados == [], "ni siquiera se busca a que reacciono", f"{buscados}")
+    revisar("reaccion sin conversacion abierta" in log
+            and "573001112233" not in log and "👍" not in log and "w.ADIOS" not in log,
+            "al log va el evento, sin el numero, el emoji ni el mensaje", log)
+
+    procesar({"id": "w.T2", "type": "text", "text": {"body": "hola de nuevo"}})
+    revisar(turnos == ["hola de nuevo"],
+            "un TEXTO sin conversacion abierta abre una, como siempre: la regla es solo de reacciones",
+            f"{turnos}")
+
+    def abierta_rompe(t, canal, de, horas=None):
+        raise RuntimeError("la base no contesta")
+    api.persistencia.estado_de_conversacion_abierta = abierta_rompe
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        procesar({"id": "w.R7", "type": "reaction", "reaction": {"message_id": "w.ADIOS", "emoji": "👍"}})
+    revisar(turnos == ["[El cliente reacciono con 👍 a: «¡Gracias por escribirnos! Que tengas buen dia.»]"],
+            "si la consulta falla, se sigue como hasta hoy: la reaccion va al turno", f"{turnos}")
+    revisar("573001112233" not in salida.getvalue(),
+            "y el fallo se registra sin el numero", salida.getvalue())
 
     procesar({"id": "w.S", "type": "unsupported"})
     revisar(textos and "no puedo leer" in textos[0] and turnos == [],

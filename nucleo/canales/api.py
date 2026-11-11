@@ -11457,6 +11457,37 @@ _AVISO_ADJUNTO = {
 CITA_DE_REACCION_MAXIMA = 160
 
 
+def _reaccion_cae_en_una_abierta(config, tenant: str, de: str) -> bool:
+    """
+    UN 👍 A LA DESPEDIDA NO ABRE UNA CONVERSACION  --  11/11/2026 (auditoria H6)
+
+    Una reaccion entra al turno como respuesta, y registrar_mensaje solo
+    reutiliza una conversacion ABIERTA y vigente: si el chat ya se cerro (o la
+    abierta vencio por inactividad, que el turno cierra antes de guardar), el
+    👍 a «¡Gracias por escribirnos!» abria una conversacion nueva y la IA la
+    contestaba. Decision de producto: una reaccion sin conversacion abierta no
+    abre ninguna y no se contesta. Es la MISMA consulta y el MISMO plazo que
+    decide donde cae el mensaje (estado_de_conversacion_abierta,
+    horas_inactividad_cierra): si aca hay una, el turno escribe en esa.
+
+    Al log va solo el evento: ni el numero, ni el emoji, ni a que reacciono.
+    Si la consulta falla se sigue como hasta hoy, al turno: perder una
+    respuesta del cliente es peor que contestar un 👍 de mas.
+    """
+    try:
+        abierta = persistencia.estado_de_conversacion_abierta(
+            tenant, canales.WHATSAPP, de, config.limites.horas_inactividad_cierra or None)
+    except Exception as e:
+        registrar("whatsapp", "no se pudo saber si la reaccion cae en una conversacion abierta",
+                  tenant=tenant, error=e)
+        return True
+    if abierta is None:
+        registrar("whatsapp", "reaccion sin conversacion abierta: no abre ninguna ni se contesta",
+                  tenant=tenant)
+        return False
+    return True
+
+
 def _texto_de_reaccion(tenant: str, reaccion: dict, de: str) -> str:
     """
     «[El cliente reacciono con 👍 a: «...»]». Si el mensaje no se encuentra
@@ -11824,6 +11855,8 @@ def _procesar_mensaje_whatsapp(config, tenant: str, rol: str, entrante: dict) ->
         if tipo == "reaction":
             reaccion = entrante.get("reaccion") or {}
             if not reaccion.get("emoji"):
+                return
+            if not _reaccion_cae_en_una_abierta(config, tenant, de):
                 return
             texto = _texto_de_reaccion(tenant, reaccion, de)
 
