@@ -6,7 +6,8 @@ import {
   leerRotulosBandeja,
   guardarReincidencia,
   leerRespuestasRapidas,
-  guardarRespuestasRapidas
+  guardarRespuestasRapidas,
+  guardarEtiquetasDelEquipo
 } from '$lib/server/v2/bandeja-config.js';
 
 /** Prefijo de los campos del formulario de rótulos: `rotulo:<clave>`. */
@@ -195,5 +196,48 @@ export const actions = {
       });
     }
     return { respuestasGuardadas: true };
+  },
+
+  /* El catálogo de etiquetas del equipo (11/11/2026). La pantalla arma la
+     lista ENTERA en un campo oculto `etiquetas` (JSON): crear, renombrar,
+     cambiar el color y borrar se guardan juntos, como el organigrama. Acá
+     solo se comprueba la FORMA -- una lista de {clave?, nombre, color} -- y
+     se arma la lista que viaja con los tres campos y nada más: lo que el
+     navegador agregue no llega al motor. Qué color existe, el largo del
+     nombre y las repetidas los valida el motor contra el esquema. */
+  async etiquetas({ fetch, request, locals }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, {
+        etiquetas: { error: 'Solo un administrador puede cambiar las etiquetas del equipo.' }
+      });
+    }
+    const form = await request.formData();
+    /** @type {any} */
+    let crudo;
+    try {
+      crudo = JSON.parse(form.get('etiquetas')?.toString() || '[]');
+    } catch {
+      crudo = null;
+    }
+    if (!Array.isArray(crudo) || !crudo.every((e) => e && typeof e === 'object')) {
+      return fail(400, { etiquetas: { error: 'No se entendió la lista de etiquetas. Recargá la página.' } });
+    }
+    const lista = crudo.map((/** @type {any} */ e) => {
+      const salida = /** @type {{ clave?: string, nombre: string, color: string }} */ ({
+        nombre: String(e.nombre ?? '').trim(),
+        color: String(e.color ?? 'gris')
+      });
+      if (typeof e.clave === 'string' && e.clave.trim()) salida.clave = e.clave.trim();
+      return salida;
+    });
+    if (lista.some((e) => !e.nombre)) {
+      return fail(400, { etiquetas: { error: 'Hay una etiqueta sin nombre: escribí uno o borrala.' } });
+    }
+    try {
+      await guardarEtiquetasDelEquipo(locals, fetch, lista);
+    } catch (/** @type {any} */ err) {
+      return fail(400, { etiquetas: { error: err?.message || 'No se pudieron guardar las etiquetas.' } });
+    }
+    return { etiquetasGuardadas: true };
   }
 };

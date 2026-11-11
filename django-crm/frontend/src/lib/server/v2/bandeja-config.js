@@ -206,6 +206,33 @@ export async function guardarRespuestasRapidas(locals, fetch, respuestas) {
 }
 
 /**
+ * Reemplaza el catálogo entero de etiquetas del equipo (11/11/2026): crear,
+ * renombrar, cambiar el color y borrar son el mismo gesto. Una etiqueta sin
+ * `clave` es nueva y el motor se la arma desde el nombre; las que ya tienen
+ * clave la conservan aunque cambie el nombre (es lo que guardan los chats).
+ * El motor valida color, nombre y repetidas, y su mensaje se deja pasar.
+ * Devuelve lo mismo que `leerRotulosBandeja`, ya con el catálogo nuevo.
+ *
+ * @param {{ clave?: string, nombre: string, color: string }[]} etiquetas
+ */
+export async function guardarEtiquetasDelEquipo(locals, fetch, etiquetas) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) {
+    throw new Error('Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT).');
+  }
+  const resp = await fetch(`${cfg.baseUrl}/configuracion/bandeja/etiquetas`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, etiquetas })
+  });
+  const datos = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(datos.error || 'El asistente rechazó el cambio.');
+  }
+  return datos;
+}
+
+/**
  * Cuántos días mira el aviso de reincidencia (29/10/2026). 0 lo apaga. El
  * rango lo valida el motor y su mensaje se deja pasar.
  *

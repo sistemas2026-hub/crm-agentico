@@ -13,7 +13,8 @@
    * fueron el 04/11/2026: el estado se dice una sola vez, en la línea de
    * HandoffControls (lib/conversaciones/estado-unico.js).
    */
-  import { ArrowLeft, Phone, User, PanelRightOpen, PanelRightClose } from '@lucide/svelte';
+  import { ArrowLeft, Phone, User, PanelRightOpen, PanelRightClose, MessageSquareDot } from '@lucide/svelte';
+  import SelectorDeEtiquetas from '$lib/conversaciones/etiquetas/SelectorDeEtiquetas.svelte';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import { telefonoLegible } from '$lib/conversaciones/formato.js';
 
@@ -31,7 +32,20 @@
     ficha = null,
     /** Cómo se lee cada caso en esta empresa (lib/conversaciones/rotulos.js). */
     rotulos = {},
-    onAlternarContexto
+    onAlternarContexto,
+    /* ETIQUETAS DEL EQUIPO (11/11/2026): el catálogo de la empresa y las del
+       chat. Guarda la página; acá solo se dibujan y se avisa el cambio. */
+    catalogoEtiquetas = [],
+    etiquetasAsignadas = [],
+    guardandoEtiquetas = false,
+    errorEtiquetas = '',
+    onCambiarEtiquetas = undefined,
+    /* «MARCAR COMO NO LEÍDA» (11/11/2026). Sin el aviso no se dibuja el
+       botón. Lo que dice si no se pudo (p. ej. el chat no tiene mensajes del
+       cliente) va en `avisoLectura`. */
+    onMarcarNoLeida = undefined,
+    marcandoNoLeida = false,
+    avisoLectura = ''
   } = $props();
 
   /* REINCIDENCIA (29/10/2026): la cuenta la hace el motor
@@ -156,6 +170,19 @@
         </span>
       {/if}
     </div>
+
+    <!-- TERCER RENGLÓN: las etiquetas que el equipo le puso al chat
+         (11/11/2026). Solo si la empresa tiene catálogo. -->
+    <SelectorDeEtiquetas
+      catalogo={catalogoEtiquetas}
+      asignadas={etiquetasAsignadas}
+      guardando={guardandoEtiquetas}
+      error={errorEtiquetas}
+      onCambiar={onCambiarEtiquetas}
+    />
+    {#if avisoLectura}
+      <p class="aviso-lectura" role="status">{avisoLectura}</p>
+    {/if}
   </div>
 
   <!-- La caja «Control humano / La atiende la IA» y su filete se fueron el
@@ -170,6 +197,23 @@
        cabecera para algo que el ícono del panel ya dice. El nombre sigue en
        'aria-label' (lector de pantalla) y en 'title' (al pasar el mouse), y
        el ícono cambia según si el panel está abierto o no. -->
+  <!-- «Marcar como no leída» (11/11/2026): un ícono, como el de contexto, y
+       con su nombre en 'aria-label' y 'title'. Lo usa quien abrió el chat
+       para dejarlo «para después»: vuelve a la lista con el chat en negrita,
+       como en WhatsApp. -->
+  {#if onMarcarNoLeida}
+    <button
+      type="button"
+      class="v2-btn v2-btn-sm boton-icono"
+      onclick={() => onMarcarNoLeida?.()}
+      disabled={marcandoNoLeida}
+      aria-label="Marcar como no leída"
+      title="Marcar como no leída"
+    >
+      <MessageSquareDot size={16} aria-hidden="true" />
+    </button>
+  {/if}
+
   <button
     type="button"
     class="v2-btn v2-btn-sm contexto-toggle boton-icono"
@@ -187,6 +231,12 @@
 </header>
 
 <style>
+  .aviso-lectura {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+  }
+
   /* La reincidencia se lee como aviso, no como un identificador más: cambia
      lo que conviene ofrecerle al cliente. */
   .reincide {
@@ -331,6 +381,8 @@
   /* Cuadrado y con el ícono al centro: un botón de solo ícono con el
      relleno de uno de texto queda angosto y desparejo. */
   .boton-icono {
+    display: inline-flex;
+    flex: none;
     width: 32px;
     height: 32px;
     padding: 0;

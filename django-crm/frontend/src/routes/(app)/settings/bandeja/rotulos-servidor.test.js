@@ -12,6 +12,7 @@ const guardarRotulosBandeja = vi.fn();
 const leerRotulosBandeja = vi.fn();
 const leerAjustesBandeja = vi.fn();
 const guardarReincidencia = vi.fn();
+const guardarEtiquetasDelEquipo = vi.fn();
 vi.mock('$lib/server/v2/bandeja-config.js', () => ({
   guardarAjustesBandeja: vi.fn(),
   leerAjustesBandeja: (...a) => leerAjustesBandeja(...a),
@@ -21,7 +22,8 @@ vi.mock('$lib/server/v2/bandeja-config.js', () => ({
   // Las respuestas rápidas (11/11/2026) se cargan en el mismo load; tienen su
   // propia prueba en respuestas-servidor.test.js.
   leerRespuestasRapidas: async () => [],
-  guardarRespuestasRapidas: vi.fn()
+  guardarRespuestasRapidas: vi.fn(),
+  guardarEtiquetasDelEquipo: (...a) => guardarEtiquetasDelEquipo(...a)
 }));
 
 const { actions, load } = await import('./+page.server.js');
@@ -89,5 +91,60 @@ describe('rótulos de la Bandeja', () => {
     const r = /** @type {any} */ (await actions.rotulos(evento({ 'rotulo:queja': 'Queja' }, 'USER')));
     expect(r.status).toBe(403);
     expect(guardarRotulosBandeja).not.toHaveBeenCalled();
+  });
+});
+
+/* Las etiquetas del equipo (11/11/2026): el campo oculto con la lista entera
+   tiene que llegar al motor con clave/nombre/color y NADA más, y una lista
+   malformada no puede llegar. */
+describe('etiquetas del equipo', () => {
+  // Con llaves: lo que devuelve un beforeEach, vitest lo llama como limpieza
+  // al terminar cada prueba -- y devolver el mock lo invocaba de más.
+  beforeEach(() => {
+    guardarEtiquetasDelEquipo.mockReset().mockResolvedValue({});
+  });
+
+  it('la lista llega entera; la nueva sin clave, la renombrada con la suya', async () => {
+    const r = /** @type {any} */ (await actions.etiquetas(evento({
+      etiquetas: JSON.stringify([
+        { clave: 'vip', nombre: ' Muy importante ', color: 'amarillo', extra: 'no viaja' },
+        { clave: '', nombre: 'Nueva', color: 'verde' }
+      ])
+    })));
+    expect(r.etiquetasGuardadas).toBe(true);
+    expect(guardarEtiquetasDelEquipo.mock.calls[0][2]).toEqual([
+      { clave: 'vip', nombre: 'Muy importante', color: 'amarillo' },
+      { nombre: 'Nueva', color: 'verde' }
+    ]);
+  });
+
+  it('una lista vacía se manda vacía: es borrarlas todas', async () => {
+    await actions.etiquetas(evento({ etiquetas: '[]' }));
+    expect(guardarEtiquetasDelEquipo.mock.calls[0][2]).toEqual([]);
+  });
+
+  it('un JSON roto o una sin nombre no llegan al motor', async () => {
+    const roto = /** @type {any} */ (await actions.etiquetas(evento({ etiquetas: '{no' })));
+    const sinNombre = /** @type {any} */ (await actions.etiquetas(evento({
+      etiquetas: JSON.stringify([{ nombre: '  ', color: 'gris' }])
+    })));
+    expect(roto.status).toBe(400);
+    expect(sinNombre.status).toBe(400);
+    expect(guardarEtiquetasDelEquipo).not.toHaveBeenCalled();
+  });
+
+  it('el error del motor llega tal cual', async () => {
+    guardarEtiquetasDelEquipo.mockRejectedValue(new Error("'#f0a' no es uno de los colores"));
+    const r = /** @type {any} */ (await actions.etiquetas(evento({
+      etiquetas: JSON.stringify([{ nombre: 'X', color: '#f0a' }])
+    })));
+    expect(r.status).toBe(400);
+    expect(r.data.etiquetas.error).toMatch(/colores/);
+  });
+
+  it('quien no es administrador no escribe', async () => {
+    const r = /** @type {any} */ (await actions.etiquetas(evento({ etiquetas: '[]' }, 'USER')));
+    expect(r.status).toBe(403);
+    expect(guardarEtiquetasDelEquipo).not.toHaveBeenCalled();
   });
 });

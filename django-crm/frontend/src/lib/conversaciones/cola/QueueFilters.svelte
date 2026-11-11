@@ -28,7 +28,17 @@
    * en una tira que se desplaza de costado. Con el desplazamiento todos los
    * motivos están a la vista de un gesto, así que el «+N más» se fue: era un
    * tercer renglón para esconder lo que la tira ya no necesita esconder.
+   *
+   * «NO LEÍDAS» Y LAS ETIQUETAS VAN EN LA TIRA  (11/11/2026)
+   * La fila de controles está medida al límite (ver `.controles`): un cuarto
+   * control no entra. Así que los dos filtros nuevos abren la tira, antes de
+   * los motivos y separados por un filete, y la tira se dibuja SIEMPRE: «No
+   * leídas» es un filtro de todos los días, como en WhatsApp, y esconderlo
+   * cuando no hay motivos lo haría desaparecer justo cuando la cola está
+   * tranquila. Siguen siendo dos renglones.
    */
+  import { estiloDeColor } from '$lib/conversaciones/etiquetas.js';
+
   let {
     // --- qué canales se ven
     vista = $bindable('operativo'),
@@ -38,6 +48,13 @@
     // --- escaladas y motivo
     soloEscaladas = $bindable(false),
     motivo = $bindable(''),
+    // --- no leídas y etiqueta del equipo (11/11/2026)
+    soloNoLeidas = $bindable(false),
+    etiqueta = $bindable(''),
+    /** Cuántos chats de la pestaña tienen algo sin leer. */
+    nNoLeidas = 0,
+    /** [[{clave, nombre, color}, n]]: lo calcula el layout sobre la pestaña. */
+    etiquetasCola = [],
     // --- derivado del layout: se representa, no se recalcula
     motivos = [],
     // --- helper puro, compartido con la fila de la lista
@@ -66,7 +83,8 @@
   let tira = $state(/** @type {HTMLElement|null} */ (null));
   $effect(() => {
     void motivos;
-    if (!tira || !motivo) return;
+    void etiquetasCola;
+    if (!tira || !(motivo || etiqueta)) return;
     const elegido = /** @type {HTMLElement|null} */ (
       tira.querySelector('[data-motivo][aria-pressed="true"]'));
     if (!elegido) return;
@@ -124,28 +142,60 @@
 
        Se dibuja solo si hay mas de un motivo en la pestaña: con uno solo, el
        filtro no separa nada y es una fila de ruido. -->
-  {#if motivos.length > 1}
-    <div class="motivos" role="group" aria-label="Filtrar por motivo de escalada" bind:this={tira}>
+  <div class="motivos" bind:this={tira}>
+    <div class="grupo" role="group" aria-label="Filtrar por lectura y por etiqueta del equipo">
+      <!-- Como el «No leídos» de WhatsApp: se cruza con la pestaña, igual que
+           «Solo escaladas». La cifra son CHATS con algo sin leer. -->
       <button
         type="button"
         class="motivo"
-        aria-pressed={motivo === ''}
-        onclick={() => (motivo = '')}>Todos</button
+        aria-pressed={soloNoLeidas}
+        onclick={() => (soloNoLeidas = !soloNoLeidas)}
+        title="Chats con mensajes del cliente que nadie del equipo abrió"
       >
-      {#each motivos as [m, n] (m)}
+        No leídas
+        <span class="b-cifra">{nNoLeidas}</span>
+      </button>
+      {#each etiquetasCola as [e, n] (e.clave)}
         <button
           type="button"
-          class="motivo"
+          class="motivo motivo-etq"
           data-motivo
-          aria-pressed={motivo === m}
-          onclick={() => (motivo = motivo === m ? '' : m)}
+          aria-pressed={etiqueta === e.clave}
+          onclick={() => (etiqueta = etiqueta === e.clave ? '' : e.clave)}
+          style={estiloDeColor(e.color)}
         >
-          {motivoLabel(m)}
+          <span class="punto-etq" aria-hidden="true"></span>
+          {e.nombre}
           <span class="b-cifra">{n}</span>
         </button>
       {/each}
     </div>
-  {/if}
+
+    {#if motivos.length > 1}
+      <span class="separador" aria-hidden="true"></span>
+      <div class="grupo" role="group" aria-label="Filtrar por motivo de escalada">
+        <button
+          type="button"
+          class="motivo"
+          aria-pressed={motivo === ''}
+          onclick={() => (motivo = '')}>Todos</button
+        >
+        {#each motivos as [m, n] (m)}
+          <button
+            type="button"
+            class="motivo"
+            data-motivo
+            aria-pressed={motivo === m}
+            onclick={() => (motivo = motivo === m ? '' : m)}
+          >
+            {motivoLabel(m)}
+            <span class="b-cifra">{n}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
 
 <style>
   /* ── canal, orden y filtro de escalada ───────────────────────────────── */
@@ -245,6 +295,38 @@
       scrollbar-width: thin;
       scrollbar-color: var(--bandeja-borde-fuerte) transparent;
     }
+  }
+
+  .grupo {
+    display: flex;
+    flex: none;
+    gap: 4px;
+  }
+
+  /* Entre los filtros del equipo y los motivos: un filete de 1px, para que
+     «Todos» se lea como «todos los motivos» y no como «sacá todo». */
+  .separador {
+    flex: none;
+    align-self: stretch;
+    width: 1px;
+    margin: 2px 2px;
+    background: var(--bandeja-borde);
+  }
+
+  /* La etiqueta se reconoce por su punto de color; el chip sigue siendo el
+     mismo que los motivos para que la tira no sea un muestrario. Elegida, toma
+     su color entero. */
+  .punto-etq {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--etq-texto);
+  }
+
+  .motivo.motivo-etq[aria-pressed='true'] {
+    color: var(--etq-texto);
+    background: var(--etq-fondo);
+    border-color: var(--etq-borde);
   }
 
   .motivos::-webkit-scrollbar {

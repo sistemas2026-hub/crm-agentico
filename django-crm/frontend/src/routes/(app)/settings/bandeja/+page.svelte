@@ -33,6 +33,7 @@
   import StatCard from '$lib/v2/components/StatCard.svelte';
   import SettingsFormPanel from '$lib/v2/components/SettingsFormPanel.svelte';
   import { Timer, Activity, PlugZap, Tag, MessageSquareText } from '@lucide/svelte';
+  import CatalogoDeEtiquetas from '$lib/conversaciones/etiquetas/CatalogoDeEtiquetas.svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -425,6 +426,19 @@
           </p>
         </div>
       </div>
+
+      <!-- ── ETIQUETAS DEL EQUIPO (11/11/2026) ──────────────────────────────
+           Viajan con los rótulos (GET /configuracion/bandeja/rotulos): sin
+           esa lectura no hay catálogo que mostrar ni que editar. -->
+      {#if r}
+        <CatalogoDeEtiquetas
+          catalogo={r.etiquetas_del_equipo ?? []}
+          colores={r.colores_de_etiqueta ?? undefined}
+          puedeEditar={data.can_edit}
+          error={form?.etiquetas?.error ?? ''}
+          guardadas={!!form?.etiquetasGuardadas}
+        />
+      {/if}
 
       {#if !data.can_edit}
         <p class="v2-hint" style="margin-top:12px">

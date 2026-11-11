@@ -55,6 +55,8 @@
     resultadosDeLaVista,
     SIN_BUSQUEDA
   } from '$lib/conversaciones/busqueda-mensajes.js';
+  import { noLeidos } from '$lib/conversaciones/lectura.js';
+  import { contarEtiquetas, tieneEtiqueta } from '$lib/conversaciones/etiquetas.js';
 
   /** @type {{ data: any, children: import('svelte').Snippet }} */
   let { data, children } = $props();
@@ -169,6 +171,13 @@
       esta ADEMAS por atender, o en atencion, o resuelta. Por eso es un filtro
       que se cruza con la pestaña, y no una quinta pestaña. */
   let soloEscaladas = $state(false);
+  /* «No leídas» y la etiqueta del equipo (11/11/2026). Los dos se cruzan con
+     la pestaña, como «Solo escaladas» y el motivo. */
+  let soloNoLeidas = $state(false);
+  /** '' = todas. La clave de una etiqueta del equipo. */
+  let etiqueta = $state('');
+  /** El catálogo [{clave, nombre, color}], uno solo para la empresa. */
+  let catalogoEtiquetas = $derived(data.etiquetas_del_equipo ?? []);
   /* El panel de carga del equipo y el filtro por persona (29/10/2026). */
   const esAdmin = $derived(data.yo?.rol === 'ADMIN');
   let verCarga = $state(false);
@@ -377,6 +386,11 @@
     return [...cuenta.entries()].sort((a, b) => b[1] - a[1]);
   });
 
+  /* Lo que muestran los dos filtros nuevos, contado sobre la PESTAÑA actual
+     por lo mismo que los motivos (11/11/2026). */
+  let nNoLeidas = $derived(deLaPestana(base, filtro).filter((c) => noLeidos(c) > 0).length);
+  let etiquetasCola = $derived(contarEtiquetas(deLaPestana(base, filtro), catalogoEtiquetas, etiqueta));
+
   /* Los chips de motivo ya no se recortan a cuatro con un «+N más»
      (04/11/2026): van todos en una tira que se desplaza de costado, en un solo
      renglón. Ver QueueFilters. */
@@ -432,6 +446,8 @@
           (/** @type {any} */ x) => String(x.asignada_a_usuario_id ?? '') === filtroOperador));
     }
     if (motivo) lista = lista.filter((/** @type {any} */ c) => c.motivo_escalamiento === motivo);
+    if (soloNoLeidas) lista = lista.filter((/** @type {any} */ c) => noLeidos(c) > 0);
+    if (etiqueta) lista = lista.filter((/** @type {any} */ c) => tieneEtiqueta(c, etiqueta));
 
     const q = busqueda.trim().toLowerCase();
     if (q) {
@@ -619,6 +635,7 @@
       <QueueFilters
         bind:vista bind:orden bind:ordenElegido
         bind:soloEscaladas bind:motivo
+        bind:soloNoLeidas bind:etiqueta {nNoLeidas} {etiquetasCola}
         {motivos} {motivoLabel} {ORDENES}
       />
     {/if}
@@ -629,6 +646,7 @@
       areas={data.areas ?? {}}
       busquedaMensajes={busquedaMensajes.estado === 'inactivo' ? null : busquedaMensajes}
       resultadosMensajes={resultadosDeLaVista(busquedaMensajes.resultados, vista)}
+      etiquetas={catalogoEtiquetas}
     />
   </aside>
 

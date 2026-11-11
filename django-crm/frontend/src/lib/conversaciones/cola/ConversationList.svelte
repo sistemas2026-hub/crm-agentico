@@ -47,7 +47,9 @@
     /** @type {import('$lib/conversaciones/busqueda-mensajes.js').EstadoBusqueda | null} */
     busquedaMensajes = null,
     /** Los resultados ya filtrados por la vista de canales del layout. */
-    resultadosMensajes = []
+    resultadosMensajes = [],
+    /** El catálogo de etiquetas del equipo (11/11/2026). Se propaga tal cual. */
+    etiquetas = []
   } = $props();
 </script>
 
@@ -60,7 +62,7 @@
     <QueueEmptyState variante="sin-coincidencias" {busqueda} />
   {:else}
     {#each visibles as c (c.id)}
-      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {areas} {slaToma} />
+      <ConversationRow {c} {abierta} {ahora} {tramoEspera} {motivoLabel} {ventanaDe} {areas} {slaToma} {etiquetas} />
     {/each}
   {/if}
   {#if busquedaMensajes && !error}

@@ -18,7 +18,9 @@ const { envMock } = vi.hoisted(() => ({
 }));
 vi.mock('$env/dynamic/private', () => ({ env: envMock }));
 
-const { leerAjustesBandeja, guardarAjustesBandeja } = await import('./bandeja-config.js');
+const { leerAjustesBandeja, guardarAjustesBandeja, guardarEtiquetasDelEquipo } = await import(
+  './bandeja-config.js'
+);
 
 const CONFIGURADO = {
   PRIVATE_ASISTENTE_URL: 'http://motor:5000',
@@ -197,5 +199,30 @@ describe('guardarAjustesBandeja', () => {
       guardarAjustesBandeja(sinSesion, fetchMock, { sla_toma_minutos: 15, umbral_rx_dbm: -27 })
     ).rejects.toThrow(/no configurado/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/* El catálogo de etiquetas del equipo (11/11/2026). Lo que se protege: que
+   la lista viaje ENTERA y tal cual (una sin clave es nueva; el motor se la
+   arma), al endpoint propio, con el tenant de la sesión. */
+describe('guardarEtiquetasDelEquipo', () => {
+  it('manda la lista entera al endpoint de etiquetas', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ etiquetas_del_equipo: [] }) });
+    const lista = [
+      { clave: 'vip', nombre: 'Cliente VIP', color: 'violeta' },
+      { nombre: 'Nueva', color: 'verde' }
+    ];
+    await guardarEtiquetasDelEquipo(LOCALS, fetchMock, lista);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://motor:5000/configuracion/bandeja/etiquetas');
+    expect(fetchMock.mock.calls[0][1].method).toBe('PUT');
+    expect(cuerpoEnviado()).toEqual({ tenant: 'rapilink', etiquetas: lista });
+  });
+
+  it('el rechazo del motor llega con su motivo', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "'#f0a' no es uno de los colores de etiqueta" })
+    });
+    await expect(guardarEtiquetasDelEquipo(LOCALS, fetchMock, [])).rejects.toThrow(/colores/);
   });
 });

@@ -81,6 +81,11 @@ export async function load({ fetch, depends, locals }) {
              /* Las áreas de la empresa {clave: etiqueta}, para escalar (T22) y
                 para decir a cuál se escaló. */
              areas: datos.areas ?? {},
+             /* El catálogo de etiquetas del equipo [{clave, nombre, color}]
+                (11/11/2026). Sin esta línea las filas llegan con sus claves y
+                ninguna se dibuja: el salto donde §6 dice que un dato se pierde
+                con el backend en verde (cola-acotada.test.js lo cuida). */
+             etiquetas_del_equipo: datos.etiquetas_del_equipo ?? [],
              /* Los tres numeros crudos de la salud del canal. El veredicto
                 lo arma `lib/conversaciones/canal.js`, en un solo lugar. */
              canal_whatsapp: datos.canal_whatsapp ?? null,

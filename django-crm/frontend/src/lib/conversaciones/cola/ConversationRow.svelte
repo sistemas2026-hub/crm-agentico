@@ -65,6 +65,9 @@
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
   import { plazoDeToma, textoDePlazo } from '$lib/conversaciones/sla.js';
   import { ventanaUrge, comoRestante } from '$lib/conversaciones/ventana.js';
+  import { noLeidos } from '$lib/conversaciones/lectura.js';
+  import { etiquetasDeFila, recortar } from '$lib/conversaciones/etiquetas.js';
+  import EtiquetaChip from '$lib/conversaciones/etiquetas/EtiquetaChip.svelte';
 
   let {
     // La conversación, entera y tal como la manda el motor.
@@ -86,7 +89,10 @@
     areas = {},
     /** El plazo de toma del tenant, en minutos. 0 = la empresa no definió
         objetivo y no se dibuja cuenta regresiva. */
-    slaToma = 0
+    slaToma = 0,
+    /** El catálogo de etiquetas del equipo [{clave, nombre, color}], uno solo
+        para la empresa: viaja con la cola, como los rótulos (11/11/2026). */
+    etiquetas = []
   } = $props();
 
   /* EL CANAL SE NOMBRA SOLO CUANDO NO ES WHATSAPP (04/11/2026). La vista que
@@ -230,9 +236,20 @@
      nadie -- no hay nada que tomar. */
   const sinDuenioDexter = $derived(!c.asignada_a && c.es_legado && !resuelta(c));
   const canalAparte = $derived(!!c.canal && c.canal !== 'whatsapp');
+
+  /* NO LEÍDOS (11/11/2026), como WhatsApp Business: el número de mensajes del
+     cliente que nadie del equipo abrió, y el nombre en negrita. Lo cuenta el
+     motor (db.ultima_actividad) y, en un chat, suma sus abiertas. */
+  const sinLeer = $derived(noLeidos(c));
+
+  /* Las etiquetas del equipo: dos a la vista y «+N». Más empujarían el resto
+     de las marcas fuera de la columna; todas se ven en la conversación. */
+  const deLaFila = $derived(etiquetasDeFila(c.etiquetas_del_equipo, etiquetas));
+  const chips = $derived(recortar(deLaFila));
+
   const hayMarcas = $derived(
     !!plazo || !!c.area_destino || urgeVentana || insiste || estaActiva(c) ||
-      !!c.asignada_a || sinDuenioDexter || canalAparte
+      !!c.asignada_a || sinDuenioDexter || canalAparte || chips.visibles.length > 0
   );
 </script>
 
@@ -248,7 +265,7 @@
       {#if urgencia}
         <span class="urgencia {urgencia}" aria-hidden="true"></span>
       {/if}
-      <span class="quien">
+      <span class="quien" class:sin-leer={sinLeer > 0}>
         <!-- Quien escribe por WhatsApp se identifica con un telefono y quien
              prueba desde el CRM con un uuid. El icono se queda porque
              distinguir un cliente real de una prueba de un vistazo sigue
@@ -267,10 +284,18 @@
           ? `Esperando desde hace ${shortAge(esperaIso)}`
           : `Última actividad hace ${shortAge(c.actualizado_en)}`}
       >{shortAge(esperaIso || c.actualizado_en)}</span>
+      {#if sinLeer > 0}
+        <!-- El número va oculto al lector de pantalla y la frase entera no:
+             «3» solo no dice de qué es. -->
+        <span class="no-leidos" title="{sinLeer} {sinLeer === 1 ? 'mensaje' : 'mensajes'} del cliente sin leer">
+          <span aria-hidden="true">{sinLeer > 99 ? '99+' : sinLeer}</span>
+          <span class="oculto">{sinLeer} sin leer</span>
+        </span>
+      {/if}
     </div>
 
     <div class="renglon renglon-2">
-      <span class="de-que">
+      <span class="de-que" class:sin-leer={sinLeer > 0}>
         {#if tema}<span class="tema">{tema}</span>{#if resumen}<span aria-hidden="true">{' · '}</span>{resumen}{/if}
         {:else if resumen}{resumen}
         {:else}
@@ -342,6 +367,15 @@
              mensaje de los ultimos minutos y se apaga solo. -->
         {#if estaActiva(c)}
           <span class="latido">Activa</span>
+        {/if}
+        <!-- Las etiquetas que le puso el equipo al chat (11/11/2026). -->
+        {#each chips.visibles as e (e.clave)}
+          <EtiquetaChip nombre={e.nombre} color={e.color} tamano="fila" />
+        {/each}
+        {#if chips.resto > 0}
+          <span class="etq-resto" title={deLaFila.slice(chips.visibles.length).map((e) => e.nombre).join(', ')}
+            >+{chips.resto}</span
+          >
         {/if}
         <!-- `asignada_a` es la ASIGNACIÓN DURABLE DE DEXTER (proyeccion.py).
              NO es el dueño del ticket del CRM -- D28.
@@ -473,6 +507,50 @@
 
   .hace-tarde {
     color: var(--bandeja-error);
+  }
+
+  /* SIN LEER (11/11/2026): como WhatsApp, el nombre y el texto un tono más
+     fuertes y un contador al final del renglón. El contador es marino -- el
+     color de la acción de una persona --, no el verde: en esta Bandeja el
+     verde dice «en vivo / confirmado». */
+  .quien.sin-leer {
+    font-weight: 700;
+  }
+
+  .de-que.sin-leer {
+    color: var(--bandeja-texto);
+  }
+
+  .no-leidos {
+    flex: none;
+    align-self: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--bandeja-accion);
+    color: #fff;
+    font-family: var(--bandeja-titulo);
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .oculto {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .etq-resto {
+    flex: none;
+    color: var(--bandeja-texto-2);
+    font-size: 11px;
   }
 
   /* ── renglón 2: de qué se trata, y el estado ─────────────────────────── */

@@ -33,6 +33,7 @@
   import { itemsDelChat } from '$lib/conversaciones/chat.js';
   import { estadoDeLaConversacion, cierreDe } from '$lib/conversaciones/estado-unico.js';
   import { estadoDeDevolucion } from '$lib/conversaciones/devolucion.js';
+  import { noLeidos, ultimoDelCliente, filaDelChat, debeMarcarLeida } from '$lib/conversaciones/lectura.js';
   import {
     sesionDeGrabacion,
     soltarRecursosDelCompositor
@@ -1178,6 +1179,147 @@
     };
   });
 
+  // --- leída / no leída (11/11/2026, como WhatsApp Business) -----------------
+  // La marca es del EQUIPO y del CHAT (motor: db.marcar_leida). Cuándo se
+  // avisa lo decide `debeMarcarLeida` (lib/conversaciones/lectura.js): al
+  // abrir y cuando llega algo nuevo del cliente con la pestaña a la vista --
+  // lo trae el sondeo de acá, o la cola dice que el chat tiene no leídos
+  // (otra abierta del mismo número). Nunca en cada sondeo sin novedad.
+  let lectura = $state({
+    enVuelo: false,
+    marcadaAlAbrir: false,
+    /** @type {number | null} sello del proxy, mismo reloj que `sondeadoEn` */
+    marcadaEn: null,
+    /** @type {number | null} el último del cliente que había al marcar */
+    marcadoHasta: null
+  });
+  let marcandoNoLeida = $state(false);
+  let avisoLectura = $state('');
+
+  async function intentarMarcarLeida() {
+    // Recién marcada «no leída», la cola nueva va a decir que tiene no leídos
+    // mientras se sale a la lista: no se la vuelve a marcar leída en el medio.
+    if (typeof document === 'undefined' || marcandoNoLeida) return;
+    const ultimoCliente = ultimoDelCliente(mensajes);
+    const debe = debeMarcarLeida({
+      visible: document.visibilityState === 'visible',
+      enVuelo: lectura.enVuelo,
+      marcadaAlAbrir: lectura.marcadaAlAbrir,
+      marcadaEn: lectura.marcadaEn,
+      ultimoCliente,
+      marcadoHasta: lectura.marcadoHasta,
+      noLeidosEnCola: noLeidos(filaDelChat(data.conversaciones, conversacion.id)),
+      colaLeidaEn: data.sondeadoEn ? Date.parse(data.sondeadoEn) : null
+    });
+    if (!debe) return;
+    lectura.enVuelo = true;
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/leida`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leida: true })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      // Aunque falle, no se reintenta en cada sondeo: se vuelve a intentar
+      // cuando llegue algo nuevo. Un aviso que no se pudo guardar deja el
+      // chat en negrita, que es el lado seguro.
+      lectura.marcadaAlAbrir = true;
+      lectura.marcadoHasta = ultimoCliente;
+      if (resp.ok) {
+        lectura.marcadaEn = datos.marcada_en ? Date.parse(datos.marcada_en) : null;
+        // La cola lo muestra ya, no a la vuelta del reloj de 8 s.
+        invalidate('app:conversaciones');
+      }
+    } catch {
+      lectura.marcadaAlAbrir = true;
+      lectura.marcadoHasta = ultimoCliente;
+    } finally {
+      lectura.enVuelo = false;
+    }
+  }
+
+  // Al abrir, y cada vez que la cola trae una vuelta nueva: `data.sondeadoEn`
+  // cambia con cada lectura de la cola, y `mensajes` con cada sondeo de acá.
+  $effect(() => {
+    void data.sondeadoEn;
+    void mensajes.length;
+    untrack(() => intentarMarcarLeida());
+  });
+  // Volver a la pestaña es "verla": si llegó algo mientras estaba de fondo, se
+  // marca sin esperar al próximo sondeo.
+  $effect(() => {
+    const alVer = () => {
+      if (document.visibilityState === 'visible') intentarMarcarLeida();
+    };
+    document.addEventListener('visibilitychange', alVer);
+    return () => document.removeEventListener('visibilitychange', alVer);
+  });
+
+  /* «Marcar como no leída»: vuelve a contar el último mensaje del cliente y
+     LLEVA A LA LISTA, como en WhatsApp. Quedarse en la conversación abierta
+     la volvería a marcar leída con el próximo mensaje, que es lo contrario de
+     lo que se pidió: «esto lo miro después». */
+  async function marcarNoLeida() {
+    if (marcandoNoLeida) return;
+    marcandoNoLeida = true;
+    avisoLectura = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/leida`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leida: false })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        avisoLectura = datos.error || 'No se pudo marcar como no leída.';
+        marcandoNoLeida = false;
+        return;
+      }
+      // `marcandoNoLeida` queda en true a propósito: el componente se
+      // desmonta al llegar a la lista, y hasta entonces no se marca nada.
+      await goto('/conversaciones', { invalidate: ['app:conversaciones'] });
+    } catch {
+      avisoLectura = 'No se pudo contactar al asistente.';
+      marcandoNoLeida = false;
+    }
+  }
+
+  // --- etiquetas del equipo (11/11/2026) ------------------------------------
+  // Son del CHAT y las guarda el motor contra el catálogo de la empresa. Se
+  // dibujan al instante (optimista) y, si el motor las rechaza, vuelven a lo
+  // que había con el motivo a la vista.
+  let etiquetasChat = $state(untrack(() => data.conversacion?.etiquetas_del_equipo ?? []));
+  let guardandoEtiquetas = $state(false);
+  let errorEtiquetas = $state('');
+
+  async function cambiarEtiquetas(/** @type {string[]} */ claves) {
+    if (guardandoEtiquetas) return;
+    const antes = etiquetasChat;
+    etiquetasChat = claves;
+    guardandoEtiquetas = true;
+    errorEtiquetas = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/etiquetas`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ etiquetas: claves })
+      });
+      const datos = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        etiquetasChat = antes;
+        errorEtiquetas = datos.error || 'No se pudieron guardar las etiquetas.';
+        return;
+      }
+      etiquetasChat = datos.etiquetas ?? claves;
+      invalidate('app:conversaciones');
+    } catch {
+      etiquetasChat = antes;
+      errorEtiquetas = 'No se pudo contactar al asistente.';
+    } finally {
+      guardandoEtiquetas = false;
+    }
+  }
+
   // --- conservar: sacar la conversacion de la purga por retencion ----------
   // Distinto de marcar un ejemplo: eso dice "esta respuesta fue buena" y
   // alimenta el manual; esto dice "no la borres todavia" -- un reclamo, un
@@ -1915,6 +2057,14 @@
     rotulos={data.rotulos ?? {}}
     ficha={fichaCliente?.cliente ?? null}
     onAlternarContexto={alternarContexto}
+    catalogoEtiquetas={data.etiquetas_del_equipo ?? []}
+    etiquetasAsignadas={etiquetasChat}
+    {guardandoEtiquetas}
+    {errorEtiquetas}
+    onCambiarEtiquetas={cambiarEtiquetas}
+    onMarcarNoLeida={marcarNoLeida}
+    {marcandoNoLeida}
+    {avisoLectura}
   />
 
   <HandoffControls
