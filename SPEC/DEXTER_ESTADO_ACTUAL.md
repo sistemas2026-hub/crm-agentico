@@ -119,27 +119,73 @@ Vale anotarlo junto, porque es la lección y no el detalle:
 | `str(e)` en `operaciones_externas.error` | preexistente; no filtra la coordenada pero sí el id de servicio y el serial |
 | Los servicios **5345** y **5394** | coordenada en un formato que el parser no reconoce: puede ser basura o un quinto formato |
 
-## App de campo: siete de las diez mejoras — 11/11/2026
+## App de campo: nueve de las diez mejoras — 11/11/2026
 
 Medido contra el código, no contra el documento del encargo
 (`SPEC/APP_CAMPO_DIEZ_MEJORAS.md`, que es el pedido y no lleva estados).
 
-**Hechas:** 1 (campana), 3 (el conteo de «Mi Trabajo»), 4 y 9 (el material en
-un solo lugar), 5 (ticket desplegable, mapa y coordenadas), 6 (galería), 10
+**Hechas:** 1 (campana), 2 (las cifras del inicio), 3 (el conteo de «Mi
+Trabajo»), 3b («Cerca mío»), 4 y 9 (el material en un solo lugar), 5 (ticket
+desplegable, mapa y coordenadas), 6 (galería), 8 («Otro» con texto libre), 10
 (finalizar con resumen).
 
-**Abiertas:**
+**La décima no es trabajo pendiente: es una decisión pendiente.**
 
-- **2 — las tres cifras del inicio.** Las tres existen y suman bien; falta
-  que «Asignadas» diga **con cuántas arrancó** el día.
-- **3b — los chips «Cerca mío» / «Todos».** Siguen en
-  `trabajo_screen.dart:552`.
 - **7 — el bloqueo.** Ya funciona con sus dos casillas y foto opcional. El
-  pedido era «mirá qué le puede mejorar», y **qué mejorar no está definido**:
-  no es trabajo pendiente, es una decisión pendiente.
-- **8 — «Qué encontraste» con texto libre.** `permite_otro` **no aparece en
-  `tenants/rapilink.config.yaml`**. Es la más barata de las cuatro: es
-  configuración, no espera release de la app ni despliegue.
+  pedido era «mirá qué le puede mejorar», y **qué mejorar no está definido**.
+  Medido antes de proponer algo: **cero bloqueos reportados desde que existe**.
+  La recomendación fue no tocarlo — diseñar contra cero casos reales es
+  adivinar, y el formulario que se adivine es el que el técnico va a tener que
+  llenar el día que sí se le bloquee una visita.
+
+### Lo que cerró esta tarde, y con qué se midió
+
+| Mejora | Qué cambió | Evidencia |
+|---|---|---|
+| **2** — las cifras del inicio | «Asignadas» pasó a ser **lo que le queda**, sin las cerradas adentro. Antes un técnico que cerró cuatro de siete veía un 7 toda la tarde — el mismo defecto que «Mi Trabajo» corrigió el 09/11 | `inicio_screen_test.dart`, con las dos guardas **endurecidas**: la rejilla ahora cierra exacto (`en curso + pendientes == asignadas`), antes solo se afirmaba que no se pasara |
+| **3b** — «Cerca mío» | el chip **se retiró**; la distancia se lee en cada tarjeta y **no se reordena nada**. El filtro reordenaba la lista entera, y eso le costaba el orden del Supervisor a quien quería un dato | `cercania_test.dart`: la guarda que cuidaba «una orden con ventana prometida se atiende cuando se prometió» ahora es **más fuerte** — antes dependía de que el técnico no tocara el chip |
+| **8** — «Otro» con texto libre | **cuatro campos** en producción: `que_encontro` (correctivo_fibra v17), `estado_de_lo_recogido` (retiro_equipos v2), `que_se_hizo` (servicio_tv v2), `resultado` (trabajo_general v2) | el listado de las cinco plantillas vigentes, pegado al cerrar: los cuatro con `OTRO` |
+
+**La mejora 8 no era configuración del tenant.** Este estado decía que
+`permite_otro` «no aparece en `tenants/rapilink.config.yaml`» y que por eso era
+«la más barata». Eso estaba mal: la bandera vive en el **esquema de la
+plantilla** del CRM (`campo_worktypeversion.esquema`), no en la config del
+motor. Costo real: un comando nuevo (`permitir_otro`) que falló **cuatro veces
+contra producción** antes de publicar algo — y la cuarta la encontró el usuario,
+no la prueba:
+
+| Intento | Por qué falló |
+|---|---|
+| 1 | las opciones viven en `reglas.options` **o** en `opciones`; mirar una sola dio «0 opciones» en un campo que sí las tiene |
+| 2 | la variable `opciones` pisó el dict de argumentos del comando — `TypeError` |
+| 3 | llamar a `plantillas.publicar` pasa por `componer`, **el validador del editor**, y la v16 de `correctivo_fibra` tiene campos que el editor no sabe crear (`decimal`): un esquema que lleva meses en producción no entra por ahí |
+| 4 | el bucle marcaba **todos** los campos, no el nombrado: le agregó la bandera a `servicio_probado_con_el_cliente`, que nadie pidió tocar. **La guarda no lo vio porque se escribió copiando el mismo bucle con el defecto** |
+
+Lo que reemplazó a `componer` es más estrecho y más fuerte para este caso: se
+compara el esquema nuevo contra el vigente y se exige que **la única diferencia
+sea la bandera**. `componer` valida que un esquema sea construible; esto valida
+que no se tocó nada más, que es justo lo que el comando promete.
+
+**Un «Otro» no va en un campo de sí/no, y eso es decisión, no omisión.** Los
+cinco campos de selección que quedan sin la bandera son confirmaciones
+(`servicio_probado_con_el_cliente`, `retiro_la_acometida`,
+`canales_verificados_con_el_cliente`,
+`nueva_direccion_confirmada_con_el_cliente`). Un «Otro» ahí le da salida a
+quien no quiere contestar, que es lo contrario de lo que el campo busca. El
+comando lo rechaza y exige nombrar el campo: no hay modo «marcá todos».
+
+**`estado_luces` / `ftth_correctivo` no existen en producción.** Figuraban en la
+lista de pendientes de esta sesión; están en `seed_campo_demo.py`. Una lista de
+tareas armada leyendo la siembra y no la base inventa trabajo que nadie pidió.
+
+**«Arrancó con N» quedó afuera, y se retiró después de ponerlo.** El usuario
+pidió «con cuántas inició la jornada, es del día». La nota deciía **«arrancó con
+38»** al lado de un 2: `resumen.totalDeTrabajos` es todo el historial que el
+teléfono descargó, no la jornada. Se intentaron tres formas de derivarlo de lo
+que la app ya tiene y **las tres eran una suposición sobre la forma del dato**;
+se retiró el número en vez de adivinar una cuarta. Para darlo bien hace falta
+**una columna en `local_jornada`** que selle el conteo al abrir el día — es el
+único lugar donde el dato existe sin inferirlo. Decisión del usuario.
 
 ---
 
