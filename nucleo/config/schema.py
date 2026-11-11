@@ -3303,6 +3303,59 @@ class RespuestaRapida(Base):
         return v
 
 
+# La paleta de las etiquetas del equipo (11/11/2026). CERRADA y por NOMBRE, no
+# un hexadecimal libre: el color lo pinta la pantalla con sus tokens, en claro
+# y en oscuro, y con un contraste medido contra el texto. Un "#ff00aa" de un
+# formulario no tiene version oscura ni garantia de leerse, y un nombre que la
+# pantalla no conoce no se dibuja. Agregar un color es decision del producto:
+# va aca y en lib/conversaciones/etiquetas.js, juntos.
+COLORES_DE_ETIQUETA = ("gris", "rojo", "naranja", "amarillo", "verde", "azul", "violeta", "rosa")
+ColorDeEtiqueta = Literal["gris", "rojo", "naranja", "amarillo", "verde", "azul", "violeta", "rosa"]
+# La clave es un identificador: minusculas, digitos y guion bajo, y empieza con
+# letra. Es lo que se guarda en asistente.etiquetas_de_chat; el nombre se
+# puede cambiar sin tocar los chats que la tienen.
+CLAVE_DE_ETIQUETA = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+ETIQUETAS_DEL_EQUIPO_MAXIMO = 30
+NOMBRE_DE_ETIQUETA_MAXIMO = 30
+
+
+class EtiquetaDelEquipo(Base):
+    """
+    Una etiqueta que una PERSONA le pone a un chat (11/11/2026): «Cliente VIP»,
+    «Moroso». Varias por chat, con color, como en WhatsApp Business.
+
+    NO es 'Conversaciones.etiquetas': esa es la taxonomia que el MODELO elige
+    al escalar y alimenta metricas. Esta no la lee el modelo ni decide nada en
+    el motor: ordena el trabajo del equipo y se filtra en la cola. La
+    asignacion a cada chat vive en asistente.etiquetas_de_chat; aca solo el
+    catalogo de la empresa.
+    """
+    clave: str
+    nombre: str
+    color: ColorDeEtiqueta = "gris"
+
+    @field_validator("clave")
+    @classmethod
+    def _clave_es_identificador(cls, v: str) -> str:
+        if not CLAVE_DE_ETIQUETA.match(v or ""):
+            raise ValueError(
+                f"'{v}' no sirve como clave de etiqueta: minusculas, digitos y guion bajo, "
+                "empezando con una letra, hasta 40 caracteres.")
+        return v
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre_corto(cls, v: str) -> str:
+        v = " ".join((v or "").split())
+        if not v:
+            raise ValueError("una etiqueta necesita un nombre.")
+        if len(v) > NOMBRE_DE_ETIQUETA_MAXIMO:
+            raise ValueError(
+                f"el nombre '{v}' tiene {len(v)} caracteres; el maximo es "
+                f"{NOMBRE_DE_ETIQUETA_MAXIMO}: se dibuja como un chip en la fila de la cola.")
+        return v
+
+
 class Conversaciones(Base):
     """
     Configuracion de la bandeja de conversaciones con clientes finales.
@@ -3361,6 +3414,35 @@ class Conversaciones(Base):
                 raise ValueError(f"el atajo '/{r.atajo}' está repetido.")
             vistos.add(r.atajo)
         return v
+
+    # Las etiquetas que el EQUIPO le pone a cada chat (11/11/2026), con su
+    # color. NO es 'etiquetas' (arriba), que elige el modelo. Se editan desde
+    # /settings/bandeja (editor.guardar_etiquetas_del_equipo); la asignacion a
+    # cada chat vive en asistente.etiquetas_de_chat. Vacio = la Bandeja no
+    # ofrece etiquetar.
+    etiquetas_del_equipo: list[EtiquetaDelEquipo] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _etiquetas_del_equipo_unicas(self) -> "Conversaciones":
+        """
+        Dos etiquetas con la misma clave se guardarian bien y se leerian mal:
+        un chat marcado con esa clave no sabria cual de las dos es. Y dos con
+        el mismo nombre son dos chips iguales que filtran distinto.
+        """
+        etiquetas = self.etiquetas_del_equipo
+        if len(etiquetas) > ETIQUETAS_DEL_EQUIPO_MAXIMO:
+            raise ValueError(
+                f"hay {len(etiquetas)} etiquetas del equipo; el maximo es "
+                f"{ETIQUETAS_DEL_EQUIPO_MAXIMO}: es un filtro de la cola, no una taxonomia.")
+        claves = [e.clave for e in etiquetas]
+        repetidas = sorted({c for c in claves if claves.count(c) > 1})
+        if repetidas:
+            raise ValueError(f"etiquetas del equipo con la clave repetida: {', '.join(repetidas)}")
+        nombres = [e.nombre.casefold() for e in etiquetas]
+        repetidos = sorted({e.nombre for e in etiquetas if nombres.count(e.nombre.casefold()) > 1})
+        if repetidos:
+            raise ValueError(f"etiquetas del equipo con el nombre repetido: {', '.join(repetidos)}")
+        return self
 
 
 class Manual(Base):

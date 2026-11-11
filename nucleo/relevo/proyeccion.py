@@ -273,6 +273,7 @@ def agrupar_por_numero(filas: list[dict], creado_en: dict) -> list[dict]:
                      impide en la base--, ninguna queda escondida: falla hacia
                      lo visible (§4.2, regla 10).
       ULTIMO MENSAJE el mas reciente de todo el chat.
+      NO LEIDOS      la suma de los de sus abiertas (11/11/2026).
     """
     sueltas, grupos = [], {}
     for f in filas:
@@ -315,6 +316,13 @@ def agrupar_por_numero(filas: list[dict], creado_en: dict) -> list[dict]:
         # fila, cada abierta se cuenta una vez (estado.js, delChat).
         fila["abiertas"] = [dict(f) for f in abiertas if f is not urgente]
         fila["creado_en"] = creado_en.get(str(representante["id"]))
+        # LOS NO LEIDOS DEL CHAT (11/11/2026) son la SUMA de los de sus
+        # abiertas, no los de la urgente: el cliente puede haber escrito en la
+        # otra (registrar_mensaje cae en la que se movio ultima). Las cerradas
+        # no suman -- la consulta ya las cuenta 0, y aca se repite para que la
+        # regla no dependa de eso. Las etiquetas del equipo no se agregan: son
+        # del chat, y todas sus filas traen las mismas.
+        fila["no_leidos"] = sum(int(f.get("no_leidos") or 0) for f in abiertas)
         # Para BUSCAR, no para mostrar: un cliente que vuelve y todavia no se
         # identifico en la conversacion nueva se encuentra por el nombre que
         # dio antes. No se pinta en la fila: si el numero cambio de dueno,

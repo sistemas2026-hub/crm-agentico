@@ -71,6 +71,7 @@ import copy
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
@@ -78,7 +79,7 @@ from pydantic import ValidationError
 
 from nucleo.observabilidad.registro import registrar
 
-from .schema import RE_NOMBRE_REF, TenantConfig, _barrer_secretos
+from .schema import COLORES_DE_ETIQUETA, RE_NOMBRE_REF, TenantConfig, _barrer_secretos
 
 _RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
 
@@ -1560,6 +1561,82 @@ def _mutar_respuestas_rapidas(doc: dict, respuestas: list) -> None:
         conv["respuestas_rapidas"] = limpias
     else:
         conv.pop("respuestas_rapidas", None)
+
+
+def guardar_etiquetas_del_equipo(tenant: str, etiquetas: list) -> TenantConfig:
+    """
+    El catalogo de etiquetas que el EQUIPO le pone a los chats (11/11/2026),
+    desde /settings/bandeja. Mismo camino que los rotulos: reemplaza la lista
+    entera -- lo que el formulario no manda, se borra del catalogo.
+
+    Borrar una etiqueta del catalogo NO la saca de los chats que la tenian
+    (asistente.etiquetas_de_chat): la cola simplemente deja de mostrarla. Si
+    alguien la vuelve a crear con la misma clave, reaparece donde estaba.
+    """
+    if not isinstance(etiquetas, list):
+        raise ErrorEdicion("las etiquetas tienen que venir como una lista.")
+    return _editar(tenant, lambda doc: _mutar_etiquetas_del_equipo(doc, etiquetas))
+
+
+def clave_de_etiqueta(nombre: str) -> str:
+    """
+    «Cliente VIP» -> 'cliente_vip'. Sin tildes ni eñes: la clave es un
+    identificador (schema.CLAVE_DE_ETIQUETA), y lo que se lee es el nombre.
+    Un nombre sin ninguna letra ni digito usable da 'etiqueta'.
+    """
+    plano = unicodedata.normalize("NFKD", str(nombre or "")).encode("ascii", "ignore").decode()
+    clave = re.sub(r"[^a-z0-9]+", "_", plano.lower()).strip("_")[:40].rstrip("_")
+    if not clave or not clave[0].isalpha():
+        clave = f"etiqueta_{clave}" if clave else "etiqueta"
+    return clave[:40].rstrip("_")
+
+
+def _mutar_etiquetas_del_equipo(doc: dict, etiquetas: list) -> None:
+    """
+    Cada elemento: {clave?, nombre, color}.
+
+      CLAVE   la que ya tenia se CONSERVA aunque cambie el nombre: es lo que
+              guardan los chats, y renombrar «VIP» a «Cliente VIP» no puede
+              desetiquetar a nadie. Una etiqueta nueva viene sin clave y nace
+              del nombre; si choca con otra, se le agrega _2, _3...
+      COLOR   de la paleta cerrada (schema.COLORES_DE_ETIQUETA). Uno que no
+              esta se rechaza con su nombre, no se cambia por gris en
+              silencio: la persona eligio algo y tiene que saber que no se
+              guardo.
+
+    Los nombres repetidos, las claves invalidas y el tope los rechaza el
+    esquema al validar el documento entero (_editar), con su mensaje.
+    """
+    limpias: list[dict] = []
+    usadas = {str(e.get("clave") or "").strip() for e in etiquetas
+              if isinstance(e, dict) and str(e.get("clave") or "").strip()}
+    for e in etiquetas:
+        if not isinstance(e, dict):
+            raise ErrorEdicion("cada etiqueta tiene que venir con nombre y color.")
+        nombre = " ".join(str(e.get("nombre") or "").split())
+        if not nombre:
+            raise ErrorEdicion("hay una etiqueta sin nombre: escribí uno o borrala.")
+        color = str(e.get("color") or "gris").strip()
+        if color not in COLORES_DE_ETIQUETA:
+            raise ErrorEdicion(
+                f"'{color}' no es uno de los colores de etiqueta "
+                f"({', '.join(COLORES_DE_ETIQUETA)}).")
+        clave = str(e.get("clave") or "").strip()
+        if not clave:
+            base = clave_de_etiqueta(nombre)
+            clave, n = base, 2
+            while clave in usadas:
+                sufijo = f"_{n}"
+                clave = base[:40 - len(sufijo)] + sufijo
+                n += 1
+            usadas.add(clave)
+        limpias.append({"clave": clave, "nombre": nombre, "color": color})
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    if limpias:
+        conv["etiquetas_del_equipo"] = limpias
+    else:
+        conv.pop("etiquetas_del_equipo", None)
 
 
 def guardar_parrilla_canales(tenant: str, canales: list[str]) -> TenantConfig:

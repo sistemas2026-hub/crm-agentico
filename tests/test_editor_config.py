@@ -44,6 +44,7 @@ from nucleo.config.editor import (ErrorEdicion, _mutar_ajustes_bandeja,  # noqa:
                                   _mutar_persona, _mutar_rol_de_entrada,
                                   _mutar_rotulos_bandeja,
                                   _mutar_respuestas_rapidas,
+                                  _mutar_etiquetas_del_equipo, clave_de_etiqueta,
                                   _mutar_casos_manual, _fundir_rotulos_de_casos,
                                   claves_sin_rotulo,
                                   _validar,
@@ -898,6 +899,78 @@ def prueba_respuestas_rapidas() -> None:
           lambda: _mutar_respuestas_rapidas(documento_base(), ["solo texto"]))
 
 
+def prueba_etiquetas_del_equipo() -> None:
+    """
+    Las etiquetas que el EQUIPO le pone a un chat (11/11/2026). Lo que se
+    protege: que una etiqueta nueva nazca con una clave valida y unica, que
+    RENOMBRAR conserve la clave (es lo que guardan los chats), que el color sea
+    de la paleta cerrada, y que el documento siga validando con el mismo
+    validador del motor. Y que no se confundan con 'conversaciones.etiquetas',
+    la taxonomia del modelo.
+    """
+    print("\n-- etiquetas del equipo --")
+    doc = documento_base()
+    taxonomia = list((doc.get("conversaciones") or {}).get("etiquetas") or [])
+
+    _mutar_etiquetas_del_equipo(doc, [
+        {"nombre": "  Cliente   VIP ", "color": "violeta"},
+        {"nombre": "Moroso", "color": "rojo"},
+        {"nombre": "Cliente-VIP!", "color": "azul"},   # misma clave base
+    ])
+    et = doc["conversaciones"]["etiquetas_del_equipo"]
+    comprobar([e["clave"] for e in et] == ["cliente_vip", "moroso", "cliente_vip_2"],
+              "una etiqueta nueva nace con clave del nombre, y una que choca lleva _2")
+    comprobar(et[0]["nombre"] == "Cliente VIP", "el nombre se guarda con los espacios normalizados")
+    cfg = _validar(TENANT, doc)
+    comprobar([e.color for e in cfg.conversaciones.etiquetas_del_equipo] == ["violeta", "rojo", "azul"],
+              "y el documento valida con el mismo validador que usa el motor")
+    comprobar(list(cfg.conversaciones.etiquetas) == taxonomia,
+              "la taxonomia del modelo (conversaciones.etiquetas) no se toca")
+
+    # Renombrar conserva la clave: los chats la tienen guardada.
+    _mutar_etiquetas_del_equipo(doc, [{"clave": "cliente_vip", "nombre": "Muy importante",
+                                       "color": "amarillo"}])
+    et = doc["conversaciones"]["etiquetas_del_equipo"]
+    comprobar(et == [{"clave": "cliente_vip", "nombre": "Muy importante", "color": "amarillo"}],
+              "renombrar y cambiar el color conserva la clave; lo que no vino se borro")
+    _validar(TENANT, doc)
+
+    comprobar(clave_de_etiqueta("Ñandú rápido") == "nandu_rapido", "la clave no lleva tildes ni eñes")
+    comprobar(clave_de_etiqueta("2026 urgente") == "etiqueta_2026_urgente",
+              "una clave que empezaria con un digito lleva un prefijo")
+    comprobar(clave_de_etiqueta("!!!") == "etiqueta", "un nombre sin letras da 'etiqueta'")
+
+    lanza("un color fuera de la paleta se rechaza, no se cambia por gris",
+          lambda: _mutar_etiquetas_del_equipo(documento_base(), [{"nombre": "X", "color": "#ff00aa"}]))
+    lanza("una etiqueta sin nombre se rechaza",
+          lambda: _mutar_etiquetas_del_equipo(documento_base(), [{"nombre": "  ", "color": "gris"}]))
+
+    # Lo que rechaza el ESQUEMA (lo valida _editar con el documento entero).
+    def no_valida(que: str, etiquetas: list) -> None:
+        d = documento_base()
+        d.setdefault("conversaciones", {})["etiquetas_del_equipo"] = etiquetas
+        try:
+            _validar(TENANT, d)
+        except Exception:
+            comprobar(True, que)
+            return
+        comprobar(False, que)
+
+    no_valida("dos etiquetas con la misma clave no validan",
+              [{"clave": "a", "nombre": "A", "color": "gris"}, {"clave": "a", "nombre": "B", "color": "gris"}])
+    no_valida("dos etiquetas con el mismo nombre (sin importar mayusculas) no validan",
+              [{"clave": "a", "nombre": "VIP", "color": "gris"}, {"clave": "b", "nombre": "vip", "color": "gris"}])
+    no_valida("una clave que no es identificador no valida",
+              [{"clave": "Con Espacio", "nombre": "X", "color": "gris"}])
+    no_valida("un nombre de mas de 30 caracteres no valida",
+              [{"clave": "x", "nombre": "x" * 31, "color": "gris"}])
+    no_valida("mas de 30 etiquetas no validan",
+              [{"clave": f"e{i}", "nombre": f"E{i}", "color": "gris"} for i in range(31)])
+
+    _mutar_etiquetas_del_equipo(doc, [])
+    comprobar("etiquetas_del_equipo" not in doc["conversaciones"], "una lista vacia borra el catalogo")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" EDITOR DE ROLES  --  mutaciones sobre el documento de configuracion")
@@ -920,6 +993,7 @@ if __name__ == "__main__":
     prueba_rotulos_bandeja()
     prueba_rotulos_de_casos()
     prueba_respuestas_rapidas()
+    prueba_etiquetas_del_equipo()
 
     print("\n" + "=" * 70)
     if fallos:

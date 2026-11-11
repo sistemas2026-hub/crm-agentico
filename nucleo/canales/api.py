@@ -97,6 +97,7 @@ from nucleo.seguimiento import buscar_cliente, encuesta, ticket_desde_dexter
 from nucleo.seguimiento import importacion_io
 from nucleo.persistencia import encuestas as encuestas_db
 from nucleo.config.schema import MensajeAutomatico as _MensajeAutomatico
+from nucleo.config.schema import COLORES_DE_ETIQUETA
 
 MensajeAutomaticoVacio = _MensajeAutomatico()
 from nucleo.seguimiento import verificacion_accion
@@ -4761,7 +4762,36 @@ def _rotulos_de(config) -> dict:
         "sin_rotulo": editor.claves_sin_rotulo(config),
         # Viaja con los rotulos porque se edita en la misma pantalla.
         "reincidencia_dias": config.conversaciones.reincidencia_dias,
+        # Las etiquetas del equipo (11/11/2026), y la paleta cerrada de la que
+        # se elige el color: la pantalla ofrece lo que el esquema acepta.
+        "etiquetas_del_equipo": [e.model_dump() for e in config.conversaciones.etiquetas_del_equipo],
+        "colores_de_etiqueta": list(COLORES_DE_ETIQUETA),
     }
+
+
+@app.put("/configuracion/bandeja/etiquetas")
+def configuracion_bandeja_etiquetas_guardar():
+    """
+    Reemplaza el catalogo entero de etiquetas del equipo (11/11/2026): crear,
+    renombrar, cambiar el color y borrar son el mismo gesto. Endpoint propio
+    por lo mismo que los rotulos. Solo administradores: lo comprueba el CRM
+    (la accion de /settings/bandeja), igual que con los rotulos.
+
+    Cuerpo: {tenant, etiquetas: [{clave?, nombre, color}]}. Una sin clave es
+    nueva y la clave nace del nombre (editor.clave_de_etiqueta).
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = editor.guardar_etiquetas_del_equipo(tenant, cuerpo.get("etiquetas"))
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify(_rotulos_de(config))
 
 
 @app.put("/configuracion/bandeja/reincidencia")
@@ -6579,10 +6609,19 @@ def conversaciones():
         registrar("conversaciones", "sin config del tenant: la banda 'sin_gestion' no se calcula",
                   tenant=tenant, error=e)
         rol_entrada, horas_sg = None, None
+    # LAS ETIQUETAS DEL EQUIPO (11/11/2026): el catalogo viaja UNA vez, como
+    # los rotulos, y cada fila trae solo las claves que siguen en el. Una
+    # etiqueta borrada del catalogo no se borra de los chats
+    # (asistente.etiquetas_de_chat): deja de mostrarse. Sin config, ninguna --
+    # una clave sin nombre ni color no se puede dibujar.
+    catalogo_etiquetas = _catalogo_de_etiquetas(tenant)
+    vigentes = {e["clave"] for e in catalogo_etiquetas}
     for fila in salida:
         fila.update(proyeccion.proyectar(fila, rol_de_entrada=rol_entrada,
                                          sin_gestion_horas=horas_sg))
         fila["canal_operativo"] = fila.get("canal") in canales.REALES
+        fila["etiquetas_del_equipo"] = [c for c in (fila.get("etiquetas_del_equipo") or [])
+                                        if c in vigentes]
     # LA BANDEJA POR CHAT (21/10/2026, contrato §4.5 / C19): con 'por_numero'
     # cada fila operativa es un CHAT -- todas las conversaciones de un mismo
     # numero -- y no una conversacion. Se agrupa DESPUES de proyectar, asi la
@@ -6644,6 +6683,9 @@ def conversaciones():
                     # Las areas de la empresa, para decir «Escalada a Soporte
                     # Técnico» con la etiqueta y filtrar por area (T22).
                     "areas": areas_cola,
+                    # El catalogo de etiquetas del equipo: clave, nombre y
+                    # color, uno solo para la empresa (11/11/2026).
+                    "etiquetas_del_equipo": catalogo_etiquetas,
                     "canal_whatsapp": canal_whatsapp})
 
 
@@ -6694,6 +6736,20 @@ def conversaciones_buscar():
         r["canal_operativo"] = r.get("canal") in canales.REALES
     return jsonify({"resultados": resultados,
                     "tope": persistencia.BUSQUEDA_MENSAJES_TOPE})
+
+
+def _catalogo_de_etiquetas(tenant: str) -> list[dict]:
+    """
+    Las etiquetas del equipo de la empresa (Conversaciones.etiquetas_del_equipo),
+    como [{clave, nombre, color}]. Lista vacia si la config no se puede leer:
+    falla hacia "no se muestra ninguna", no hacia mostrar claves sueltas.
+    """
+    try:
+        return [e.model_dump() for e in _config_de(tenant).conversaciones.etiquetas_del_equipo]
+    except Exception as e:
+        registrar("conversaciones", "sin config del tenant: sin etiquetas del equipo",
+                  tenant=tenant, error=e)
+        return []
 
 
 @app.get("/tenant-de-organizacion/<organization_id>")
@@ -7443,6 +7499,11 @@ def conversaciones_mensajes(id_conversacion):
     except Exception as e:
         registrar("conversaciones", "no se pudo calcular la reincidencia", error=e)
         conv["reincidencia"] = None
+    # Las etiquetas del equipo del chat, solo las que siguen en el catalogo
+    # (11/11/2026). Mismo criterio que la cola: una borrada no se muestra.
+    vigentes = {e["clave"] for e in _catalogo_de_etiquetas(tenant)}
+    conv["etiquetas_del_equipo"] = [c for c in (conv.get("etiquetas_del_equipo") or [])
+                                    if c in vigentes]
 
     # Los identificadores tecnicos del equipo del cliente, FILTRADOS por la
     # misma lista que decide que se persiste al verificar. 'datos_sesion'
@@ -12559,6 +12620,134 @@ def conversaciones_reasignar(id_conversacion):
     return jsonify({"reasignada": True, "aplicada": r.aplicada, "relevo_version": r.version,
                     "asignada_a": (r.datos or {}).get("nuevo_nombre") if r.aplicada else None,
                     "reintento": r.motivo == "reintento"})
+
+
+def _id_de_conversacion(valor: str) -> str | None:
+    """El id normalizado, o None si no es un uuid. Un id que no es uuid no
+    existe: es un 404, no el 500 de la base al compararlo con la columna."""
+    try:
+        return str(uuid.UUID(str(valor)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+@app.post("/conversaciones/<id_conversacion>/leida")
+def conversaciones_leida(id_conversacion):
+    """
+    «Leida» y «Marcar como no leida» de la Bandeja (11/11/2026), como WhatsApp
+    Business. La marca es del EQUIPO y del CHAT: ver db.marcar_leida.
+
+    Cuerpo: {tenant, leida: true|false}
+
+    La pantalla la llama al abrir la conversacion y cuando llega un mensaje
+    del cliente con la pestaña a la vista; la persona, desde «Marcar como no
+    leida». No pide autor: leer no cambia nada de lo que ve el cliente ni del
+    relevo, y no se registra quien. El proxy igual exige sesion.
+
+      200  aplicada
+      400  sin tenant, o 'leida' que no es true/false
+      404  no existe o no es de esta empresa
+      409  «no leida» sin ningun mensaje del cliente en una abierta del chat:
+           no hay nada que volver a contar (codigo 'sin_mensajes_del_cliente')
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    leida = cuerpo.get("leida")
+    # Estricto: un "false" en texto es verdadero en Python, y marcaria leida
+    # justo lo que la persona pidio dejar sin leer.
+    if not isinstance(leida, bool):
+        return jsonify({"error": "'leida' tiene que ser true o false.",
+                        "codigo": "leida_invalida"}), 400
+    cid = _id_de_conversacion(id_conversacion)
+    if not cid:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    try:
+        r = persistencia.marcar_leida(tenant, cid, leida)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("conversaciones", "fallo al marcar leida", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if r is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if not r["aplicada"]:
+        return jsonify({"error": "Este chat no tiene mensajes del cliente para volver a marcar "
+                                 "como no leídos.",
+                        "codigo": r.get("motivo") or "sin_mensajes_del_cliente"}), 409
+    return jsonify({"leida": r["leida"], "conversaciones": r["conversaciones"],
+                    "leida_hasta": r["leida_hasta"]})
+
+
+@app.put("/conversaciones/<id_conversacion>/etiquetas")
+def conversaciones_etiquetas(id_conversacion):
+    """
+    Las etiquetas del EQUIPO del chat de esta conversacion (11/11/2026).
+
+    Cuerpo: {tenant, etiquetas: [claves], autor, autor_usuario_id}
+
+    Reemplaza el conjunto entero. Las claves se validan contra el catalogo de
+    la empresa (Conversaciones.etiquetas_del_equipo) ANTES de escribir, y una
+    que no esta rechaza todo el pedido: fail-closed. Guardar «la mitad que si
+    existe» dejaria a la persona creyendo que puso algo que no se guardo.
+
+    El autor lo arma el proxy desde la sesion (lib/server/v2/autor.js), nunca
+    el navegador: es quien queda como 'cambiada_por'. Su nombre NO va al log.
+
+      200  {etiquetas: [claves guardadas]}
+      400  sin tenant, autor invalido, 'etiquetas' que no es una lista de
+           textos, o una clave fuera del catalogo (codigo 'etiqueta_desconocida')
+      404  no existe o no es de esta empresa
+      409  la conversacion no tiene numero: no hay chat que etiquetar
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        autor, autor_id, _ = _autor_y_clave(cuerpo)
+    except persistencia.AutorInvalido as e:
+        return jsonify({"error": f"Autor invalido: {mensaje_publico(e, 'datos de autor incompletos')}"}), 400
+    pedidas = cuerpo.get("etiquetas")
+    if not isinstance(pedidas, list) or not all(isinstance(c, str) for c in pedidas):
+        return jsonify({"error": "'etiquetas' tiene que ser una lista de claves.",
+                        "codigo": "etiquetas_invalidas"}), 400
+    cid = _id_de_conversacion(id_conversacion)
+    if not cid:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    try:
+        catalogo = [e.clave for e in _config_de(tenant).conversaciones.etiquetas_del_equipo]
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        # Sin catalogo no se puede validar: no se escribe a ciegas.
+        registrar("conversaciones", "sin config del tenant: no se guardan etiquetas",
+                  tenant=tenant, error=e)
+        return jsonify({"error": "No se pudo leer el catálogo de etiquetas."}), 503
+    # Sin repetidas y en el ORDEN DEL CATALOGO: la fila dibuja las dos
+    # primeras, y que cuales se ven dependa del orden en que alguien las
+    # marco haria que el mismo chat se vea distinto segun quien lo etiqueto.
+    pedidas = {c.strip() for c in pedidas if c.strip()}
+    desconocidas = sorted(pedidas - set(catalogo))
+    if desconocidas:
+        return jsonify({"error": f"Esas etiquetas no existen en esta empresa: "
+                                 f"{', '.join(desconocidas)}.",
+                        "codigo": "etiqueta_desconocida"}), 400
+    claves = [c for c in catalogo if c in pedidas]
+    try:
+        guardadas = persistencia.guardar_etiquetas_de_chat(tenant, cid, claves, autor_id, autor)
+    except persistencia.SinChat:
+        return jsonify({"error": "Esta conversación no tiene un número: no hay chat que etiquetar.",
+                        "codigo": "sin_chat"}), 409
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("conversaciones", "fallo al guardar etiquetas del equipo", error=e)
+        return jsonify({"error": "No se pudo guardar."}), 500
+    if guardadas is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify({"etiquetas": guardadas})
 
 
 @app.post("/conversaciones/<id_conversacion>/borrador")

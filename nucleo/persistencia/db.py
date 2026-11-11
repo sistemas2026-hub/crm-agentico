@@ -753,6 +753,21 @@ def ultima_actividad(tenant: str, canal: str | None = None,
                   humana.creado_en as ultima_atencion_humana,
                   cliente.creado_en as ultimo_mensaje_cliente,
                   coalesce(cliente.n, 0) as mensajes_cliente,
+                  -- LOS NO LEIDOS (11/11/2026, como WhatsApp Business): los
+                  -- mensajes del cliente que llegaron despues de que alguien
+                  -- del equipo la abriera. Se CALCULAN, no se guardan (ver
+                  -- supabase/202611111200_conversaciones_leida_hasta.sql).
+                  -- Una cerrada cuenta 0: no hay nada que atender en ella, y
+                  -- lo que el cliente escriba despues cae en otra.
+                  case when c.estado = 'cerrada' then 0
+                       else coalesce(cliente.no_leidos, 0) end as no_leidos,
+                  c.leida_hasta,
+                  -- Las etiquetas que puso el EQUIPO al chat (11/11/2026).
+                  -- No es 'c.etiqueta' (la que elige el modelo al escalar).
+                  -- Son del chat, no de la conversacion: un cliente que vuelve
+                  -- las conserva. Claves crudas; cuales siguen existiendo lo
+                  -- decide la API contra el catalogo de la empresa.
+                  coalesce(et.claves, '{}'::text[]) as etiquetas_del_equipo,
                   -- T19: si la evaluacion que quedo NO_DETERMINADO ya la
                   -- reviso alguien. Sin esto, una conversacion vieja pediria
                   -- revision para siempre.
@@ -798,10 +813,27 @@ def ultima_actividad(tenant: str, canal: str | None = None,
                left join lateral (
                    -- 'n' es para la guarda anti-limbo: un 'hola' y el saludo
                    -- de vuelta no es un pedido sin resolver.
-                   select max(creado_en) as creado_en, count(*) as n
+                   -- 'no_leidos' va en ESTE lateral y no en uno propio: recorre
+                   -- las mismas filas (mensajes del cliente de la
+                   -- conversacion), y una quinta subconsulta por conversacion
+                   -- seria justo el costo que el tope de cerradas vino a
+                   -- contener. NULL en leida_hasta = nunca se abrio: cuentan
+                   -- todos.
+                   select max(creado_en) as creado_en, count(*) as n,
+                          count(*) filter (
+                              where creado_en > coalesce(c.leida_hasta,
+                                                         '-infinity'::timestamptz)
+                          ) as no_leidos
                      from asistente.messages
                     where conversation_id = c.id and rol = 'user'
-               ) cliente on true"""
+               ) cliente on true
+               -- Las etiquetas del equipo: UNA fila por chat, por clave
+               -- primaria. Un join y no un lateral: no agrega nada por
+               -- conversacion (supabase/202611111201_etiquetas_de_chat.sql).
+               left join asistente.etiquetas_de_chat et
+                 on et.organization_id = c.organization_id
+                and et.canal = c.canal
+                and et.usuario_externo = c.usuario_externo"""
 
     # El filtro va en el WHERE, ANTES de las subconsultas laterales: asi
     # las cerradas viejas no pagan ni una.
@@ -1072,6 +1104,15 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                           and o.canal = conversations.canal
                           and o.usuario_externo = conversations.usuario_externo
                       ) as ultimo_mensaje_cliente_numero,
+                      -- Las etiquetas del equipo del CHAT (11/11/2026): las
+                      -- mismas que muestra la fila de la cola, para que el
+                      -- selector de la conversacion arranque con lo que hay.
+                      coalesce((select et.claves from asistente.etiquetas_de_chat et
+                                 where et.organization_id = conversations.organization_id
+                                   and et.canal = conversations.canal
+                                   and et.usuario_externo = conversations.usuario_externo),
+                               '{}'::text[]) as etiquetas_del_equipo,
+                      leida_hasta,
                       (atendida_manual or exists (
                            select 1 from asistente.messages h
                             where h.conversation_id = conversations.id
@@ -3423,6 +3464,145 @@ def marcar_atendida(tenant: str, conversation_id: str, por: str | None) -> bool:
                where organization_id = %s and id = %s""",
             (por, org, conversation_id))
         return cur.rowcount > 0
+
+
+# Las abiertas del MISMO chat que la conversacion pedida (o la pedida misma).
+# Un usuario_externo vacio no es un chat: solo la pedida. Mismo criterio que
+# proyeccion.agrupar_por_numero y que hilo_del_numero.
+_DEL_CHAT = """c.organization_id = %(org)s
+               and (c.id = %(id)s
+                    or (c.estado <> 'cerrada'
+                        and %(numero)s::text <> ''
+                        and c.canal = %(canal)s
+                        and c.usuario_externo = %(numero)s))"""
+
+
+def marcar_leida(tenant: str, conversation_id: str, leida: bool) -> dict | None:
+    """
+    «Leida» y «no leida» de la Bandeja, como WhatsApp Business (11/11/2026).
+    Ver supabase/202611111200_conversaciones_leida_hasta.sql.
+
+    La marca es del EQUIPO, no de cada persona, y es del CHAT: la fila de la
+    cola suma los no leidos de todas las abiertas del numero
+    (proyeccion.agrupar_por_numero), y la pantalla de la conversacion muestra
+    el hilo entero. Asi que:
+
+      leida=True   leida_hasta = now() en la pedida y en las otras ABIERTAS del
+                   mismo chat. Si marcara solo la pedida, un chat con dos
+                   abiertas seguiria en negrita con el hilo entero a la vista.
+                   Las cerradas no se tocan: cuentan 0 igual.
+
+      leida=False  vuelve a contar el ULTIMO mensaje del cliente del chat:
+                   leida_hasta = ese mensaje - 1 ms, en la abierta donde cayo.
+                   Las demas no se tocan: con que una cuente, la fila vuelve a
+                   negrita, que es lo que se pidio. Si el chat no tiene ningun
+                   mensaje del cliente en una abierta -- una conversacion que
+                   abrio una persona (T21) y que el cliente todavia no
+                   contesto, o una cerrada --, NO se inventa uno: devuelve
+                   'aplicada': False con 'motivo': 'sin_mensajes_del_cliente'.
+                   Poner "no leida" algo que no tiene nada para leer seria una
+                   negrita sin contador, que no dice que mirar.
+
+    Ninguna de las dos toca 'actualizado_en' (la cola ordena por esa columna)
+    ni 'relevo_version': leer no es una transicion del relevo.
+
+    None si la conversacion no existe o no es de esta empresa.
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select canal, coalesce(usuario_externo, '') as numero
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        ancla = cur.fetchone()
+        if not ancla:
+            return None
+        p = {"org": org, "id": conversation_id, "canal": ancla["canal"],
+             "numero": ancla["numero"]}
+
+        if leida:
+            cur.execute(
+                f"""update asistente.conversations c
+                       set leida_hasta = now()
+                     where {_DEL_CHAT}
+                 returning c.id, c.leida_hasta""", p)
+            filas = cur.fetchall()
+            return {"aplicada": True, "leida": True,
+                    "conversaciones": [str(f["id"]) for f in filas],
+                    "leida_hasta": filas[0]["leida_hasta"] if filas else None}
+
+        cur.execute(
+            f"""select m.conversation_id, max(m.creado_en) as ultimo
+                  from asistente.messages m
+                  join asistente.conversations c
+                    on c.id = m.conversation_id
+                   and c.organization_id = m.organization_id
+                 where {_DEL_CHAT}
+                   and c.estado <> 'cerrada'
+                   and m.rol = 'user'
+              group by m.conversation_id
+              order by ultimo desc
+                 limit 1""", p)
+        ultima = cur.fetchone()
+        if not ultima:
+            return {"aplicada": False, "leida": False, "motivo": "sin_mensajes_del_cliente"}
+        cur.execute(
+            """update asistente.conversations
+                  set leida_hasta = %s::timestamptz - interval '1 millisecond'
+                where organization_id = %s and id = %s
+            returning id, leida_hasta""",
+            (ultima["ultimo"], org, ultima["conversation_id"]))
+        fila = cur.fetchone()
+        return {"aplicada": True, "leida": False,
+                "conversaciones": [str(fila["id"])], "leida_hasta": fila["leida_hasta"]}
+
+
+class SinChat(ValueError):
+    """La conversacion no tiene usuario_externo: no hay chat que etiquetar."""
+
+
+def guardar_etiquetas_de_chat(tenant: str, conversation_id: str, claves: list[str],
+                              autor_usuario_id: str, autor_nombre: str) -> list[str] | None:
+    """
+    Reemplaza las etiquetas del EQUIPO del chat de esa conversacion
+    (11/11/2026, supabase/202611111201_etiquetas_de_chat.sql).
+
+    Reemplaza el conjunto entero: lo que no viene, se saca. Una lista vacia
+    deja la fila con '{}' -- y con quien las saco y cuando --, no la borra.
+
+    NO VALIDA LAS CLAVES contra el catalogo: eso lo hace la API con la config
+    de la empresa ANTES de llamar (fail-closed). Aca solo se guarda.
+
+    None si la conversacion no existe o no es de esta empresa; SinChat si no
+    tiene usuario_externo (una conversacion sin numero no es un chat, y una
+    etiqueta guardada con clave vacia se le pegaria a todas las que tampoco lo
+    tienen).
+    """
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select canal, coalesce(usuario_externo, '') as numero
+               from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        ancla = cur.fetchone()
+        if not ancla:
+            return None
+        if not ancla["numero"].strip():
+            raise SinChat("la conversacion no tiene numero: no hay chat que etiquetar")
+        cur.execute(
+            """insert into asistente.etiquetas_de_chat
+                   (organization_id, canal, usuario_externo, claves,
+                    cambiada_por_usuario_id, cambiada_por_nombre, cambiada_en)
+               values (%s, %s, %s, %s::text[], %s, %s, now())
+               on conflict (organization_id, canal, usuario_externo) do update
+                  set claves = excluded.claves,
+                      cambiada_por_usuario_id = excluded.cambiada_por_usuario_id,
+                      cambiada_por_nombre = excluded.cambiada_por_nombre,
+                      cambiada_en = now()
+               returning claves""",
+            (org, ancla["canal"], ancla["numero"], list(claves),
+             autor_usuario_id, autor_nombre))
+        return list(cur.fetchone()["claves"] or [])
 
 
 def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
