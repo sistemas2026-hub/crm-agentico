@@ -7475,15 +7475,33 @@ def conversaciones_mensajes(id_conversacion):
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        resultado = persistencia.mensajes_de(tenant, id_conversacion)
+        resultado = _cuerpo_mensajes(tenant, id_conversacion)
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("conversaciones", "fallo al leer mensajes", error=e)
         return jsonify({"error": "No se pudo leer la conversacion."}), 500
 
-    if resultado["conversacion"] is None:
+    if resultado is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify(resultado)
+
+
+def _cuerpo_mensajes(tenant: str, id_conversacion: str) -> dict | None:
+    """
+    Lo que responde GET /conversaciones/<id>/mensajes, como dato: el
+    encabezado de la conversacion con lo que la pantalla necesita ya calculado
+    (ventana de WhatsApp, control efectivo, reincidencia, etiquetas vigentes,
+    identificadores del equipo) mas el hilo y las respuestas rapidas. None si
+    la conversacion no existe o no es de esta empresa.
+
+    Una sola definicion (11/11/2026): la ruta de siempre y /apertura la usan
+    las dos. Lo que cambie aca cambia en ambas, y no puede quedar una pantalla
+    leyendo una forma vieja por el camino que nadie actualizo.
+    """
+    resultado = persistencia.mensajes_de(tenant, id_conversacion)
+    if resultado["conversacion"] is None:
+        return None
 
     # La ventana de 24 h SOLO para WhatsApp. El simulador, la API y cualquier
     # canal futuro no tienen esta regla, y heredarla por descuido dejaria al
@@ -7537,7 +7555,7 @@ def conversaciones_mensajes(id_conversacion):
         registrar("conversaciones", "no se pudieron leer las respuestas rapidas", error=e)
         resultado["respuestas_rapidas"] = []
 
-    return jsonify(resultado)
+    return resultado
 
 
 @app.get("/conversaciones/<id_conversacion>/hilo")
@@ -7566,8 +7584,8 @@ def conversaciones_hilo(id_conversacion):
     except ValueError:
         return jsonify({"error": "'limite' tiene que ser un numero."}), 400
     try:
-        hilo = persistencia.hilo_del_numero(
-            tenant, id_conversacion, antes=(request.args.get("antes") or None), limite=limite)
+        hilo = _cuerpo_hilo(tenant, id_conversacion,
+                            antes=(request.args.get("antes") or None), limite=limite)
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -7576,6 +7594,17 @@ def conversaciones_hilo(id_conversacion):
         return jsonify({"error": "No se pudo leer el chat."}), 500
     if hilo is None:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    return jsonify(hilo)
+
+
+def _cuerpo_hilo(tenant: str, id_conversacion: str, *, antes: str | None = None,
+                 limite: int = persistencia.TRAMOS_POR_PAGINA) -> dict | None:
+    """Lo que responde GET /conversaciones/<id>/hilo, como dato. None si la
+    conversacion no existe. Sin argumentos, la primera pagina: lo que pide la
+    pantalla al abrir, y lo que /apertura manda."""
+    hilo = persistencia.hilo_del_numero(tenant, id_conversacion, antes=antes, limite=limite)
+    if hilo is None:
+        return None
     # 'agrupa' le dice a la pantalla si este canal es un chat: sin eso, una
     # simulada cerrada se veia como "la ultima del chat" y ofrecia escribirle.
     hilo["agrupa"] = hilo["canal"] in canales.REALES
@@ -7583,7 +7612,76 @@ def conversaciones_hilo(id_conversacion):
         hilo.update({"tramos": [], "hay_anteriores": False, "antes": None,
                      "mas_reciente_id": hilo["ancla"], "abiertas": [], "posteriores": [],
                      "total_tramos": 1})
-    return jsonify(hilo)
+    return hilo
+
+
+@app.get("/conversaciones/<id_conversacion>/apertura")
+def conversaciones_apertura(id_conversacion):
+    """
+    UNA SOLA IDA POR APERTURA  --  11/11/2026
+
+    Todo lo que la Bandeja necesita de la base del motor para dibujar una
+    conversacion, en una respuesta: el hilo (/mensajes), el chat del numero
+    (/hilo), las herramientas, el relevo, el equipo, las sincronizaciones, las
+    acciones y los casos del manual. Las ocho rutas siguen existiendo y
+    respondiendo igual; esta las junta.
+
+    POR QUE. Abrir una conversacion disparaba ocho lecturas EN PARALELO desde
+    la pantalla, contra un motor de un proceso y 16 hilos que ademas atiende
+    los turnos de WhatsApp. Cada apertura ocupaba ocho hilos y ocho sesiones de
+    base a la vez; con dos personas abriendo un chat, el resto hacia cola. El
+    SQL de cada una tarda 13-20 ms: lo caro no era la consulta sino los hilos y
+    los pedidos HTTP. Aca es SECUENCIAL a proposito --un hilo del motor por
+    apertura-- y las sesiones salen del pool, asi que ocho seguidas son
+    baratas.
+
+    Cada clave es EL MISMO cuerpo que la ruta individual (una sola definicion,
+    _cuerpo_<nombre>), con los parametros por defecto. Si un panel secundario
+    falla llega en null y el resto llega igual, con una linea de log de texto
+    fijo; la pantalla ya sabe dejar vacio el panel que no vino. Sin mensajes no
+    hay pantalla: una conversacion que no existe es 404 con codigo, y un fallo
+    al leerla es 500, como en /mensajes.
+
+    El 'codigo' del 404 es lo que distingue, desde la pantalla, "no existe" de
+    "este motor todavia no tiene esta ruta" (Flask contesta 404 sin JSON): en el
+    segundo caso la pantalla vuelve a las ocho lecturas y la apertura funciona
+    igual que antes mientras conviven frontend nuevo y motor viejo.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    try:
+        mensajes = _cuerpo_mensajes(tenant, id_conversacion)
+    except RuntimeError as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
+    except Exception as e:
+        registrar("conversaciones", "fallo al leer mensajes", error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    if mensajes is None:
+        return jsonify({"error": f"La conversacion '{id_conversacion}' no existe.",
+                        "codigo": "conversacion_inexistente"}), 404
+
+    salida: dict = {"apertura": True, "mensajes": mensajes}
+    paneles = (
+        ("hilo", lambda: _cuerpo_hilo(tenant, id_conversacion)),
+        ("herramientas", lambda: _cuerpo_herramientas(tenant, id_conversacion)),
+        ("relevo", lambda: _cuerpo_relevo(tenant, id_conversacion)),
+        ("equipo", lambda: _cuerpo_equipo(tenant, id_conversacion)),
+        ("sincronizaciones", lambda: _cuerpo_sincronizaciones(tenant, id_conversacion)),
+        ("acciones", lambda: _cuerpo_acciones(tenant, id_conversacion)),
+        ("casos", lambda: _cuerpo_casos_del_manual(tenant)),
+    )
+    for nombre, leer in paneles:
+        try:
+            salida[nombre] = leer()
+        except Exception as e:
+            # Texto fijo y el panel por nombre: nunca el error ni un dato de
+            # la conversacion. La pantalla deja ese panel vacio y sigue.
+            registrar("conversaciones", "fallo un panel de la apertura", panel=nombre,
+                      conversation_id=id_interno(id_conversacion), error=e)
+            salida[nombre] = None
+    return jsonify(salida)
 
 
 @app.get("/canales/plantillas")
@@ -9079,12 +9177,17 @@ def conversaciones_herramientas(id_conversacion):
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        llamadas = persistencia.herramientas_de(tenant, id_conversacion)
+        return jsonify(_cuerpo_herramientas(tenant, id_conversacion))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
         registrar("conversaciones", "fallo al leer herramientas", error=e)
         return jsonify({"error": "No se pudo leer el registro de herramientas."}), 500
+
+
+def _cuerpo_herramientas(tenant: str, id_conversacion: str) -> dict:
+    """Lo que responde GET /conversaciones/<id>/herramientas, como dato."""
+    llamadas = persistencia.herramientas_de(tenant, id_conversacion)
 
     # El diagnostico se cuenta ACA y no en la pantalla: distinguir un bloqueo
     # de un fallo depende de una columna de la base, y si la pantalla lo
@@ -9094,7 +9197,7 @@ def conversaciones_herramientas(id_conversacion):
     # Tres categorias y no cuatro. 'bloqueada' e 'intento no ejecutado' son la
     # misma cosa vista desde dos lados -- el codigo freno la accion-- y
     # separarlas obligaba a explicar una diferencia que no existe.
-    return jsonify({
+    return {
         "herramientas": llamadas,
         "diagnostico": {
             # Corrio y devolvio datos.
@@ -9109,7 +9212,7 @@ def conversaciones_herramientas(id_conversacion):
             "errores": sum(1 for l in llamadas
                            if not l["exito"] and not l.get("es_bloqueo")),
         },
-    })
+    }
 
 
 @app.get("/conversaciones/<id_conversacion>/sincronizaciones")
@@ -9131,7 +9234,7 @@ def conversaciones_sincronizaciones(id_conversacion):
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        pendientes = persistencia.sincronizaciones_de(tenant, id_conversacion)
+        return jsonify(_cuerpo_sincronizaciones(tenant, id_conversacion))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -9139,7 +9242,10 @@ def conversaciones_sincronizaciones(id_conversacion):
                   conversation_id=id_interno(id_conversacion), error=e)
         return jsonify({"error": "No se pudo leer el estado de sincronizacion."}), 500
 
-    return jsonify({"sincronizaciones": pendientes})
+
+def _cuerpo_sincronizaciones(tenant: str, id_conversacion: str) -> dict:
+    """Lo que responde GET /conversaciones/<id>/sincronizaciones, como dato."""
+    return {"sincronizaciones": persistencia.sincronizaciones_de(tenant, id_conversacion)}
 
 
 @app.get("/conversaciones/<id_conversacion>/acciones")
@@ -9160,7 +9266,7 @@ def conversaciones_acciones(id_conversacion):
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        acciones = persistencia.acciones_de_conversacion(tenant, id_conversacion)
+        return jsonify(_cuerpo_acciones(tenant, id_conversacion))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -9168,7 +9274,10 @@ def conversaciones_acciones(id_conversacion):
                   conversation_id=id_interno(id_conversacion), error=e)
         return jsonify({"error": "No se pudieron leer las acciones."}), 500
 
-    return jsonify({"acciones": acciones})
+
+def _cuerpo_acciones(tenant: str, id_conversacion: str) -> dict:
+    """Lo que responde GET /conversaciones/<id>/acciones, como dato."""
+    return {"acciones": persistencia.acciones_de_conversacion(tenant, id_conversacion)}
 
 
 """
@@ -9786,7 +9895,7 @@ def conversaciones_equipo(id_conversacion):
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        acciones = persistencia.acciones_sobre_el_equipo(tenant, id_conversacion)
+        return jsonify(_cuerpo_equipo(tenant, id_conversacion))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -9794,7 +9903,10 @@ def conversaciones_equipo(id_conversacion):
                   conversation_id=id_interno(id_conversacion), error=e)
         return jsonify({"error": "No se pudo leer el registro de acciones."}), 500
 
-    return jsonify({"acciones": acciones})
+
+def _cuerpo_equipo(tenant: str, id_conversacion: str) -> dict:
+    """Lo que responde GET /conversaciones/<id>/equipo, como dato."""
+    return {"acciones": persistencia.acciones_sobre_el_equipo(tenant, id_conversacion)}
 
 
 @app.get("/conversaciones/<id_conversacion>/relevo")
@@ -9817,7 +9929,7 @@ def conversaciones_relevo(id_conversacion):
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        eventos = persistencia.eventos_de_relevo(tenant, id_conversacion)
+        return jsonify(_cuerpo_relevo(tenant, id_conversacion))
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
@@ -9827,7 +9939,10 @@ def conversaciones_relevo(id_conversacion):
                   conversation_id=id_interno(id_conversacion), error=e)
         return jsonify({"error": "No se pudo leer el registro de relevo."}), 500
 
-    return jsonify({"eventos": eventos})
+
+def _cuerpo_relevo(tenant: str, id_conversacion: str) -> dict:
+    """Lo que responde GET /conversaciones/<id>/relevo, como dato."""
+    return {"eventos": persistencia.eventos_de_relevo(tenant, id_conversacion)}
 
 
 @app.post("/conversaciones/<id_conversacion>/mensajes/<mensaje_id>/marcar")
@@ -9946,12 +10061,17 @@ def manual_casos():
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        config = _config_de(tenant)
+        return jsonify(_cuerpo_casos_del_manual(tenant))
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
 
-    return jsonify({"casos": config.manual.casos,
-                    "rotulos": dict(config.conversaciones.rotulos)})
+
+def _cuerpo_casos_del_manual(tenant: str) -> dict:
+    """Lo que responde GET /manual/casos, como dato. FileNotFoundError si la
+    empresa no existe."""
+    config = _config_de(tenant)
+    return {"casos": config.manual.casos,
+            "rotulos": dict(config.conversaciones.rotulos)}
 
 
 @app.put("/manual/casos")
