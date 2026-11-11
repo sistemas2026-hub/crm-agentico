@@ -45,6 +45,15 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   dio: ^5.11.1
+
+  #  EL MAPA DE LA FICHA  --  11/11/2026.
+  #
+  #  `flutter_map` y no el de Google: no necesita clave de API ni una cuenta
+  #  de facturacion, y sobre todo no mete un proveedor nuevo en la
+  #  autorizacion de tratamiento de datos. Las teselas salen de Esri, que es
+  #  el mismo origen que ya usa el mapa de cuadrillas del panel web.
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
   flutter_secure_storage: ^11.0.0
   sqflite: ^2.4.3
   path: ^1.9.1

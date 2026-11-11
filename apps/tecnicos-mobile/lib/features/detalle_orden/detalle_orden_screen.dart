@@ -26,6 +26,7 @@ import '../trabajo/orden_operativo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
 import 'guardar_ubicacion_del_cliente.dart';
+import 'mapa_del_cliente.dart';
 import 'comprobar_conexion.dart';
 import '../trabajo/widgets/franja_del_servicio.dart';
 import 'diagnostico_de_campo.dart';
@@ -1062,8 +1063,34 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   ///
   /// Quedan dos, que es exactamente la rejilla del diseño: una fila de a dos.
   Widget _accionesRapidas(TrabajoVista trabajo) {
+    final double? lat = trabajo.latitud;
+    final double? lng = trabajo.longitud;
+    final bool hayPunto = SalirDeLaApp.uriDeMapa(
+          latitud: lat,
+          longitud: lng,
+        ) !=
+        null;
     return Column(
       children: <Widget>[
+        //  EL MAPA, Y NO DOS NUMEROS  --  11/11/2026.
+        //
+        //  La ficha mostraba la coordenada como texto y un boton que abria
+        //  Google Maps. Dos numeros no le dicen a nadie donde queda una casa,
+        //  y salir de la aplicacion para verlo es perder el hilo del trabajo:
+        //  el tecnico vuelve y tiene que reencontrar donde estaba.
+        //
+        //  Se dibuja SOLO si hay un punto que valga --la misma regla que
+        //  decide si «Ruta GPS» sirve, y que ya descarta una latitud sin
+        //  longitud y un 0,0--. Sin punto no se pinta un mapa vacio del
+        //  centro del oceano: queda el boton de guardarlo.
+        if (hayPunto) ...<Widget>[
+          MapaDelCliente(
+            latitud: lat!,
+            longitud: lng!,
+            etiqueta: trabajo.direccion,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
         Row(
           children: <Widget>[
             Expanded(
