@@ -322,6 +322,10 @@ html:not(.dark) .bandeja {
   /* 04/11/2026: marino, no eléctrico. Ver `--bandeja-accion`. */
   background: var(--bandeja-accion);
   border-color: var(--bandeja-accion);
+  /* Plano, como todo lo demás de la Bandeja (11/11/2026). El halo de v2.css
+     sale de `--v2-ember`, que hoy es índigo: debajo del marino quedaba una
+     sombra de otro color, lo único con sombra en la pantalla. */
+  box-shadow: none;
 }
 
 .bandeja .v2-btn-primary:hover:not(:disabled) {

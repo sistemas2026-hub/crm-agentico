@@ -506,13 +506,18 @@
              Una plantilla aprobada sirve igual con la ventana abierta, y
              tenerla escondida detrás de un estado hacía que nadie supiera que
              existía hasta que ya no se podía escribir. -->
+        <!-- Con la ventana cerrada ES la acción: un solo botón que cambia de
+             nombre y de peso, no un segundo «Elegir plantilla» en el pie que
+             repetía a este (11/11/2026). -->
         <button
           type="button"
           class="barra-boton"
+          class:barra-boton-accion={bloqueadoPorVentana && !bloqueadoPorIA}
           onclick={() => onAbrirPlantillas?.()}
           disabled={cargandoPlantillas}
         >
-          <FileText size={13} /> Plantillas
+          <FileText size={13} />
+          {bloqueadoPorVentana && !bloqueadoPorIA ? 'Elegir plantilla' : 'Plantillas'}
         </button>
 
         {#if errorDevolver}
@@ -576,6 +581,13 @@
            nadie puede tipear, en una pantalla donde el hilo se queda con el
            18%. El texto de adentro explica por qué está bloqueado, así que la
            caja sigue diciendo algo -- pero en la mitad de alto. -->
+      <!-- EL BOTÓN AL LADO DEL CUADRO (11/11/2026). Vivía solo en el pie, en un
+           renglón propio y lejos de lo que manda; ahí se leía como un bloque
+           aparte, y el renglón se lo quitaba al hilo. Y sólo se dibuja cuando
+           hay algo que se pueda mandar: con la IA atendiendo la acción es
+           «Intervenir», y con la ventana cerrada es «Elegir plantilla» en la
+           barra. Un «Enviar» muerto que parece vivo competía con las dos. -->
+      <div class="escribir">
       <textarea
         data-privado
         class="compositor-texto"
@@ -606,6 +618,41 @@
           }
         }}
       ></textarea>
+        {#if modo === 'nota'}
+          <button
+            class="v2-btn v2-btn-strong"
+            type="button"
+            onclick={() => onGuardarNota?.()}
+            disabled={enviando || !entrada.trim()}
+            aria-busy={enviando}
+          >
+            {enviando ? 'Guardando…' : 'Guardar nota'}
+          </button>
+        {:else if bloqueadoPorIA || bloqueadoPorVentana}
+          <!-- Nada: la acción de este estado está en la banda o en la barra. -->
+        {:else if adjunto}
+          <button
+            class="v2-btn v2-btn-primary"
+            type="button"
+            onclick={() => onEnviarAdjunto?.()}
+            disabled={enviando}
+            aria-busy={enviando}
+          >
+            <Send size={14} />{enviando ? 'Enviando…' : 'Enviar archivo'}
+          </button>
+        {:else}
+          <button
+            class="v2-btn v2-btn-primary"
+            type="submit"
+            disabled={enviando || !entrada.trim()}
+            aria-busy={enviando}
+          >
+            <Send size={14} />{#if modo === 'responder_y_devolver'}
+              {enviando ? 'Enviando y devolviendo…' : 'Enviar y devolver'}
+            {:else}{enviando ? 'Enviando…' : 'Enviar'}{/if}
+          </button>
+        {/if}
+      </div>
       <!-- «QUEDA EN ESPERA» (29/10/2026). La opción que el contrato del relevo
            le da a T5 y que nunca tuvo pantalla: la conversación queda marcada
            como esperando algo -- que el cliente reinicie, que pase el técnico
@@ -665,6 +712,9 @@
            la referencia. La pista no se dibuja cuando Enter no manda nada:
            con la ventana cerrada o con la IA atendiendo, dejarla puesta
            sería invitar al gesto que no funciona. -->
+      <!-- Con la ventana cerrada no queda nada que decir acá: ni la pista
+           (Enter no manda) ni el canal (la banda ya lo dijo). -->
+      {#if !bloqueadoPorVentana}
       <div class="compositor-pie">
         <span class="pista">
           {#if !bloqueadoPorVentana && !bloqueadoPorIA}
@@ -681,48 +731,8 @@
             <span class="barra-canal">{estadoCanal}</span>
           {/if}
         </span>
-
-        {#if modo === 'nota'}
-          <button
-            class="v2-btn v2-btn-strong"
-            type="button"
-            onclick={() => onGuardarNota?.()}
-            disabled={enviando || !entrada.trim()}
-            aria-busy={enviando}
-          >
-            {enviando ? 'Guardando…' : 'Guardar nota'}
-          </button>
-        {:else if adjunto}
-          <button
-            class="v2-btn v2-btn-primary"
-            type="button"
-            onclick={() => onEnviarAdjunto?.()}
-            disabled={enviando || bloqueadoPorVentana || bloqueadoPorIA}
-            aria-busy={enviando}
-          >
-            <Send size={14} />{enviando ? 'Enviando…' : 'Enviar archivo'}
-          </button>
-        {:else if bloqueadoPorVentana && !bloqueadoPorIA}
-          <button
-            class="v2-btn v2-btn-primary"
-            type="button"
-            onclick={() => onAbrirPlantillas?.()}
-          >
-            Elegir plantilla
-          </button>
-        {:else}
-          <button
-            class="v2-btn v2-btn-primary"
-            type="submit"
-            disabled={enviando || bloqueadoPorIA || !entrada.trim()}
-            aria-busy={enviando}
-          >
-            <Send size={14} />{#if modo === 'responder_y_devolver'}
-              {enviando ? 'Enviando y devolviendo…' : 'Enviar y devolver'}
-            {:else}{enviando ? 'Enviando…' : 'Enviar'}{/if}
-          </button>
-        {/if}
       </div>
+      {/if}
     </form>
   </div>
 
@@ -1299,6 +1309,25 @@
     container-type: inline-size;
   }
 
+  /* El cuadro y su botón en un renglón, el botón abajo a la derecha, donde
+     termina lo escrito. Si la columna es tan angosta que el cuadro quedaría
+     por debajo de 220px, el botón baja entero a su renglón, a la derecha. */
+  .escribir {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .escribir > .compositor-texto {
+    flex: 1 1 220px;
+    width: auto;
+    min-width: 0;
+  }
+  .escribir > .v2-btn {
+    flex: none;
+  }
+
   .compositor-texto {
     width: 100%;
     resize: vertical;
@@ -1573,6 +1602,19 @@
   .barra-boton:disabled {
     opacity: 0.55;
     cursor: default;
+  }
+  /* Ventana cerrada: la única acción posible, con el marino de la acción y
+     la misma forma que el resto de la barra. */
+  .barra-boton.barra-boton-accion {
+    color: #fff;
+    font-weight: 600;
+    background: var(--bandeja-accion);
+    border-color: var(--bandeja-accion);
+  }
+  .barra-boton.barra-boton-accion:hover:not(:disabled) {
+    color: #fff;
+    background: var(--bandeja-accion-hover);
+    border-color: var(--bandeja-accion-hover);
   }
 
   /* Por dónde sale, al borde derecho. `margin-left:auto` y no un espaciador:
