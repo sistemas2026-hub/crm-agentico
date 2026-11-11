@@ -73,15 +73,20 @@ class Command(BaseCommand):
         #  sola dio «0 opciones» en un campo que SI las tiene, medido el
         #  11/11/2026 con `que_encontro` de `correctivo_fibra`.
         reglas = objetivo.get("reglas") or {}
-        opciones = list(reglas.get("options") or objetivo.get("opciones") or [])
+        #  NO SE LLAMA `opciones`: ese nombre ya es el de los argumentos del
+        #  comando (`opciones["aplicar"]`), y pisarlo rompio la primera
+        #  corrida real con un TypeError. Dos cosas distintas con el mismo
+        #  nombre en la misma funcion es una que se come a la otra.
+        opciones_del_campo = list(
+            reglas.get("options") or objetivo.get("opciones") or [])
         self.stdout.write(f"  campo '{objetivo.get('id')}' — tipo "
                           f"'{objetivo.get('tipo')}', "
-                          f"{len(opciones)} opciones")
+                          f"{len(opciones_del_campo)} opciones")
 
         #  NO SE MARCA UN CAMPO QUE NO ES DE SELECCION. Un `permite_otro` en un
         #  campo de texto o numerico no significa nada y el validador lo
         #  rechazaria despues, cuando ya se publico una version de mas.
-        if not opciones:
+        if not opciones_del_campo:
             raise CommandError(
                 "ese campo no tiene opciones: «Otro» solo tiene sentido donde "
                 "hay una lista de la que elegir")
