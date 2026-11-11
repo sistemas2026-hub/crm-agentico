@@ -7,16 +7,139 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **19/10/2026 — producción en `ba5a1a5f`**, remedida con
-`git fetch` y `git patch-id --stable`.
+Última actualización: **11/11/2026 — producción en `d73356f2`**, medida con
+`git fetch` sobre `origin/fix/integracion-wisphub`.
 
-**Esta cabecera estaba 12 días vieja y afirmaba que producción era `8bc8af9`.**
-Lo era el 07/10; desde entonces entraron **90 commits** de otra sesión
-(Materiales, Cierre de jornada, Bodega en Reportes, el Supervisor midiendo el
-equipo de un ticket, la paginación de Despacho, dos APKs). **Esta actualización
-NO cataloga esos 90**: arregla el número que envejeció y agrega lo que cerró
-esta sesión. Quien necesite el detalle de los 90 lo tiene en
-`git log 8bc8af9..ba5a1a5f`.
+**La cabecera anterior tenía 23 días y afirmaba que producción era
+`ba5a1a5f`.** Lo era el 19/10; desde entonces entraron **532 commits**, de
+varias sesiones. **Esta actualización NO cataloga esos 532** — arregla el
+número que envejeció y agrega lo que cerró esta sesión. Quien necesite el
+detalle lo tiene en `git log ba5a1a5f..d73356f2`.
+
+Que esto haya vuelto a pasar, con 532 en vez de 90, dice algo sobre el
+mecanismo y no sobre quien lo olvidó: un archivo que una sola sesión puede
+escribir envejece a la velocidad de las OTRAS. No es una propuesta de cambiar
+la regla del escritor único --nació de tres sesiones que lo dejaron en dos
+versiones divergentes-- sino un dato para quien la revise.
+
+> **Esta sección la escribió una sesión que NO es la dueña del archivo**
+> (`integrar-centro-mando`), por pedido explícito del usuario el 11/11/2026.
+> Se limitó a la cabecera y a agregar la sección de abajo: no se tocó ninguna
+> otra, ni se podó nada.
+
+---
+
+## La ubicación del cliente, escrita desde la calle — 10 y 11/11/2026
+
+**Producción en `d73356f2`.** El técnico, parado en la puerta, deja la
+coordenada de la casa escrita en los sistemas del ISP. Probado en vivo: una
+coordenada real quedó en WispHub desde el teléfono.
+
+### Por qué existe, medido
+
+De **5.186 equipos, 10 tienen coordenada** (0,19 %): 5.082 en `null` y 94 en
+cadena vacía. Del otro lado, 1.350 de 2.700. El dato lo tiene el técnico y no
+había forma de que lo dejara escrito.
+
+Y antes de eso, el parser que las LEE perdía **591 de 1.662** coordenadas ya
+cargadas, por tres formatos que no reconocía (grados-minutos-segundos,
+separadas por espacio, decimal con hemisferio en letra). Hoy lee 1.644 y
+pierde 18, que son basura de verdad: direcciones de calle, un correo, un
+decimal roto. Eso recuperó **573 clientes** que la pantalla daba por «sin
+ubicación», y **112 órdenes vivas** recibieron su punto con
+`completar_coordenadas --aplicar`.
+
+### El camino, y por qué es el que es
+
+```
+botón en la ficha
+  → POST /api/campo/trabajos/<id>/ubicacion-del-cliente/
+  → campo/services/ubicacion_al_isp.py
+  → POST {MOTOR}/interno/orden/<id>/guardar-ubicacion
+  → nucleo/seguimiento/coordenada_del_cliente.py
+       interruptor → frontera.humana() → idempotencia → los dos proveedores
+```
+
+**Ruta dedicada y no `/interno/herramienta/<nombre>`**: esa entra por la
+puerta AUTÓNOMA, cerrada hoy por Autonomía 2. Por ahí el botón habría andado
+en local y fallado solo en producción.
+
+**WispHub manda** (decisión del usuario, corregida el 11/11): si falla, la
+acción falla y el equipo no se intenta. El equipo va después y puede faltar
+—hay órdenes sin serial de ONU— sin que eso impida ubicar la casa.
+
+**Corregir exige justificación, y la exige el SERVIDOR.** Llenar un vacío no
+pide nada. La diferencia la hace cumplir `ubicacion_views.py`, no la pantalla:
+si la regla viviera en el teléfono, en tres meses habría correcciones sin
+motivo y nadie sabría por qué se movió una casa. El rastro queda en el
+historial de la orden, sin la coordenada.
+
+### Lo que encontraron las dos auditorías, y vale más que la capacidad
+
+Se corrieron `auditor-de-frontera` y `revisor-de-pii` DESPUÉS de desplegar
+—orden equivocado, y queda dicho—. Encontraron tres cosas que ninguna de las
+pruebas en verde podía ver:
+
+1. **La clave de idempotencia fija rompía la capacidad.** `reclamar` compara
+   el hash de argumentos ANTES que `exitosa` y que `fallida`; como el botón
+   relee el GPS en cada toque, el segundo llegaba con otra huella y salía
+   `CLAVE_REUTILIZADA`. Ese cliente quedaba sin coordenada **para siempre** y
+   el síntoma acusaba al ISP.
+2. **El eco del proveedor se guardaba entero** en
+   `operaciones_externas.respuesta`, en claro y sin lista blanca. Medido
+   después contra el servicio real: ese `PUT` devuelve **34 campos, con la
+   coordenada y tres contraseñas**. Contradecía CLAUDE.md §5.
+3. **Una guarda de frontera quedó en rojo** (`test_m06a_frontera_autorizacion`)
+   porque las dos herramientas entraron al catálogo sin clase de riesgo. Ya
+   están clasificadas R2.
+
+### Lo que las pruebas verdes NO veían — cuatro veces el mismo patrón
+
+Vale anotarlo junto, porque es la lección y no el detalle:
+
+- el doble de usuario tenía `get_full_name()`, **un método que este modelo no
+  tiene**: 15 pruebas en verde contra un `User` imaginario, y el botón
+  devolvía 400 en producción;
+- el andamio de idempotencia aceptaba `argumentos_hash` y **no lo usaba**, con
+  un comentario que afirmaba fidelidad a la tabla real;
+- el proveedor falso devolvía `{"ok": true}`, un acuse corto, que es
+  exactamente la hipótesis que la herramienta real rompe;
+- y una prueba **bendecía el defecto** con todas las letras: «falta el del
+  equipo: no se escribe nada». No falló la prueba — falló lo que se decidió
+  que estuviera bien. Lo encontró un técnico tocando un botón.
+
+### Qué queda abierto
+
+| | |
+|---|---|
+| `invocable_por_servicio` sobra en las dos herramientas | abre el camino autónomo; quitarlo exige agregar las dos marcas a `editor._BANDERAS_DE_SISTEMA` en el mismo cambio |
+| **El actor no se persiste** | se valida en tres capas y no queda en ninguna fila: hoy no hay con qué contestar quién escribió una coordenada |
+| Las guardas de calidad del GPS viven solo en Dart | simulada, precisión y sin señal. El servidor escribe lo que le manden |
+| El interruptor se lee una vez para las dos escrituras | ventana de hasta 15 s entre la primera y la segunda |
+| `str(e)` en `operaciones_externas.error` | preexistente; no filtra la coordenada pero sí el id de servicio y el serial |
+| Los servicios **5345** y **5394** | coordenada en un formato que el parser no reconoce: puede ser basura o un quinto formato |
+
+## App de campo: siete de las diez mejoras — 11/11/2026
+
+Medido contra el código, no contra el documento del encargo
+(`SPEC/APP_CAMPO_DIEZ_MEJORAS.md`, que es el pedido y no lleva estados).
+
+**Hechas:** 1 (campana), 3 (el conteo de «Mi Trabajo»), 4 y 9 (el material en
+un solo lugar), 5 (ticket desplegable, mapa y coordenadas), 6 (galería), 10
+(finalizar con resumen).
+
+**Abiertas:**
+
+- **2 — las tres cifras del inicio.** Las tres existen y suman bien; falta
+  que «Asignadas» diga **con cuántas arrancó** el día.
+- **3b — los chips «Cerca mío» / «Todos».** Siguen en
+  `trabajo_screen.dart:552`.
+- **7 — el bloqueo.** Ya funciona con sus dos casillas y foto opcional. El
+  pedido era «mirá qué le puede mejorar», y **qué mejorar no está definido**:
+  no es trabajo pendiente, es una decisión pendiente.
+- **8 — «Qué encontraste» con texto libre.** `permite_otro` **no aparece en
+  `tenants/rapilink.config.yaml`**. Es la más barata de las cuatro: es
+  configuración, no espera release de la app ni despliegue.
 
 ---
 
