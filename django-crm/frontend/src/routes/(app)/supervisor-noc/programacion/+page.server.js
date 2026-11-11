@@ -120,10 +120,17 @@ export const actions = {
     if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'seguimiento', error: 'Esto es para quien gestiona.' });
     try {
       const r = await guardarConfiguracionDeSeguimiento({ cookies }, cuerpoDeSeguimiento(await request.formData()));
+      //  EL MENSAJE DICE LA CADENCIA, NO SOLO QUE GUARDÓ (11/11/2026): el
+      //  campo de minutos no se manda cuando quedó vacío, así que «guardado»
+      //  sin el número dejaría al usuario sin saber con qué valor quedó.
+      const cada = Number(r?.repetir_recordatorio_cada_minutos ?? 0);
+      const insiste = Number.isFinite(cada) && cada > 0
+        ? ` Vuelve a avisarle cada ${cada} minutos hasta que reporte.`
+        : ' Avisa una sola vez por atraso.';
       return {
         de: 'seguimiento',
         hecho: r?.recordar_al_tecnico
-          ? 'Guardado. El Supervisor le recuerda al técnico la orden sin reporte.'
+          ? `Guardado. El Supervisor le recuerda al técnico la orden sin reporte.${insiste}`
           : 'Guardado. El Supervisor ya no le recuerda al técnico.'
       };
     } catch (e) {
