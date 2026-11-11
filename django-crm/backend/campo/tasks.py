@@ -695,8 +695,86 @@ def mirar_las_que_faltan(orden) -> dict:
               if e.id not in mirada
               and intentos.get(e.id, 0) < INTENTOS_POR_FOTO]
 
+    miradas = _mirar_estas(faltan)
+
+    #  SEGUNDA PASADA: LA MEDICION QUE NO SE SOSTIENE  --  11/11/2026
+    #
+    #  POR QUE  --  pedido del usuario, tras ver cerrar la OT #200
+    #  -----------------------------------------------------------
+    #  «o si mejor ese datos llene la app con la lectura que toma de la
+    #  foto». La precondicion de eso es una lectura confiable, y hoy no lo
+    #  es: el modelo le corre el punto decimal y lee «-2.10» donde la
+    #  pantalla dice «-21.0». Medido 3 de cada 7 veces el 10/11, y en la
+    #  propia #200 las dos veces que se miro esa foto.
+    #
+    #  El sistema hacia lo correcto con una lectura imposible --descartarla--
+    #  pero descartar deja la medicion SIN VERIFICAR, y asi cerro la #200:
+    #  el tecnico escribio -18.0, la pantalla marcaba -21.0, y nadie los
+    #  comparo nunca. Una lectura sola no tiene con que validarse; dos si.
+    #
+    #  POR QUE ES UNA SEGUNDA PASADA Y NO LA MISMA LISTA. Las dos cosas
+    #  pasan en esta misma llamada y en este orden a proposito: en el camino
+    #  acelerado la cola puede no haber mirado ninguna foto todavia --que es
+    #  exactamente como quedo atrapada la #200-- y `mediciones_para_releer`
+    #  necesita las lecturas YA ESCRITAS para poder juzgarlas. Preguntando
+    #  despues de la primera pasada, la relectura sale en el mismo momento en
+    #  que el tecnico manda el reporte, que es lo que el usuario pidio el
+    #  09/11: que la devolucion no espere al ciclo de la hora siguiente.
+    #
+    #  SE RECUENTAN LOS INTENTOS, no se reusa `intentos`: la primera pasada
+    #  acaba de sumar filas y el tope tiene que verlas. Con el tope viejo una
+    #  foto recien mirada podria releerse una vez de mas.
+    #
+    #  QUIEN DECIDE NO ES ESTA FUNCION. `revision_del_cierre` dice cuales y
+    #  por que --es donde vive la comparacion, con su tolerancia y su filtro
+    #  de lecturas imposibles-- y aca solo se ejecuta. Copiar ese criterio
+    #  seria tener dos.
+    relecturas = 0
+    try:
+        from campo import revision_del_cierre as RC
+
+        pedidas = RC.mediciones_para_releer(orden)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("mirada inmediata: no se pudo decidir que releer (%s)",
+                       type(e).__name__)
+        pedidas = []
+    if pedidas:
+        ahora = dict(_intentos_por_evidencia(
+            orden, [ultima[r].id for r in pedidas if r in ultima]))
+        de_nuevo = [ultima[r] for r in pedidas
+                    if r in ultima
+                    and ahora.get(ultima[r].id, 0) < INTENTOS_POR_FOTO]
+        relecturas = _mirar_estas(de_nuevo)
+
+    return {"miradas": miradas, "faltaban": len(faltan),
+            "relecturas": relecturas}
+
+
+def _intentos_por_evidencia(orden, ids) -> dict:
+    """Cuantas filas de analisis tiene cada evidencia. APPEND-ONLY: contarlas
+    es contar los intentos (ver `campo/analisis_de_evidencia.py`)."""
+    from campo.models import AnalisisDeEvidencia
+
+    cuenta = {}
+    for evidencia_id in (AnalisisDeEvidencia.objects
+                         .filter(org=orden.org, evidencia_id__in=list(ids))
+                         .values_list("evidencia_id", flat=True)):
+        cuenta[evidencia_id] = cuenta.get(evidencia_id, 0) + 1
+    return cuenta
+
+
+def _mirar_estas(evidencias) -> int:
+    """Mira esta lista de evidencias, con el tope por pasada. Devuelve
+    cuantas se miraron.
+
+    Se extrajo del cuerpo de `mirar_las_que_faltan` el 11/11/2026 porque
+    ahora hay dos pasadas --las que no tienen analisis y las que hay que
+    releer-- y lo que escriba cada una tiene que ser indistinguible: mismo
+    `_mirar_y_anotar`, mismo tope, mismo manejo del fallo. Dos copias
+    divergen, y el veredicto dependeria de por que camino se miro la foto.
+    """
     miradas = 0
-    for evidencia in faltan[:MAX_FOTOS_EN_EL_MOMENTO]:
+    for evidencia in list(evidencias)[:MAX_FOTOS_EN_EL_MOMENTO]:
         try:
             _mirar_y_anotar(evidencia)
             miradas += 1
@@ -706,7 +784,7 @@ def mirar_las_que_faltan(orden) -> dict:
             #  red de atras es la tarea por foto y el ciclo horario.
             logger.warning("mirada inmediata: fallo una foto (%s)",
                            type(e).__name__)
-    return {"miradas": miradas, "faltaban": len(faltan)}
+    return miradas
 
 
 def pedir_analisis_de_la_foto(evidencia) -> None:

@@ -572,6 +572,164 @@ def _lectura_creible(valor, limites):
     return piso <= valor <= techo
 
 
+def _lecturas_de_la_foto(orden, requisito_id: str) -> list[str]:
+    """TODOS los textos que la IA escribio sobre esa foto, del mas viejo al
+    mas nuevo. Solo los que dicen algo: una fila sin texto es un intento que
+    fallo, no una lectura.
+
+    POR QUE HACEN FALTA TODAS, Y NO LA ULTIMA  --  11/11/2026
+    ---------------------------------------------------------
+    `_texto_de_la_foto` devuelve una --la ultima-- y para DESCRIBIR alcanza.
+    Para sacar un NUMERO no: dos lecturas que dan el mismo numero son una
+    lectura confirmada, y dos que dan numeros distintos no son ninguna. Ese
+    es el unico control que existe sobre lo que el modelo lee de una
+    pantalla, porque no hay segundo instrumento con que comparar.
+
+    DE UNA SOLA EVIDENCIA, la mas reciente de ese requisito. Las lecturas de
+    la foto que el tecnico rehizo no se mezclan con las de la que reemplazo:
+    son dos pantallas distintas y coincidir entre ellas no probaria nada.
+    """
+    from campo.models import AnalisisDeEvidencia
+
+    ultima = (AnalisisDeEvidencia.objects
+              .filter(org=orden.org, evidencia__orden_trabajo=orden,
+                      evidencia__requisito_id=requisito_id)
+              #  La vuelta primero, por lo mismo que `_texto_de_la_foto`.
+              .order_by("-vuelta", "-created_at").first())
+    if ultima is None:
+        return []
+    textos = (AnalisisDeEvidencia.objects
+              .filter(org=orden.org, evidencia_id=ultima.evidencia_id)
+              .order_by("created_at").values_list("texto", flat=True))
+    return [t for t in textos if (t or "").strip()]
+
+
+def _numero_de_la_foto(textos, limites):
+    """`(valor, discordaron)`: el dBm que esa foto muestra, o `None`.
+
+    LA DOBLE LECTURA  --  11/11/2026, pedido del usuario
+    -----------------------------------------------------
+    El usuario, despues de ver la OT #200 cerrar con la medicion de salida
+    sin verificar: «o si mejor ese datos llene la app con la lectura que toma
+    de la foto». La precondicion de eso --y el problema de fondo de los
+    cinco bugs de esta semana-- es que la lectura del modelo no es confiable:
+    le corre el punto decimal y lee «-2.10» donde la pantalla dice «-21.0».
+    Medido 3 de cada 7 veces el 10/11, y otra vez el 11/11 en la misma foto.
+
+    Una lectura sola no tiene con que validarse. Dos si:
+
+      · un solo valor creible  ->  ese es el numero
+      · dos valores creibles distintos  ->  NO HAY numero (`discordaron`)
+      · ninguno creible  ->  no hay numero, y no es discordancia: es el
+        descarte que ya existia (ver `_lectura_creible`)
+
+    POR QUE NO SE PROMEDIA NI SE ELIGE UNA. Promediar «-2.10» con «-21.0» da
+    un numero que ninguna pantalla mostro, y elegir la que convenga es
+    inventar la mitad del juicio -- el mismo motivo por el que `PF.uno_solo`
+    no elige entre dos lecturas de un mismo texto.
+
+    UNA SOLA LECTURA CREIBLE SIGUE VALIENDO, y es deliberado: el tecnico ya
+    escribio su propio numero, asi que cuando los dos coinciden hay dos
+    fuentes independientes de acuerdo y no hace falta pagar una tercera. La
+    segunda lectura se pide donde hace falta --ver `mediciones_para_releer`--
+    y no en toda foto, que duplicaria el costo del analisis entero para
+    confirmar lo que ya estaba confirmado.
+    """
+    from campo import potencia_de_la_foto as PF
+
+    creibles = []
+    for t in textos:
+        v = PF.uno_solo(t)
+        if v is None or not _lectura_creible(v, limites):
+            continue
+        if v not in creibles:
+            creibles.append(v)
+    if len(creibles) == 1:
+        return creibles[0], False
+    return None, len(creibles) > 1
+
+
+def mediciones_para_releer(orden, cierre=None) -> list[str]:
+    """Los requisitos de foto de medicion cuya lectura conviene volver a
+    pedirle al modelo. Solo lee; quien la vuelve a mirar es
+    `campo.tasks.mirar_las_que_faltan`, que es quien puede escribir.
+
+    CUANDO SE GASTA UNA SEGUNDA LECTURA: cuando la primera va a tener
+    consecuencia y no se sostiene sola.
+
+      · no se leyo ningun numero  ->  eso DEVUELVE la orden (`ilegibles`), y
+        mandar a un tecnico de vuelta por un fallo de lectura del modelo es
+        el viaje mas caro que este sistema puede causar
+      · el numero no es creible, o las lecturas discordaron  ->  la medicion
+        queda sin verificar, que es como cerro la OT #200
+      · el numero no coincide con lo escrito  ->  eso tambien DEVUELVE la
+        orden, y conviene estar seguro antes
+
+    Y CUANDO NO: cuando el numero creible coincide con el del tecnico. Ahi ya
+    hay dos fuentes independientes de acuerdo --su medidor y la foto-- y una
+    tercera lectura no agrega nada que no se sepa.
+
+    SIN NUMERO ESCRITO TAMBIEN SE RELEE si la foto no deja leer nada: la
+    devolucion por foto ilegible no depende de que el tecnico haya escrito.
+
+    EL TOPE DE INTENTOS NO VIVE ACA. Lo aplica `mirar_las_que_faltan` con
+    `INTENTOS_POR_FOTO`, contando filas: una foto que el modelo lee mal tres
+    veces deja de releerse y espera a una persona.
+    """
+    from campo import potencia_de_la_foto as PF
+
+    if cierre is None:
+        cierre = _cierre_de_esta_vuelta(orden)
+    if cierre is None:
+        return []
+    respuestas = _lo_que_escribio_el_tecnico(orden, cierre)
+    declaradas = {e.get("id") for e in
+                  ((getattr(orden.tipo_trabajo_version, "esquema", None)
+                    or {}).get("evidencias") or [])
+                  if isinstance(e, dict) and e.get("id")}
+    #  LOS CAMPOS QUE LA PLANTILLA DECLARA, no solo las fotos  --  11/11
+    #
+    #  SIN CAMPO DE POTENCIA NO SE RELEE NADA, y lo encontro una guarda
+    #  ajena: `test_las_fotos_se_miran_antes_de_decidir` arma su orden con
+    #  `"campos": []` --declara las tres fotos y ningun campo-- y sus siete
+    #  casos se pusieron en rojo porque esta funcion pedia releer las dos
+    #  fotos de medicion en cada pasada. Eran guardas de COSTO: «no se le
+    #  paga dos veces al modelo».
+    #
+    #  Y tenian razon. Una segunda lectura solo sirve si hay con que
+    #  CONTRASTARLA: el numero que el tecnico escribio. Donde la plantilla
+    #  no tiene ese campo, el formulario nunca va a traerlo, y releer la
+    #  foto hasta agotar el tope no puede cambiar nada -- es gasto puro, en
+    #  toda orden abierta de esa plantilla y en cada pasada del ciclo.
+    campos_declarados = {c.get("id") for c in
+                         ((getattr(orden.tipo_trabajo_version, "esquema", None)
+                           or {}).get("campos") or [])
+                         if isinstance(c, dict) and c.get("id")}
+    salida = []
+    for campo, requisito, _cuando in ((CAMPO_AL_LLEGAR, "medicion_al_llegar",
+                                       "al llegar"),
+                                      (CAMPO_AL_SALIR, "medicion_al_salir",
+                                       "al salir")):
+        if requisito not in declaradas or campo not in campos_declarados:
+            continue
+        textos = _lecturas_de_la_foto(orden, requisito)
+        if not textos:
+            #  Nadie la miro todavia. La mira `mirar_las_que_faltan` por su
+            #  camino de siempre; releer no es lo que falta aca.
+            continue
+        limites = _lo_que_el_tecnico_PODRIA_escribir(orden, campo)
+        valor, _discordaron = _numero_de_la_foto(textos, limites)
+        if valor is None:
+            salida.append(requisito)
+            continue
+        escrito = _a_numero(respuestas.get(campo))
+        if escrito is None:
+            continue
+        if PF.comparar(valor, escrito)[0] is False:
+            salida.append(requisito)
+    return salida
+
+
 def _pieza_de_medicion(orden):
     """Lo que el Supervisor midio CONTRA EL EQUIPO para esta orden, o `None`.
 
@@ -670,11 +828,24 @@ def _potencia(orden, cierre):
                         or {}).get("evidencias") or [])
                       if isinstance(e, dict) and e.get("id")}
         dudas, vistos, rehacer, sin_mirar, ilegibles = [], 0, [], [], []
-        sin_analizar, verificadas = [], []
+        sin_analizar, verificadas, discordantes = [], [], []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
-            texto_foto = _texto_de_la_foto(orden, requisito)
-            de_la_foto = PF.uno_solo(texto_foto)
+            #  TODAS LAS LECTURAS DE ESA FOTO, no la ultima  --  11/11/2026
+            #
+            #  Ver `_numero_de_la_foto`: el numero vale si DOS lecturas lo
+            #  dicen, o si una sola lo dice y es creible. Lo que no vale es
+            #  una lectura creible contra otra creible distinta, y hasta hoy
+            #  este punto no podia ni enterarse: leia una fila.
+            lecturas = _lecturas_de_la_foto(orden, requisito)
+            texto_foto = lecturas[-1] if lecturas else ""
+            limites = _lo_que_el_tecnico_PODRIA_escribir(orden, campo)
+            #  LOS NUMEROS CRUDOS, antes de filtrar por creible: distinguen
+            #  «la foto no deja leer un dBm» --que devuelve la orden-- de
+            #  «se leyo algo que no puede salir de ese medidor», que no.
+            crudos = [v for v in (PF.uno_solo(t) for t in lecturas)
+                      if v is not None]
+            de_la_foto, discordaron = _numero_de_la_foto(lecturas, limites)
 
             #  LA FOTO QUE TODAVIA NADIE MIRO  --  10/11/2026, OT #200
             #
@@ -731,7 +902,11 @@ def _potencia(orden, cierre):
             #  TAMBIEN SIN NUMERO ESCRITO, a diferencia de `sin_mirar`: ahi
             #  faltan las dos cosas y la foto sigue siendo obligatoria. Lo que
             #  no se puede es acusar de una DISCREPANCIA que no se midio.
-            if (de_la_foto is None and texto_foto.strip()
+            #  NINGUNA DE LAS LECTURAS DIO UN dBm, no «la ultima no dio»:
+            #  con la relectura puesta, una foto puede tener dos textos y
+            #  solo el primero traer el numero. Exigir que la ultima lo
+            #  tenga devolveria una orden por una foto que SI se leyo.
+            if (not crudos and texto_foto.strip()
                     and requisito in declaradas):
                 ilegibles.append(cuando)
                 if requisito not in rehacer:
@@ -740,9 +915,15 @@ def _potencia(orden, cierre):
             #  `_lectura_creible`: no se "corrige" lo que el modelo leyo
             #  --eso seria inventar el dato-- se deja de opinar sobre una
             #  foto cuya lectura no se puede sostener.
-            if not _lectura_creible(de_la_foto,
-                                    _lo_que_el_tecnico_PODRIA_escribir(
-                                        orden, campo)):
+            #  LAS DOS LECTURAS NO DIJERON LO MISMO  --  11/11/2026
+            #
+            #  Las dos son creibles y son numeros distintos: no hay con que
+            #  decidir cual salio de esa pantalla. Se dice y no se compara.
+            #  NO devuelve la orden --`rehacer` no la toca--: el que leyo
+            #  distinto dos veces es el modelo, no el tecnico.
+            if discordaron and requisito in declaradas:
+                discordantes.append(cuando)
+            if not _lectura_creible(de_la_foto, limites):
                 #  PERO EL DESCARTE SE DICE  --  09/11/2026, OT #217
                 #
                 #  Medido dos veces (OT #212 y #217): la pantalla marca
@@ -755,7 +936,10 @@ def _potencia(orden, cierre):
                 #
                 #  No cambia el veredicto: una foto mal leida no puede frenar
                 #  a un tecnico (31/10). Cambia lo que se puede saber.
-                if de_la_foto is not None and escrito is not None:
+                #  Y SOLO ESO: si la foto no dejaba leer nada ya se conto
+                #  en `ilegibles`, y si las lecturas discordaron ya se conto
+                #  arriba. Tres ausencias distintas, una frase cada una.
+                if crudos and escrito is not None and not discordaron:
                     sin_mirar.append(cuando)
                 de_la_foto = None
             if escrito is None or de_la_foto is None:
@@ -790,6 +974,10 @@ def _potencia(orden, cierre):
             nota += (" La medición " + " ni ".join(sin_analizar)
                      + " todavía no se pudo comparar: esa foto no se ha "
                        "revisado.")
+        if discordantes:
+            nota += (" La medición " + " ni ".join(discordantes)
+                     + " no se pudo verificar: la foto se leyó dos veces y "
+                       "dio números distintos.")
         if dudas:
             return _punto("potencia", None,
                           "La foto y el reporte no dicen lo mismo: "

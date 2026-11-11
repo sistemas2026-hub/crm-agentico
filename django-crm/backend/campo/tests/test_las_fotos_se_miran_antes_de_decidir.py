@@ -64,6 +64,20 @@ def _visto(texto, motivo=""):
             "motivo": motivo, "modelo": "prueba", "segundos": 1, "tokens": 10}
 
 
+#: EL NUMERO QUE UNA FOTO DE MEDIDOR TRAE SIEMPRE  --  11/11/2026
+#:
+#: Los textos de estas guardas decian «ya mirada. MUESTRA: si» y ningun dBm.
+#: Para `revision_del_cierre` eso es una foto de medidor ILEGIBLE --la
+#: expresion regular no encuentra un nivel-- que es motivo de devolucion y,
+#: desde la doble lectura, de relectura. El escenario afirmaba sobre un caso
+#: que no es el que estas guardas vienen a medir.
+#:
+#: Se arregla el escenario y no la afirmacion: lo que miden --que no se le
+#: pague dos veces al modelo por una foto ya mirada-- sigue intacto, y ahora
+#: sobre una foto de medidor como las de produccion.
+CON_NUMERO = " La pantalla se lee: 1550 nm, -50.00 dBm."
+
+
 @pytest.fixture
 def abierto(org_a, admin_profile, monkeypatch):
     """LAS PUERTAS DEL CIERRE AUTONOMO, abiertas por el camino real.
@@ -137,6 +151,11 @@ def _foto(orden, requisito, vuelta, *, texto=None,
         estado_archivo=(estado if estado is not None
                         else EvidenciaTrabajo.RECIBIDO))
     if texto:
+        #  Una foto de medidor lleva su numero (ver `CON_NUMERO`). Las demas
+        #  --el daño encontrado, el test de velocidad-- no, y es correcto:
+        #  de esas no se espera ningun nivel.
+        if requisito.startswith("medicion") and "dbm" not in texto.lower():
+            texto = texto + CON_NUMERO
         AnalisisDeEvidencia.objects.create(
             org=orden.org, evidencia=ev, vuelta=vuelta, texto=texto)
     return ev
@@ -325,7 +344,7 @@ def test_la_foto_de_una_vuelta_ANTERIOR_con_analisis_tampoco(org_a):
 
     assert analizar.call_count == 1, \
         "una devolucion volvio a mandar al modelo fotos que no cambiaron"
-    assert r == {"miradas": 1, "faltaban": 1}, r
+    assert r == {"miradas": 1, "faltaban": 1, "relecturas": 0}, r
 
 
 def test_la_REHECHA_sin_analisis_se_mira_aunque_la_vieja_lo_tenga(org_a):
@@ -422,7 +441,7 @@ def test_si_UNA_foto_falla_las_demas_se_miran_igual(org_a):
     with mock.patch("campo.inspeccion_visual.analizar", side_effect=_mira):
         r = T.mirar_las_que_faltan(orden)
 
-    assert r == {"miradas": 2, "faltaban": 3}, r
+    assert r == {"miradas": 2, "faltaban": 3, "relecturas": 0}, r
     assert len(_analisis_de(orden)) == 2
 
 
@@ -504,7 +523,8 @@ def test_el_TOPE_corta_y_no_deja_la_tarea_colgada(org_a):
         r = T.mirar_las_que_faltan(orden)
 
     assert analizar.call_count == T.MAX_FOTOS_EN_EL_MOMENTO, analizar.call_count
-    assert r == {"miradas": T.MAX_FOTOS_EN_EL_MOMENTO,
+    assert r == {"relecturas": 0,
+                 "miradas": T.MAX_FOTOS_EN_EL_MOMENTO,
                  "faltaban": T.MAX_FOTOS_EN_EL_MOMENTO + 3}, r
 
 
