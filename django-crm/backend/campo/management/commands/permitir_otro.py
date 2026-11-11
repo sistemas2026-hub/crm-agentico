@@ -96,6 +96,21 @@ class Command(BaseCommand):
             return
 
         objetivo["permite_otro"] = True
+
+        #  LAS OPCIONES SE NORMALIZAN ANTES DE PUBLICAR, y sin esto el comando
+        #  rompe justo al aplicar (11/11/2026, lo encontro la prueba y no la
+        #  corrida -- por una vez).
+        #
+        #  `componer` las lee de `opciones` (`plantillas.py:507`), pero una
+        #  plantilla puede tenerlas en `reglas.options`. Republicar un esquema
+        #  de esa forma las PIERDE, y `componer` corta con «necesita al menos
+        #  dos opciones». El simulacro pasaba igual: la diferencia aparece
+        #  recien al publicar.
+        for c in campos:
+            r = c.get("reglas") or {}
+            if r.get("options") and not c.get("opciones"):
+                c["opciones"] = list(r["options"])
+
         esquema["campos"] = campos
 
         if not opciones["aplicar"]:
