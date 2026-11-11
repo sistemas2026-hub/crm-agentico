@@ -648,12 +648,24 @@ class _InicioScreenState extends State<InicioScreen> {
                   //  esto bajaria con el. Para afirmar el arranque real
                   //  habria que guardarlo al abrir la jornada --una columna
                   //  en `local_jornada`-- y eso es otra decision.
-                  //  Solo cuando dice algo que el numero de arriba no
-                  //  dice: si no cerro ninguna, «arrancó con 7» al
-                  //  lado de un 7 es ruido.
-                  nota: arrancoCon == total
-                      ? null
-                      : 'arrancó con $arrancoCon',
+                  //  «ARRANCO CON N» SE RETIRA  --  11/11/2026, el mismo
+                  //  dia que se puso. En la pantalla decia «2 asignadas ·
+                  //  arrancó con 38»: el 38 es el HISTORIAL descargado en el
+                  //  telefono --las 36 cerradas de dias anteriores incluidas--
+                  //  y no con cuantas empezo el dia.
+                  //
+                  //  Se saca en vez de arreglarse a ojo porque para decir «con
+                  //  cuantas arranco HOY» hace falta saber que ordenes son de
+                  //  hoy, y eso la lista no lo dice: una cerrada recien no
+                  //  trae fecha, y filtrar por `completadaEn` deja afuera
+                  //  justo esa. Un numero equivocado con cara de dato cierto
+                  //  es peor que ninguno.
+                  //
+                  //  Para que vuelva hay que guardar el conteo al ABRIR la
+                  //  jornada --una columna en `local_jornada`--, que es el
+                  //  unico lugar donde «con cuantas arranco» es un hecho y no
+                  //  una deduccion.
+                  nota: null,
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),

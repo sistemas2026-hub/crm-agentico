@@ -299,9 +299,6 @@ void main() {
       //  entero, que es lo que mide el avance.
       expect(find.text('2'), findsWidgets);
       expect(find.text('PENDIENTES'), findsOneWidget);
-      //  Y la nota dice con cuántas arrancó, que es el dato que el
-      //  número grande dejó de llevar.
-      expect(find.textContaining('arrancó con 3'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -372,7 +369,6 @@ void main() {
       //  baja en cada cierre, «1 de 4» pasaria a «2 de 2» y nunca
       //  llegaria a 4 de 4.
       expect(find.text('1 de 4'), findsOneWidget);
-      expect(find.textContaining('arrancó con 4'), findsOneWidget);
       await banco.cerrar();
     });
 
