@@ -286,10 +286,16 @@ void _enLaPantalla() {
       expect(find.text('Cerca mío'), findsNothing);
     });
 
-    testWidgets('e2 · con ubicación, el filtro está y empieza APAGADO',
+    testWidgets('e2 · el filtro YA NO ESTA, y el orden es el del Supervisor',
         (WidgetTester t) async {
-      // Una orden con ventana prometida se atiende cuando se prometió, aunque
-      // quede lejos. Reordenar sin que lo pidan cambia el día en silencio.
+      //  CAMBIO DE CONDUCTA  --  11/11/2026, pedido del usuario. «Cerca mío»
+      //  era un filtro que REORDENABA la lista entera; ahora la distancia se
+      //  lee en cada tarjeta y no se reordena nada.
+      //
+      //  Lo que esta prueba cuidaba sigue siendo lo mismo y ahora es mas
+      //  fuerte: una orden con ventana prometida se atiende CUANDO SE
+      //  PROMETIO, aunque quede lejos. Antes eso dependia de que el tecnico
+      //  no tocara el chip; ahora no hay chip que tocar.
       await montar(
         t,
         <Map<String, dynamic>>[
@@ -299,45 +305,18 @@ void _enLaPantalla() {
         donde: () async => (6.2518, -75.5636),
       );
 
-      expect(find.text('Cerca mío'), findsOneWidget);
-      // El orden original: la 1 antes que la 2.
-      final List<String> antes = t
+      expect(find.text('Cerca mío'), findsNothing);
+
+      //  Y EL ORDEN NO SE TOCO, con la ubicacion disponible: la de mas lejos
+      //  sigue primera porque asi la despacharon. Es la afirmacion que
+      //  importa -- la ubicacion ahora se lee al abrir la pantalla, asi que
+      //  si algo reordenara solo, pasaria aca.
+      final List<String> visibles = t
           .widgetList<Text>(find.byType(Text))
           .map((Text w) => w.data ?? '')
           .where((String x) => x.startsWith('Cliente '))
           .toList();
-      expect(antes.first, 'Cliente lejos');
-    });
-
-    testWidgets('e3 · al encenderlo, la más cercana queda primera',
-        (WidgetTester t) async {
-      await montar(
-        t,
-        <Map<String, dynamic>>[
-          orden('lejos', numero: 1, lat: 6.30, lng: -75.56),
-          orden('cerca', numero: 2, lat: 6.2519, lng: -75.5636),
-        ],
-        donde: () async => (6.2518, -75.5636),
-      );
-
-      // `ensureVisible` por si el filtro queda fuera del scroll horizontal: un
-      // `tap` sobre algo fuera de la vista no falla, golpea al aire. Asi se
-      // descubrio que el chip estaba al final y el toque no llegaba.
-      await t.ensureVisible(find.text('Cerca mío'));
-      await t.tap(find.text('Cerca mío'));
-      // Dos vueltas: la primera dibuja el filtro encendido, la segunda recoge
-      // el `setState` que hace la busqueda de ubicacion al resolverse. Es un
-      // futuro que no cuelga de un frame, asi que un solo `pumpAndSettle` no lo
-      // ve.
-      await t.pumpAndSettle();
-      await t.pumpAndSettle();
-
-      final List<String> despues = t
-          .widgetList<Text>(find.byType(Text))
-          .map((Text w) => w.data ?? '')
-          .where((String x) => x.startsWith('Cliente '))
-          .toList();
-      expect(despues.first, 'Cliente cerca');
+      expect(visibles.first, 'Cliente lejos');
     });
 
     testWidgets('e4 · la distancia se muestra en la tarjeta',
@@ -348,11 +327,7 @@ void _enLaPantalla() {
         donde: () async => (6.2518, -75.5636),
       );
 
-      // `ensureVisible` por si el filtro queda fuera del scroll horizontal: un
-      // `tap` sobre algo fuera de la vista no falla, golpea al aire. Asi se
       // descubrio que el chip estaba al final y el toque no llegaba.
-      await t.ensureVisible(find.text('Cerca mío'));
-      await t.tap(find.text('Cerca mío'));
       // Dos vueltas: la primera dibuja el filtro encendido, la segunda recoge
       // el `setState` que hace la busqueda de ubicacion al resolverse. Es un
       // futuro que no cuelga de un frame, asi que un solo `pumpAndSettle` no lo
@@ -379,11 +354,7 @@ void _enLaPantalla() {
         donde: () async => null,
       );
 
-      // `ensureVisible` por si el filtro queda fuera del scroll horizontal: un
-      // `tap` sobre algo fuera de la vista no falla, golpea al aire. Asi se
       // descubrio que el chip estaba al final y el toque no llegaba.
-      await t.ensureVisible(find.text('Cerca mío'));
-      await t.tap(find.text('Cerca mío'));
       // Dos vueltas: la primera dibuja el filtro encendido, la segunda recoge
       // el `setState` que hace la busqueda de ubicacion al resolverse. Es un
       // futuro que no cuelga de un frame, asi que un solo `pumpAndSettle` no lo

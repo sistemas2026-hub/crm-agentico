@@ -583,7 +583,21 @@ class _InicioScreenState extends State<InicioScreen> {
   /// las órdenes; la del medio va rellena de azul, como en la maqueta, porque
   /// es la que está viva.
   Widget _avanceDiario(ResumenDeInicio resumen, List<TrabajoVista> trabajos) {
-    final int total = resumen.totalDeTrabajos;
+    //  CON CUANTAS ARRANCO EL DIA: todas las de la jornada, cerradas
+    //  incluidas. Es el denominador del avance, no lo que le queda.
+    final int arrancoCon = resumen.totalDeTrabajos;
+
+    //  ASIGNADAS = LO QUE LE QUEDA HOY  --  11/11/2026, pedido del
+    //  usuario: «muestra el total de asignadas y ahi solo deberia
+    //  mostrar las asignadas hoy».
+    //
+    //  Antes era `totalDeTrabajos` crudo: mezclaba las cerradas con
+    //  las que faltan, asi que un tecnico que cerro cuatro de siete
+    //  veia un 7 toda la tarde. Es el mismo defecto que «Mi Trabajo»
+    //  corrigio el 09/11 --«esta combinando las cerradas y
+    //  pendientes»-- y que en esta pantalla habia quedado.
+    final int total =
+        (arrancoCon - resumen.completados).clamp(0, arrancoCon);
     final int enCurso =
         trabajos.where((TrabajoVista t) => t.estado.enMarcha).length;
 
@@ -594,10 +608,15 @@ class _InicioScreenState extends State<InicioScreen> {
     // "5 asignadas, 1 en curso, 5 pendientes": no cierra, y se lee como un
     // error de la aplicacion. En el diseño pendiente significa "todavia no
     // empezada", y eso es lo que se cuenta aca.
-    final int sinEmpezar =
-        (total - resumen.completados - enCurso).clamp(0, total);
+    //  Y LAS TRES SIGUEN SUMANDO: asignadas = en curso + pendientes.
+    //  Ya no se restan los completados aca porque `total` no los trae.
+    final int sinEmpezar = (total - enCurso).clamp(0, total);
 
-    final double avance = total == 0 ? 0 : resumen.completados / total;
+    //  El avance se mide contra el DIA ENTERO y no contra lo que
+    //  queda: con un denominador que baja en cada cierre, la barra
+    //  nunca llegaria al final.
+    final double avance =
+        arrancoCon == 0 ? 0 : resumen.completados / arrancoCon;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -629,7 +648,12 @@ class _InicioScreenState extends State<InicioScreen> {
                   //  esto bajaria con el. Para afirmar el arranque real
                   //  habria que guardarlo al abrir la jornada --una columna
                   //  en `local_jornada`-- y eso es otra decision.
-                  nota: total == 0 ? null : 'arrancó con $total',
+                  //  Solo cuando dice algo que el numero de arriba no
+                  //  dice: si no cerro ninguna, «arrancó con 7» al
+                  //  lado de un 7 es ruido.
+                  nota: arrancoCon == total
+                      ? null
+                      : 'arrancó con $arrancoCon',
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
@@ -677,7 +701,11 @@ class _InicioScreenState extends State<InicioScreen> {
             // "1 / 4 OT" en monoespaciada se lee "1 / 4 0T": la O y el cero
             // se confunden. "de" no tiene ese problema y se entiende igual.
             Text(
-              '${resumen.completados} de $total',
+              //  CONTRA EL DIA ENTERO, igual que la barra: «1 de 3» con un
+              //  denominador que baja en cada cierre terminaria en «3 de 3»
+              //  pasando por «1 de 3», «2 de 2», «3 de 1». Lo que avanza es
+              //  el numerador.
+              '${resumen.completados} de $arrancoCon',
               style: AppTypography.dato.copyWith(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w700,

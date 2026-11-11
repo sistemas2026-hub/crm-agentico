@@ -2,6 +2,8 @@ import 'cercania.dart';
 import 'conteo_de_mi_trabajo.dart';
 import 'orden_operativo.dart';
 import '../../core/acciones/lector_de_codigo.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/estado/ordenes_jornada.dart';
@@ -105,7 +107,19 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
   /// quede lejos. Reordenar por distancia sin que el técnico lo pida le
   /// cambiaría el día en silencio. La cercanía es una herramienta para decidir,
   /// no una regla.
-  bool _porCercania = false;
+  //  YA NO SE ENCIENDE, Y LA GUARDA SE QUEDA  --  11/11/2026.
+  //
+  //  El filtro «Cerca mío» se retiro: la distancia ahora se lee en cada
+  //  tarjeta sin reordenar nada. Esto queda en `false` y la comprobacion de
+  //  `_ordenadas` queda con el.
+  //
+  //  Y NO ES CODIGO MUERTO: el comentario de esa guarda predijo este dia con
+  //  todas las letras --«la protege el dia que la ubicacion llegue por otro
+  //  lado: un seguimiento continuo, o LEERLA AL ABRIR LA PANTALLA. Ese dia,
+  //  sin esta linea, la lista se reordenaria sola y nadie sabria por que»--.
+  //  La ubicacion ahora se lee al abrir. Sin esto, el orden del Supervisor se
+  //  perderia en silencio el primer dia que alguien tenga el GPS encendido.
+  final bool _porCercania = false;
 
   Future<void> _ubicarme() async {
     final buscar = widget.dondeEstoy;
@@ -129,6 +143,23 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
     // La primera pantalla que se abre dispara la carga; la segunda encuentra
     // los datos ya cargados.
     widget.ordenes.asegurarCargado();
+
+    //  LA UBICACION SE PIDE AL ABRIR, y eso cambia una decision escrita.
+    //
+    //  Antes se pedia al encender «Cerca mío»: «el permiso se pregunta cuando
+    //  hace falta, no por las dudas. Una app que pide GPS al arrancar es una
+    //  app que la gente aprende a negar». Esa regla era correcta cuando el
+    //  unico uso era un filtro que el tecnico encendia a proposito.
+    //
+    //  Sin el chip, la distancia se muestra en cada tarjeta y no hay nada que
+    //  encender: si no se pide aca, no se muestra nunca. Y el permiso en la
+    //  practica YA esta dado -- la jornada comparte la ubicacion cada 90
+    //  segundos desde que el tecnico sale (`compartir_ubicacion.dart`), asi
+    //  que esto no agrega una pregunta: reusa la respuesta.
+    //
+    //  Si no hay permiso, `_ubicarme` no lo pide a gritos: falla en silencio y
+    //  las tarjetas quedan sin distancia, que es como estan hoy.
+    unawaited(_ubicarme());
   }
 
   @override
@@ -532,37 +563,23 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.margen),
             child: Row(
               children: <Widget>[
-                // «CERCA MIO» VA PRIMERO, y no es un capricho de orden.
+                // «CERCA MIO» YA NO ES UN CHIP  --  11/11/2026, pedido del
+                // usuario, y la propuesta que el encargo dejo escrita.
                 //
-                // Al final quedaba detras de cuatro filtros y fuera de la vista
-                // a cualquier ancho de telefono: medido al escribir la guarda,
-                // el toque ni siquiera llegaba. Una herramienta para decidir a
-                // donde ir que hay que deslizar para encontrar es una
-                // herramienta que no se usa.
+                // Era un filtro que REORDENABA la lista entera, y eso tenia un
+                // costo: una orden con ventana prometida se atiende CUANDO SE
+                // PROMETIO, aunque quede lejos. Quien lo encendia perdia el
+                // orden del Supervisor para ganar un dato -- que esta a tres
+                // cuadras-- y despues tenia que acordarse de apagarlo.
                 //
-                // Y NO es el orden por omision: una orden con ventana prometida
-                // se atiende CUANDO SE PROMETIO, aunque quede lejos. Reordenar
-                // por distancia sin que el tecnico lo pida le cambiaria el dia
-                // en silencio.
+                // Ese dato ahora esta en CADA TARJETA, sin reordenar nada: la
+                // distancia se lee de un vistazo y el orden sigue siendo el que
+                // decidio quien despacho. Se gana la informacion y no se pierde
+                // la regla.
                 //
-                // Solo aparece si alguien sabe buscar la ubicacion: una app
-                // compilada sin eso no ofrece un filtro que no va a funcionar.
-                if (widget.dondeEstoy != null) ...<Widget>[
-                  _ChipFiltro(
-                    texto: 'Cerca mío',
-                    activo: _porCercania,
-                    onTap: () async {
-                      final bool encender = !_porCercania;
-                      setState(() => _porCercania = encender);
-                      // Se pide la ubicacion al encenderlo, no al abrir la
-                      // pantalla: el permiso se pregunta cuando hace falta, no
-                      // «por las dudas». Una app que pide GPS al arrancar es
-                      // una app que la gente aprende a negar.
-                      if (encender && _lat == null) await _ubicarme();
-                    },
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                ],
+                // La fila queda con cinco filtros en vez de seis, que era el
+                // otro problema de este chip: empujaba al resto fuera de la
+                // pantalla.
                 // «TODOS» YA NO ES UN CHIP (09/11/2026, pedido del usuario).
                 //
                 // No decía nada que no estuviera al lado --los otros cinco

@@ -293,9 +293,15 @@ void main() {
       // --que los numeros salgan de las ordenes y no de una constante-- se
       // afirma igual sobre las celdas.
       expect(find.text('ASIGNADAS'), findsOneWidget);
-      expect(find.text('3'), findsWidgets);
-      expect(find.text('PENDIENTES'), findsOneWidget);
+      //  DOS Y NO TRES  --  11/11/2026. «Asignadas» pasó a ser lo que
+      //  LE QUEDA, sin las cerradas: de las tres órdenes, una está
+      //  completada. El «1 de 3» de arriba sigue contando el día
+      //  entero, que es lo que mide el avance.
       expect(find.text('2'), findsWidgets);
+      expect(find.text('PENDIENTES'), findsOneWidget);
+      //  Y la nota dice con cuántas arrancó, que es el dato que el
+      //  número grande dejó de llevar.
+      expect(find.textContaining('arrancó con 3'), findsOneWidget);
       await banco.cerrar();
     });
 
@@ -347,16 +353,26 @@ void main() {
       final int enCurso = cifraDe('EN CURSO');
       final int pendientes = cifraDe('PENDIENTES');
 
-      expect(asignadas, 4, reason: 'las cuatro ordenes de la jornada');
+      //  LA REGLA SE ENDURECIO  --  11/11/2026. Antes «asignadas» era
+      //  el total con las cerradas adentro, y lo unico que se podia
+      //  afirmar era que las otras dos no se pasaran. Ahora
+      //  «asignadas» es LO QUE QUEDA, asi que las tres cierran
+      //  EXACTO -- y eso es una guarda mas fuerte, no la misma
+      //  relajada para que pase.
+      expect(asignadas, 3, reason: 'las cuatro menos la ya cerrada');
       expect(enCurso, 1, reason: 'la que esta en sitio');
       expect(pendientes, 2, reason: 'las dos asignadas sin empezar');
-      // Y la completada es la cuarta: 1 + 2 + 1 = 4.
-      expect(find.text('1 de 4'), findsOneWidget);
       expect(
         enCurso + pendientes,
-        lessThanOrEqualTo(asignadas),
-        reason: 'la rejilla nunca puede sumar mas que el total',
+        asignadas,
+        reason: 'la rejilla cierra exacto: en curso + pendientes = lo '
+            'que queda',
       );
+      //  El avance sigue contra el DIA ENTERO: con un denominador que
+      //  baja en cada cierre, «1 de 4» pasaria a «2 de 2» y nunca
+      //  llegaria a 4 de 4.
+      expect(find.text('1 de 4'), findsOneWidget);
+      expect(find.textContaining('arrancó con 4'), findsOneWidget);
       await banco.cerrar();
     });
 
