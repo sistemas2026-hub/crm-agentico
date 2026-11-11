@@ -78,10 +78,12 @@ def _editar_sin_transaccion(tenant, mutar):
 
 TERMINO = "Calle 45 # 12-30 Soledad"
 llamadas: list[str] = []
+vistas: list[str] = []
 
 
-def _buscar(tenant, q):
+def _buscar(tenant, q, vista="todos"):
     llamadas.append(q)
+    vistas.append(vista)
     return [
         {"mensaje_id": "m1", "conversation_id": "c1", "rol": "user", "creado_en": "2026-11-11T10:00:00Z",
          "fragmento": "vivo en " + q, "nombre_cliente": "Ana", "usuario_externo": "573001",
@@ -92,7 +94,7 @@ def _buscar(tenant, q):
     ]
 
 
-def _buscar_que_falla(tenant, q):
+def _buscar_que_falla(tenant, q, vista="todos"):
     # Un error de base cita el valor que fallo: es justo lo que no puede
     # terminar en el log.
     raise ValueError(f"invalid input near '{q}'")
@@ -185,6 +187,20 @@ try:
         comprobar(datos.get("tope") == api.persistencia.BUSQUEDA_MENSAJES_TOPE,
                   "y dice cual es el tope, para que la pantalla avise si lo alcanzo")
         comprobar(TERMINO not in salida.getvalue(), "el termino buscado no va al log")
+
+        # La vista de canales llega a la base (11/11/2026, auditoria H2): la
+        # base filtra ANTES del tope de 30. Sin el parametro, 'todos' (lo de
+        # hasta hoy, para una pantalla vieja durante el despliegue).
+        comprobar(vistas == ["todos"], f"sin 'vista', la base busca en todos ({vistas})")
+        for v in ("operativo", "pruebas", "todos"):
+            r = c.get("/conversaciones/buscar", query_string={"tenant": TENANT, "q": "poste", "vista": v})
+            comprobar(r.status_code == 200 and vistas[-1] == v,
+                      f"vista={v}: la base recibe esa vista ({r.status_code}, {vistas[-1]})")
+        antes = len(llamadas)
+        r = c.get("/conversaciones/buscar", query_string={"tenant": TENANT, "q": "poste", "vista": "reales"})
+        comprobar(r.status_code == 400 and (r.get_json() or {}).get("codigo") == "vista_invalida"
+                  and len(llamadas) == antes,
+                  f"una vista desconocida: 400 y no llega a la base ({r.status_code})")
 
         api.persistencia.buscar_en_mensajes = _buscar_que_falla
         salida = io.StringIO()

@@ -26,6 +26,10 @@ export const BUSQUEDA_MAXIMO = 100;
  *  más que esto, la persona ya escribió otra cosa. */
 export const PLAZO_BUSQUEDA_MS = 8000;
 
+/** Las vistas de canales de la cola. La base filtra por ellas ANTES de cortar
+ *  en 30 (11/11/2026, auditoría H2); el motor rechaza cualquier otra. */
+export const VISTAS_BUSQUEDA = Object.freeze(['operativo', 'pruebas', 'todos']);
+
 /** `q` con los espacios normalizados, que es lo que mide el rango. */
 export const normalizarBusqueda = (/** @type {unknown} */ q) =>
   String(q ?? '').split(/\s+/).filter(Boolean).join(' ');
@@ -40,7 +44,7 @@ export const normalizarBusqueda = (/** @type {unknown} */ q) =>
  * @param {App.Locals} locals
  * @param {typeof globalThis.fetch} fetch
  * @param {string} q
- * @param {{ signal?: AbortSignal }} [opciones]
+ * @param {{ signal?: AbortSignal, vista?: string }} [opciones]
  * @returns {Promise<{ resultados: any[], tope: number | null }>}
  */
 export async function buscarEnMensajes(locals, fetch, q, opciones = {}) {
@@ -57,7 +61,8 @@ export async function buscarEnMensajes(locals, fetch, q, opciones = {}) {
   try {
     const url =
       `${cfg.baseUrl}/conversaciones/buscar?tenant=${encodeURIComponent(cfg.tenant)}` +
-      `&q=${encodeURIComponent(q)}`;
+      `&q=${encodeURIComponent(q)}` +
+      `&vista=${encodeURIComponent(opciones.vista ?? 'todos')}`;
     const resp = await fetch(url, { headers: headersMotor(), signal: control.signal });
     const datos = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(datos?.error || 'El asistente no pudo buscar en los mensajes.');

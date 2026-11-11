@@ -34,9 +34,12 @@ const DEL_MOTOR = {
 };
 
 let fetchMock = vi.fn();
-const evento = (/** @type {string} */ q, user = /** @type {any} */ ({ id: 'u1' })) =>
+const evento = (/** @type {string} */ q, user = /** @type {any} */ ({ id: 'u1' }), vista = /** @type {string|null} */ (null)) =>
   /** @type {any} */ ({
-    url: new URL(`http://crm/api/conversaciones/buscar?q=${encodeURIComponent(q)}`),
+    url: new URL(
+      `http://crm/api/conversaciones/buscar?q=${encodeURIComponent(q)}` +
+        (vista === null ? '' : `&vista=${encodeURIComponent(vista)}`)
+    ),
     locals: { user, tenant: 'empresa-x' },
     fetch: fetchMock,
     request: new Request('http://crm/api/conversaciones/buscar')
@@ -75,6 +78,25 @@ describe('GET /api/conversaciones/buscar', () => {
     expect(url.pathname).toBe('/conversaciones/buscar');
     expect(url.searchParams.get('tenant')).toBe('empresa-x');
     expect(url.searchParams.get('q')).toBe('50% & co');
+  });
+
+  it('EL EFECTO (auditoría H2): la vista de canales llega al motor, que filtra antes del tope', async () => {
+    for (const vista of ['operativo', 'pruebas', 'todos']) {
+      fetchMock.mockClear();
+      const r = await GET(evento('poste caído', undefined, vista));
+      expect(r.status).toBe(200);
+      const url = new URL(String(/** @type {any} */ (fetchMock.mock.calls[0])[0]));
+      expect(url.searchParams.get('vista')).toBe(vista);
+    }
+  });
+
+  it('sin vista, «todos»; una vista desconocida: 400 y no se le pregunta al motor', async () => {
+    await GET(evento('poste caído'));
+    const url = new URL(String(/** @type {any} */ (fetchMock.mock.calls[0])[0]));
+    expect(url.searchParams.get('vista')).toBe('todos');
+    fetchMock.mockClear();
+    expect((await GET(evento('poste caído', undefined, 'reales'))).status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('los espacios se normalizan antes de medir y de mandar', async () => {

@@ -67,10 +67,19 @@ export function partirPorCoincidencia(texto, q) {
   return partes;
 }
 
+/** Las vistas de canales de la cola, las mismas que acepta el motor. */
+export const VISTAS = Object.freeze(['operativo', 'pruebas', 'todos']);
+
 /**
  * Los resultados que corresponden a la vista de canales que eligió quien
  * mira -- la MISMA regla que la cola (`base` en +layout.svelte): sin
  * `canal_operativo`, no se esconde nada.
+ *
+ * Desde el 11/11/2026 (auditoría H2) la vista viaja al motor y la BASE filtra
+ * antes de cortar en 30: filtrar solo acá, después del tope, dejaba «Ningún
+ * mensaje contiene X» cuando los 30 más recientes eran de prueba. Esto queda
+ * como segunda mano para un motor que todavía no sabe de vistas (la ventana
+ * del despliegue): con uno que sí, no esconde nada.
  *
  * @param {any[]} resultados
  * @param {string} vista 'operativo' | 'pruebas' | 'todos'
@@ -98,14 +107,16 @@ export const SIN_BUSQUEDA = Object.freeze({ estado: 'inactivo', q: '', resultado
 /**
  * El que espera entre teclas y cancela lo anterior.
  *
- * `buscar(q, signal)` hace el pedido (en la pantalla, un fetch a la ruta del
- * servidor) y devuelve `{ resultados, tope }` o lanza. `alCambiar` recibe el
+ * `buscar(q, signal, vista)` hace el pedido (en la pantalla, un fetch a la
+ * ruta del servidor) y devuelve `{ resultados, tope }` o lanza. La vista de
+ * canales es parte de lo pedido: si cambia con una búsqueda escrita, se
+ * vuelve a preguntar -- los 30 de una vista no son los de otra. `alCambiar` recibe el
  * estado cada vez que cambia. Solo la ÚLTIMA búsqueda pedida puede escribir
  * el estado: una respuesta vieja que llega tarde se descarta aunque el
  * navegador no haya llegado a cancelarla.
  *
  * @param {{
- *   buscar: (q: string, signal: AbortSignal) => Promise<{ resultados: any[], tope?: number | null }>,
+ *   buscar: (q: string, signal: AbortSignal, vista: string) => Promise<{ resultados: any[], tope?: number | null }>,
  *   alCambiar: (estado: EstadoBusqueda) => void,
  *   espera?: number
  * }} opciones
@@ -117,6 +128,7 @@ export function crearBuscadorMensajes({ buscar, alCambiar, espera = ESPERA_ENTRE
   let enCurso = null;
   let turno = 0;
   let ultima = '';
+  let ultimaVista = '';
 
   const cortar = () => {
     if (reloj) clearTimeout(reloj);
@@ -126,11 +138,12 @@ export function crearBuscadorMensajes({ buscar, alCambiar, espera = ESPERA_ENTRE
   };
 
   return {
-    /** Lo escrito cambió. */
-    pedir(/** @type {unknown} */ crudo) {
+    /** Lo escrito, o la vista de canales, cambió. */
+    pedir(/** @type {unknown} */ crudo, vista = 'todos') {
       const q = normalizar(crudo);
-      if (q === ultima && reloj === null && enCurso === null && q) return;
+      if (q === ultima && vista === ultimaVista && reloj === null && enCurso === null && q) return;
       ultima = q;
+      ultimaVista = vista;
       cortar();
       const miTurno = ++turno;
       if (!debeBuscarEnMensajes(q)) {
@@ -145,7 +158,7 @@ export function crearBuscadorMensajes({ buscar, alCambiar, espera = ESPERA_ENTRE
         const control = new AbortController();
         enCurso = control;
         try {
-          const r = await buscar(q, control.signal);
+          const r = await buscar(q, control.signal, vista);
           if (miTurno !== turno) return;
           alCambiar({
             estado: 'listo',

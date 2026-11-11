@@ -74,7 +74,7 @@ describe('el que espera entre teclas', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  /** @param {(q: string, signal: AbortSignal) => Promise<any>} buscar */
+  /** @param {(q: string, signal: AbortSignal, vista: string) => Promise<any>} buscar */
   const armar = (buscar) => {
     /** @type {any[]} */
     const estados = [];
@@ -138,6 +138,57 @@ describe('el que espera entre teclas', () => {
     b.pedir('poste');
     await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
     expect(ultimo()).toMatchObject({ estado: 'error', q: 'poste', error: 'el asistente no contestó' });
+  });
+
+  it('la vista de canales viaja con la búsqueda (11/11/2026, auditoría H2)', async () => {
+    const buscar = vi.fn(async () => ({ resultados: [] }));
+    const { b } = armar(buscar);
+    b.pedir('poste', 'operativo');
+    await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
+    expect(buscar).toHaveBeenCalledTimes(1);
+    expect(buscar.mock.calls[0][2]).toBe('operativo');
+  });
+
+  it('EL EFECTO: cambiar la vista con la búsqueda escrita la repite con la vista nueva', async () => {
+    const buscar = vi.fn(async (_q, _s, vista) => ({ resultados: [{ vista }] }));
+    const { b, ultimo } = armar(buscar);
+    b.pedir('poste', 'operativo');
+    await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
+    // El mismo texto y la misma vista no vuelven a preguntar...
+    b.pedir('poste', 'operativo');
+    await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
+    expect(buscar).toHaveBeenCalledTimes(1);
+    // ...pero otra vista sí: los 30 de una no son los de la otra.
+    b.pedir('poste', 'pruebas');
+    expect(ultimo().estado).toBe('buscando');
+    await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
+    expect(buscar).toHaveBeenCalledTimes(2);
+    expect(buscar.mock.calls[1][2]).toBe('pruebas');
+    expect(ultimo()).toMatchObject({ estado: 'listo', resultados: [{ vista: 'pruebas' }] });
+  });
+
+  it('cambiar la vista con una búsqueda EN CURSO corta la vieja y pregunta por la nueva', async () => {
+    /** @type {AbortSignal[]} */
+    const señales = [];
+    /** @type {((v: any) => void)[]} */
+    const resolvers = [];
+    const { b, ultimo } = armar(
+      (_q, signal) =>
+        new Promise((r) => {
+          señales.push(signal);
+          resolvers.push(r);
+        })
+    );
+    b.pedir('poste', 'operativo');
+    await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
+    b.pedir('poste', 'todos');
+    expect(señales[0].aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_TECLAS_MS);
+    resolvers[1]({ resultados: [{ mensaje_id: 'de-todos' }] });
+    await vi.advanceTimersByTimeAsync(0);
+    resolvers[0]({ resultados: [{ mensaje_id: 'de-operativo' }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ultimo().resultados).toEqual([{ mensaje_id: 'de-todos' }]);
   });
 
   it('cancelar al desmontar: nada escribe después', async () => {

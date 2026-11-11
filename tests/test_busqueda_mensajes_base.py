@@ -129,11 +129,11 @@ try:
     os.environ["DBNAME"] = BASE
     from nucleo.persistencia import db                              # noqa: E402
 
-    def conv(tenant, tel, nombre=None, estado="abierta"):
+    def conv(tenant, tel, nombre=None, estado="abierta", canal="whatsapp"):
         return str(q("""insert into asistente.conversations
                           (organization_id, canal, usuario_externo, nombre_cliente, estado)
-                        values (%s, 'whatsapp', %s, %s, %s) returning id""",
-                     (orgs[tenant], tel, nombre, estado))[0][0])
+                        values (%s, %s, %s, %s, %s) returning id""",
+                     (orgs[tenant], canal, tel, nombre, estado))[0][0])
 
     def msj(tenant, c, contenido, rol="user", hace_min=0):
         origen = {"user": "cliente", "assistant": "ia", "nota": "humano"}.get(rol)
@@ -237,6 +237,37 @@ try:
     comprobar(len(db.buscar_en_mensajes(TENANT_A, "repetido numero", limite=500)) == 30,
               "y pedir mas no pasa el tope")
 
+    # LA VISTA, ANTES DEL TOPE (11/11/2026, auditoria H2). La pantalla corta
+    # por vista; hasta hoy lo hacia DESPUES de que la base cortara en 30, y
+    # con 30 coincidencias del simulador mas recientes que la de un cliente
+    # decia «Ningun mensaje contiene X» habiendo uno real.
+    print("\n-- la vista de canales se aplica antes del tope --")
+    simulada = conv(TENANT_A, "sim-1", "Prueba", canal="whatsapp-simulado")
+    api_int = conv(TENANT_A, "bateria-1", None, canal="api")
+    dora = conv(TENANT_A, "573777", "Dora")
+    m_real = msj(TENANT_A, dora, "la fibra quedo colgando del arbol", hace_min=60)
+    q("""insert into asistente.messages (organization_id, conversation_id, rol, contenido, origen, creado_en)
+         select %s, case when g %% 2 = 0 then %s::uuid else %s::uuid end, 'user',
+                'prueba ' || g || ': la fibra quedo colgando', 'cliente', now() - make_interval(secs => g)
+         from generate_series(1, 40) g""", (orgs[TENANT_A], simulada, api_int))
+    r_todos = db.buscar_en_mensajes(TENANT_A, "fibra quedo colgando", vista="todos")
+    comprobar(len(r_todos) == 30 and m_real not in [str(x["mensaje_id"]) for x in r_todos],
+              "con 'todos' los 30 mas recientes son de prueba (el escenario del defecto)")
+    r_op = db.buscar_en_mensajes(TENANT_A, "fibra quedo colgando", vista="operativo")
+    comprobar([str(x["mensaje_id"]) for x in r_op] == [m_real],
+              f"EL EFECTO: con 'operativo' aparece el mensaje real ({len(r_op)})")
+    r_pr = db.buscar_en_mensajes(TENANT_A, "fibra quedo colgando", vista="pruebas")
+    comprobar(len(r_pr) == 30 and {str(x["conversation_id"]) for x in r_pr} == {simulada, api_int},
+              f"con 'pruebas', 30 y solo de canales de prueba ({len(r_pr)})")
+    comprobar(db.buscar_en_mensajes(TENANT_B, "fibra quedo colgando", vista="pruebas") == []
+              and db.buscar_en_mensajes(TENANT_B, "fibra quedo colgando", vista="operativo") == [],
+              "y la otra empresa no ve ninguna de las dos vistas")
+    try:
+        db.buscar_en_mensajes(TENANT_A, "fibra quedo colgando", vista="reales")
+        comprobar(False, "una vista desconocida se rechaza")
+    except ValueError:
+        comprobar(True, "una vista desconocida se rechaza")
+
     print(f"\n-- cuanto tarda, con {VOLUMEN:,} mensajes sembrados en la empresa --".replace(",", "."))
     relleno = conv(TENANT_A, "573500", "Relleno")
     q("""insert into asistente.messages (organization_id, conversation_id, rol, contenido, origen, creado_en)
@@ -272,22 +303,35 @@ try:
                          ("no existe en ningun mensaje", "sin coincidencias (recorre todo)")):
         ms, n = medir(termino)
         print(f"  [medido] «{que}»: mediana {ms:.0f} ms de 5, {n} resultado(s)")
+    # La vista por defecto de la Bandeja es 'operativo': el filtro por canal
+    # entra al CTE, y su costo tambien se mide.
+    tiempos_op = []
+    for _ in range(5):
+        t0 = time.perf_counter()
+        db.buscar_en_mensajes(TENANT_A, "no existe en ningun mensaje", vista="operativo")
+        tiempos_op.append((time.perf_counter() - t0) * 1000)
+    print(f"  [medido] «sin coincidencias, vista operativo»: mediana {statistics.median(tiempos_op):.0f} ms de 5")
     # El plan, con el MISMO rol degradado y la RLS de la consulta real: como
     # superusuario la RLS no corre y el numero mentiria. Se afirma que los
     # mensajes se recorren UNA vez: el join directo los recorria una vez por
-    # conversacion (4 x 256 ms el 11/11/2026).
+    # conversacion (4 x 256 ms el 11/11/2026). Con el filtro de la vista
+    # 'operativo' (la de entrada de la Bandeja) adentro del CTE, que es el
+    # caso mas caro.
     with db.sesion(TENANT_A) as (cur, org):
         cur.execute("""explain (analyze, buffers, format text)
                        with hallados as materialized (
                          select m.id, m.conversation_id, m.creado_en from asistente.messages m
                          where m.organization_id = %s and m.rol = any(%s)
                            and m.contenido ilike %s escape '\\'
+                           and m.conversation_id = any(array(select cv.id from asistente.conversations cv
+                                where cv.organization_id = %s and cv.canal = any(%s::text[])))
                          order by m.creado_en desc, m.id limit 30)
                        select h.id from hallados h
                        join asistente.conversations c
                          on c.id = h.conversation_id and c.organization_id = %s
                        order by h.creado_en desc, h.id""",
-                    (org, list(db.ROLES_BUSCABLES), "%no existe en ningun mensaje%", org))
+                    (org, list(db.ROLES_BUSCABLES), "%no existe en ningun mensaje%",
+                     org, ["whatsapp"], org))
         plan = [list(f.values())[0] for f in cur.fetchall()]
     print("  [plan] " + "\n  [plan] ".join(plan))
     recorridos = [l for l in plan if "Scan on messages" in l]

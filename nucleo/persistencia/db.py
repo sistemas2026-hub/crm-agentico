@@ -984,7 +984,13 @@ def _fragmento(texto: str, q: str, largo: int = FRAGMENTO_LARGO) -> str:
     return ("…" if desde > 0 else "") + texto[desde:hasta].strip() + ("…" if hasta < len(texto) else "")
 
 
-def buscar_en_mensajes(tenant: str, q: str, limite: int = BUSQUEDA_MENSAJES_TOPE) -> list[dict]:
+#: Las vistas de canales del buscador, las mismas que la cola de la Bandeja:
+#: solo los canales reales (canal.REALES), solo los de prueba, o todo.
+VISTAS_BUSQUEDA = ("operativo", "pruebas", "todos")
+
+
+def buscar_en_mensajes(tenant: str, q: str, limite: int = BUSQUEDA_MENSAJES_TOPE,
+                       vista: str = "todos") -> list[dict]:
     """
     Los mensajes de la empresa que contienen 'q', los mas recientes primero
     (11/11/2026). Lo usa el buscador de la Bandeja, que hasta hoy solo miraba
@@ -1003,9 +1009,38 @@ def buscar_en_mensajes(tenant: str, q: str, limite: int = BUSQUEDA_MENSAJES_TOPE
     Devuelve el FRAGMENTO, no el mensaje entero: lo que la pantalla necesita
     para decidir si abrir la conversacion. Las notas internas entran --quien
     busca es del equipo-- y viajan marcadas con su rol.
+
+    LA VISTA SE FILTRA ANTES DEL TOPE (11/11/2026, auditoria H2). Hasta hoy
+    esta funcion cortaba en 30 y la pantalla escondia DESPUES los de prueba:
+    con 30 coincidencias del simulador mas recientes que la de un cliente, la
+    Bandeja decia «Ningun mensaje contiene X» habiendo uno real. Ahora la vista
+    ('operativo' | 'pruebas' | 'todos') entra al CTE y los 30 son de la vista
+    pedida. La definicion de canal real es una sola, nucleo/canales/canal.REALES,
+    la misma que marca 'canal_operativo' en la cola.
     """
+    if vista not in VISTAS_BUSQUEDA:
+        raise ValueError("vista de busqueda desconocida")
+    from nucleo.canales.canal import REALES
+
     limite = max(1, min(int(limite), BUSQUEDA_MENSAJES_TOPE))
+    # El canal vive en la conversacion, no en el mensaje: se filtra con
+    # '= any(array(subconsulta))'. NO con 'in (subconsulta)': medido el
+    # 11/11/2026, con 'in' el planificador volvio al bucle anidado -- un
+    # recorrido de mensajes POR CONVERSACION real, el mismo defecto que el CTE
+    # vino a quitar --. El array es un InitPlan: las conversaciones se leen una
+    # vez y los mensajes se recorren una sola vez (lo afirma el plan de
+    # tests/test_busqueda_mensajes_base.py). Un canal NULL no es real: cae en
+    # «pruebas», igual que 'canal in REALES'.
+    por_canal, params_canal = "", ()
+    if vista != "todos":
+        condicion = ("cv.canal = any(%s::text[])" if vista == "operativo"
+                     else "coalesce(cv.canal, '') <> all(%s::text[])")
+        por_canal = ("\n                   and m.conversation_id = any(array("
+                     "select cv.id from asistente.conversations cv"
+                     " where cv.organization_id = %s and " + condicion + "))")
     with sesion(tenant) as (cur, org):
+        if por_canal:
+            params_canal = (org, sorted(REALES))
         cur.execute(
             # PRIMERO LOS 30 MENSAJES, DESPUES SUS CONVERSACIONES. Escrita como
             # un join directo, el planificador -- con la RLS de por medio --
@@ -1019,7 +1054,7 @@ def buscar_en_mensajes(tenant: str, q: str, limite: int = BUSQUEDA_MENSAJES_TOPE
                  from asistente.messages m
                  where m.organization_id = %s
                    and m.rol = any(%s)
-                   and m.contenido ilike %s escape '\\'
+                   and m.contenido ilike %s escape '\\'""" + por_canal + """
                  order by m.creado_en desc, m.id
                  limit %s
                )
@@ -1029,7 +1064,7 @@ def buscar_en_mensajes(tenant: str, q: str, limite: int = BUSQUEDA_MENSAJES_TOPE
                join asistente.conversations c
                  on c.id = h.conversation_id and c.organization_id = %s
                order by h.creado_en desc, h.id""",
-            (org, list(ROLES_BUSCABLES), _patron_ilike(q), limite, org))
+            (org, list(ROLES_BUSCABLES), _patron_ilike(q), *params_canal, limite, org))
         filas = cur.fetchall()
     salida = []
     for f in filas:

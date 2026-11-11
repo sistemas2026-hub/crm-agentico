@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import {
   buscarEnMensajes,
   normalizarBusqueda,
+  VISTAS_BUSQUEDA,
   BUSQUEDA_MINIMO,
   BUSQUEDA_MAXIMO
 } from '$lib/server/v2/busqueda-mensajes.js';
@@ -19,6 +20,10 @@ import {
  * que es fijo y nunca cita lo buscado. Nada de esto va al log: `q` es texto
  * de un cliente.
  *
+ * `vista` ('operativo' | 'pruebas' | 'todos') viaja hasta la base, que filtra
+ * por canal ANTES de cortar en 30 (11/11/2026, auditoría H2). Sin ella,
+ * 'todos'; con una desconocida, 400 sin ir al motor.
+ *
  * @type {import('./$types').RequestHandler}
  */
 export async function GET({ url, locals, fetch, request }) {
@@ -32,8 +37,12 @@ export async function GET({ url, locals, fetch, request }) {
       { status: 400 }
     );
   }
+  const vista = url.searchParams.get('vista') || 'todos';
+  if (!VISTAS_BUSQUEDA.includes(vista)) {
+    return json({ error: 'La vista tiene que ser operativo, pruebas o todos.' }, { status: 400 });
+  }
   try {
-    const { resultados, tope } = await buscarEnMensajes(locals, fetch, q, { signal: request.signal });
+    const { resultados, tope } = await buscarEnMensajes(locals, fetch, q, { signal: request.signal, vista });
     return json({ resultados, tope });
   } catch (/** @type {any} */ err) {
     if (err?.name === 'AbortError') {

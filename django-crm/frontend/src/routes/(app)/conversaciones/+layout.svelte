@@ -136,13 +136,18 @@
      cargado. Con 3 letras o más se pregunta ADEMÁS al motor por el contenido
      de todos los mensajes, 300 ms después de la última tecla y cancelando el
      pedido anterior. Va por la ruta del servidor (/api/conversaciones/buscar),
-     que pone la empresa de la sesión. Ver lib/conversaciones/busqueda-mensajes.js. */
+     que pone la empresa de la sesión. Ver lib/conversaciones/busqueda-mensajes.js.
+     La vista de canales viaja con la búsqueda y la base filtra antes de
+     cortar en 30 (11/11/2026, auditoría H2); cambiarla repite la búsqueda. */
   let busquedaMensajes = $state(
     /** @type {import('$lib/conversaciones/busqueda-mensajes.js').EstadoBusqueda} */ ({ ...SIN_BUSQUEDA })
   );
   const buscadorMensajes = crearBuscadorMensajes({
-    buscar: async (q, signal) => {
-      const resp = await fetch(`/api/conversaciones/buscar?q=${encodeURIComponent(q)}`, { signal });
+    buscar: async (q, signal, vistaPedida) => {
+      const resp = await fetch(
+        `/api/conversaciones/buscar?q=${encodeURIComponent(q)}&vista=${encodeURIComponent(vistaPedida)}`,
+        { signal }
+      );
       const datos = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(datos?.error || 'el asistente no contestó');
       return datos;
@@ -150,7 +155,7 @@
     alCambiar: (e) => (busquedaMensajes = e)
   });
   $effect(() => {
-    buscadorMensajes.pedir(busqueda);
+    buscadorMensajes.pedir(busqueda, vista);
   });
   $effect(() => () => buscadorMensajes.cancelar());
 

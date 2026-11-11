@@ -6723,8 +6723,18 @@ def conversaciones_buscar():
         return jsonify({"error": f"La búsqueda tiene que tener entre {BUSQUEDA_MINIMO} y "
                                  f"{BUSQUEDA_MAXIMO} caracteres.",
                         "codigo": "busqueda_fuera_de_rango"}), 400
+    # La vista de canales de la cola (11/11/2026, auditoria H2): se filtra en
+    # la base ANTES del tope de 30. Filtrar en la pantalla despues del tope
+    # dejaba «Ningun mensaje contiene X» cuando los 30 eran de prueba. Sin el
+    # parametro, 'todos' -- lo que hacia hasta hoy, para una pantalla vieja
+    # durante el despliegue --; con uno desconocido, 400 y no una vista
+    # adivinada.
+    vista = request.args.get("vista") or "todos"
+    if vista not in persistencia.VISTAS_BUSQUEDA:
+        return jsonify({"error": "La vista tiene que ser operativo, pruebas o todos.",
+                        "codigo": "vista_invalida"}), 400
     try:
-        resultados = persistencia.buscar_en_mensajes(tenant, q)
+        resultados = persistencia.buscar_en_mensajes(tenant, q, vista=vista)
     except RuntimeError as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 404
     except Exception as e:
