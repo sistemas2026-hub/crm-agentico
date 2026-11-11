@@ -28,11 +28,13 @@ const RR = [
   { atajo: 'reinicio', texto: 'Desconectá el equipo 30 segundos.' }
 ];
 
+// Desde el 11/11/2026 el hilo llega dentro de /apertura, junto con sus
+// paneles; las respuestas rápidas siguen dentro de 'mensajes'.
 const motor = (/** @type {any} */ extraMensajes) =>
   vi.fn(async (/** @type {string} */ url) => {
     const ruta = new URL(url).pathname.split('/').pop();
-    const cuerpo =
-      ruta === 'mensajes' ? { conversacion: { id: 'c1' }, mensajes: [], ...extraMensajes } : {};
+    const mensajes = { conversacion: { id: 'c1' }, mensajes: [], ...extraMensajes };
+    const cuerpo = ruta === 'apertura' ? { apertura: true, mensajes } : {};
     return new Response(JSON.stringify(cuerpo), { status: 200 });
   });
 

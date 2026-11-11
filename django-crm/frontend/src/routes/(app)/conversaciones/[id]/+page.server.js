@@ -94,25 +94,18 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     (r) => siLlego(r) ?? { disponible: false, motivo: 'sin_respuesta' }
   );
 
-  // Los pedidos son independientes entre si -- en paralelo, no uno atras del
-  // otro. Antes se esperaba mensajes, DESPUES herramientas, DESPUES casos:
-  // cada salto de conversacion pagaba la suma de las idas y vueltas al motor
-  // en vez del maximo, y esa espera es la que se sentia como si la pagina
-  // entera se recargara.
-  const [rMensajes, rHerr, rCasos, rRelevo, rEquipo, rSync, rAcciones, rChat] = await Promise.all([
-    leer('mensajes', PLAZO_MOTOR_MS),
-    leer('herramientas', PLAZO_MOTOR_MS),
+  /* UNA SOLA IDA AL MOTOR (11/11/2026): el hilo y sus siete paneles vienen
+     juntos en GET .../apertura. Antes eran ocho lecturas en paralelo, y el
+     costo no estaba en el SQL (13-20 ms cada una) sino en que el motor es UN
+     proceso con 16 hilos que además atiende WhatsApp: cada apertura ocupaba
+     ocho hilos y ocho sesiones de base, y con dos personas abriendo un chat el
+     resto hacía cola. Ver lecturasDeApertura, abajo, que además sabe volver a
+     las ocho si el motor todavía no tiene la ruta. */
+  const leerCasos = () =>
     leerConPlazo(fetch, `${baseUrl}/manual/casos?tenant=${encodeURIComponent(tenant)}`,
-      { headers: headersMotor() }, PLAZO_MOTOR_MS, 'conversacion casos del manual'),
-    leer('relevo', PLAZO_MOTOR_MS),
-    leer('equipo', PLAZO_MOTOR_MS),
-    leer('sincronizaciones', PLAZO_MOTOR_MS),
-    leer('acciones', PLAZO_MOTOR_MS),
-    /* EL CHAT (21/10/2026, contrato §4.5): las conversaciones ANTERIORES del
-       mismo número, para mostrarlas arriba como WhatsApp. Si no llega, la
-       conversación se lee igual, sola, como antes. */
-    leer('hilo', PLAZO_MOTOR_MS)
-  ]);
+      { headers: headersMotor() }, PLAZO_MOTOR_MS, 'conversacion casos del manual');
+  const { rMensajes, rHerr, rCasos, rRelevo, rEquipo, rSync, rAcciones, rChat } =
+    await lecturasDeApertura(leer, leerCasos);
   const chat = siLlego(rChat);
 
   if (rMensajes?.status === 404) {
@@ -229,6 +222,81 @@ export async function load({ fetch, cookies, params, locals, depends }) {
     chat: chat ?? { tramos: [], hay_anteriores: false, antes: null,
                     mas_reciente_id: datos.conversacion?.id ?? null, abiertas: [],
                     posteriores: [], agrupa: false } };
+}
+
+/** @typedef {{ ok: boolean, status: number, cuerpo: any } | null} Lectura */
+/** @typedef {{ rMensajes: Lectura, rHerr: Lectura, rCasos: Lectura, rRelevo: Lectura,
+ *              rEquipo: Lectura, rSync: Lectura, rAcciones: Lectura, rChat: Lectura }} Lecturas */
+
+/**
+ * El hilo y sus siete paneles, de la base del motor, en UNA ida: GET
+ * .../apertura (11/11/2026). Devuelve las ocho lecturas con la MISMA forma
+ * que tenían cuando eran ocho pedidos --`{ ok, status, cuerpo }` o null--,
+ * así el resto del load no distingue de dónde vinieron.
+ *
+ * Qué se hace con cada respuesta de /apertura:
+ *  - 200 con `apertura: true`: cada clave es el cuerpo de su ruta. La que el
+ *    motor mandó en null (ese panel falló allá) llega como null, que es lo
+ *    mismo que hoy significa "no contestó": el panel queda vacío.
+ *  - 404 CON `codigo: 'conversacion_inexistente'`: no existe. Viaja como la
+ *    lectura del hilo con status 404 y el load dice 404 como siempre.
+ *  - 404 SIN ese código, o un 200 que no es una apertura: es un motor que
+ *    todavía no conoce la ruta (Flask contesta 404 sin JSON). Se vuelve a
+ *    las ocho lecturas y la pantalla se abre igual que antes.
+ *  - 500, o sin respuesta (plazo, conexión): como si el hilo hubiera fallado
+ *    o no llegado; el load ya sabe decir 500 o "el asistente tarda".
+ *
+ * @param {(ruta: string, ms: number) => Promise<Lectura>} leer
+ * @param {() => Promise<Lectura>} leerCasos
+ * @returns {Promise<Lecturas>}
+ */
+async function lecturasDeApertura(leer, leerCasos) {
+  const r = await leer('apertura', PLAZO_MOTOR_MS);
+  const noExiste = r?.status === 404 && r.cuerpo?.codigo === 'conversacion_inexistente';
+  const motorSinLaRuta = (r?.status === 404 && !noExiste) || (r?.ok && r.cuerpo?.apertura !== true);
+  if (motorSinLaRuta) return lecturasUnaPorUna(leer, leerCasos);
+  if (!r?.ok) {
+    return { rMensajes: r, rHerr: null, rCasos: null, rRelevo: null, rEquipo: null,
+             rSync: null, rAcciones: null, rChat: null };
+  }
+  /** @param {any} cuerpo @returns {Lectura} */
+  const panel = (cuerpo) => (cuerpo == null ? null : { ok: true, status: 200, cuerpo });
+  const a = r.cuerpo;
+  return { rMensajes: panel(a.mensajes), rHerr: panel(a.herramientas), rCasos: panel(a.casos),
+           rRelevo: panel(a.relevo), rEquipo: panel(a.equipo), rSync: panel(a.sincronizaciones),
+           rAcciones: panel(a.acciones), rChat: panel(a.hilo) };
+}
+
+/**
+ * EL CAMINO ANTERIOR, que sigue acá a propósito: las ocho lecturas, una por
+ * ruta y en paralelo. Es lo que corre cuando el motor todavía no tiene
+ * /apertura --durante un despliegue conviven frontend nuevo y motor viejo, o
+ * al revés-- y es lo que hace que esa ventana no deje a nadie sin abrir una
+ * conversación. Cuando /apertura lleve un tiempo en producción se puede
+ * quitar; mientras tanto, lecturasDeApertura es la única que lo llama.
+ *
+ * Los pedidos son independientes entre sí: en paralelo, no uno atrás del
+ * otro, para pagar el máximo de las idas al motor y no la suma.
+ *
+ * @param {(ruta: string, ms: number) => Promise<Lectura>} leer
+ * @param {() => Promise<Lectura>} leerCasos
+ * @returns {Promise<Lecturas>}
+ */
+async function lecturasUnaPorUna(leer, leerCasos) {
+  const [rMensajes, rHerr, rCasos, rRelevo, rEquipo, rSync, rAcciones, rChat] = await Promise.all([
+    leer('mensajes', PLAZO_MOTOR_MS),
+    leer('herramientas', PLAZO_MOTOR_MS),
+    leerCasos(),
+    leer('relevo', PLAZO_MOTOR_MS),
+    leer('equipo', PLAZO_MOTOR_MS),
+    leer('sincronizaciones', PLAZO_MOTOR_MS),
+    leer('acciones', PLAZO_MOTOR_MS),
+    /* EL CHAT (21/10/2026, contrato §4.5): las conversaciones ANTERIORES del
+       mismo número, para mostrarlas arriba como WhatsApp. Si no llega, la
+       conversación se lee igual, sola, como antes. */
+    leer('hilo', PLAZO_MOTOR_MS)
+  ]);
+  return { rMensajes, rHerr, rCasos, rRelevo, rEquipo, rSync, rAcciones, rChat };
 }
 
 /** @type {import('./$types').Actions} */

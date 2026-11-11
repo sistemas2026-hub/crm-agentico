@@ -46,27 +46,44 @@ const json = (/** @type {any} */ cuerpo, status = 200) =>
   Promise.resolve(new Response(JSON.stringify(cuerpo), { status }));
 
 /** El motor contesta todo al toque, salvo las rutas de `colgadas`. Respeta la
- *  señal de abortar, como el fetch de verdad. */
+ *  señal de abortar, como el fetch de verdad.
+ *
+ *  Desde el 11/11/2026 la base del motor se lee en UNA ida (/apertura) y el
+ *  simulado la junta como el motor real: si lo que cuelga es el hilo
+ *  ('mensajes'), cuelga la apertura entera; un panel colgado llega en null. */
 const motor = (/** @type {string[]} */ colgadas = [], conversacion = {}) =>
   vi.fn((/** @type {string} */ url, /** @type {any} */ init) => {
-    const ruta = new URL(url).pathname.split('/').pop();
-    if (colgadas.includes(/** @type {string} */ (ruta))) {
-      return new Promise((_, rechazar) => {
+    const ruta = /** @type {string} */ (new URL(url).pathname.split('/').pop());
+    const cuelga = () =>
+      new Promise((_, rechazar) => {
         init?.signal?.addEventListener('abort', () => rechazar(new DOMException('abortado', 'AbortError')));
       });
+    /** @param {string} r */
+    const cuerpo = (r) => {
+      switch (r) {
+        case 'mensajes':
+          return { conversacion: { id: ID, ...conversacion }, mensajes: [{ id: 'm1' }] };
+        case 'cliente':
+          return { disponible: true, motivo: null, cliente: { nombre: 'Ana' } };
+        case 'relevo':
+          return { eventos: [{ tipo: 'cerrada' }] };
+        case 'optica':
+          return { disponible: true, motivo: null, optica: { rx: -20 } };
+        default:
+          return {};
+      }
+    };
+    if (ruta === 'apertura') {
+      if (colgadas.includes('mensajes')) return cuelga();
+      /** @param {string} r */
+      const panel = (r) => (colgadas.includes(r) ? null : cuerpo(r));
+      return json({ apertura: true, mensajes: cuerpo('mensajes'), hilo: panel('hilo'),
+                    herramientas: panel('herramientas'), relevo: panel('relevo'),
+                    equipo: panel('equipo'), sincronizaciones: panel('sincronizaciones'),
+                    acciones: panel('acciones'), casos: panel('casos') });
     }
-    switch (ruta) {
-      case 'mensajes':
-        return json({ conversacion: { id: ID, ...conversacion }, mensajes: [{ id: 'm1' }] });
-      case 'cliente':
-        return json({ disponible: true, motivo: null, cliente: { nombre: 'Ana' } });
-      case 'relevo':
-        return json({ eventos: [{ tipo: 'cerrada' }] });
-      case 'optica':
-        return json({ disponible: true, motivo: null, optica: { rx: -20 } });
-      default:
-        return json({});
-    }
+    if (colgadas.includes(ruta)) return cuelga();
+    return json(cuerpo(ruta));
   });
 
 const evento = (/** @type {any} */ fetch) => /** @type {any} */ ({
@@ -160,7 +177,7 @@ describe('y lo lento tampoco cuelga para siempre', () => {
 });
 
 describe('lo que sí se espera, con plazo', () => {
-  it('un panel del motor colgado se queda vacío; el hilo llega', async () => {
+  it('un panel que el motor no pudo leer se queda vacío; el hilo llega', async () => {
     const promesa = load(evento(motor(['herramientas', 'hilo'])));
     await vi.advanceTimersByTimeAsync(PLAZO_MOTOR_MS + 10);
     const datos = /** @type {any} */ (await promesa);
@@ -190,6 +207,8 @@ describe('con todo al día', () => {
     expect(await datos.owners).toEqual([{ id: 'o1' }]);
     expect(await datos.operadores).toEqual([{ usuario_id: 'u2', nombre: 'Otra' }]);
 
+    // Un motor que contesta 404 a TODO: a /apertura sin código (como uno que
+    // no tiene la ruta), así que se vuelve a las ocho, y ahí el hilo es 404.
     const no = vi.fn(() => json({ error: 'x' }, 404));
     const e = await load(evento(no)).then(() => null, (/** @type {any} */ x) => x);
     expect(e?.status).toBe(404);
