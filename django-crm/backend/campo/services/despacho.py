@@ -119,6 +119,12 @@ def crear_orden(
             f"en '{version.estado}'. Solo se despacha contra plantillas "
             f"publicadas: una borrador puede cambiar debajo del tecnico.")
 
+    #  EL TICKET COMO UNION (12/11/2026): el texto `origen_ref` sigue igual; el
+    #  FK se escribe solo si el caso existe y es de esta empresa. Ver
+    #  `campo.hilo_del_cliente.caso_de_origen`.
+    from campo.hilo_del_cliente import caso_de_origen
+    caso = caso_de_origen(org, origen_tipo, origen_ref)
+
     ultimo = None
     for _ in range(INTENTOS_CONSECUTIVO):
         try:
@@ -130,6 +136,7 @@ def crear_orden(
                     origen_sistema=origen_sistema,
                     origen_tipo=origen_tipo,
                     origen_ref=origen_ref,
+                    caso=caso,
                     cliente_nombre=cliente.get("nombre") or "",
                     cliente_telefono=cliente.get("telefono") or "",
                     cliente_direccion=cliente.get("direccion") or "",

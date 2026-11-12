@@ -353,6 +353,31 @@ class OrdenTrabajo(BaseModel):
         help_text="ID o número del origen externo (ej. #91288)",
     )
 
+    #  EL TICKET DE ESTA VISITA, COMO UNION Y NO COMO TEXTO  --  12/11/2026
+    #
+    #  Auditoria del menu (SPEC/AUDITORIA_MENU_2026-11-12.md §2 «Tickets»): el
+    #  ticket no podia decir «¿hay tecnico asignado?» porque la orden lo
+    #  nombraba solo por texto (`origen_tipo="case"` + `origen_ref` con el id
+    #  del caso). El texto se queda --cinco lectores lo usan y no se tocan en
+    #  esta entrega--; esto lo vuelve una union que la base respalda:
+    #
+    #  * el caso EXISTE y es de la MISMA empresa: se resuelve en
+    #    `campo.hilo_del_cliente.caso_de_origen`, que filtra por org. Un
+    #    `origen_ref` de otra empresa o que no es un id deja esto en NULL, nunca
+    #    une a ciegas;
+    #  * SET_NULL y no CASCADE: borrar un ticket no borra el trabajo que se hizo
+    #    en la calle, ni su material, ni sus fotos;
+    #  * lo escribe `crear_orden` --el unico camino que crea ordenes-- y las
+    #    existentes se rellenan en `campo/0049`.
+    caso = models.ForeignKey(
+        "cases.Case",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_de_campo",
+        help_text="El ticket del que nacio esta visita, si nacio de uno.",
+    )
+
     # Datos del cliente y ubicación física
     cliente_nombre = models.CharField(max_length=255)
     cliente_telefono = models.CharField(max_length=64, blank=True, default="")
