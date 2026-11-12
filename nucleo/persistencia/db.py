@@ -3778,28 +3778,49 @@ def guardar_etiquetas_de_chat(tenant: str, conversation_id: str, claves: list[st
         return list(cur.fetchone()["claves"] or [])
 
 
-def borrar_conversacion(tenant: str, conversation_id: str) -> dict | None:
+def borrar_conversacion(tenant: str, conversation_id: str, *,
+                        canales_permitidos) -> dict | None:
     """
     SOLO PARA PRUEBAS: borra una conversacion de un tiro -- mensajes,
     llamadas a herramientas y adjuntos se van en cascada (on delete
     cascade, igual que purgar_conversaciones). A diferencia de la purga
     automatica, esto NO respeta 'conservar' ni ejemplos marcados: es una
-    accion manual y deliberada (el boton de "reiniciar" del entrenamiento
-    por WhatsApp real, para reescribirle al bot sin arrastrar el contexto
-    de la prueba anterior -- sacar cuando termine esa etapa).
+    accion manual y deliberada, para reescribirle al bot sin arrastrar el
+    contexto de la prueba anterior.
 
-    Devuelve {'usuario_externo', 'canal'} de lo borrado (para que el
-    llamador limpie tambien el estado en memoria del proceso, ver
-    nucleo/canales/api.py:_sesiones), o None si no existia.
+    SOLO EN LOS CANALES QUE SE LE PASAN (12/11/2026). Borrar datos de un
+    cliente es una accion CRITICA (PRD §2), y hasta hoy esto borraba cualquier
+    conversacion de la empresa -- tambien las de WhatsApp real, que pueden
+    estar en 'conservar' por un reclamo. 'canales_permitidos' es obligatorio
+    y sin valor por defecto: el llamador dice explicitamente donde se puede
+    borrar (la ruta pasa canal.ATENDIBLES_POR_CHAT, los que no son reales).
+    La condicion va DENTRO del delete y no en un select previo: no hay
+    ventana entre mirar el canal y borrar, y un canal nulo o desconocido no
+    coincide con ninguno, asi que no se borra (falla cerrado).
+
+    Devuelve:
+      None                                   no existe (o es de otra empresa)
+      {'borrada': False, 'canal'}            existe y su canal no se puede borrar
+      {'borrada': True, 'usuario_externo', 'canal'}  borrada; el llamador limpia
+                                             el estado en memoria (api._sesiones)
     """
+    permitidos = sorted(canales_permitidos)
     with sesion(tenant) as (cur, org):
         cur.execute(
             """delete from asistente.conversations
                where organization_id = %s and id = %s
+                 and canal = any(%s::text[])
                returning usuario_externo, canal""",
-            (org, conversation_id))
+            (org, conversation_id, permitidos))
         fila = cur.fetchone()
-        return dict(fila) if fila else None
+        if fila:
+            return {"borrada": True, **dict(fila)}
+        cur.execute(
+            """select canal from asistente.conversations
+               where organization_id = %s and id = %s""",
+            (org, conversation_id))
+        existe = cur.fetchone()
+        return {"borrada": False, "canal": existe["canal"]} if existe else None
 
 
 def purgar_conversaciones(tenant: str, dias: int) -> int:

@@ -13570,22 +13570,34 @@ def conversaciones_borrar(id_conversacion):
     quede vacia, el proceso seguiria recordando el rol activo, si ya
     escalo, y el historial de la conversacion borrada.
 
-    Pensado para el boton "Reiniciar (prueba)" del entrenamiento por
-    WhatsApp real -- sacar este endpoint y el boton cuando termine esa
-    etapa.
+    SOLO CANALES QUE NO SON REALES (12/11/2026, auditoria del menu §2).
+    Nacio para el boton "Reiniciar (prueba)" del entrenamiento por WhatsApp
+    real, que ya no existe (se fue en 1.4B); quedo abierto a cualquier
+    conversacion de la empresa, con solo el tenant como guarda. Borrar datos
+    de un cliente es CRITICO (PRD §2) y ademas se saltea 'conservar'. Ahora
+    una conversacion de un canal real (canal.REALES) responde 403 y no se
+    toca; las del simulador y las de la API se siguen borrando. Que el
+    proxy lo limite a ADMIN no reemplaza esto: la guarda esta en el delete.
     """
     tenant = request.args.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el parametro 'tenant'."}), 400
 
     try:
-        borrada = persistencia.borrar_conversacion(tenant, id_conversacion)
+        borrada = persistencia.borrar_conversacion(
+            tenant, id_conversacion, canales_permitidos=canales.ATENDIBLES_POR_CHAT)
     except Exception as e:
         registrar("conversaciones", "fallo al borrar", error=e)
         return jsonify({"error": "No se pudo borrar."}), 500
 
     if not borrada:
         return jsonify({"error": f"La conversacion '{id_conversacion}' no existe."}), 404
+    if borrada.get("borrada") is not True:
+        registrar("conversaciones", "se rechazo borrar una conversacion de canal real",
+                  conversation_id=id_interno(id_conversacion))
+        return jsonify({"error": "Solo se pueden borrar conversaciones de prueba: las de "
+                                 "un canal real son datos de un cliente.",
+                        "codigo": "canal_real"}), 403
 
     _sesiones.pop(canales.clave_sesion_de_fila(
         tenant, borrada.get("canal"), borrada["usuario_externo"]), None)

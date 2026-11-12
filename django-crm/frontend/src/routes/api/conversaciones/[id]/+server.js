@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
+import { rolDeSesion } from '$lib/server/v2/operadores.js';
 
 /**
  * Proxy hacia el motor para continuar una conversación abierta desde la
@@ -58,17 +59,26 @@ export async function POST({ request, locals, fetch }) {
 }
 
 /**
- * SOLO PARA PRUEBAS -- borra la conversacion entera para poder reescribirle
- * al bot desde el WhatsApp real sin arrastrar el contexto de la prueba
- * anterior (rol derivado, si ya escalo, el historial). Ver el boton
- * "Reiniciar (prueba)" en +page.svelte y nucleo/canales/api.py:
- * conversaciones_borrar -- sacar los dos cuando termine esa etapa.
+ * SOLO PARA PRUEBAS -- borra la conversacion entera (mensajes, herramientas y
+ * adjuntos en cascada) para volver a probar sin arrastrar el contexto de la
+ * prueba anterior. Ver nucleo/canales/api.py: conversaciones_borrar.
+ *
+ * DOS GUARDAS (12/11/2026, auditoría del menú §2). Borrar datos es una
+ * acción CRÍTICA (PRD §2) y hasta hoy alcanzaba con estar autenticado:
+ *  - acá, solo un ADMIN, por el rol de la sesión y no por lo que muestre la
+ *    pantalla (hoy ninguna pantalla lo llama);
+ *  - en el motor, solo conversaciones de un canal que NO es real: una de
+ *    WhatsApp real responde 403 aunque la pida un ADMIN.
+ * Ninguna de las dos reemplaza a la otra.
  *
  * @type {import('./$types').RequestHandler}
  */
 export async function DELETE({ params, locals, fetch }) {
   if (!locals.user) {
     return json({ error: 'No autenticado' }, { status: 401 });
+  }
+  if (rolDeSesion(locals) !== 'ADMIN') {
+    return json({ error: 'Solo un administrador puede borrar una conversación.' }, { status: 403 });
   }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
@@ -79,15 +89,17 @@ export async function DELETE({ params, locals, fetch }) {
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/conversaciones/${params.id}?tenant=${tenant}`, {
-      method: 'DELETE', headers: headersMotor()
-    });
+    const resp = await fetch(
+      `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}?tenant=${encodeURIComponent(tenant)}`,
+      { method: 'DELETE', headers: headersMotor() }
+    );
     if (!resp.ok) {
       const datos = await resp.json().catch(() => ({}));
-      return json({ error: datos.error || 'No se pudo borrar' }, { status: resp.status });
+      return json({ error: datos.error || 'No se pudo borrar', codigo: datos.codigo },
+        { status: resp.status });
     }
     return new Response(null, { status: 204 });
-  } catch (/** @type {any} */ err) {
-    return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
+  } catch {
+    return json({ error: 'No se pudo contactar al asistente' }, { status: 502 });
   }
 }

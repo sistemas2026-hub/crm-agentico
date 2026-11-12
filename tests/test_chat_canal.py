@@ -324,12 +324,23 @@ comprobar(resp.status_code == 200
 # borrar (prueba) un hilo simulado
 r_ses, s_ses = dos_sesiones()
 with Espia(respuestas={"borrar_conversacion":
-                       {"usuario_externo": TEL, "canal": "whatsapp-simulado"}}):
+                       {"borrada": True, "usuario_externo": TEL, "canal": "whatsapp-simulado"}}):
     resp = cliente.delete("/conversaciones/conv-sim?tenant=rapilink")
 comprobar(resp.status_code == 204
           and ("rapilink", "whatsapp-simulado", TEL) not in api._sesiones
           and api._sesiones.get(("rapilink", "whatsapp", TEL)) is r_ses,
           "borrar el hilo simulado descarta la sesion simulada y NO la real")
+
+# borrar un hilo REAL (12/11/2026): la persistencia lo deja en pie y la ruta
+# dice 403 sin tocar ninguna sesion en memoria.
+r_ses, s_ses = dos_sesiones()
+with Espia(respuestas={"borrar_conversacion": {"borrada": False, "canal": "whatsapp"}}):
+    resp = cliente.delete("/conversaciones/conv-real?tenant=rapilink")
+comprobar(resp.status_code == 403
+          and (resp.get_json() or {}).get("codigo") == "canal_real"
+          and api._sesiones.get(("rapilink", "whatsapp", TEL)) is r_ses
+          and api._sesiones.get(("rapilink", "whatsapp-simulado", TEL)) is s_ses,
+          "borrar un hilo real responde 403 y no descarta ninguna sesion")
 
 # respuesta de una persona en un hilo simulado, devolviendo al asistente
 r_ses, s_ses = dos_sesiones()
