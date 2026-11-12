@@ -256,9 +256,12 @@ def test_6c_el_alcance_real_sigue_viniendo_de_la_base(org_a, user_profile):
         abierta_en=timezone.now(), ultimo_mensaje_en=timezone.now())
     prompt = _instrucciones(org_a, conv)
 
-    #  Nadie le dio nivel a esta empresa: el configurado es 0 y asi se declara.
-    assert "Nivel de autonomía configurado: 0" in prompt
-    assert "Nivel EFECTIVO ahora mismo: 0" in prompt
+    #  Nadie le dio nivel a esta empresa: 12/11/2026, el configurado por
+    #  omision es 3 (era 0; PRD §2) y asi se declara. El EFECTIVO lo decide
+    #  la base y el interruptor --ilegible aca, falla cerrado a 1--, nunca el
+    #  estilo que dice "tu nivel es 3, podes ejecutar".
+    assert "Nivel de autonomía configurado: 3" in prompt
+    assert "Nivel EFECTIVO ahora mismo: 1" in prompt
 
 
 # =============================================================================

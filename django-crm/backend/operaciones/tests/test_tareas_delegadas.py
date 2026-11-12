@@ -241,7 +241,9 @@ def test_sin_tarea_delegada_NO_se_cierra_aunque_el_nivel_lo_permita(
     autonomia.cambiar(org, P.NIVEL_EJECUTAR_REVERSIBLE, actor=perfil,
                       motivo="piloto", criterios="medido")
 
-    #  Todo autorizado MENOS la tarea.
+    #  Todo autorizado MENOS la tarea. 12/11/2026: nace delegada (PRD §2);
+    #  "menos la tarea" es hoy una persona que la quito.
+    td.quitar(org, td.CERRAR_DESINCRONIZADOS, actor=perfil, motivo="a mano")
     assert td.esta_delegada(org, td.CERRAR_DESINCRONIZADOS) is False
     supervisor.correr_ciclo(org)
     supervisor.correr_ciclo(org)
@@ -365,18 +367,29 @@ def test_al_delegar_se_informa_que_otras_tareas_ya_estaban(org_y_persona):
 
     assert r["delegada"] == td.CICLO_AUTOMATICO
     claves = [o["clave"] for o in r["otras_tareas_ya_delegadas"]]
-    assert claves == [td.CERRAR_DESINCRONIZADOS], (
+    assert td.CERRAR_DESINCRONIZADOS in claves, (
         "la herramienta no informa que el cierre ya estaba delegado: el "
         "modelo tiene que suponerlo, y ya supuso mal una vez")
+    #  12/11/2026: lo no critico nace delegado, asi que "las otras" son
+    #  TODAS las no criticas, tambien las que nadie toco. Si la lista trajera
+    #  solo las filas, el chat diria que no hay nada mas andando.
+    assert set(claves) == {c for c in td.CATALOGO
+                           if not td.es_critica(c)} - {td.CICLO_AUTOMATICO}
     #  Y NO SE INCLUYE A SI MISMA: "otras" son otras.
     assert td.CICLO_AUTOMATICO not in claves
 
 
 @pytest.mark.django_db
 def test_sin_otras_tareas_la_lista_viene_vacia_y_no_ausente(org_y_persona):
-    """Vacia, no ausente: una clave que a veces no esta obliga a adivinar."""
+    """Vacia, no ausente: una clave que a veces no esta obliga a adivinar.
+
+    12/11/2026: "sin otras" es hoy una empresa donde una persona quito todas
+    las demas (nacen delegadas)."""
     from operaciones import chat_herramientas as ch
 
     org, perfil = org_y_persona
+    for clave in td.CATALOGO:
+        if clave != td.CICLO_AUTOMATICO:
+            td.quitar(org, clave, actor=perfil, motivo="x")
     r = ch.delegar_tarea(org, clave=td.CICLO_AUTOMATICO, actor=perfil)
     assert r["otras_tareas_ya_delegadas"] == []

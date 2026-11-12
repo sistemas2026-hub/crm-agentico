@@ -373,6 +373,13 @@ export function cargaPorTecnico(personas) {
  */
 export const ACCION_PASO_A_DESPACHO = 'APPROVED';
 
+/** Cómo se nombra cada hecho que el Supervisor hizo solo (12/11/2026). */
+const HECHO = {
+  pase_a_despacho: 'Pasó el caso a Despacho',
+  cierre_de_caso: 'Cerró el caso',
+  jornada: 'Armó la jornada'
+};
+
 export function actividadReciente(eventos) {
   if (!Array.isArray(eventos) || eventos.length === 0) {
     return { disponible: false, filas: [] };
@@ -399,12 +406,35 @@ export function actividadReciente(eventos) {
       //  cambie de redaccion, el filtro dejaria de encontrar nada y nadie se
       //  enteraria -- la pantalla se veria igual, solo vacia.
       accion: e?.accion ?? '',
-      evento: VERBO[e?.accion] ?? e?.accion ?? '',
+      //  Un hecho del Supervisor se nombra por lo que hizo, no por el verbo
+      //  crudo: «Propuesta aceptada» de un pase que nadie acepto es falso.
+      evento: HECHO[e?.hecho_solo?.tipo] ?? VERBO[e?.accion] ?? e?.accion ?? '',
       detalle: e?.nombre || e?.descripcion || '',
       cuando: e?.cuando ?? null,
       quien: e?.quien ?? '',
-      esIa: e?.es_ia === true
+      esIa: e?.es_ia === true,
+      hechoSolo: hechoSolo(e?.hecho_solo)
     }))
+  };
+}
+
+/**
+ * «Hecho · deshacer» (12/11/2026): lo que el Supervisor hizo SOLO.
+ *
+ * El backend decide (`operaciones/deshacer.py::como_se_deshace`) si una fila
+ * es un hecho suyo y si se puede deshacer; acá solo se normaliza. Sin el
+ * dato, `null`: una fila sin `hecho_solo` NO se pinta como hecho, y menos con
+ * un botón que el backend no sabe cumplir.
+ *
+ * @param {any} h
+ * @returns {{ tipo: string, sePuede: boolean, porQueNo: string } | null}
+ */
+export function hechoSolo(h) {
+  if (!h || typeof h !== 'object' || typeof h.tipo !== 'string') return null;
+  return {
+    tipo: h.tipo,
+    sePuede: h.se_puede === true,
+    porQueNo: typeof h.por_que_no === 'string' ? h.por_que_no : ''
   };
 }
 

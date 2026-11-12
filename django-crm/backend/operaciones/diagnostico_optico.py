@@ -868,8 +868,8 @@ def cerrar_si_corresponde(org, propuesta, *, ahora=None,
     #  frase con la que la pidio.
     if not tareas_delegadas.esta_delegada(org, tareas_delegadas.CERRAR_DESINCRONIZADOS):
         return {"intentado": False, "cerrado": False,
-                "motivo": "nadie le delego al Supervisor que cierre estos "
-                          "casos: se le pide desde su chat"}
+                "motivo": "una persona le quitó al Supervisor que cierre estos "
+                          "casos: se vuelve a delegar en Ajustes del Supervisor"}
 
     #  PUERTA 3  --  lo que la empresa autorizo. Se consulta aunque las dos
     #  anteriores hayan pasado: pasar una no exime de la siguiente, que es como

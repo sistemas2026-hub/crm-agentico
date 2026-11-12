@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
-import { loQueLeFalta, tonoDeLaTarea } from './ajustes.js';
+import { comoLlego, loQueLeFalta, separarPorCritica, tonoDeLaTarea } from './ajustes.js';
+
+describe('lo no crítico nace delegado (12/11/2026)', () => {
+  it('una delegada por defecto no se le atribuye a nadie', () => {
+    expect(comoLlego({ delegada: true, por_omision: true, delegada_por: 'Ana' })).toBe(
+      'La hace sola desde el primer día: nadie la cambió.'
+    );
+  });
+  it('una delegada por una persona la nombra, y una quitada también', () => {
+    expect(comoLlego({ delegada: true, por_omision: false, delegada_por: 'Ana' })).toBe('La delegó Ana');
+    expect(comoLlego({ delegada: false, quitada_por: 'Luis' })).toBe('La quitó Luis');
+  });
+  it('separa lo que hace solo de lo crítico, y sin el dato cuenta como crítica', () => {
+    const g = separarPorCritica([
+      { clave: 'a', critica: false },
+      { clave: 'b', critica: true },
+      { clave: 'c' }
+    ]);
+    expect(g.solas.map((t) => t.clave)).toEqual(['a']);
+    expect(g.criticas.map((t) => t.clave)).toEqual(['b', 'c']);
+  });
+});
 
 /** Una tarea que no le falta nada. @param {any} [cambios] */
 const tarea = (cambios = {}) => ({

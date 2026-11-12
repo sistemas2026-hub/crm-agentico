@@ -14,13 +14,22 @@
   import { enhance } from '$app/forms';
   import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import '../supervisor-noc.css';
-  import { loQueLeFalta, tonoDeLaTarea } from '$lib/supervisor/ajustes.js';
+  import {
+    comoLlego,
+    loQueLeFalta,
+    separarPorCritica,
+    tonoDeLaTarea
+  } from '$lib/supervisor/ajustes.js';
 
   let { data, form } = $props();
 
   const ajustes = $derived(/** @type {any} */ (data.ajustes));
   const tareas = $derived(/** @type {any[]} */ (ajustes?.tareas ?? []));
   const nivel = $derived(Number(ajustes?.nivel_efectivo ?? 0));
+  //  12/11/2026: lo no crítico nace delegado y lo crítico espera a una
+  //  persona (PRD §2). La pantalla los muestra separados, con el porqué.
+  const grupos = $derived(separarPorCritica(tareas));
+  const esperan = $derived(/** @type {any[]} */ (ajustes?.espera_a_una_persona ?? []));
 
   /** La que se está mandando, para no dejar apretar dos veces. */
   let enviando = $state(/** @type {string | null} */ (null));
@@ -69,8 +78,10 @@
         <div class="snoc-pila-xs">
           <h1 class="snoc-h1">AJUSTES DEL SUPERVISOR</h1>
           <p class="snoc-body snoc-secundario">
-            Qué tareas hace solo el Supervisor. Cada una se delega o se quita con su
-            interruptor, y queda registrado quién lo hizo y por qué.
+            Lo que no es crítico, el Supervisor lo hace solo desde el primer día. Acá se
+            <strong>quita</strong>: cada tarea tiene su interruptor, y queda registrado quién y
+            por qué. Lo crítico —lo que mueve dinero, corta un servicio o le llega a muchos
+            clientes a la vez— espera siempre a una persona.
           </p>
         </div>
         <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
@@ -103,6 +114,12 @@
       <section class="snoc-panel" style="gap:var(--snoc-xs);">
         <p class="snoc-body" style="margin:0;">
           Nivel de autonomía que aplica hoy: <strong>{nivel}</strong>
+          {#if ajustes.nivel_por_omision}
+            <span class="snoc-secundario">(el de fábrica: nadie lo cambió)</span>
+          {:else if Number(ajustes.nivel_configurado ?? 0) < 3}
+            · <strong class="snoc-error-txt">una persona lo dejó en {ajustes.nivel_configurado}: con
+              menos de 3 ninguna tarea actúa sola</strong>
+          {/if}
           <!-- EL MOTIVO DEL BACKEND, no una frase fija: con el motor caído
                el interruptor tampoco permite, y decir «freno de mano» culparía
                a la causa equivocada (auditor independiente, 27/10/2026). -->
@@ -113,15 +130,16 @@
           {/if}
         </p>
         <p class="snoc-body-sm snoc-secundario" style="margin:0;">
-          Delegar una tarea no alcanza sola: además la empresa tiene que tener el nivel que esa
-          tarea exige. El nivel y el freno se cambian en
-          <a href="/supervisor-noc">Pendientes por revisión</a> → botón «Autonomía».
+          Para pararlo todo de un paso está el freno de mano; el nivel y el freno se cambian en
+          <a href="/supervisor-noc">Pendientes por revisión</a> → botón «Autonomía». Quitar una
+          tarea no quita lo que el código comprueba antes de cada acción.
         </p>
       </section>
 
-      <!-- ============ LAS TAREAS ============ -->
+      <!-- ============ LO QUE HACE SOLO ============ -->
+      <h2 class="snoc-h3" style="margin:var(--snoc-sm) 0 0;">Lo hace solo</h2>
       <section class="snoc-pila" style="gap:var(--snoc-sm);">
-        {#each tareas as t (t.clave)}
+        {#each grupos.solas as t (t.clave)}
           {@const tono = tonoDeLaTarea(t, nivel)}
           {@const faltan = loQueLeFalta(t, nivel)}
           <article class="snoc-panel" style="gap:var(--snoc-xs);" aria-labelledby="tarea-{t.clave}">
@@ -131,26 +149,19 @@
                   <span class="snoc-punto {PUNTO[tono]}" aria-hidden="true"></span>
                   <h2 class="snoc-h3" id="tarea-{t.clave}">{t.nombre}</h2>
                   {#if t.delegada}
-                    <span class="snoc-insignia snoc-insignia-secundaria-suave">Delegada</span>
+                    <span class="snoc-insignia snoc-insignia-secundaria-suave">Lo hace solo</span>
                   {:else}
-                    <span class="snoc-insignia snoc-insignia-neutra">Sin delegar</span>
-                  {/if}
-                  {#if t.exige_nivel}
-                    <span class="snoc-insignia snoc-insignia-variante">Exige nivel {t.exige_nivel}</span>
+                    <span class="snoc-insignia snoc-insignia-neutra">Quitada</span>
                   {/if}
                 </div>
 
-                {#if t.delegada}
-                  <p class="snoc-body-sm snoc-secundario" style="margin:0;">
-                    Delegada por <strong>{t.delegada_por || 'una persona'}</strong> el {fecha(t.delegada_en)}
-                    {#if t.con_estas_palabras}· «{t.con_estas_palabras}»{/if}
-                  </p>
-                {:else if t.quitada_por}
-                  <p class="snoc-body-sm snoc-secundario" style="margin:0;">
-                    Quitada por <strong>{t.quitada_por}</strong> el {fecha(t.quitada_en)}
-                    {#if t.motivo_al_quitar}· «{t.motivo_al_quitar}»{/if}
-                  </p>
-                {/if}
+                <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+                  {comoLlego(t)}
+                  {#if t.delegada && !t.por_omision && t.delegada_en} el {fecha(t.delegada_en)}{/if}
+                  {#if !t.delegada && t.quitada_en} el {fecha(t.quitada_en)}{/if}
+                  {#if t.delegada && t.con_estas_palabras}· «{t.con_estas_palabras}»{/if}
+                  {#if !t.delegada && t.motivo_al_quitar}· «{t.motivo_al_quitar}»{/if}
+                </p>
 
                 <p class="snoc-body-sm" style="margin:0;"><strong>Qué hace.</strong> {t.que_hace}</p>
                 <p class="snoc-body-sm snoc-secundario" style="margin:0;">
@@ -183,7 +194,7 @@
                     name="motivo"
                     required
                     maxlength="500"
-                    placeholder={t.delegada ? 'Por qué la quitás' : 'Por qué la delegás'}
+                    placeholder={t.delegada ? 'Por qué la quitás' : 'Por qué la volvés a delegar'}
                     disabled={enviando === t.clave}
                   />
                 </label>
@@ -198,7 +209,7 @@
                   {#if enviando === t.clave}
                     Guardando…
                   {:else}
-                    {t.delegada ? 'Quitar la tarea' : 'Delegar la tarea'}
+                    {t.delegada ? 'Quitar la tarea' : 'Volver a delegarla'}
                   {/if}
                 </button>
                 {#if form?.error && form?.clave === t.clave}
@@ -207,6 +218,35 @@
               </form>
             </div>
           </article>
+        {/each}
+      </section>
+
+      <!-- ============ LO QUE ESPERA A UNA PERSONA ============
+           Lo crítico (PRD §2) no se delega desde acá: lo frena su propio
+           circuito en el código, y la pantalla dice por qué. -->
+      <h2 class="snoc-h3" style="margin:var(--snoc-sm) 0 0;">Espera a una persona</h2>
+      <section class="snoc-pila" style="gap:var(--snoc-sm);">
+        {#each grupos.criticas as t (t.clave)}
+          <article class="snoc-panel" style="gap:var(--snoc-xs);">
+            <h3 class="snoc-h3">{t.nombre}</h3>
+            <p class="snoc-body-sm" style="margin:0;"><strong>Qué hace.</strong> {t.que_hace}</p>
+            <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+              <strong>Por qué espera a una persona.</strong> Es crítica: la aprueba una persona cada vez.
+            </p>
+          </article>
+        {/each}
+        {#each esperan as c (c.clave)}
+          <article class="snoc-panel" style="gap:var(--snoc-xs);">
+            <h3 class="snoc-h3">{c.nombre}</h3>
+            <p class="snoc-body-sm" style="margin:0;"><strong>Qué hace.</strong> {c.que_hace}</p>
+            <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+              <strong>Por qué espera a una persona.</strong> {c.por_que_critica}
+            </p>
+          </article>
+        {:else}
+          {#if !grupos.criticas.length}
+            <p class="snoc-body-sm snoc-secundario">Nada: todo lo que el Supervisor sabe hacer lo hace solo.</p>
+          {/if}
         {/each}
       </section>
     {/if}

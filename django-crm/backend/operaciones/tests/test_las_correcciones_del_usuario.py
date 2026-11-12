@@ -636,7 +636,11 @@ def test_q_la_labor_se_clasifica_con_el_cliente_de_instalaciones(monkeypatch):
     assert existente.get("labor") != "instalacion"
 
 
-def test_r_se_relee_por_version_solo_lo_que_la_lectura_nueva_puede_mover(org_a):
+def test_r_se_relee_por_version_solo_lo_que_la_lectura_nueva_puede_mover(
+        org_a, admin_profile):
+    #  12/11/2026: las correcciones nacen delegadas (PRD §2). Esta prueba mide
+    #  el escenario EN SOMBRA, asi que una persona las quita primero.
+    td.quitar(org_a, pad.TAREA_CORRECCIONES, actor=admin_profile, motivo="x")
     v1_frena = _pendiente(org_a, medida=EN_RANGO)
     v2_frena = _pendiente(org_a, medida=EN_RANGO,
                           version=dxt.VERSION_DE_LA_LECTURA)
@@ -822,6 +826,9 @@ def test_t2_delegarla_sin_el_paso_dice_que_falta(org_a, admin_profile,
 
     monkeypatch.setattr(autonomia, "puede",
                         lambda o, nivel: {"puede": True, "motivo": ""})
+    #  12/11/2026: el paso nace delegado; "sin el paso" es una persona que lo
+    #  quito.
+    td.quitar(org_a, td.PASAR_A_DESPACHO, actor=admin_profile, motivo="x")
     nombre_del_paso = td.CATALOGO[td.PASAR_A_DESPACHO]["nombre"]
 
     r = ch.delegar_tarea(org_a, clave=pad.TAREA_CORRECCIONES,
@@ -1162,8 +1169,13 @@ def test_w_una_pieza_de_antes_sin_la_marca_se_pide_una_vez_mas(org_a, soledad):
 #  F · EL INFORME, CASO POR CASO
 # =============================================================================
 
-def test_x_el_informe_dice_cuales_pasarian_con_las_correcciones(org_a):
-    """Por el camino real: la tarea no esta delegada en la base."""
+def test_x_el_informe_dice_cuales_pasarian_con_las_correcciones(
+        org_a, admin_profile):
+    """Por el camino real: la tarea no esta delegada en la base.
+
+    12/11/2026: nace delegada (PRD §2); "no delegada" es hoy una persona que
+    la quito, y es el escenario en sombra que el informe tiene que contar."""
+    td.quitar(org_a, pad.TAREA_CORRECCIONES, actor=admin_profile, motivo="x")
     autorizada = _pendiente(org_a, medida=EN_RANGO, accion_autorizada="si")
     _pendiente(org_a, medida=EN_RANGO)
 

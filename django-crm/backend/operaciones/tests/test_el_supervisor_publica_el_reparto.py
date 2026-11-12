@@ -193,21 +193,35 @@ def _ausente(org, profile):
 # P · las puertas
 # ---------------------------------------------------------------------------
 
+#  12/11/2026: lo no critico NACE delegado y la empresa nace en nivel 3 (PRD
+#  §2). "Sin la tarea" pasa a ser "una persona la quito", y "sin el nivel",
+#  "una persona lo bajo": las dos puertas siguen, y se prueban con la decision
+#  explicita que hoy las cierra.
+
 def test_p_sin_la_tarea_queda_en_sombra_y_no_escribe(
-        empresa, version, jornada, fcm, django_capture_on_commit_callbacks):
+        empresa, version, jornada, admin_profile, fcm, monkeypatch,
+        django_capture_on_commit_callbacks):
+    td.quitar(empresa, td.PUBLICAR_EL_REPARTO, actor=admin_profile,
+              motivo="la publicamos a mano")
+    monkeypatch.setattr("operaciones.autonomia._interruptor_de",
+                        lambda org: (True, ""))
     o = _orden(empresa, version)
 
     r = _correr(empresa, _a_las(6), django_capture_on_commit_callbacks)
 
     assert (r["modo"], r["publicaria"], r["publicadas"]) == (PR.SOMBRA, 1, 0)
-    assert "delegó" in r["porque"]
+    assert "quitó" in r["porque"]
     assert _de_quien(o) == [] and fcm == []
 
 
 def test_p2_sin_el_nivel_tampoco(
         empresa, version, jornada, admin_profile, fcm, monkeypatch,
         django_capture_on_commit_callbacks):
+    from operaciones import autonomia
+
     td.delegar(empresa, td.PUBLICAR_EL_REPARTO, actor=admin_profile)
+    autonomia.cambiar(empresa, 1, actor=admin_profile, motivo="pausa",
+                      criterios="ninguno")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
                         lambda org: (True, ""))
     o = _orden(empresa, version)
@@ -223,6 +237,9 @@ def test_p3_crear_las_ordenes_no_habilita_publicarlas(
         django_capture_on_commit_callbacks):
     from operaciones import autonomia
 
+    #  12/11/2026: publicar nace delegada; lo que se cuida es que prender una
+    #  tarea no prenda otra de rebote, asi que publicar arranca QUITADA.
+    td.quitar(empresa, td.PUBLICAR_EL_REPARTO, actor=admin_profile, motivo="x")
     td.delegar(empresa, td.CREAR_LAS_ORDENES, actor=admin_profile)
     autonomia.cambiar(empresa, 3, actor=admin_profile, motivo="x", criterios="y")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",

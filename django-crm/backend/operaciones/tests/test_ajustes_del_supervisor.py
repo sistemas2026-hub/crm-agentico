@@ -80,6 +80,10 @@ def _fila(cli, clave):
 @pytest.mark.django_db
 def test_delegar_con_un_clic_la_deja_delegada_para_el_supervisor(empresa):
     org, usuario, perfil = empresa
+    #  12/11/2026: lo no critico NACE delegado (PRD §2), asi que "delegar con
+    #  un clic" es hoy VOLVER a delegar una que una persona quito. Se parte de
+    #  ahi; lo que se afirma despues no cambia.
+    td.quitar(org, td.ARMAR_LA_JORNADA, actor=perfil, motivo="la apagamos")
     assert not td.esta_delegada(org, td.ARMAR_LA_JORNADA)
 
     cli = _cli(org, usuario, perfil)
@@ -135,6 +139,9 @@ def test_quitar_con_un_clic_la_apaga_y_deja_quien_y_por_que(empresa):
 def test_sin_motivo_no_cambia_nada(empresa):
     org, usuario, perfil = empresa
     cli = _cli(org, usuario, perfil)
+    #  12/11/2026: nace delegada; para probar que sin motivo no se ENCIENDE,
+    #  primero la apaga una persona.
+    td.quitar(org, td.ARMAR_LA_JORNADA, actor=perfil, motivo="apagada")
 
     r = _post(cli, td.ARMAR_LA_JORNADA, True, "   ")
     assert r.status_code == 400
@@ -192,13 +199,25 @@ def test_quien_no_gestiona_no_ve_ni_cambia(empresa):
     assert cli.get(URL).status_code == 403
     r = _post(cli, td.ARMAR_LA_JORNADA, True)
     assert r.status_code == 403
-    assert not td.esta_delegada(org, td.ARMAR_LA_JORNADA)
+    #  12/11/2026: la tarea nace delegada, asi que "no quedo delegada" ya no
+    #  mide nada. Se afirma el efecto que si importa, en las dos direcciones:
+    #  quien no gestiona no escribe ninguna fila, ni para prender ni para
+    #  apagar.
+    r = _post(cli, td.ARMAR_LA_JORNADA, False)
+    assert r.status_code == 403
+    assert not TareaDelegada.objects.filter(org=org).exists()
+    assert td.esta_delegada(org, td.ARMAR_LA_JORNADA)
 
 
 @pytest.mark.django_db
 def test_delegar_en_una_empresa_no_toca_la_otra(empresa):
     org, usuario, perfil = empresa
     otra_org = Org.objects.create(name="Otra empresa")
+    #  12/11/2026: las dos nacen delegadas. Para que el aislamiento se vea,
+    #  las dos arrancan APAGADAS por una persona, y se prende solo una.
+    _, de_la_otra = _persona(otra_org, "jefa@otra.test", "Jefa Otra", "ADMIN")
+    td.quitar(org, td.ARMAR_LA_JORNADA, actor=perfil, motivo="x")
+    td.quitar(otra_org, td.ARMAR_LA_JORNADA, actor=de_la_otra, motivo="x")
 
     r = _post(_cli(org, usuario, perfil), td.ARMAR_LA_JORNADA, True)
     assert r.status_code == 200
@@ -217,9 +236,13 @@ def test_la_lista_trae_el_catalogo_entero_y_lo_que_falta(empresa):
     assert set(tareas) == set(td.CATALOGO)
 
     #  Las correcciones se apoyan en el paso: la pantalla lo dice ANTES del
-    #  clic, y cambia cuando el paso se delega.
+    #  clic, y cambia cuando el paso se delega. 12/11/2026: el paso nace
+    #  delegado, asi que el "antes" es con el paso QUITADO por una persona.
     req = tareas[td.PASAR_CON_LAS_CORRECCIONES]["requiere"]
     assert [x["clave"] for x in req] == [td.PASAR_A_DESPACHO]
+    assert req[0]["delegada"] is True
+    _post(cli, td.PASAR_A_DESPACHO, False)
+    req = _fila(cli, td.PASAR_CON_LAS_CORRECCIONES)["requiere"]
     assert req[0]["delegada"] is False
 
     _post(cli, td.PASAR_A_DESPACHO, True)
@@ -227,7 +250,10 @@ def test_la_lista_trae_el_catalogo_entero_y_lo_que_falta(empresa):
     assert req[0]["delegada"] is True
 
     #  Delegar el ciclo desde la pantalla es lo que hace que el resto corra
-    #  solo: la misma lectura que usa el chat para avisarlo.
+    #  solo: la misma lectura que usa el chat para avisarlo. Igual: nace
+    #  delegado, y se mide quitado y vuelto a delegar.
+    assert td.algo_la_va_a_correr(org, td.ARMAR_LA_JORNADA)["si"]
+    _post(cli, td.CICLO_AUTOMATICO, False)
     assert not td.algo_la_va_a_correr(org, td.ARMAR_LA_JORNADA)["si"]
     _post(cli, td.CICLO_AUTOMATICO, True)
     assert td.algo_la_va_a_correr(org, td.ARMAR_LA_JORNADA)["si"]
@@ -267,11 +293,25 @@ def test_un_motivo_demasiado_largo_se_rechaza_y_no_se_corta_en_silencio(empresa)
 
 
 @pytest.mark.django_db
-def test_quitar_una_que_nunca_se_delego_dice_que_ya_estaba_asi(empresa):
+def test_quitar_una_que_nunca_se_toco_la_apaga_y_la_segunda_vez_dice_que_ya_estaba(
+        empresa):
+    """12/11/2026. Antes: "quitar una que nunca se delego dice que ya estaba
+    asi" (409, sin fila). Desde que lo no critico nace delegado, una que nadie
+    toco ESTA delegada: quitarla tiene que funcionar y dejar quien y por que.
+    El 409 sigue, para la segunda vez -- que es lo que esta prueba cuidaba:
+    una pantalla vieja no re-sella un registro."""
     org, usuario, perfil = empresa
-    r = _post(_cli(org, usuario, perfil), td.ARMAR_LA_JORNADA, False)
+    cli = _cli(org, usuario, perfil)
+    r = _post(cli, td.ARMAR_LA_JORNADA, False, "la armamos a mano")
+    assert r.status_code == 200, r.content
+    f = TareaDelegada.objects.get(org=org, clave=td.ARMAR_LA_JORNADA)
+    assert f.activa is False and f.quitada_por_id == perfil.id
+    assert not td.esta_delegada(org, td.ARMAR_LA_JORNADA)
+
+    r = _post(cli, td.ARMAR_LA_JORNADA, False, "otra vez")
     assert r.status_code == 409
-    assert not TareaDelegada.objects.filter(org=org).exists()
+    f.refresh_from_db()
+    assert f.motivo_al_quitar == "la armamos a mano"
 
 
 @pytest.mark.django_db

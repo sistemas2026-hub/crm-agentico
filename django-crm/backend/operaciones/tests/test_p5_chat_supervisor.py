@@ -700,8 +700,10 @@ def test_25_el_prompt_lleva_los_limites_REALES_consultados_en_vivo(
     with _con_modelo(modelo):
         chat.responder(c, "¿podés reiniciar la ONT?")
 
-    #  Sin fila de nivel, es 0 -- fail-closed. Y el prompt lo dice.
-    assert "Nivel de autonomía configurado: 0" in modelo.sistema
+    #  12/11/2026: sin fila de nivel es 3 (era 0; PRD §2). Lo que esta
+    #  prueba cuida sigue: el prompt lleva lo REAL, y con el interruptor del
+    #  motor ilegible (aca no hay motor) el efectivo cae y NO permite ejecutar.
+    assert "Nivel de autonomía configurado: 3" in modelo.sistema
     assert "NO permite ejecutar acciones" in modelo.sistema
 
 

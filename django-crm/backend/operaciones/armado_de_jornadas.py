@@ -616,8 +616,8 @@ def armar_las_jornadas_del_dia(org, ahora=None, *, leer=None) -> dict:
             #  persona escribio al moverlo, y esto va a un log.
             porque = "la empresa no tiene autorizado que el Supervisor la arme"
     elif not porque:
-        porque = ("nadie le delego al Supervisor que arme la jornada: se le "
-                  "pide desde su chat")
+        porque = ("una persona le quitó al Supervisor que arme la jornada: se "
+                  "vuelve a delegar en Ajustes del Supervisor")
 
     if delegada and not porque:
         salida["modo"] = ARMADO

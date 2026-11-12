@@ -97,7 +97,16 @@ def _correr(org, motor=None):
 # P · las puertas
 # ---------------------------------------------------------------------------
 
-def test_p_sin_la_tarea_queda_en_sombra_y_no_crea(empresa, plantillas, monkeypatch):
+#  12/11/2026: lo no critico NACE delegado y la empresa nace en nivel 3 (PRD
+#  §2). "Sin la tarea" es hoy "una persona la quito", y "sin el nivel", "una
+#  persona lo bajo": las puertas siguen y se prueban con esa decision.
+
+def test_p_sin_la_tarea_queda_en_sombra_y_no_crea(empresa, plantillas,
+                                                  admin_profile, monkeypatch):
+    td.quitar(empresa, td.CREAR_LAS_ORDENES, actor=admin_profile,
+              motivo="las creamos a mano")
+    monkeypatch.setattr("operaciones.autonomia._interruptor_de",
+                        lambda org: (True, ""))
     monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "una-empresa")
     _caso(empresa)
     motor = _Motor()
@@ -105,13 +114,17 @@ def test_p_sin_la_tarea_queda_en_sombra_y_no_crea(empresa, plantillas, monkeypat
     r = _correr(empresa, motor)
 
     assert (r["modo"], r["crearia"], r["creadas"]) == (O.SOMBRA, 1, 0)
-    assert "delegó" in r["porque"]
+    assert "quitó" in r["porque"]
     assert OrdenTrabajo.objects.count() == 0
     assert motor.preguntas == []
 
 
 def test_p2_sin_el_nivel_tampoco(empresa, plantillas, admin_profile, monkeypatch):
+    from operaciones import autonomia
+
     td.delegar(empresa, td.CREAR_LAS_ORDENES, actor=admin_profile)
+    autonomia.cambiar(empresa, 1, actor=admin_profile, motivo="pausa",
+                      criterios="ninguno")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
                         lambda org: (True, ""))
     monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "una-empresa")

@@ -342,11 +342,12 @@ def test_14_sin_autonomia_suficiente_NO_se_coordina(org_a, jefe):
         _pedir(s, jefe)
 
     assert e.value.veredicto["puede"] is False
-    #  El efectivo es el CONFIGURADO, y sin fila de NivelAutonomia el
-    #  configurado es OBSERVAR (0) -- medido, no supuesto. Lo que importa no es
-    #  que valga 1 sino que NO ALCANCE para coordinar.
+    #  12/11/2026: sin fila el configurado es 3 (era OBSERVAR, 0; PRD §2), y
+    #  lo que lo baja aca es el INTERRUPTOR ilegible, que recorta a
+    #  RECOMENDAR (1) -- falla cerrado, medido. Lo que importa sigue siendo
+    #  que NO ALCANCE para coordinar.
     assert e.value.veredicto["efectivo"] < P.NIVEL_COORDINAR
-    assert e.value.veredicto["efectivo"] == P.NIVEL_OBSERVAR
+    assert e.value.veredicto["efectivo"] == P.NIVEL_RECOMENDAR
     #  Y NO SE MODIFICO NADA.
     assert A.objects.filter(org=org_a).count() == 0
     assert s.eventos.filter(tipo=TipoEvento.COORDINACION).count() == 0
@@ -363,7 +364,8 @@ def test_15_el_rechazo_queda_AUDITADO(org_a, jefe):
     assert filas.count() == 1
     fila = filas.first()
     assert fila.metadata["nivel_requerido"] == P.NIVEL_COORDINAR
-    assert fila.metadata["nivel_efectivo"] == P.NIVEL_OBSERVAR
+    #  12/11/2026: 1 y no 0 -- lo recorta el interruptor ilegible (ver test_14).
+    assert fila.metadata["nivel_efectivo"] == P.NIVEL_RECOMENDAR
     assert fila.metadata["se_modifico_algo"] is False
     assert fila.metadata["motivo"]
     #  Y aparece en el feed del tablero, que es donde alguien lo veria.
@@ -372,6 +374,10 @@ def test_15_el_rechazo_queda_AUDITADO(org_a, jefe):
 
 def test_16_subir_el_nivel_abre_la_puerta_y_bajarlo_la_cierra(org_a, jefe):
     s = _situacion(org_a)
+    #  12/11/2026: sin fila el nivel es 3 (PRD §2). El "nivel 1" de partida
+    #  lo pone una persona, que es como se baja hoy.
+    gob.cambiar(org_a, P.NIVEL_RECOMENDAR, actor=jefe, motivo="pausa",
+                criterios="ninguno")
     with _permitir_ejecucion():
         #  Nivel 1: no.
         with pytest.raises(coord.CoordinacionNoPermitida):

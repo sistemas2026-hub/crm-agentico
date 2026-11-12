@@ -221,8 +221,8 @@ def _puertas(org) -> str:
 
     try:
         if not tareas_delegadas.esta_delegada(org, tareas_delegadas.UBICAR_LOS_ASUNTOS):
-            return ("nadie le delego al Supervisor que ubique los asuntos: se le "
-                    "pide desde su chat")
+            return ("una persona le quitó al Supervisor que ubique los asuntos: se "
+                    "vuelve a delegar en Ajustes del Supervisor")
     except Exception as e:                                       # noqa: BLE001
         return f"no se pudo comprobar si la tarea esta delegada ({type(e).__name__})"
     try:

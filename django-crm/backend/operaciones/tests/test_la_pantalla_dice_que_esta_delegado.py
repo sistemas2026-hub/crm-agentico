@@ -51,6 +51,7 @@ from common.models import Org, Profile, User
 from common.serializer import OrgAwareRefreshToken
 from operaciones import autonomia, tareas_delegadas as td
 from operaciones.models import PropuestaSupervisor as P
+from operaciones.tareas_modelos import TareaDelegada
 
 URL = "/api/operaciones/supervisor/autonomia/"
 
@@ -98,10 +99,15 @@ def test_la_ruta_devuelve_el_catalogo_entero_y_no_solo_lo_encendido(
     lista = r.json()["delegaciones"]
     #  Todas las del catalogo, ninguna de mas.
     assert {d["clave"] for d in lista} == set(td.CATALOGO)
-    #  Y nada delegado todavia: esta empresa es nueva. Que la lista NO venga
-    #  vacia con cero delegaciones es el punto -- se ve lo que falta encender.
+    #  Que la lista NO venga vacia es el punto -- se ve el catalogo entero.
+    #  12/11/2026: en una empresa nueva lo no critico NACE delegado (PRD §2),
+    #  y la lista lo tiene que decir asi: delegada, por omision, y sin
+    #  atribuirselo a nadie. Lo critico, no delegado.
     assert lista, "el catalogo llego vacio"
-    assert all(d["delegada"] is False for d in lista)
+    for d in lista:
+        assert d["delegada"] is (not d["critica"]), d["clave"]
+        assert d["por_omision"] is (not d["critica"]), d["clave"]
+        assert d["delegada_en"] is None, d["clave"]
     for d in lista:
         assert d["nombre"] and d["que_hace"], d["clave"]
 
@@ -125,11 +131,16 @@ def test_lo_que_se_delego_de_verdad_aparece_encendido(jefa, monkeypatch):
     assert encendida["con_estas_palabras"] == (
         "pasa solo los que las reglas dejen pasar")
 
-    #  Y delegar UNA no enciende las demas. Es la regla que el catalogo repite
-    #  en dos comentarios: "habilitar una cosa no puede habilitar la otra de
-    #  rebote".
+    assert encendida["por_omision"] is False
+
+    #  Y delegar UNA no enciende las demas: "habilitar una cosa no puede
+    #  habilitar la otra de rebote". 12/11/2026: las demas ya nacen delegadas,
+    #  asi que se afirma que delegar esta no les escribio nada -- siguen por
+    #  omision, sin quien ni cuando.
     otras = [d for c, d in por_clave.items() if c != td.PASAR_A_DESPACHO]
-    assert all(d["delegada"] is False for d in otras)
+    assert all(d["por_omision"] is True and d["delegada_en"] is None
+               for d in otras)
+    assert TareaDelegada.objects.filter(org=org).count() == 1
 
 
 @pytest.mark.django_db
@@ -184,6 +195,9 @@ def test_sin_el_ciclo_horario_nada_la_despierta(jefa, monkeypatch):
     _sin_interruptor(monkeypatch, permite=True)
 
     td.delegar(org, td.PASAR_A_DESPACHO, actor=perfil)
+    #  12/11/2026: el ciclo nace delegado; "sin el ciclo" es una persona que
+    #  lo quito. La precondicion que se cuida es la misma.
+    td.quitar(org, td.CICLO_AUTOMATICO, actor=perfil, motivo="lo corremos a mano")
 
     antes = {d["clave"]: d for d in
              _cli(org, usuario, perfil).get(URL).json()["delegaciones"]}

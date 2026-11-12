@@ -517,9 +517,14 @@ def test_31_nada_convierte_una_decision_en_una_regla(org_a):
 #  §5  GOBIERNO DE AUTONOMIA
 # =============================================================================
 
-def test_32_sin_fila_el_nivel_es_CERO(org_a):
-    #  Fail-closed: el alcance se concede, no se hereda de un default.
-    assert autonomia.nivel_configurado(org_a) == P.NIVEL_OBSERVAR
+def test_32_sin_fila_el_nivel_es_TRES_y_nunca_el_critico(org_a):
+    #  Hasta el 12/11/2026: "sin fila el nivel es CERO -- el alcance se
+    #  concede, no se hereda". Ese dia se invirtio por PRD §2 (autonomo por
+    #  defecto, una persona solo en lo critico): sin fila, 3. Lo que esta
+    #  prueba sigue cuidando es el techo: el defecto NO es el 4, y el 4 no
+    #  alcanza nunca.
+    assert autonomia.nivel_configurado(org_a) == P.NIVEL_EJECUTAR_REVERSIBLE
+    assert autonomia.NIVEL_POR_OMISION < P.NIVEL_CRITICO
 
 
 def test_33_cambiar_el_nivel_exige_persona_motivo_y_criterios(org_a,
@@ -559,7 +564,8 @@ def test_36_un_cambio_valido_queda_con_su_historia(org_a, admin_profile):
         criterios="30 dias en shadow, 0 falsos positivos medidos")
 
     assert fila.nivel == P.NIVEL_COORDINAR
-    assert fila.nivel_anterior == P.NIVEL_OBSERVAR
+    #  12/11/2026: el anterior de la primera fila es el defecto (3, era 0).
+    assert fila.nivel_anterior == autonomia.NIVEL_POR_OMISION
     assert autonomia.nivel_configurado(org_a) == P.NIVEL_COORDINAR
     h = autonomia.historial(org_a)
     assert len(h) == 1 and h[0]["motivo"].startswith("arranca")
@@ -775,7 +781,8 @@ def test_53_el_nivel_de_una_empresa_no_afecta_a_la_otra(org_a, org_b,
                       motivo="x", criterios="y")
 
     assert autonomia.nivel_configurado(org_a) == P.NIVEL_COORDINAR
-    assert autonomia.nivel_configurado(org_b) == P.NIVEL_OBSERVAR
+    #  12/11/2026: la otra sigue en el defecto (3, era 0), no en el de org_a.
+    assert autonomia.nivel_configurado(org_b) == autonomia.NIVEL_POR_OMISION
 
 
 def test_54_el_seguimiento_de_una_empresa_no_toca_la_otra(org_a, org_b):

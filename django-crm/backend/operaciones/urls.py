@@ -82,6 +82,9 @@ urlpatterns = [
     path("indicadores/", views.IndicadoresView.as_view(), name="indicadores"),
     path("actividad-supervisor/", views.ActividadSupervisorView.as_view(),
          name="actividad-supervisor"),
+    #  12/11/2026: deshacer un hecho del Supervisor (operaciones/deshacer.py).
+    path("actividad-supervisor/<uuid:actividad_id>/deshacer/",
+         views.DeshacerHechoView.as_view(), name="deshacer-hecho"),
     path("reportes/", views.ReportesView.as_view(), name="reportes"),
     path("capacidad/jornada/", views.CapacidadJornadaView.as_view(),
          name="capacidad-jornada"),

@@ -52,6 +52,13 @@ def _con_nivel_3(org, perfil, monkeypatch):
                       motivo="piloto", criterios="medido")
 
 
+def _sin_el_ciclo(org, perfil):
+    """12/11/2026: el ciclo NACE delegado (PRD §2). "Sin el ciclo" es hoy una
+    persona que lo quito; la precondicion que estas pruebas cuidan es la
+    misma."""
+    td.quitar(org, td.CICLO_AUTOMATICO, actor=perfil, motivo="a mano")
+
+
 def _delegar(org, perfil, clave):
     from operaciones import chat_herramientas
     return chat_herramientas.ejecutar(
@@ -68,6 +75,7 @@ def test_con_el_nivel_en_3_y_sin_el_ciclo_el_chat_DICE_que_nada_la_corre(
         org_y_persona, monkeypatch):
     org, perfil = org_y_persona
     _con_nivel_3(org, perfil, monkeypatch)
+    _sin_el_ciclo(org, perfil)
 
     r = _delegar(org, perfil, td.PASAR_A_DESPACHO)
 
@@ -88,6 +96,7 @@ def test_el_cierre_de_desincronizados_tiene_el_mismo_aviso(
     """No es un parche para una tarea: toda tarea de accion lo necesita."""
     org, perfil = org_y_persona
     _con_nivel_3(org, perfil, monkeypatch)
+    _sin_el_ciclo(org, perfil)
 
     r = _delegar(org, perfil, td.CERRAR_DESINCRONIZADOS)
 
@@ -145,7 +154,8 @@ def test_el_ciclo_no_se_exige_a_si_mismo(org_y_persona):
     una empresa que todavia no lo tiene, el chat contestaria que ni delegandolo
     serviria. Es la unica prueba del banco que ve esa bandera.
     """
-    org, _ = org_y_persona
+    org, perfil = org_y_persona
+    _sin_el_ciclo(org, perfil)
 
     assert td.esta_delegada(org, td.CICLO_AUTOMATICO) is False
     r = td.algo_la_va_a_correr(org, td.CICLO_AUTOMATICO)
@@ -167,8 +177,16 @@ def test_cuando_faltan_los_DOS_se_dicen_los_DOS(org_y_persona):
 
     Con un 'if/elif' el segundo faltante no se veria NUNCA en este caso, que
     es justo el mas comun. Por eso se arman como lista.
+
+    12/11/2026: una empresa nueva ya no esta asi (nace en 3 y con el ciclo
+    delegado). Los dos faltantes juntos se arman con decisiones explicitas:
+    una persona bajo el nivel y quito el ciclo.
     """
-    org, perfil = org_y_persona   # sin tocar el nivel: queda en el de entrada
+    from operaciones import autonomia
+
+    org, perfil = org_y_persona
+    autonomia.cambiar(org, 1, actor=perfil, motivo="pausa", criterios="ninguno")
+    _sin_el_ciclo(org, perfil)
 
     r = _delegar(org, perfil, td.PASAR_A_DESPACHO)
 
@@ -227,6 +245,7 @@ def test_la_puerta_del_ciclo_sigue_admitiendo_SOLO_el_ciclo(
     org, perfil = org_y_persona
     _con_nivel_3(org, perfil, monkeypatch)
     td.delegar(org, td.PASAR_A_DESPACHO, actor=perfil, pedido_textual="pasa")
+    _sin_el_ciclo(org, perfil)
 
     r = tasks.ciclo_del_supervisor()
 

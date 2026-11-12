@@ -219,6 +219,25 @@ export async function cancelarPropuesta({ cookies }, id, motivo) {
 }
 
 /**
+ * Deshace UN hecho que el Supervisor hizo solo (12/11/2026).
+ *
+ * Que se puede deshacer lo decide el backend (`operaciones/deshacer.py`): aca
+ * no se valida nada que alla no se valide. Un 409 trae el porque en `detail`
+ * (ya tiene orden, ya lo cambio alguien) y viaja tal cual a la pantalla.
+ *
+ * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
+ * @param {string} id  el id de la fila de actividad
+ * @param {string} motivo
+ */
+export async function deshacerHecho({ cookies }, id, motivo) {
+  return apiRequest(
+    `/operaciones/actividad-supervisor/${encodeURIComponent(id)}/deshacer/`,
+    { method: 'POST', body: { motivo } },
+    { cookies }
+  );
+}
+
+/**
  * Los ultimos hechos del modulo, para el feed del tablero.
  *
  * Es el unico bloque de esa pantalla que no existia en ninguna forma: el

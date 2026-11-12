@@ -264,12 +264,14 @@ def nivel_efectivo(org) -> dict:
     juntos: un tablero que muestre solo el efectivo no deja ver que alguien
     configuro 3 y algo lo esta bajando a 0, que es justo lo que hay que mirar.
     """
-    fila = _fila_vigente(org)
-    configurado = int(fila.nivel) if fila is not None else NIVEL_POR_OMISION
+    #  Por 'nivel_configurado' y no leyendo la fila aca: es el unico lugar que
+    #  decide el valor, y una prueba lo reemplaza para forzar el nivel 4
+    #  ('test_un_nivel_4_no_alcanza_nunca').
+    configurado = nivel_configurado(org)
     #  SI LO DECIDIO UNA PERSONA O ES EL DEFECTO (12/11/2026): la pantalla
     #  tiene que poder decir "nadie lo cambio" en vez de atribuirle a alguien
     #  un 3 que nadie escribio.
-    por_omision = fila is None
+    por_omision = _fila_vigente(org) is None
     permite, motivo = _interruptor_de(org)
 
     #  El interruptor gobierna la EJECUCION. Observar y recomendar no son

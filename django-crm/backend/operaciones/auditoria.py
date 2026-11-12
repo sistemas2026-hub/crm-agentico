@@ -80,8 +80,13 @@ ENTIDAD_JORNADA = "JornadaDeCuadrilla"
 #:  Las entidades que este modulo mira. NO es toda 'common.Activity' y no debe
 #:  serlo: sin este filtro el feed se llenaria de contactos editados y correos
 #:  enviados, que es cierto pero no es lo que esta pantalla pregunta.
+#:
+#:  LA JORNADA, desde el 12/11/2026: la escribia el armado automatico desde el
+#:  17/10 y el feed no la mostraba. Con lo no critico delegado por defecto,
+#:  lo que el Supervisor hace solo tiene que verse aca como «hecho».
 ENTIDADES_DEL_SUPERVISOR = (ENTIDAD_PROPUESTA, ENTIDAD_ACTIVIDAD,
-                            ENTIDAD_NOVEDAD, ENTIDAD_SITUACION, ENTIDAD_CASO)
+                            ENTIDAD_NOVEDAD, ENTIDAD_SITUACION, ENTIDAD_CASO,
+                            ENTIDAD_JORNADA)
 
 #:  LOS GRUPOS DEL FILTRO, por lo que una persona quiere preguntar.
 #:

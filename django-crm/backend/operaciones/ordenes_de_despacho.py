@@ -467,8 +467,8 @@ def _puertas(org) -> str:
                 "la ficha del cliente, no se pide")
     try:
         if not td.esta_delegada(org, _tarea()):
-            return ("nadie le delegó al Supervisor que cree las órdenes: se le "
-                    "pide desde su chat")
+            return ("una persona le quitó al Supervisor que cree las órdenes: se "
+                    "vuelve a delegar en Ajustes del Supervisor")
     except Exception as e:                                       # noqa: BLE001
         return f"no se pudo comprobar la tarea ({type(e).__name__})"
     try:

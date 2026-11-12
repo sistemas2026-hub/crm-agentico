@@ -10,6 +10,7 @@ import {
   cargaPorTecnico,
   ticketsPorOrigen,
   actividadReciente,
+  hechoSolo,
   celdaDeSla,
   nivelDePrioridad,
   rotuloDeHallazgo,
@@ -1091,5 +1092,25 @@ describe('una propuesta no es un ticket', () => {
   it('una orden de trabajo no se llama ticket', () => {
     const t = ticketsDe([de('1', 'x'), { estado: 'propuesta', origen_tipo: 'orden', origen_id: '9' }]);
     expect(t.palabra).toBe('casos');
+  });
+});
+
+describe('hecho · deshacer (12/11/2026)', () => {
+  it('un pase que hizo solo viaja como hecho deshacible y se nombra por lo que hizo', () => {
+    const d = actividadReciente([
+      {
+        id: '1', accion: 'APPROVED', nombre: 'x', es_ia: true,
+        hecho_solo: { tipo: 'pase_a_despacho', se_puede: true, por_que_no: '' }
+      }
+    ]);
+    expect(d.filas[0].hechoSolo).toEqual({ tipo: 'pase_a_despacho', sePuede: true, porQueNo: '' });
+    expect(d.filas[0].evento).toBe('Pasó el caso a Despacho');
+  });
+  it('sin el dato no es un hecho, y nunca se ofrece deshacer por defecto', () => {
+    expect(actividadReciente([{ id: '1', accion: 'APPROVED' }]).filas[0].hechoSolo).toBeNull();
+    expect(hechoSolo({ tipo: 'cierre_de_caso', por_que_no: 'no' })).toEqual({
+      tipo: 'cierre_de_caso', sePuede: false, porQueNo: 'no'
+    });
+    expect(hechoSolo({ se_puede: true })).toBeNull();
   });
 });

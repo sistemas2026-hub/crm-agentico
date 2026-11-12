@@ -343,6 +343,9 @@ def test_g_sin_la_tarea_delegada_es_sombra(org_a, admin_profile, monkeypatch):
     _varios(org_a, "No Tiene Internet", FALLA, FALLA, FALLA)
     _conversacion(org_a, admin_profile)
     td.delegar(org_a, td.CICLO_AUTOMATICO, actor=admin_profile)
+    #  12/11/2026: nace delegada (PRD §2); "sin la tarea" es una persona que
+    #  la quito.
+    td.quitar(org_a, td.UBICAR_LOS_ASUNTOS, actor=admin_profile, motivo="x")
     autonomia.cambiar(org_a, 3, actor=admin_profile, motivo="x", criterios="y")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
     _apagar_las_otras_fases(monkeypatch)
@@ -350,14 +353,20 @@ def test_g_sin_la_tarea_delegada_es_sombra(org_a, admin_profile, monkeypatch):
     r = sup.correr_ciclo(org_a)["niveles_de_los_asuntos"]
 
     assert (r["modo"], r["ubicaria"]) == (H.SOMBRA, 1)
-    assert "delego" in r["porque"]
+    assert "quitó" in r["porque"]
     assert not N.NivelDeAsunto.objects.exists()
     assert not MensajeSupervisor.objects.exists()
 
 
 def test_g2_sin_el_nivel_3_de_la_empresa_es_sombra(org_a, admin_profile, monkeypatch):
+    from operaciones import autonomia
+
     _varios(org_a, "No Tiene Internet", FALLA, FALLA, FALLA)
     td.delegar(org_a, td.UBICAR_LOS_ASUNTOS, actor=admin_profile)
+    #  12/11/2026: sin fila el nivel es 3; "sin el nivel" es una persona que
+    #  lo bajo.
+    autonomia.cambiar(org_a, 1, actor=admin_profile, motivo="pausa",
+                      criterios="ninguno")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
     _apagar_las_otras_fases(monkeypatch)
 

@@ -424,6 +424,50 @@
   //  antes de que haya ningun click.
   let traerActividad = async () => {};
 
+  //  «HECHO · DESHACER»  --  12/11/2026. Lo no critico ya no pide permiso
+  //  antes; lo que el Supervisor hizo solo se revierte desde su fila. Que se
+  //  puede deshacer lo decide el backend ('hechoSolo.sePuede'); aca solo se
+  //  pide el motivo y se manda.
+  let deshaciendo = $state(/** @type {string | null} */ (null));
+  let motivoDeshacer = $state('');
+  let enviandoDeshacer = $state(false);
+  let errorDeshacer = $state('');
+  /** Los que se deshicieron en esta pantalla, hasta que el sondeo los traiga. */
+  let deshechos = $state(/** @type {Record<string, boolean>} */ ({}));
+
+  /** @param {string} id */
+  function abrirDeshacer(id) {
+    deshaciendo = id;
+    motivoDeshacer = '';
+    errorDeshacer = '';
+  }
+
+  /** @param {string} id */
+  async function confirmarDeshacer(id) {
+    if (enviandoDeshacer || !motivoDeshacer.trim()) return;
+    enviandoDeshacer = true;
+    errorDeshacer = '';
+    try {
+      const r = await fetch(`/supervisor-noc/actividad/${encodeURIComponent(id)}/deshacer`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ motivo: motivoDeshacer.trim() })
+      });
+      const cuerpo = await r.json().catch(() => ({}));
+      if (!r.ok || !cuerpo?.ok) {
+        errorDeshacer = cuerpo?.error || 'No se pudo deshacer.';
+        return;
+      }
+      deshechos = { ...deshechos, [id]: true };
+      deshaciendo = null;
+      await traerActividad();
+    } catch {
+      errorDeshacer = 'No se pudo deshacer: sin conexión con el servidor.';
+    } finally {
+      enviandoDeshacer = false;
+    }
+  }
+
   /** Cambia de grupo: se vuelve a pedir desde arriba, sin las paginas viejas. */
   async function elegirGrupo(nueva) {
     if (nueva === grupo) return;
@@ -1409,7 +1453,9 @@
                       <button class="snv-enlace" type="button" onclick={abrirAlcance}>Ver por qué</button>
                     </p>
                   {:else if c.t.estado === 'apagada'}
-                    <p class="snv-tarjeta-txt">No está delegada. <a class="snv-enlace" href="/supervisor-noc/ajustes">Delegar</a></p>
+                    <!-- 12/11/2026: lo no crítico nace delegado; apagada
+                         quiere decir que una persona la quitó. -->
+                    <p class="snv-tarjeta-txt">Una persona la quitó. <a class="snv-enlace" href="/supervisor-noc/ajustes">Ver en Ajustes</a></p>
                   {:else}
                     <p class="snv-tarjeta-txt">{c.pie}</p>
                   {/if}
@@ -1438,7 +1484,10 @@
                   <p class="snv-tarjeta-linea snv-critico"><span class="snv-punto snv-punto-critico" aria-hidden="true"></span>
                     {ganada.degradadas.length} la perdió por un fallo: {ganada.degradadas.map(nombreDeAccion).join(', ')}</p>
                 {/if}
-                <a class="snv-enlace" href="/capacidad">Ver en Capacidad</a>
+                <!-- 12/11/2026 (auditoría del menú): qué hace solo cada
+                     agente se decide en /agentes (PRD §2); acá solo se lee. -->
+                <a class="snv-enlace" href="/agentes">Cambiar en Agentes</a>
+                · <a class="snv-enlace" href="/capacidad">Ver en Capacidad</a>
               {/if}
             </article>
           </div>
@@ -1887,6 +1936,40 @@
                           {f.evento}
                           {#if f.esIa}
                             <span class="snoc-insignia snoc-insignia-neutra" title="Lo escribió el Supervisor, no una persona">IA</span>
+                          {/if}
+                          <!-- «HECHO · DESHACER» (12/11/2026): lo que hizo
+                               solo. El botón solo donde el backend sabe
+                               deshacerlo; donde no, el porqué a la vista. -->
+                          {#if f.hechoSolo}
+                            <span class="snoc-insignia snoc-insignia-secundaria-suave">Hecho</span>
+                            {#if deshechos[f.id]}
+                              <span class="snoc-body-sm snoc-tenue">· deshecho</span>
+                            {:else if f.hechoSolo.sePuede}
+                              {#if deshaciendo === f.id}
+                                <form class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap; margin-top:4px;"
+                                      onsubmit={(ev) => { ev.preventDefault(); confirmarDeshacer(f.id); }}>
+                                  <input class="snoc-campo" aria-label="Motivo para deshacer"
+                                         placeholder="Por qué lo deshacés" maxlength="500" required
+                                         bind:value={motivoDeshacer} disabled={enviandoDeshacer} />
+                                  <button type="submit" class="snoc-btn snoc-btn-error"
+                                          disabled={enviandoDeshacer || !motivoDeshacer.trim()}>
+                                    {enviandoDeshacer ? 'Deshaciendo…' : 'Deshacer'}
+                                  </button>
+                                  <button type="button" class="snoc-btn" onclick={() => (deshaciendo = null)}
+                                          disabled={enviandoDeshacer}>Cancelar</button>
+                                  {#if errorDeshacer}
+                                    <span class="snoc-body-sm snoc-error-txt" role="alert">{errorDeshacer}</span>
+                                  {/if}
+                                </form>
+                              {:else}
+                                · <button type="button" class="snoc-ver-mas" style="display:inline; padding:0;"
+                                          onclick={() => abrirDeshacer(f.id)}>deshacer</button>
+                              {/if}
+                            {:else if f.hechoSolo.porQueNo}
+                              <span class="snoc-body-sm snoc-tenue" title={f.hechoSolo.porQueNo}>
+                                · no se deshace desde acá: {f.hechoSolo.porQueNo}
+                              </span>
+                            {/if}
                           {/if}
                         </td>
                         <td class="snoc-body-sm snoc-recorte" title="{f.detalle} · {f.quien}">{f.detalle}</td>

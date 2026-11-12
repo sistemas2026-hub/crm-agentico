@@ -1068,7 +1068,8 @@ def pasar_si_corresponde(org, senal, propuesta, *, ahora=None,
     if not delegada:
         return {"paso": False, "grupo": d.grupo, "puerta": PUERTA_TAREA,
                 "porque": "nadie le delego al Supervisor que pase casos a "
-                          "Despacho: se le pide desde su chat"}
+                          "Despacho, o una persona se lo quitó: se vuelve a delegar "
+                          "en Ajustes del Supervisor"}
 
     #  PUERTA 3 · EL TECHO DE LA EMPRESA.
     veredicto = autorizacion if autorizacion is not None else autonomia.puede(

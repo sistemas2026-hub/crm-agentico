@@ -55,7 +55,7 @@ from django.http import Http404
 from django.utils import timezone
 
 from operaciones import (actividades, asistentes, auditoria, chat,
-                         contexto_propuesta, correlacion,
+                         contexto_propuesta, correlacion, deshacer,
                          fuentes, indicadores,
                          supervisor)
 from operaciones.capacidad import capacidad_de_jornada
@@ -269,10 +269,42 @@ class ActividadSupervisorView(APIView):
                     "es_ia": f.user is None,
                     "cuando": f.created_at.isoformat(),
                     "descripcion": f.description or "",
+                    #  «HECHO · DESHACER» (12/11/2026): si es algo que el
+                    #  Supervisor hizo solo, y si el backend sabe deshacerlo o
+                    #  por que no. null = no es un hecho suyo. Lo decide
+                    #  'deshacer.como_se_deshace', no la pantalla.
+                    "hecho_solo": deshacer.como_se_deshace(f),
                 }
                 for f in filas
             ],
         })
+
+
+class DeshacerHechoView(APIView):
+    """
+    POST {motivo}: deshace un hecho del Supervisor, si el backend sabe hacerlo.
+
+    12/11/2026. Lo no critico ya no pide permiso antes; esto es la otra mitad:
+    revertir despues, con nombre y motivo. 409 con el porque cuando no se
+    puede (ya tiene orden, ya lo cambio alguien, o es de los que no se
+    deshacen): la persona tiene permiso, es el estado el que lo impide.
+    """
+
+    permission_classes = [EsJefeDeOperaciones]
+
+    def post(self, request, actividad_id):
+        actor = getattr(request, "profile", None)
+        try:
+            salida = deshacer.deshacer(
+                request.org, actividad_id, actor=actor,
+                motivo=str(request.data.get("motivo") or ""))
+        except deshacer.NoSeDeshace as e:
+            codigo = (status.HTTP_400_BAD_REQUEST
+                      if e.codigo in ("SIN_PERSONA", "SIN_MOTIVO")
+                      else status.HTTP_409_CONFLICT)
+            return Response({"error": e.codigo, "detail": str(e)},
+                            status=codigo)
+        return Response(salida)
 
 
 class PropuestaDetalleView(APIView):

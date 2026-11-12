@@ -106,8 +106,8 @@ def _puertas(org) -> str:
 
     try:
         if not td.esta_delegada(org, _tarea()):
-            return ("nadie le delegó al Supervisor que publique el reparto: se "
-                    "le pide desde su chat")
+            return ("una persona le quitó al Supervisor que publique el reparto: se "
+                    "vuelve a delegar en Ajustes del Supervisor")
     except Exception as e:                                       # noqa: BLE001
         return f"no se pudo comprobar la tarea ({type(e).__name__})"
     try:

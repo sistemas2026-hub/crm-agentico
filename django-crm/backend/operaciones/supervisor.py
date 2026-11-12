@@ -1,10 +1,20 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- SUPERVISOR NOC IA  --  SHADOW MODE: observa, analiza, propone. No ejecuta.
+ SUPERVISOR NOC IA  --  observa, analiza, propone, y hace solo lo no critico
 ================================================================================
 
-EL CICLO, Y DONDE SE CORTA
+LO QUE ESTE ENCABEZADO DECIA, Y YA NO ES CIERTO  --  12/11/2026
+---------------------------------------------------------------
+El titulo decia "SHADOW MODE: no ejecuta" (PRD §8.18 lo marco el 02/11: el
+mismo archivo ya ejecutaba). Desde octubre corre las tareas delegadas del
+catalogo ('tareas_delegadas.py': pasar a Despacho, cerrar desincronizados,
+armar la jornada...) y desde el 12/11/2026 las no criticas nacen delegadas.
+Lo que sigue abajo describe el camino de la PROPUESTA, que es el de lo
+critico y el de lo que el codigo no puede garantizar solo; ese camino si
+sigue cortandose en la revision humana.
+
+EL CICLO DE UNA PROPUESTA, Y DONDE SE CORTA
 --------------------------
     SEÑAL -> NORMALIZACION -> CLASIFICACION -> ANALISIS -> PROPUESTA
           -> REGISTRO -> REVISION HUMANA

@@ -159,16 +159,22 @@ def _delegar_y_autorizar(org, perfil, monkeypatch):
 # A · las puertas
 # ---------------------------------------------------------------------------
 
+#  12/11/2026: lo no critico NACE delegado y la empresa nace en nivel 3 (PRD
+#  §2). "Sin la tarea" es hoy "una persona la quito", y "sin el nivel", "una
+#  persona lo bajo". Las puertas siguen; se prueban con esa decision.
+
 def test_a_sin_la_tarea_delegada_queda_en_sombra_y_NO_escribe(
-    empresa, cuadrilla
+    empresa, cuadrilla, admin_profile
 ):
+    td.quitar(empresa, td.ARMAR_LA_JORNADA, actor=admin_profile,
+              motivo="la armamos a mano")
     _en_despacho(empresa, pad.FALLA_DE_SERVICIO)
 
     r = adj.armar_las_jornadas_del_dia(empresa, A_LAS_10,
                                        leer=_Motor())["jornadas_del_dia"]
 
     assert r["modo"] == adj.SOMBRA
-    assert "delego" in r["porque"]
+    assert "quitó" in r["porque"]
     #  Dice lo que armaria: la falla de SOLEDAD inclina a la #1 a correctivo.
     assert r["resultado"]["labores"] == {"Cuadrilla #1": "correctivo"}
     assert not JornadaDeCuadrilla.objects.filter(fecha=MARTES).exists()
@@ -197,9 +203,16 @@ def test_a2_con_el_nivel_3_pero_SIN_la_tarea_tampoco_arma(
     """EL ESCENARIO DE PRODUCCION. Rapilink ya tiene el nivel 3 --lo usa el paso
     a Despacho--, asi que la tarea delegada es la UNICA puerta que mantiene
     esto en sombra el dia del deploy. `test_a` no lo mide: ahi falta tambien
-    el nivel."""
+    el nivel.
+
+    12/11/2026: desde que lo no critico nace delegado, el dia del deploy esto
+    ARMA SOLO en una empresa sin fila (es lo decidido, PRD §2). La puerta que
+    esta prueba cuida sigue: con el nivel en 3, una tarea que una persona
+    QUITO no arma."""
     from operaciones import autonomia
 
+    td.quitar(empresa, td.ARMAR_LA_JORNADA, actor=admin_profile,
+              motivo="la armamos a mano")
     autonomia.cambiar(empresa, 3, actor=admin_profile,
                       motivo="pasar casos a Despacho", criterios="medido")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
@@ -210,15 +223,21 @@ def test_a2_con_el_nivel_3_pero_SIN_la_tarea_tampoco_arma(
                                        leer=_Motor())["jornadas_del_dia"]
 
     assert r["modo"] == adj.SOMBRA
-    assert "delego" in r["porque"]
+    assert "quitó" in r["porque"]
     assert not JornadaDeCuadrilla.objects.filter(fecha=MARTES).exists()
 
 
 def test_c_con_la_tarea_pero_SIN_el_nivel_queda_en_sombra(
     empresa, cuadrilla, admin_profile, monkeypatch
 ):
+    from operaciones import autonomia
+
     td.delegar(empresa, td.ARMAR_LA_JORNADA, actor=admin_profile,
                pedido_textual="arma la jornada")
+    #  12/11/2026: sin fila el nivel es 3; "sin el nivel" es una persona que
+    #  lo bajo.
+    autonomia.cambiar(empresa, 1, actor=admin_profile, motivo="pausa",
+                      criterios="ninguno")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de",
                         lambda org: (True, ""))
 
