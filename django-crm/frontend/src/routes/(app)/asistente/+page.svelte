@@ -34,6 +34,24 @@
   /** @type {{ data: any }} */
   let { data } = $props();
 
+  /*
+   * SI HAY CON QUIÉN HABLAR, ANTES DE ESCRIBIR  --  12/11/2026
+   * Hasta hoy, sin motor la página cargaba vacía igual y la persona descubría
+   * el fallo al mandar el primer mensaje. El servidor dice el estado
+   * (+page.server.js) y acá se dice en palabras; el cuadro se deshabilita
+   * solo cuando se sabe que no hay asistente. Con el motor sin contestar se
+   * avisa pero se deja escribir: puede volver en un momento, y el mensaje
+   * dirá entonces si no llegó.
+   */
+  const AVISOS = {
+    sin_instalacion: 'No hay un asistente desplegado en esta instalación. Esta pantalla no va a poder responder.',
+    sin_empresa:
+      'No se pudo confirmar el asistente de esta empresa: o todavía no tiene uno configurado, o no contesta ahora. Probá recargar en un momento.',
+    sin_respuesta: 'El asistente no contestó al abrir la página. Podés escribir igual; si sigue sin responder, avisá a quien administra Dexter.'
+  };
+  let aviso = $derived(AVISOS[/** @type {keyof typeof AVISOS} */ (data.estado)] ?? null);
+  let bloqueado = $derived(data.estado === 'sin_instalacion');
+
   let mensajes = $state([]);
   let entrada = $state('');
   let enviando = $state(false);
@@ -137,8 +155,11 @@
 </PageHeader>
 
 <div class="chat">
+  {#if aviso}
+    <p class="aviso-motor" role="status" data-estado={data.estado}>{aviso}</p>
+  {/if}
   <div class="chat-mensajes">
-    {#if mensajes.length === 0}
+    {#if mensajes.length === 0 && !aviso}
       <p class="chat-vacio">Escribí un mensaje para empezar.</p>
     {/if}
     {#each mensajes as m}
@@ -203,9 +224,9 @@
       type="text"
       bind:value={entrada}
       placeholder="Escribí tu mensaje…"
-      disabled={enviando}
+      disabled={enviando || bloqueado}
     />
-    <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando}>Enviar</button>
+    <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando || bloqueado}>Enviar</button>
   </form>
 </div>
 
@@ -223,6 +244,14 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+  .aviso-motor {
+    margin: 12px 0 0;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    color: var(--v2-clay);
+    background: color-mix(in srgb, var(--v2-clay) 10%, var(--v2-card));
   }
   .chat-vacio {
     color: var(--v2-slate);
