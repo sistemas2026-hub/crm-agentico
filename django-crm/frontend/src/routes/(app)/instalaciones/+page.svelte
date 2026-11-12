@@ -95,7 +95,16 @@
     {/each}
   </nav>
 
-  {#if data.error}
+  {#if data.sinPermiso}
+    <!-- 12/11/2026: la bandeja (y el expediente con la cédula) es de las
+         áreas que la empresa eligió en Ajustes → Instalaciones. El servidor
+         lo decide; acá solo se dice por qué no se ve nada. -->
+    <section class="vacio" role="status">
+      <AlertTriangle size={26} />
+      <h2>Esta bandeja no está habilitada para tu área</h2>
+      <p>{data.error}</p>
+    </section>
+  {:else if data.error}
     <div class="alerta"><AlertTriangle size={16} /><span>{data.error}</span></div>
   {/if}
   {#if form?.error}
@@ -113,7 +122,7 @@
     </div>
   {/if}
 
-  {#if !data.solicitudes?.length}
+  {#if !data.solicitudes?.length && !data.sinPermiso}
     <section class="vacio">
       <Inbox size={26} />
       <h2>No hay solicitudes esperando</h2>

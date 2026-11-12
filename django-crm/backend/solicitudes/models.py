@@ -196,3 +196,44 @@ class SolicitudServicio(BaseModel):
     @property
     def tiene_gps(self) -> bool:
         return bool(self.gps_lat and self.gps_lng)
+
+
+class AjustesDeInstalacion(BaseModel):
+    """Lo que cada empresa decide sobre su bandeja de instalaciones.
+
+    QUIEN DECIDE LA FACTIBILIDAD ES UN DATO DE LA EMPRESA (12/11/2026). Hasta
+    ese dia cualquier rol de la organizacion leia la bandeja, decidia y abria
+    el expediente con la foto de la cedula, el recibo y la firma (auditoria del
+    menu, §2 «Instalaciones»). En la primera empresa lo decide un AREA de
+    atencion --la que la empresa configura por persona en el motor--, no un
+    rol de Django, y en la proxima puede ser otra. Por eso es una lista de
+    areas editable desde Ajustes -> Instalaciones y no un nombre en el codigo
+    (CLAUDE.md §3.3).
+
+    Una fila por organizacion. SIN FILA = SIN AREAS: decide solo gestion
+    (ADMIN, SUPERVISOR, OPERACIONES). Falla cerrado.
+    """
+
+    org = models.OneToOneField(Org, on_delete=models.CASCADE,
+                               related_name="ajustes_de_instalacion")
+    #: Nombres internos de area tal como los guarda el motor
+    #: ('asistente.area_colaborador'), no sus etiquetas: la etiqueta se corrige,
+    #: el nombre no.
+    areas_que_deciden = models.JSONField(default=list, blank=True)
+
+    #: PRE-FACTIBILIDAD AUTOMATICA. Nace APAGADA: encenderla cambia lo que pasa
+    #: con cada solicitud que llega, y eso lo decide el administrador.
+    prefactibilidad_activa = models.BooleanField(default=False)
+    #: Por encima de esta precision el punto no alcanza para decidir solo: son
+    #: cuadras de diferencia. 200 m es lo que la tarjeta ya avisaba como dudoso.
+    precision_gps_maxima_m = models.PositiveIntegerField(default=200)
+
+    class Meta:
+        db_table = "solicitudes_ajustesdeinstalacion"
+
+    def __str__(self) -> str:
+        return f"Ajustes de instalacion de {self.org_id}"
+
+    def areas_normalizadas(self) -> set:
+        return {str(a or "").strip().lower() for a in (self.areas_que_deciden or [])
+                if str(a or "").strip()}

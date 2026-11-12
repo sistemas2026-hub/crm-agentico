@@ -30,14 +30,58 @@ import { apiRequest } from '$lib/api-helpers.js';
  * @param {any} cookies
  * @param {string} estado
  */
-export async function leerBandeja(cookies, estado = '') {
+export async function leerBandeja(cookies, estado = '', { automatica = false } = {}) {
   try {
-    const q = estado ? `?estado=${encodeURIComponent(estado)}` : '';
+    const params = new URLSearchParams();
+    if (estado) params.set('estado', estado);
+    if (automatica) params.set('automatica', '1');
+    const q = params.toString() ? `?${params}` : '';
     const datos = await apiRequest(`/solicitudes/bandeja/${q}`, {}, cookies);
-    return { solicitudes: datos?.solicitudes ?? [] };
+    return { solicitudes: datos?.solicitudes ?? [], sinPermiso: false };
   } catch (/** @type {any} */ err) {
-    return { solicitudes: [], error: err?.message || 'No se pudo leer la bandeja.' };
+    // SIN PERMISO NO ES "NO HAY SOLICITUDES" (12/11/2026). Desde ese día la
+    // bandeja es de las áreas que la empresa eligió; quien no está ve un aviso
+    // que dice por qué y qué hacer, no el estado vacío — que diría que no
+    // llegó nada cuando sí llegó.
+    if (err?.status === 403) {
+      return {
+        solicitudes: [],
+        sinPermiso: true,
+        error: err?.body?.error || err?.message || 'No tenés permiso para ver esta bandeja.'
+      };
+    }
+    return {
+      solicitudes: [],
+      sinPermiso: false,
+      error: err?.message || 'No se pudo leer la bandeja.'
+    };
   }
+}
+
+/**
+ * Quién decide la factibilidad y la pre-factibilidad automática.
+ * Nunca lanza: sin esto la pantalla de Ajustes se abre igual, con el error.
+ * @param {any} cookies
+ */
+export async function leerAjustesDecision(cookies) {
+  try {
+    return await apiRequest('/solicitudes/ajustes/decision/', {}, cookies);
+  } catch (/** @type {any} */ err) {
+    return { error: err?.message || 'No se pudieron leer los ajustes de decisión.' };
+  }
+}
+
+/**
+ * @param {any} cookies
+ * @param {{ areas_que_deciden?: string[], prefactibilidad_activa?: boolean,
+ *           precision_gps_maxima_m?: number }} valores
+ */
+export async function guardarAjustesDecision(cookies, valores) {
+  return apiRequest(
+    '/solicitudes/ajustes/decision/',
+    { method: 'PUT', body: valores },
+    cookies
+  );
 }
 
 /**

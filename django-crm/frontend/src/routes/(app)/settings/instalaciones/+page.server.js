@@ -1,19 +1,36 @@
 /**
- * Ajustes → Instalaciones: los dos equipos de WispHub del flujo.
+ * Ajustes → Instalaciones: los dos equipos de WispHub del flujo, y quién
+ * decide la factibilidad.
  *
  * Uno recibe la solicitud nueva (valida si el servicio llega a esa dirección),
  * el otro la ejecuta. Se eligen de una lista traída de WispHub, no se
  * escriben: un id tipeado mal es un ticket a nombre de nadie.
+ *
+ * QUIÉN DECIDE (12/11/2026): las áreas de la empresa que pueden ver la bandeja,
+ * decidir y abrir el expediente con la cédula, además de administración,
+ * supervisión y operaciones. Ninguna elegida = solo esos tres roles. El
+ * backend lo exige (solicitudes/permisos.py); esta pantalla solo lo edita, y
+ * guardar es de ADMIN también en el servidor.
  */
 import { fail } from '@sveltejs/kit';
-import { guardarAjustes, leerAjustes, leerTecnicos } from '$lib/server/v2/solicitudes.js';
+import {
+  guardarAjustes,
+  guardarAjustesDecision,
+  leerAjustes,
+  leerAjustesDecision,
+  leerTecnicos
+} from '$lib/server/v2/solicitudes.js';
 
 const SOLO_ADMIN = 'Solo un administrador puede cambiar esto.';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, locals }) {
-  const [ajustes, tecnicos] = await Promise.all([leerAjustes(cookies), leerTecnicos(cookies)]);
-  return { ajustes, tecnicos, can_edit: locals.profile?.role === 'ADMIN' };
+  const [ajustes, tecnicos, decision] = await Promise.all([
+    leerAjustes(cookies),
+    leerTecnicos(cookies),
+    leerAjustesDecision(cookies)
+  ]);
+  return { ajustes, tecnicos, decision, can_edit: locals.profile?.role === 'ADMIN' };
 }
 
 /** @type {import('./$types').Actions} */
@@ -37,5 +54,19 @@ export const actions = {
       return fail(400, { error: err?.message || 'No se pudo guardar.' });
     }
     return { guardado: true };
+  },
+
+  async decision({ request, cookies, locals }) {
+    if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN, de: 'decision' });
+
+    const form = await request.formData();
+    try {
+      await guardarAjustesDecision(cookies, {
+        areas_que_deciden: form.getAll('areas_que_deciden').map((a) => a.toString())
+      });
+    } catch (/** @type {any} */ err) {
+      return fail(400, { error: err?.message || 'No se pudo guardar.', de: 'decision' });
+    }
+    return { guardado: true, de: 'decision' };
   }
 };

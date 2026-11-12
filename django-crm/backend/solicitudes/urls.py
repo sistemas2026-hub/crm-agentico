@@ -3,6 +3,7 @@
 from django.urls import path
 
 from solicitudes.gestion import (
+    AjustesDecisionView,
     AjustesView,
     BandejaView,
     BuscarSolicitudView,
@@ -24,6 +25,10 @@ urlpatterns = [
     # Lo que usa el equipo, todo autenticado.
     path("solicitudes/bandeja/", BandejaView.as_view(), name="solicitud-bandeja"),
     path("solicitudes/ajustes/", AjustesView.as_view(), name="solicitud-ajustes"),
+    # Quien decide la factibilidad y la pre-factibilidad automatica: datos de
+    # la organizacion, no del motor (12/11/2026).
+    path("solicitudes/ajustes/decision/", AjustesDecisionView.as_view(),
+         name="solicitud-ajustes-decision"),
     path("solicitudes/tecnicos/", TecnicosView.as_view(), name="solicitud-tecnicos"),
     path("solicitudes/<uuid:solicitud_id>/decidir/", DecidirView.as_view(),
          name="solicitud-decidir"),

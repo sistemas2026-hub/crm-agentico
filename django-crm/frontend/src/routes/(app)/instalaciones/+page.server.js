@@ -11,8 +11,10 @@ import { decidir, leerBandeja } from '$lib/server/v2/solicitudes.js';
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, url }) {
   const estado = url.searchParams.get('estado') ?? '';
-  const { solicitudes, error } = await leerBandeja(cookies, estado);
-  return { solicitudes, error, estado };
+  const { solicitudes, error, sinPermiso } = await leerBandeja(cookies, estado);
+  // 'sinPermiso' VIAJA HASTA LA PÁGINA (12/11/2026): sin él, un 403 se veía
+  // como "No hay solicitudes esperando" y nadie sabía por qué.
+  return { solicitudes, error, estado, sinPermiso: Boolean(sinPermiso) };
 }
 
 /** @type {import('./$types').Actions} */

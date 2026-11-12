@@ -35,8 +35,22 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.permissions import HasOrgContext
-from solicitudes.models import SolicitudServicio
+from solicitudes.models import AjustesDeInstalacion, SolicitudServicio
 from solicitudes.motivos import SIN_MOTIVO, es_de_relleno
+from solicitudes.permisos import negado
+
+SOLO_ADMIN = "Solo un administrador puede cambiar los ajustes de instalaciones."
+
+
+def _no_es_admin(request):
+    """403 si quien pide no es ADMIN. En el SERVIDOR (12/11/2026): hasta ese
+    dia solo la pantalla lo comprobaba, y ocultar un boton no es un control."""
+    perfil = getattr(request, "profile", None)
+    user = getattr(perfil, "user", None)
+    if perfil is not None and (str(perfil.role or "").upper() == "ADMIN"
+                               or getattr(user, "is_superuser", False)):
+        return None
+    return Response({"error": SOLO_ADMIN}, status=http.HTTP_403_FORBIDDEN)
 
 # Los cuatro valores que definen a que equipo va cada cosa. Viven en la config
 # del tenant (variables_tenant) y no en una tabla nuestra: son datos de la
@@ -122,14 +136,29 @@ class AjustesView(APIView):
                          for clave, nombre in VARIABLES.items()})
 
     def put(self, request):
+        if (no_admin := _no_es_admin(request)) is not None:
+            return no_admin
+        try:
+            tenant = _tenant(request.profile.org)
+        except RuntimeError:
+            return Response({"error": "Esta organización no tiene empresa en el motor."},
+                            status=http.HTTP_502_BAD_GATEWAY)
         errores = []
         for clave, nombre in VARIABLES.items():
             if clave not in request.data:
                 continue
             valor = str(request.data.get(clave) or "").strip()
+            if not valor:
+                #  El motor rechaza un valor vacio con 400; un campo que no se
+                #  eligio no se toca (la pantalla exige los dos tecnicos).
+                continue
             try:
+                #  'tenant' VA EN EL CUERPO (12/11/2026): el motor lo exige ahi
+                #  ('PUT /configuracion/variables/<nombre>', api.py) y este PUT
+                #  no lo mandaba, asi que guardar los equipos respondia 400
+                #  "Falta el campo 'tenant'" desde que se escribio.
                 r = _motor(f"/configuracion/variables/{nombre}", metodo="PUT",
-                           json={"valor": valor})
+                           json={"tenant": tenant, "valor": valor})
                 r.raise_for_status()
             except Exception as e:                  # noqa: BLE001
                 errores.append(f"{nombre}: {e}")
@@ -139,12 +168,96 @@ class AjustesView(APIView):
         return self.get(request)
 
 
+def _areas_de_la_empresa(org) -> tuple[list, str]:
+    """([{nombre, etiqueta}], error). Las areas que la empresa declaro en el
+    motor, para ELEGIR de una lista en vez de escribir un nombre interno que
+    nadie conoce. Si el motor no contesta, lista vacia y el error dicho."""
+    try:
+        r = _motor("/agentes/areas", metodo="GET", params={"tenant": _tenant(org)},
+                   timeout=10)
+        r.raise_for_status()
+        crudas = (r.json() or {}).get("areas") or []
+    except Exception as e:                          # noqa: BLE001
+        return [], f"No se pudieron leer las áreas de la empresa ({type(e).__name__})."
+    return [{"nombre": str(a.get("nombre") or ""),
+             "etiqueta": str(a.get("etiqueta") or a.get("nombre") or "")}
+            for a in crudas if isinstance(a, dict) and a.get("nombre")], ""
+
+
+def _ajustes_de(org) -> AjustesDeInstalacion:
+    """La fila de la empresa, o una sin guardar con los valores de fabrica."""
+    return (AjustesDeInstalacion.objects.filter(org=org).first()
+            or AjustesDeInstalacion(org=org))
+
+
+class AjustesDecisionView(APIView):
+    """Quien decide la factibilidad, y la pre-factibilidad automatica (12/11/2026).
+
+    GET lo puede leer cualquiera de la organizacion (la pantalla de Ajustes se
+    abre para todos, solo-lectura para quien no es ADMIN); PUT es de ADMIN, en
+    el servidor.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def _respuesta(self, org):
+        fila = _ajustes_de(org)
+        areas, error = _areas_de_la_empresa(org)
+        return Response({
+            "areas_que_deciden": list(fila.areas_que_deciden or []),
+            "prefactibilidad_activa": bool(fila.prefactibilidad_activa),
+            "precision_gps_maxima_m": int(fila.precision_gps_maxima_m),
+            "areas_disponibles": areas,
+            "error_areas": error,
+        })
+
+    def get(self, request):
+        return self._respuesta(request.profile.org)
+
+    def put(self, request):
+        if (no_admin := _no_es_admin(request)) is not None:
+            return no_admin
+        org = request.profile.org
+        fila = _ajustes_de(org)
+        datos = request.data
+        if "areas_que_deciden" in datos:
+            crudas = datos.get("areas_que_deciden")
+            if not isinstance(crudas, list):
+                return Response({"error": "'areas_que_deciden' va como lista."},
+                                status=http.HTTP_400_BAD_REQUEST)
+            vistas, limpias = set(), []
+            for a in crudas:
+                nombre = str(a or "").strip()[:40]
+                if nombre and nombre.lower() not in vistas:
+                    vistas.add(nombre.lower())
+                    limpias.append(nombre)
+            fila.areas_que_deciden = limpias
+        if "prefactibilidad_activa" in datos:
+            fila.prefactibilidad_activa = str(datos.get("prefactibilidad_activa")).lower() in (
+                "true", "1", "si", "on")
+        if "precision_gps_maxima_m" in datos:
+            try:
+                metros = int(datos.get("precision_gps_maxima_m"))
+            except (TypeError, ValueError):
+                return Response({"error": "La precisión máxima va en metros, como número."},
+                                status=http.HTTP_400_BAD_REQUEST)
+            if not 1 <= metros <= 5000:
+                return Response({"error": "La precisión máxima va entre 1 y 5000 metros."},
+                                status=http.HTTP_400_BAD_REQUEST)
+            fila.precision_gps_maxima_m = metros
+        fila.save()
+        return self._respuesta(org)
+
+
 class BandejaView(APIView):
     """Las solicitudes que llegaron, para decidir sobre ellas."""
 
     permission_classes = (IsAuthenticated, HasOrgContext)
 
     def get(self, request):
+        #  POR AREA, NO SOLO AUTENTICADO (12/11/2026): ver solicitudes/permisos.py.
+        if (sin_permiso := negado(request)) is not None:
+            return sin_permiso
         org = request.profile.org
         estado = request.query_params.get("estado") or ""
         qs = SolicitudServicio.objects.filter(org=org)
@@ -237,6 +350,8 @@ class DecidirView(APIView):
     permission_classes = (IsAuthenticated, HasOrgContext)
 
     def post(self, request, solicitud_id: str):
+        if (sin_permiso := negado(request)) is not None:
+            return sin_permiso
         org = request.profile.org
         s = SolicitudServicio.objects.filter(org=org, id=solicitud_id).first()
         if s is None:
@@ -345,6 +460,10 @@ class ExpedienteView(APIView):
     renderer_classes = (_RendererCrudo,)
 
     def get(self, request, solicitud_id: str):
+        #  El permiso va ANTES de buscar la fila: un 404 contra un 403 le
+        #  diria a quien no puede si ese id existe.
+        if (sin_permiso := negado(request)) is not None:
+            return sin_permiso
         org = request.profile.org
         s = SolicitudServicio.objects.filter(org=org, id=solicitud_id).first()
         if s is None:

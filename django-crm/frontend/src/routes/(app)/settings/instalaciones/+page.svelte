@@ -24,6 +24,28 @@
   let aprobadas = $state(a.tecnico_aprobadas ?? '');
 
   const correoDe = (id) => data.tecnicos?.find((t) => t.id === id)?.email ?? '';
+
+  // QUIÉN DECIDE (12/11/2026). Las áreas se ELIGEN de las que la empresa
+  // declaró en el motor: el nombre interno no lo conoce nadie, y uno escrito a
+  // mano que no coincida dejaría al área afuera sin que nada lo avise.
+  const d = untrack(() => data.decision ?? {});
+  let elegidas = $state(new Set(d.areas_que_deciden ?? []));
+  const alternarArea = (nombre) => {
+    const proximo = new Set(elegidas);
+    proximo.has(nombre) ? proximo.delete(nombre) : proximo.add(nombre);
+    elegidas = proximo;
+  };
+  // Una elegida que el motor ya no declara (se borró el área) se muestra igual:
+  // sigue guardada y sigue valiendo, y esconderla la haría imposible de quitar.
+  const opcionesDeArea = $derived.by(() => {
+    const disponibles = data.decision?.areas_disponibles ?? [];
+    const nombres = new Set(disponibles.map((a) => a.nombre));
+    const huerfanas = [...(d.areas_que_deciden ?? [])]
+      .filter((n) => !nombres.has(n))
+      .map((n) => ({ nombre: n, etiqueta: `${n} (ya no existe en la empresa)` }));
+    return [...disponibles, ...huerfanas];
+  });
+  let guardandoDecision = $state(false);
 </script>
 
 <svelte:head><title>Instalaciones · Ajustes</title></svelte:head>
@@ -42,10 +64,10 @@
   {#if data.ajustes?.error}
     <div class="alerta"><AlertTriangle size={16} /><span>{data.ajustes.error}</span></div>
   {/if}
-  {#if form?.error}
+  {#if form?.error && form?.de !== 'decision'}
     <div class="alerta"><AlertTriangle size={16} /><span>{form.error}</span></div>
   {/if}
-  {#if form?.guardado}
+  {#if form?.guardado && form?.de !== 'decision'}
     <div class="ok"><CheckCircle2 size={16} /><span>Guardado.</span></div>
   {/if}
 
@@ -114,6 +136,60 @@
       <p class="nota">Solo un administrador puede cambiar esto.</p>
     {/if}
   </form>
+
+  <!-- QUIÉN DECIDE LA FACTIBILIDAD (12/11/2026). Hasta ese día la bandeja, la
+       decisión y el expediente con la cédula los veía cualquier rol. -->
+  <form method="POST" action="?/decision" id="quien-decide" use:enhance={() => {
+    guardandoDecision = true;
+    return async ({ update }) => { await update({ reset: false }); guardandoDecision = false; };
+  }}>
+    <fieldset class="tarjeta" disabled={!data.can_edit || guardandoDecision}>
+      <legend>Quién decide la factibilidad</legend>
+      <p class="ayuda">
+        Las personas de estas áreas ven la bandeja de Instalaciones, deciden si el servicio
+        llega a la dirección y abren el expediente (con la foto del documento, el recibo y
+        la firma). Administración, supervisión y operaciones pueden siempre.
+        <strong>Sin ningún área elegida, solo ellos.</strong>
+      </p>
+      {#if data.decision?.error}
+        <div class="alerta"><AlertTriangle size={16} /><span>{data.decision.error}</span></div>
+      {/if}
+      {#if data.decision?.error_areas}
+        <div class="alerta"><AlertTriangle size={16} /><span>{data.decision.error_areas}</span></div>
+      {/if}
+      {#if opcionesDeArea.length}
+        <div class="areas">
+          {#each opcionesDeArea as area (area.nombre)}
+            <label class="area">
+              <input type="checkbox" name="areas_que_deciden" value={area.nombre}
+                     checked={elegidas.has(area.nombre)}
+                     onchange={() => alternarArea(area.nombre)} />
+              <span>{area.etiqueta}</span>
+            </label>
+          {/each}
+        </div>
+      {:else if !data.decision?.error_areas}
+        <p class="nota">La empresa todavía no tiene áreas. Se crean en Ajustes → Áreas (/settings/areas).</p>
+      {/if}
+      {#if !elegidas.size}
+        <p class="aviso-vacio">
+          <AlertTriangle size={14} />
+          Ningún área elegida: solo administración, supervisión y operaciones ven la bandeja.
+        </p>
+      {/if}
+    </fieldset>
+    {#if form?.de === 'decision' && form?.error}
+      <div class="alerta"><AlertTriangle size={16} /><span>{form.error}</span></div>
+    {/if}
+    {#if form?.de === 'decision' && form?.guardado}
+      <div class="ok"><CheckCircle2 size={16} /><span>Guardado.</span></div>
+    {/if}
+    {#if data.can_edit}
+      <button type="submit" class="guardar" disabled={guardandoDecision}>
+        {guardandoDecision ? 'Guardando…' : 'Guardar quién decide'}
+      </button>
+    {/if}
+  </form>
 </div>
 </div>
 
@@ -152,6 +228,11 @@
   }
   .guardar:disabled { background: color-mix(in srgb, var(--v2-ember) 45%, var(--v2-card)); cursor: default; }
   .nota { color: var(--v2-slate); font-size: .86rem; margin: 0; }
+  form { display: flex; flex-direction: column; gap: 12px; }
+  .areas { display: flex; flex-direction: column; gap: 6px; }
+  .area { display: flex; align-items: center; gap: 9px; font-size: .92rem; cursor: pointer; }
+  .area input { width: auto; }
+  .aviso-vacio { display: flex; gap: 7px; align-items: center; margin: 0; font-size: .84rem; color: var(--v2-clay); }
 
   .alerta, .ok {
     display: flex; gap: 9px; align-items: center; border-radius: 8px;
