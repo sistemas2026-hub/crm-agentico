@@ -674,6 +674,27 @@ def _numero_de_la_foto(textos, limites):
         v = PF.uno_solo(t)
         if v is None or not _lectura_creible(v, limites):
             continue
+        #  LA PANTALLA SE CONTRADICE A SI MISMA  --  12/11/2026
+        #
+        #  Un medidor optico muestra la MISMA potencia en dBm y en µW, y son
+        #  convertibles. Si los dos numeros que el modelo leyo de una sola
+        #  pantalla no son el mismo valor, esa lectura no sirve, cualquiera
+        #  sea cual de los dos esta mal.
+        #
+        #  Esto ataca el sesgo que ni la doble lectura ni el rango pudieron:
+        #  el modelo corre el punto decimal y lo sostiene. Medido en la foto
+        #  de la OT #214: leyo «-2.10 dBm, 0.682 µW», y esos µW son -31.7
+        #  dBm. Casi 30 dB de diferencia en la misma frase.
+        #
+        #  Es mas fuerte que el rango porque es FISICA, no configuracion: no
+        #  depende de la planta de ninguna empresa, y no le pide al modelo
+        #  que admita nada -- ya se midio que no lo hace.
+        #
+        #  `None` (no se puede saber) NO descarta: el µW en el piso del
+        #  display, o una lectura que no lo trae, siguen valiendo como antes.
+        coherente, _ = PF.coherente_con_los_microwatts(t)
+        if coherente is False:
+            continue
         if v not in creibles:
             creibles.append(v)
     if len(creibles) == 1:
