@@ -75,7 +75,7 @@
                       await update({ reset: false });
                     }}>
                 <input type="hidden" name="nombre" value={nombre} />
-                <input name="valor" class="v2-input" required {value} />
+                <input name="valor" class="v2-input" required value={valor} />
                 <button class="v2-btn v2-btn-primary v2-btn-sm" type="submit">Guardar</button>
                 <button class="v2-btn v2-btn-sm" type="button" onclick={() => (editando = null)}>Cancelar</button>
               </form>
