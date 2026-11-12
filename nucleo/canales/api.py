@@ -5109,6 +5109,111 @@ def configuracion_variable_borrar(nombre):
     return jsonify({"borrado": nombre})
 
 
+# =============================================================================
+#  TEXTOS DEL TRASPASO Y CIERRE POR INACTIVIDAD  --  12/11/2026
+#  Hasta este dia solo se cambiaban por YAML (auditoria del menu, §2). Ver
+#  editor.guardar_textos_escalamiento y editor.guardar_cierre_inactividad.
+# =============================================================================
+
+def _traspaso_de(config) -> dict:
+    """Lo que la pantalla necesita para mostrar y volver a guardar sin cambiar
+    nada que no se toco. Mismas claves que los PUT de abajo."""
+    esc = config.escalamiento
+    cierre = config.cierre_inactivas_ia
+    return {
+        "textos": {
+            "mensaje": esc.mensaje or "",
+            "mensajes_por_motivo": dict(esc.mensajes_por_motivo or {}),
+            "mensaje_ya_escalada": esc.mensaje_ya_escalada or "",
+            "mensaje_si_falla": esc.mensaje_si_falla or "",
+            "frases_de_traspaso": list(esc.frases_de_traspaso or []),
+        },
+        # Los motivos que HOY disparan un traspaso: solo esos admiten texto
+        # propio. Se listan todos, tengan texto o no, para que la pantalla
+        # muestre que uno sin texto usa el general.
+        "motivos": list(esc.activar_si or []),
+        "cierre": {
+            "habilitado": bool(cierre.habilitado),
+            "horas_inactividad_cierra": config.limites.horas_inactividad_cierra,
+            "rollout_cutoff": cierre.rollout_cutoff.isoformat() if cierre.rollout_cutoff else None,
+            "backfill_habilitado": bool(cierre.backfill_habilitado),
+            "backfill_lote": cierre.backfill_lote,
+        },
+        # El otro lado de la validacion cruzada: el cierre no puede actuar
+        # antes de que la Bandeja muestre la conversacion. La pantalla lo
+        # dice antes de que el motor tenga que rechazarlo.
+        "sin_gestion_horas": getattr(config, "sin_gestion_horas", None),
+    }
+
+
+@app.get("/configuracion/traspaso")
+def configuracion_traspaso():
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(_traspaso_de(config))
+
+
+@app.put("/configuracion/traspaso/textos")
+def configuracion_traspaso_textos():
+    """
+    Los cinco textos del traspaso. LAS CINCO CLAVES TIENEN QUE VENIR, aunque
+    sea vacias: 'no vino' y 'borralo' no son lo mismo (mismo criterio que
+    /configuracion/capacidad). Lo valida el editor.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    textos = {k: cuerpo[k] for k in editor.CLAVES_TEXTOS_TRASPASO if k in cuerpo}
+    try:
+        config = editor.guardar_textos_escalamiento(tenant, textos)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify(_traspaso_de(config))
+
+
+@app.put("/configuracion/traspaso/cierre")
+def configuracion_traspaso_cierre():
+    """
+    El cierre por inactividad. 'horas_inactividad_cierra' en null = las
+    conversaciones no se cierran por tiempo (y entonces el cierre no puede
+    estar encendido). Las cuatro claves tienen que venir.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    claves = ("habilitado", "horas_inactividad_cierra", "backfill_habilitado", "backfill_lote")
+    faltan = [c for c in claves if c not in cuerpo]
+    if faltan:
+        return jsonify({"error": f"Falta {', '.join(faltan)}. Para quitar el plazo, mandalo en null."}), 400
+    if not all(isinstance(cuerpo[c], bool) for c in ("habilitado", "backfill_habilitado")):
+        return jsonify({"error": "'habilitado' y 'backfill_habilitado' tienen que ser true o false."}), 400
+    try:
+        crudo = cuerpo["horas_inactividad_cierra"]
+        horas = None if crudo in (None, "") else int(crudo)
+        lote = int(cuerpo["backfill_lote"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "Las horas y el lote tienen que ser numeros enteros."}), 400
+    try:
+        config = editor.guardar_cierre_inactividad(
+            tenant, cuerpo["habilitado"], horas, cuerpo["backfill_habilitado"], lote)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify(_traspaso_de(config))
+
+
 def _aplicar_politica_de_rol(config, rol_pedido: str, nombre: str, crudo):
     """
     Aplica la politica de campos de un ROL a la salida cruda de una herramienta.

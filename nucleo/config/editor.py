@@ -182,6 +182,14 @@ SECCIONES_EDITABLES = (
     # diff. La base manda en operacion y el archivo sirve de plantilla; lo que
     # protege el trabajo del cliente es esta guarda, no esconder la seccion.
     "areas",
+    # 12/11/2026. Los textos que lee el cliente cuando se lo pasa a una
+    # persona, y el cierre por inactividad, se editan desde Ajustes ->
+    # WhatsApp -> Textos del traspaso. Hasta ese dia solo cambiaban por YAML
+    # (auditoria del menu, §2 Administrar): sin estas dos lineas, la primera
+    # carga del archivo despues de una edicion la pisaria sin avisar.
+    # 'limites' ya estaba arriba ('horas_inactividad_cierra' vive ahi).
+    "escalamiento",         # _mutar_textos_escalamiento
+    "cierre_inactivas_ia",  # _mutar_cierre_inactividad
 )
 
 
@@ -2037,3 +2045,218 @@ def guardar_saldo_proveedor(tenant: str, url: str, auth_ref: str, campo: str,
             "proveedor.")
     return _editar(tenant, lambda d: _mutar_saldo_proveedor(
         d, url, auth_ref, campo, tolerancia))
+
+
+# =============================================================================
+#  TEXTOS DEL TRASPASO Y CIERRE POR INACTIVIDAD  --  12/11/2026
+# =============================================================================
+#
+# Hasta este dia se cambiaban solo por YAML, que es lo que CLAUDE.md §3.3
+# prohibe: son palabras y plazos de cada empresa, y el segundo ISP no puede
+# necesitar una sesion de codigo para decir "te paso con un asesor" en su
+# dialecto. Peor: el editor ya LEIA 'cierre_inactivas_ia' para rechazar un
+# umbral de la Bandeja (ver _mutar_ajustes_bandeja), asi que un formulario
+# podia negarse a guardar por un tope que ninguna pantalla dejaba tocar
+# (auditoria del menu, §2 Administrar).
+#
+# Mismo camino que el resto del archivo: _editar() valida contra TenantConfig
+# y solo sube la version si el documento cambio. Igual que todos, sufre D7
+# (el volcado reescribe los defaults ausentes); estas funciones no lo agravan.
+
+#: Lo que puede medir un texto del traspaso. WhatsApp admite 4096, pero este
+#: texto REEMPLAZA la respuesta del turno (ver api.py::_mensaje_de_escalada):
+#: es lo unico que el cliente lee, y uno de mil caracteres ya es una carta.
+TEXTO_TRASPASO_MAXIMO = 1000
+#: Una frase de traspaso se busca DENTRO de la respuesta del modelo
+#: (estado_escalada.promete_traspaso). "un" o "te" aparecen en cualquier
+#: respuesta y harian que, en el unico camino en que se revisa, toda respuesta
+#: se reemplace por 'mensaje_si_falla'. Cinco caracteres es lo minimo que ya
+#: es una frase ("asesor", "un compañero").
+FRASE_TRASPASO_MINIMO = 5
+FRASE_TRASPASO_MAXIMO = 120
+FRASES_TRASPASO_MAXIMAS = 30
+#: El cierre por inactividad: de una hora a treinta dias. Menos de una hora
+#: corta una conversacion entre turno y turno; mas de treinta dias es no
+#: querer cerrarla, y para eso esta el interruptor.
+HORAS_CIERRE_MINIMO = 1
+HORAS_CIERRE_MAXIMO = 720
+
+#: Las claves que el PUT de textos exige, aunque sea vacias: "no vino" y
+#: "borralo" no son lo mismo (mismo criterio que guardar_capacidad_declarada).
+CLAVES_TEXTOS_TRASPASO = ("mensaje", "mensajes_por_motivo", "mensaje_ya_escalada",
+                          "mensaje_si_falla", "frases_de_traspaso")
+
+
+def _plano(texto: str) -> str:
+    """Para comparar dos textos sin que un espacio o una mayuscula los separe."""
+    return " ".join(str(texto or "").lower().split())
+
+
+def _texto_traspaso(valor, que: str) -> str:
+    if valor is None:
+        return ""
+    if not isinstance(valor, str):
+        raise ErrorEdicion(f"{que}: tiene que ser un texto.")
+    limpio = valor.strip()
+    if len(limpio) > TEXTO_TRASPASO_MAXIMO:
+        raise ErrorEdicion(f"{que}: pasa de {TEXTO_TRASPASO_MAXIMO} caracteres. "
+                           "Es lo único que el cliente lee en ese turno: acortalo.")
+    return limpio
+
+
+def _mutar_textos_escalamiento(doc: dict, textos: dict) -> None:
+    """
+    Los cinco textos de 'escalamiento' que lee (o que protege) el cliente.
+
+    Las DOS validaciones que necesitan el documento viven aca, no en
+    guardar_*: que cada motivo exista en 'activar_si' (si no, el texto no se
+    mostraria nunca y nadie lo notaria -- el esquema tambien lo rechaza, pero
+    con un mensaje que no dice que hacer) y que el texto de "ya escalada" no
+    sea el mismo anuncio.
+    """
+    esc = doc.setdefault("escalamiento", {})
+    motivos = list(esc.get("activar_si") or [])
+
+    general = _texto_traspaso(textos["mensaje"], "el mensaje general")
+    if not general:
+        # El general es el que cubre cualquier motivo sin texto propio,
+        # incluido uno que todavia no exista (api.py::_mensaje_de_escalada).
+        # Vacio, un traspaso sin texto propio le manda al cliente un mensaje
+        # en blanco justo en el turno en que lo pasan a una persona.
+        raise ErrorEdicion("el mensaje general no puede quedar vacío: es el que recibe el "
+                           "cliente cuando el motivo del traspaso no tiene texto propio.")
+
+    crudo_motivos = textos["mensajes_por_motivo"] or {}
+    if not isinstance(crudo_motivos, dict):
+        raise ErrorEdicion("los mensajes por motivo tienen que venir como motivo -> texto.")
+    por_motivo: dict[str, str] = {}
+    for motivo, texto in crudo_motivos.items():
+        if motivo not in motivos:
+            raise ErrorEdicion(
+                f"el motivo '{motivo}' no es uno de los que hoy disparan un traspaso en esta "
+                "empresa: su texto no se mostraría nunca.")
+        limpio = _texto_traspaso(texto, f"el mensaje de '{motivo}'")
+        # Vacio = ese motivo usa el general. No se guarda la clave: un texto
+        # vacio guardado se leeria igual, pero en el diff pareceria decidido.
+        if limpio:
+            por_motivo[motivo] = limpio
+
+    ya_escalada = _texto_traspaso(textos["mensaje_ya_escalada"],
+                                  "el mensaje para quien vuelve a escribir")
+    # UN SOLO TEXTO, decision congelada (CLAUDE.md §12, 12/09/2026): lo que
+    # varia por motivo es el anuncio, no esto. Y no puede ser el anuncio: el
+    # 08/09/2026 un cliente contesto "ok" y recibio palabra por palabra "Te
+    # paso con un compañero...", como si el pase no hubiera ocurrido.
+    if ya_escalada:
+        anuncios = {_plano(general)} | {_plano(t) for t in por_motivo.values()}
+        if _plano(ya_escalada) in anuncios:
+            raise ErrorEdicion(
+                "el mensaje para quien vuelve a escribir no puede ser igual al anuncio del "
+                "traspaso: repetido, suena a que el pase nunca ocurrió. Tiene que decir que "
+                "el caso YA está con alguien.")
+
+    si_falla = _texto_traspaso(textos["mensaje_si_falla"], "el mensaje si el traspaso falla")
+
+    crudas = textos["frases_de_traspaso"] or []
+    if not isinstance(crudas, list):
+        raise ErrorEdicion("las frases de traspaso tienen que venir como lista.")
+    frases: list[str] = []
+    vistas: set[str] = set()
+    for f in crudas:
+        if not isinstance(f, str):
+            raise ErrorEdicion("cada frase de traspaso tiene que ser un texto.")
+        limpia = " ".join(f.split())
+        if not limpia:
+            continue
+        if len(limpia) < FRASE_TRASPASO_MINIMO:
+            raise ErrorEdicion(
+                f"la frase '{limpia}' es demasiado corta (mínimo {FRASE_TRASPASO_MINIMO} "
+                "caracteres): aparecería en casi cualquier respuesta y la reemplazaría.")
+        if len(limpia) > FRASE_TRASPASO_MAXIMO:
+            raise ErrorEdicion(f"una frase de traspaso pasa de {FRASE_TRASPASO_MAXIMO} caracteres.")
+        if _plano(limpia) in vistas:
+            continue
+        vistas.add(_plano(limpia))
+        frases.append(limpia)
+    if len(frases) > FRASES_TRASPASO_MAXIMAS:
+        raise ErrorEdicion(f"hay más de {FRASES_TRASPASO_MAXIMAS} frases de traspaso.")
+
+    esc["mensaje"] = general
+    esc["mensajes_por_motivo"] = por_motivo
+    esc["mensaje_ya_escalada"] = ya_escalada
+    esc["mensaje_si_falla"] = si_falla
+    esc["frases_de_traspaso"] = frases
+
+
+def guardar_textos_escalamiento(tenant: str, textos: dict) -> TenantConfig:
+    """
+    Los textos del traspaso a una persona. Las cinco claves tienen que venir
+    (ver CLAVES_TEXTOS_TRASPASO): un formulario que mande menos borraria lo
+    que omitio sin pedirlo.
+    """
+    faltan = [c for c in CLAVES_TEXTOS_TRASPASO if c not in (textos or {})]
+    if faltan:
+        raise ErrorEdicion("faltan " + ", ".join(faltan) + ": para vaciar un texto se manda "
+                           "vacío, no se omite.")
+    return _editar(tenant, lambda doc: _mutar_textos_escalamiento(doc, textos))
+
+
+def _mutar_cierre_inactividad(doc: dict, habilitado: bool, horas: int | None,
+                              backfill_habilitado: bool, backfill_lote: int,
+                              ahora_iso: str) -> None:
+    """
+    El cierre de lo que atendio SOLO el asistente, y el plazo con el que una
+    conversacion muda deja de reutilizarse ('limites.horas_inactividad_cierra').
+
+    EL CORTE SE FIJA AL ENCENDER, Y NUNCA SE MUEVE DESDE ACA. 'rollout_cutoff'
+    parte el mundo en flujo normal y backlog (ver CierreInactivasIA). Sin
+    corte no se cierra nada, asi que encender desde la pantalla sin corte no
+    haria nada -- y pedirle a una persona que escriba una fecha ISO es pedirle
+    que se equivoque. Encender por primera vez es la decision de "desde
+    ahora": se fija ahi. Una vez puesto no se toca: moverlo hacia atras
+    convertiria backlog en flujo normal, que es justo lo que las cohortes
+    existen para impedir.
+
+    LA VALIDACION CRUZADA CON LA BANDEJA ES LA ESPEJO DE _mutar_ajustes_bandeja:
+    alla se rechaza un umbral 'sin gestion' mas tarde que el cierre; aca, un
+    cierre mas temprano que ese umbral. Sin la espejo, bajar las horas desde
+    esta pantalla dejaba un umbral guardado que el motor recorta en silencio
+    (TenantConfig.sin_gestion_horas_efectivas) y una pantalla que muestra un
+    numero que no es el que actua.
+    """
+    if habilitado and horas is None:
+        raise ErrorEdicion(
+            "para encender el cierre por inactividad hace falta el plazo en horas: sin él, "
+            "el interruptor quedaría encendido sin cerrar nada.")
+    sin_gestion = doc.get("sin_gestion_horas")
+    if habilitado and horas is not None and sin_gestion and int(sin_gestion) > int(horas):
+        raise ErrorEdicion(
+            f"el cierre no puede actuar antes de {int(sin_gestion)} horas, que es cuando la "
+            "Bandeja muestra una conversación «sin resolución registrada»: se cerraría antes de "
+            "que nadie la viera. Bajá primero ese umbral en Ajustes → Bandeja.")
+
+    limites = doc.setdefault("limites", {})
+    limites["horas_inactividad_cierra"] = int(horas) if horas is not None else None
+
+    cierre = dict(doc.get("cierre_inactivas_ia") or {})
+    cierre["habilitado"] = bool(habilitado)
+    if habilitado and not cierre.get("rollout_cutoff"):
+        cierre["rollout_cutoff"] = ahora_iso
+    cierre["backfill_habilitado"] = bool(backfill_habilitado)
+    cierre["backfill_lote"] = int(backfill_lote)
+    doc["cierre_inactivas_ia"] = cierre
+
+
+def guardar_cierre_inactividad(tenant: str, habilitado: bool, horas: int | None,
+                               backfill_habilitado: bool, backfill_lote: int,
+                               ahora_iso: str | None = None) -> TenantConfig:
+    if horas is not None and not (HORAS_CIERRE_MINIMO <= int(horas) <= HORAS_CIERRE_MAXIMO):
+        raise ErrorEdicion(f"el plazo tiene que estar entre {HORAS_CIERRE_MINIMO} y "
+                           f"{HORAS_CIERRE_MAXIMO} horas.")
+    if not (1 <= int(backfill_lote) <= 500):
+        raise ErrorEdicion("el lote del backlog tiene que estar entre 1 y 500 por pasada.")
+    if ahora_iso is None:
+        from datetime import datetime, timezone
+        ahora_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return _editar(tenant, lambda doc: _mutar_cierre_inactividad(
+        doc, habilitado, horas, backfill_habilitado, backfill_lote, ahora_iso))

@@ -398,6 +398,19 @@
           </span>
           <span aria-hidden="true">→</span>
         </a>
+        <!-- 12/11/2026: los textos que lee el cliente al pasarlo a una persona
+             solo se cambiaban por YAML. No son plantillas (van dentro de la
+             ventana de 24 h), por eso son una página hermana y no un momento más. -->
+        <a class="v2-card plantillas-link" href="/settings/canales/whatsapp/traspaso" style="margin-top:10px">
+          <span>
+            <b>Traspaso a una persona y cierre por inactividad</b>
+            <span class="v2-sub">
+              Qué le dice Dexter al cliente cuando lo pasa a alguien del equipo, y cuándo se cierra
+              sola una conversación que quedó muda.
+            </span>
+          </span>
+          <span aria-hidden="true">→</span>
+        </a>
       {/if}
 
       <!-- ── URL del webhook ─────────────────────────────────────────────── -->
