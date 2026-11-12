@@ -3723,6 +3723,15 @@ def agentes_editar_area(nombre):
     if "icono" in cuerpo and cuerpo["icono"] not in ICONOS_DE_AREA:
         return jsonify({"error": ("Icono desconocido. Disponibles: "
                                   + ", ".join(ICONOS_DE_AREA) + ".")}), 400
+    # QUE VE ESTA AREA DE LA FICHA DEL CLIENTE (12/11/2026): null = el defecto
+    # seguro del motor; lista = esos campos. Aca solo se exige la FORMA; que
+    # cada campo exista lo valida AreaDeTrabajo.ficha_cliente al pasar por
+    # _editar, que es el mismo esquema con que carga el motor.
+    ficha = cuerpo.get("ficha_cliente")
+    if "ficha_cliente" in cuerpo and ficha is not None and (
+            not isinstance(ficha, list) or not all(isinstance(c, str) for c in ficha)):
+        return jsonify({"error": "'ficha_cliente' tiene que ser una lista de campos, o null "
+                                 "para volver al defecto seguro."}), 400
 
     from nucleo.config import editor
 
@@ -3740,12 +3749,22 @@ def agentes_editar_area(nombre):
                 a["color"] = str(cuerpo["color"] or "")
             if "icono" in cuerpo:
                 a["icono"] = str(cuerpo["icono"])
+            if "ficha_cliente" in cuerpo:
+                if ficha is None:
+                    a.pop("ficha_cliente", None)
+                else:
+                    a["ficha_cliente"] = [c.strip() for c in ficha if c.strip()]
             doc["areas"] = areas
             return
         raise ValueError("No existe el area '" + nombre + "'.")
 
     try:
         editor._editar(tenant, mutar)
+    except editor.ErrorEdicion as e:
+        # ANTES que ValueError, de la que hereda (12/11/2026): un campo de
+        # ficha mal escrito o un color invalido es un 400 con su motivo, no
+        # un "no existe el area".
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:                                   # noqa: BLE001
@@ -5059,7 +5078,50 @@ def configuracion_variables_listar():
     except Exception as e:
         return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
                      componente="configuracion", e=e)
-    return jsonify({"variables": dict(config.variables_tenant or {})})
+    return jsonify({"variables": dict(config.variables_tenant or {}),
+                    **_usos_de_variables(config)})
+
+
+def _usos_de_variables(config) -> dict:
+    """
+    Quien usa cada variable, y cuales se piden y no estan (12/11/2026).
+
+    Para la pantalla «Variables de la empresa»: sin esto es una lista de
+    nombres sueltos, y borrar una que usa una herramienta se descubre cuando
+    el motor rechaza el guardado (el esquema exige que exista). Con esto la
+    pantalla lo dice antes, y muestra la variable que FALTA cargar -- que es
+    lo que necesita el segundo ISP despues de conectar un sistema.
+
+    'usos': toda cadena de la definicion de una herramienta que coincide con
+    el nombre de una variable cargada (generico: base_url_ref,
+    argumentos_desde_variables, entrega_variable y lo que venga despues).
+    'faltan': los campos que por definicion NOMBRAN una variable y apuntan a
+    una que no esta. No se adivina con 'auth_ref': esa nombra un secreto.
+    """
+    cargadas = set((config.variables_tenant or {}).keys())
+    usos: dict[str, set[str]] = {}
+    faltan: dict[str, set[str]] = {}
+
+    def recorrer(nodo, herramienta):
+        if isinstance(nodo, str):
+            if nodo in cargadas:
+                usos.setdefault(nodo, set()).add(herramienta)
+        elif isinstance(nodo, dict):
+            for v in nodo.values():
+                recorrer(v, herramienta)
+        elif isinstance(nodo, list):
+            for v in nodo:
+                recorrer(v, herramienta)
+
+    for h in config.herramientas or []:
+        recorrer(h.model_dump(mode="json", exclude={"auth_ref"}), h.nombre)
+        pedidas = [h.base_url_ref, getattr(h, "entrega_variable", None),
+                   *(getattr(h, "argumentos_desde_variables", None) or {}).values()]
+        for nombre in pedidas:
+            if nombre and nombre not in cargadas:
+                faltan.setdefault(nombre, set()).add(h.nombre)
+    return {"usos": {k: sorted(v) for k, v in usos.items()},
+            "faltan": {k: sorted(v) for k, v in faltan.items()}}
 
 
 @app.put("/configuracion/variables/<nombre>")
@@ -10750,7 +10812,7 @@ def conectores_preparar(id_conector):
         return jsonify({"error": "Falta el campo 'tenant'."}), 400
     try:
         plan = conectores.preparar(id_conector, cuerpo.get("areas") or {},
-                                   _config_de(tenant))
+                                   _config_de(tenant), conectores.secretos_cargados(tenant))
     except conectores.ErrorConector as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except FileNotFoundError:
@@ -10770,6 +10832,10 @@ def conectores_preparar(id_conector):
                            for r, v in plan["campos_por_rol"].items()},
         "variables": plan["variables"],
         "secretos": plan["secretos"],
+        # 12/11/2026: lo que FALTA, mirando lo cargado (ver catalogo.preparar).
+        "faltan_secretos": plan["faltan_secretos"],
+        "faltan_variables": plan["faltan_variables"],
+        "credenciales_listas": plan["credenciales_listas"],
     })
 
 
@@ -10793,8 +10859,11 @@ def conectores_aplicar(id_conector):
                     "salteadas": plan["salteadas"],
                     # Lo que TODAVIA falta: sin la credencial cargada, las
                     # herramientas estan en el catalogo y fallan al primer uso.
-                    "faltan_secretos": plan["secretos"],
-                    "faltan_variables": [v["nombre"] for v in plan["variables"]]})
+                    # 12/11/2026: solo lo que de verdad falta. Antes salian
+                    # todos los del conector, cargados o no.
+                    "faltan_secretos": plan["faltan_secretos"],
+                    "faltan_variables": plan["faltan_variables"],
+                    "credenciales_listas": plan["credenciales_listas"]})
 
 
 # =============================================================================

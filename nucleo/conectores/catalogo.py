@@ -98,8 +98,28 @@ def leer(id_conector: str) -> dict:
     return yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
 
 
+def secretos_cargados(tenant: str) -> set[str] | None:
+    """
+    Los NOMBRES de los secretos que el tenant ya tiene cargados, o None si no
+    se pudo saber (12/11/2026).
+
+    None no es "ninguno": es "no se". Quien lo use tiene que tratarlo como
+    que faltan todos -- decir "Credenciales listas" porque la base no
+    contesto seria afirmar lo que no se midio. Mismo origen que la pantalla
+    de Credenciales (api.py::configuracion_credenciales), para que las dos no
+    se contradigan.
+    """
+    from nucleo.seguridad import secretos
+
+    try:
+        return {s["nombre"] for s in secretos.listar(tenant)}
+    except Exception as fallo:      # noqa: BLE001
+        registrar("conectores", "no se pudieron leer los secretos cargados", error=fallo)
+        return None
+
+
 def preparar(id_conector: str, mapa_areas: dict[str, str],
-             config_actual) -> dict:
+             config_actual, cargados: set[str] | None = None) -> dict:
     """
     Traduce el conector a lo que hay que escribir, SIN escribir nada.
 
@@ -147,14 +167,29 @@ def preparar(id_conector: str, mapa_areas: dict[str, str],
                 previos = campos_por_rol.setdefault(rol, {}).get(h["nombre"], [])
                 campos_por_rol[rol][h["nombre"]] = sorted(set(previos) | set(campos))
 
-    faltan_secretos = [s["nombre"] for s in (doc.get("secretos") or [])]
+    # LO QUE FALTA, MIRANDO LO QUE YA ESTA (12/11/2026). Hasta hoy se listaban
+    # TODOS los secretos del conector como faltantes, aunque estuvieran
+    # cargados: la pantalla pedia una credencial que ya existia, y quien la
+    # tenia cargada no podia saber si el aviso era viejo o real (auditoria del
+    # menu, §2). 'cargados' None = no se pudo leer: faltan todos, por la regla
+    # de secretos_cargados(). Las variables se miran en la config, que es
+    # donde viven.
+    declarados = [s["nombre"] for s in (doc.get("secretos") or [])]
+    faltan_secretos = [n for n in declarados if cargados is None or n not in cargados]
+    variables = doc.get("variables") or []
+    vigentes = dict(getattr(config_actual, "variables_tenant", None) or {})
+    faltan_variables = [v["nombre"] for v in variables if not vigentes.get(v["nombre"])]
     return {
         "conector": doc.get("nombre") or id_conector,
         "nuevas": nuevas,
         "salteadas": salteadas,
         "campos_por_rol": campos_por_rol,
-        "variables": doc.get("variables") or [],
-        "secretos": faltan_secretos,
+        "variables": variables,
+        "secretos": declarados,
+        "faltan_secretos": faltan_secretos,
+        "faltan_variables": faltan_variables,
+        # Solo True si se SUPO: con la lectura caida nunca se afirma.
+        "credenciales_listas": cargados is not None and not faltan_secretos,
     }
 
 
@@ -183,7 +218,8 @@ def aplicar(tenant: str, id_conector: str, mapa_areas: dict[str, str]) -> dict:
     """Escribe el conector en el catalogo del tenant. Devuelve el plan aplicado."""
     from nucleo.config import editor, fuente
 
-    plan = preparar(id_conector, mapa_areas, fuente.cargar(tenant))
+    plan = preparar(id_conector, mapa_areas, fuente.cargar(tenant),
+                    secretos_cargados(tenant))
     if not plan["nuevas"]:
         raise ErrorConector(
             "No hay nada que agregar: todas las herramientas de este conector "

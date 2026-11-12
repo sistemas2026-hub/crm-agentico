@@ -150,27 +150,42 @@
         </p>
 
         <!-- Sin esto las herramientas están pero fallan al primer uso, y el
-             síntoma no dice que faltaba una credencial. -->
-        <div class="pendiente">
-          <div style="display:flex;gap:8px;align-items:flex-start">
-            <KeyRound size={15} style="flex:none;margin-top:2px" />
-            <div>
-              <div style="font-weight:700;font-size:13px">Falta cargar las credenciales</div>
-              <p style="margin:4px 0 0;font-size:12.5px;line-height:1.5">
-                Sin esto las herramientas están en el catálogo pero fallan la primera vez
-                que se usen.
-              </p>
-              <ul class="lista-pendiente">
-                {#each aplicado.faltan_secretos ?? [] as s}
-                  <li><span class="v2-num">{s}</span> — en Configuración → Credenciales</li>
-                {/each}
-                {#each aplicado.faltan_variables ?? [] as v}
-                  <li><span class="v2-num">{v}</span> — todavía sin pantalla: se carga con <code>cli/cargar_config.py</code> (<code>variables_tenant</code>)</li>
-                {/each}
-              </ul>
+             síntoma no dice que faltaba una credencial. Desde el 12/11/2026 el
+             motor dice qué falta DE VERDAD (antes listaba todo, cargado o no),
+             y cada faltante enlaza a la pantalla donde se carga. -->
+        {#if (aplicado.faltan_secretos ?? []).length || (aplicado.faltan_variables ?? []).length}
+          <div class="pendiente">
+            <div style="display:flex;gap:8px;align-items:flex-start">
+              <KeyRound size={15} style="flex:none;margin-top:2px" />
+              <div>
+                <div style="font-weight:700;font-size:13px">Falta cargar algunos datos</div>
+                <p style="margin:4px 0 0;font-size:12.5px;line-height:1.5">
+                  Sin esto las herramientas están en el catálogo pero fallan la primera vez
+                  que se usen.
+                </p>
+                <ul class="lista-pendiente">
+                  {#each aplicado.faltan_secretos ?? [] as s}
+                    <li><span class="v2-num">{s}</span> — <a href="/settings/credenciales">cargarla en Credenciales</a></li>
+                  {/each}
+                  {#each aplicado.faltan_variables ?? [] as v}
+                    <li><span class="v2-num">{v}</span> — <a href={`/settings/variables?nombre=${encodeURIComponent(v)}`}>cargarla en Variables de la empresa</a></li>
+                  {/each}
+                </ul>
+              </div>
             </div>
           </div>
-        </div>
+        {:else if aplicado.credenciales_listas}
+          <p style="margin:0;font-size:13px;display:flex;gap:6px;align-items:center">
+            <Check size={15} style="color:var(--v2-moss)" /> Credenciales listas: ya estaban cargadas.
+          </p>
+        {:else}
+          <!-- Sin faltantes pero sin poder afirmarlo: la lectura de secretos no
+               contestó. No se dice «listas» sin haberlo medido. -->
+          <p class="v2-sub" style="margin:0;font-size:12.5px">
+            No se pudo comprobar si las credenciales están cargadas. Miralo en
+            <a href="/settings/credenciales">Credenciales</a>.
+          </p>
+        {/if}
 
         <button class="v2-btn" style="margin-top:14px" onclick={volver}>Volver a la lista</button>
       </div>
@@ -282,6 +297,17 @@
                   </li>
                 {/each}
               </ul>
+            {/if}
+
+            <!-- Lo que va a faltar después de conectar, antes de decidir. -->
+            {#if plan.credenciales_listas}
+              <p style="margin:12px 0 0;font-size:12.5px;display:flex;gap:6px;align-items:center">
+                <Check size={14} style="color:var(--v2-moss)" /> Credenciales listas.
+              </p>
+            {:else if (plan.faltan_secretos ?? []).length}
+              <p class="v2-sub" style="margin:12px 0 0;font-size:12.5px">
+                Después vas a tener que cargar: {plan.faltan_secretos.join(', ')}.
+              </p>
             {/if}
 
             <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
