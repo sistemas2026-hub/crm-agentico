@@ -105,7 +105,8 @@ export const LEAD_SOURCES = [
   'partner',
   'public relations',
   'compaign',
-  'other'
+  'other',
+  'whatsapp'
 ];
 
 export const LEAD_SOURCE_LABEL = {
@@ -115,7 +116,10 @@ export const LEAD_SOURCE_LABEL = {
   partner: 'Socio',
   'public relations': 'Relaciones públicas',
   compaign: 'Campaña',
-  other: 'Otro'
+  other: 'Otro',
+  // 12/11/2026: el prospecto que registra el asistente en una conversación
+  // (`leads/senales.py`). Antes nacía «Otro».
+  whatsapp: 'WhatsApp'
 };
 
 /**

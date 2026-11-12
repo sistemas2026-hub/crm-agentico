@@ -91,6 +91,11 @@ LEAD_SOURCE = (
     ("public relations", "Public Relations"),
     ("compaign", "Campaign"),
     ("other", "Other"),
+    #  12/11/2026 (auditoria del menu, item 10): el prospecto que el asistente
+    #  registra en una conversacion de WhatsApp. Hasta hoy nacia 'other',
+    #  porque el catalogo no tenia el canal por el que entran casi todas las
+    #  ventas, y "de donde vienen los prospectos" no se podia contestar.
+    ("whatsapp", "WhatsApp"),
 )
 
 STATUS_CHOICE = (
