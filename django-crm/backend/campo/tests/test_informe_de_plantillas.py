@@ -128,3 +128,55 @@ def test_b2_una_empresa_sin_plantillas_no_ensucia_la_salida(org_a):
     assert str(org_a.id) not in salida, (
         "sin plantillas no se imprime el encabezado: el informe se lee para "
         "encontrar algo, no para recorrer empresas vacias")
+
+
+# --------------------------------------------------------------------------- #
+# C. La linea de los asuntos  --  agregada el 12/11/2026, DESPUES del defecto
+# --------------------------------------------------------------------------- #
+#  LAS OCHO PRUEBAS DE ARRIBA PASABAN CON ESTA LINEA ROTA. La primera version
+#  del comando hacia `t.asuntos.all()` --preguntandole a un JSONField como si
+#  fuera una relacion-- dentro de un `except Exception` que imprimia «(sin la
+#  tabla de asuntos)». Contra produccion salio eso en TODAS las plantillas: un
+#  mensaje creible, que encima culpaba a la base.
+#
+#  Ninguna de las ocho afirmaba sobre esta linea. Afirmaban que el comando
+#  corre, que lista ids, que avisa de las labores con dos plantillas -- todo
+#  cierto, y el dato que decide si el Supervisor puede elegir plantilla salia
+#  mal. Por eso estas tres existen.
+def test_c1_los_asuntos_SE_IMPRIMEN(org_a):
+    tipo = _tipo(org_a, codigo="instalacion_fibra", labor="instalacion",
+                 campos=[SERIAL])
+    tipo.asuntos = ["Instalacion Nueva", "Instatalacion Nueva"]
+    tipo.save(update_fields=["asuntos"])
+
+    salida = _correr(org_a)
+    assert "Instalacion Nueva" in salida
+    #  LAS DOS GRAFIAS: el catalogo de WispHub trae el typo como un valor
+    #  DISTINTO, y si una plantilla declara una sola, los tickets de la otra
+    #  no la encuentran.
+    assert "Instatalacion Nueva" in salida
+
+
+def test_c2_sin_asuntos_dice_NINGUNO_y_no_una_excusa(org_a):
+    _tipo(org_a, codigo="instalacion_fibra", labor="instalacion",
+          campos=[SERIAL])
+    salida = _correr(org_a)
+
+    assert "asuntos: NINGUNO" in salida
+    #  EL CONTROL QUE MATA EL DEFECTO: el mensaje que culpaba a la base no
+    #  puede volver. Si alguien reintroduce un `except` ahi, esto lo ve.
+    assert "sin la tabla" not in salida
+
+
+def test_c3_los_asuntos_salen_DE_LA_PLANTILLA_no_de_la_labor(org_a):
+    #  Son dos cosas distintas y se confunden facil: `WorkType.asuntos` es un
+    #  JSONField (`models.py:66`) y es el que lee `plantilla_para_asunto` al
+    #  elegir; los asuntos de `Labor` son una relacion (`labores.py:111`) y los
+    #  lista `informe_de_labores`. Este informe habla del primero.
+    tipo = _tipo(org_a, codigo="instalacion_fibra", labor="instalacion",
+                 campos=[SERIAL])
+    tipo.asuntos = ["Lo que declara la plantilla"]
+    tipo.save(update_fields=["asuntos"])
+
+    salida = _correr(org_a)
+    assert "Lo que declara la plantilla" in salida

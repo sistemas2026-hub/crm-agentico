@@ -85,13 +85,27 @@ class Command(BaseCommand):
                     f"\n   {t.codigo}  «{t.nombre}»  labor={t.labor or '-'}  "
                     f"{estado}  {version}")
 
-                asuntos = []
-                try:
-                    asuntos = [a.asunto for a in t.asuntos.all()]
-                except Exception:                               # noqa: BLE001
-                    #  Las plantillas de antes del 20/10 no tienen la relacion.
-                    #  Que falte no es un error: se dice y se sigue.
-                    asuntos = ["(sin la tabla de asuntos)"]
+                #  `WorkType.asuntos` ES UNA LISTA, NO UNA RELACION
+                #  (`models.py:66`, JSONField), y es lo que lee el codigo real
+                #  al elegir plantilla: `plantilla_para_asunto` itera
+                #  `v.work_type.asuntos`.
+                #
+                #  LA PRIMERA VERSION DE ESTE COMANDO HIZO `t.asuntos.all()`,
+                #  envuelto en un `except Exception` que imprimia «(sin la
+                #  tabla de asuntos)». O sea: preguntaba al objeto equivocado y
+                #  el except convertia el error en un mensaje CREIBLE, que
+                #  encima culpaba a la base. Se vio en la primera corrida
+                #  contra produccion, el 12/11/2026 -- las ocho pruebas de este
+                #  comando pasaban porque ninguna afirmaba sobre esta linea.
+                #
+                #  Es el anti-patron que CLAUDE.md marca: un except amplio que
+                #  no deja fallar nada y por eso no deja ver nada. Ahora no hay
+                #  except: si `asuntos` dejara de existir, esto revienta y se
+                #  arregla, en vez de informar una mentira tranquilizadora.
+                #
+                #  Los asuntos de la LABOR son otra cosa (`labores.py:111`,
+                #  related_name en `Labor`) y los lista `informe_de_labores`.
+                asuntos = [str(a) for a in (t.asuntos or []) if str(a).strip()]
                 self.stdout.write(
                     f"      asuntos: {', '.join(asuntos) if asuntos else 'NINGUNO'}")
 
