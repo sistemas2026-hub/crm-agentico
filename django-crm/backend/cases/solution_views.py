@@ -43,7 +43,25 @@ def _wants_release(data, instance=None):
     publishing = "is_published" in data and _as_bool(data.get("is_published")) != bool(
         getattr(instance, "is_published", False)
     )
-    return moving_to_approved or publishing
+    # Cambiar QUE agentes del asistente lo citan es decidir a quien se le
+    # responde con esto: la misma decision que publicarlo (12/11/2026).
+    roles = "roles_asistente" in data and (data.get("roles_asistente") or "") != (
+        getattr(instance, "roles_asistente", "") or ""
+    )
+    # Y cambiar el TEXTO de uno publicado es cambiar lo que el asistente dice
+    # desde ese momento: la ingesta lo sube solo (cases/kb_asistente.py). Sin
+    # esto, quien solo puede escribir publicaria por la puerta de al lado.
+    # Solo si esta EN el corpus (aprobado y publicado): una fila vieja
+    # inconsistente (borrador publicado) no la usa el asistente y se tiene que
+    # poder seguir editando para arreglarla.
+    en_el_corpus = bool(getattr(instance, "is_published", False)) and (
+        getattr(instance, "status", None) == "approved"
+    )
+    texto_publicado = en_el_corpus and any(
+        campo in data and (data.get(campo) or "") != (getattr(instance, campo, "") or "")
+        for campo in ("title", "description")
+    )
+    return moving_to_approved or publishing or roles or texto_publicado
 
 
 def _as_bool(value):
@@ -258,7 +276,7 @@ class SolutionPublishView(APIView):
         if solution.status != "approved":
             return Response(
                 {
-                    "error": "Only approved solutions can be published. Please approve it first."
+                    "error": "Solo se puede publicar un artículo aprobado. Aprobalo primero."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

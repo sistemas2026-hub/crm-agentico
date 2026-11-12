@@ -34,7 +34,7 @@
          published means rather than just naming the flag. -->
     <span class="v2-num">{count(totals.count)}</span>
     {totals.count === 1 ? 'artículo' : 'artículos'} ·
-    <span class="v2-num">{count(totals.published)}</span> visibles para los clientes
+    <span class="v2-num">{count(totals.published)}</span> en el conocimiento de Dexter
   {/snippet}
   {#snippet actions()}
     <a class="v2-btn v2-btn-primary" href="/solutions/new"><Plus />Nuevo artículo</a>
@@ -72,7 +72,7 @@
 <FilterBar
   page="solutions"
   url={page.url}
-  meta="Publicado significa que se le puede mostrar al cliente. Aprobarlo es un paso aparte"
+  meta="Publicado significa que Dexter lo puede citar. Aprobarlo es un paso aparte"
 />
 
 {#if form?.error}
@@ -128,7 +128,7 @@
                   <span
                     style="display:inline-flex;gap:5px;align-items:center;color:var(--v2-slate);font-size:12.5px"
                   >
-                    <Eye size={13} />Los clientes lo ven
+                    <Eye size={13} />Dexter lo usa
                   </span>
                 {:else}
                   <span

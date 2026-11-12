@@ -80,7 +80,7 @@
 
       {#if data.article.is_published}
         <p class="notice">
-          Este artículo está publicado. Lo que se guarde acá es lo que ven los clientes.
+          Este artículo está publicado. Lo que se guarde acá es lo que Dexter va a citar desde ahora (solo un administrador puede cambiarlo).
         </p>
       {/if}
 
@@ -111,7 +111,7 @@
               Un artículo publicado no puede retroceder en el flujo. Despublicalo primero.
             {:else if !data.canRelease}
               Aprobar es decisión de un administrador. Es lo que permite que un artículo llegue a
-              los clientes.
+              Dexter.
             {:else}
               Aprobarlo no lo publica. Eso es un botón aparte en el artículo.
             {/if}

@@ -38,6 +38,12 @@ class SolutionSerializer(serializers.ModelSerializer):
             "description",
             "status",
             "is_published",
+            "roles_asistente",
+            "estado_ingesta",
+            "ingesta_detalle",
+            "ingesta_fragmentos",
+            "ingesta_actualizada_en",
+            "corpus_document_id",
             "org",
             "case_count",
             "author",
@@ -49,6 +55,11 @@ class SolutionSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "org",
+            "estado_ingesta",
+            "ingesta_detalle",
+            "ingesta_fragmentos",
+            "ingesta_actualizada_en",
+            "corpus_document_id",
             "created_at",
             "updated_at",
             "created_by",
@@ -81,6 +92,8 @@ class SolutionCreateUpdateSerializer(serializers.ModelSerializer):
             "description",
             "status",
             "is_published",
+            # Que agentes del asistente pueden citarlo (12/11/2026).
+            "roles_asistente",
         ]
 
     def validate(self, attrs):
@@ -165,6 +178,12 @@ class SolutionDetailSerializer(serializers.ModelSerializer):
             "description",
             "status",
             "is_published",
+            "roles_asistente",
+            "estado_ingesta",
+            "ingesta_detalle",
+            "ingesta_fragmentos",
+            "ingesta_actualizada_en",
+            "corpus_document_id",
             "org",
             "linked_cases",
             "case_count",

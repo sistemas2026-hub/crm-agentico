@@ -39,7 +39,10 @@
  * released it. That row is the one stat card on the list page.
  */
 import { error } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import { apiRequest } from '$lib/api-helpers.js';
+import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 
 /** `Solution.STATUS_CHOICES`, in workflow order. */
 export const SOLUTION_STATUSES = ['draft', 'reviewed', 'approved'];
@@ -73,8 +76,47 @@ function toRow(row) {
     updated_at: row.updated_at ?? row.created_at,
     // Derived here rather than in three templates: approved and unreleased is
     // the state the whole list page exists to surface.
-    awaiting_release: row.status === 'approved' && !row.is_published
+    awaiting_release: row.status === 'approved' && !row.is_published,
+    // El asistente (12/11/2026): aprobado + publicado entra a su corpus por
+    // el mismo camino que un Documento. Ver cases/kb_asistente.py.
+    roles_asistente: row.roles_asistente ?? '',
+    asistente: estadoEnElAsistente(row)
   };
+}
+
+/**
+ * Si Dexter puede citar el artículo, en palabras. Sale de lo que el backend
+ * guardó de la última ingesta, nunca de suponer que publicar ya alcanzó.
+ *
+ * @param {any} row
+ * @returns {{ clave: string, texto: string, detalle: string }}
+ */
+export function estadoEnElAsistente(row) {
+  const detalle = (row?.ingesta_detalle ?? '').toString();
+  const listo = row?.status === 'approved' && row?.is_published;
+  switch (row?.estado_ingesta ?? '') {
+    case 'ok':
+      return {
+        clave: 'ok',
+        texto: `Dexter lo puede citar${row?.ingesta_fragmentos ? ` · ${row.ingesta_fragmentos} fragmentos` : ''}`,
+        detalle
+      };
+    case 'pendiente':
+    case 'procesando':
+      return { clave: 'procesando', texto: 'Cargándolo en el asistente…', detalle };
+    case 'error':
+      return { clave: 'error', texto: 'No se pudo cargar en el asistente', detalle };
+    case 'retirado':
+      return { clave: 'fuera', texto: 'Retirado del asistente', detalle };
+    default:
+      return listo
+        ? { clave: 'procesando', texto: 'Cargándolo en el asistente…', detalle }
+        : {
+            clave: 'fuera',
+            texto: 'El asistente no lo usa: entra al aprobarlo y publicarlo',
+            detalle
+          };
+  }
 }
 
 /**
@@ -155,7 +197,7 @@ export async function getArticle({ cookies }, id) {
 }
 
 /** Scalar fields the article forms own. Everything else is server-derived. */
-export const EDITABLE_FIELDS = ['title', 'description', 'status', 'is_published'];
+export const EDITABLE_FIELDS = ['title', 'description', 'status', 'is_published', 'roles_asistente'];
 
 /**
  * Turn form values into a request body.
@@ -232,4 +274,36 @@ export async function setPublished({ cookies }, id, published) {
     { method: 'POST', body: {} },
     { cookies }
   );
+}
+
+/**
+ * Los agentes de Dexter que pueden citar un artículo (12/11/2026).
+ *
+ * El mismo pedido que la subida de Documentos (routes/(app)/documents/new):
+ * desde el servidor, porque la URL del motor no sale al navegador, y con la
+ * empresa de la SESIÓN, no del entorno. Si el motor no está o no responde,
+ * lista vacía: la página sirve igual, sin la sección de agentes.
+ *
+ * @param {any} event
+ * @returns {Promise<Array<{ nombre: string, cargo: string, esCliente: boolean }>>}
+ */
+export async function agentesDelAsistente(event) {
+  const baseUrl = env.PRIVATE_ASISTENTE_URL;
+  if (!baseUrl) return [];
+  try {
+    const tenant = await tenantDeLaSesion(event.locals, event.fetch);
+    if (!tenant) return [];
+    const r = await event.fetch(`${baseUrl}/agentes?tenant=${encodeURIComponent(tenant)}`, {
+      headers: headersMotor()
+    });
+    if (!r.ok) return [];
+    const datos = await r.json();
+    return (datos.agentes ?? []).map((/** @type {any} */ a) => ({
+      nombre: a.nombre,
+      cargo: a.cargo ?? '',
+      esCliente: a.orientado_a === 'cliente_final'
+    }));
+  } catch {
+    return [];
+  }
 }

@@ -24,8 +24,10 @@ hypothetical shape of bug for this codebase.
 `read` is deliberately absent: every member of the org may read every article.
 A knowledge base whose articles are hidden from the agents answering the
 tickets is not a knowledge base. `is_published` is not an access rule either.
-It is the customer-visibility switch, and the customer-facing site it gates was
-explicitly cut (see `kb_views`), so today it gates the agent suggester only.
+It was the customer-visibility switch, and the customer-facing site it gated was
+explicitly cut (see `kb_views`). Desde el 12/11/2026 aprobado + publicado es lo
+que mete el articulo en el corpus del asistente (cases/kb_asistente.py): es
+decir que Dexter puede citarlo. Por eso sigue siendo de quien puede publicar.
 """
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -35,7 +37,7 @@ from rest_framework.exceptions import PermissionDenied
 from cases.access import is_org_admin
 from cases.models import Solution
 
-_DENIED = "You do not have Permission to perform this action"
+_DENIED = "No tenés permiso para hacer esto con este artículo."
 
 
 def get_solution_or_404(profile, pk):
@@ -50,9 +52,9 @@ def get_solution_or_404(profile, pk):
     try:
         solution = Solution.objects.filter(pk=pk, org=profile.org).first()
     except (DjangoValidationError, ValueError):
-        raise Http404("No such solution.")
+        raise Http404("No existe ese artículo.")
     if solution is None:
-        raise Http404("No such solution.")
+        raise Http404("No existe ese artículo.")
     return solution
 
 
@@ -77,7 +79,7 @@ def assert_solution_release_access(profile):
     """
     if not is_org_admin(profile):
         raise PermissionDenied(
-            "Only an admin can approve or publish a knowledge-base article."
+            "Solo un administrador puede aprobar o publicar un artículo de la base de conocimiento."
         )
 
 

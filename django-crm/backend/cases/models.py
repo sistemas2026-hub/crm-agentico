@@ -693,6 +693,32 @@ class Solution(BaseModel):
     # Cases that use this solution
     cases = models.ManyToManyField(Case, related_name="solutions", blank=True)
 
+    #  UNA SOLA BASE DE CONOCIMIENTO  --  12/11/2026
+    #  Un articulo APROBADO y PUBLICADO entra al corpus del asistente por la
+    #  misma puerta que un Documento (POST /corpus/documentos del motor), y
+    #  despublicarlo lo retira. Hasta ese dia /solutions era una segunda base
+    #  que el RAG no leia. Ver cases/kb_asistente.py. Los campos de ingesta
+    #  son los mismos que los de common.Document, para que la pantalla los
+    #  cuente igual.
+    roles_asistente = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Agentes del asistente que pueden citarlo, separados por coma. "
+        "Vacio = no lo recupera nadie (falla cerrado, como un Documento).",
+    )
+    estado_ingesta = models.CharField(max_length=16, blank=True, default="")
+    ingesta_detalle = models.TextField(blank=True, null=True)
+    ingesta_fragmentos = models.PositiveIntegerField(blank=True, null=True)
+    ingesta_actualizada_en = models.DateTimeField(blank=True, null=True)
+    corpus_document_id = models.CharField(max_length=64, blank=True, null=True)
+    # Cada ingesta es una version nueva del documento en el corpus: una
+    # version aprobada alla es inmutable, y republicar lo mismo no la revive.
+    version_corpus = models.PositiveIntegerField(default=0)
+    # Huella de lo que esta en el corpus (titulo, cuerpo, roles). Distinta de
+    # la actual = hay que volver a ingerir.
+    huella_corpus = models.CharField(max_length=64, blank=True, default="")
+
     class Meta:
         verbose_name = "Solution"
         verbose_name_plural = "Solutions"

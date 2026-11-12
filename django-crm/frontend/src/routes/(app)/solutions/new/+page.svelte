@@ -62,7 +62,7 @@
    */
   let consequence = $derived.by(() => {
     if (isPublished && status === 'approved')
-      return { tone: 'moss', text: 'Los clientes pueden leer esto, y alguien ya lo revisó.' };
+      return { tone: 'moss', text: 'Dexter lo va a poder citar, y alguien ya lo revisó.' };
     if (isPublished)
       return {
         tone: 'clay',
@@ -71,11 +71,11 @@
     if (status === 'approved')
       return {
         tone: 'clay',
-        text: 'Revisado, pero nadie fuera del equipo puede verlo. No va a llegar a la base de conocimiento del cliente hasta que se publique.'
+        text: 'Aprobado, pero Dexter no lo usa hasta que se publique.'
       };
     return {
       tone: 'slate',
-      text: 'Solo interno. Los agentes pueden adjuntarlo a tickets; los clientes no pueden encontrarlo.'
+      text: 'Solo interno. El equipo puede adjuntarlo a tickets; Dexter no lo usa.'
     };
   });
 </script>
@@ -170,13 +170,13 @@
               {/each}
             </select>
             {#if !data.canRelease}
-              <em>Aprobar es decisión de un administrador. Es lo que permite que un artículo llegue a los clientes.</em>
+              <em>Aprobar es decisión de un administrador. Es lo que permite que un artículo llegue a Dexter.</em>
             {/if}
           </label>
 
           {#if data.canRelease}
             <div class="pub">
-              <span class="pub-label">Visibilidad para el cliente</span>
+              <span class="pub-label">¿Lo usa Dexter?</span>
               <div class="seg">
                 <button type="button" class:on={!isPublished} onclick={() => (isPublished = false)}>
                   <EyeOff size={13} />Interno
