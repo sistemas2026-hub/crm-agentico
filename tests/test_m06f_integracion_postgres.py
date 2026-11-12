@@ -125,9 +125,16 @@ SN = "PRUEBA0M06F1"
 ARGS_R3 = {"sn_onu": SN}
 APROBADOR = "supervisor.prueba"
 
+#  El 30/10/2026 (4a70dca5) reiniciar_ont gano una tercera previa,
+#  consultar_incidente_red, y este diccionario no se actualizo: el doble daba
+#  KeyError, la revalidacion fallaba cerrado (correcto) y la prueba leia ese 409
+#  como si aprobar no funcionara. Nadie lo vio porque la siembra tambien estaba
+#  rota. Ahora una previa que el doble no conoce falla CON SU NOMBRE (ver
+#  Entorno._ejecutar_tool y la comprobacion al empezar main).
 LECTURAS = {"consultar_senal_ont": {"onu_signal_1490_veredicto": "aceptable"},
             "ping_cliente": {"ping-exitoso": "3 de 3"},
-            "consultar_estado_ont": {"last_status_change": "2026-09-22 09:00:00"}}
+            "consultar_estado_ont": {"last_status_change": "2026-09-22 09:00:00"},
+            "consultar_incidente_red": {"es_incidente_de_red": False}}
 
 
 class _Resp:
@@ -172,6 +179,9 @@ class Entorno:
 
     def _ejecutar_tool(self, herramienta, sesion, argumentos, *a, **k):
         if herramienta.solo_lectura:
+            if herramienta.nombre not in LECTURAS:
+                raise AssertionError(f"el doble no conoce la lectura '{herramienta.nombre}': "
+                                     f"agregala a LECTURAS")
             return copy.deepcopy(LECTURAS[herramienta.nombre])
         return self._orig[(motor, "_ejecutar_tool")](herramienta, sesion, argumentos, *a, **k)
 
@@ -292,6 +302,12 @@ def main() -> int:
     print(f"  M06-F contra PostgreSQL descartable ({_u.hostname}/{BASE})")
     print("=" * 78)
     creada = False
+    # Cada previa que la config exige para reiniciar tiene que tener su lectura
+    # en el doble. Si mañana se agrega otra, esto falla con su nombre y no como
+    # un 409 que parece «aprobar no funciona» (pasó el 30/10/2026).
+    faltan = [p.herramienta for p in H["reiniciar_ont"].exige_previas
+              if p.herramienta not in LECTURAS]
+    afirmar(not faltan, f"el doble conoce todas las previas de reiniciar_ont (faltan {faltan})")
     try:
         preparar()
         creada = True
@@ -309,9 +325,16 @@ def main() -> int:
             TENANT, "reiniciar_ont", dict(ARGS_R3), "x", "soporte", "c", conv, None,
             hash_argumentos=hash_de(ARGS_R3), origen="evento:repetido", contexto={})
         afirmar(ya and otra == pid, "proponer lo mismo otra vez devuelve LA MISMA (dedup B5)")
-        n_trig = sql("""select count(*) from pg_trigger t join pg_class r on r.oid=t.tgrelid
-                        where r.relname='acciones_propuestas' and not t.tgisinternal""")[0][0]
-        afirmar(n_trig == 1, f"un solo trigger propio sobre acciones_propuestas ({n_trig})")
+        # El conjunto EXACTO, no un conteo: _vinculante (B5, 22/09) y
+        # _rol_inmutable (autonomia por agente, 02/11) son dos guardas distintas
+        # y a proposito. Un conteo de «uno» quedo viejo el 02/11; un conjunto
+        # sigue cazando un trigger duplicado o perdido.
+        trig = {r[0] for r in sql("""select t.tgname from pg_trigger t
+                                     join pg_class r on r.oid=t.tgrelid
+                                     where r.relname='acciones_propuestas'
+                                       and not t.tgisinternal""")}
+        afirmar(trig == {"acciones_propuestas_vinculante", "acciones_propuestas_rol_inmutable"},
+                f"los triggers propios sobre acciones_propuestas son los esperados ({sorted(trig)})")
 
         seccion("13.1 SIN aprobacion -> bloqueada, cero efecto")
         with Entorno() as e:
