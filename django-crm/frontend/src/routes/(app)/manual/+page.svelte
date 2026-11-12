@@ -16,6 +16,8 @@
   import { relativeTime } from '$lib/v2/format.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import DocumentoSubirDialog from '$lib/components/manual/DocumentoSubirDialog.svelte';
+  import CorregirAgente from '$lib/components/manual/CorregirAgente.svelte';
+  import CasoDorado from '$lib/components/manual/CasoDorado.svelte';
   import { toast } from 'svelte-sonner';
 
   /** @type {{ data: any }} */
@@ -163,12 +165,50 @@
   // 'porCaso' porque ese derived la lee.
   let casos = $state([...(data.casos ?? [])]);
 
+  /**
+   * LO ENSAYADO NO SE MEZCLA CON LO REAL (12/11/2026). Se marca un ejemplo
+   * desde Conversaciones o desde el Simulador, y la pantalla los mostraba
+   * iguales: una prueba del equipo se leía como algo que pasó con un cliente.
+   * Real o no lo decide el motor (`real`, con la misma lista de canales que la
+   * autonomía ganada); acá solo se rotula y, si se quiere, se oculta.
+   */
+  let ocultarSimuladas = $state(false);
+  const visible = (/** @type {any} */ x) => !ocultarSimuladas || x.real !== false;
+
   const porCaso = $derived(
     (casos || []).map((caso) => ({
       caso,
-      ejemplos: ejemplos.filter((e) => e.caso === caso)
+      ejemplos: ejemplos.filter((e) => e.caso === caso && visible(e))
     }))
   );
+  /**
+   * El caso dorado abierto en pantalla: { clave, yaml, avisos } o un error.
+   * Una sola clave a la vez (`ejemplos:<id>` / `revisiones:<id>`).
+   * @type {Record<string, any>}
+   */
+  let casosDorados = $state({});
+
+  /** @param {'ejemplos'|'revisiones'} tipo @param {string} id */
+  async function convertirEnCasoDorado(tipo, id) {
+    const clave = `${tipo}:${id}`;
+    if (casosDorados[clave]) {
+      casosDorados = { ...casosDorados, [clave]: undefined };
+      return;
+    }
+    casosDorados = { ...casosDorados, [clave]: { cargando: true } };
+    try {
+      const resp = await fetch(`/api/manual/caso-dorado?tipo=${tipo}&id=${encodeURIComponent(id)}`);
+      const datos = await resp.json().catch(() => ({}));
+      casosDorados = {
+        ...casosDorados,
+        [clave]: resp.ok
+          ? { yaml: datos.caso_dorado, avisos: datos.avisos ?? [], origen: datos.origen }
+          : { error: datos.error || 'No se pudo armar el caso dorado.' }
+      };
+    } catch {
+      casosDorados = { ...casosDorados, [clave]: { error: 'No se pudo contactar al asistente.' } };
+    }
+  }
 
   const totalMarcado = $derived(ejemplos.length);
 
@@ -314,15 +354,40 @@
   // Copia local mutable, mismo motivo que 'ejemplos': aprobar/descartar
   // actualiza la pantalla al toque, sin recargar todo.
   let revisiones = $state(data.revisiones ?? []);
-  const pendientes = $derived(revisiones.filter((r) => r.estado === 'pendiente'));
-  const yaRevisadas = $derived(revisiones.filter((r) => r.estado !== 'pendiente'));
+  const pendientes = $derived(revisiones.filter((r) => r.estado === 'pendiente' && visible(r)));
+  const yaRevisadas = $derived(revisiones.filter((r) => r.estado !== 'pendiente' && visible(r)));
   let verRevisadas = $state(false);
+  const nSimuladas = $derived(
+    ejemplos.filter((e) => e.real === false).length
+      + revisiones.filter((r) => r.real === false).length
+  );
 
+  /**
+   * Aprobar una revisión TIENE UN EFECTO desde el 12/11/2026: la conversación
+   * pasa a ser un caso dorado (la trae cli/importar_casos_dorados.py) y el
+   * motor devuelve el caso ya armado, que se muestra en el momento. Solo se
+   * aprueba una de buen ejemplo: el motor rechaza (409) la otra.
+   */
   async function resolverRevision(r, accion) {
     const resp = await fetch(`/api/manual/revisiones/${r.id}/${accion}`, { method: 'POST' });
-    if (resp.ok) {
-      const estado = accion === 'aprobar' ? 'aprobado' : 'descartado';
-      revisiones = revisiones.map((x) => (x.id === r.id ? { ...x, estado } : x));
+    const datos = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      toast.error(datos?.error || 'No se pudo guardar.');
+      return;
+    }
+    const estado = accion === 'aprobar' ? 'aprobado' : 'descartado';
+    revisiones = revisiones.map((x) => (x.id === r.id ? { ...x, estado } : x));
+    if (accion === 'aprobar') {
+      if (datos.caso_dorado) {
+        casosDorados = {
+          ...casosDorados,
+          [`revisiones:${r.id}`]: { yaml: datos.caso_dorado, avisos: datos.avisos ?? [], origen: datos.origen }
+        };
+        verRevisadas = true;
+      }
+      toast.success(datos.sin_caso
+        ? `Aprobada. ${datos.sin_caso}`
+        : 'Aprobada: ya es un caso dorado. Copialo o traelo con el importador.');
     }
   }
 </script>
@@ -330,7 +395,8 @@
 <PageHeader title="Manual">
   {#snippet sub()}
     Respuestas del agente marcadas como buen ejemplo, agrupadas por caso — base para redactar el
-    procedimiento de cada una. Se marca desde Conversaciones o el Simulador de WhatsApp.
+    procedimiento de cada una. Se marca desde Conversaciones o el Simulador de WhatsApp. Cada ejemplo
+    y cada revisión aprobada se convierte en un caso dorado: la prueba con la que se mide al agente.
   {/snippet}
   {#snippet actions()}
     {#if esAdmin}
@@ -498,6 +564,13 @@
         </div>
       {/if}
 
+      {#if nSimuladas > 0}
+        <label class="v2-sub filtro-simuladas">
+          <input type="checkbox" bind:checked={ocultarSimuladas} />
+          Ocultar lo que viene del simulador ({nSimuladas})
+        </label>
+      {/if}
+
       <div class="v2-label" style="margin:24px 0 10px">
         Revisiones del supervisor
         <span class="v2-muted">({pendientes.length} pendiente{pendientes.length === 1 ? '' : 's'})</span>
@@ -517,6 +590,7 @@
                 <Pill tone={r.es_buen_ejemplo ? 'moss' : 'clay'}>
                   {r.es_buen_ejemplo ? 'Buen ejemplo' : 'Con problemas'}
                 </Pill>
+                {#if r.real === false}<Pill tone="slate">simulador</Pill>{/if}
                 {#if r.caso}<span style="margin-left:6px">{etiqueta(r.caso)}</span>{/if}
               </div>
               <div class="ejemplo-pregunta" style="margin-top:8px">
@@ -530,16 +604,35 @@
                 {relativeTime(r.creado_en)} ·
                 <a href="/conversaciones/{r.conversation_id}">Ver conversación completa</a>
                 {#if esAdmin}
+                  · <a href="/simulador-whatsapp?reproducir={r.conversation_id}">Reproducir en el simulador</a>
                   ·
-                  <button type="button" class="quitar-marca-link" style="color:var(--v2-moss,#15803d)"
-                    onclick={() => resolverRevision(r, 'aprobar')}>
-                    Aprobar
-                  </button> ·
+                  {#if r.es_buen_ejemplo}
+                    <!-- Aprobar = queda como caso dorado (12/11/2026). Antes
+                         el botón guardaba un estado que no leía nadie. -->
+                    <button type="button" class="quitar-marca-link" style="color:var(--v2-moss,#15803d)"
+                      title="Queda como caso dorado: la prueba con la que se mide al agente"
+                      onclick={() => resolverRevision(r, 'aprobar')}>
+                      Aprobar como caso dorado
+                    </button> ·
+                  {/if}
                   <button type="button" class="quitar-marca-link" onclick={() => resolverRevision(r, 'descartar')}>
                     Descartar
                   </button>
                 {/if}
               </div>
+              {#if esAdmin && !r.es_buen_ejemplo}
+                <!-- Una con problemas no se aprueba: su traza no es lo que
+                     debería pasar. Lo útil es escribirle al agente el
+                     procedimiento que le faltó (queda propuesto en Habilidades)
+                     y después descartarla. -->
+                <div class="revision-corregir">
+                  <CorregirAgente
+                    rol={r.rol_efectivo ?? null}
+                    textoDeLaRespuesta={r.aporte_sugerido || r.justificacion || ''}
+                    conversacionId={r.conversation_id}
+                  />
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -555,6 +648,7 @@
               <div class="v2-card ejemplo-card">
                 <div class="ejemplo-meta v2-sub" style="margin-top:0">
                   <Pill tone={r.estado === 'aprobado' ? 'moss' : 'slate'}>{r.estado}</Pill>
+                  {#if r.real === false}<Pill tone="slate">simulador</Pill>{/if}
                   {#if r.caso}<span style="margin-left:6px">{etiqueta(r.caso)}</span>{/if}
                 </div>
                 <div class="ejemplo-pregunta" style="margin-top:8px">
@@ -563,7 +657,17 @@
                 <div class="ejemplo-meta v2-sub">
                   {r.revisado_por ? `Por ${r.revisado_por} · ` : ''}{relativeTime(r.revisado_en || r.creado_en)} ·
                   <a href="/conversaciones/{r.conversation_id}">Ver conversación completa</a>
+                  {#if esAdmin && r.estado === 'aprobado' && r.es_buen_ejemplo}
+                    ·
+                    <button type="button" class="caso-dorado-link"
+                      onclick={() => convertirEnCasoDorado('revisiones', r.id)}>
+                      {casosDorados[`revisiones:${r.id}`] ? 'Ocultar el caso dorado' : 'Ver el caso dorado'}
+                    </button>
+                  {/if}
                 </div>
+                {#if casosDorados[`revisiones:${r.id}`]}
+                  <CasoDorado estado={casosDorados[`revisiones:${r.id}`]} nombreArchivo={`caso-revision-${r.id.slice(0, 8)}.yaml`} />
+                {/if}
               </div>
             {/each}
           </div>
@@ -644,6 +748,9 @@
             <div class="ejemplos-lista">
               {#each grupo.ejemplos as e (e.id)}
                 <div class="v2-card ejemplo-card">
+                  {#if e.real === false}
+                    <div style="margin-bottom:6px"><Pill tone="slate">simulador</Pill></div>
+                  {/if}
                   <div class="ejemplo-pregunta"><b>Cliente:</b> {e.pregunta || '—'}</div>
                   <div class="ejemplo-respuesta"><b>Agente:</b> {e.respuesta}</div>
                   <div class="ejemplo-meta v2-sub">
@@ -653,7 +760,18 @@
                     <button type="button" class="quitar-marca-link" onclick={() => quitarMarca(e)}>
                       Quitar marca
                     </button>
+                    {#if esAdmin}
+                      ·
+                      <button type="button" class="caso-dorado-link"
+                        onclick={() => convertirEnCasoDorado('ejemplos', e.id)}>
+                        {casosDorados[`ejemplos:${e.id}`] ? 'Ocultar el caso dorado' : 'Convertir en caso dorado'}
+                      </button>
+                      · <a href="/simulador-whatsapp?reproducir={e.conversation_id}">Reproducir en el simulador</a>
+                    {/if}
                   </div>
+                  {#if casosDorados[`ejemplos:${e.id}`]}
+                    <CasoDorado estado={casosDorados[`ejemplos:${e.id}`]} nombreArchivo={`caso-ejemplo-${String(e.id).slice(0, 8)}.yaml`} />
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -761,6 +879,26 @@
   .ejemplo-meta {
     margin-top: 10px;
     font-size: 11.5px;
+  }
+  .filtro-simuladas {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin-top: 16px;
+  }
+  .caso-dorado-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--v2-ember-text);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .revision-corregir {
+    margin-top: 8px;
   }
   .quitar-marca-link {
     background: none;

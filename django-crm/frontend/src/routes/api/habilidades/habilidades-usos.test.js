@@ -23,7 +23,7 @@ const RESPUESTA_MOTOR = {
 };
 
 function evento(query, rol = 'ADMIN') {
-  const fetch = vi.fn(async () => new Response(JSON.stringify(RESPUESTA_MOTOR), { status: 200 }));
+  const fetch = vi.fn(async (/** @type {any} */ _url, /** @type {any} */ _init) => new Response(JSON.stringify(RESPUESTA_MOTOR), { status: 200 }));
   return {
     fetch,
     ev: /** @type {any} */ ({
