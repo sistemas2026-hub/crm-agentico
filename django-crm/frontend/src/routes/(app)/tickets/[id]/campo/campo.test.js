@@ -21,7 +21,9 @@ const FILA = {
 /** @param {any} locals */
 const evento = (locals) => /** @type {any} */ ({ params: { id: CASO }, cookies: {}, locals });
 
-beforeEach(() => apiRequest.mockReset());
+beforeEach(() => {
+  apiRequest.mockReset();
+});
 
 describe('GET /tickets/[id]/campo', () => {
   it('sin sesión, 401 y no se llama al backend', async () => {

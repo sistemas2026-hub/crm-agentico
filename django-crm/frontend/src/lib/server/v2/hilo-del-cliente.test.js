@@ -27,7 +27,9 @@ const FILA = {
   completada_campo_en: null, cerrada_en: null, caso_id: CASO, puede_abrir: false
 };
 
-beforeEach(() => apiRequest.mockReset());
+beforeEach(() => {
+  apiRequest.mockReset();
+});
 
 describe('el bloque «Campo» del ticket', () => {
   it('pide al backend por el caso y entrega cada fila entera', async () => {

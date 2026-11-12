@@ -78,8 +78,9 @@ export async function conversacionDelCaso(locals, fetch, casoId) {
   if (!casoId || !UUID_VALIDO.test(casoId)) return null;
   try {
     const base = env.PRIVATE_ASISTENTE_URL;
+    if (!base) return null;
     const tenant = await tenantDeLaSesion(locals, fetch);
-    if (!base || !tenant) return null;
+    if (!tenant) return null;
     const r = await fetch(
       `${base}/conversaciones/por-caso/${casoId}?${new URLSearchParams({ tenant })}`,
       { headers: headersMotor(), signal: AbortSignal.timeout(10000) }
