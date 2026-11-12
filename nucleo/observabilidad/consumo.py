@@ -338,20 +338,6 @@ AVISO_DESDE = 0.8
 RATIO_DIVERGENCIA = 1.5
 
 
-def tope_superado(config, tenant: str) -> tuple[bool, float, float]:
-    """(se paso, gastado, tope). Sin tope configurado nunca se pasa.
-
-    Devuelve las tres cosas y no solo el booleano: quien avisa necesita poder
-    decir CUANTO, y un aviso de "alcanzaste el limite" sin la cifra obliga a ir
-    a buscarla a otro lado justo cuando hay urgencia.
-    """
-    tope = getattr(getattr(config, "limites", None), "max_costo_usd_mes", None)
-    if not tope:
-        return False, 0.0, 0.0
-    gastado = gasto_del_mes(tenant)
-    return gastado >= float(tope), gastado, float(tope)
-
-
 def estado_del_gasto(config, tenant: str) -> dict:
     """
     En que punto del tope esta esta empresa, y que corresponde hacer.

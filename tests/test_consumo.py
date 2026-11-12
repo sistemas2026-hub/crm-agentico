@@ -159,32 +159,10 @@ with consumo.abrir(ConfigFalsa()):
 afirmar(not volcados, "un turno sin ninguna llamada al modelo no escribe una fila vacia")
 
 
-print("\n== 5. el tope no bloquea de mas ==")
-consumo.gasto_del_mes = lambda tenant: 42.0
-
-paso, gastado, tope = consumo.tope_superado(ConfigFalsa(), "tenant_de_prueba")
-afirmar(paso is False, "sin tope configurado nunca se considera superado")
-
-
-class ConTope(ConfigFalsa):
-    class limites:
-        max_costo_usd_mes = 50.0
-
-
-paso, gastado, tope = consumo.tope_superado(ConTope(), "tenant_de_prueba")
-afirmar(paso is False and gastado == 42.0 and tope == 50.0,
-        "por debajo del tope no se bloquea, y devuelve cuanto y de cuanto")
-
-
-class TopeBajo(ConfigFalsa):
-    class limites:
-        max_costo_usd_mes = 10.0
-
-
-paso, gastado, tope = consumo.tope_superado(TopeBajo(), "tenant_de_prueba")
-afirmar(paso is True and gastado == 42.0,
-        "por encima del tope se marca, con la cifra para poder decirla")
-
+# == 5. (12/11/2026) Probaba consumo.tope_superado, que no tenia ningun
+# llamador en el repo: el motor frena con estado_del_gasto (api.py), y lo
+# mismo -- sin tope no frena, por debajo sigue con la cifra, por encima
+# frena -- lo afirma la seccion 6 sobre esa funcion. Se borro con la funcion.
 
 print("\n== aislamiento entre turnos concurrentes ==")
 # El acumulador vive en un ContextVar y no en una variable de modulo: el motor
