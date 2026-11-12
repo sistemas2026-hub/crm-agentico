@@ -38,6 +38,7 @@
   import { plazoPrimeraRespuesta } from '$lib/v2/plazo-primera-respuesta.js';
   import { partirNombreDelTicket, actorDelEvento, textoDelEvento } from '$lib/v2/ticket-detalle.js';
   import { origenDelTicket } from '$lib/v2/ticket-origen.js';
+  import BloqueCampo from './BloqueCampo.svelte';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -1318,6 +1319,11 @@
         <dd>{longDate(ticket.resolved_at)}</dd>
       {/if}
     </dl>
+
+    <!-- EL BLOQUE «CAMPO» (12/11/2026): las visitas de este ticket y el enlace
+         a la ficha del cliente. Componente aparte para que este archivo
+         compartido cambie solo en estas líneas. -->
+    <BloqueCampo casoId={ticket.id} servicio={ticket.external_service_id || null} />
 
     {#await data.origen then origen}
       {#if origen}
