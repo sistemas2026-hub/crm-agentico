@@ -10,59 +10,45 @@
     Receipt,
     BookOpen,
     Plus,
-    CornerDownLeft
+    CornerDownLeft,
+    Sun,
+    MessageCircle,
+    Activity,
+    ClipboardCheck,
+    Bot,
+    CircleCheck,
+    Wrench,
+    UserRound
   } from '@lucide/svelte';
+  import { accionesDePaleta } from '$lib/v2/paleta.js';
 
   /**
    * One search across every record type, opened with ⌘K.
    *
-   * v1 had a search box per list, each scoped to that list, so finding a
-   * ticket meant knowing it was a ticket first. This asks once.
+   * Empty query shows actions rather than an empty box.
    *
-   * Empty query shows actions rather than an empty box. The fastest way to
-   * start a new deal is ⌘K, "new", Enter, and that only works if the actions
-   * are there before you type.
+   * DESDE EL 12/11/2026 llega a lo que trabaja un ISP: conversaciones (por el
+   * texto de sus mensajes, con el buscador de la Bandeja), solicitudes de
+   * instalación y órdenes de campo, y las acciones llevan a la Bandeja, al
+   * Supervisor NOC, a Instalaciones y a Agentes. `role` y `ocultos` vienen del
+   * layout (del servidor): una acción a una pantalla que el rol no abre, o a un
+   * módulo que la empresa ocultó, no se ofrece (`lib/v2/paleta.js`).
    *
-   * @type {{ open: boolean, onclose: () => void }}
+   * @type {{ open: boolean, onclose: () => void, role?: string, ocultos?: string[] }}
    */
-  let { open = false, onclose } = $props();
+  let { open = false, onclose, role = 'USER', ocultos = [] } = $props();
 
-  const ACTIONS = [
-    {
-      kind: 'Acciones',
-      id: 'act-deal',
-      title: 'Nueva negociación',
-      meta: 'Negociaciones',
-      href: '/pipeline/new',
-      icon: Plus
-    },
-    {
-      kind: 'Acciones',
-      id: 'act-today',
-      title: 'Ir a Hoy',
-      meta: '',
-      href: '/',
-      icon: Columns3
-    },
-    {
-      kind: 'Acciones',
-      id: 'act-tasks',
-      title: 'Ir a Tareas',
-      meta: '',
-      href: '/tasks',
-      icon: Columns3
-    },
-    {
-      kind: 'Acciones',
-      id: 'act-invoices',
-      title: 'Ir a Facturas',
-      meta: '',
-      href: '/invoices',
-      icon: Receipt
-    }
-  ];
+  /** @type {Record<string, any>} */
+  const ICONO_ACCION = { Sun, MessageCircle, Activity, ClipboardCheck, Bot, Plus, CircleCheck, Receipt };
+  let acciones = $derived(
+    accionesDePaleta({ role, ocultos }).map((a) => ({ ...a, icon: ICONO_ACCION[a.icono] ?? Plus }))
+  );
 
   const ICON = {
+    Conversaciones: MessageCircle,
+    Instalaciones: ClipboardCheck,
+    'Órdenes': Wrench,
+    Clientes: UserRound,
     Negociaciones: Columns3,
     Cuentas: Building2,
     Contactos: Users,
@@ -75,11 +61,14 @@
 
   let query = $state('');
   let hits = $state(/** @type {any[]} */ ([]));
+  /** Las fuentes que no contestaron a tiempo: la paleta lo dice en vez de
+   *  afirmar que nada coincide. */
+  let incompletas = $state(/** @type {string[]} */ ([]));
   let cursor = $state(0);
   /** @type {HTMLInputElement | undefined} */
   let input = $state();
 
-  let rows = $derived(query.trim() ? hits : ACTIONS);
+  let rows = $derived(query.trim() ? hits : acciones);
 
   /** Grouped for display, but `rows` stays flat so ↑/↓ crosses group borders. */
   let groups = $derived(
@@ -92,30 +81,45 @@
   );
 
   // Re-runs whenever the query changes. `seq` drops out-of-order responses,
-  // which matters now that this is a network call rather than a filter. The
-  // request goes to /api/search, a server route that scopes to the org and
-  // keeps the httpOnly token off the client.
+  // and the request goes to /api/search, a server route that scopes to the
+  // org and keeps the httpOnly token off the client.
+  //
+  // CON PAUSA (12/11/2026). Ahora cada búsqueda llega también al motor, que
+  // atiende la Bandeja y los turnos de WhatsApp (PRD §8.21): una por tecla
+  // eran cinco pedidos para escribir «perez». Se espera ESPERA_TECLA_MS sin
+  // teclear, y un pedido viejo se aborta cuando sale el nuevo.
+  const ESPERA_TECLA_MS = 250;
   let seq = 0;
   $effect(() => {
     const q = query;
     const mine = ++seq;
     if (!q.trim()) {
       hits = [];
+      incompletas = [];
       cursor = 0;
       return;
     }
-    fetch(`/api/search?q=${encodeURIComponent(q)}`)
-      .then((r) => r.json())
-      .then((r) => {
-        if (mine !== seq) return;
-        hits = r.results || [];
-        cursor = 0;
-      })
-      .catch(() => {
-        if (mine !== seq) return;
-        hits = [];
-        cursor = 0;
-      });
+    const control = new AbortController();
+    const reloj = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: control.signal })
+        .then((r) => r.json())
+        .then((r) => {
+          if (mine !== seq) return;
+          hits = r.results || [];
+          incompletas = r.incompletas || [];
+          cursor = 0;
+        })
+        .catch(() => {
+          if (mine !== seq) return;
+          hits = [];
+          incompletas = ['la búsqueda'];
+          cursor = 0;
+        });
+    }, ESPERA_TECLA_MS);
+    return () => {
+      clearTimeout(reloj);
+      control.abort();
+    };
   });
 
   $effect(() => {
@@ -173,7 +177,7 @@
           bind:this={input}
           bind:value={query}
           type="text"
-          placeholder="Buscar negociaciones, cuentas, personas, tickets, facturas…"
+          placeholder="Buscar conversaciones, tickets, instalaciones, órdenes, clientes…"
           aria-label="Buscar"
           aria-autocomplete="list"
           autocomplete="off"
@@ -205,8 +209,12 @@
           {/each}
         {:else}
           <p class="v2-sub" style="padding:22px 15px;text-align:center;margin:0">
-            Nada coincide con “{query}”. Probá el nombre de una cuenta, una negociación, o un
-            número de factura.
+            {#if incompletas.length}
+              Nada coincide con “{query}” en lo que se pudo leer; no contestó {incompletas.join(' ni ')}.
+            {:else}
+              Nada coincide con “{query}”. Probá un número de orden (OT-12), el nombre de quien pidió
+              una instalación, o algo que se haya escrito en una conversación.
+            {/if}
           </p>
         {/each}
       </div>
@@ -216,7 +224,10 @@
         <span><CornerDownLeft size={11} style="vertical-align:-1px" /> abrir</span>
         <span><kbd class="v2-kbd">esc</kbd> cerrar</span>
         {#if query.trim()}
-          <span style="margin-left:auto" class="v2-num">{hits.length} encontrados</span>
+          <span style="margin-left:auto" class="v2-num"
+            >{hits.length} encontrados{#if incompletas.length && hits.length}
+              · sin {incompletas.join(' ni ')}{/if}</span
+          >
         {/if}
       </div>
     </div>

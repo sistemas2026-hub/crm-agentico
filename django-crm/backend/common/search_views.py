@@ -14,6 +14,15 @@ can never surface a record the caller could not open from the list:
   whole org; everyone else sees created-or-assigned.
 * tickets. Reuse ``visible_cases_qs`` (adds the watcher clause).
 * knowledge-base articles. Org-wide, every member reads them.
+* solicitudes de instalacion (12/11/2026): solo los roles de gestion
+  (ADMIN, SUPERVISOR, OPERACIONES) o un superusuario. Es MAS estricto que la
+  bandeja de hoy (`solicitudes/gestion.py::BandejaView`, cualquier miembro):
+  la auditoria del menu dejo pendiente cerrar esa bandeja por rol, y el
+  buscador no tiene que ser el camino que la deje abierta cuando se cierre.
+  El resultado no trae documento ni telefono: solo nombre, estado y barrio.
+* ordenes de trabajo de campo (12/11/2026): la regla de
+  `campo/permissions.py::PuedeAccederOrden` -- gestion ve las de la empresa,
+  cualquier otro solo las que tiene asignadas.
 
 Matching stays on the server; the whole record set never reaches the browser.
 """
@@ -24,6 +33,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Account
+from campo.models import OrdenTrabajo
+from campo.permissions import ROLES_GESTION
 from cases.access import is_org_admin, visible_cases_qs
 from cases.models import Solution
 from common.permissions import HasOrgContext
@@ -31,6 +42,7 @@ from contacts.models import Contact
 from invoices.models import Invoice
 from leads.models import Lead
 from opportunity.models import Opportunity
+from solicitudes.models import SolicitudServicio
 
 # Rows per type. Small on purpose. The palette shows a handful per group and
 # the point is the fastest match, not an exhaustive report.
@@ -216,4 +228,73 @@ class GlobalSearchView(APIView):
                 }
             )
 
+        results.extend(_solicitudes(profile, user, q))
+        results.extend(_ordenes(profile, user, q))
+
         return Response({"query": q, "results": results})
+
+
+def _es_gestion(profile, user):
+    return (profile.role or "").upper() in ROLES_GESTION or user.is_superuser
+
+
+def _solicitudes(profile, user, q):
+    """Solicitudes de instalacion por nombre, telefono o documento. Solo
+    gestion (ver el docstring del modulo). Lo que sale no repite el telefono
+    ni el documento buscados: quien busca ya los tiene, y el resultado se ve
+    en una lista que cualquiera puede estar mirando por encima del hombro."""
+    if not _es_gestion(profile, user):
+        return []
+    filtro = (
+        Q(nombre__icontains=q)
+        | Q(apellido__icontains=q)
+        | Q(telefono__icontains=q)
+        | Q(numero_documento__icontains=q)
+    )
+    # "Nombre Apellido" escrito junto tambien tiene que encontrar.
+    partes = q.split()
+    if len(partes) >= 2:
+        filtro |= Q(nombre__icontains=partes[0]) & Q(apellido__icontains=" ".join(partes[1:]))
+    filas = (
+        SolicitudServicio.objects.filter(org=profile.org)
+        .filter(filtro)
+        .order_by("-created_at")[:PER_TYPE]
+    )
+    return [
+        {
+            "type": "solicitud",
+            "id": str(s.id),
+            "title": s.nombre_completo or "Solicitud sin nombre",
+            "subtitle": " · ".join(x for x in (s.get_estado_display(), s.barrio) if x),
+            "estado": s.estado,
+        }
+        for s in filas
+    ]
+
+
+def _ordenes(profile, user, q):
+    """Ordenes de campo por numero (12, OT-12), cliente, telefono o id de
+    servicio, con la visibilidad de `PuedeAccederOrden`."""
+    qs = OrdenTrabajo.objects.filter(org=profile.org)
+    if not _es_gestion(profile, user):
+        qs = qs.filter(asignaciones__profile=profile).distinct()
+    filtro = (
+        Q(cliente_nombre__icontains=q)
+        | Q(cliente_telefono__icontains=q)
+        | Q(cliente_id_abonado__iexact=q)
+    )
+    numero = q.upper().removeprefix("OT-").removeprefix("OT").strip().lstrip("#")
+    if numero.isdigit():
+        filtro |= Q(numero=int(numero))
+    filas = qs.filter(filtro).order_by("-numero")[:PER_TYPE]
+    return [
+        {
+            "type": "orden",
+            "id": str(o.id),
+            "title": f"OT-{o.numero} · {o.cliente_nombre}".strip(" ·"),
+            "subtitle": o.get_estado_operativo_display(),
+            # El id de servicio del ISP, para enlazar la ficha del cliente.
+            "id_servicio": o.cliente_id_abonado or None,
+        }
+        for o in filas
+    ]

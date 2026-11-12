@@ -209,5 +209,10 @@
     </div>
   {/if}
 
-  <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} />
+  <CommandPalette
+    open={paletteOpen}
+    onclose={() => (paletteOpen = false)}
+    role={data.role}
+    ocultos={data.org.modulos_ocultos}
+  />
 </div>
