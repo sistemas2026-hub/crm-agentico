@@ -86,6 +86,19 @@ export function sePuedeAprobar(accion) {
 }
 
 /**
+ * Sólo una acción `pendiente` se puede rechazar (12/11/2026).
+ *
+ * A diferencia de aprobar, el plazo no importa: una pendiente vencida no se
+ * puede ejecutar, pero decir «no» sobre ella sigue siendo una decisión que el
+ * motor acepta (compare-and-set sobre `pendiente`) y que la evidencia de
+ * autonomía ganada cuenta. Una `ejecutando` ya no: rechazarla borraría el
+ * rastro de un efecto que quizá salió (M06-F).
+ */
+export function sePuedeRechazar(accion) {
+  return accion?.estado === 'pendiente';
+}
+
+/**
  * Las que necesitan que una persona haga algo.
  *
  * `desconocida` entra aunque sea terminal: nadie la va a resolver sola, y
@@ -108,6 +121,7 @@ export function lineaDeAccion(accion) {
     titulo: estado.titulo,
     detalle: estado.detalle,
     puedeAprobarse: sePuedeAprobar(accion),
+    puedeRechazarse: sePuedeRechazar(accion),
     // El plazo sólo se anuncia mientras todavía importa: decir «vence en 3
     // min» de algo que ya se ejecutó es ruido.
     venceEn: accion?.estado === 'pendiente' ? (accion?.vence_en ?? null) : null,

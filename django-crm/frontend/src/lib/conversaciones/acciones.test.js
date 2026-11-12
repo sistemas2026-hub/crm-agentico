@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  estadoDeAccion, sePuedeAprobar, esperanRevision, lineaDeAccion
+  estadoDeAccion, sePuedeAprobar, sePuedeRechazar, esperanRevision, lineaDeAccion
 } from './acciones.js';
 
 const a = (extra) => ({
@@ -89,6 +89,22 @@ describe('sólo se ofrece aprobar lo que el backend aceptaría', () => {
     for (const estado of ['ejecutada_ok', 'ejecutada_fallo', 'vencida',
                           'desconocida', 'cancelada', 'rechazada', 'ejecutando']) {
       expect(sePuedeAprobar(a({ estado }))).toBe(false);
+    }
+  });
+});
+
+describe('rechazar (12/11/2026): solo una pendiente, aunque haya vencido', () => {
+  it('una pendiente, en plazo o vencida, sí', () => {
+    expect(sePuedeRechazar(a())).toBe(true);
+    expect(sePuedeRechazar(a({ expirada: true }))).toBe(true);
+    expect(lineaDeAccion(a()).puedeRechazarse).toBe(true);
+  });
+
+  it('ninguna que ya salió o terminó: rechazar una ejecutando borraría el rastro del efecto', () => {
+    for (const estado of ['ejecutando', 'ejecutada_ok', 'ejecutada_fallo', 'vencida',
+                          'desconocida', 'cancelada', 'rechazada', 'aprobada']) {
+      expect(sePuedeRechazar(a({ estado }))).toBe(false);
+      expect(lineaDeAccion(a({ estado })).puedeRechazarse).toBe(false);
     }
   });
 });

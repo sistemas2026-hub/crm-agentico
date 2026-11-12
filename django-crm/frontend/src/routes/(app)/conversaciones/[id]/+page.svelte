@@ -170,6 +170,39 @@
     }
   }
 
+  /* RECHAZAR CON MOTIVO (12/11/2026). Rechazar no ejecuta nada: deja la
+     acción en `rechazada`, que es el «no» que la evidencia de autonomía
+     ganada necesita contar. Quién rechaza lo pone el servidor desde la
+     sesión. Devuelve '' si salió bien, o lo que hay que decirle a la persona;
+     se relee siempre, porque si otra persona la resolvió antes (409) lo que
+     importa es cómo quedó. */
+  let rechazandoAccion = $state(/** @type {string|null} */ (null));
+  async function rechazarAccion(/** @type {string} */ id, /** @type {string} */ motivo) {
+    if (rechazandoAccion) return 'Ya se está rechazando otra acción.';
+    rechazandoAccion = id;
+    let aviso = '';
+    try {
+      const resp = await fetch(`/api/conversaciones/${conversacion.id}/acciones/${id}/rechazar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motivo })
+      });
+      if (!resp.ok) {
+        const datos = await resp.json().catch(() => ({}));
+        aviso = resp.status === 409
+          ? 'Otra persona ya la resolvió: se muestra cómo quedó.'
+          : datos?.error || 'No se pudo rechazar.';
+      }
+      const r = await fetch(`/api/conversaciones/${conversacion.id}/acciones`);
+      if (r.ok) acciones = (await r.json()).acciones ?? [];
+    } catch {
+      aviso = 'No se pudo rechazar: revisá la conexión y probá de nuevo.';
+    } finally {
+      rechazandoAccion = null;
+    }
+    return aviso;
+  }
+
   /**
    * Vuelve a leer el registro del relevo desde el motor.
    *
@@ -2331,7 +2364,8 @@
            panel porque son de la PESTAÑA: el mismo TracePanel, montado en
            otro lado, no tendria por que traerlos. -->
       <p class="seccion-ctx">Lo que hizo el asistente</p>
-      <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion} />
+      <ActionsPanel {acciones} aprobando={aprobandoAccion} onAprobar={aprobarAccion}
+        rechazando={rechazandoAccion} onRechazar={rechazarAccion} />
       <TracePanel
         {herramientas} {diagnostico} {contrasteUtil} {pasoMarcado}
         motivoBloqueo={MOTIVO_BLOQUEO}
