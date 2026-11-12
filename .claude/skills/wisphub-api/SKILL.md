@@ -1099,17 +1099,64 @@ esto, quien SI lo tiene --el tecnico, parado en la puerta-- puede corregirlos,
 y el alta de red (ip, usuario_rb, plan, zona) sigue siendo de la oficina, que
 es la unica que conoce la topologia.
 
-**Lo que sigue sin verificarse, y hace falta antes de construir:**
+### MEDIDO el 12/11/2026: Rapilink NO usa el modulo de instalaciones
 
-- Si `estado_instalacion` se puede MOVER por API (1 Nueva -> 2 Progreso -> 4
-  Terminada). Es lo que decide si una instalacion se puede cerrar desde la app.
-  El campo es de escritura en el alta (`?instalacion`), pero avanzar una que ya
-  existe no esta probado por ningun verbo.
-- Si la fila de `/api/instalaciones/` devuelve `estado_instalacion`: en el
-  esquema de ese listado solo esta `estado`.
-- Si el filtro `tecnico` de `/api/instalaciones/` se respeta de verdad. Esta
-  documentado entre sus 47 filtros y en `/clientes/` SI funciona, pero en este
-  endpoint no se midio -- y esta API ignora filtros en silencio.
+Solo lectura, sin una sola escritura. Y el resultado cambia el diseño, asi que
+conviene leerlo antes de construir cualquier cosa sobre `/api/instalaciones/`:
+
+    GET /api/instalaciones/                          count = 1
+        ?estado_instalacion=1  Nueva                 0
+        ?estado_instalacion=2  Progreso              0
+        ?estado_instalacion=3  Activada              0
+        ?estado_instalacion=4  Terminada             0
+        ?estado_instalacion=7  Pendiente             0
+        ?estado_instalacion=8  Planificacion         1   <- la unica
+                               suma de los seis      1   = el total
+
+**UN registro, y esta en pre-instalacion.** El trabajo de instalacion de esta
+empresa NO vive aca: vive en los TICKETS, con asunto «Instalacion Nueva» y
+departamento «Ventas». Construir la app contra este endpoint seria construir
+contra una tabla vacia.
+
+(Limite de la medicion, que hay que decir: esta API aplica recortes propios sin
+filtro de fecha --medido en tickets y facturas--, asi que «1» puede ser «1 en la
+ventana reciente» y no «1 en la historia». Para lo que se decidio hoy no cambia
+nada: de las seis listas que un tecnico mirarian, cinco estan en cero.)
+
+**El filtro `estado_instalacion` SI se respeta**: un valor imposible
+(`999999999`) devuelve 0, y la suma de los seis estados cuadra con el total.
+
+**La fila NO trae `estado_instalacion`.** Son 54 campos y ese NO esta --
+AUSENTE, no vacio--. Lo que trae es `estado`, y como TEXTO: `'Instalación'`,
+no un numero. O sea: se puede FILTRAR por `estado_instalacion` y no se puede
+LEER de vuelta. Quien quiera saber en que estado quedo algo tiene que deducirlo
+de la lista en la que aparece.
+
+**`tecnico` vino `null`** en esa fila, consistente con el hallazgo de que en
+instalaciones asignadas la asignacion real viaja en `email_tecnico`. Su filtro
+devuelve 0 ante un imposible (buena senal) pero NO se pudo validar con un valor
+real: con una sola fila y su tecnico en null, ningun id devuelve un
+subconjunto. **No es «no funciona», es «no se puede medir con estos datos»** --
+y la diferencia importa: declararlo verificado seria inventar.
+
+### Lo que NO hace falta verificar, y por que
+
+Se iba a medir si `estado_instalacion` se puede MOVER por API (1 -> 2 -> 4),
+con una escritura sobre el servicio de prueba. **Se descarto antes de hacerla**,
+por dos razones:
+
+1. No hay nada que mover: cinco de los seis estados estan en cero.
+2. El sujeto estaba mal elegido. El 5832 esta **Activo**, y
+   `estado_instalacion` no es una etiqueta como `nombre`: es una posicion en una
+   fila de trabajo. Escribirselo podria meter un cliente real en la «Lista de
+   instalaciones» del panel --inventandole trabajo al equipo-- o moverle el
+   `estado` del servicio, que reserva el `0` para «instalacion». El riesgo no es
+   perder un dato: es cortarle el servicio a alguien o ensuciarle la cola a
+   quien despacha.
+
+Para cerrar una instalacion se usa lo que YA esta verificado:
+`POST /api/tickets/{id}/respuesta/` con `ticket-estado`, que es la unica forma
+confirmada de mover el estado de un ticket.
 
 ### `/api/instalaciones/` es la pantalla del panel, y sin filtro no la devuelve
 
