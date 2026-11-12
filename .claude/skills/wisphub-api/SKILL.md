@@ -1050,6 +1050,92 @@ no distingue «funciono» de «no hizo nada» no prueba nada. Mover el ultimo
 decimal (misma ubicacion, ~10 cm) deja las dos preguntas separadas: que APLICO
 se ve en el campo, y que NO PISO se ve en el diff.
 
+### La IDENTIDAD del cliente no esta donde uno la busca (12/11/2026)
+
+**El detalle del servicio NO trae el nombre, la direccion, la cedula ni el
+telefono.** Medido sobre el 5832: `GET /api/clientes/5832/` devuelve 34 campos
+y esos cuatro NO ESTAN -- ni vacios, AUSENTES. Son dos recursos distintos con
+la misma raiz:
+
+| Recurso | Campos | Que es |
+|---|---|---|
+| `/api/clientes/{id}/` | 34 | EL SERVICIO: ip, plan, zona, router, sn_onu, coordenadas, las cuatro contrasenas |
+| `/api/clientes/{id}/perfil/` | 33 | LA PERSONA: nombre, apellidos, cedula, direccion, telefono, email |
+
+La trampa no es que falte documentacion: es que el nombre del endpoint dice
+"clientes" y lo que devuelve es el servicio. Buscar `nombre` ahi y encontrar
+que no esta lleva a concluir que la API no lo expone. Y el error simetrico ya
+estaba medido en el otro sentido: `/perfil/` NO trae `coordenadas`.
+
+### VERIFICADO el 12/11/2026: el PUT parcial del PERFIL aplica, y es la via
+### para que un tecnico corrija la identidad desde la puerta
+
+Hasta hoy de `/perfil/` solo se habia verificado el **DELETE** (el borrado
+real). Tambien acepta escritura, y con la misma propiedad que ya se habia
+medido en el servicio: **un PUT con SOLO los campos que cambian aplica y NO
+pisa el resto.** Escritura real autorizada por el usuario sobre el servicio de
+prueba **5832**:
+
+    OPTIONS /api/clientes/5832/perfil/
+      -> 200  Allow: GET, PUT, PATCH, DELETE, HEAD, OPTIONS
+
+    PUT /api/clientes/5832/perfil/
+        {"nombre": ..., "direccion": ..., "cedula": ..., "telefono": ...}
+      -> 200
+    GET /api/clientes/5832/perfil/   (aparte, no el eco)
+      -> los CUATRO aplicaron
+         los otros 29 campos intactos
+         24 campos con valor antes, 24 despues
+    PUT con los valores originales   -> 200, los cuatro restaurados
+
+Cada campo se escribio con un valor DISTINTO del que tenia, por la razon que
+esta seccion ya explica mas arriba: con un valor identico, «nada cambio» es
+indistinguible de «la API ignoro la llamada».
+
+**POR QUE IMPORTA.** Una instalacion nueva entra como ticket del cliente
+ficticio del ISP (un prospecto sin identidad resuelta), y hoy el nombre, la
+cedula y la direccion los teclea alguien que no tiene el documento delante. Con
+esto, quien SI lo tiene --el tecnico, parado en la puerta-- puede corregirlos,
+y el alta de red (ip, usuario_rb, plan, zona) sigue siendo de la oficina, que
+es la unica que conoce la topologia.
+
+**Lo que sigue sin verificarse, y hace falta antes de construir:**
+
+- Si `estado_instalacion` se puede MOVER por API (1 Nueva -> 2 Progreso -> 4
+  Terminada). Es lo que decide si una instalacion se puede cerrar desde la app.
+  El campo es de escritura en el alta (`?instalacion`), pero avanzar una que ya
+  existe no esta probado por ningun verbo.
+- Si la fila de `/api/instalaciones/` devuelve `estado_instalacion`: en el
+  esquema de ese listado solo esta `estado`.
+- Si el filtro `tecnico` de `/api/instalaciones/` se respeta de verdad. Esta
+  documentado entre sus 47 filtros y en `/clientes/` SI funciona, pero en este
+  endpoint no se midio -- y esta API ignora filtros en silencio.
+
+### `/api/instalaciones/` es la pantalla del panel, y sin filtro no la devuelve
+
+La entrada anterior de esta skill decia «1 registro, parece ser instalaciones
+pendientes, sin confirmar». El spec lo aclara: es el
+«Lista de instalaciones» Y «Lista de pre-instalaciones» de WispHub, y **se
+filtra por `estado_instalacion`**:
+
+    1 Nueva · 2 Progreso · 3 Activada · 4 Terminada · 7 Pendiente
+    8 Planificacion   <- las PRE-instalaciones
+
+Pide el permiso «Lista de Clientes». Cada fila trae **54 campos**, con las
+cuatro contrasenas, la cedula y las coordenadas: lista blanca obligatoria.
+
+**No hay catalogo de `localidad` ni de `ciudad`** en ninguna de las 54 rutas
+(si hay `/zonas/`, `/router/`, `/sectorial/`, `/plan-internet/`, `/staff/`,
+`/modelo-antena/`, `/proveedores/`, `/formas-de-pago/`). Son texto libre, y esa
+es la causa estructural de las direcciones mal escritas. Los valores que YA
+existen se pueden cosechar de la base de clientes: `localidad` y `ciudad` son
+filtros verificados.
+
+**`/api/solicitar-instalacion/` no es para el tecnico.** Es un alta de
+PRE-instalacion y exige `front_dni_proof`, `back_dni_proof` y
+`proof_of_address` (archivos binarios), ademas de nombre, apellido, direccion y
+telefono. Es un flujo de ventas, no de campo.
+
 ## Antes de dar por buena una integracion
 
 - [ ] Cada filtro del catalogo tiene `verificado_el`
