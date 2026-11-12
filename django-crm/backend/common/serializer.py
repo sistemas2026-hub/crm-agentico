@@ -148,6 +148,16 @@ class OrgSettingsSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(f"'{c}' no es un correo valido.")
         return ", ".join(correos)
 
+    def validate_modulos_ocultos(self, valor):
+        """Solo claves del catalogo cerrado (common/modulos.py), sin repetidos.
+        Escribirlo es de ADMIN por la misma puerta que el resto del PATCH."""
+        from common.modulos import normalizar_modulos_ocultos
+
+        try:
+            return normalizar_modulos_ocultos(valor)
+        except ValueError as e:
+            raise serializers.ValidationError(str(e))
+
     class Meta:
         model = Org
         fields = [
@@ -176,6 +186,10 @@ class OrgSettingsSerializer(serializers.ModelSerializer):
             # Where new service requests are emailed (solicitudes/entrega.py).
             "correo_solicitudes",
             "auto_close_children_on_parent_close",
+            # Lo que esta empresa saca de su menu (12/11/2026). Viaja en la
+            # MISMA respuesta que el cascaron ya pide en cada navegacion
+            # (getOrgShell): leerlo no cuesta un viaje mas.
+            "modulos_ocultos",
             # Vertical pack. Read-only -- see the class docstring.
             "vertical",
             "terminology",

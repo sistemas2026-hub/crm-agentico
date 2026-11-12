@@ -9,7 +9,7 @@
   import { Search, Sun, MessageCircle, LifeBuoy, ClipboardCheck, Plus, Menu } from '@lucide/svelte';
   import { barra, recordarPreferencia, resumenRecogido } from '$lib/conversaciones/barra-lateral.svelte.js';
 
-  /** @type {{ data: { counts: Record<string, number>, org: { name: string, terminology?: Record<string, string> | null }, role: string }, children: import('svelte').Snippet }} */
+  /** @type {{ data: { counts: Record<string, number>, org: { name: string, terminology?: Record<string, string> | null, modulos_ocultos?: string[] }, role: string }, children: import('svelte').Snippet }} */
   let { data, children } = $props();
 
   let paletteOpen = $state(false);
@@ -100,6 +100,7 @@
       org={data.org}
       role={data.role}
       terminology={data.org.terminology}
+      ocultos={data.org.modulos_ocultos}
       onsearch={() => (paletteOpen = true)}
     />
   {/if}
@@ -198,6 +199,7 @@
           org={data.org}
           role={data.role}
           terminology={data.org.terminology}
+          ocultos={data.org.modulos_ocultos}
           onsearch={() => {
             menuOpen = false;
             paletteOpen = true;

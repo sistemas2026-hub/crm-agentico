@@ -142,11 +142,20 @@ export function updateOrgSettings({ cookies }, body) {
  *
  * @param {{ cookies: import('@sveltejs/kit').Cookies }} event
  * @returns {Promise<{ terminology?: Record<string, string>, vertical?: string,
- *                     logo_url?: string }>}
+ *                     logo_url?: string, modulos_ocultos: string[] }>}
  */
 export async function getOrgShell({ cookies }) {
   const org = await apiRequest('/org/settings/', {}, { cookies });
-  return { terminology: org?.terminology, vertical: org?.vertical, logo_url: org?.logo_url };
+  return {
+    terminology: org?.terminology,
+    vertical: org?.vertical,
+    logo_url: org?.logo_url,
+    // Los módulos heredados que la empresa sacó de su menú (12/11/2026,
+    // /settings/modulos). Llegan en esta MISMA respuesta: el menú los respeta
+    // sin un viaje más por navegación. Solo una lista; cualquier otra cosa es
+    // «nada oculto».
+    modulos_ocultos: Array.isArray(org?.modulos_ocultos) ? org.modulos_ocultos : []
+  };
 }
 
 /**

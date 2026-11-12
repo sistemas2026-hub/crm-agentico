@@ -34,9 +34,10 @@
     Bot,
     Cable,
     BookMarked,
-    Moon
+    Moon,
+    Funnel
   } from '@lucide/svelte';
-  import { t } from '$lib/terminology.js';
+  import { gruposDelMenu } from '$lib/v2/menu.js';
   import { alternarTema, leerTema } from '$lib/v2/tema.js';
 
   // El tema se lee del navegador, asi que recien cuando hay navegador: en el
@@ -47,31 +48,25 @@
   });
 
   /**
-   * One flat tree, grouped by what the person is doing rather than by which
-   * Django app owns the model. Every label matches the route it lands on and
-   * the page title it lands on; "Pipeline" goes to /v2/pipeline, which is
-   * titled "Pipeline".
+   * El árbol del menú vive en `$lib/v2/menu.js` desde el 12/11/2026, como
+   * función pura y con su prueba: qué ve cada rol, qué renombra la terminología
+   * de la empresa y qué módulos heredados ocultó la empresa
+   * (`/settings/modulos`). Acá solo se pone el ícono y se dibuja.
    *
-   * v1 had /leads listed twice, as "Pipeline" and as "Leads", and a "Deals"
-   * entry pointing at /opportunities while /deals 404'd.
+   * `role` sale del JWT en el servidor (layout). Solo decide qué se MUESTRA:
+   * cada destino oculto lo sigue exigiendo su backend.
    *
-   * `role` is server-derived from the JWT (see the app layout loader). It only
-   * decides which destinations to *show*. Every hidden one is still enforced
-   * by the backend, so this is UX, not access control. An item marked `admin`
-   * is one where a member gets nothing but a "for administrators" gate, so
-   * showing it would only teach them to bounce off it.
-   *
-   * `termKey` marks the handful of entity destinations a vertical pack may
-   * relabel (see `$lib/terminology.js`). The string in `label` below is only
-   * ever the fallback an org with no pack, or no override for that key,
-   * still renders; the derived `groups` below is what actually resolves it
-   * against `terminology`. No other label branches on the org at all.
+   * `ocultos` viaja en la misma respuesta de la organización que ya trae la
+   * terminología: si esa lectura falla o vence, llega vacío y el menú se
+   * dibuja ENTERO. Ante la duda se muestra -- ocultar no protege nada, y
+   * esconder sin saber deja a alguien sin camino a su pantalla.
    *
    * @type {{
    *   counts?: Record<string, number>,
    *   org?: { name: string },
    *   role?: string,
    *   terminology?: Record<string, string> | null,
+   *   ocultos?: string[],
    *   onsearch?: () => void
    * }}
    */
@@ -80,141 +75,23 @@
     org = { name: '' },
     role = 'USER',
     terminology = undefined,
+    ocultos = [],
     onsearch = () => {}
   } = $props();
 
-  /*
-   * Grupos por TRABAJO, del mas urgente al menos (22/10/2026). Antes el
-   * primero era "Vender" -- la portada de BottleCRM -- y toda la operacion
-   * del ISP cabia en "Atender", con 14 entradas y dos iconos repetidos
-   * (Radar dos veces, Network dos veces). Ningun destino se quito: solo
-   * cambiaron de grupo, y cada uno tiene ahora un icono propio.
-   */
-  const GROUPS = [
-    {
-      label: 'Operación en vivo',
-      items: [
-        { href: '/', label: 'Hoy', icon: Sun, exact: true },
-        { href: '/conversaciones', label: 'Conversaciones', icon: MessageCircle },
-        { href: '/supervisor-noc', label: 'Supervisor NOC IA', icon: Activity },
-        // Que hace cada agente AHORA. /agentes dice como esta configurado
-        // cada uno; esto, en que anda en este momento -- son dos preguntas
-        // distintas y por eso son dos entradas.
-        { href: '/centro-mando', label: 'Centro de mando', icon: Radar },
-        { href: '/asistente', label: 'Asistente', icon: Sparkles }
-      ]
-    },
-    {
-      label: 'Campo',
-      items: [
-        // La bandeja donde se decide la factibilidad de cada solicitud.
-        // Existia desde el 02/09 y NO estaba enlazada en ningun lado: solo
-        // se llegaba escribiendo la URL. Una pantalla sin entrada no esta
-        // terminada, esta escondida.
-        { href: '/instalaciones', label: 'Instalaciones', icon: ClipboardCheck },
-        // Que hay en bodega y que tiene cada tecnico. Va aca y no bajo
-        // Configurar porque es una pantalla de OPERACION: se abre para
-        // decidir si se puede despachar, no para ajustar nada.
-        { href: '/inventario', label: 'Inventario', icon: Boxes }
-      ]
-    },
-    {
-      label: 'Clientes',
-      items: [
-        // Approvals and Analytics live under Tickets as section tabs. They are
-        // not separate destinations, so they do not get separate nav entries,
-        // one level of navigation, and the tab strip carries the rest.
-        { href: '/tickets', label: 'Tickets', icon: LifeBuoy, count: 'tickets' },
-        { href: '/tasks', label: 'Tareas', icon: CircleCheck, count: 'tasks' },
-        { href: '/accounts', label: 'Cuentas', icon: Building2, termKey: 'account.plural' },
-        { href: '/contacts', label: 'Contactos', icon: Users, termKey: 'contact.plural' },
-        { href: '/solutions', label: 'Base de conocimiento', icon: BookOpen },
-        { href: '/documents', label: 'Documentos', icon: FileText }
-      ]
-    },
-    {
-      label: 'Ventas',
-      items: [
-        {
-          href: '/pipeline',
-          label: 'Negociaciones',
-          icon: Columns3,
-          count: 'pipeline',
-          termKey: 'opportunity.plural'
-        },
-        { href: '/leads', label: 'Prospectos', icon: Target, count: 'leads', termKey: 'lead.plural' },
-        { href: '/goals', label: 'Metas', icon: Trophy }
-      ]
-    },
-    {
-      label: 'Facturación',
-      items: [
-        {
-          href: '/invoices',
-          label: 'Facturas',
-          icon: Receipt,
-          count: 'invoices',
-          termKey: 'invoice.plural'
-        },
-        { href: '/timesheet', label: 'Registro de horas', icon: Clock }
-      ]
-    },
-    {
-      // Lo que se ajusta de la IA: quien atiende, que sigue al pie de la
-      // letra, de que ejemplos aprende, y donde se la prueba sin un cliente.
-      label: 'Dexter',
-      items: [
-        { href: '/agentes', label: 'Agentes', icon: Bot },
-        // ADMIN-only: una habilidad vigente es lo que un agente sigue "al pie
-        // de la letra" frente a un cliente.
-        { href: '/habilidades', label: 'Habilidades', icon: GraduationCap, admin: true },
-        { href: '/manual', label: 'Manual', icon: BookMarked },
-        { href: '/simulador-whatsapp', label: 'Simulador WhatsApp', icon: Smartphone }
-      ]
-    },
-    {
-      // Administration, kept apart from the work. Someone who never touches
-      // these should not read past them four times a day.
-      //
-      // Team is admin-only. A member reaches it only to be told so. Settings
-      // is not: the hub is readable by any member (it just omits admin-only
-      // counts), so it stays for everyone.
-      label: 'Administrar',
-      items: [
-        { href: '/team', label: 'Equipo y accesos', icon: UserCog, admin: true },
-        { href: '/settings', label: 'Configuración', icon: SlidersHorizontal },
-        // ADMIN-only: el rol 'configuracion_guiada' del motor solo lo
-        // alcanza esta pantalla (ver /api/configuracion-guiada, mismo gate
-        // que /api/agentes). Sin esto en el menu, la unica forma de llegar
-        // seria escribiendo la URL a mano.
-        // Dos caminos para lo mismo, y no se pisan: el catalogo es para un
-        // sistema YA verificado (se elige de una lista y trae sus filtros
-        // hechos); la guiada es para uno que nadie conecto todavia (se
-        // describe la API, se sondea de verdad, y sale una propuesta).
-        { href: '/conectores', label: 'Conectar sistema', icon: PlugZap, admin: true },
-        { href: '/configuracion-guiada', label: 'Conectar API nueva', icon: Cable, admin: true },
-        // ADMIN-only: es el gasto de la empresa y su tope. Un colaborador de
-        // soporte no tiene por que ver la factura.
-        { href: '/consumo', label: 'Consumo', icon: Gauge, admin: true },
-        // ADMIN-only: cuanto trabajo le resolvio Dexter a la empresa, con sus
-        // contrapesos (PRD §2). Es lo que se le muestra a quien decide si
-        // Dexter sirve; un colaborador no lo necesita para atender.
-        { href: '/capacidad', label: 'Capacidad', icon: TrendingUp, admin: true }
-      ]
-    }
-  ];
+  /** @type {Record<string, any>} */
+  const ICONOS = {
+    Sun, Columns3, Target, Building2, Users, CircleCheck, LifeBuoy, BookOpen, Receipt,
+    Trophy, Clock, UserCog, FileText, SlidersHorizontal, Smartphone, Sparkles,
+    MessageCircle, PlugZap, GraduationCap, Gauge, TrendingUp, ClipboardCheck, Radar,
+    Boxes, Activity, Bot, Cable, BookMarked, Funnel
+  };
 
-  // Drop admin-only items for members, resolve any relabelled entity through
-  // the terminology map, then drop any group left with nothing.
   let groups = $derived(
-    GROUPS.map((group) => ({
-      ...group,
-      items: group.items
-        .filter((item) => role === 'ADMIN' || !item.admin)
-        .map((item) =>
-          item.termKey ? { ...item, label: t(terminology, item.termKey, item.label) } : item
-        )
-    })).filter((group) => group.items.length > 0)
+    gruposDelMenu({ role, terminology, ocultos }).map((g) => ({
+      ...g,
+      items: g.items.map((i) => ({ ...i, icon: ICONOS[i.icono] ?? Search }))
+    }))
   );
 
   const isActive = (href, exact) =>

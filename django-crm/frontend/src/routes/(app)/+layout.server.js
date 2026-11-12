@@ -135,6 +135,10 @@ export async function load(event) {
       // sale de la MISMA respuesta de `/org/settings/` -- no cuesta un viaje
       // de red extra. `undefined` es el caso normal, no un fallo.
       logo_url: /** @type {string | undefined} */ (undefined),
+      // Los módulos heredados que esta empresa sacó del menú (12/11/2026,
+      // /settings/modulos). Vienen en la misma respuesta que la terminología;
+      // si esa lectura falla o vence, queda vacío y el menú sale ENTERO.
+      modulos_ocultos: /** @type {string[]} */ ([]),
       // The currency for figures that are sums rather than one record: pipeline
       // totals, invoice ageing, goal progress. A per-record currency cannot
       // label a sum, and `money()` falls back to a hardcoded USD when it is not
@@ -196,6 +200,7 @@ export async function load(event) {
     // caso corriente. Quien lo dibuje tiene que tener un respaldo: la marca
     // no puede depender de un archivo que casi nunca esta.
     shell.org.logo_url = orgResult.value.logo_url;
+    shell.org.modulos_ocultos = orgResult.value.modulos_ocultos ?? [];
   }
 
   return shell;

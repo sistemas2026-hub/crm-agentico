@@ -162,6 +162,11 @@ class Org(BaseModel):
     # explicit confirmation; this flag only controls the default state.
     auto_close_children_on_parent_close = models.BooleanField(default=False)
 
+    # Los modulos heredados del CRM que esta empresa saca de su menu
+    # (12/11/2026, common/modulos.py). Vacio = todo visible, que es como nace
+    # cada empresa. Solo decide que dibuja el menu: NO es un permiso.
+    modulos_ocultos = models.JSONField(default=list, blank=True)
+
     # Vertical packs. Descriptive only: records which pack was applied at
     # signup. NEVER used in a permission check or a queryset filter.
     vertical = models.CharField(
