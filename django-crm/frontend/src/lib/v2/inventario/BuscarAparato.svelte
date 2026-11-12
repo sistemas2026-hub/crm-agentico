@@ -216,6 +216,15 @@
                     </span>
                   {/if}
                 </span>
+                {#if h.orden}
+                  <!-- La orden en la que se movio (12/11/2026): el backend la
+                       mandaba y esta pantalla la descartaba. Ahora es un enlace
+                       a su pagina. -->
+                  <a
+                    href="/ordenes/{h.orden}"
+                    class="font-label-numeric text-body-sm text-primary hover:underline mt-0.5"
+                  >{h.orden_numero ? `OT-${h.orden_numero}` : 'Ver la orden'}</a>
+                {/if}
                 {#if h.motivo}
                   <span class="font-body-sm text-body-sm text-secondary italic mt-0.5">{h.motivo}</span>
                 {/if}

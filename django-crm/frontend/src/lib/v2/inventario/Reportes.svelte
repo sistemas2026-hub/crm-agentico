@@ -307,7 +307,14 @@
               </td>
               <td class="py-space-md px-space-lg font-body-md text-body-md text-on-surface">{f.persona ?? '—'}</td>
               <td class="py-space-md px-space-lg font-label-numeric text-body-sm text-secondary">
-                {f.orden_numero ? `#${f.orden_numero}` : '—'}
+                {#if f.orden_numero && f.orden_id}
+                  <!-- Enlace a la orden (12/11/2026): antes era texto sin adonde ir. -->
+                  <a href="/ordenes/{f.orden_id}" class="text-primary hover:underline">OT-{f.orden_numero}</a>
+                {:else if f.orden_numero}
+                  OT-{f.orden_numero}
+                {:else}
+                  —
+                {/if}
               </td>
               <td class="py-space-md px-space-lg font-body-sm text-body-sm text-secondary">{f.motivo || '—'}</td>
               <td class="py-space-md px-space-lg">

@@ -30,7 +30,8 @@ async function pantalla(de, filasDelBackend) {
 const PEDIDO = {
   id: 'p1', en: '2026-10-18T14:05:00-05:00', estado: 'pendiente', material: 'CON-SC-APC',
   material_nombre: 'Conector SC/APC', cantidad: '20', unidad: 'unidades',
-  persona: 'Carlos Gómez', orden_numero: 1849, motivo: 'se acabaron'
+  persona: 'Carlos Gómez', orden_numero: 1849,
+  orden_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', motivo: 'se acabaron'
 };
 const FALTANTE = {
   id: 'i1', en: '2026-10-18T17:00:00-05:00', tipo: 'danado', tipo_texto: 'Dañado',
@@ -68,9 +69,11 @@ describe('los reportes de lo que escribe el técnico', () => {
 
   it('un pedido dice qué, cuánto, quién, para qué orden y por qué', async () => {
     const b = await pantalla('pedidos', [PEDIDO]);
-    for (const texto of ['Pendiente', 'Conector SC/APC', '20 unidades', 'Carlos Gómez', '#1849', 'se acabaron']) {
+    for (const texto of ['Pendiente', 'Conector SC/APC', '20 unidades', 'Carlos Gómez', 'OT-1849', 'se acabaron']) {
       expect(b).toContain(texto);
     }
+    // «OT-n» es un enlace a la página de la orden (12/11/2026), no texto.
+    expect(b).toContain('href="/ordenes/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"');
   });
 
   it('un faltante dice qué pasó y la explicación del técnico', async () => {
