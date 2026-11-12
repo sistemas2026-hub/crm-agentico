@@ -1,10 +1,17 @@
 import { fail } from '@sveltejs/kit';
 import { addLeadNote, convertLead, getLead } from '$lib/server/v2/leads.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
+import { leerSolicitudesDelLead } from '$lib/server/v2/ventas.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, params }) {
-  return await getLead({ cookies }, params.id);
+  // Lo que pasó con el link que el asistente le generó (12/11/2026): estado de
+  // la solicitud, y a dónde seguirla. En paralelo y sin poder tumbar la ficha.
+  const [lead, venta] = await Promise.all([
+    getLead({ cookies }, params.id),
+    leerSolicitudesDelLead(cookies, params.id)
+  ]);
+  return { ...lead, venta };
 }
 
 /** @type {import('./$types').Actions} */

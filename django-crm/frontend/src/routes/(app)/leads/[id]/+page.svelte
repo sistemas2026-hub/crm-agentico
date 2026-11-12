@@ -22,7 +22,12 @@
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import Pill from '$lib/v2/components/Pill.svelte';
   import { money, relativeDays, daysSince, shortDate } from '$lib/v2/format.js';
-  import { LEAD_STATUS_TONE, LEAD_STATUS_LABEL, industryLabel } from '$lib/v2/enums.js';
+  import {
+    LEAD_STATUS_TONE,
+    LEAD_STATUS_LABEL,
+    LEAD_SOURCE_LABEL,
+    industryLabel
+  } from '$lib/v2/enums.js';
   import { t } from '$lib/terminology.js';
   import { enhance } from '$app/forms';
   import {
@@ -455,12 +460,48 @@
       <dt>Responsable</dt>
       <dd>{lead.assigned_to || 'Nadie'}</dd>
       <dt>Origen</dt>
-      <dd>{lead.source || '—'}</dd>
+      <dd>{lead.source ? (LEAD_SOURCE_LABEL[lead.source] ?? lead.source) : '—'}</dd>
       <dt>Rubro</dt>
       <dd>{industryLabel(lead.industry) || '—'}</dd>
       <dt>Valor est.</dt>
       <dd class="v2-num">{lead.opportunity_amount ? money(lead.opportunity_amount, lead.currency) : '—'}</dd>
     </dl>
+
+    <!-- La solicitud de servicio (12/11/2026): qué pasó con el link que el
+         asistente le generó, y a dónde seguirla. La conversación se abre desde
+         el ticket: la solicitud no guarda de qué chat vino, solo el teléfono. -->
+    {#if data.venta?.solicitudes?.length}
+      <div class="v2-label v2-rail-head">Solicitud de servicio</div>
+      {#each data.venta.solicitudes as s (s.id)}
+        <dl class="v2-kv">
+          <dt>Estado</dt>
+          <dd>{s.estadoTexto}</dd>
+          {#if s.plan}<dt>Plan</dt><dd>{s.plan}</dd>{/if}
+          <dt>Link</dt>
+          <dd>
+            {#if s.enviada_en}Enviado {shortDate(s.enviada_en)}
+            {:else if s.abierta}Abierto {shortDate(s.abierta_en)}, sin enviar
+            {:else}Generado {shortDate(s.creada_en)}, sin abrir{/if}
+          </dd>
+          {#if s.estado === 'aprobada'}
+            <dt>Instalación</dt>
+            <dd>
+              {#if s.instalada_en}Instalada {shortDate(s.instalada_en)}
+              {:else if s.orden_numero}Orden #{s.orden_numero} en curso
+              {:else if s.caso_id}Sin orden de campo todavía
+              {:else}Sin dato{/if}
+            </dd>
+          {/if}
+        </dl>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px">
+          {#if s.hrefInstalaciones}<a class="v2-btn v2-btn-sm" href={s.hrefInstalaciones}>Instalaciones</a>{/if}
+          {#if s.hrefTicket}<a class="v2-btn v2-btn-sm" href={s.hrefTicket}>Ticket y conversación</a>{/if}
+        </div>
+      {/each}
+    {:else if data.venta?.error}
+      <div class="v2-label v2-rail-head">Solicitud de servicio</div>
+      <p class="v2-muted" style="font-size:12px">No se pudo leer la solicitud.</p>
+    {/if}
 
     <div class="v2-label v2-rail-head">Cronología</div>
     <dl class="v2-kv">
