@@ -1220,6 +1220,12 @@ def mensajes_de(tenant: str, conversation_id: str) -> dict:
                       actualizado_en, conservar, conservar_motivo, conservar_por,
                       atendida_manual, atendida_por, tomada_por, tomada_en,
                       id_cliente, nombre_cliente, datos_sesion,
+                      -- El ticket del sistema del ISP que abrio esta
+                      -- conversacion (12/11/2026). La pantalla ya lo pintaba
+                      -- (CasePanel, la cabecera) pero nunca llegaba: solo
+                      -- viajaba en la cola. Es un identificador, no un dato
+                      -- del cliente, y sale de la misma fila.
+                      ticket_operativo,
                       -- El control del relevo (B3): la pantalla recibe el
                       -- control EFECTIVO ya calculado (api.py), no la regla.
                       relevo_version, control, control_motivo,

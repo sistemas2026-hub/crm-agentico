@@ -21,6 +21,7 @@
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import { enhance } from '$app/forms';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
+  import { enlacesDeSalida } from '$lib/conversaciones/enlaces.js';
 
   let {
     caso, conversacion, owners = [], ownerActual,
@@ -39,6 +40,8 @@
   } = $props();
 
   const etiquetaLabel = (/** @type {string} */ e) => rotuloDe(e, rotulos);
+  // Los enlaces de salida (12/11/2026, lib/conversaciones/enlaces.js).
+  const enlaces = $derived(enlacesDeSalida(conversacion));
   const CANAL = { whatsapp: 'WhatsApp', 'whatsapp-simulado': 'Simulador' };
 
   // D28 HECHO VISIBLE. Son dos dueños distintos y no se reconcilian: el del
@@ -100,6 +103,17 @@
       <span class="panel-etiqueta">Canal</span>
       <span class="panel-valor">{CANAL[conversacion.canal] ?? conversacion.canal}</span>
     </div>
+
+    {#if enlaces.agente}
+      <!-- Qué agente la lleva, y a dónde ir para ver qué puede hacer solo
+           (12/11/2026). -->
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Agente</span>
+        <a class="panel-valor abrir" href={enlaces.agente}>
+          {conversacion.rol_efectivo} <ArrowUpRight size={12} />
+        </a>
+      </div>
+    {/if}
 
     <div class="panel-fila">
       <span class="panel-etiqueta">Clasificación</span>
@@ -259,7 +273,16 @@
        completar la composición. -->
   {#if conversacion.ticket_operativo}
     <div class="panel-tarjeta">
-      <div class="panel-tarjeta-cabeza"><span class="panel-titulo">Ticket operativo</span></div>
+      <div class="panel-tarjeta-cabeza">
+        <span class="panel-titulo">Ticket operativo</span>
+        <!-- Antes era un chip sin salida (12/11/2026): el CRM lo guarda como
+             external_ticket_id y la búsqueda de Tickets lo encuentra. -->
+        {#if enlaces.ticketOperativo}
+          <a class="abrir" href={enlaces.ticketOperativo}>
+            Buscar en Tickets <ArrowUpRight size={12} />
+          </a>
+        {/if}
+      </div>
       <div class="bloque">
         <div class="panel-fila">
           <span class="panel-etiqueta">Identificador</span>

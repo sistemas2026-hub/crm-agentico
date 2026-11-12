@@ -19,6 +19,11 @@ la base y por la ruta Flask, no con un doble:
   B. Una del simulador y una de la API: 204, y se van con sus mensajes.
   C. Un canal que el motor no conoce (o nulo) no se borra: falla cerrado.
   D. Otra empresa: 404, y la fila ajena sigue ahi.
+
+Y de paso, con la misma base (construirla cuesta minutos):
+  E. La apertura de una conversacion trae 'ticket_operativo', que la Bandeja
+     usa para enlazar el ticket (lib/conversaciones/enlaces.js) y que hasta el
+     12/11/2026 solo viajaba en la cola.
 ================================================================================
 """
 from __future__ import annotations
@@ -165,6 +170,20 @@ try:
               f"una conversacion de otra empresa responde 404 y sigue ahi ({resp.status_code})")
     resp = borrar(str(uuid.uuid4()))
     comprobar(resp.status_code == 404, f"un id que no existe responde 404 ({resp.status_code})")
+
+    # ======================================================================
+    print("\n== E. la apertura trae el ticket operativo ==")
+    con_ticket = conv(org, "whatsapp", numero="573100000077")
+    q("update asistente.conversations set ticket_operativo = '94553' where id = %s", (con_ticket,))
+    resp = http.get(f"/conversaciones/{con_ticket}/mensajes?tenant={TENANT}")
+    c = (resp.get_json() or {}).get("conversacion") or {}
+    comprobar(resp.status_code == 200 and c.get("ticket_operativo") == "94553",
+              f"/mensajes (la misma definicion que /apertura) trae ticket_operativo "
+              f"({resp.status_code}, {c.get('ticket_operativo')!r})")
+    sin_ticket = conv(org, "whatsapp", numero="573100000078")
+    c = (http.get(f"/conversaciones/{sin_ticket}/mensajes?tenant={TENANT}").get_json() or {}).get("conversacion") or {}
+    comprobar("ticket_operativo" in c and c["ticket_operativo"] is None,
+              "sin ticket, la clave viene en null: la pantalla no dibuja el enlace")
 finally:
     try:
         with psycopg.connect(dsn("postgres"), autocommit=True) as con:

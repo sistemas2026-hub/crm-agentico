@@ -17,6 +17,7 @@
   import SelectorDeEtiquetas from '$lib/conversaciones/etiquetas/SelectorDeEtiquetas.svelte';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import { telefonoLegible } from '$lib/conversaciones/formato.js';
+  import { enlacesDeSalida } from '$lib/conversaciones/enlaces.js';
 
   let {
     conversacion,
@@ -94,6 +95,10 @@
       .join('')
       .toUpperCase();
 
+  /* Los enlaces de salida (12/11/2026): solo con lo que ya trae la
+     conversación. Ver lib/conversaciones/enlaces.js. */
+  const enlaces = $derived(enlacesDeSalida(conversacion));
+
   const nombre = $derived(conversacion.nombre_cliente || '');
   const telefono = $derived(
     esTelefono(conversacion.usuario_externo) ? quien(conversacion.usuario_externo) : ''
@@ -155,8 +160,14 @@
       {#if ficha?.estado}
         <span class="centro-id">{ficha.estado}</span>
       {/if}
-      {#if conversacion.ticket_operativo}
-        <span class="centro-id">Ticket <b class="centro-num">{conversacion.ticket_operativo}</b></span>
+      {#if enlaces.ticketOperativo}
+        <a class="centro-id centro-enlace" href={enlaces.ticketOperativo}
+          title="Buscar este ticket en Tickets">Ticket <b class="centro-num">{conversacion.ticket_operativo}</b></a>
+      {/if}
+      {#if enlaces.ficha}
+        <!-- La ficha completa del cliente por id_servicio (12/11/2026): sus
+             conversaciones, tickets, órdenes y equipo en una pantalla. -->
+        <a class="centro-id centro-enlace" href={enlaces.ficha}>Ver ficha completa</a>
       {/if}
       {#if reincide}
         <!-- «3 en 30 días» no decía de qué (04/11/2026): se lee la palabra, y
@@ -231,6 +242,17 @@
 </header>
 
 <style>
+  /* Un identificador que además lleva a algún lado: subrayado al pasar,
+     sin cambiar el peso del renglón. */
+  .centro-enlace {
+    color: inherit;
+    text-decoration: none;
+  }
+  .centro-enlace:hover,
+  .centro-enlace:focus-visible {
+    text-decoration: underline;
+  }
+
   .aviso-lectura {
     margin: 4px 0 0;
     font-size: 12px;
