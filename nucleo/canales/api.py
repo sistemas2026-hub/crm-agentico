@@ -13670,7 +13670,26 @@ def mantenimiento_purgar(tenant):
 
 @app.get("/salud")
 def salud():
-    return jsonify({"estado": "ok"})
+    """Que el motor respira, Y QUE CODIGO ES EL QUE RESPIRA.
+
+    `codigo` es una huella del contenido de `nucleo/` tal como esta en esta
+    imagen. Para saber si un arbol es el que esta corriendo:
+
+        py -3.13 -m nucleo.observabilidad.version     <- en el arbol
+        curl https://<motor>/salud                    <- en el que vive
+
+    Iguales: es ese codigo. Distintas: no lo es. No hay tercer resultado, y
+    no depende de que la plataforma de despliegue pase ninguna etiqueta --
+    el motivo largo esta en `nucleo/observabilidad/version.py`.
+
+    SIGUE SIN AUTENTICACION, y la huella no la pide: es un numero derivado de
+    codigo que ya es visible para quien tiene el repositorio, no dice que
+    version del software es ni que vulnerabilidades tendria, y sin ella esta
+    ruta no contesta la unica pregunta por la que alguien la llama despues de
+    un despliegue.
+    """
+    from nucleo.observabilidad import version
+    return jsonify({"estado": "ok", "codigo": version.huella()})
 
 
 if __name__ == "__main__":
