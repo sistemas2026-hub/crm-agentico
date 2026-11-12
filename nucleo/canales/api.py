@@ -47,7 +47,8 @@ from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
 from nucleo.canales import en_vuelo
-from nucleo.canales import avisos, media, transcripcion, vision, whatsapp
+from nucleo.canales import (avisos, cotejo, media, transcripcion, vision,
+                            whatsapp)
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
@@ -5917,6 +5918,103 @@ def interno_analizar_evidencia():
                     #  repetiria la descripcion como un hecho comprobado.
                     "para_el_turno": vision.texto_para_el_agente(
                         r, pie, proposito=proposito)}), 200
+
+
+@app.post("/interno/cotejo/reporte-contra-ticket")
+def interno_cotejar_reporte():
+    """
+    ¿Lo que el tecnico reporto explica el ticket que origino la orden?
+
+    El usuario, el 12/11/2026: «debe haber relacion entre el asunto, la
+    descripcion del ticket y la respuesta del tecnico. No puede haber una
+    respuesta correcta en un asunto que ni por ahi iba al caso.»
+
+    POR QUE EL MOTOR Y NO EL CRM. Mismo reparto que
+    '/interno/vision/analizar-evidencia': la credencial del proveedor vive
+    SOLO aca. El CRM manda dos textos y recibe un veredicto; no sabe a quien
+    se le pregunto.
+
+    LAS CINCO GARANTIAS QUE REUSA, y por eso no es un atajo:
+      - el interruptor de ESTA empresa ('cotejo_reporte_campo'), que es
+        propio y no el de las fotos: mandar el texto que escribe el personal
+        no es el mismo permiso que mandar la foto de una casa
+      - el tope de gasto del tenant, consultado ANTES de pagarle a nadie
+      - la redaccion del texto que vuelve, que la hace `cotejo.cotejar`
+      - el evento de consumo, para que esto aparezca en /consumo y no en una
+        factura que nadie mira
+      - NUNCA 500: si algo falla vuelve 200 con veredicto 'no_se_sabe'. Quien
+        llama tiene que poder distinguir «no se pudo juzgar» de «la peticion
+        estaba mal», y un 500 obligaria al CRM a decidir que hacer con una
+        excepcion -- que es justo donde se cuela un fail-open.
+
+    NUNCA DEVUELVE 'si' POR UN ERROR. Apagado, sin tenant, sin tope, sin
+    config: todos 'no_se_sabe'. La asimetria esta escrita en
+    `nucleo/canales/cotejo.py`: un «no cuadra» de mas cuesta que alguien mire
+    una orden; un «cuadra» de mas cuesta un cliente sin servicio.
+
+    EL CUERPO: JSON con 'se_pidio' y 'que_hizo'. No se acepta el modelo ni la
+    instruccion -- los fija este lado, igual que en vision.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    datos = request.get_json(silent=True) or {}
+    se_pidio = str(datos.get("se_pidio") or "")
+    que_hizo = str(datos.get("que_hizo") or "")
+
+    def sin_juicio(motivo: str):
+        """La unica forma de contestar que no es un juicio del modelo."""
+        return jsonify({"veredicto": cotejo.NO_SE_SABE, "motivo": motivo,
+                        "error": "", "segundos": 0, "tokens": 0}), 200
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        #  A DIFERENCIA DE CASI TODO EL RESTO DE ESTE ARCHIVO, esto NO es un
+        #  500: una config que no carga no puede frenar el cierre de una
+        #  orden. Se contesta «no se sabe» y el punto queda en None, que es
+        #  exactamente lo que significa.
+        registrar("cotejo", "no se pudo cargar la configuracion",
+                  tenant=tenant, error=e)
+        return sin_juicio("no se pudo leer la configuracion de la empresa")
+
+    #  EL INTERRUPTOR DE ESTA EMPRESA, y falla CERRADO.
+    if not getattr(config, cotejo.BANDERA, False):
+        return sin_juicio("esta empresa no tiene habilitado el cotejo")
+
+    #  EL TOPE DE GASTO, antes de pagar. Mismo criterio que vision: si no se
+    #  puede saber, se sigue -- no dejar sin servicio por una estadistica.
+    try:
+        frenar = consumo.estado_del_gasto(config, tenant)["accion"] == "frenar"
+    except Exception:                                         # noqa: BLE001
+        frenar = False
+    if frenar:
+        registrar("cotejo", "tope alcanzado: no se coteja", tenant=tenant)
+        return sin_juicio("la empresa alcanzo su tope de gasto")
+
+    modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
+    r = cotejo.cotejar(se_pidio, que_hizo, modelo)
+
+    #  TEXTO FIJO y conteos. Del contenido no va NADA al log: ni los dos
+    #  textos, ni el motivo que el modelo escribio citandolos. La orden no se
+    #  nombra porque esta ruta no la conoce -- recibe dos cadenas.
+    registrar("cotejo", "reporte cotejado contra el ticket", tenant=tenant,
+              veredicto=r.veredicto, segundos=r.segundos, tokens=r.tokens,
+              caracteres=len(r.motivo), error=r.error or None)
+
+    if r.tokens:
+        proveedor_c, modelo_c = consumo.partir_referencia(modelo)
+        costo_c, tarifa_c = consumo.costo_de(config, modelo, r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.VISION, proveedor_c, modelo_c,
+            entrada=r.tokens, costo_usd=costo_c, hay_tarifa=tarifa_c,
+            metadatos={"segundos": r.segundos, "veredicto": r.veredicto,
+                       "origen": "cotejo_reporte_campo"})
+
+    return jsonify({"veredicto": r.veredicto, "motivo": r.motivo,
+                    "error": r.error, "segundos": r.segundos,
+                    "tokens": r.tokens}), 200
 
 
 @app.get("/autonomia")
