@@ -122,7 +122,19 @@ export async function guardarAjustes(cookies, valores) {
 }
 
 /**
- * Aprobar o rechazar. Aprobar mueve el ticket de WispHub al equipo que instala.
+ * @param {any} cookies
+ * @param {string} id
+ */
+export async function reintentar(cookies, id) {
+  // Reintenta lo que quedó pendiente con un sistema externo (mover o cerrar
+  // el ticket del ISP, el aviso al cliente). El backend decide qué falta y no
+  // repite lo ya hecho (12/11/2026).
+  return apiRequest(`/solicitudes/${id}/reintentar/`, { method: 'POST', body: {} }, cookies);
+}
+
+/**
+ * Aprobar o rechazar. Aprobar mueve el ticket de WispHub al equipo que instala;
+ * rechazar lo cierra y le avisa al cliente el motivo.
  * @param {any} cookies
  * @param {string} id
  * @param {boolean} aprueba

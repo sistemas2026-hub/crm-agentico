@@ -177,6 +177,36 @@ class SolicitudServicio(BaseModel):
     correo_enviado_en = models.DateTimeField(null=True, blank=True)
     fallo_integracion = models.TextField(blank=True, default="")
 
+    # --- lo que pasa DESPUES de decidir (12/11/2026) -----------------------
+    # Hasta ese dia el unico rastro de los efectos externos era el texto de
+    # 'fallo_integracion', y por eso "se puede reintentar" era falso: nada
+    # sabia QUE habia quedado pendiente. Ahora cada efecto deja su sello, y lo
+    # pendiente se CALCULA de estos sellos (solicitudes/decision.py), no del
+    # texto del fallo.
+    ticket_reasignado_en = models.DateTimeField(null=True, blank=True)
+    ticket_cerrado_en = models.DateTimeField(null=True, blank=True)
+    # Cuantos intentos fallidos llevan los efectos con el ISP. Entra en la
+    # clave de idempotencia que se le manda al motor: el mismo intento
+    # reenviado no sale dos veces, y uno nuevo despues de un fallo si sale.
+    intentos_integracion = models.PositiveSmallIntegerField(default=0)
+
+    # El aviso al cliente cuando se rechaza. El MOTOR garantiza que sale una
+    # sola vez por solicitud (clave fija); esto es lo que la pantalla muestra.
+    AVISO_PENDIENTE = "pendiente"
+    AVISO_ENVIADO = "enviado"
+    AVISO_ESPERANDO = "esperando"       # fuera del horario de la empresa
+    AVISO_NO_ENVIADO = "no_enviado"
+    AVISO_NO_APLICA = "no_aplica"       # rechazos de antes de que existiera
+    aviso_cliente_estado = models.CharField(max_length=16, blank=True, default="")
+    aviso_cliente_motivo = models.CharField(max_length=80, blank=True, default="")
+    aviso_cliente_en = models.DateTimeField(null=True, blank=True)
+
+    # PRE-FACTIBILIDAD: si la decidio Dexter y no una persona, y por que se
+    # aprobo sola o por que quedo para una persona ("fuera de zona", "GPS
+    # dudoso"). Lo lee quien abre la bandeja.
+    decision_automatica = models.BooleanField(default=False)
+    prefactibilidad_motivo = models.CharField(max_length=300, blank=True, default="")
+
     class Meta:
         db_table = "solicitudes_solicitudservicio"
         ordering = ("-created_at",)

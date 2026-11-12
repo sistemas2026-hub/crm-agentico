@@ -10,6 +10,7 @@ from solicitudes.gestion import (
     CancelarSolicitudView,
     DecidirView,
     ExpedienteView,
+    ReintentarView,
     TecnicosView,
 )
 from solicitudes.views import SolicitudCrearView, SolicitudPublicaView
@@ -32,6 +33,9 @@ urlpatterns = [
     path("solicitudes/tecnicos/", TecnicosView.as_view(), name="solicitud-tecnicos"),
     path("solicitudes/<uuid:solicitud_id>/decidir/", DecidirView.as_view(),
          name="solicitud-decidir"),
+    # Lo que quedo pendiente con el ISP o con el aviso al cliente (12/11/2026).
+    path("solicitudes/<uuid:solicitud_id>/reintentar/", ReintentarView.as_view(),
+         name="solicitud-reintentar"),
     # El expediente NO va por /media/: trae documento de identidad, recibo,
     # foto y firma. Se sirve con la misma llave que la bandeja -- ver
     # ExpedienteView.

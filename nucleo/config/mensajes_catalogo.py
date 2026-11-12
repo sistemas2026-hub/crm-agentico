@@ -43,6 +43,8 @@ CAMPOS: dict[str, tuple[str, str]] = {
     "fecha_promesa": ("Fecha prometida de pago", "02/11/2026"),
     "enlace_factura": ("Enlace a la factura", "https://…/factura"),
     "motivo_rechazo": ("Por qué se rechazó el pago", "el comprobante no se lee"),
+    "motivo_factibilidad": ("Por qué no se puede instalar",
+                            "todavía no tenemos red en su sector"),
     "escrito": ("Lo escribe quien envía", "ya revisamos tu equipo"),
 }
 
@@ -137,6 +139,15 @@ EVENTOS: dict[str, dict] = {
         "descripcion": "Al cliente, cuando queda activo su servicio nuevo.",
         "destinatario": "cliente", "disparo": "dexter",
         "campos": _CLIENTE + ["servicio", "plan"]},
+    # 12/11/2026 (auditoria del menu, §4 item 4): rechazar una solicitud de
+    # instalacion no le avisaba al prospecto; el motivo quedaba anotado y nadie
+    # se lo decia. Lo pide el CRM al decidir "sin factibilidad", una vez por
+    # solicitud. Sin servicio ni ticket: todavia no es cliente del ISP.
+    "solicitud_sin_factibilidad": {
+        "grupo": "Ventas", "etiqueta": "Solicitud sin factibilidad",
+        "descripcion": "Al prospecto, cuando su solicitud de instalación se rechaza porque el servicio no llega a su dirección.",
+        "destinatario": "cliente", "disparo": "dexter",
+        "campos": _CLIENTE + ["motivo_factibilidad"]},
 }
 
 #: Una plantilla de partida para cada momento (29/10/2026), con QUE dato va en
@@ -223,6 +234,12 @@ SUGERENCIAS: dict[str, dict] = {
         "cuerpo": "Hola {{1}}, bienvenido a {{2}}. Su servicio {{3}} con el plan {{4}} ya está activo. "
                   "Si necesita ayuda, escríbanos por este medio.",
         "datos": ["cliente_nombre", "empresa", "servicio", "plan"]},
+    "solicitud_sin_factibilidad": {
+        "nombre": "solicitud_sin_factibilidad", "categoria": "UTILITY",
+        "cuerpo": "Hola {{1}}, revisamos su solicitud de instalación y por ahora no podemos "
+                  "prestarle el servicio en esa dirección: {{2}}. Si tiene otra dirección o "
+                  "quiere que lo tengamos en cuenta más adelante, responda este mensaje.",
+        "datos": ["cliente_nombre", "motivo_factibilidad"]},
 }
 
 
@@ -241,7 +258,8 @@ def sugerencia(evento: str) -> dict | None:
 #: configurados desde la pantalla, que dice que todavia no se mandan: un aviso
 #: encendido que nunca sale es peor que uno que dice "todavia no".
 LISTOS: frozenset[str] = frozenset({"seguimiento_ticket", "encuesta_cierre", "visita_programada",
-                                   "ticket_creado_cliente", "caida_masiva", "caida_restablecida"})
+                                   "ticket_creado_cliente", "caida_masiva", "caida_restablecida",
+                                   "solicitud_sin_factibilidad"})
 
 #: Los avisos que se piden desde afuera por POST /avisos/evento (30/10/2026).
 #: Lista CERRADA: esa ruta recibe contexto libre, y abrirla a cualquier aviso
@@ -263,6 +281,13 @@ PROACTIVOS: dict[str, dict] = {
                                "ticket_numero", "ticket_asunto", "fecha_visita", "franja"}),
         "destino": "telefono"},
     "ticket_creado_cliente": {"contexto": frozenset(), "destino": "ticket"},
+    #  12/11/2026: el telefono es el de la solicitud (el numero con el que el
+    #  prospecto escribio por WhatsApp, o el que dejo en el formulario), y el
+    #  motivo es la nota de quien decidio. Nada de direccion ni documento.
+    "solicitud_sin_factibilidad": {
+        "contexto": frozenset({"cliente_nombre", "cliente_apellidos", "cliente_nombre_completo",
+                               "motivo_factibilidad"}),
+        "destino": "telefono"},
 }
 
 RESPALDOS_POR_DEFECTO: dict[str, str] = {

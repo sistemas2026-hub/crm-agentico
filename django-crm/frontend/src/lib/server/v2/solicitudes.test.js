@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiRequest = vi.fn();
 vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }));
 
-const { leerBandeja, leerAjustesDecision, guardarAjustesDecision } = await import(
+const { leerBandeja, leerAjustesDecision, guardarAjustesDecision, reintentar } = await import(
   './solicitudes.js'
 );
 
@@ -57,6 +57,18 @@ describe('Instalaciones: la bandeja', () => {
     await leerBandeja({}, 'aprobada', { automatica: true });
 
     expect(apiRequest.mock.calls[0][0]).toBe('/solicitudes/bandeja/?estado=aprobada&automatica=1');
+  });
+});
+
+describe('Instalaciones: reintentar', () => {
+  it('pide al backend lo pendiente de ESA solicitud y devuelve lo que contesta', async () => {
+    apiRequest.mockResolvedValue({ pendientes: [], aviso_cliente: { estado: 'enviado' } });
+
+    const r = await reintentar({}, 'abc');
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/solicitudes/abc/reintentar/');
+    expect(apiRequest.mock.calls[0][1].method).toBe('POST');
+    expect(r.aviso_cliente.estado).toBe('enviado');
   });
 });
 

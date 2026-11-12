@@ -64,6 +64,24 @@
   const PRECISION_DUDOSA_M = 200;
 
   const mapa = (g) => `https://www.google.com/maps?q=${g.lat},${g.lng}`;
+
+  // Lo pendiente lo calcula el backend (decision.pendientes); acá solo se
+  // nombra (12/11/2026).
+  const QUE_FALTA = {
+    reasignacion: 'mover el ticket al equipo que instala',
+    cierre: 'cerrar el ticket del ISP',
+    aviso: 'avisarle al cliente'
+  };
+  /** El estado del WhatsApp al cliente al rechazar, dicho para una persona. */
+  const textoAviso = (a) => {
+    if (!a?.estado) return '';
+    if (a.estado === 'enviado') return 'Se le avisó al cliente por WhatsApp.';
+    if (a.estado === 'esperando') return 'El aviso al cliente sale cuando abra el horario de avisos de la empresa.';
+    if (a.estado === 'pendiente') return 'El aviso al cliente todavía no salió.';
+    if (a.estado === 'no_aplica') return 'Rechazada antes de que existiera el aviso al cliente: no se le escribió.';
+    return `No se pudo avisar al cliente: ${a.texto || a.motivo || 'motivo desconocido'}.`;
+  };
+  let reintentando = $state('');
   const fecha = (s) => (s ? new Date(s).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '—');
 </script>
 
@@ -115,9 +133,23 @@
       <CheckCircle2 size={16} />
       <span>
         Solicitud {form.estado === 'aprobada' ? 'aprobada' : 'rechazada'}.
-        {#if form.fallo}
-          El ticket de WispHub no se pudo mover: {form.fallo}
+        {#if form.pendientes?.length && form.fallo}
+          Quedó pendiente con el ISP: {form.fallo}
         {/if}
+        {#if form.estado === 'sin_factibilidad' && form.aviso}
+          {textoAviso(form.aviso)}
+        {/if}
+      </span>
+    </div>
+  {/if}
+  {#if form?.reintentado}
+    <div class="ok" class:alerta={form.pendientes?.length}>
+      <CheckCircle2 size={16} />
+      <span>
+        {form.pendientes?.length
+          ? `Sigue pendiente: ${form.pendientes.map((p) => QUE_FALTA[p] ?? p).join(', ')}.`
+          : 'Listo: no queda nada pendiente con el ISP ni con el aviso al cliente.'}
+        {#if form.aviso?.estado === 'no_enviado'}{textoAviso(form.aviso)}{/if}
       </span>
     </div>
   {/if}
@@ -194,16 +226,58 @@
         </div>
       {/if}
 
-      {#if s.fallo_integracion}
+      {#if s.estado === 'sin_factibilidad' && s.aviso_cliente?.estado}
+        <p class="aviso-cliente" class:fallo={s.aviso_cliente.estado === 'no_enviado'}>
+          {textoAviso(s.aviso_cliente)}
+        </p>
+      {/if}
+
+      {#if s.pendientes?.length}
+        <!-- LO PENDIENTE, CON SU BOTÓN (12/11/2026). Antes la pantalla decía
+             «se puede reintentar» y no había cómo: el backend devolvía 409 a
+             todo lo que no estuviera enviada. -->
+        <div class="pendiente">
+          <p class="fallo">
+            <AlertTriangle size={14} />
+            <span>
+              <strong>Falta:</strong> {s.pendientes.map((p) => QUE_FALTA[p] ?? p).join(', ')}.
+              {#if s.fallo_integracion}<span class="tenue">Último error: {s.fallo_integracion}</span>{/if}
+            </span>
+          </p>
+          <form method="POST" action="?/reintentar" use:enhance={() => {
+            reintentando = s.id;
+            return async ({ update }) => { await update({ reset: false }); reintentando = ''; };
+          }}>
+            <input type="hidden" name="id" value={s.id} />
+            <button type="submit" class="decidir" disabled={reintentando === s.id}>
+              {reintentando === s.id ? 'Reintentando…' : 'Reintentar'}
+            </button>
+          </form>
+        </div>
+      {:else if s.fallo_integracion}
         <!-- Esto es lo que quedo a medias con un sistema externo (el ticket
              del ISP, el correo). Antes se guardaba y no se mostraba en
              ninguna parte: el 09/09/2026 una cancelacion dejo el ticket
-             abierto y desde la pantalla parecia que no habia pasado nada. -->
+             abierto y desde la pantalla parecia que no habia pasado nada.
+             Sin pendientes, es historia: lo que fallo ya se resolvio o no se
+             reintenta desde aca (el correo, la creacion del ticket). -->
         <p class="fallo">
           <AlertTriangle size={14} />
-          <span><strong>Quedó pendiente con un sistema externo:</strong> {s.fallo_integracion}</span>
+          <span><strong>Lo que falló con un sistema externo:</strong> {s.fallo_integracion}</span>
         </p>
       {/if}
+
+      <!-- DE DÓNDE VINO (12/11/2026): el prospecto se abre en Prospectos; la
+           conversación no, porque la solicitud no la guarda (el asistente no
+           la anota al crearla). Se dice en vez de inventar un enlace. -->
+      <p class="origen">
+        {#if s.lead_id}
+          <a href="/leads/{s.lead_id}">Ver el prospecto</a>
+        {:else}
+          <span>Sin prospecto asociado (llegó por fuera del chat).</span>
+        {/if}
+        <span class="tenue">· La conversación de origen no queda guardada en la solicitud; se encuentra por el teléfono {s.telefono || ''} en Conversaciones.</span>
+      </p>
 
       <button type="button" class="ver-detalle" onclick={() => alternarDetalle(s.id)}
               aria-expanded={detalles.has(s.id)}>
@@ -280,7 +354,7 @@
           <label class="nota">
             Nota
             <textarea name="nota" bind:value={nota} rows="2"
-              placeholder="Obligatoria si rechazás: el cliente va a preguntar por qué."></textarea>
+              placeholder="Obligatoria si rechazás: se le manda al cliente por WhatsApp, tal cual. Escribila para él."></textarea>
           </label>
           <div class="botones">
             <button type="submit" name="aprueba" value="true" class="aprobar" disabled={enviando === s.id}>
@@ -358,6 +432,11 @@
   }
 
   .fallo { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-size: .83rem; color: var(--v2-rust); }
+  .pendiente { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+  .aviso-cliente { margin: 0; font-size: .85rem; color: var(--v2-slate); }
+  .origen { margin: 0; font-size: .82rem; display: flex; flex-wrap: wrap; gap: 6px; }
+  .origen a { color: var(--v2-ember-text); }
+  .tenue { color: var(--v2-slate); }
 
   /* El motivo de cancelacion se lee como una cita, porque lo es: son las
      palabras del cliente sin resumir ni corregir (ver CancelarSolicitudView). */

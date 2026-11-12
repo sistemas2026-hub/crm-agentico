@@ -55,4 +55,5 @@ class Respuesta:
     def raise_for_status(self):
         if not self.ok:
             import requests
-            raise requests.HTTPError(f"{self.status_code}")
+            #  Como requests: el error lleva la respuesta adentro.
+            raise requests.HTTPError(f"{self.status_code}", response=self)

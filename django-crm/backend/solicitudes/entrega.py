@@ -298,7 +298,8 @@ def entregar(s) -> None:
                           "fallo_integracion", "updated_at"])
 
 
-def cerrar_ticket_wisphub(s, motivo: str) -> None:
+def cerrar_ticket_wisphub(s, motivo: str, *, texto: str | None = None,
+                          clave_idem: str | None = None) -> None:
     """Responde el ticket de instalacion con el motivo y lo cierra.
 
     Existe porque cancelar solo en el CRM deja el ticket vivo en WispHub: el
@@ -325,12 +326,22 @@ def cerrar_ticket_wisphub(s, motivo: str) -> None:
     token = os.environ.get("MOTOR_SERVICE_TOKEN")
     if token:
         cabeceras["X-Servicio-Token"] = token
+    # LA MISMA SOLICITUD NO CIERRA DOS VECES EL TICKET (12/11/2026): el motor
+    # no repite una mutacion con la misma clave (/interno/herramienta,
+    # nucleo/seguridad/idempotencia.py). Quien llama arma la clave.
+    if clave_idem:
+        cabeceras["Idempotency-Key"] = clave_idem
 
     # El motivo va TAL CUAL lo escribio el cliente, entre comillas y con quien
     # lo dijo: quien lea el ticket despues tiene que poder distinguir lo que
     # dijo la persona de lo que interpretamos nosotros.
-    texto = (f"El cliente cancelo la solicitud de instalacion.\n\n"
-             f"Motivo, en sus palabras: \"{motivo}\"")
+    #
+    # 'texto' (12/11/2026): el rechazo por factibilidad cierra el mismo ticket
+    # con otro texto -- ahi el motivo no lo dijo el cliente, lo decidio el
+    # equipo.
+    if texto is None:
+        texto = (f"El cliente cancelo la solicitud de instalacion.\n\n"
+                 f"Motivo, en sus palabras: \"{motivo}\"")
     r = requests.post(
         f"{base}/interno/herramienta/{herramienta}",
         params={"tenant": tenant},

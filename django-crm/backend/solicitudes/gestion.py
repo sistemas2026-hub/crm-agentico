@@ -35,6 +35,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.permissions import HasOrgContext
+from solicitudes import decision
 from solicitudes.models import AjustesDeInstalacion, SolicitudServicio
 from solicitudes.motivos import SIN_MOTIVO, es_de_relleno
 from solicitudes.permisos import negado
@@ -267,6 +268,11 @@ class BandejaView(APIView):
             # Por defecto, lo que espera una decision. Es para lo que se abre
             # esta pantalla; el resto se filtra a proposito.
             qs = qs.filter(estado=SolicitudServicio.ENVIADA)
+        # Las que aprobo Dexter solo (pre-factibilidad), en su propia pestaña:
+        # quien quiera revisar lo que se decidio sin una persona las encuentra
+        # juntas, con el motivo (12/11/2026).
+        if request.query_params.get("automatica") in ("1", "true"):
+            qs = qs.filter(decision_automatica=True)
 
         return Response({"solicitudes": [{
             "id": str(s.id),
@@ -306,12 +312,10 @@ class BandejaView(APIView):
             "cancelada_en": s.cancelada_en.isoformat() if s.cancelada_en else None,
             "nota_revision": s.nota_revision,
             "revisada_en": s.revisada_en.isoformat() if s.revisada_en else None,
-            # El nombre de quien decidio, no su id: la pantalla lo muestra y un
-            # id no le dice nada a nadie.
-            "revisada_por": (getattr(s.revisada_por, "user", None)
-                             and s.revisada_por.user.get_full_name()
-                             or getattr(getattr(s.revisada_por, "user", None),
-                                        "email", "") or ""),
+            # El nombre de quien decidio va en 'revisada_por', desde
+            # decision.para_pantalla (abajo). Aca se llamaba a
+            # 'user.get_full_name()', que el User de este CRM no tiene: toda
+            # solicitud ya revisada rompia el listado (12/11/2026).
             "correo_enviado_en": (s.correo_enviado_en.isoformat()
                                   if s.correo_enviado_en else None),
 
@@ -333,6 +337,18 @@ class BandejaView(APIView):
             "autorizaciones_en": (s.autorizaciones_en.isoformat()
                                   if s.autorizaciones_en else None),
             "ip_autorizaciones": s.ip_autorizaciones,
+
+            # El prospecto, para enlazar a /leads/<id>. La conversacion de
+            # origen NO la sabe la solicitud: el motor no la anota al crearla
+            # (registrar_solicitud_servicio solo manda el telefono). La
+            # pantalla lo dice en vez de inventar un enlace (12/11/2026).
+            "lead_id": str(s.lead_id) if s.lead_id else None,
+
+            # Lo que paso despues de decidir: que quedo pendiente con el ISP,
+            # si el aviso al cliente salio y por que no, quien decidio (una
+            # persona o Dexter) y el motivo de la pre-factibilidad. Pisa el
+            # 'revisada_por' de arriba con la misma regla mas el autor Dexter.
+            **decision.para_pantalla(s),
         } for s in qs.select_related("revisada_por__user")
                      .order_by("-enviada_en")[:200]]})
 
@@ -370,32 +386,48 @@ class DecidirView(APIView):
             return Response({"error": "Para rechazar hace falta anotar el motivo."},
                             status=http.HTTP_400_BAD_REQUEST)
 
-        s.estado = (SolicitudServicio.APROBADA if aprueba
-                    else SolicitudServicio.SIN_FACTIBILIDAD)
-        s.revisada_por = request.profile
-        s.revisada_en = timezone.now()
-        s.nota_revision = nota
-
-        if aprueba and s.ticket_wisphub:
-            detalle = (f"Factibilidad confirmada. {nota}".strip() + "\n\n"
-                       f"{s.nombre_completo} | {s.direccion}, {s.barrio}")
-            if s.tiene_gps:
-                detalle += f" | GPS: {s.gps_lat}, {s.gps_lng}"
-            try:
-                r = _motor("/interno/herramienta/reasignar_ticket_instalacion",
-                           params={"tenant": _tenant(org)},
-                           json={"id_ticket": s.ticket_wisphub,
-                                 "descripcion": detalle[:400]}, timeout=45)
-                r.raise_for_status()
-            except Exception as e:                  # noqa: BLE001
-                previo = (s.fallo_integracion + " | ") if s.fallo_integracion else ""
-                s.fallo_integracion = (previo + f"reasignacion: {e}")[:1000]
-
-        s.save(update_fields=["estado", "revisada_por", "revisada_en",
-                              "nota_revision", "fallo_integracion", "updated_at"])
+        #  LA DECISION Y SUS EFECTOS VIVEN EN solicitudes/decision.py
+        #  (12/11/2026): rechazar ahora cierra el ticket del ISP y le avisa al
+        #  prospecto, y el prospecto (Lead) sigue a su solicitud. Si dos
+        #  personas deciden a la vez, decide la primera y la otra recibe 409.
+        if not decision.decidir(s, aprueba=aprueba, nota=nota, autor=request.profile):
+            s.refresh_from_db()
+            return Response(
+                {"error": f"Esta solicitud ya esta en estado '{s.get_estado_display()}'."},
+                status=http.HTTP_409_CONFLICT)
+        s.refresh_from_db()
         return Response({"estado": s.estado,
                          "revisada_en": s.revisada_en.isoformat(),
-                         "fallo": s.fallo_integracion or ""})
+                         "fallo": s.fallo_integracion or "",
+                         **decision.para_pantalla(s)})
+
+
+class ReintentarView(APIView):
+    """Reejecuta lo que quedo pendiente con un sistema externo (12/11/2026).
+
+    Hasta ese dia la pantalla decia «se puede reintentar» y no habia como:
+    DecidirView respondia 409 a toda solicitud que no estuviera 'enviada'. Lo
+    pendiente lo calcula decision.pendientes() de los sellos de cada efecto;
+    sin nada pendiente, 409. Idempotente: un efecto ya hecho no se repite, y el
+    aviso al cliente lleva una clave fija que el motor no manda dos veces.
+    """
+
+    permission_classes = (IsAuthenticated, HasOrgContext)
+
+    def post(self, request, solicitud_id: str):
+        if (sin_permiso := negado(request)) is not None:
+            return sin_permiso
+        s = SolicitudServicio.objects.filter(org=request.profile.org, id=solicitud_id).first()
+        if s is None:
+            return Response({"error": "No existe esa solicitud."},
+                            status=http.HTTP_404_NOT_FOUND)
+        if not decision.pendientes(s):
+            return Response({"error": "No hay nada pendiente para reintentar en esta solicitud.",
+                             **decision.para_pantalla(s)},
+                            status=http.HTTP_409_CONFLICT)
+        decision.reintentar(s)
+        return Response({"estado": s.estado, "fallo": s.fallo_integracion or "",
+                         **decision.para_pantalla(s)})
 
 
 class _RendererCrudo(BaseRenderer):
@@ -690,17 +722,13 @@ class CancelarSolicitudView(APIView):
         # El ticket de WispHub queda vivo si nadie lo cierra, y alguien saldria
         # a instalar. Va DESPUES de guardar y fuera de la transaccion, mismo
         # criterio que el resto del modulo: si el tercero no responde, la
-        # cancelacion no se deshace -- queda anotada para reintentar.
+        # cancelacion no se deshace -- queda anotada y desde el 12/11/2026 se
+        # puede reintentar de verdad (ReintentarView): el cierre deja su sello
+        # en 'ticket_cerrado_en' y lo pendiente se calcula de ahi.
+        decision.sincronizar_lead(s)
         fallo = ""
-        if s.ticket_wisphub:
-            from solicitudes.entrega import cerrar_ticket_wisphub
-            try:
-                cerrar_ticket_wisphub(s, motivo)
-            except Exception as e:                   # noqa: BLE001
-                fallo = f"cierre ticket: {type(e).__name__}: {e}"
-                previo = (s.fallo_integracion + " | ") if s.fallo_integracion else ""
-                s.fallo_integracion = (previo + fallo)[:1000]
-                s.save(update_fields=["fallo_integracion", "updated_at"])
+        if not decision.cerrar_ticket(s):
+            fallo = s.fallo_integracion.rsplit(" | ", 1)[-1]
 
         return Response({"estado": s.estado,
                          "cancelada_en": s.cancelada_en.isoformat(),

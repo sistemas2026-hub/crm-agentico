@@ -90,6 +90,24 @@ comprobar(llamadas[-1]["contexto"] == {"franja": "8 a 12"},
           "la empresa, la fecha o un dato de otro evento no se pueden pisar desde afuera",
           str(llamadas[-1]["contexto"]))
 
+print("\nla solicitud sin factibilidad (12/11/2026): telefono y motivo, nada mas")
+r = http.post("/avisos/evento", json={"tenant": "rapilink", "evento": "solicitud_sin_factibilidad",
+                                       "clave": "solicitud:s-1:sin_factibilidad",
+                                       "telefono": "573001234567",
+                                       "contexto": {"cliente_nombre": "Ana",
+                                                    "motivo_factibilidad": "no hay red en su sector",
+                                                    "cliente_direccion": "Calle 1",
+                                                    "enlace_factura": "http://x"}})
+comprobar(r.status_code == 200, "el evento entra por la ruta de avisos", r.get_data(as_text=True)[:200])
+comprobar(llamadas[-1]["evento"] == "solicitud_sin_factibilidad"
+          and llamadas[-1]["clave"] == "solicitud:s-1:sin_factibilidad"
+          and llamadas[-1]["telefono_crudo"] == "573001234567",
+          "con la clave de la solicitud y el telefono de la solicitud", str(llamadas[-1:]))
+comprobar(llamadas[-1]["contexto"] == {"cliente_nombre": "Ana",
+                                       "motivo_factibilidad": "no hay red en su sector"},
+          "la direccion u otro dato que no es de este evento no viaja",
+          str(llamadas[-1]["contexto"]))
+
 print("\nel ticket creado: el motor confirma el hecho contra el ISP")
 respuesta = {"enviado": True, "motivo": None}
 lecturas_ficha: list[tuple] = []

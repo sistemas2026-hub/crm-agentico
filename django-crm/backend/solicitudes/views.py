@@ -338,6 +338,12 @@ class SolicitudPublicaView(APIView):
 
         entregar(solicitud)
 
+        # El prospecto sigue a su solicitud: enviada -> 'in process'
+        # (12/11/2026). Nunca rompe la respuesta: la solicitud ya esta a salvo.
+        from solicitudes import decision
+
+        decision.sincronizar_lead(solicitud)
+
         return Response({
             "ok": True,
             "enviada_en": solicitud.enviada_en.isoformat(),
