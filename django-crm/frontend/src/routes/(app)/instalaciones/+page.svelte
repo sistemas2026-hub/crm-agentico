@@ -28,13 +28,20 @@
   // 'Recibidas' es la vista por defecto (estado vacío = lo que espera una
   // decisión, que es para lo que se abre esta pantalla). Las otras cuatro son
   // consulta: lo ya resuelto, y lo que todavía no llegó.
+  // 'Aprobadas por Dexter' (12/11/2026): las que aprobó sola la
+  // pre-factibilidad, con su motivo, para revisarlas juntas.
   const PESTANAS = [
     { estado: '', texto: 'Recibidas' },
     { estado: 'nueva', texto: 'En proceso' },
     { estado: 'aprobada', texto: 'Aprobadas' },
+    { estado: 'aprobada', automatica: true, texto: 'Aprobadas por Dexter' },
     { estado: 'sin_factibilidad', texto: 'Sin factibilidad' },
     { estado: 'cancelada', texto: 'Canceladas' }
   ];
+  const hrefDe = (p) =>
+    p.estado ? `?estado=${p.estado}${p.automatica ? '&automatica=1' : ''}` : '/instalaciones';
+  const esActiva = (p) =>
+    (data.estado || '') === p.estado && Boolean(data.automatica) === Boolean(p.automatica);
   import { CheckCircle2, AlertTriangle, MapPin, FileText, Inbox } from '@lucide/svelte';
 
   /** @type {{ data: any, form: any }} */
@@ -105,10 +112,10 @@
   <nav class="pestanas" aria-label="Filtrar por estado">
     {#each PESTANAS as p}
       <a
-        href={p.estado ? `?estado=${p.estado}` : '/instalaciones'}
+        href={hrefDe(p)}
         class="pestana"
-        class:activa={(data.estado || '') === p.estado}
-        aria-current={(data.estado || '') === p.estado ? 'page' : undefined}
+        class:activa={esActiva(p)}
+        aria-current={esActiva(p) ? 'page' : undefined}
       >{p.texto}</a>
     {/each}
   </nav>
@@ -224,6 +231,15 @@
           </div>
           <p class="motivo-texto">{s.nota_revision}</p>
         </div>
+      {/if}
+
+      {#if s.prefactibilidad_motivo}
+        <!-- Por qué Dexter la aprobó sola, o por qué la dejó para una persona
+             («fuera de zona», «GPS dudoso»). Lo escribe el backend. -->
+        <p class="prefact" class:auto={s.decision_automatica}>
+          <strong>{s.decision_automatica ? 'Aprobada por Dexter:' : 'Pre-factibilidad:'}</strong>
+          {s.prefactibilidad_motivo}
+        </p>
       {/if}
 
       {#if s.estado === 'sin_factibilidad' && s.aviso_cliente?.estado}
@@ -434,6 +450,8 @@
   .fallo { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-size: .83rem; color: var(--v2-rust); }
   .pendiente { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
   .aviso-cliente { margin: 0; font-size: .85rem; color: var(--v2-slate); }
+  .prefact { margin: 0; font-size: .85rem; color: var(--v2-clay); }
+  .prefact.auto { color: var(--v2-moss); }
   .origen { margin: 0; font-size: .82rem; display: flex; flex-wrap: wrap; gap: 6px; }
   .origen a { color: var(--v2-ember-text); }
   .tenue { color: var(--v2-slate); }

@@ -340,9 +340,16 @@ class SolicitudPublicaView(APIView):
 
         # El prospecto sigue a su solicitud: enviada -> 'in process'
         # (12/11/2026). Nunca rompe la respuesta: la solicitud ya esta a salvo.
-        from solicitudes import decision
+        from solicitudes import decision, prefactibilidad
 
         decision.sincronizar_lead(solicitud)
+
+        # PRE-FACTIBILIDAD (12/11/2026): si la empresa la encendio y el caso
+        # esta claro (zona con cuadrilla de instalacion y GPS preciso), Dexter
+        # aprueba sola con la misma reasignacion que una persona. Si no, queda
+        # en la bandeja con el motivo. Despues de entregar, porque aprobar es
+        # mover el ticket que entregar acaba de crear. Nunca lanza.
+        prefactibilidad.aplicar(solicitud)
 
         return Response({
             "ok": True,

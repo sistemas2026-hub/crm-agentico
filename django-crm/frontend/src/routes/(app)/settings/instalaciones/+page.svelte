@@ -178,6 +178,29 @@
         </p>
       {/if}
     </fieldset>
+
+    <!-- PRE-FACTIBILIDAD AUTOMÁTICA (12/11/2026). Nace apagada: encenderla
+         cambia lo que pasa con cada solicitud que llega. -->
+    <fieldset class="tarjeta" disabled={!data.can_edit || guardandoDecision}>
+      <legend>Pre-factibilidad automática</legend>
+      <p class="ayuda">
+        Cuando llega una solicitud, Dexter la aprueba sola si el barrio está en una zona que
+        cubre una cuadrilla de instalación y la ubicación del GPS es precisa. Mueve el ticket al
+        equipo que instala igual que una persona, y queda en la pestaña «Aprobadas por Dexter»
+        con el motivo. Si algo no está claro («fuera de zona», «GPS dudoso»), queda en la
+        bandeja para una persona. <strong>Nunca rechaza sola.</strong>
+      </p>
+      <label class="area">
+        <input type="checkbox" name="prefactibilidad_activa"
+               checked={Boolean(d.prefactibilidad_activa)} />
+        <span>Aprobar sola las solicitudes claras</span>
+      </label>
+      <label class="campo-numero">
+        <span>Precisión máxima del GPS, en metros</span>
+        <input type="number" name="precision_gps_maxima_m" min="1" max="5000" step="1"
+               value={d.precision_gps_maxima_m ?? 200} />
+      </label>
+    </fieldset>
     {#if form?.de === 'decision' && form?.error}
       <div class="alerta"><AlertTriangle size={16} /><span>{form.error}</span></div>
     {/if}
@@ -186,7 +209,7 @@
     {/if}
     {#if data.can_edit}
       <button type="submit" class="guardar" disabled={guardandoDecision}>
-        {guardandoDecision ? 'Guardando…' : 'Guardar quién decide'}
+        {guardandoDecision ? 'Guardando…' : 'Guardar quién decide y la pre-factibilidad'}
       </button>
     {/if}
   </form>
@@ -232,6 +255,8 @@
   .areas { display: flex; flex-direction: column; gap: 6px; }
   .area { display: flex; align-items: center; gap: 9px; font-size: .92rem; cursor: pointer; }
   .area input { width: auto; }
+  .campo-numero { display: flex; flex-direction: column; gap: 5px; font-size: .88rem; }
+  .campo-numero input { max-width: 160px; }
   .aviso-vacio { display: flex; gap: 7px; align-items: center; margin: 0; font-size: .84rem; color: var(--v2-clay); }
 
   .alerta, .ok {

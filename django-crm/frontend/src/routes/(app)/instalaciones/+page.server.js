@@ -11,10 +11,12 @@ import { decidir, leerBandeja, reintentar } from '$lib/server/v2/solicitudes.js'
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, url }) {
   const estado = url.searchParams.get('estado') ?? '';
-  const { solicitudes, error, sinPermiso } = await leerBandeja(cookies, estado);
+  // Las aprobadas por Dexter (pre-factibilidad) son su propia pestaña.
+  const automatica = url.searchParams.get('automatica') === '1';
+  const { solicitudes, error, sinPermiso } = await leerBandeja(cookies, estado, { automatica });
   // 'sinPermiso' VIAJA HASTA LA PÁGINA (12/11/2026): sin él, un 403 se veía
   // como "No hay solicitudes esperando" y nadie sabía por qué.
-  return { solicitudes, error, estado, sinPermiso: Boolean(sinPermiso) };
+  return { solicitudes, error, estado, automatica, sinPermiso: Boolean(sinPermiso) };
 }
 
 /** @type {import('./$types').Actions} */

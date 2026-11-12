@@ -60,9 +60,16 @@ export const actions = {
     if (locals.profile?.role !== 'ADMIN') return fail(403, { error: SOLO_ADMIN, de: 'decision' });
 
     const form = await request.formData();
+    const metros = Number(form.get('precision_gps_maxima_m') ?? 200);
+    if (!Number.isInteger(metros) || metros < 1 || metros > 5000) {
+      return fail(400, { error: 'La precisión máxima va entre 1 y 5000 metros.', de: 'decision' });
+    }
     try {
       await guardarAjustesDecision(cookies, {
-        areas_que_deciden: form.getAll('areas_que_deciden').map((a) => a.toString())
+        areas_que_deciden: form.getAll('areas_que_deciden').map((a) => a.toString()),
+        // Un checkbox apagado no viaja en el formulario: ausente = apagada.
+        prefactibilidad_activa: form.get('prefactibilidad_activa') === 'on',
+        precision_gps_maxima_m: metros
       });
     } catch (/** @type {any} */ err) {
       return fail(400, { error: err?.message || 'No se pudo guardar.', de: 'decision' });
