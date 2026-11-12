@@ -12,6 +12,7 @@ from campo import (
     despacho_pantalla_views,
     despacho_views,
     dia_publicado_views,
+    hilo_del_cliente_views,
     inventario_operacion_views,
     inventario_views,
     material_del_dia_views,
@@ -158,6 +159,14 @@ urlpatterns = [
     path("trabajos/crear/", despacho_views.CrearOrdenView.as_view(), name="trabajo_crear"),
     path("trabajos/<uid:pk>/asignar/", despacho_views.AsignarTrabajoView.as_view(), name="trabajo_asignar"),
     path("trabajos/<uid:pk>/validar/", despacho_views.ValidarTrabajoView.as_view(), name="trabajo_validar"),
+    #  EL HILO DEL CLIENTE (12/11/2026): ticket ↔ orden ↔ cliente, en tres
+    #  lecturas. Ver campo/hilo_del_cliente.py.
+    path("casos/<uid:pk>/ordenes/", hilo_del_cliente_views.OrdenesDelCasoView.as_view(),
+         name="ordenes_del_caso"),
+    path("trabajos/<uid:pk>/hilo/", hilo_del_cliente_views.HiloDeOrdenView.as_view(),
+         name="trabajo_hilo"),
+    path("clientes/<str:servicio>/", hilo_del_cliente_views.FichaDelClienteView.as_view(),
+         name="ficha_del_cliente"),
     path("trabajos/<uid:pk>/", views.TrabajoDetailView.as_view(), name="trabajo_detail"),
     path("trabajos/<uid:pk>/acciones/", views.AccionesTrabajoView.as_view(), name="trabajo_acciones"),
     # Que material toco esta orden. Solo lectura: mover inventario entra por

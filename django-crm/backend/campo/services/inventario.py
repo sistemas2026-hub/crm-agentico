@@ -673,7 +673,7 @@ def historia_de(org, material, serie) -> list:
     """
     movs = (
         MovimientoDeMaterial.objects.filter(org=org, material=material, serie=serie)
-        .select_related("ubicacion_origen", "ubicacion_destino")
+        .select_related("ubicacion_origen", "ubicacion_destino", "orden")
         .order_by("ocurrido_en", "created_at")
     )
     salida = []
@@ -685,6 +685,10 @@ def historia_de(org, material, serie) -> list:
             "desde": m.ubicacion_origen.nombre if m.ubicacion_origen else None,
             "hacia": m.ubicacion_destino.nombre if m.ubicacion_destino else None,
             "orden": str(m.orden_id) if m.orden_id else None,
+            #  El numero, para dibujar «OT-n» como enlace (12/11/2026): la
+            #  pantalla recibia el id y lo descartaba porque no tenia que
+            #  mostrar ni a donde ir.
+            "orden_numero": m.orden.numero if m.orden_id else None,
             "motivo": m.motivo or "",
         })
     return salida

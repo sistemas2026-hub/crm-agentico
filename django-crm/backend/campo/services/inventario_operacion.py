@@ -770,6 +770,9 @@ def pedidos_a_bodega(org, *, desde=None, hasta=None) -> list[dict]:
         "unidad": p.material.unidad,
         "persona": nombre_de(p.profile) if p.profile_id else None,
         "orden_numero": p.orden.numero if p.orden_id else None,
+        #  El id viaja para que «OT-n» sea un enlace a la pagina de la orden
+        #  (12/11/2026): con el numero solo, la pantalla no tiene a donde ir.
+        "orden_id": str(p.orden_id) if p.orden_id else None,
         "motivo": _tapar(p.motivo),
         "resuelto_por": nombre_de(p.resuelto_por) if p.resuelto_por_id else None,
         "resuelto_en": p.resuelto_en.isoformat() if p.resuelto_en else None,
