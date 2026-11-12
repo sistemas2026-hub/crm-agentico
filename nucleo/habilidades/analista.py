@@ -63,9 +63,11 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+from nucleo.canales.canal import REALES
 from nucleo.modelo import cliente
 from nucleo.observabilidad.registro import registrar
 from nucleo.persistencia.db import sesion
+from nucleo.seguridad import redaccion
 
 # Por debajo de esto no hay patron, hay casualidad. Es el numero que separa
 # "esto pasa" de "esto paso": con 2 casos cualquier conversacion rara genera
@@ -125,6 +127,14 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
     despues si vale la pena redactar algo.
     """
     patrones: list[Patron] = []
+    # SOLO CANALES REALES (12/11/2026). Hasta hoy las tres senales contaban
+    # tambien el simulador y el asistente interno: treinta pruebas de una
+    # persona ensayando el mismo caso en /simulador-whatsapp alcanzaban el
+    # piso y salian como "hueco de la operacion real" -- una habilidad
+    # motivada por el equipo probando, no por clientes. Mismo criterio que la
+    # autonomia ganada (nucleo/canales/api.py, medicion con canales.REALES):
+    # la evidencia de lo que pasa con clientes sale de los canales de clientes.
+    reales = sorted(REALES)
     with sesion(tenant) as (cur, org):
         # LO QUE YA ESTA CUBIERTO NO SE VUELVE A PROPONER.
         #
@@ -154,6 +164,7 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                       count(*) as n, array_agg(id::text) as ids
                  from asistente.conversations
                 where organization_id = %s
+                  and canal = any(%s)
                   and escalada_a_humano
                   and motivo_escalamiento is not null
                   and rol_efectivo is not null
@@ -161,7 +172,7 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                 group by rol_efectivo, motivo_escalamiento
                having count(*) >= %s
                 order by count(*) desc""",
-            (org, dias, minimo))
+            (org, reales, dias, minimo))
         for f in _filas(cur):
             if (f["rol"], f["motivo"]) in cubiertos:
                 continue
@@ -180,12 +191,13 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                   from asistente.messages m
                   join asistente.conversations c on c.id = m.conversation_id
                  where m.organization_id = %s and m.rol = 'assistant'
+                   and c.canal = any(%s)
                    and c.rol_efectivo is not null
                    and m.creado_en > now() - make_interval(days => %s)
                    and ({like})
                  group by c.rol_efectivo
                 having count(distinct c.id) >= %s""",
-            (org, dias, *[f"%{f}%" for f in FRASES_SIN_PROCEDIMIENTO], minimo))
+            (org, reales, dias, *[f"%{f}%" for f in FRASES_SIN_PROCEDIMIENTO], minimo))
         for f in _filas(cur):
             patrones.append(Patron(
                 rol=f["rol"], senal="sin_procedimiento",
@@ -201,10 +213,11 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                  join asistente.habilidades h on h.id = u.habilidad_id
                  join asistente.conversations c on c.id = u.conversation_id
                 where u.organization_id = %s and c.escalada_a_humano
+                  and c.canal = any(%s)
                   and u.creado_en > now() - make_interval(days => %s)
                 group by u.rol, h.codigo
                having count(distinct c.id) >= %s""",
-            (org, dias, minimo))
+            (org, reales, dias, minimo))
         for f in _filas(cur):
             patrones.append(Patron(
                 rol=f["rol"], senal="habilidad_insuficiente",
@@ -227,7 +240,15 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                     order by creado_en limit %s""",
                 (org, p.conversaciones[:MUESTRAS_POR_PATRON],
                  MUESTRAS_POR_PATRON))
-            p.muestras = [f["contenido"][:400] for f in _filas(cur)]
+            # REDACTADAS ANTES DE SALIR (12/11/2026). Las muestras van al
+            # modelo y lo que el modelo devuelve queda persistido como los
+            # pasos de una habilidad -- que despues se inyecta en el prompt
+            # de cada turno. Un telefono o una cedula que el cliente escribio
+            # podia terminar escrito en un procedimiento vigente. Se redacta
+            # ANTES de recortar: cortar primero puede partir un numero en un
+            # pedazo que el patron ya no reconoce.
+            p.muestras = [redaccion.redactar(f["contenido"])[:400]
+                          for f in _filas(cur)]
     return patrones
 
 
@@ -271,6 +292,10 @@ eso y el procedimiento no se activaria nunca.
 4. Los pasos son imperativos, numerados, concretos y en orden. Nada de \
 consejos generales tipo "se empatico".
 5. Todo en español, sin markdown.
+6. No copies a los pasos ni al disparador ningun dato personal de las \
+muestras: nombres, telefonos, documentos, direcciones, correos. Un \
+procedimiento es para todos los clientes; si un paso necesita un dato, dice \
+cual pedir, nunca el de una persona.
 
 Responde SOLO un objeto JSON, sin texto alrededor:
 {{"nombre": "...", "cuando_usarla": "...", "pasos": "1. ...\\n2. ..."}}
