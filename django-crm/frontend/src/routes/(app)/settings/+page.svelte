@@ -120,7 +120,7 @@
       items: [
         {
           href: '/team',
-          title: 'Equipo y acceso',
+          title: 'Equipo y accesos',
           body: 'Quién puede iniciar sesión, y qué le permite hacer su rol.',
           // People counts are admin-only oversight; a member's fan-out gets no
           // totals (the endpoint 403s), so the row lists the destination with

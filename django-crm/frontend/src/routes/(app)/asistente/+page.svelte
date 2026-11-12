@@ -132,14 +132,14 @@
 
 <PageHeader title="Asistente">
   {#snippet sub()}
-    Pregunta por clientes, tickets o casos -- por ejemplo: "¿hay casos en estado asignado?"
+    Preguntá por clientes, tickets o casos — por ejemplo: «¿hay casos en estado asignado?»
   {/snippet}
 </PageHeader>
 
 <div class="chat">
   <div class="chat-mensajes">
     {#if mensajes.length === 0}
-      <p class="chat-vacio">Escribi un mensaje para empezar.</p>
+      <p class="chat-vacio">Escribí un mensaje para empezar.</p>
     {/if}
     {#each mensajes as m}
       <div class="chat-burbuja chat-{m.rol}">
@@ -202,7 +202,7 @@
       class="v2-input"
       type="text"
       bind:value={entrada}
-      placeholder="Escribi tu mensaje…"
+      placeholder="Escribí tu mensaje…"
       disabled={enviando}
     />
     <button class="v2-btn v2-btn-primary" type="submit" disabled={enviando}>Enviar</button>

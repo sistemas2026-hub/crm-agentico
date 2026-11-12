@@ -528,14 +528,17 @@
               {/if}
               <div class="ejemplo-meta v2-sub">
                 {relativeTime(r.creado_en)} ·
-                <a href="/conversaciones/{r.conversation_id}">Ver conversación completa</a> ·
-                <button type="button" class="quitar-marca-link" style="color:var(--v2-moss,#15803d)"
-                  onclick={() => resolverRevision(r, 'aprobar')}>
-                  Aprobar
-                </button> ·
-                <button type="button" class="quitar-marca-link" onclick={() => resolverRevision(r, 'descartar')}>
-                  Descartar
-                </button>
+                <a href="/conversaciones/{r.conversation_id}">Ver conversación completa</a>
+                {#if esAdmin}
+                  ·
+                  <button type="button" class="quitar-marca-link" style="color:var(--v2-moss,#15803d)"
+                    onclick={() => resolverRevision(r, 'aprobar')}>
+                    Aprobar
+                  </button> ·
+                  <button type="button" class="quitar-marca-link" onclick={() => resolverRevision(r, 'descartar')}>
+                    Descartar
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}

@@ -143,6 +143,15 @@ function toDoc(d, viewer) {
       name: d.created_by?.name || d.created_by?.email || 'Desconocido'
     },
     created_at: d.created_at,
+    // Estado en el corpus del asistente. El serializer lo manda y la lista lo
+    // lee ({#if d.usar_en_asistente} ...); hasta el 12/11/2026 esta capa lo
+    // dejaba caer y el indicador «N fragmentos / No se pudo indexar» nunca se
+    // dibujaba -- el mismo patron que `requiere_noc` (CLAUDE.md §6).
+    usar_en_asistente: Boolean(d.usar_en_asistente),
+    roles_asistente: d.roles_asistente ?? '',
+    estado_ingesta: d.estado_ingesta ?? '',
+    ingesta_detalle: d.ingesta_detalle ?? '',
+    ingesta_fragmentos: typeof d.ingesta_fragmentos === 'number' ? d.ingesta_fragmentos : null,
     can_write: viewer.role === 'ADMIN' || (createdById != null && createdById === viewer.userId)
   };
 }

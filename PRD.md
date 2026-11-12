@@ -1131,6 +1131,14 @@ Guarda: `sesion.test.js` recorre `atenderSesion()` entera con el backend doblado
 
 **Lo que no se hizo.** No se tocó el backend ni la rotación: la lista negra inmediata es la garantía contra un refresh robado y se queda. No se midió en producción —el log del frontend tiene la línea `Token refresh failed:` con `status=401` para el camino 1 y con `ECONNABORTED`/`ECONNREFUSED` para el 2; desde este cambio el rechazo se registra como `sesion_refresh_rechazado`—. **Lo que la reabre:** que una sesión se cierre sin que el log muestre un `sesion_refresh_rechazado` justo antes.
 
+### 8.23 DECISIÓN — Auditoría del menú: las pantallas del ISP son islas, y lo que se marca para enseñar no llega (12/11/2026)
+
+**Lo que la originó.** Pedido del dueño: recorrer cada sección del menú, cómo funciona, cómo se engrana con las demás, qué está mal y qué falta, «la idea es ser un gran software». Se hizo con ocho agentes de solo lectura en paralelo (uno por grupo del menú y uno transversal) y la evidencia completa, con `archivo:línea`, quedó en [SPEC/AUDITORIA_MENU_2026-11-12.md](SPEC/AUDITORIA_MENU_2026-11-12.md). Seis conclusiones: las pantallas de Dexter no se enlazan entre sí (el ticket no volvía a la Bandeja; Instalaciones, Inventario y Centro de mando no salen a ningún lado); no hay una identidad única del cliente (cinco representaciones sin clave de unión); siguen existiendo aprobaciones humanas para trabajo no crítico (Supervisor NOC en `NIVEL_OBSERVAR`, `pre_close` de tickets, factibilidad); lo que el equipo marca para enseñarle a Dexter no llega (ejemplos del Manual sin lector, revisiones aprobadas sin efecto, Base de conocimiento fuera del RAG); un tercio del menú es herencia del CRM sin alimentación propia; y la ficha del cliente se ve completa sin mirar el rol.
+
+**Lo que se decidió y se hizo el mismo día** (veinte arreglos chicos; detalle en el documento): resolver una revisión del Manual es de ADMIN en el servidor; el indicador de ingesta de Documentos llega a la pantalla (la capa servidor lo dejaba caer, con prueba); Hoy pide la cola con el mismo tope que la Bandeja; desde el ticket se abre la conversación; ningún error le nombra una variable de entorno a la persona; los títulos respetan la terminología del tenant como el menú; y una docena de textos que mentían o mandaban a pantallas inexistentes.
+
+**Lo que se decidió NO hacer todavía, y queda como lista ordenada en el documento (§4):** lo grande se decide con el dueño porque reordena pantallas y autonomía: invertir el defecto del Supervisor NOC, pre-factibilidad automática, ficha del cliente por `id_servicio`, cerrar el bucle del Manual hacia los casos dorados, podar el menú heredado, y las dos violaciones de §3.3 (textos de escalamiento solo por YAML; variables de empresa sin pantalla). **Lo que la reabre:** cada ítem de esa lista se cierra con su hash en el propio documento.
+
 ---
 
 ## 9. Despliegue

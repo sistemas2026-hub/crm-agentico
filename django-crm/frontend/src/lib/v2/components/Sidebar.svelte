@@ -143,7 +143,7 @@
           termKey: 'opportunity.plural'
         },
         { href: '/leads', label: 'Prospectos', icon: Target, count: 'leads', termKey: 'lead.plural' },
-        { href: '/goals', label: 'Objetivos', icon: Trophy }
+        { href: '/goals', label: 'Metas', icon: Trophy }
       ]
     },
     {

@@ -10,6 +10,7 @@
   import { INVOICE_STATUS_TONE, invoiceStatusLabel } from '$lib/v2/enums.js';
   import { enhance } from '$app/forms';
   import { Plus, Receipt } from '@lucide/svelte';
+  import { t } from '$lib/terminology.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -40,7 +41,7 @@
     !SETTLED.includes(inv.status) && inv.due_date && daysSince(inv.due_date) > 0;
 </script>
 
-<PageHeader title="Facturas">
+<PageHeader title={t(data.org?.terminology, 'invoice.plural', 'Facturas')}>
   {#snippet sub()}
     <!--
       These aggregates come from the API over the whole result set. v1 summed

@@ -38,8 +38,13 @@ export async function POST({ request, locals, fetch }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
-    return json({ error: 'Asistente no configurado (falta PRIVATE_ASISTENTE_URL/TENANT)' },
-      { status: 500 });
+    // Sin nombrar variables de entorno: a quien escribe no le sirven, y el
+    // detalle de la instalacion no es para la pantalla (mismo criterio que
+    // centro-mando/+page.server.js desde el 31/10/2026).
+    return json({ error: !baseUrl
+        ? 'No hay un asistente desplegado para esta instalación.'
+        : 'Esta empresa todavía no tiene un asistente configurado.' },
+      { status: 503 });
   }
 
   /**

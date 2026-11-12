@@ -7,6 +7,7 @@
   import { money, count } from '$lib/v2/format.js';
   import { activeChips, activePresetKey } from '$lib/v2/filters.js';
   import { Plus, Building2 } from '@lucide/svelte';
+  import { t } from '$lib/terminology.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -27,7 +28,7 @@
   );
 </script>
 
-<PageHeader title="Cuentas">
+<PageHeader title={t(data.org?.terminology, 'account.plural', 'Cuentas')}>
   {#snippet sub()}
     <!-- The count is the size of the whole result set, not of this page. -->
     <span class="v2-num">{count(totals.count)}</span> cuentas

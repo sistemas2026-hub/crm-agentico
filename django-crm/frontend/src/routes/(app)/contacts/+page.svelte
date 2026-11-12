@@ -7,6 +7,7 @@
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { count, relativeDays } from '$lib/v2/format.js';
   import { Users, PhoneOff, Plus } from '@lucide/svelte';
+  import { t } from '$lib/terminology.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -15,7 +16,7 @@
   let totals = $derived(data.totals);
 </script>
 
-<PageHeader title="Contactos">
+<PageHeader title={t(data.org?.terminology, 'contact.plural', 'Contactos')}>
   {#snippet sub()}
     <span class="v2-num">{count(totals.count)}</span> personas
     {#if !data.includeInactive && totals.inactive}

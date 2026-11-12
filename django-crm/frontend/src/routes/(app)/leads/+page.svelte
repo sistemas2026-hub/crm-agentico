@@ -6,8 +6,8 @@
   import Avatar from '$lib/v2/components/Avatar.svelte';
   import EmptyState from '$lib/v2/components/EmptyState.svelte';
   import { money, count, relativeDays, daysSince } from '$lib/v2/format.js';
-  import { LEAD_STATUS_TONE } from '$lib/v2/enums.js';
-  import { Plus, Upload, Target } from '@lucide/svelte';
+  import { LEAD_STATUS_TONE, LEAD_STATUS_LABEL, LEAD_SOURCE_LABEL } from '$lib/v2/enums.js';
+  import { Plus, Target } from '@lucide/svelte';
   import { t } from '$lib/terminology.js';
 
   /** @type {{ data: any }} */
@@ -41,10 +41,9 @@
     <span class="v2-num">{totals.unworked_over_a_week}</span> sin trabajar hace más de una semana
   {/snippet}
   {#snippet actions()}
-    <!-- Import stays unwired: /api/leads/import/ does not exist yet. Contacts
-         and cases both have import/preview/ and import/commit/; leads does not.
-         Tracked in the phase 2 plan. -->
-    <button class="v2-btn"><Upload />Importar</button>
+    <!-- Sin «Importar» hasta que exista /api/leads/import/ (contactos y casos
+         lo tienen; prospectos no). Un boton que no hace nada se retira, no se
+         deja esperando. -->
     <a class="v2-btn v2-btn-primary" href="/leads/new"><Plus />Nuevo {singular}</a>
   {/snippet}
 </PageHeader>
@@ -67,7 +66,6 @@
       {#snippet icon()}<Target size={21} />{/snippet}
       {#snippet actions()}
         <a class="v2-btn v2-btn-primary" href="/leads/new">Nuevo {singular}</a>
-        <button class="v2-btn">Importar</button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -97,8 +95,8 @@
                 <div>{l.company_name}</div>
                 <div class="v2-table-secondary" data-m="hide">{l.industry}</div>
               </td>
-              <td data-m="tag"><Pill tone={LEAD_STATUS_TONE[l.status]}>{l.status}</Pill></td>
-              <td class="v2-muted" data-m="hide" style="font-size:12.5px">{l.source}</td>
+              <td data-m="tag"><Pill tone={LEAD_STATUS_TONE[l.status]}>{LEAD_STATUS_LABEL[l.status] ?? l.status}</Pill></td>
+              <td class="v2-muted" data-m="hide" style="font-size:12.5px">{LEAD_SOURCE_LABEL[l.source] ?? l.source}</td>
               <td class="v2-r v2-num"
                 >{l.opportunity_amount ? money(l.opportunity_amount, l.currency) : '—'}</td
               >

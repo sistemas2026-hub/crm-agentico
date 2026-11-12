@@ -71,7 +71,7 @@ export async function POST({ params, locals, fetch, cookies, request }) {
           asignado = propio;
         }
       } catch (/** @type {any} */ err) {
-        console.error('[atender] no se pudo asignar el ticket:', err);
+        console.error('[atender] no se pudo asignar el ticket:', err?.constructor?.name ?? 'Error', err?.status ?? '');
       }
     }
 

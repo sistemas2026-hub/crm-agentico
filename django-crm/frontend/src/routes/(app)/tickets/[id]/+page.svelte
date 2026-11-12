@@ -900,6 +900,12 @@
                   aria-expanded={verConversacion}>
                   {verConversacion ? 'Colapsar' : 'Expandir'} conversación
                 </button>
+                <!-- El camino de vuelta. La Bandeja enlaza al ticket desde el 29/10;
+                     el ticket no enlazaba a la Bandeja, y para contestarle al
+                     cliente habia que buscarlo a mano por telefono. -->
+                {#if conversacionId}
+                  <a class="v2-btn v2-btn-sm" href="/conversaciones/{conversacionId}">Abrir en Conversaciones</a>
+                {/if}
               </header>
 
               {#if verConversacion}

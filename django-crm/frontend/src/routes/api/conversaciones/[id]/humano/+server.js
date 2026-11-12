@@ -18,10 +18,11 @@ export async function POST({ request, params, locals, fetch }) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
 
+  const cuerpo = await request.json().catch(() => ({}));
   const {
     mensaje, clave_idempotencia, devolver_al_asistente = false,
     pendiente_interno = null, pendiente_interno_hasta = null
-  } = await request.json();
+  } = cuerpo ?? {};
   if (!mensaje) {
     return json({ error: 'Falta el mensaje' }, { status: 400 });
   }

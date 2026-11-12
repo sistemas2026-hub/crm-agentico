@@ -52,7 +52,9 @@ export async function leerFuentesDeHoy(event) {
 
   const [crm, conv, centro, solicitudes, bloqueos, pedidos] = await Promise.allSettled([
     getToday({ cookies }),
-    destino ? delMotor(fetch, destino.baseUrl, `/conversaciones?${q}&por_numero=1`) : sinMotor(),
+    // Mismo tope que la Bandeja (CERRADAS_DIAS): una cerrada hace mas de 30 dias no
+    // puede estar en la cola de hoy, y sin el tope el motor recorre todo el historial.
+    destino ? delMotor(fetch, destino.baseUrl, `/conversaciones?${q}&por_numero=1&cerradas_dias=30`) : sinMotor(),
     destino ? delMotor(fetch, destino.baseUrl, `/centro-mando?${q}&ventana=10`) : sinMotor(),
     leerBandeja(cookies),
     leerBloqueosAbiertos({ cookies }, { soloNoc: true }),

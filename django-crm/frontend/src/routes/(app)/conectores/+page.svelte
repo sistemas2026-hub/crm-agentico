@@ -162,10 +162,10 @@
               </p>
               <ul class="lista-pendiente">
                 {#each aplicado.faltan_secretos ?? [] as s}
-                  <li><span class="v2-num">{s}</span> — en Ajustes → Secretos</li>
+                  <li><span class="v2-num">{s}</span> — en Configuración → Credenciales</li>
                 {/each}
                 {#each aplicado.faltan_variables ?? [] as v}
-                  <li><span class="v2-num">{v}</span> — en Ajustes → Variables</li>
+                  <li><span class="v2-num">{v}</span> — todavía sin pantalla: se carga con <code>cli/cargar_config.py</code> (<code>variables_tenant</code>)</li>
                 {/each}
               </ul>
             </div>

@@ -103,7 +103,7 @@
 
     {#if data.noLeidas.length}
       <p class="no-leidas" role="status">
-        No se pudo leer {data.noLeidas.join(', ')}. Lo demás está al día.
+        No se pudo leer {data.noLeidas.join(', ')}. El resto de lo que podés ver está al día.
       </p>
     {/if}
 
@@ -160,7 +160,7 @@
             <b>{filtro === 'todo' ? 'Nada te necesita ahora' : 'Nada en este filtro'}</b>
             <p>
               {filtro === 'todo'
-                ? 'Sin clientes esperando, órdenes detenidas, instalaciones ni pedidos pendientes. Dexter sigue atendiendo.'
+                ? 'Nada pendiente en lo que podés ver. Dexter sigue atendiendo.'
                 : 'Probá con «Todo».'}
             </p>
           </div>

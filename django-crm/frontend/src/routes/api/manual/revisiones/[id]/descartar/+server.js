@@ -14,6 +14,9 @@ export async function POST({ params, locals, fetch }) {
   if (!locals.user) {
     return json({ error: 'No autenticado' }, { status: 401 });
   }
+  if (locals.profile?.role !== 'ADMIN') {
+    return json({ error: 'Solo un administrador puede resolver una revisión.' }, { status: 403 });
+  }
 
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = await tenantDeLaSesion(locals, fetch);

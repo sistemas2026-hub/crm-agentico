@@ -200,7 +200,7 @@ function deSolicitudes(solicitudes, ahora) {
       tono: 'aten',
       cuando: minutos != null ? `La más vieja: ${duracion(minutos)}` : 'Por decidir',
       titulo: `${plural(solicitudes.length, 'solicitud', 'solicitudes')} de instalación por decidir`,
-      detalle: 'Esperan que alguien confirme la factibilidad antes de crear el ticket.',
+      detalle: 'Esperan que alguien confirme la factibilidad para pasar el ticket al equipo que instala.',
       accion: 'Decidir factibilidad',
       href: '/instalaciones',
       minutos,

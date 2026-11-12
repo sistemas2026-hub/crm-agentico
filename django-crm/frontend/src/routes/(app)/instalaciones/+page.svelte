@@ -64,7 +64,7 @@
   const PRECISION_DUDOSA_M = 200;
 
   const mapa = (g) => `https://www.google.com/maps?q=${g.lat},${g.lng}`;
-  const fecha = (s) => (s ? new Date(s).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+  const fecha = (s) => (s ? new Date(s).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '—');
 </script>
 
 <svelte:head><title>Instalaciones</title></svelte:head>

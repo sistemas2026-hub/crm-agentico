@@ -653,7 +653,7 @@
   }
 </script>
 
-<svelte:head><title>Oficina virtual · {titulo}</title></svelte:head>
+<svelte:head><title>Centro de mando · {titulo}</title></svelte:head>
 
 <div class="pantalla">
   <header class="barra">

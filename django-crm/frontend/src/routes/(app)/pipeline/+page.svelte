@@ -10,6 +10,7 @@
   import { STAGE_LABEL, AGING_TONE, AGING_LABEL } from '$lib/v2/enums.js';
   import { activeChips, activePresetKey, withoutParam } from '$lib/v2/filters.js';
   import { Columns3, List, Plus } from '@lucide/svelte';
+  import { t } from '$lib/terminology.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
@@ -66,7 +67,7 @@
   });
 </script>
 
-<PageHeader title="Negociaciones">
+<PageHeader title={t(data.org?.terminology, 'opportunity.plural', 'Negociaciones')}>
   {#snippet sub()}
     <!-- Totals come from the API aggregate, never from the rows on screen.
          Not "open deals": the default view is now the pipeline's own "All

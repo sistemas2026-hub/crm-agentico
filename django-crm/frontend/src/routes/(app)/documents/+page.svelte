@@ -157,7 +157,7 @@
                           d.estado_ingesta === 'procesando'}
                       >
                         {#if d.estado_ingesta === 'error'}
-                          <TriangleAlert size={11} /> No se pudo indexar
+                          <span title={d.ingesta_detalle || undefined}><TriangleAlert size={11} /> No se pudo indexar</span>
                         {:else if d.estado_ingesta === 'ok'}
                           <Sparkles size={11} />
                           {d.ingesta_fragmentos ?? 0}
