@@ -153,34 +153,43 @@
                 : `${motor.credencialesTotales.cargadas} cargadas`)
             : null,
           warn: motor.credencialesTotales ? motor.credencialesTotales.faltan > 0 : false
-        },
-        {
-          href: '/settings/organization',
-          title: 'Organización',
-          body: 'Los datos de la empresa que se imprimen en cada factura y cotización.',
-          value: org?.company_name || null,
-          warn: false
         }
       ]
     },
     {
-      label: 'Cómo se gestionan los tickets',
+      //  12/11/2026. Lo que es de la EMPRESA y no de un módulo: con qué datos
+      //  factura, qué variables usan sus herramientas, qué módulos ve en el
+      //  menú, su horario y cómo decide una instalación.
+      label: 'Empresa',
       items: [
         {
-          href: '/settings/routing',
-          title: 'Enrutamiento de tickets',
-          body: 'A quién le llega un ticket nuevo, en el orden en que se prueban las reglas.',
-          value: d.routingTotals ? `${d.routingTotals.active} reglas` : null,
-          warn: d.routingTotals ? d.routingTotals.unrouted_last_30d > 0 : false
+          href: '/settings/organization',
+          title: 'Datos de facturación',
+          //  12/11/2026: se llamaba «Organización», igual que la oficina virtual del
+          //  asistente (/settings/organizacion), y son dos cosas distintas.
+          body: 'Los datos de la empresa que se imprimen en cada factura y cotización.',
+          value: org?.company_name || null,
+          warn: false
         },
         {
-          href: '/settings/escalation',
-          title: 'Escalamiento',
-          body: 'Qué pasa cuando un ticket no cumple su objetivo de respuesta.',
-          value: d.escalationTotals
-            ? `${d.escalationTotals.active} de ${d.escalationTotals.count} prioridades`
+          href: '/settings/variables',
+          title: 'Variables de la empresa',
+          body: 'Datos que usan las herramientas y no son secretos: subdominios, IDs de cuenta, links.',
+          value: motor.variables
+            ? motor.variables.faltan
+              ? `${motor.variables.faltan} sin cargar`
+              : `${count(motor.variables.cantidad)} cargadas`
             : null,
-          warn: d.escalationTotals ? d.escalationTotals.breaches_unhandled_30d > 0 : false
+          //  Una que una herramienta pide y no está es una herramienta que
+          //  falla al primer uso: eso sí hay que ir a atenderlo.
+          warn: !!motor.variables && motor.variables.faltan > 0
+        },
+        {
+          href: '/settings/modulos',
+          title: 'Módulos del menú',
+          body: 'Qué secciones ve esta empresa en el menú: las heredadas del CRM que no usa se pueden ocultar.',
+          value: null,
+          warn: false
         },
         {
           href: '/settings/business-hours',
@@ -190,41 +199,12 @@
           warn: false
         },
         {
-          href: '/settings/ticket-approvals',
-          title: 'Reglas de aprobación',
-          body: 'Qué bloquea el cierre de un ticket, y quién puede destrabarlo.',
-          value: d.approvalTotals ? `${d.approvalTotals.active} activas` : null,
-          warn: stuckApprovalRules > 0
-        },
-        {
-          href: '/settings/reopen',
-          title: 'Política de reapertura',
-          body: 'Si la respuesta de un cliente vuelve a abrir un ticket cerrado.',
-          // Admin-only, like people and tokens above: a member's fan-out gets
-          // null (the endpoint 403s), so the row lists the destination without
-          // a value rather than guessing at the policy.
-          value: !d.reopen
-            ? null
-            : d.reopen.is_enabled
-              ? `Dentro de ${d.reopen.reopen_window_days} días`
-              : 'Apagada. Lo cerrado sigue cerrado',
-          // Replies arriving outside the window are normal for any window, so
-          // that number belongs on the page, not on a warning here. Off is the
-          // state worth flagging: it makes every reply to a closed ticket
-          // vanish, not just the late ones.
-          warn: d.reopen ? !d.reopen.is_enabled : false
-        },
-        {
-          href: '/settings/inbound-email',
-          title: 'Correo entrante',
-          body: 'Las direcciones que convierten un correo en un ticket.',
-          value: d.mailboxTotals
-            ? `${d.mailboxTotals.active} de ${d.mailboxTotals.count} activas`
-            : null,
-          // Off AND still receiving, not merely off. An address switched off
-          // and left alone is a decision; one still getting mail and creating
-          // nothing is a customer being ignored.
-          warn: d.mailboxTotals ? d.mailboxTotals.silently_dropping > 0 : false
+          href: '/settings/instalaciones',
+          title: 'Instalaciones',
+          body: 'Cómo entra una solicitud de instalación y quién decide su factibilidad.',
+          //  12/11/2026: existía y no la enlazaba ninguna pantalla.
+          value: null,
+          warn: false
         }
       ]
     },
@@ -267,7 +247,9 @@
         },
         {
           href: '/settings/organizacion',
-          title: 'Organización de la empresa',
+          //  12/11/2026: se llamaba «Organización de la empresa», igual que los
+          //  datos de facturación de Django. Lo que dibuja es la oficina virtual.
+          title: 'Oficina virtual',
           body: 'Qué departamentos tiene, cómo se llaman y en qué piso están. Es lo que dibuja la oficina virtual.',
           //  El valor dice de dónde sale la estructura, no cuántos
           //  departamentos hay: lo que alguien necesita saber desde acá es si
@@ -314,6 +296,24 @@
           warn: !!motor.sinRotulo
         },
         {
+          //  12/11/2026: viven en la página de la Bandeja, pero «Macros» (tickets
+          //  del CRM) y estas se confundían. Clave propia: mismo href que otras dos.
+          href: '/settings/bandeja',
+          clave: 'respuestas-rapidas',
+          title: 'Respuestas rápidas (Bandeja)',
+          body: 'Los textos que se insertan escribiendo «/atajo» al contestar un chat.',
+          value: null,
+          warn: false
+        },
+        {
+          //  12/11/2026: solo se cambiaban por YAML.
+          href: '/settings/canales/whatsapp/traspaso',
+          title: 'Traspaso a una persona',
+          body: 'Qué le dice Dexter al cliente cuando lo pasa al equipo, y cuándo se cierra sola una conversación muda.',
+          value: null,
+          warn: false
+        },
+        {
           href: '/settings/canales/whatsapp',
           title: 'WhatsApp',
           body: 'Las credenciales de Meta que activan el canal, y la URL del webhook.',
@@ -332,9 +332,16 @@
           title: 'Pagos',
           body: 'El link con el que un cliente puede pagar; el asistente se lo ofrece a quien debe una factura.',
           // Sin link no es una falla: el asistente dice cuánto se debe y no ofrece
-          // dónde pagar. Y el valor no se lee acá a propósito: no le suma otra
-          // llamada al motor a un hub que ya hace una docena.
-          value: null,
+          // dónde pagar. El valor sale de la MISMA lectura que «Variables de la
+          // empresa» (12/11/2026): antes decía siempre null para no sumar otra
+          // llamada al motor, y esa ya se hace.
+          value: motor.pagos
+            ? motor.pagos.link
+              ? `Link cargado${motor.pagos.medios ? ` · ${motor.pagos.medios} otros medios` : ''}`
+              : motor.pagos.medios
+                ? `Sin link · ${motor.pagos.medios} otros medios`
+                : 'Sin link de pago'
+            : null,
           warn: false
         },
         {
@@ -403,15 +410,8 @@
       ]
     },
     {
-      label: 'Palabras y campos compartidos',
+      label: 'Etiquetas y plantillas',
       items: [
-        {
-          href: '/settings/macros',
-          title: 'Macros',
-          body: 'Respuestas predefinidas, y los placeholders que reemplazan.',
-          value: d.macroTotals ? `${d.macroTotals.org} compartidas` : null,
-          warn: d.macroTotals ? d.macroTotals.with_unknown_placeholders > 0 : false
-        },
         {
           href: '/settings/tags',
           title: 'Etiquetas',
@@ -422,6 +422,83 @@
           warn: false
         },
         {
+          href: '/invoices/templates',
+          title: 'Plantillas de factura',
+          body: 'Cómo se ve una factura cuando la recibe un cliente.',
+          value: 'Dentro de Facturas',
+          warn: false
+        }
+      ]
+    },
+    {
+      //  12/11/2026 (auditoría del menú, §2 Administrar): estas siete escriben
+      //  tablas de Django que el motor NO lee. Siguen sirviendo para los
+      //  tickets del CRM, pero mezcladas con las de Dexter hacían creer que
+      //  cambiaban cómo atiende el asistente. Al final y dicho.
+      label: 'Avanzado (tickets del CRM)',
+      nota: 'Reglas de los tickets del CRM heredado. No cambian cómo atiende Dexter.',
+      items: [
+        {
+          href: '/settings/routing',
+          title: 'Enrutamiento de tickets',
+          body: 'A quién le llega un ticket nuevo, en el orden en que se prueban las reglas.',
+          value: d.routingTotals ? `${d.routingTotals.active} reglas` : null,
+          warn: d.routingTotals ? d.routingTotals.unrouted_last_30d > 0 : false
+        },
+        {
+          href: '/settings/escalation',
+          title: 'Escalamiento de tickets (CRM)',
+          body: 'Qué pasa cuando un ticket no cumple su objetivo de respuesta.',
+          value: d.escalationTotals
+            ? `${d.escalationTotals.active} de ${d.escalationTotals.count} prioridades`
+            : null,
+          warn: d.escalationTotals ? d.escalationTotals.breaches_unhandled_30d > 0 : false
+        },
+        {
+          href: '/settings/ticket-approvals',
+          title: 'Reglas de aprobación',
+          body: 'Qué bloquea el cierre de un ticket, y quién puede destrabarlo.',
+          value: d.approvalTotals ? `${d.approvalTotals.active} activas` : null,
+          warn: stuckApprovalRules > 0
+        },
+        {
+          href: '/settings/reopen',
+          title: 'Política de reapertura',
+          body: 'Si la respuesta de un cliente vuelve a abrir un ticket cerrado.',
+          // Admin-only, like people and tokens above: a member's fan-out gets
+          // null (the endpoint 403s), so the row lists the destination without
+          // a value rather than guessing at the policy.
+          value: !d.reopen
+            ? null
+            : d.reopen.is_enabled
+              ? `Dentro de ${d.reopen.reopen_window_days} días`
+              : 'Apagada. Lo cerrado sigue cerrado',
+          // Replies arriving outside the window are normal for any window, so
+          // that number belongs on the page, not on a warning here. Off is the
+          // state worth flagging: it makes every reply to a closed ticket
+          // vanish, not just the late ones.
+          warn: d.reopen ? !d.reopen.is_enabled : false
+        },
+        {
+          href: '/settings/inbound-email',
+          title: 'Correo entrante',
+          body: 'Las direcciones que convierten un correo en un ticket.',
+          value: d.mailboxTotals
+            ? `${d.mailboxTotals.active} de ${d.mailboxTotals.count} activas`
+            : null,
+          // Off AND still receiving, not merely off. An address switched off
+          // and left alone is a decision; one still getting mail and creating
+          // nothing is a customer being ignored.
+          warn: d.mailboxTotals ? d.mailboxTotals.silently_dropping > 0 : false
+        },
+        {
+          href: '/settings/macros',
+          title: 'Macros (tickets)',
+          body: 'Respuestas predefinidas, y los placeholders que reemplazan.',
+          value: d.macroTotals ? `${d.macroTotals.org} compartidas` : null,
+          warn: d.macroTotals ? d.macroTotals.with_unknown_placeholders > 0 : false
+        },
+        {
           href: '/settings/custom-fields',
           title: 'Campos personalizados',
           body: 'Campos que esta organización agregó a los registros.',
@@ -429,13 +506,6 @@
             ? `${d.fieldTotals.active} en ${d.fieldTotals.models_extended} tipos de registro`
             : null,
           warn: d.fieldTotals ? d.fieldTotals.required_with_gaps > 0 : false
-        },
-        {
-          href: '/invoices/templates',
-          title: 'Plantillas de factura',
-          body: 'Cómo se ve una factura cuando la recibe un cliente.',
-          value: 'Dentro de Facturas',
-          warn: false
         }
       ]
     }
@@ -461,6 +531,9 @@
   <div class="v2-pad" style="padding-top:18px;padding-bottom:32px">
     {#each groups as g (g.label)}
       <div class="v2-label" style="margin-bottom:10px">{g.label}</div>
+      {#if g.nota}
+        <p class="v2-sub" style="font-size:11.5px;margin:-4px 0 10px">{g.nota}</p>
+      {/if}
       <div class="v2-card" style="overflow:hidden;margin-bottom:22px">
         {#each g.items as s (s.clave ?? s.href)}
           <a class="v2-setting" href={s.href}>

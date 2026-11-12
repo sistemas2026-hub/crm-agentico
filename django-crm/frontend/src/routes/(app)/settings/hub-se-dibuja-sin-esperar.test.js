@@ -37,9 +37,10 @@ describe('el hub de Configuracion', () => {
     expect(html).toContain('Rapilink');
     for (const grupo of [
       'Personas y acceso',
-      'Cómo se gestionan los tickets',
+      'Empresa',
       'Asistente',
-      'Palabras y campos compartidos'
+      'Etiquetas y plantillas',
+      'Avanzado (tickets del CRM)'
     ]) {
       expect(html).toContain(grupo);
     }
@@ -66,5 +67,55 @@ describe('el hub de Configuracion', () => {
     expect(html).toContain('3 compartidas');
     expect(html).toContain('Rapilink SAS');
     expect(html).toContain('12');
+  });
+
+  /*
+   * 12/11/2026 (auditoría del menú, §2 Administrar). Las siete subpáginas que
+   * el motor no lee van juntas, AL FINAL y dicho; las tres que no enlazaba
+   * nada aparecen; los tres pares con el mismo nombre dejan de llamarse igual.
+   */
+  it('las siete que el motor no lee van en «Avanzado», después de todo lo demás', () => {
+    const html = dibujar(pendiente());
+    const avanzado = html.indexOf('Avanzado (tickets del CRM)');
+    expect(html).toContain('No cambian cómo atiende Dexter');
+    for (const h of ['routing', 'escalation', 'ticket-approvals', 'reopen', 'inbound-email', 'macros', 'custom-fields']) {
+      const i = html.indexOf(`href="/settings/${h}"`);
+      expect(i, h).toBeGreaterThan(avanzado);
+    }
+    //  Y ninguna de Dexter quedó debajo.
+    for (const h of ['/settings/bandeja', '/settings/variables', '/settings/canales/whatsapp']) {
+      expect(html.indexOf(`href="${h}"`), h).toBeLessThan(avanzado);
+    }
+  });
+
+  it('enlaza Instalaciones, Variables, Módulos y el Traspaso', () => {
+    const html = dibujar(pendiente());
+    for (const h of ['/settings/instalaciones', '/settings/variables', '/settings/modulos',
+      '/settings/canales/whatsapp/traspaso']) {
+      expect(html).toContain(`href="${h}"`);
+    }
+  });
+
+  it('los pares ambiguos tienen nombres distintos', () => {
+    const html = dibujar(pendiente());
+    for (const t of ['Datos de facturación', 'Oficina virtual', 'Escalamiento de tickets (CRM)',
+      'Traspaso a una persona', 'Macros (tickets)', 'Respuestas rápidas (Bandeja)']) {
+      expect(html).toContain(t);
+    }
+    expect(html).not.toContain('<b>Organización</b>');
+    expect(html).not.toContain('<b>Escalamiento</b>');
+    expect(html).not.toContain('<b>Macros</b>');
+  });
+
+  it('Pagos y Variables dicen su estado real con la lectura que llega del motor', () => {
+    const html = dibujar({
+      ...pendiente(),
+      motor: { pagos: { link: true, medios: 2 }, variables: { cantidad: 5, faltan: 1 } }
+    });
+    expect(html).toContain('Link cargado · 2 otros medios');
+    expect(html).toContain('1 sin cargar');
+    const sinLink = dibujar({ ...pendiente(), motor: { pagos: { link: false, medios: 0 }, variables: { cantidad: 3, faltan: 0 } } });
+    expect(sinLink).toContain('Sin link de pago');
+    expect(sinLink).toContain('3 cargadas');
   });
 });

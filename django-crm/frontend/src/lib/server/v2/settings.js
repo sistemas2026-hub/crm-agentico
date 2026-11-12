@@ -28,6 +28,8 @@ import { leerCanalWhatsapp } from './canal-whatsapp.js';
 import { leerCredenciales } from './credenciales.js';
 import { leerSmartOlt } from './smartolt.js';
 import { leerAvisos } from './avisos-campo.js';
+import { leerVariables } from './variables-empresa.js';
+import { leerMediosGuardados, VARIABLE_LINK_DE_PAGO, VARIABLE_MEDIOS_DE_PAGO } from './pagos-config.js';
 import { contarPlanesVenta } from './planes-venta.js';
 import { leerOferta } from './oferta.js';
 import { leerGuiasTV } from './guias-tv.js';
@@ -228,7 +230,7 @@ export function conPlazo(promesa, ms = PLAZO_MOTOR_MS, nombre) {
  */
 async function leerDelMotor(event) {
   const [asistente, canalWhatsapp, smartolt, planesVenta, oferta, guiasTv, credenciales,
-    ajustesBandeja, rotulosBandeja, organizacion] = await Promise.all([
+    ajustesBandeja, rotulosBandeja, organizacion, variables] = await Promise.all([
     conPlazo(leerConfiguracionAsistente(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerConfiguracionAsistente'),
     conPlazo(leerCanalWhatsapp(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerCanalWhatsapp'),
     conPlazo(leerSmartOlt(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerSmartOlt'),
@@ -249,7 +251,12 @@ async function leerDelMotor(event) {
     // La estructura de la empresa. Al hub le interesa UNA cosa: si esta
     // empresa ya declaro la suya o esta viendo la generica del producto. Las
     // dos se dibujan igual, asi que sin decirlo nadie lo sabria.
-    conPlazo(leerOrganizacion(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerOrganizacion')
+    conPlazo(leerOrganizacion(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerOrganizacion'),
+    // UNA lectura para DOS filas (12/11/2026): «Variables de la empresa» y
+    // «Pagos», que guarda su link y sus medios como variables. La fila de
+    // Pagos decía siempre null para no sumar otra llamada; con esta, que ya
+    // hacía falta, dice su estado real sin costo extra.
+    conPlazo(leerVariables(event.locals, event.fetch), PLAZO_MOTOR_MS, 'motor leerVariables')
   ]);
   return {
     // null = no hay asistente, o no contesto a tiempo. El hub lista igual sus
@@ -275,6 +282,17 @@ async function leerDelMotor(event) {
         }
       : null,
     planesVenta,
+    // null = no se pudo leer. 'faltan' = las que una herramienta pide y no están.
+    variables: variables
+      ? { cantidad: Object.keys(variables.variables).length, faltan: Object.keys(variables.faltan).length }
+      : null,
+    pagos: variables
+      ? {
+          link: typeof variables.variables[VARIABLE_LINK_DE_PAGO] === 'string' &&
+            variables.variables[VARIABLE_LINK_DE_PAGO].trim() !== '',
+          medios: leerMediosGuardados(variables.variables[VARIABLE_MEDIOS_DE_PAGO]).medios.length
+        }
+      : null,
     oferta: oferta
       ? { servicios: (oferta.servicios_ofrecidos ?? []).filter((/** @type {any} */ s) => s.activo).length,
           canales: (oferta.parrilla_canales ?? []).length }

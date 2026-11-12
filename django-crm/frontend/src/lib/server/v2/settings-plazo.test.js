@@ -51,6 +51,22 @@ vi.mock('./bandeja-config.js', () => ({
 // archivo no cargaba: importa motor-headers.js, que pide $env, y la prueba
 // entera dejaba de correr.
 vi.mock('./organizacion-config.js', () => ({ leerOrganizacion: async () => null }));
+// 12/11/2026: UNA lectura de variables alimenta dos filas (Variables y Pagos).
+// pagos-config se sustituye por lo mismo que exporta: el real importa
+// motor-headers.js, que pide $env. La regla de lectura de los medios se
+// prueba en pagos-config.test.js.
+vi.mock('./variables-empresa.js', () => ({
+  leerVariables: async () => ({
+    variables: { LINK_DE_PAGO: 'https://pagos.x', MEDIOS_DE_PAGO: '[1,2]', OTRA: 'y' },
+    usos: {},
+    faltan: { FALTA_UNA: ['h'] }
+  })
+}));
+vi.mock('./pagos-config.js', () => ({
+  VARIABLE_LINK_DE_PAGO: 'LINK_DE_PAGO',
+  VARIABLE_MEDIOS_DE_PAGO: 'MEDIOS_DE_PAGO',
+  leerMediosGuardados: (/** @type {string} */ c) => ({ medios: JSON.parse(c), ilegible: false })
+}));
 vi.mock('./avisos-campo.js', () => ({ leerAvisos: async () => ({ canales: [1, 2] }) }));
 vi.mock('./business-hours.js', () => ({ getBusinessHours: async () => ({ calendar: {} }) }));
 vi.mock('./custom-fields.js', () => ({ getCustomFields: async () => ({ totals: {} }) }));
@@ -119,6 +135,9 @@ describe('getSettingsHub', () => {
     expect(motor.credencialesTotales).toEqual({ cargadas: 1, faltan: 1 });
     // Las claves sin rótulo se cuentan entre las tres familias (29/10/2026).
     expect(motor.sinRotulo).toBe(2);
+    //  Pagos ya no es siempre null: sale de la misma lectura que Variables.
+    expect(motor.pagos).toEqual({ link: true, medios: 2 });
+    expect(motor.variables).toEqual({ cantidad: 3, faltan: 1 });
   });
 
   it('con el motor al dia, todo llega', async () => {
