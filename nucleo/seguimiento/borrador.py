@@ -47,7 +47,24 @@ _TONO = {
 
 
 class BorradorNoDisponible(Exception):
-    """El borrador no se pudo producir o no se puede mostrar (fuga, vacio)."""
+    """El borrador no se pudo producir o no se puede mostrar (fuga, vacio).
+
+    `http` dice que codigo le corresponde a la respuesta, y existe para que
+    quien la arma NO TENGA QUE LEER EL MENSAJE  --  12/11/2026.
+
+    `api.py` decidia con `502 if "no respondio" in str(e) else 422`: una
+    comparacion contra una cadena en español que vive en otro archivo. Cambiar
+    esa frase --una tilde, una palabra-- convertia silenciosamente todos los
+    fallos del modelo en 422, y nada lo habria dicho. El codigo es un dato de
+    la excepcion, no algo que se deduzca de como se redacto.
+    """
+
+    #: 422 por omision: el pedido estaba bien y no hay nada que sugerir.
+    http = 422
+
+    def __init__(self, mensaje: str, http: int = 422):
+        super().__init__(mensaje)
+        self.http = http
 
 
 def _instruccion(config) -> str:
@@ -114,7 +131,7 @@ def redactar(config, *, rol: str | None, mensajes: list[dict]) -> str:
         consumo.anotar(referencia, respuesta)
     except Exception as e:
         registrar("borrador", "fallo al pedir el borrador", error=e)
-        raise BorradorNoDisponible("el modelo no respondió") from None
+        raise BorradorNoDisponible("el modelo no respondió", http=502) from None
     texto = (respuesta.contenido or "").strip().strip('"').strip()
     if not texto:
         raise BorradorNoDisponible("el modelo no propuso nada")

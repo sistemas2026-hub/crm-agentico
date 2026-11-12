@@ -3699,7 +3699,13 @@ def agentes_crear_area():
     try:
         editor._editar(tenant, mutar)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 409
+        #  `mensaje_publico` Y NO `str(e)`: este except atrapa una clase AMPLIA.
+        #  `ErrorEdicion` es nuestra y su texto explica la regla al usuario;
+        #  un `ValueError` de una biblioteca trae lo que la biblioteca quiso
+        #  decir. La diferencia la decide la clase de la instancia, no el
+        #  except (12/11/2026).
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo guardar el area.")}), 409
     except Exception as e:                                   # noqa: BLE001
         registrar("agentes", "fallo al crear un area", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo crear el area: "
@@ -3747,7 +3753,9 @@ def agentes_editar_area(nombre):
     try:
         editor._editar(tenant, mutar)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+        #  Clase amplia: ver el comentario en la ruta de crear un area.
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo guardar el area.")}), 404
     except Exception as e:                                   # noqa: BLE001
         registrar("agentes", "fallo al editar un area", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo guardar: " + type(e).__name__}), 400
@@ -3793,7 +3801,9 @@ def agentes_borrar_area(nombre):
     try:
         editor._editar(tenant, mutar)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+        #  Clase amplia: ver el comentario en la ruta de crear un area.
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo borrar el area.")}), 404
     except Exception as e:                                   # noqa: BLE001
         registrar("agentes", "fallo al borrar un area", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo borrar: " + type(e).__name__}), 400
@@ -7769,7 +7779,9 @@ def canales_plantillas_crear():
         config = _config_de(tenant)
         creada = whatsapp.crear_plantilla(config, tenant, cuerpo.get("plantilla") or {})
     except whatsapp.PlantillaInvalida as e:
-        return jsonify({"error": str(e), "codigo": "plantilla_invalida"}), 400
+        return jsonify({"error": mensaje_publico(
+            e, "La plantilla no es valida."),
+            "codigo": "plantilla_invalida"}), 400
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -7796,7 +7808,9 @@ def canales_plantillas_borrar(nombre):
         config = _config_de(tenant)
         whatsapp.borrar_plantilla(config, tenant, nombre)
     except whatsapp.PlantillaInvalida as e:
-        return jsonify({"error": str(e), "codigo": "plantilla_invalida"}), 400
+        return jsonify({"error": mensaje_publico(
+            e, "La plantilla no es valida."),
+            "codigo": "plantilla_invalida"}), 400
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -12950,9 +12964,16 @@ def conversaciones_borrador(id_conversacion):
         texto = borrador.redactar(_config_de(tenant), rol=conv.get("rol_efectivo"),
                                   mensajes=resultado.get("mensajes") or [])
     except borrador.BorradorNoDisponible as e:
-        # El texto es nuestro (borrador.py), no de una biblioteca: se puede mostrar.
-        codigo = 502 if "no respondió" in str(e) else 422
-        return jsonify({"error": f"No hay sugerencia: {e}.", "codigo": "sin_borrador"}), codigo
+        #  EL TEXTO POR EL REGISTRO Y EL CODIGO POR LA EXCEPCION  --
+        #  12/11/2026. Aca habia un comentario que decia "el texto es nuestro,
+        #  se puede mostrar" y un `502 if "no respondió" in str(e)`: la
+        #  decision de mostrar vivia en un comentario, y la del codigo HTTP en
+        #  una comparacion contra una frase en español escrita en otro archivo.
+        #  Las dos pasaron a donde se pueden hacer cumplir -- `_publicas()` y
+        #  `BorradorNoDisponible.http`.
+        return jsonify({"error": "No hay sugerencia: " + mensaje_publico(
+            e, "no se pudo preparar una.") + ".",
+            "codigo": "sin_borrador"}), e.http
     return jsonify({"borrador": texto})
 
 

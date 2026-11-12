@@ -46,17 +46,28 @@ def _publicas() -> tuple[type, ...]:
 
     Import tardio: estos modulos importan media aplicacion y este se importa
     desde api.py."""
-    from nucleo.canales.whatsapp import ErrorWhatsApp
+    from nucleo.canales.whatsapp import ErrorWhatsApp, PlantillaInvalida
     from nucleo.conectores.catalogo import ErrorConector
     from nucleo.config.editor import ErrorEdicion
     from nucleo.config.fusion import FusionInvalida
     from nucleo.ingesta.corpus import RolesInvalidos, VersionAprobadaInmutable
     from nucleo.modelo.motor import ErrorMotor
     from nucleo.persistencia.db import AutorInvalido, TenantSinConfiguracion
+    from nucleo.seguimiento.borrador import BorradorNoDisponible
     from nucleo.seguridad.secretos import ErrorSecreto
-    return (ErrorWhatsApp, ErrorConector, ErrorEdicion, FusionInvalida, RolesInvalidos,
-            VersionAprobadaInmutable, ErrorMotor, TenantSinConfiguracion, ErrorSecreto,
-            AutorInvalido)
+    #  LAS DOS ULTIMAS SE AGREGARON EL 12/11/2026, y no son nuevas: sus
+    #  mensajes YA se mostraban en `api.py` con `str(e)` directo, una de ellas
+    #  con un comentario al lado que decia "el texto es nuestro, se puede
+    #  mostrar". Eso es la decision correcta tomada en el lugar equivocado: un
+    #  comentario no la hace cumplir y no la revisa nadie. Puestas aca, la
+    #  decide la CLASE de la instancia, y la seccion 2 de
+    #  `tests/test_errores_http.py` exige que ninguna construya su mensaje
+    #  interpolando una excepcion atrapada -- que es la condicion que las
+    #  vuelve mostrables, y que un comentario no puede garantizar.
+    return (ErrorWhatsApp, PlantillaInvalida, ErrorConector, ErrorEdicion,
+            FusionInvalida, RolesInvalidos, VersionAprobadaInmutable, ErrorMotor,
+            TenantSinConfiguracion, ErrorSecreto, AutorInvalido,
+            BorradorNoDisponible)
 
 
 def mensaje_publico(e: BaseException, por_defecto: str) -> str:
