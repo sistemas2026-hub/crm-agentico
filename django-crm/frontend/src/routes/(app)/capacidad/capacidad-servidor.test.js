@@ -4,6 +4,9 @@ vi.mock('$lib/server/v2/tenant.js', () => ({
   destinoDelAsistente: async () => ({ baseUrl: 'http://motor', tenant: 'rapilink' })
 }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
+//  /team (12/11/2026): las personas activas del CRM, para contar el equipo.
+const equipo = vi.hoisted(() => ({ respuesta: /** @type {any} */ ({ active: [] }) }));
+vi.mock('$lib/server/v2/team.js', () => ({ listTeam: async () => equipo.respuesta }));
 
 const { load, actions } = await import('./+page.server.js');
 /** @param {any} e */
@@ -145,5 +148,48 @@ describe('lo que declara la empresa: minutos y personas del equipo (§3.3)', () 
       minutos_por_visita: '', personas_del_equipo: '' }, 'USER')));
     expect(r.status).toBe(403);
     expect(cuerpo).toBeNull();
+  });
+});
+
+
+describe('las personas del equipo salen de /team si nadie las declaró (12/11/2026)', () => {
+  /** @type {string[]} */
+  let pedidos;
+  /** @param {any} tablero */
+  function motorCon(tablero) {
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url) => {
+      pedidos.push(String(url));
+      if (String(url).includes('/agentes/asignaciones')) {
+        //  p3 tiene área pero está INACTIVA; p2 está activa sin área.
+        return { ok: true, json: async () => ({ areas_por_persona: { p1: 'soporte', p3: 'soporte', p4: 'ventas', p2: '' } }) };
+      }
+      return { ok: true, status: 200, json: async () => tablero };
+    }));
+  }
+  beforeEach(() => {
+    pedidos = [];
+    equipo.respuesta = { active: [{ id: 'p1' }, { id: 'p2' }, { id: 'p4' }], inactive: [{ id: 'p3' }] };
+  });
+
+  it('cuenta solo las ACTIVAS con un área de atención, y se lo pasa al motor', async () => {
+    motorCon({ ...DEL_MOTOR, personas_usadas: 2, personas_origen: 'equipo' });
+    const data = await cargar(evento());
+    expect(data.personasEquipo).toBe(2);
+    expect(pedidos.find((u) => u.includes('/reportes/capacidad'))).toContain('personas_equipo=2');
+  });
+
+  it('de dónde salió el número llega a la página con el nombre del motor', async () => {
+    motorCon({ ...DEL_MOTOR, personas_usadas: 2, personas_origen: 'equipo' });
+    const data = await cargar(evento());
+    expect(data.tablero.personas_origen).toBe('equipo');
+    expect(data.tablero.personas_usadas).toBe(2);
+  });
+
+  it('si no se puede leer el equipo, no se manda nada (nunca un 0)', async () => {
+    equipo.respuesta = { forbidden: true };
+    motorCon(DEL_MOTOR);
+    const data = await cargar(evento());
+    expect(data.personasEquipo).toBeNull();
+    expect(pedidos.find((u) => u.includes('/reportes/capacidad'))).not.toContain('personas_equipo');
   });
 });

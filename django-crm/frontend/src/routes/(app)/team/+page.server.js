@@ -7,6 +7,11 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { readableError } from '$lib/server/v2/form-errors.js';
 import { tenantDeLaSesion, destinoDelAsistente } from '$lib/server/v2/tenant.js';
 
+const SOLO_ADMIN = 'Solo un administrador puede gestionar el equipo.';
+
+/** @param {App.Locals} locals */
+const esAdmin = (locals) => locals?.profile?.role === 'ADMIN';
+
 /**
  * Team and access.
  *
@@ -18,6 +23,14 @@ import { tenantDeLaSesion, destinoDelAsistente } from '$lib/server/v2/tenant.js'
  * @type {import('./$types').PageServerLoad}
  */
 export async function load({ locals, cookies, fetch }) {
+  // LA PUERTA ES ESTA LINEA, NO EL 403 DE DJANGO  --  12/11/2026
+  // Hasta hoy la pantalla dependia de que `listTeam` fallara para un miembro
+  // (auditoria del menu, §4.2 transversal). Django si negaba la lista, pero
+  // la carga seguia y le pedia al motor las asignaciones: areas por persona,
+  // identidades en el sistema externo y candidatos, todo para alguien que no
+  // administra. Ahora un no administrador recibe `forbidden` antes de que
+  // salga ninguna lectura.
+  if (!esAdmin(locals)) return { forbidden: true };
   const equipo = await listTeam({ cookies });
 
   // Las areas de trabajo salen del asistente, no de una lista fija aca: son
@@ -165,7 +178,8 @@ export const actions = {
    * queda con parte de los cambios aplicados y parte no, y nadie sabe cual.
    * Aca se aplica en orden y se informa que fallo, si algo fallo.
    */
-  actualizar: async ({ cookies, request, fetch }) => {
+  actualizar: async ({ cookies, request, fetch, locals }) => {
+    if (!esAdmin(locals)) return fail(403, { error: SOLO_ADMIN });
     const form = await request.formData();
     const userId = form.get('userId')?.toString() || '';
     const profileId = form.get('profileId')?.toString() || '';
@@ -265,6 +279,7 @@ export const actions = {
   },
 
   invite: async ({ cookies, request, fetch, locals }) => {
+    if (!esAdmin(locals)) return fail(403, { invite: { error: SOLO_ADMIN } });
     // Las areas se releen aca: el action no comparte estado con el load, y
     // hace falta saber que agentes precarga la elegida.
     //
@@ -388,7 +403,8 @@ export const actions = {
    * but the server is what enforces them: a member cannot promote themselves
    * and nobody can change their own role here.
    */
-  setRole: async ({ cookies, request }) => {
+  setRole: async ({ cookies, request, locals }) => {
+    if (!esAdmin(locals)) return fail(403, { error: SOLO_ADMIN });
     const form = await request.formData();
     const userId = form.get('userId')?.toString();
     const role = form.get('role')?.toString();
@@ -426,6 +442,7 @@ export const actions = {
    * y moverlos falsearia quien atendio que.
    */
   setStatus: async ({ cookies, request, fetch, locals }) => {
+    if (!esAdmin(locals)) return fail(403, { error: SOLO_ADMIN });
     const form = await request.formData();
     const userId = form.get('userId')?.toString();
     const status = form.get('status')?.toString();

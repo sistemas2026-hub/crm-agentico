@@ -4252,6 +4252,21 @@ def reporte_capacidad():
         registrar("reportes", "fallo al calcular capacidad", error=e)
         return jsonify({"error": "No se pudo calcular el tablero."}), 500
 
+    # LAS PERSONAS DEL EQUIPO SALEN DE /team SI NADIE LAS DECLARO (12/11/2026).
+    # El CRM sabe cuantas personas activas tienen un area de atencion; pedirle
+    # a alguien que lo escriba a mano era pedirle un dato que ya existe, y sin
+    # el, "casos por persona" quedaba en "—". Lo cuenta la capa servidor del
+    # frontend (que es quien ve el CRM) y lo manda aca; lo declarado sigue
+    # mandando, como correccion manual. 'personas_origen' le dice a la
+    # pantalla de donde salio el numero que uso el calculo.
+    personas, personas_origen = cap.personas_del_equipo, "declarado"
+    if personas is None:
+        try:
+            del_equipo = int(request.args.get("personas_equipo") or 0)
+        except ValueError:
+            del_equipo = 0
+        personas, personas_origen = (del_equipo, "equipo") if del_equipo > 0 else (None, None)
+
     cuerpo = {"dias": dias, "desde": desde.isoformat(), "hasta": hasta.isoformat(),
               "canales": sorted(canales.REALES),
               # Lo que declaro la empresa, para que la pantalla lo muestre en el
@@ -4259,8 +4274,10 @@ def reporte_capacidad():
               "declarado": {"minutos_por_conversacion": cap.minutos_por_conversacion,
                             "minutos_por_visita": cap.minutos_por_visita,
                             "personas_del_equipo": cap.personas_del_equipo},
+              "personas_usadas": personas,
+              "personas_origen": personas_origen,
               **tablero.componer(m, cap.minutos_por_conversacion, cap.minutos_por_visita,
-                                cap.personas_del_equipo)}
+                                personas)}
     if aviso:
         cuerpo["aviso"] = aviso
     return jsonify(cuerpo)

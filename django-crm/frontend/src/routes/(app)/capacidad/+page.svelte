@@ -135,8 +135,23 @@
                  value={t.declarado?.minutos_por_visita ?? ''} /></label>
         <label>Personas del equipo
           <input type="number" min="1" name="personas_del_equipo" class="v2-input"
+                 placeholder={t.personas_origen === 'equipo' ? String(t.personas_usadas) : ''}
                  value={t.declarado?.personas_del_equipo ?? ''} /></label>
       </div>
+      <!-- De dónde salió el número (12/11/2026): sin declarar, se cuenta desde
+           Equipo; lo escrito acá lo corrige y manda. -->
+      <p class="pie">
+        {#if t.personas_origen === 'declarado'}
+          Personas: {t.personas_usadas}, declaradas acá. Vaciá el campo para contarlas desde
+          <a href="/team">Equipo</a>.
+        {:else if t.personas_origen === 'equipo'}
+          Personas: {t.personas_usadas}, contadas en <a href="/team">Equipo</a> (activas y con un área de
+          atención). Escribí otro número solo si ese no representa a quienes atienden.
+        {:else}
+          Personas: sin dato. Nadie lo declaró y en <a href="/team">Equipo</a> no hay personas activas con
+          un área de atención.
+        {/if}
+      </p>
       {#if form?.declarar?.error}<p class="aviso-error">{form.declarar.error}</p>{/if}
       {#if form?.declarar?.ok}<p class="pie">Guardado. El tablero ya lo usa.</p>{/if}
       <div><button class="v2-btn v2-btn-primary" type="submit">Guardar</button></div>

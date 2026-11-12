@@ -18,10 +18,13 @@ export const PERIODOS = [7, 30, 90];
  * @param {number} dias
  * @returns {Promise<{ tablero: any | null, error?: string }>}
  */
-export async function leerTableroCapacidad(locals, fetch, dias) {
+export async function leerTableroCapacidad(locals, fetch, dias, personasEquipo = null) {
   const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) return { tablero: null, error: 'Asistente no configurado para esta empresa.' };
   const q = new URLSearchParams({ tenant: cfg.tenant, dias: String(dias) });
+  //  Solo se usa si la empresa no declaró el número (12/11/2026): lo
+  //  declarado manda, esto lo pre-llena.
+  if (personasEquipo) q.set('personas_equipo', String(personasEquipo));
   try {
     const resp = await fetch(`${cfg.baseUrl}/reportes/capacidad?${q}`, {
       headers: headersMotor(),
@@ -32,6 +35,46 @@ export async function leerTableroCapacidad(locals, fetch, dias) {
     return { tablero: datos };
   } catch {
     return { tablero: null, error: 'No se pudo contactar al asistente.' };
+  }
+}
+
+/**
+ * Cuántas personas ACTIVAS del equipo tienen un área de atención (12/11/2026).
+ *
+ * `personas_del_equipo` se declaraba a mano aunque /team ya lo sabe: las
+ * personas activas del CRM cruzadas con el área que cada una tiene en el
+ * asistente (`/agentes/asignaciones`). Se cruzan las dos porque ninguna sola
+ * alcanza: el CRM no sabe quién atiende clientes, y el asistente no sabe quién
+ * se desactivó (el traspaso al desactivar le quita el área, pero no lanza si
+ * falla).
+ *
+ * `null` si no se pudo saber — nunca 0: un cero dividiría «casos por persona»
+ * por nada y diría que el equipo no existe. No lanza.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @param {(e: { cookies: any }) => Promise<any>} listarEquipo `team.js::listTeam`
+ * @param {any} cookies
+ * @returns {Promise<number | null>}
+ */
+export async function contarPersonasDelEquipo(locals, fetch, listarEquipo, cookies) {
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) return null;
+  try {
+    const [equipo, resp] = await Promise.all([
+      listarEquipo({ cookies }),
+      fetch(`${cfg.baseUrl}/agentes/asignaciones?tenant=${encodeURIComponent(cfg.tenant)}`, {
+        headers: headersMotor()
+      })
+    ]);
+    if (!equipo || equipo.forbidden || !resp.ok) return null;
+    const { areas_por_persona: areas = {} } = await resp.json();
+    const n = (equipo.active ?? []).filter(
+      (/** @type {any} */ m) => typeof areas[m.id] === 'string' && areas[m.id].trim() !== ''
+    ).length;
+    return n > 0 ? n : null;
+  } catch {
+    return null;
   }
 }
 

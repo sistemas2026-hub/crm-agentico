@@ -1,5 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { guardarDeclaracionCapacidad, leerTableroCapacidad, PERIODOS } from '$lib/server/v2/capacidad.js';
+import { contarPersonasDelEquipo, guardarDeclaracionCapacidad, leerTableroCapacidad, PERIODOS }
+  from '$lib/server/v2/capacidad.js';
+import { listTeam } from '$lib/server/v2/team.js';
 
 /**
  * Capacidad: cuánto trabajo le resolvió Dexter a la empresa (PRD §2).
@@ -14,15 +16,18 @@ import { guardarDeclaracionCapacidad, leerTableroCapacidad, PERIODOS } from '$li
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ locals, fetch, url }) {
+export async function load({ locals, fetch, url, cookies }) {
   if (locals.profile?.role !== 'ADMIN') {
     redirect(303, '/');
   }
   const pedido = Number(url.searchParams.get('dias'));
   const dias = PERIODOS.includes(pedido) ? pedido : 30;
+  //  Las personas del equipo salen de /team (12/11/2026); el motor solo las
+  //  usa si la empresa no declaró otro número, y dice de dónde salió el que usó.
+  const personasEquipo = await contarPersonasDelEquipo(locals, fetch, listTeam, cookies);
   //  La autonomia de cada agente se ve y se decide en /agentes (02/11/2026).
-  const { tablero, error } = await leerTableroCapacidad(locals, fetch, dias);
-  return { tablero, dias, periodos: PERIODOS, error };
+  const { tablero, error } = await leerTableroCapacidad(locals, fetch, dias, personasEquipo);
+  return { tablero, dias, periodos: PERIODOS, error, personasEquipo };
 }
 
 /** Los tres números que declara la empresa. Vacío = null = sin declarar. */
