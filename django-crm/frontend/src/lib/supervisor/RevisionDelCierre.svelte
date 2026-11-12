@@ -157,7 +157,39 @@
 {#if r}
   <section class="rc rc-{r.veredicto}" aria-label="Revisión del cierre">
     <p class="rc-titulo"><strong>El Supervisor revisó el cierre:</strong> {r.texto}</p>
-    {#if r.solucion}<p class="rc-solucion">Qué hizo: «{r.solucion}»</p>{/if}
+    <!-- LOS DOS LADOS, UNO AL LADO DEL OTRO (12/11/2026). El usuario:
+         «debe haber relación entre el asunto, la descripción del ticket y la
+         respuesta del técnico. No puede haber una respuesta correcta en un
+         asunto que ni por ahí iba al caso». Hasta hoy esta tarjeta mostraba
+         «Qué hizo» y nada de lo que se le pidió: para cruzarlos había que
+         abrir la orden en otra pantalla, y nadie lo hacía. Es el mismo hueco
+         del 06/11 con las fotos --«no había con qué comparar»--, con texto. -->
+    {#if r.el_ticket?.caso || r.el_ticket?.diagnostico_previo}
+      <div class="rc-cotejo">
+        <p class="rc-pedido">
+          <span class="rc-rotulo">Se pidió</span>
+          {#if r.el_ticket.asunto}<span class="rc-asunto">{r.el_ticket.asunto}</span>{/if}
+          {#if r.el_ticket.caso}<span class="rc-caso">{r.el_ticket.caso}</span>{/if}
+        </p>
+        {#if r.el_ticket.diagnostico_previo}
+          <p class="rc-previo">
+            <span class="rc-rotulo">Ya se había diagnosticado</span>
+            {r.el_ticket.diagnostico_previo}
+          </p>
+        {/if}
+        {#if r.solucion}
+          <p class="rc-solucion">
+            <span class="rc-rotulo">Qué hizo</span>«{r.solucion}»
+          </p>
+        {:else}
+          <p class="rc-solucion rc-sin-solucion">
+            <span class="rc-rotulo">Qué hizo</span>no lo escribió
+          </p>
+        {/if}
+      </div>
+    {:else if r.solucion}
+      <p class="rc-solucion"><span class="rc-rotulo">Qué hizo</span>«{r.solucion}»</p>
+    {/if}
     {#if r.supervisor_no_pudo}
       <!-- La quiso cerrar solo y no quedó cerrada: cuándo, y si el motor no lo
            dejó o no se sabe si el ISP la cerró (no es lo mismo). -->
@@ -356,6 +388,31 @@
   .rc-no_cerrar { border-left-color: var(--snoc-error); background: var(--snoc-error-container); }
   .rc-titulo, .rc-solucion { margin: 0; overflow-wrap: anywhere; }
   .rc-solucion { font-style: italic; color: var(--snoc-on-surface-variant); }
+  /*  EL COTEJO (12/11/2026): lo pedido y lo hecho tienen que leerse de un
+      vistazo, uno debajo del otro. El borde de la izquierda los agrupa como
+      una sola cosa: si se ven como dos parrafos sueltos, el ojo los lee por
+      separado y vuelve el problema que esto resuelve.  */
+  .rc-cotejo {
+    display: flex; flex-direction: column; gap: 2px;
+    border-left: 3px solid var(--snoc-outline-variant);
+    padding-left: var(--snoc-sm); margin: 0;
+  }
+  .rc-pedido, .rc-previo { margin: 0; overflow-wrap: anywhere; }
+  /*  El rotulo NO es negrita sobre el texto: el texto es lo que se compara y
+      tiene que ganar. El rotulo solo dice de cual de los dos lados es.  */
+  .rc-rotulo {
+    display: inline-block; min-width: 10.5em;
+    color: var(--snoc-on-surface-variant);
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .rc-asunto { font-weight: 600; }
+  .rc-asunto + .rc-caso::before { content: ' · '; }
+  .rc-sin-solucion { color: var(--snoc-error); font-style: normal; }
+  @media (max-width: 640px) {
+    /*  En el telefono el rotulo va arriba: con 10.5em al lado, al texto le
+        quedan pocas palabras por linea y deja de leerse como una frase.  */
+    .rc-rotulo { display: block; min-width: 0; }
+  }
   .rc-no-pudo { margin: 0; font-size: 12px; color: #8a5300; overflow-wrap: anywhere; }
   .rc-puntos { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
   .rc-fotos summary { cursor: pointer; }
