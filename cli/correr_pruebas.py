@@ -230,6 +230,20 @@ def correr(archivo: Path, segundos: int) -> tuple[bool, str, float]:
             cwd=str(RAIZ),
             capture_output=True,
             text=True,
+            #  LA CODIFICACION, EN LOS DOS LADOS  --  12/11/2026.
+            #
+            #  Le pedia UTF-8 AL HIJO (`PYTHONIOENCODING`) y decodificaba en
+            #  el PADRE con la del sistema: cp1252 en Windows. Cualquier
+            #  prueba que imprima un byte que cp1252 no tiene reventaba el
+            #  hilo lector de `subprocess` con UnicodeDecodeError -- y eso no
+            #  es una prueba en rojo, es el corredor cayendose; el numero que
+            #  este archivo produce quedaba incompleto sin decirlo.
+            #
+            #  Visto hoy al correr las 88 que piden base en Windows. En CI
+            #  (Linux, UTF-8) no pasaba, que es justo lo que lo mantuvo
+            #  invisible.
+            encoding="utf-8",
+            errors="replace",
             timeout=segundos,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
@@ -274,6 +288,12 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--sin-base", action="store_true",
                    help="salta las que piden Postgres")
+    #  SOLO LAS DE BASE, para el job de CI que levanta un Postgres  --
+    #  12/11/2026. Sin esto ese job tendria que correr `--sin-red`, o sea las
+    #  160 aisladas otra vez: el job rapido ya las corrio, y duplicarlas suma
+    #  minutos a cada push sin agregar una sola afirmacion nueva.
+    p.add_argument("--solo-base", action="store_true",
+                   help="corre SOLO las que piden Postgres")
     p.add_argument("--sin-red", action="store_true",
                    help="salta las que salen a la red")
     p.add_argument("--solo", default="",
@@ -287,6 +307,11 @@ def main() -> int:
     todas = descubrir()
     if args.solo:
         todas = [(a, c) for a, c in todas if args.solo in a.name]
+    #  ARRIBA DE `--listar` a proposito: si el filtro se aplicara despues, la
+    #  lista mostraria las 256 y el corredor correria 88. Una lista que no
+    #  coincide con lo que se corre es peor que no tenerla.
+    if args.solo_base:
+        todas = [(a, c) for a, c in todas if c == "base"]
 
     if args.listar:
         for clase in ("aislada", "base", "red"):

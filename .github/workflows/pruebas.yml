@@ -10,10 +10,65 @@
 #
 # QUE CORRE, Y QUE NO
 # -------------------
-# Las 95 pruebas que no necesitan Postgres ni salir a la red. Las 48 que piden
-# base quedan afuera **por ahora** y el corredor las nombra al final: un verde
-# sobre 95 de 145 miente si no se dice cuantas quedaron sin correr. El paso
-# siguiente es levantar un Postgres de servicio aca y correrlas tambien.
+# Las que no necesitan Postgres ni salir a la red. Las que piden base quedan
+# afuera y el corredor las nombra al final: un verde que no dice cuantas
+# quedaron sin correr es el falso verde que D1 existe para no tener.
+#
+# Los numeros: hoy son 160 aisladas + 88 de base + 8 de red = 256. El
+# comentario anterior decia 95 de 145; era de septiembre y se leia como
+# verdad.
+#
+# POR QUE LAS 88 DE BASE SIGUEN AFUERA  --  medido el 12/11/2026
+# --------------------------------------------------------------
+# "Levantar un Postgres de servicio" parecia una linea de YAML. Se armo la
+# cadena entera contra una base vacia de verdad y se corrieron las 88:
+#
+#       50 en verde * 38 en rojo * 48 minutos
+#
+# Levantar la base y migrarla SE PUDO, y hace falta saber como porque ninguna
+# de estas seis condiciones falla con un error que nombre lo que falta:
+#
+#   1. `postgres:16` pelado no sirve -- el esquema usa pgvector:
+#      'extension "vector" is not available'. La imagen es
+#      `pgvector/pgvector:pg16`.
+#   2. Las migraciones de DJANGO van PRIMERO: el esquema del motor referencia
+#      `public.organization`. Sin eso: 'relation "public.organization" does
+#      not exist'.
+#   3. `pgcrypto` tiene que estar en el schema `extensions` --convencion de
+#      Supabase--, no en `public`.
+#   4. Los roles `crm_user` y `motor_user` tienen que PREEXISTIR: son
+#      credenciales de despliegue (B-7) y ninguna migracion las crea, pero
+#      `202609141110_roles_operativos_public.sql` les hace GRANT.
+#   5. Quien aplica el ledger necesita CREATEROLE (el esquema crea
+#      `app_backend`); quien corre Django NO puede ser superusuario o las
+#      afirmaciones de RLS quedan vacias (lo dice
+#      `crm/test_settings_postgres.py`). Son dos privilegios distintos: la
+#      misma separacion migrador/runtime de B-7.
+#   6. `create schema extensions` antes que todo lo demas.
+#
+# Con esas seis, las 78 migraciones aplican. Y AHI APARECE LO QUE FRENA ESTO,
+# que no es de CI:
+#
+#   * ~28 pruebas insertan en `public.organization` nombrando solo `name`, y
+#     un esquema recien migrado por Django lo RECHAZA: 'null value in column
+#     "created_at" violates not-null constraint'. `auto_now_add=True` llena esa
+#     columna en Python, no en la base. Esas mismas pruebas pasan contra la
+#     base de produccion -- o sea que PRODUCCION TIENE UN DEFAULT QUE LAS
+#     MIGRACIONES DEL REPO NO CREAN. Es "lo que el repo declara no es lo que
+#     esta desplegado" (CLAUDE.md §6) una capa mas abajo, y arreglarlo de
+#     verdad es decidir cual de los dos lados tiene razon.
+#   * ~10 crean su PROPIA base (`test_rutas_sql` es la de D8) y contra esta
+#     cadena mueren con 'schema "asistente" does not exist' y despues se
+#     cuelgan a los 120s.
+#
+# O sea: el paso que falta NO es este workflow. Es que las 88 puedan correr
+# contra un esquema construido desde el repo. Mientras eso no se decida, un
+# job con base pondria cada push en rojo por 38 motivos de entorno, y un job
+# que corriera solo las 50 que pasan seria exactamente el falso verde que
+# este archivo existe para no producir.
+#
+# Para repetir la medicion: `cli/correr_pruebas.py --solo-base` corre solo
+# esas 88.
 #
 # Lo que NO hace, a proposito: desplegar. El despliegue lo dispara un push a
 # la rama de produccion, y eso lo decide una persona.
