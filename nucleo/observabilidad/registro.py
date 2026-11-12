@@ -189,6 +189,50 @@ def error_seguro(e: BaseException) -> dict:
     return datos
 
 
+def error_para_guardar(e: BaseException, limite: int = 200) -> str:
+    """Lo que de una excepcion se puede ESCRIBIR EN UNA COLUMNA de la base.
+
+    POR QUE EXISTE  --  12/11/2026
+    ------------------------------
+    Cuatro sitios guardaban `f"{type(e).__name__}: {e}"`: tres en motor.py,
+    que es el `codigo_error` de `asistente.tool_calls`, y uno en
+    idempotencia.py, que es `asistente.operaciones_externas.error`. Las dos
+    columnas son NUESTRAS y las dos estan declaradas como metadatos:
+    "la auditoria (tool_calls) guarda solo metadatos: que se consulto, quien y
+    cuando -- nunca que decia la respuesta" (CLAUDE.md 5).
+
+    Y `{e}` de una excepcion ajena no es un metadato. El caso medido es
+    `requests.HTTPError`, que es la que llega cuando el ISP contesta mal: su
+    texto es "404 Client Error: Not Found for url: <LA URL ENTERA>", con la
+    query puesta -- y por ahi viajan la cedula, el id del servicio y, en la
+    escritura de ubicacion, la coordenada de la casa. Quedaba en la base, en
+    claro, en la unica tabla propia de ese flujo.
+
+    Es el mismo defecto que D19/D23 saco de la RESPUESTA (ver
+    `nucleo/canales/errores.py`) y D20 del LOG. Faltaba la base.
+
+    QUE QUEDA, Y ALCANZA PARA DIAGNOSTICAR
+    --------------------------------------
+    Lo mismo que `registrar()` deja en el log: el tipo, el estado HTTP o el
+    sqlstate, y `archivo:linea`. Con eso y la fila --que ya tiene herramienta,
+    tenant y hora-- se llega al caso. El texto completo sigue estando en el
+    log, que es donde se decidio que viviera.
+
+    NO se intenta limpiar el mensaje por patron: una lista de patrones que
+    decide que es un dato personal falla ABIERTA el dia que aparece un formato
+    que no esta en la lista. Aca no se guarda el mensaje, y punto.
+    """
+    datos = dict(error_seguro(e))
+    tipo = str(datos.pop("error", type(e).__name__))
+    #  `donde` al final: es lo primero que se recorta si el limite aprieta, y
+    #  lo que mas sirve --el tipo y el estado-- queda siempre.
+    donde = datos.pop("donde", None)
+    partes = [f"{k}={v}" for k, v in datos.items()]
+    if donde:
+        partes.append(f"donde={donde}")
+    return " ".join([tipo] + partes)[:limite]
+
+
 def _valor_seguro(valor) -> str:
     if valor is None or isinstance(valor, (bool, int, float)):
         return str(valor)

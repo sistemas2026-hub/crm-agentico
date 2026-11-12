@@ -81,7 +81,7 @@ from nucleo.seguridad import redaccion
 from nucleo.seguridad import salida as guardia_salida
 from nucleo.seguridad import techo as techos
 from nucleo.seguridad.verificacion import Sesion, nivel_requerido, es_factor_de_posesion
-from nucleo.observabilidad.registro import registrar
+from nucleo.observabilidad.registro import error_para_guardar, registrar
 
 
 def _indice_patron(patron: str | None) -> int | None:
@@ -1915,7 +1915,9 @@ def ejecutar_accion_aprobada(config, accion: dict) -> tuple[dict, str | None]:
         #  CODIGOS_DE_BLOQUEO, y no el texto de la excepcion.
         return {"error": f"Esta accion no se ejecuto: {e.motivo}"}, e.codigo
     except Exception as e:
-        return {"error": "La API no acepto la accion."}, f"{type(e).__name__}: {e}"[:200]
+        #  EL CODIGO, NO EL TEXTO DEL PROVEEDOR: esto se guarda en
+        #  `tool_calls.codigo_error`, que es auditoria (12/11/2026).
+        return {"error": "La API no acepto la accion."}, error_para_guardar(e)
 
 
 PREVIAS_NO_VIGENTES = "PREVIAS_NO_VIGENTES_AL_APROBAR"
@@ -2084,8 +2086,9 @@ def ejecutar_accion_irreversible(config, accion: dict, tenant: str
         return ({"error": f"Esta accion no se ejecuto: {e.motivo}", "bloqueo_de_frontera": True},
                 e.codigo, None)
     except Exception as e:                                       # noqa: BLE001
+        #  Idem: va a `tool_calls.codigo_error` (12/11/2026).
         return ({"error": "La API no acepto la accion."},
-                f"{type(e).__name__}: {e}"[:200], None)
+                error_para_guardar(e), None)
 
     if not r.hubo_respuesta:
         return ({"error": "Esta accion no se ejecuto: " + r.motivo}, r.codigo, None)
@@ -4245,7 +4248,8 @@ def responder(config, nombre_rol: str, mensaje: str, historial: list[dict],
                         # puede decirle al cliente que hubo un problema, en vez de
                         # que /chat completo se caiga con un 500.
                         salida = {"error": "No se pudo completar la consulta en este momento."}
-                        codigo_error = f"{type(e).__name__}: {e}"[:200]
+                        #  Idem: va a `tool_calls.codigo_error` (12/11/2026).
+                        codigo_error = error_para_guardar(e)
                     if herramienta.solo_lectura:
                         cache_turno[clave_cache] = (salida, codigo_error)
 
