@@ -1119,41 +1119,78 @@
                        buscarlo), despues QUE tiene contratado, y al final
                        el dato tecnico. -->
                   {#if enlaces.cliente}
+                    <!-- SEGÚN QUIÉN MIRA (12/11/2026): la ficha llega ya
+                         filtrada por el servidor con el criterio del motor
+                         (lib/server/v2/ficha-visible.js). Un dato que esta
+                         persona no puede ver se dice «oculto para tu área»:
+                         un renglón ausente afirmaría que el cliente no lo
+                         tiene. El plan llega como 'plan', alias de
+                         'plan_internet' en el catálogo. -->
+                    {@const titular = enlaces.cliente}
+                    {@const oculto = (/** @type {string} */ c) =>
+                      !!titular._sinCriterio || (titular._ocultos ?? []).includes(c)}
+                    {#if titular._sinCriterio}
+                      <p class="sin-dato">
+                        No se pudo confirmar qué datos del titular puede ver tu
+                        área, así que no se muestran. Volvé a abrir el ticket.
+                      </p>
+                    {/if}
                     <dl>
-                      {#if enlaces.cliente.nombre}
+                      {#if titular.nombre}
                         <dt>Cliente</dt>
-                        <dd>{enlaces.cliente.nombre}</dd>
+                        <dd>{titular.nombre}</dd>
+                      {:else if oculto('nombre')}
+                        <dt>Cliente</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
-                      {#if enlaces.cliente.cedula}
+                      {#if titular.cedula}
                         <dt>Cédula</dt>
-                        <dd><code>{enlaces.cliente.cedula}</code></dd>
+                        <dd><code>{titular.cedula}</code></dd>
+                      {:else if oculto('cedula')}
+                        <dt>Cédula</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
-                      {#if enlaces.cliente.estado}
+                      {#if titular.estado}
                         <dt>Servicio</dt>
-                        <dd>{enlaces.cliente.estado}</dd>
+                        <dd>{titular.estado}</dd>
+                      {:else if oculto('estado')}
+                        <dt>Servicio</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
-                      {#if enlaces.cliente.telefono}
+                      {#if titular.telefono}
                         <dt>Teléfono</dt>
                         <dd>
                           <!-- Separados y marcables: el proveedor los manda en
                                una sola cadena con comas, y quien tiene que
                                llamar no debería recortarlos a mano. -->
-                          {#each String(enlaces.cliente.telefono).split(',') as tel}
+                          {#each String(titular.telefono).split(',') as tel}
                             <a class="tel" href="tel:{tel.trim()}">{tel.trim()}</a>
                           {/each}
                         </dd>
+                      {:else if oculto('telefono')}
+                        <dt>Teléfono</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
-                      {#if enlaces.cliente.direccion}
+                      {#if titular.direccion}
                         <dt>Dirección</dt>
-                        <dd>{enlaces.cliente.direccion}</dd>
+                        <dd>{titular.direccion}</dd>
+                      {:else if oculto('direccion')}
+                        <dt>Dirección</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
-                      {#if enlaces.cliente.localidad}
+                      {#if titular.localidad}
                         <dt>Barrio</dt>
-                        <dd>{enlaces.cliente.localidad}</dd>
+                        <dd>{titular.localidad}</dd>
+                      {:else if oculto('localidad')}
+                        <dt>Barrio</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
-                      {#if enlaces.cliente.plan}
+                      {#if titular.plan}
                         <dt>Plan</dt>
-                        <dd>{enlaces.cliente.plan}</dd>
+                        <dd>{titular.plan}</dd>
+                      {:else if oculto('plan_internet')}
+                        <dt>Plan</dt>
+                        <dd class="dato-oculto">Oculto para tu área</dd>
                       {/if}
                       {#if enlaces.ip}
                         <dt>IP</dt>
@@ -1730,6 +1767,12 @@
     margin: 8px 0 0;
     font-size: 12px;
     line-height: 1.5;
+    color: var(--v2-slate);
+  }
+  /* Un dato del titular que esta persona no ve (12/11/2026): en cursiva y
+     apagado, para que no se lea como el valor del campo. */
+  .dato-oculto {
+    font-style: italic;
     color: var(--v2-slate);
   }
 

@@ -11,6 +11,7 @@ import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 import { reparteTickets } from '$lib/v2/roles.js';
 import { hoyDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
+import { leerVisibilidad, contextoParaQuienMira } from '$lib/server/v2/ficha-visible.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ locals, cookies, params, fetch }) {
@@ -70,6 +71,7 @@ export async function load({ locals, cookies, params, fetch }) {
   // todavia puesta, o sea el clic pareciendo perdido. El caso, la
   // conversacion y la respuesta no dependen de esto: llegan primero y esto
   // completa las tarjetas tecnicas cuando llega.
+  const yo = resolveMe(gente.people, /** @type {any} */ (locals)?.user?.email);
   const delMotor = (async () => {
     try {
       const base = env.PRIVATE_ASISTENTE_URL;
@@ -81,11 +83,25 @@ export async function load({ locals, cookies, params, fetch }) {
       // tablas del CRM. Se lo pasamos nosotros, que ya lo tenemos cargado.
       const servicio = datos.ticket?.external_service_id;
       if (servicio) params_.set('servicio', servicio);
-      const r = await fetch(
+      const pedido = fetch(
         `${base}/conversaciones/por-caso/${params.id}?${params_}`,
         { headers: headersMotor(), signal: AbortSignal.timeout(20000) }
       );
-      return r.ok ? await r.json() : null;
+      // LA FICHA DEL TITULAR SEGÚN QUIÉN MIRA (12/11/2026). Hasta hoy la
+      // cédula, los teléfonos y la dirección llegaban a cualquier rol. El
+      // contexto de por-caso NO se filtra en el motor -- el despacho del
+      // backend lo lee entero para armar la orden --, así que se filtra acá,
+      // con el criterio que da el motor (lib/server/v2/ficha-visible.js). En
+      // paralelo: no le suma espera a la apertura.
+      const visibilidad = leerVisibilidad(fetch, {
+        base, tenant, locals, perfil: yo, headers: headersMotor()
+      });
+      const r = await pedido;
+      if (!r.ok) return null;
+      const d = await r.json();
+      return d && typeof d === 'object'
+        ? { ...d, contexto: contextoParaQuienMira(d.contexto, await visibilidad) }
+        : d;
     } catch {
       // Se traga a proposito: sin esto una promesa rechazada tumba la
       // pagina entera, y lo que hay en juego son dos tarjetas de contexto.
@@ -102,7 +118,7 @@ export async function load({ locals, cookies, params, fetch }) {
     reparte,
     // Solo id y nombre: el selector no necesita el correo de nadie.
     personas: gente.people.map((p) => ({ id: p.id, name: p.name })),
-    yo: resolveMe(gente.people, /** @type {any} */ (locals)?.user?.email),
+    yo,
     origen: delMotor.then((d) => d?.conversacion ?? null),
     // Si el ticket tiene un chat al que la respuesta pueda salir. Es la MISMA
     // busqueda que hace el envio (`conversacion_de_caso` en el motor, en las

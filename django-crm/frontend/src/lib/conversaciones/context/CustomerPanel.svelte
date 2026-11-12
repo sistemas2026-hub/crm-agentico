@@ -30,13 +30,18 @@
   import { tonoDeEstadoServicio, fechaLegible, montoLegible } from '$lib/conversaciones/formato.js';
   import { avisoDeCorte, telefonoDelCanal } from './ficha-cliente.js';
   import { resumenDeCuenta } from '$lib/conversaciones/cuenta.js';
+  import { estaOculto, TEXTO_OCULTO } from '$lib/v2/ficha-visible.js';
   import { Copy, Check } from '@lucide/svelte';
 
   let {
     conversacion,
     /** La ficha leída en vivo del sistema del ISP, o null. Cada campo se
         dibuja SÓLO si vino: la lista blanca del motor deja fuera lo que no
-        corresponde, y un renglón con un guion no informa nada. */
+        corresponde, y un renglón con un guion no informa nada.
+        SEGÚN QUIÉN MIRA (12/11/2026): el motor filtra además por el área de
+        quien mira (nucleo/seguridad/ficha_por_area.py) y manda `_ocultos`.
+        Un campo oculto se dibuja «oculto para tu área»: dejarlo en blanco
+        diría que el cliente no lo tiene, y eso miente. */
     ficha = null,
     /** La ficha todavía viaja: llega después de la conversación (07/11/2026).
         Sin esto, las secciones de abajo aparecían de golpe, o nunca, sin que
@@ -72,13 +77,15 @@
   /* Una seccion se dibuja si tiene AL MENOS un dato. Se calcula acá y no en
      el marcado para que el titulo y el contenido no puedan desincronizarse --
      un rotulo "Ubicacion" sin nada debajo es peor que no tenerlo. */
-  const hayUbicacion = $derived(!!(ficha?.direccion || ficha?.localidad || ficha?.ciudad || ficha?.zona));
-  const hayServicio = $derived(!!(ficha?.plan_internet || ficha?.estado || ficha?.fecha_instalacion));
+  /** Un campo con algo que decir: su valor, o que está oculto para quien mira. */
+  const dice = (/** @type {string} */ campo) => !!ficha?.[campo] || estaOculto(ficha, campo);
+  const hayUbicacion = $derived(['direccion', 'localidad', 'ciudad', 'zona'].some(dice));
+  const hayServicio = $derived(['plan_internet', 'estado', 'fecha_instalacion'].some(dice));
   /* El «saldo» de la ficha ya no cuenta (10/11/2026): no es lo que se debe.
      La sección existe si hay cuenta que decir --o que se está calculando-- o
      si la ficha trae cobranza o corte. */
   const hayFacturacion = $derived(
-    !!(ficha?.estado_facturas || ficha?.fecha_corte) || resumen.tipo !== 'nada'
+    dice('estado_facturas') || dice('fecha_corte') || resumen.tipo !== 'nada'
   );
 
   /* Cortado o suspendido se marca: es lo que explica la mitad de las
@@ -147,6 +154,11 @@
         <span class="panel-etiqueta">Documento</span>
         <span class="panel-valor panel-mono">{ficha.cedula}</span>
       </div>
+    {:else if estaOculto(ficha, 'cedula')}
+      <div class="panel-fila">
+        <span class="panel-etiqueta">Documento</span>
+        <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span>
+      </div>
     {/if}
 
     <p class="verificacion" class:v-si={verificado} class:v-no={!verificado}>
@@ -179,14 +191,23 @@
       {#if ficha.direccion}
         <div class="panel-fila"><span class="panel-etiqueta">Dirección</span>
           <span class="panel-valor">{ficha.direccion}</span></div>
+      {:else if estaOculto(ficha, 'direccion')}
+        <div class="panel-fila"><span class="panel-etiqueta">Dirección</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
       {#if ficha.localidad || ficha.ciudad}
         <div class="panel-fila"><span class="panel-etiqueta">Localidad</span>
           <span class="panel-valor">{[ficha.localidad, ficha.ciudad].filter(Boolean).join(' · ')}</span></div>
+      {:else if estaOculto(ficha, 'localidad') || estaOculto(ficha, 'ciudad')}
+        <div class="panel-fila"><span class="panel-etiqueta">Localidad</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
       {#if ficha.zona}
         <div class="panel-fila"><span class="panel-etiqueta">Zona</span>
           <span class="panel-valor">{ficha.zona}</span></div>
+      {:else if estaOculto(ficha, 'zona')}
+        <div class="panel-fila"><span class="panel-etiqueta">Zona</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
     </div>
   {/if}
@@ -197,6 +218,9 @@
       {#if ficha.plan_internet}
         <div class="panel-fila"><span class="panel-etiqueta">Plan</span>
           <span class="panel-valor">{ficha.plan_internet}</span></div>
+      {:else if estaOculto(ficha, 'plan_internet')}
+        <div class="panel-fila"><span class="panel-etiqueta">Plan</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
       {#if ficha.estado}
         <!-- El único dato de la ficha que es un veredicto, y por eso es el
@@ -210,10 +234,16 @@
               <span class="estado-punto" aria-hidden="true"></span>{ficha.estado}
             </span>
           </span></div>
+      {:else if estaOculto(ficha, 'estado')}
+        <div class="panel-fila"><span class="panel-etiqueta">Estado del servicio</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
       {#if ficha.fecha_instalacion}
         <div class="panel-fila"><span class="panel-etiqueta">Instalado</span>
           <span class="panel-valor cifra">{fechaLegible(ficha.fecha_instalacion)}</span></div>
+      {:else if estaOculto(ficha, 'fecha_instalacion')}
+        <div class="panel-fila"><span class="panel-etiqueta">Instalado</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
     </div>
   {/if}
@@ -274,6 +304,9 @@
       {#if ficha?.estado_facturas}
         <div class="panel-fila"><span class="panel-etiqueta">Cobranza</span>
           <span class="panel-valor">{ficha.estado_facturas}</span></div>
+      {:else if estaOculto(ficha, 'estado_facturas')}
+        <div class="panel-fila"><span class="panel-etiqueta">Cobranza</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
       {#if ficha?.fecha_corte}
         <div class="panel-fila"><span class="panel-etiqueta">Fecha de corte</span>
@@ -281,6 +314,9 @@
             {fechaLegible(ficha.fecha_corte)}
             {#if avisoCorte}<span class="corte-aviso">{avisoCorte}</span>{/if}
           </span></div>
+      {:else if estaOculto(ficha, 'fecha_corte')}
+        <div class="panel-fila"><span class="panel-etiqueta">Fecha de corte</span>
+          <span class="panel-valor dato-oculto">{TEXTO_OCULTO}</span></div>
       {/if}
     </div>
   {/if}
@@ -357,6 +393,13 @@
   }
 
   .sin-dato {
+    color: var(--bandeja-texto-3);
+  }
+
+  /* Un dato que quien mira no puede ver (12/11/2026): apagado y en cursiva,
+     para que no se lea como el valor del campo. */
+  .dato-oculto {
+    font-style: italic;
     color: var(--bandeja-texto-3);
   }
 
