@@ -20,6 +20,11 @@ vi.mock('$lib/server/v2/operadores.js', () => ({
   operadoresDeLaOrg: async () => [],
   rolDeSesion: () => 'USER'
 }));
+// Quién mira (12/11/2026): la lista de la organización, para el perfil.
+vi.mock('$lib/server/v2/org-people.js', () => ({
+  getOrgPeopleAndTeams: async () => ({ people: [], teams: [] }),
+  resolveMe: () => null
+}));
 
 const { load } = await import('./+page.server.js');
 

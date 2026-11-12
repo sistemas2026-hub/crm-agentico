@@ -6,6 +6,7 @@ import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { operadoresDeLaOrg, rolDeSesion } from '$lib/server/v2/operadores.js';
 import { conPlazo, leerConPlazo } from '$lib/server/v2/plazo.js';
+import { getOrgPeopleAndTeams, resolveMe } from '$lib/server/v2/org-people.js';
 
 /* LA CONVERSACIÓN NO ESPERA A LO LENTO  --  07/11/2026
    "¿Por qué queda cargando la página de conversación?" Al abrir otra
@@ -83,9 +84,35 @@ export async function load({ fetch, cookies, params, locals, depends }) {
 
   /* LO QUE LLEGA DESPUÉS, primera parte: la ficha sale ya, en la misma ola
      que el hilo -- es la más lenta y no depende de nada. NO se espera. */
-  const fichaCliente = leer('cliente', PLAZO_EXTERNO_MS).then(
-    (r) => siLlego(r) ?? { disponible: false, motivo: 'sin_respuesta', cliente: null }
+  /* LA FICHA SEGÚN QUIÉN MIRA (12/11/2026, privacidad por área). El motor
+     filtra la ficha por el rol de la sesión y por el ÁREA del perfil, que lee
+     de su base (nucleo/seguridad/ficha_por_area.py); sin `rol` ni `perfil`
+     entrega el defecto restringido, sin cédula, a todos -- ADMIN incluido.
+     El rol sale del JWT verificado; el Profile.id no viaja en el JWT (solo
+     el User.id), así que se busca en la lista de la organización por correo
+     (resolveMe). Esa ida al backend va encadenada a la ficha, que ya era una
+     promesa: no retiene la pantalla, y con plazo propio -- si el CRM no
+     contesta, la ficha se pide sin perfil y el motor cae al defecto, que es
+     el lado seguro. */
+  const perfil = conPlazo(
+    getOrgPeopleAndTeams(cookies).then((g) => resolveMe(g.people, locals.user?.email)),
+    PLAZO_CRM_MS,
+    'conversacion perfil de quien mira'
   );
+  const fichaCliente = perfil
+    .then((p) => {
+      /** @type {Record<string, string>} */
+      const quien = { tenant, rol: rolDeSesion(locals) };
+      if (p) quien.perfil = String(p);
+      return leerConPlazo(
+        fetch,
+        `${baseUrl}/conversaciones/${encodeURIComponent(params.id)}/cliente?${new URLSearchParams(quien)}`,
+        { headers: headersMotor() },
+        PLAZO_EXTERNO_MS,
+        'conversacion cliente'
+      );
+    })
+    .then((r) => siLlego(r) ?? { disponible: false, motivo: 'sin_respuesta', cliente: null });
   /* LA CUENTA (10/11/2026): cuánto debe, calculado por el motor con la misma
      herramienta que el agente de cobro --dos idas al sistema del ISP, ficha y
      facturas pendientes--. Reemplaza al «saldo» de la ficha, que no es lo
@@ -127,7 +154,13 @@ export async function load({ fetch, cookies, params, locals, depends }) {
   // Los tres contadores del diagnóstico los cuenta el motor, no esta pagina:
   // la diferencia entre "el codigo lo freno" y "el tercero fallo" sale de una
   // columna de la base, no del texto del error.
-  const herramientas = siLlego(rHerr)?.herramientas ?? [];
+  // Sin `parametros` (12/11/2026): el motor los guarda enmascarados a los
+  // últimos 4 caracteres (motor.py::_enmascarar), ningún panel los dibuja, y
+  // aun así viajaban al navegador dentro de los datos de la página. Lo que no
+  // se muestra no sale: un cuarto de cédula sigue siendo un dato del cliente.
+  const herramientas = (siLlego(rHerr)?.herramientas ?? []).map(
+    (/** @type {any} */ { parametros: _p, ...llamada }) => llamada
+  );
   const diagnostico = siLlego(rHerr)?.diagnostico ?? null;
 
   // Como llego la conversacion a estas manos: un evento por transicion del
