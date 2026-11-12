@@ -150,7 +150,11 @@ def recordar_para(org, *, ahora=None) -> dict:
         #  toda llamada que llegaba a avisar -- diez guardas en rojo de una.
         cual = cual_recordatorio(s["minutos_desde_la_referencia"],
                                  config[0], cada)
+        #  `cada` VIAJA CON EL AVISO, no solo para calcular `cual`: entra en
+        #  la clave de idempotencia. Sin eso, subir la cadencia apaga la
+        #  insistencia por el resto del dia (auditoria de frontera,
+        #  12/11/2026; el porque esta en `avisos.avisar_sin_reporte`).
         if avisos.avisar_sin_reporte(orden, s["minutos_desde_la_referencia"],
-                                     s["referencia"], cual=cual):
+                                     s["referencia"], cual=cual, cada=cada):
             salida["avisadas"] += 1
     return salida

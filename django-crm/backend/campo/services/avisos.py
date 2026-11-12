@@ -293,7 +293,8 @@ def avisar_jornada_publicada(org, nuevas_por_perfil: dict, fecha) -> None:
         )
 
 
-def avisar_sin_reporte(orden, minutos, referencia: str, *, cual: int = 1) -> bool:
+def avisar_sin_reporte(orden, minutos, referencia: str, *, cual: int = 1,
+                       cada: int = 0) -> bool:
     """El recordatorio al tecnico (30/10/2026, `campo/recordatorio_de_reporte.py`):
     «⏱ OT #12: 38 min sin reportar». Devuelve si ESTA llamada lo mando.
 
@@ -314,13 +315,35 @@ def avisar_sin_reporte(orden, minutos, referencia: str, *, cual: int = 1) -> boo
     y ponerle sufijo a todas haria que el primer recordatorio saliera de
     nuevo para cada una. Un duplicado en el telefono de cada tecnico, el
     mismo minuto, por una migracion.
+
+    `cada` VA EN LA CLAVE, Y ESO ARREGLA UN APAGON (12/11/2026)
+    ----------------------------------------------------------
+    La primera version puso solo el ordinal. El ordinal depende de `cada`
+    --es `1 + (minutos - ventana) // cada`-- asi que SUBIR la cadencia lo
+    hace BAJAR, de vuelta al rango que la cadencia vieja ya gasto, y el
+    reclamo rechaza todo como repetido.
+
+    Medido por el auditor de frontera: una orden vencida desde las 7:00 con
+    cadencia 15 lleva 23 avisos al mediodia; el supervisor pone 60 esperando
+    uno por hora y recibe **cero por el resto del dia**, porque los ordinales
+    7, 8, 9... que la rejilla de 60 emite ya estan tomados. Al dia siguiente
+    la referencia ya no es de hoy y no vuelve nunca. La pantalla, mientras
+    tanto, contestaba «Vuelve a avisarle cada 60 minutos hasta que reporte».
+
+    Con `cada` en la clave, cada cadencia tiene su propio espacio y el
+    cambio no colisiona con nada. Volver a una cadencia anterior tampoco: el
+    ordinal crece con el reloj, asi que al volver ya es mayor que el ultimo
+    que se gasto en ese espacio.
     """
     perfiles = _asignados(orden)
     if not perfiles:
         return False
     contenido = {"orden_numero": orden.numero, "minutos": minutos,
                  "recordatorio": cual}
-    sufijo = "" if cual <= 1 else f"|{cual}"
+    #  El `@{cada}` es lo que impide el apagon al cambiar la cadencia; ver el
+    #  docstring. `cada=0` (un solo aviso por atraso) nunca llega aca con
+    #  `cual > 1`, asi que no necesita caso propio.
+    sufijo = "" if cual <= 1 else f"|{cual}@{int(cada)}"
     try:
         with transaction.atomic():
             registro = AvisoEnviado.objects.create(
