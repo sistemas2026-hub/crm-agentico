@@ -3307,6 +3307,39 @@ def conversacion_de_caso(tenant: str, caso_id: str) -> dict | None:
         return dict(fila) if fila else None
 
 
+#: Cuantas conversaciones de un cliente se devuelven. La ficha lista, no
+#: archiva: las mas nuevas primero, y quien busca una vieja usa la Bandeja.
+CONVERSACIONES_DE_CLIENTE_TOPE = 50
+
+
+def conversaciones_de_cliente(tenant: str, id_cliente: str,
+                              limite: int = CONVERSACIONES_DE_CLIENTE_TOPE) -> list[dict]:
+    """
+    Las conversaciones de UN cliente del ISP, por su identificador de servicio
+    (12/11/2026, ficha del cliente: auditoria del menu §4 item 5).
+
+    Solo por `id_cliente`, que es lo que el asistente escribe cuando VERIFICA
+    al cliente (`_ejecutar_confirmacion`). Nunca por nombre ni por telefono: un
+    numero cambia de dueño y un nombre se repite, y la ficha mostraria los
+    chats de otra persona con cara de dato correcto.
+
+    Solo metadatos --canal, estado, cuando, por que se paso a una persona, a
+    que caso quedo atada--: ni mensajes, ni el numero del canal, ni el nombre.
+    Para el hilo ya esta /conversaciones/<id>/mensajes.
+    """
+    limite = max(1, min(int(limite), CONVERSACIONES_DE_CLIENTE_TOPE))
+    with sesion(tenant) as (cur, org):
+        cur.execute(
+            """select id, canal, estado, etiqueta, motivo_escalamiento,
+                      escalada_a_humano, caso_id, creado_en, actualizado_en
+               from asistente.conversations
+               where organization_id = %s and id_cliente = %s
+               order by creado_en desc
+               limit %s""",
+            (org, str(id_cliente), limite))
+        return [dict(f) for f in cur.fetchall()]
+
+
 def identidad_de_conversacion(tenant: str, conversation_id: str) -> dict | None:
     """
     A QUE cliente del sistema externo apunta esta conversacion. Nada mas.

@@ -8452,6 +8452,104 @@ def servicio_titular(servicio):
     return jsonify(datos)
 
 
+# =============================================================================
+#  LA FICHA DEL CLIENTE POR SU SERVICIO  --  12/11/2026
+# =============================================================================
+#  Auditoria del menu (SPEC/AUDITORIA_MENU_2026-11-12.md §4 item 5): no habia
+#  un lugar donde ver a UN cliente entero. Esta ruta da lo que solo el motor
+#  sabe --sus conversaciones y el estado de su servicio y su equipo--; los
+#  tickets, las ordenes y las solicitudes los da el CRM, y la capa servidor del
+#  frontend junta las dos mitades.
+#
+#  EL ESTADO DEL SERVICIO SE ARMA CON `contexto_tecnico`, la MISMA funcion del
+#  detalle del ticket: no se duplica la consulta al ISP ni a la OLT.
+#
+#  LA FICHA DE LA PERSONA, POR AREA. El criterio de que campo ve cada quien es
+#  UNO y lo decide `nucleo/seguridad/ficha_por_area.py::ficha_para` (rama de
+#  privacidad). Mientras ese modulo no este en el arbol, se entrega SOLO lo que
+#  no es dato personal (nombre, estado, plan, localidad): fail-closed, nunca
+#  la ficha entera.
+
+#: Lo que se entrega de la ficha cuando no hay criterio por area cargado. Ni
+#: cedula, ni telefono, ni direccion, ni coordenadas, ni IP.
+_FICHA_SIN_CRITERIO = ("nombre", "estado", "plan", "plan_id", "localidad")
+
+#: Lo que nunca sale de esta ruta, haya criterio o no: la IP del cliente y el
+#: enlace a su router son de la red interna del ISP y nadie los pide aca.
+_FUERA_DE_LA_FICHA_DEL_CLIENTE = ("ip", "router")
+
+_SERVICIO_VALIDO = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _ficha_para_quien_mira(config, tenant: str, rol: str | None,
+                           perfil: str | None, ficha: dict) -> dict:
+    """La ficha de la persona recortada para quien mira. Un solo criterio: el
+    de `ficha_por_area` si esta; si no, el minimo sin datos personales."""
+    try:
+        from nucleo.seguridad.ficha_por_area import ficha_para
+    except ImportError:
+        return {k: ficha[k] for k in _FICHA_SIN_CRITERIO if k in (ficha or {})}
+    return ficha_para(config, tenant, rol, perfil, ficha or {})
+
+
+@app.get("/clientes/<id_servicio>/ficha")
+def cliente_ficha_por_servicio(id_servicio):
+    """Conversaciones y estado del servicio de un cliente, por su servicio.
+
+    Solo lectura. El tenant es el de la sesion de quien pregunta (lo manda la
+    capa servidor del frontend); `rol` y `perfil` son de esa misma sesion y
+    solo sirven para recortar la ficha de la persona.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    servicio = str(id_servicio or "").strip()
+    if not _SERVICIO_VALIDO.match(servicio):
+        return jsonify({"error": "SERVICIO_INVALIDO"}), 400
+
+    #  Las conversaciones no dependen del ISP: si la base falla se dice, y el
+    #  resto de la ficha se entrega igual.
+    try:
+        conversaciones = [{
+            "id": str(c["id"]),
+            "canal": c.get("canal"),
+            "canal_operativo": c.get("canal") in canales.REALES,
+            "estado": c.get("estado"),
+            "etiqueta": c.get("etiqueta"),
+            "motivo_escalamiento": c.get("motivo_escalamiento"),
+            "escalada_a_humano": bool(c.get("escalada_a_humano")),
+            "caso_id": str(c["caso_id"]) if c.get("caso_id") else None,
+            "creado_en": c["creado_en"].isoformat() if c.get("creado_en") else None,
+            "actualizado_en": (c["actualizado_en"].isoformat()
+                               if c.get("actualizado_en") else None),
+        } for c in persistencia.conversaciones_de_cliente(tenant, servicio)]
+    except Exception as e:
+        registrar("ficha_cliente", "no se pudieron leer las conversaciones", error=e)
+        conversaciones = None
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:
+        registrar("ficha_cliente", "sin config del tenant", error=e)
+        config = None
+    contexto = {}
+    if config is not None:
+        try:
+            contexto = contexto_tecnico(config, tenant,
+                                        identidad_del_contexto(None, servicio)) or {}
+        except Exception as e:
+            registrar("ficha_cliente", "no se pudo armar el contexto", error=e)
+            contexto = {}
+    contexto = {k: v for k, v in contexto.items()
+                if k not in _FUERA_DE_LA_FICHA_DEL_CLIENTE}
+    if "cliente" in contexto:
+        contexto["cliente"] = _ficha_para_quien_mira(
+            config, tenant, request.args.get("rol"), request.args.get("perfil"),
+            contexto["cliente"])
+    return jsonify({"servicio": servicio, "conversaciones": conversaciones,
+                    "contexto": contexto})
+
+
 @app.post("/casos/<caso_id>/ticket-operativo")
 def caso_crear_ticket_operativo(caso_id):
     """
