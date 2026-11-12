@@ -66,6 +66,23 @@ class _LectorDeCodigoState extends State<LectorDeCodigo> {
       BarcodeFormat.code39,
       BarcodeFormat.ean13,
       BarcodeFormat.dataMatrix,
+      //  PDF417: EL REVERSO DE LA CÉDULA  --  12/11/2026.
+      //
+      //  Es el formato del código de barras del dorso de la cédula colombiana,
+      //  y lleva el nombre completo y el número. Entra acá por el mismo motivo
+      //  por el que existe este lector, dicho por el usuario sobre las
+      //  instalaciones: «al momento de digitar los datos hay muchos errores,
+      //  mala escritura del nombre». Un nombre escuchado por teléfono y
+      //  escrito a mano no se puede corregir después, porque nadie sabe que
+      //  está mal.
+      //
+      //  NO SE INTERPRETA ACÁ, y es deliberado: este lector devuelve el texto
+      //  crudo (ver el encabezado). El dorso de la cédula trae varios campos
+      //  pegados y su disposición no es la misma en todas las emisiones;
+      //  partirla en nombre y número es otra decisión, y hay que medirla
+      //  contra cédulas reales antes de escribirla. Agregar el formato es lo
+      //  que habilita leerla.
+      BarcodeFormat.pdf417,
     ],
     detectionSpeed: DetectionSpeed.noDuplicates,
   );

@@ -146,6 +146,7 @@ class CampoDelFormulario {
     this.referencia,
     this.permiteOtro = false,
     this.textoOtro = '',
+    this.escaneable = false,
   });
 
   /// La opción que deja escribir lo que la lista no tiene (18/10/2026).
@@ -154,6 +155,16 @@ class CampoDelFormulario {
   /// Si este campo de opciones permite «Otro» con texto. Lo declara la
   /// plantilla (`permite_otro`), no la app.
   final bool permiteOtro;
+
+  /// Si este campo de texto se puede leer con la cámara (`escaneable`).
+  ///
+  /// LO DECIDE LA PLANTILLA, NO LA APP  --  12/11/2026. Un serial de ONU se
+  /// lee de una etiqueta; «contá qué pasó» no se lee de ninguna parte. Un
+  /// botón de cámara en todos los campos de texto llenaría de cámaras los que
+  /// no tienen nada que escanear, y elegir acá cuál la lleva obligaría a que
+  /// la app conozca los campos de cada empresa — justo lo que el formulario
+  /// dirigido por esquema existe para evitar.
+  final bool escaneable;
 
   /// Lo que se escribió al elegir «Otro». Se guarda al lado del campo, con la
   /// clave [idOtro], igual que lo espera el servidor.
@@ -259,6 +270,9 @@ class CampoDelFormulario {
         ReferenciaDeFicha.desde(campo['referencia'], ficha);
 
     final bool permiteOtro = campo['permite_otro'] == true;
+    //  `== true` y no un cast: la clave puede no venir —las plantillas que no
+    //  la declaran no la mandan— y un campo ausente no es un error.
+    final bool escaneable = campo['escaneable'] == true;
     final String textoOtro = (valores['${id}_otro'] ?? '').toString();
 
     // --- El estado, en orden de gravedad ---------------------------------
@@ -338,6 +352,7 @@ class CampoDelFormulario {
       maximo: maximo,
       referencia: referencia,
       permiteOtro: permiteOtro,
+      escaneable: escaneable,
       textoOtro: textoOtro,
     );
   }

@@ -290,6 +290,98 @@ void main() {
     });
   });
 
+  group('El campo que se lee con la cámara', () {
+    //  POR QUÉ ESTE GRUPO EXISTE  --  12/11/2026
+    //
+    //  El usuario, sobre las instalaciones: «al momento de digitar los datos
+    //  hay muchos errores, mala escritura del nombre, direcciones mal
+    //  digitalizadas». Y el serial de la ONU se tecleaba a mano aunque la
+    //  aplicación ya tiene lector de códigos: no estaba conectado a ningún
+    //  campo del formulario.
+    //
+    //  Lo que se afirma acá es DÓNDE aparece el botón, porque el defecto
+    //  simétrico es igual de malo: una cámara en «contá qué pasó» no sirve
+    //  para nada y ensucia todos los formularios de todas las empresas.
+
+    /// Un campo de texto, escaneable o no según lo diga la plantilla.
+    List<dynamic> conTexto({required bool escaneable, String tipo = 'texto'}) =>
+        <dynamic>[
+          <String, dynamic>{
+            'clave': 'serial_onu',
+            'etiqueta': 'Serial de la ONU',
+            'tipo': tipo,
+            'obligatorio': true,
+            if (escaneable) 'escaneable': true,
+          },
+        ];
+
+    Widget conCampos(List<dynamic> campos) {
+      controladores.putIfAbsent('serial_onu', () => TextEditingController());
+      return formulario(datosFuturos: false, campos: campos);
+    }
+
+    testWidgets('11. La plantilla lo pide: el botón está',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+          _enApp(conCampos(conTexto(escaneable: true))));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Serial de la ONU'), findsOneWidget,
+          reason: 'el campo se dibuja igual que antes');
+      expect(find.byIcon(Icons.qr_code_scanner_rounded), findsOneWidget,
+          reason: 'y con el botón de la cámara');
+    });
+
+    testWidgets('12. La plantilla NO lo pide: no hay cámara',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+          _enApp(conCampos(conTexto(escaneable: false))));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Serial de la ONU'), findsOneWidget);
+      expect(find.byIcon(Icons.qr_code_scanner_rounded), findsNothing,
+          reason: 'un campo de texto cualquiera no lleva cámara: es lo que '
+              'evita llenar de cámaras «contá qué pasó»');
+    });
+
+    testWidgets('13. En un NUMERO no aparece, aunque la plantilla lo pida',
+        (WidgetTester tester) async {
+      //  Un número no está en ninguna etiqueta de código de barras, y la caja
+      //  del número ya tiene la unidad a la derecha: el botón taparía el dBm.
+      //  Si alguien marca escaneable un campo numérico, se ignora en vez de
+      //  romper el campo.
+      await tester.pumpWidget(
+          _enApp(conCampos(conTexto(escaneable: true, tipo: 'decimal'))));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Serial de la ONU'), findsOneWidget);
+      expect(find.byIcon(Icons.qr_code_scanner_rounded), findsNothing);
+    });
+
+    testWidgets('14. El botón es tocable y no escribe nada por si mismo',
+        (WidgetTester tester) async {
+      //  QUE ABRA LA CAMARA NO SE PUEDE PROBAR ACA, y decirlo importa: el
+      //  lector pide la cámara del dispositivo, que en una prueba de widget no
+      //  existe. Lo que SI se puede afirmar es que el botón está habilitado y
+      //  que su existencia no mete un valor en el campo -- un botón que
+      //  reportara algo con solo dibujarse ensuciaría la respuesta del
+      //  técnico, y eso es exactamente lo que el resto de este archivo cuida.
+      await tester.pumpWidget(
+          _enApp(conCampos(conTexto(escaneable: true))));
+      await tester.pumpAndSettle();
+
+      final Finder boton = find.ancestor(
+        of: find.byIcon(Icons.qr_code_scanner_rounded),
+        matching: find.byType(IconButton),
+      );
+      expect(boton, findsOneWidget);
+      expect(tester.widget<IconButton>(boton).onPressed, isNotNull,
+          reason: 'habilitado, no decorativo');
+      expect(reportado.containsKey('serial_onu'), isFalse,
+          reason: 'dibujar el botón no responde el campo');
+    });
+  });
+
   group('Academia en la orden', () {
     testWidgets('10. Las cápsulas abren su guía y no tocan el formulario',
         (WidgetTester tester) async {
