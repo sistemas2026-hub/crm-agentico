@@ -46,6 +46,42 @@
 
 const ORDEN_TONO = { urg: 0, aten: 1, neutro: 2 };
 
+/**
+ * A qué pestaña de la Bandeja lleva cada banda (12/11/2026). Hasta hoy las
+ * bandas «sin asignar» y «revisar» mandaban a `/conversaciones` a secas y la
+ * persona tenía que volver a buscar lo que Hoy ya le había contado. La Bandeja
+ * lee `?pestana=` y estas tres filtran «Todos» por la MISMA `c.banda` del
+ * motor que cuenta Hoy (nucleo/relevo/proyeccion.py), así el número de acá y
+ * la lista de allá salen del mismo predicado.
+ */
+export const PESTANA_DE_BANDA = Object.freeze({
+  1: '/conversaciones?pestana=cliente_espera',
+  2: '/conversaciones?pestana=sin_asignar',
+  3: '/conversaciones?pestana=revisar'
+});
+
+/** Pide una persona: las bandas 1-3 del motor. La misma regla para Hoy, «Por
+ *  área» y la insignia del menú. */
+export const pidePersona = (/** @type {any} */ c) => c.banda === 1 || c.banda === 2 || c.banda === 3;
+
+/**
+ * El trabajo humano pendiente, contado por fuente (12/11/2026): lo que dicen
+ * «Por área» y las insignias del menú. Una fuente que no se pudo leer (null)
+ * NO tiene clave: un 0 diría «no hay nada», y lo cierto es «no se sabe».
+ *
+ * @param {{ conversaciones?: any[] | null, bloqueos?: any[] | null,
+ *           solicitudes?: any[] | null }} f
+ * @returns {{ conversaciones?: number, supervisor?: number, instalaciones?: number }}
+ */
+export function contarTrabajoHumano(f) {
+  /** @type {{ conversaciones?: number, supervisor?: number, instalaciones?: number }} */
+  const n = {};
+  if (Array.isArray(f.conversaciones)) n.conversaciones = f.conversaciones.filter(pidePersona).length;
+  if (Array.isArray(f.bloqueos)) n.supervisor = f.bloqueos.filter((b) => b.requiere_noc).length;
+  if (Array.isArray(f.solicitudes)) n.instalaciones = f.solicitudes.length;
+  return n;
+}
+
 /** Minutos entre una marca ISO y `ahora`, o null si no hay marca. */
 export function minutosDesde(iso, ahora) {
   if (!iso) return null;
@@ -118,7 +154,7 @@ function deConversaciones(conversaciones, slaMin, ahora) {
         : `${espera.length} clientes esperan respuesta de una persona`,
       detalle: (una ? fila?.motivo_cola : null) || 'Dexter ya les avisó que una persona los va a atender.',
       accion: una ? 'Tomar conversación' : 'Ver conversaciones',
-      href: una && fila?.id ? `/conversaciones/${fila.id}` : '/conversaciones',
+      href: una && fila?.id ? `/conversaciones/${fila.id}` : PESTANA_DE_BANDA[1],
       minutos,
       plazo
     });
@@ -137,7 +173,7 @@ function deConversaciones(conversaciones, slaMin, ahora) {
       titulo: `${plural(sinAsignar.length, 'conversación escalada', 'conversaciones escaladas')} sin asignar`,
       detalle: 'Nadie las tomó todavía.',
       accion: 'Asignar',
-      href: '/conversaciones',
+      href: PESTANA_DE_BANDA[2],
       minutos,
       plazo
     });
@@ -155,7 +191,7 @@ function deConversaciones(conversaciones, slaMin, ahora) {
       titulo: `${plural(revisar.length, 'conversación', 'conversaciones')} para revisar`,
       detalle: 'Quedaron sin gestión o con una evaluación pendiente.',
       accion: 'Revisar',
-      href: '/conversaciones',
+      href: PESTANA_DE_BANDA[3],
       minutos,
       plazo: null
     });
@@ -299,16 +335,15 @@ export function armarCola(fuentes) {
 export function armarPorArea(f) {
   /** @type {{ id: string, nombre: string, nota: string, valor: number, icono: string, href: string }[]} */
   const filas = [];
-  if (f.conversaciones) {
-    const n = f.conversaciones.filter((c) => c.banda === 1 || c.banda === 2 || c.banda === 3).length;
-    filas.push({ id: 'conversaciones', nombre: 'Conversaciones', nota: 'piden una persona', valor: n, icono: 'conversacion', href: '/conversaciones' });
+  const n = contarTrabajoHumano(f);
+  if (n.conversaciones != null) {
+    filas.push({ id: 'conversaciones', nombre: 'Conversaciones', nota: 'piden una persona', valor: n.conversaciones, icono: 'conversacion', href: '/conversaciones' });
   }
-  if (f.bloqueos) {
-    const n = f.bloqueos.filter((b) => b.requiere_noc).length;
-    filas.push({ id: 'noc', nombre: 'NOC', nota: 'órdenes detenidas', valor: n, icono: 'noc', href: '/supervisor-noc' });
+  if (n.supervisor != null) {
+    filas.push({ id: 'noc', nombre: 'NOC', nota: 'órdenes detenidas', valor: n.supervisor, icono: 'noc', href: '/supervisor-noc' });
   }
-  if (f.solicitudes) {
-    filas.push({ id: 'instalaciones', nombre: 'Instalaciones', nota: 'por decidir', valor: f.solicitudes.length, icono: 'instalacion', href: '/instalaciones' });
+  if (n.instalaciones != null) {
+    filas.push({ id: 'instalaciones', nombre: 'Instalaciones', nota: 'por decidir', valor: n.instalaciones, icono: 'instalacion', href: '/instalaciones' });
   }
   if (f.pedidos) {
     const n = f.pedidos.filter((p) => p.estado === 'pendiente').length;

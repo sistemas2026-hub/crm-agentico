@@ -11,6 +11,7 @@ import { getOrgShell } from '$lib/server/v2/organization.js';
 // corre en cada navegación, y un conteo sin insignia no merece una línea de
 // log por clic.
 import { conPlazo } from '$lib/server/v2/plazo.js';
+import { insigniasDeTrabajo } from '$lib/server/v2/hoy-operacion.js';
 
 /** Cuanto espera la navegacion a cada conteo del menu antes de seguir sin su
  *  insignia. Corto a proposito: es lo que separa el clic de la pantalla. */
@@ -184,7 +185,15 @@ export async function load(event) {
     ...countKeys.map((key) =>
       conPlazo(LIVE_COUNTS[/** @type {keyof typeof LIVE_COUNTS} */ (key)](event), PLAZO_CONTEO_MS)
     ),
-    conPlazo(getOrgShell(event), PLAZO_CONTEO_MS)
+    conPlazo(getOrgShell(event), PLAZO_CONTEO_MS),
+    //  LAS INSIGNIAS DE TRABAJO HUMANO  --  12/11/2026
+    //  Conversaciones que piden una persona, órdenes detenidas que esperan al
+    //  NOC e instalaciones por decidir: lo mismo que cuenta «Por área» de Hoy.
+    //  `insigniasDeTrabajo` las recuerda por organización y rol (no es una
+    //  ida al motor por clic: ver lib/server/v2/hoy-operacion.js), y con el
+    //  mismo plazo que los demás conteos. Una fuente que falló no trae su
+    //  clave, y sin clave no hay insignia: nunca un 0 inventado.
+    conPlazo(insigniasDeTrabajo(event), PLAZO_CONTEO_MS)
   ]);
 
   countKeys.forEach((key, index) => {
@@ -192,6 +201,13 @@ export async function load(event) {
     // `null` es "vencio el plazo": sin insignia, igual que un fallo.
     if (result.status === 'fulfilled' && result.value != null) shell.counts[key] = result.value;
   });
+
+  const insignias = results[countKeys.length + 1];
+  if (insignias.status === 'fulfilled' && insignias.value) {
+    for (const [clave, n] of Object.entries(insignias.value)) {
+      if (typeof n === 'number') shell.counts[clave] = n;
+    }
+  }
 
   const orgResult = results[countKeys.length];
   if (orgResult.status === 'fulfilled' && orgResult.value) {

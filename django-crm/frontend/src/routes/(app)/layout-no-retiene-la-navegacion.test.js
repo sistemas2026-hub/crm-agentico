@@ -28,6 +28,12 @@ vi.mock('$lib/server/v2/organization.js', () => ({
   getOrgShell: async () => ({ terminology: { 'lead.plural': 'Prospectos' }, logo_url: undefined })
 }));
 
+// Las insignias de trabajo humano (12/11/2026): Supervisor sin clave = una
+// fuente que no se pudo leer. El menú no tiene que inventarle un 0.
+vi.mock('$lib/server/v2/hoy-operacion.js', () => ({
+  insigniasDeTrabajo: async () => ({ conversaciones: 7, instalaciones: 2 })
+}));
+
 const { load } = await import('./+layout.server.js');
 // El mismo valor que el layout (no se puede exportar desde un +layout.server.js:
 // SvelteKit rechaza exports que no sean suyos). Si el layout lo sube, esta
@@ -50,7 +56,11 @@ describe('el load del layout de la app', () => {
       //  el reloj está detenido y `tickets` no contesta.
       await vi.advanceTimersByTimeAsync(PLAZO_CONTEO_MS + 10);
       const shell = /** @type {any} */ (await promesa);
-      expect(shell.counts).toEqual({ leads: 4, pipeline: 2, tasks: 3, invoices: 1, approvals: 5, notifications: 6 });
+      expect(shell.counts).toEqual({
+        leads: 4, pipeline: 2, tasks: 3, invoices: 1, approvals: 5, notifications: 6,
+        conversaciones: 7, instalaciones: 2
+      });
+      expect(shell.counts.supervisor).toBeUndefined();
       expect(shell.counts.tickets).toBeUndefined();
       expect(shell.org.name).toBe('Rapilink');
       expect(shell.org.terminology).toEqual({ 'lead.plural': 'Prospectos' });

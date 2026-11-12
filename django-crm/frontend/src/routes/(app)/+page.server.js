@@ -1,5 +1,5 @@
-import { leerFuentesDeHoy } from '$lib/server/v2/hoy-operacion.js';
-import { armarCola, armarPorArea, contarPorTono, resumen } from '$lib/v2/hoy-operacion.js';
+import { leerFuentesDeHoy, resolucionDelDia } from '$lib/server/v2/hoy-operacion.js';
+import { armarCola, armarPorArea, contarPorTono, pidePersona, resumen } from '$lib/v2/hoy-operacion.js';
 
 /**
  * La portada: "Hoy de la operacion". Lee las fuentes en paralelo (cada una
@@ -9,6 +9,9 @@ import { armarCola, armarPorArea, contarPorTono, resumen } from '$lib/v2/hoy-ope
  * @type {import('./$types').PageServerLoad}
  */
 export async function load(event) {
+  // La pantalla se refresca sola (12/11/2026): `invalidate('app:hoy')` cada
+  // 45 s con la pestaña visible, como la Bandeja. Ver +page.svelte.
+  event.depends('app:hoy');
   const f = await leerFuentesDeHoy(event);
 
   const cola = armarCola({
@@ -31,7 +34,7 @@ export async function load(event) {
   // "Por area" en la misma pantalla. Solo si la cola no se pudo leer se cae al
   // numero del centro.
   const piden = f.conversaciones
-    ? f.conversaciones.filter((c) => c.banda === 1 || c.banda === 2 || c.banda === 3).length
+    ? f.conversaciones.filter(pidePersona).length
     : null;
   const t = f.centro?.totales;
   const dexter = t
@@ -60,6 +63,11 @@ export async function load(event) {
     crmOcultos,
     crmFuentes: f.crm?.summary.sources ?? [],
     luego: f.crm?.later ?? [],
-    noLeidas: f.noLeidas
+    noLeidas: f.noLeidas,
+    // «Dexter resolvió hoy» (12/11/2026): solo ADMIN, como /capacidad, que es
+    // de donde sale y cuyo servidor ya lo cierra así (cifras de negocio de la
+    // empresa). Va como PROMESA sin esperar: la portada no se demora por el
+    // tablero, y SvelteKit la manda cuando resuelve. Nunca rechaza (null).
+    resolucion: event.locals.profile?.role === 'ADMIN' ? resolucionDelDia(event) : null
   };
 }

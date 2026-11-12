@@ -26,16 +26,19 @@ vi.mock('$lib/server/v2/today.js', () => ({
 vi.mock('$lib/server/v2/solicitudes.js', () => ({ leerBandeja: async () => fuentes.solicitudes }));
 vi.mock('$lib/server/v2/programacion-noc.js', () => ({ leerBloqueosAbiertos: async () => fuentes.bloqueos }));
 vi.mock('$lib/server/v2/inventario.js', () => ({ leerReporte: async () => fuentes.pedidos }));
+vi.mock('$env/dynamic/private', () => ({ env: {} }));
 
 const { load } = await import('./+page.server.js');
+const { olvidarResolucion } = await import('$lib/server/v2/hoy-operacion.js');
 
 const hace = (min) => new Date(Date.now() - min * 60000).toISOString();
 
-/** @param {(url: string) => any} responder */
-function evento(responder) {
+/** @param {(url: string) => any} responder @param {string} [rol] */
+function evento(responder, rol = 'USER') {
   return /** @type {any} */ ({
     cookies: { get: () => undefined },
-    locals: {},
+    depends: () => {},
+    locals: { org: { id: 'org-a' }, profile: { role: rol } },
     fetch: async (url) => {
       const r = responder(String(url));
       if (r instanceof Error) throw r;
@@ -45,6 +48,7 @@ function evento(responder) {
 }
 
 beforeEach(() => {
+  olvidarResolucion();
   fuentes.destino = { baseUrl: 'http://motor:5000', tenant: 'demo' };
   fuentes.today = { queue: [], summary: { count: 0, shown: 0, sources: [] }, later: [] };
   fuentes.solicitudes = { solicitudes: [] };
@@ -112,5 +116,36 @@ describe('portada Hoy', () => {
       })
     );
     expect(pedidas).toEqual([]);
+  });
+
+  it('las bandas llevan a su pestaña de la Bandeja, no a /conversaciones a secas', async () => {
+    const datos = /** @type {any} */ (
+      await load(
+        evento((url) =>
+          url.includes('/conversaciones')
+            ? { conversaciones: [{ id: 'a', banda: 1 }, { id: 'b', banda: 1 }, { id: 'c', banda: 2 }, { id: 'd', banda: 3 }] }
+            : { totales: {} }
+        )
+      )
+    );
+    const href = (id) => datos.cola.find((i) => i.id === id)?.href;
+    expect(href('conv-espera')).toBe('/conversaciones?pestana=cliente_espera');
+    expect(href('conv-sin-asignar')).toBe('/conversaciones?pestana=sin_asignar');
+    expect(href('conv-revisar')).toBe('/conversaciones?pestana=revisar');
+  });
+
+  it('«Dexter resolvió hoy» es de ADMIN, llega como promesa y con sus contrapesos', async () => {
+    const tablero = {
+      resolucion_sin_persona: { tasa: 0.5, resueltas: 5, cerradas: 10 },
+      recontacto: { tasa: 0.2, evaluadas: 8, ventana_horas: 72 },
+      satisfaccion: { promedio: 4, respondidas: 3 }
+    };
+    const responder = (url) =>
+      url.includes('/reportes/capacidad') ? tablero : url.includes('/conversaciones') ? { conversaciones: [] } : { totales: {} };
+    const deUser = /** @type {any} */ (await load(evento(responder, 'USER')));
+    expect(deUser.resolucion).toBeNull();
+    const deAdmin = /** @type {any} */ (await load(evento(responder, 'ADMIN')));
+    expect(deAdmin.resolucion).toBeInstanceOf(Promise);
+    expect(await deAdmin.resolucion).toMatchObject({ resueltas: 5, recontacto: { tasa: 0.2 }, satisfaccion: { promedio: 4 } });
   });
 });

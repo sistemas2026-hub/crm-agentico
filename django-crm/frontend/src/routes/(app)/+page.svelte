@@ -20,9 +20,40 @@
     ArrowRight,
     Building2
   } from '@lucide/svelte';
+  import { invalidate } from '$app/navigation';
 
   /** @type {{ data: any }} */
   let { data } = $props();
+
+  /*
+   * SE REFRESCA SOLA  --  12/11/2026
+   *
+   * Hasta hoy la portada era una foto: lo que pedía una persona a las 8:00
+   * seguía igual a las 11:00 si nadie recargaba. Cada SONDEO_MS, y solo con la
+   * pestaña visible (una de fondo no le gasta pedidos al motor), se vuelve a
+   * pedir; al volver a la pestaña, en el acto. Mismo patrón que la Bandeja,
+   * con un intervalo más largo: esto es un resumen, no la cola en vivo. Las
+   * insignias del menú y «Dexter resolvió hoy» se recuerdan en el servidor, así
+   * que la vuelta no le repite al motor lo que ya sabe.
+   */
+  const SONDEO_MS = 45000;
+  $effect(() => {
+    const intervalo = setInterval(() => {
+      if (document.visibilityState === 'visible') invalidate('app:hoy');
+    }, SONDEO_MS);
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') invalidate('app:hoy');
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  });
+
+  /** 0.8123 -> "81 %". null queda null: «sin dato» no es 0 %. */
+  const porciento = (/** @type {number | null | undefined} */ x) =>
+    x == null ? null : `${Math.round(x * 100)} %`;
 
   const ICONOS = {
     conversacion: MessageCircle,
@@ -177,6 +208,46 @@
       </section>
 
       <aside class="lateral" aria-label="Resumen">
+        {#if data.resolucion}
+          <!-- «Dexter resolvió hoy» (12/11/2026). Llega como promesa: la
+               portada no espera al tablero. La resolución sin persona va
+               SIEMPRE con el recontacto y la satisfacción al lado (PRD §2):
+               sola premia cerrar sin resolver. Un dato que falta dice «sin
+               dato», nunca 0. -->
+          {#await data.resolucion}
+            <section class="v2-card panel" aria-busy="true" aria-labelledby="titulo-resolvio">
+              <h2 id="titulo-resolvio" class="v2-section">Dexter resolvió (24 h)</h2>
+              <p class="resolvio-nota">Calculando…</p>
+            </section>
+          {:then r}
+            {#if r}
+              <section class="v2-card panel" aria-labelledby="titulo-resolvio">
+                <h2 id="titulo-resolvio" class="v2-section">Dexter resolvió (24 h)</h2>
+                <div class="resolvio">
+                  <div>
+                    <b class="v2-num">{r.resueltas}</b><small
+                      >de {r.cerradas} cerradas sin una persona{#if porciento(r.tasa)}
+                        · {porciento(r.tasa)}{/if}</small
+                    >
+                  </div>
+                  <div>
+                    <b class="v2-num">{porciento(r.recontacto.tasa) ?? 'sin dato'}</b><small
+                      >volvió a escribir{#if r.recontacto.ventana_horas} en {r.recontacto.ventana_horas} h{/if}
+                      ({r.recontacto.evaluadas} evaluadas)</small
+                    >
+                  </div>
+                  <div>
+                    <b class="v2-num"
+                      >{r.satisfaccion.promedio != null ? r.satisfaccion.promedio : 'sin dato'}</b
+                    ><small>satisfacción ({r.satisfaccion.respondidas} respuestas)</small>
+                  </div>
+                </div>
+                <a class="resolvio-enlace" href="/capacidad">Ver capacidad <ArrowRight /></a>
+              </section>
+            {/if}
+          {/await}
+        {/if}
+
         {#if data.porArea.length}
           <section class="v2-card panel" aria-labelledby="titulo-areas">
             <h2 id="titulo-areas" class="v2-section">Por área</h2>
@@ -340,6 +411,40 @@
   .franja-enlace:hover {
     text-decoration: underline;
     text-underline-offset: 3px;
+  }
+
+  .resolvio {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .resolvio b {
+    display: block;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .resolvio small,
+  .resolvio-nota {
+    display: block;
+    font-size: 12px;
+    color: var(--v2-slate);
+    margin: 0;
+  }
+  .resolvio-enlace {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--v2-ember-text);
+    text-decoration: none;
+  }
+  .resolvio-enlace :global(svg) {
+    width: 14px;
+    height: 14px;
   }
 
   .no-leidas {
