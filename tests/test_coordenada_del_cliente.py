@@ -159,9 +159,14 @@ class Proveedor:
 
 
 @contextlib.contextmanager
-def escenario(registro, proveedor, permitido=True, interruptor_rompe=False):
+def escenario(registro, proveedor, permitido=True, interruptor_rompe=False,
+              lecturas=None):
     import nucleo.herramientas.http as ejecutor_http
     from nucleo.seguridad import interruptor
+
+    #: Una entrada por lectura del interruptor. Quien llama pasa su propia
+    #: lista y despues la cuenta.
+    lecturas = lecturas if lecturas is not None else []
 
     originales = (persistencia.reclamar_operacion_externa,
                   persistencia.finalizar_operacion_externa,
@@ -170,9 +175,21 @@ def escenario(registro, proveedor, permitido=True, interruptor_rompe=False):
     persistencia.reclamar_operacion_externa = registro.reclamar
     persistencia.finalizar_operacion_externa = registro.finalizar
 
+    #  `permitido` ACEPTA UNA LISTA, una respuesta por lectura. Sin eso no
+    #  habria forma de probar que el interruptor se lee ANTES DE CADA
+    #  escritura: con un solo booleano, leerlo una vez y leerlo dos veces dan
+    #  exactamente el mismo resultado -- y la diferencia entre esas dos cosas
+    #  es justo lo que hay que medir.
+    respuestas = list(permitido) if isinstance(permitido, (list, tuple)) else None
+
     def _veredicto(t):
+        lecturas.append(t)
         if interruptor_rompe:
             raise RuntimeError("la base no responde")
+        if respuestas is not None:
+            #  La ultima se repite si piden mas lecturas que respuestas.
+            return Veredicto(respuestas.pop(0) if len(respuestas) > 1
+                             else respuestas[0])
         return Veredicto(permitido)
 
     interruptor.veredicto = _veredicto
@@ -335,6 +352,62 @@ with escenario(registro, proveedor, interruptor_rompe=True):
 afirmar(r.estado == coord.BLOQUEADO_POR_INTERRUPTOR and not proveedor.llamadas,
         "si NO SE PUEDE LEER el interruptor tampoco se escribe: fail-closed "
         f"({r.estado}, {len(proveedor.llamadas)})")
+
+# ---------------------------------------------------------------------------
+seccion("6b. el interruptor se lee ANTES DE CADA escritura, no una vez")
+#  EL DEFECTO QUE ESTA SECCION MATA  --  12/11/2026.
+#
+#  `guardar()` leia el interruptor UNA VEZ, arriba de todo, y despues escribia
+#  en DOS sistemas. CLAUDE.md 8: el interruptor "se lee sin cache ANTES DE CADA
+#  ESCRITURA y falla CERRADO". Entre la primera escritura y la segunda hay una
+#  llamada HTTP a un tercero --segundos, con su reintento-- y en esa ventana el
+#  interruptor podia bajar: la segunda salia igual.
+#
+#  No es un caso de laboratorio: el interruptor existe para cortar EN CALIENTE,
+#  asi que el momento en que alguien lo usa de verdad es exactamente el momento
+#  en que algo esta saliendo.
+
+#  1. CUANTAS VECES SE LEE. Dos escrituras, dos lecturas. Esta es la
+#     afirmacion central: con la lectura vieja daba 1.
+registro, proveedor = Registro(), Proveedor()
+lecturas: list = []
+with escenario(registro, proveedor, lecturas=lecturas):
+    r = guardar()
+afirmar(r.estado == coord.GUARDADA and len(proveedor.llamadas) == 2,
+        f"control: los dos destinos se escriben ({r.estado}, "
+        f"{len(proveedor.llamadas)} llamadas)")
+afirmar(len(lecturas) == 2,
+        f"el interruptor se lee UNA VEZ POR ESCRITURA (se leyo "
+        f"{len(lecturas)} vez/veces para 2 escrituras)")
+
+#  2. Y SIRVE PARA ALGO: baja despues de la primera y la segunda NO sale.
+registro, proveedor = Registro(), Proveedor()
+lecturas = []
+with escenario(registro, proveedor, permitido=[True, False], lecturas=lecturas):
+    r = guardar()
+afirmar(len(proveedor.llamadas) == 1,
+        f"si baja entre las dos, la SEGUNDA no sale ("
+        f"{len(proveedor.llamadas)} llamada(s): {proveedor.nombres})")
+afirmar(r.estado == coord.PARCIAL,
+        f"y el resultado es PARCIAL, no 'guardada' ({r.estado}: {r.motivo})")
+afirmar(r.escribio_algo,
+        "la casa ya quedo ubicada donde importa -- la primera si salio")
+#  Y SE DICE QUE FUE EL INTERRUPTOR, no un fallo del proveedor: de eso depende
+#  si el boton reintenta y que ve el tecnico.
+afirmar(any(d.bloqueado for d in r.destinos),
+        f"el destino frenado queda marcado como bloqueado, no como fallado "
+        f"({[(d.herramienta, d.ok, d.bloqueado) for d in r.destinos]})")
+
+#  3. QUE NO SE LEA DE MAS: un destino que no aplica no escribe nada, asi que
+#     no hay nada que frenar -- y anotar un bloqueo ahi seria auditar un hecho
+#     que no paso.
+registro, proveedor = Registro(), Proveedor()
+lecturas = []
+with escenario(registro, proveedor, lecturas=lecturas):
+    r = guardar(ident={"id_servicio": "5832"})
+afirmar(len(lecturas) == 1,
+        f"un solo destino que aplica -> una sola lectura (fueron "
+        f"{len(lecturas)})")
 
 # ---------------------------------------------------------------------------
 seccion("7. un destino sin identificador NO APLICA, y no frena al otro")
