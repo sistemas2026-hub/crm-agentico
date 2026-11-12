@@ -1,5 +1,6 @@
 from django.urls import path
 
+from leads.embudo_views import EmbudoView, SolicitudDelLeadView
 from leads.views.kanban_views import (
     LeadKanbanView,
     LeadMoveView,
@@ -50,8 +51,11 @@ urlpatterns = [
     ),
     # Stage management
     path("stages/<uid:pk>/", LeadStageDetailView.as_view(), name="stage_detail"),
+    # El embudo de ventas del ISP (12/11/2026): ver leads/embudo.py.
+    path("embudo/", EmbudoView.as_view(), name="lead_embudo"),
     # Lead detail routes (must be after specific routes due to pk pattern)
     path("<uid:pk>/", LeadDetailView.as_view()),
+    path("<uid:pk>/solicitud/", SolicitudDelLeadView.as_view(), name="lead_solicitud"),
     path("<uid:pk>/move/", LeadMoveView.as_view(), name="lead_move"),
     path("comment/<uid:pk>/", LeadCommentView.as_view()),
     path("attachment/<uid:pk>/", LeadAttachmentView.as_view()),
