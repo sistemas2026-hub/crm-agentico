@@ -137,6 +137,12 @@ def revisar(orden, *, pendientes=None) -> dict | None:
         "evidencias": _evidencias_para_revisar(orden, esquema),
         "sugeridas": _que_rehacer(puntos, esquema, orden),
         "solucion": _solucion(cierre),
+        #  EL OTRO LADO DE LA COMPARACION (12/11/2026). Hasta hoy esto
+        #  devolvia lo que el tecnico hizo y nada de lo que se le pidio: no
+        #  habia con que compararlo. Ver `el_ticket`.
+        "el_ticket": el_ticket(orden),
+        "lo_que_el_tecnico_escribio": _lo_que_escribio_el_tecnico(orden,
+                                                                 cierre),
     }
 
 
@@ -1230,6 +1236,66 @@ def _cierre_de_esta_vuelta(orden):
     if devuelta is not None:
         cierres = cierres.filter(created_at__gt=devuelta)
     return cierres.order_by("-created_at").first()
+
+
+def el_ticket(orden) -> dict:
+    """Lo que ORIGINO la orden, para poder compararlo con lo que se hizo.
+
+    POR QUE  --  12/11/2026
+    -----------------------
+    El usuario: «debe haber relacion entre el asunto, la descripcion del
+    ticket y la respuesta del tecnico. No puede haber una respuesta correcta
+    en un asunto que ni por ahi iba al caso.»
+
+    `revisar()` evaluaba ocho puntos --checklist, reporte, servicio, medicion,
+    material, fotos, potencia, rango-- y NINGUNO miraba el ticket. El tecnico
+    podia escribir cualquier cosa coherente consigo misma y los ocho daban
+    verde, porque no habia contra que compararla.
+
+    ES EL MISMO HUECO DEL 06/11, CON TEXTO EN VEZ DE FOTOS. Ese dia el usuario
+    pidio que el supervisor viera si las fotos coinciden con lo pedido, y la
+    nota de `revisar()` lo dejo escrito: «el hueco era de informacion, no de
+    poder: el boton ya existia, pero esta lista mandaba solo el id y el
+    titulo, asi que NO HABIA CON QUE COMPARAR». Esto trae el otro lado.
+
+    DE DONDE SALE CADA COSA, MEDIDO EN PRODUCCION EL 12/11/2026
+    -----------------------------------------------------------
+    Sobre las ultimas ordenes de Rapilink:
+
+      272 | resumen: 'Enviar a correctivo de planta: el tecnico ya asignado...'
+      270 | resumen: 'Enviar a correctivo de red/planta externa: verificar el
+                      puerto 3/4/4...'
+      264 | resumen: 'Llamar al cliente para ubicarlo: es una instalacion
+                      nueva y el ISP no tiene su direccion...'
+
+    `resumen` ES el caso, y esta lleno: lo precarga la lectura del Supervisor
+    (ver el comentario del campo en `campo/models.py`). `diagnostico_previo`
+    sale VACIO en todas: el campo existe, `crear_orden` lo acepta, y ninguno
+    de sus dos llamadores --`despacho_views.py:191` y
+    `operaciones/ordenes_de_despacho.py:654`-- se lo pasa. Se lee igual, para
+    el dia que alguien lo llene; hoy devuelve "".
+
+    (Las ordenes 1842-1844 de produccion SI lo traen y tienen `resumen`
+    vacio. No son otra poblacion: son datos de demostracion que quedaron ahi,
+    con su historia escrita en `seed_campo_demo.py`.)
+
+    NO JUZGA NADA. Devuelve los dos lados; quien compara es el punto noveno,
+    y por encima de el, una persona.
+    """
+    version = getattr(orden, "tipo_trabajo_version", None)
+    tipo = getattr(version, "work_type", None)
+    #  El diagnostico previo es un JSON libre del asistente. Se toma su
+    #  'resumen' si lo trae; lo demas son datos sueltos que no se leen como
+    #  prosa --y volcarlos enteros meteria claves internas en una pantalla.
+    previo = getattr(orden, "diagnostico_previo", None) or {}
+    return {
+        "asunto": str(getattr(tipo, "nombre", "") or ""),
+        "caso": str(getattr(orden, "resumen", "") or "").strip(),
+        "diagnostico_previo": str(previo.get("resumen") or "").strip(),
+        "origen": " ".join(x for x in (
+            str(getattr(orden, "origen_tipo", "") or ""),
+            str(getattr(orden, "origen_ref", "") or "")) if x).strip(),
+    }
 
 
 def _solucion(cierre) -> str:
