@@ -4,6 +4,7 @@ import { getTicketFormOptions, updateTicket } from '$lib/server/v2/tickets.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
 import { autorDeSesion } from '$lib/server/v2/autor.js';
+import { perfilPropio, AVISO_TICKET } from './propio.js';
 
 /**
  * Proxy para marcar una conversacion escalada como atendida sin pasar por
@@ -58,24 +59,30 @@ export async function POST({ params, locals, fetch, cookies, request }) {
     }
 
     let asignado = null;
+    /* EL AVISO (12/11/2026). Antes, si el ticket no quedaba a nombre de quien
+       tomó la conversación, la respuesta decía `asignado: null` y nada más:
+       la pantalla no avisaba y el ticket seguía «Sin asignar» en el CRM sin
+       que nadie lo supiera. Ahora viaja `aviso_ticket` con el porqué. */
+    let avisoTicket = '';
     // Solo al TOMAR y solo si de verdad se tomo ahora: al soltar, o si el
     // motor no cambio nada, asignarse el ticket seria mentirle al CRM.
     if (casoId && !cuerpo?.soltar && datos.aplicada) {
       try {
         const { owners } = await getTicketFormOptions({ cookies });
-        const propio = owners.find(
-          (/** @type {any} */ o) => o.name?.toLowerCase() === locals.user.email?.toLowerCase()
-        );
+        const { propio, motivo } = perfilPropio(owners, locals.user.email);
         if (propio) {
           await updateTicket({ cookies }, casoId, { assigned_to: propio.id });
           asignado = propio;
+        } else {
+          avisoTicket = AVISO_TICKET[/** @type {keyof typeof AVISO_TICKET} */ (motivo)] ?? AVISO_TICKET.sin_perfil;
         }
       } catch (/** @type {any} */ err) {
+        avisoTicket = AVISO_TICKET.fallo_crm;
         console.error('[atender] no se pudo asignar el ticket:', err?.constructor?.name ?? 'Error', err?.status ?? '');
       }
     }
 
-    return json({ ...datos, asignado });
+    return json({ ...datos, asignado, ...(avisoTicket ? { aviso_ticket: avisoTicket } : {}) });
   } catch (/** @type {any} */ err) {
     return json({ error: err?.message || 'No se pudo contactar al asistente' }, { status: 502 });
   }

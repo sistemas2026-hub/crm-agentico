@@ -648,6 +648,9 @@
       // proxy) -- reflejarlo ya mismo en "Asignado a", sin esperar a que
       // alguien reabra el ticket para verlo.
       if (datos.asignado) asignadoA = datos.asignado.id;
+      // Tomó la conversación pero el ticket del CRM no quedó a su nombre
+      // (12/11/2026): se dice, en vez de dejarlo «Sin asignar» en silencio.
+      if (datos.aviso_ticket) errorAtender = datos.aviso_ticket;
       // Sin esto, la lista de la izquierda (+layout.svelte, otro load())
       // no se entera hasta el proximo sondeo -- hasta 8s despues. Con
       // invalidate() se refresca al instante, apenas se guarda.
