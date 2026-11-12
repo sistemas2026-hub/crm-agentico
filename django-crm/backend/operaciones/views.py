@@ -2289,6 +2289,9 @@ class AutonomiaSupervisorView(APIView):
             "recortado": estado["recortado"],
             "motivo": estado["motivo"],
             "interruptor_permite": estado["interruptor_permite"],
+            #  12/11/2026: el configurado puede ser el defecto (3) y no una
+            #  decision de alguien; la pantalla no debe atribuirselo a nadie.
+            "por_omision": bool(estado.get("por_omision")),
             #  El techo del CODIGO, que es distinto del de la empresa: una
             #  pantalla que ofreciera subir a 4 estaria ofreciendo algo que el
             #  sistema niega siempre.
@@ -2349,7 +2352,13 @@ class AutonomiaSupervisorView(APIView):
                 "que_hace": ficha.get("que_hace") or "",
                 "que_no_hace": ficha.get("que_no_hace") or "",
                 "exige_nivel": exige,
+                #  12/11/2026: si es critica (PRD §2) lo dice la ficha, y si
+                #  esta delegada solo porque nadie la quito ('por_omision').
+                #  La pantalla los necesita para decir "lo hace solo" o
+                #  "espera a una persona, porque..." sin deducirlo.
+                "critica": td.es_critica(clave),
                 "delegada": fila is not None,
+                "por_omision": bool((fila or {}).get("por_omision")),
                 "delegada_en": (fila or {}).get("delegada_en"),
                 "con_estas_palabras": (fila or {}).get("con_estas_palabras") or "",
                 #  EL NIVEL EFECTIVO, no el configurado: con el interruptor

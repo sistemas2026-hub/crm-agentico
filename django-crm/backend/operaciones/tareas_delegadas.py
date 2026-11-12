@@ -28,18 +28,41 @@ algo que no esta en la lista, lo dice en vez de improvisarlo.
 Es la misma regla que sostiene el resto del proyecto: "el modelo compone, el
 codigo calcula", y "seguridad en codigo, nunca solo en el prompt".
 
-DELEGAR NO ES AMPLIAR EL ALCANCE
---------------------------------
-Son dos cosas distintas y hacen falta las dos:
+LO NO CRITICO NACE DELEGADO  --  12/11/2026
+------------------------------------------
+Hasta hoy este encabezado decia que la tarea y el nivel "exigen una persona"
+los dos, y las diez tareas nacian apagadas en una empresa nueva: el Supervisor
+pedia permiso para pasar un caso a Despacho, armar la jornada o cargar el
+material. Era la regla de antes del 02/11/2026. Ese dia el dueno del producto
+la invirtio (PRD §1, §2 y §8.18): autonomo por defecto, y una persona solo en
+lo CRITICO -- lo que mueve dinero, deja a un cliente sin servicio de forma que
+no vuelve sola, afecta a muchos clientes a la vez, borra o expone datos, o
+compromete a la empresa con un tercero. La auditoria del menu del 12/11/2026
+(SPEC/AUDITORIA_MENU_2026-11-12.md, Supervisor NOC) encontro que el Supervisor
+seguia del lado viejo: era la bandeja de aprobaciones mas grande del producto,
+para trabajo que PRD §2 declara no critico.
 
-    LA TAREA     QUE se delego. La enciende una persona desde el chat.
-    EL NIVEL     CUANTO puede hacer solo. Lo sube una persona desde la
-                 pantalla de autonomia, con motivo y criterios medidos.
+Desde hoy cada tarea DECLARA si es critica (campo 'critica', explicito y con
+su porque al lado; no se deduce de otra cosa y, si falta, cuenta como critica)
+y eso decide su estado cuando nadie dijo nada:
 
-Delegar una tarea con el nivel en 1 no cierra nada, y subir el nivel sin
-delegar la tarea tampoco. El Supervisor no puede hacer ninguna de las dos por
-su cuenta: las dos exigen una persona, y la de autonomia lo exige ademas con
-una restriccion de base.
+    SIN FILA          no critica -> delegada.    critica -> NO delegada.
+    FILA ENCENDIDA    delegada (la delego una persona).
+    FILA APAGADA      NO delegada, SIEMPRE: una persona la quito, con su
+                      nombre y su motivo, y ningun defecto la vuelve a prender.
+
+Asi «Ajustes del Supervisor» pasa a ser el lugar donde se QUITA autonomia, no
+donde se enciende. El nivel de la empresa acompana: sin fila nace en 3
+('autonomia.nivel_configurado'), una fila que una persona escribio se respeta,
+y el 4 sigue siendo "siempre una persona". Una critica exige el 4, asi que por
+este camino no sale sola nunca: queda como propuesta.
+
+LA PERSONA SALE, LA GARANTIA NO. Nada de esto toca lo que cada tarea comprueba
+en codigo antes de actuar (las cinco reglas del paso, el diagnostico optico del
+cierre, el tope de cada cuadrilla, la bodega que alcanza, las compuertas del
+motor). Y el interruptor de autonomia del motor sigue frenando todo de un paso
+y fallando cerrado: apagado o ilegible, el nivel efectivo cae a 1 y ninguna
+tarea actua ('autonomia.nivel_efectivo').
 """
 from __future__ import annotations
 
@@ -79,6 +102,11 @@ CERRAR_LO_REVISADO = "aprobar_y_cerrar_lo_que_dio_por_bueno"
 CATALOGO = {
     CERRAR_DESINCRONIZADOS: {
         "nombre": "Cerrar los casos ya cerrados en WispHub, con diagnóstico",
+        #  NO CRITICA (PRD §2): cerrar un ticket esta en la lista de lo que el
+        #  agente hace solo. Y este ni siquiera sale de Dexter: el caso ya esta
+        #  cerrado en el sistema del ISP, y solo se cierra si el diagnostico
+        #  del equipo lo habilita.
+        "critica": False,
         "que_hace": (
             "Por cada caso que figura cerrado en WispHub y abierto en Dexter, "
             "le pregunta a SmartOLT por el equipo del cliente. Lo cierra solo "
@@ -93,6 +121,10 @@ CATALOGO = {
     },
     PASAR_A_DESPACHO: {
         "nombre": "Pasar casos a Despacho solo, según las cinco reglas",
+        #  NO CRITICA (PRD §2 la nombra: "pasar un caso a Despacho"). No
+        #  mueve dinero ni toca el servicio: deja el caso en una cola interna,
+        #  y las cinco reglas se comprueban en codigo antes.
+        "critica": False,
         "que_hace": (
             "Después de leer un ticket, lo deja en la cola de Despacho sin "
             "esperar que alguien acepte la propuesta, cuando una de las cinco "
@@ -113,6 +145,9 @@ CATALOGO = {
     },
     ARMAR_LA_JORNADA: {
         "nombre": "Armar la jornada del día de cada cuadrilla",
+        #  NO CRITICA (PRD §2: "armar la jornada"). Interna, y una persona la
+        #  corrige con un clic en Cuadrillas.
+        "critica": False,
         "que_hace": (
             "En cada vuelta arma la jornada de hoy de cada cuadrilla activa "
             "que todavía no la tenga: su pareja de siempre, sus zonas "
@@ -132,6 +167,9 @@ CATALOGO = {
     },
     CREAR_LAS_ORDENES: {
         "nombre": "Crear las órdenes de los casos de Despacho",
+        #  NO CRITICA (PRD §2: "crear y repartir órdenes"). La orden no le
+        #  llega a nadie hasta que se publica, y una persona la cancela.
+        "critica": False,
         "que_hace": (
             "En cada vuelta crea la orden de trabajo de cada caso de la cola "
             "de Despacho que todavía no la tiene, como si alguien apretara "
@@ -154,6 +192,10 @@ CATALOGO = {
     },
     PUBLICAR_EL_REPARTO: {
         "nombre": "Publicar el reparto del día",
+        #  NO CRITICA (PRD §2: "crear y repartir órdenes", "recordarle al
+        #  técnico"). Le llega trabajo a un tecnico de la empresa, no a un
+        #  cliente ni a un tercero, y se deshace moviendo la orden.
+        "critica": False,
         "que_hace": (
             "En cada vuelta, desde dos horas antes de que abran las cuadrillas "
             "hasta el cierre, asigna a las cuadrillas del día las órdenes que "
@@ -181,6 +223,11 @@ CATALOGO = {
     },
     CARGAR_EL_MATERIAL: {
         "nombre": "Cargar el material del día",
+        #  NO CRITICA (PRD §2: "cargar el material"). Mueve material de la
+        #  bodega de la empresa a la custodia de su propio tecnico: no es
+        #  dinero que sale ni una compra a un tercero, y el tecnico confirma
+        #  o marca la diferencia al recibir.
+        "critica": False,
         "que_hace": (
             "Una vez por día y por cuadrilla, después de publicar el reparto, "
             "le carga a su líder el kit de su labor desde su bodega: lo que le "
@@ -203,6 +250,10 @@ CATALOGO = {
     },
     PASAR_CON_LAS_CORRECCIONES: {
         "nombre": "Pasar a Despacho también con las correcciones del usuario",
+        #  NO CRITICA: suma reglas al paso a Despacho, que no lo es, y no
+        #  encaja en ninguno de los cinco casos de PRD §2. PRD §8.18 no la
+        #  nombra en su lista; se clasifico con la definicion, no con la lista.
+        "critica": False,
         "que_hace": (
             "Suma al paso a Despacho las correcciones del 18/10/2026: una "
             "falla con un trabajo ya autorizado por la empresa pasa como "
@@ -229,6 +280,9 @@ CATALOGO = {
     },
     UBICAR_LOS_ASUNTOS: {
         "nombre": "Ubicar cada asunto en su nivel de respuesta",
+        #  NO CRITICA (PRD §8.18: "ubicar los asuntos"). Clasificacion
+        #  interna que una persona corrige con un clic.
+        "critica": False,
         "que_hace": (
             "En cada vuelta pone cada asunto en Urgente, Normal o Programable "
             "según lo que midió en sus tickets: si la mayoría fueron falla de "
@@ -248,6 +302,11 @@ CATALOGO = {
     },
     CERRAR_LO_REVISADO: {
         "nombre": "Aprobar y cerrar las órdenes terminadas que dé por buenas",
+        #  NO CRITICA (PRD §2: "cerrar tickets"; un ticket se reabre). Sale
+        #  del sistema --cierra el ticket en el ISP-- y por eso pasa ademas por
+        #  las compuertas del motor (interruptor, techo y autorizacion de la
+        #  herramienta), que siguen igual.
+        "critica": False,
         "que_hace": (
             "Apenas el técnico manda su reporte revisa esa orden, y además "
             "repasa todas una vez por hora: el checklist, el reporte de "
@@ -272,6 +331,9 @@ CATALOGO = {
     },
     CICLO_AUTOMATICO: {
         "nombre": "Revisar solo, una vez por hora",
+        #  NO CRITICA (PRD §8.18: "revisar solo cada hora"). Mirar no es
+        #  ejecutar; sin esta, ninguna de las otras corre sola.
+        "critica": False,
         "que_hace": (
             "Una vez por hora el Supervisor revisa la operación por su "
             "cuenta: detecta lo que cambió, deja las propuestas que "
@@ -296,6 +358,43 @@ CATALOGO = {
 }
 
 
+#  LO QUE EL SUPERVISOR DEJA SIEMPRE PARA UNA PERSONA  --  12/11/2026
+#  -------------------------------------------------------------------
+#  No son tareas de este catalogo: su circuito vive en otro lado y ya exige a
+#  la persona en codigo. Se declaran aca SOLO para que «Ajustes del
+#  Supervisor» pueda decir, al lado de lo que hace solo, que espera a alguien y
+#  por que es critico (PRD §2). No habilitan ni frenan nada: lo que lo frena
+#  es la funcion que se nombra en 'garantia', y una prueba la ata
+#  ('test_lo_critico_espera_a_una_persona').
+LO_QUE_ESPERA_A_UNA_PERSONA = (
+    {
+        "clave": "avisar_la_caida_de_red",
+        "nombre": "Avisar a los clientes de una caída de red",
+        "que_hace": (
+            "Cuando se cae un puerto de fibra, prepara el aviso por WhatsApp y "
+            "cuenta a cuántos clientes les llegaría. No sale hasta que una "
+            "persona lo aprueba en Supervisor NOC → Fallas."),
+        "por_que_critica": (
+            "Le llega a muchos clientes a la vez (PRD §2, caso 3): un aviso "
+            "equivocado lo reciben todos los de ese puerto, y no se retira."),
+        "garantia": "operaciones.aviso_de_caida.aprobar",
+    },
+)
+
+
+def es_critica(clave: str) -> bool:
+    """
+    Si esta tarea es critica segun su ficha. FALLA CERRADO: una clave que no
+    esta en el catalogo, o una ficha sin el campo, cuenta como critica -- lo
+    que no se declara se trata como critico, igual que 'critica' en el
+    catalogo de herramientas del motor (PRD §2, «Cómo se declara»).
+    """
+    ficha = CATALOGO.get(clave)
+    if ficha is None:
+        return True
+    return ficha.get("critica", True) is not False
+
+
 def catalogo_legible() -> list[dict]:
     """El catálogo con su clave, para que el chat lo muestre y lo nombre."""
     return [{"clave": c, **datos} for c, datos in CATALOGO.items()]
@@ -305,6 +404,12 @@ def esta_delegada(org, clave: str) -> bool:
     """
     Si esta tarea esta delegada y vigente para esta empresa.
 
+    LA FILA MANDA; SIN FILA, LA FICHA  --  12/11/2026. Una fila (encendida o
+    apagada) es lo que decidio una persona y se respeta siempre. Sin fila, una
+    no critica esta delegada y una critica no: es "autonomo por defecto, una
+    persona solo en lo critico" (PRD §2). Antes, sin fila era siempre False, y
+    las diez tareas nacian apagadas.
+
     FALLA CERRADO: una clave que no esta en el catalogo devuelve False, no
     levanta. El ciclo pregunta esto antes de actuar, y una excepcion ahi
     tumbaria una corrida entera por una clave vieja en la base.
@@ -313,8 +418,51 @@ def esta_delegada(org, clave: str) -> bool:
 
     if clave not in CATALOGO:
         return False
-    return TareaDelegada.objects.filter(
-        org=org, clave=clave, activa=True).exists()
+    activa = (TareaDelegada.objects.filter(org=org, clave=clave)
+              .values_list("activa", flat=True).first())
+    if activa is not None:
+        return bool(activa)
+    return not es_critica(clave)
+
+
+def empresas_con_la_tarea(clave: str) -> list:
+    """
+    Los id de las empresas para las que esta tarea esta delegada.
+
+    La usa el ciclo horario para saber a quien recorrer, ANTES de fijar el
+    contexto de RLS: 'TareaDelegada' y 'Org' no tienen politica (medido el
+    08/10/2026, ver 'tasks.py'), asi que se pueden leer sin empresa puesta.
+
+    SIN FILA, SOLO LAS EMPRESAS QUE SON UN ISP DEL MOTOR. Una no critica nace
+    delegada, pero "toda organizacion activa del CRM" no es "toda empresa": una
+    organizacion sin tenant en el motor no tiene tickets ni equipos que mirar,
+    y recorrerla seria pagar un ciclo por nada. 'tenant_de' sin respuesta es
+    '' y la deja afuera -- falla cerrado, como en el resto del backend.
+    """
+    from common.models import Org
+
+    from operaciones.tareas_modelos import TareaDelegada
+
+    if clave not in CATALOGO:
+        return []
+    filas = dict(TareaDelegada.objects.filter(clave=clave)
+                 .values_list("org_id", "activa"))
+    ids = [org_id for org_id, activa in filas.items() if activa]
+    if es_critica(clave):
+        return ids
+    from operaciones import areas_del_tenant
+
+    for org_id in (Org.objects.filter(is_active=True)
+                   .exclude(id__in=list(filas))
+                   .values_list("id", flat=True)):
+        try:
+            if areas_del_tenant.tenant_de(org_id):
+                ids.append(org_id)
+        except Exception:                                        # noqa: BLE001
+            #  No saber de que empresa es = no recorrerla. Sin el texto del
+            #  error: puede traer la URL del motor.
+            continue
+    return ids
 
 
 def algo_la_va_a_correr(org, clave: str) -> dict:
@@ -363,8 +511,8 @@ def algo_la_va_a_correr(org, clave: str) -> dict:
     return {
         "si": False,
         "por_que": (
-            "nada la va a correr sola todavía: el Supervisor solo revisa por "
-            "su cuenta si está delegada «"
+            "nada la va a correr sola: el Supervisor solo revisa por su "
+            "cuenta si está delegada «"
             + CATALOGO[CICLO_AUTOMATICO]["nombre"]
             + "». Hasta entonces esta tarea corre únicamente cuando una "
               "persona aprieta el botón de revisar en la pantalla"),
@@ -372,21 +520,47 @@ def algo_la_va_a_correr(org, clave: str) -> dict:
 
 
 def delegadas(org) -> list[dict]:
-    """Las tareas vigentes de esta empresa, con quién y cuándo las delegó."""
+    """
+    Las tareas vigentes de esta empresa, con quién y cuándo las delegó.
+
+    INCLUYE LAS QUE NACEN DELEGADAS (12/11/2026), con 'por_omision' en
+    verdadero y sin quien ni cuando: nadie las delego, las trae el defecto. Si
+    esta lista mostrara solo las filas, el chat diria "no tengo nada delegado"
+    mientras el ciclo pasa casos a Despacho -- la peor forma de equivocarse
+    para un sistema que tiene que poder decir que hace.
+    """
     from operaciones.tareas_modelos import TareaDelegada
 
-    filas = (TareaDelegada.objects
-             .filter(org=org, activa=True)
-             .select_related("delegada_por")
-             .order_by("-delegada_en"))
-    return [{
-        "clave": f.clave,
-        "nombre": CATALOGO.get(f.clave, {}).get("nombre", f.clave),
-        "delegada_en": f.delegada_en.isoformat(),
-        #  El ID y nunca el nombre ni el correo: esto puede terminar en un log.
-        "delegada_por": str(f.delegada_por_id or ""),
-        "con_estas_palabras": f.pedido_textual,
-    } for f in filas]
+    filas = {f.clave: f for f in (TareaDelegada.objects
+                                  .filter(org=org)
+                                  .select_related("delegada_por"))}
+    salida = []
+    for f in sorted((f for f in filas.values() if f.activa),
+                    key=lambda f: f.delegada_en, reverse=True):
+        if f.clave not in CATALOGO:
+            continue
+        salida.append({
+            "clave": f.clave,
+            "nombre": CATALOGO[f.clave].get("nombre", f.clave),
+            "delegada_en": f.delegada_en.isoformat(),
+            #  El ID y nunca el nombre ni el correo: esto puede terminar en un
+            #  log.
+            "delegada_por": str(f.delegada_por_id or ""),
+            "con_estas_palabras": f.pedido_textual,
+            "por_omision": False,
+        })
+    for clave, ficha in CATALOGO.items():
+        if clave in filas or es_critica(clave):
+            continue
+        salida.append({
+            "clave": clave,
+            "nombre": ficha.get("nombre", clave),
+            "delegada_en": None,
+            "delegada_por": "",
+            "con_estas_palabras": "",
+            "por_omision": True,
+        })
+    return salida
 
 
 class ErrorTarea(Exception):
@@ -444,6 +618,13 @@ def delegar(org, clave: str, *, actor, pedido_textual: str = "",
         raise ErrorTarea(
             "delegar una tarea necesita la persona que la delega: el "
             "Supervisor no puede darse trabajo a sí mismo")
+    if es_critica(clave):
+        #  12/11/2026. Una critica exige el nivel 4, que nunca alcanza por
+        #  configuracion: delegarla dejaria una fila "delegada" que no hace
+        #  nada, y la pantalla la pintaria encendida. Se dice antes.
+        raise ErrorTarea(
+            f"«{CATALOGO[clave].get('nombre', clave)}» es crítica (PRD §2): "
+            f"la aprueba una persona cada vez, no se delega")
 
     ahora = ahora or timezone.now()
     with transaction.atomic():
@@ -496,6 +677,12 @@ def quitar(org, clave: str, *, actor, motivo: str = "", ahora=None):
     UNA YA QUITADA NO SE VUELVE A QUITAR  --  27/10/2026. Antes se re-sellaba:
     pedirle al chat que quite algo que ya estaba quitado borraba quién lo quitó
     y por qué, sin cambiar nada (auditor independiente). Ahora se dice.
+
+    SIN FILA, UNA NO CRITICA SE QUITA CREANDO LA FILA APAGADA  --  12/11/2026.
+    Desde que lo no critico nace delegado, "no hay fila" ya no significa "no
+    estaba delegada": significa "la trae el defecto". Quitarla tiene que dejar
+    una fila apagada con quien y por que, que es lo que el defecto respeta
+    para siempre ('esta_delegada').
     """
     from django.db import transaction
 
@@ -503,9 +690,16 @@ def quitar(org, clave: str, *, actor, motivo: str = "", ahora=None):
 
     if actor is None:
         raise ErrorTarea("quitar una tarea necesita la persona que lo decide")
+    if clave not in CATALOGO:
+        raise ErrorTarea(f"'{clave}' no es una tarea del catálogo")
     with transaction.atomic():
         bloquear(org, clave)
         fila = TareaDelegada.objects.filter(org=org, clave=clave).first()
+        if fila is None and not es_critica(clave):
+            return TareaDelegada.objects.create(
+                org=org, clave=clave, activa=False, quitada_por=actor,
+                quitada_en=ahora or timezone.now(),
+                motivo_al_quitar=(motivo or "")[:500])
         if fila is None:
             raise ErrorTarea(f"'{clave}' no estaba delegada")
         if not fila.activa:

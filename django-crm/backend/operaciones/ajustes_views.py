@@ -111,9 +111,19 @@ def _tareas(org) -> dict:
         })
     return {
         "nivel_efectivo": estado["efectivo"],
+        "nivel_configurado": estado["configurado"],
+        #  12/11/2026: si el nivel es el defecto o lo escribio alguien. Con
+        #  una fila por debajo de 3, lo no critico tampoco corre, y la
+        #  pantalla tiene que poder decir que fue una persona.
+        "nivel_por_omision": bool(estado.get("por_omision")),
         "interruptor_permite": estado["interruptor_permite"],
         "motivo": estado["motivo"],
         "tareas": tareas,
+        #  Lo que el Supervisor deja SIEMPRE para una persona, con el porque
+        #  (PRD §2). Solo para leer: no se delega desde aca.
+        "espera_a_una_persona": [
+            {k: v for k, v in c.items() if k != "garantia"}
+            for c in td.LO_QUE_ESPERA_A_UNA_PERSONA],
     }
 
 
@@ -127,7 +137,6 @@ class AjustesSupervisorView(APIView):
 
     def post(self, request):
         from operaciones import tareas_delegadas as td
-        from operaciones.tareas_modelos import TareaDelegada
 
         actor = getattr(request, "profile", None)
         if actor is None:
@@ -162,9 +171,11 @@ class AjustesSupervisorView(APIView):
         #  fila que bloquear. Y nada de afuera adentro de esta transaccion.
         with transaction.atomic():
             td.bloquear(request.org, clave)
-            fila = (TareaDelegada.objects
-                    .filter(org=request.org, clave=clave).first())
-            if bool(fila and fila.activa) == delegar:
+            #  EL ESTADO EFECTIVO, no la fila  --  12/11/2026. Una no critica
+            #  sin fila esta delegada por defecto: mirar solo la fila diria
+            #  "no esta delegada" y dejaria "delegar" escribir una fila igual a
+            #  lo que ya pasa, o "quitar" contestar 409 a quien la quiere apagar.
+            if td.esta_delegada(request.org, clave) == delegar:
                 return Response(
                     {"detail": ("Esa tarea ya estaba "
                                 + ("delegada" if delegar else "sin delegar")

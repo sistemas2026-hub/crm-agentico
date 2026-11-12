@@ -373,7 +373,9 @@ def _puede_cerrar(org, estado) -> dict:
         "el_diagnostico_decide_caso_por_caso": True,
         "puede_hoy": bool(delegada and nivel_ok),
         "que_falta": ("" if (delegada and nivel_ok) else
-                      ("nadie delegó esa tarea desde el chat"
+                      #  12/11/2026: nace delegada; si no lo esta, es que
+                      #  una persona la quito.
+                      ("una persona quitó esa tarea en Ajustes del Supervisor"
                        if not delegada else
                        "el nivel de autonomía de la empresa no llega a 3")),
     }
@@ -407,12 +409,18 @@ def mis_limites(org) -> dict:
         #  decia a una persona que no podia hacer algo que si hace, que es la
         #  peor forma de equivocarse para un sistema que tiene que poder decir
         #  "no puedo" con credito.
-        "nota": ("el Supervisor observa y recomienda. Tiene UN camino de "
-                 "ejecucion y uno solo: cerrar un caso que ya esta cerrado en "
-                 "WispHub y sigue abierto en Dexter, si una persona le delego "
-                 "esa tarea, el nivel llega a 3 y el diagnostico optico del "
-                 "equipo lo habilita. No reinicia equipos, no crea ni reasigna "
-                 "tickets y no cambia la programacion."),
+        #  12/11/2026: la nota decia "observa y recomienda" y "un solo camino
+        #  de ejecucion", y ya no era cierto desde octubre (pasa a Despacho,
+        #  arma jornadas, crea y publica ordenes, carga material). Con lo no
+        #  critico delegado por defecto, el modelo repetiria una mentira.
+        "nota": ("el Supervisor hace solo las tareas NO criticas de su "
+                 "catalogo que esten delegadas (todas nacen delegadas; una "
+                 "persona puede quitarlas en Ajustes del Supervisor), cada una "
+                 "con sus comprobaciones en codigo antes de actuar. Lo critico "
+                 "--un aviso a muchos clientes, dinero, cortar un servicio-- "
+                 "siempre lo aprueba una persona. No reinicia equipos, no crea "
+                 "tickets y no cambia lo que se le cobra a nadie. La lista de "
+                 "lo delegado esta en 'tareas_activas'."),
         #  Lo que de verdad decide si ese camino esta abierto HOY, calculado y
         #  no narrado: el modelo no tiene que deducirlo del texto.
         "puede_cerrar_casos_desincronizados": _puede_cerrar(org, estado),
@@ -858,12 +866,13 @@ def delegar_tarea(org, *, clave="", pedido="", actor=None,
     }
 
 
-def quitar_tarea(org, *, clave="", actor=None) -> dict:
+def quitar_tarea(org, *, clave="", actor=None, pedido="") -> dict:
     """Deja de delegar una tarea. Queda el registro de que existio."""
     from operaciones import tareas_delegadas as td
 
     try:
-        fila = td.quitar(org, str(clave).strip(), actor=actor)
+        fila = td.quitar(org, str(clave).strip(), actor=actor,
+                         motivo=str(pedido or ""))
     except td.ErrorTarea as e:
         return {"error": "no_se_pudo_quitar", "detalle": str(e)}
     return {"quitada": fila.clave,

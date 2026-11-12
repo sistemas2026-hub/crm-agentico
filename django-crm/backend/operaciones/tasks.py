@@ -135,18 +135,18 @@ def ciclo_del_supervisor():
     cliente, porque esto va a un log y al resultado en Redis.
     """
     from operaciones import supervisor, tareas_delegadas as td
-    from operaciones.tareas_modelos import TareaDelegada
 
     #  LA PUERTA, y es la primera consulta a proposito: 'TareaDelegada' no
     #  tiene politica de RLS (medido, ver el encabezado), asi que es lo unico
     #  que se puede leer antes de fijar contexto. Las empresas que no delegaron
     #  el ciclo no entran: no se las recorre y se decide despues, no se las
     #  recorre.
-    org_ids = (TareaDelegada.objects
-               .filter(clave=td.CICLO_AUTOMATICO, activa=True)
-               .values_list("org_id", flat=True)
-               .distinct())
-    org_ids = list(org_ids)
+    #
+    #  12/11/2026: el ciclo NACE DELEGADO (no es critico), asi que la lista ya
+    #  no son solo las filas encendidas: tambien cada empresa del motor sin
+    #  fila, menos las que una persona apago. Lo resuelve
+    #  'td.empresas_con_la_tarea', que lee lo mismo y sin contexto.
+    org_ids = td.empresas_con_la_tarea(td.CICLO_AUTOMATICO)
     if not org_ids:
         #  Se registra, y la frase importa: "nadie lo delego" no es lo mismo
         #  que "no habia nada que hacer". La primera se arregla desde el chat.

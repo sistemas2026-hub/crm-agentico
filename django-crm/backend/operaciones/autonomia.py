@@ -30,7 +30,9 @@ haria que un tablero prometiera un alcance que no existe.
 
 FAIL-CLOSED, Y HASTA DONDE EXACTAMENTE
 --------------------------------------
-  * sin fila de nivel     -> 0. Desplegar no concede alcance.
+  * sin fila de nivel     -> 3 desde el 12/11/2026 (era 0): lo no critico es
+                             autonomo por defecto (PRD §2). Ver
+                             'NIVEL_POR_OMISION'. El 4 nunca.
   * interruptor detenido  -> se recorta a RECOMENDAR (1), no a 0.
   * interruptor ILEGIBLE  -> lo mismo, y se dice por que. No poder leer el
                              control es tratado igual que no tenerlo: es el
@@ -90,16 +92,37 @@ class ErrorAutonomia(Exception):
 #  LEER
 # =============================================================================
 
+#: EL NIVEL CON EL QUE NACE UNA EMPRESA  --  12/11/2026. Era OBSERVAR (0):
+#: "desplegar no concede alcance". Esa regla era la de antes del 02/11/2026; ese
+#: dia el dueno del producto decidio "autonomo por defecto, una persona solo en
+#: lo critico" (PRD §1, §2, §8.18), y con el 0 las diez tareas del Supervisor
+#: --todas no criticas-- seguian pidiendo permiso (auditoria del menu, S1).
+#:
+#: Es el 3 y no mas: el 4 es "accion critica, siempre una persona" y 'puede'
+#: lo niega sin importar el nivel. Lo que sigue fallando CERRADO no cambia: el
+#: interruptor del motor apagado o ilegible recorta a 1 ('nivel_efectivo'), una
+#: fila que escribio una persona manda sobre este defecto, y lo critico del
+#: catalogo exige el 4. El alcance se concede para lo no critico; lo critico
+#: sigue sin heredarse.
+NIVEL_POR_OMISION = P.NIVEL_EJECUTAR_REVERSIBLE
+
+
+def _fila_vigente(org):
+    return (NivelAutonomia.objects.filter(org=org)
+            .order_by("-cambiado_en", "-created_at").first())
+
+
 def nivel_configurado(org) -> int:
     """
-    El nivel que una persona decidio para esta empresa. 0 si nadie decidio.
+    El nivel que una persona decidio para esta empresa; sin decision, el de
+    'NIVEL_POR_OMISION' (3 desde el 12/11/2026, antes 0).
 
-    Se lee de la fila MAS RECIENTE del historial. Sin filas es 0 -- fail-closed:
-    el alcance se concede, no se hereda.
+    Se lee de la fila MAS RECIENTE del historial. Una fila manda siempre,
+    tambien si una persona BAJO el nivel: eso es quitarle alcance, y el
+    defecto no lo pisa.
     """
-    fila = (NivelAutonomia.objects.filter(org=org)
-            .order_by("-cambiado_en", "-created_at").first())
-    return int(fila.nivel) if fila is not None else P.NIVEL_OBSERVAR
+    fila = _fila_vigente(org)
+    return int(fila.nivel) if fila is not None else NIVEL_POR_OMISION
 
 
 def _interruptor_de(org) -> tuple[bool, str]:
@@ -241,7 +264,12 @@ def nivel_efectivo(org) -> dict:
     juntos: un tablero que muestre solo el efectivo no deja ver que alguien
     configuro 3 y algo lo esta bajando a 0, que es justo lo que hay que mirar.
     """
-    configurado = nivel_configurado(org)
+    fila = _fila_vigente(org)
+    configurado = int(fila.nivel) if fila is not None else NIVEL_POR_OMISION
+    #  SI LO DECIDIO UNA PERSONA O ES EL DEFECTO (12/11/2026): la pantalla
+    #  tiene que poder decir "nadie lo cambio" en vez de atribuirle a alguien
+    #  un 3 que nadie escribio.
+    por_omision = fila is None
     permite, motivo = _interruptor_de(org)
 
     #  El interruptor gobierna la EJECUCION. Observar y recomendar no son
@@ -256,13 +284,15 @@ def nivel_efectivo(org) -> dict:
                 "motivo": "" if permite else
                           (motivo + " -- no recorta observar/recomendar, que no "
                                     "son ejecutar"),
-                "interruptor_permite": permite}
+                "interruptor_permite": permite,
+                "por_omision": por_omision}
 
     return {"configurado": configurado,
             "efectivo": P.NIVEL_RECOMENDAR,
             "recortado": True,
             "motivo": motivo,
-            "interruptor_permite": permite}
+            "interruptor_permite": permite,
+            "por_omision": por_omision}
 
 
 def puede(org, nivel_requerido: int) -> dict:

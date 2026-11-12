@@ -250,10 +250,12 @@ class NivelAutonomia(BaseModel):
     encender la nueva-- y dos escrituras son una carrera. Con el historial puro,
     el vigente se lee ordenando por fecha y el cambio es UN insert.
 
-    SIN FILA, NIVEL 0. FAIL-CLOSED
-    ------------------------------
-    Una empresa sin ninguna fila esta en OBSERVAR. No se hereda un default
-    permisivo desde el codigo: desplegar no puede conceder alcance.
+    SIN FILA, NIVEL 3  --  12/11/2026 (hasta ese dia, 0)
+    ----------------------------------------------------
+    Una empresa sin ninguna fila esta en EJECUTAR REVERSIBLE: lo no critico es
+    autonomo por defecto (PRD §2, §8.18). El 4 --lo critico-- no se hereda
+    nunca, el interruptor del motor sigue recortando a 1 y una fila escrita por
+    una persona manda. Ver 'autonomia.NIVEL_POR_OMISION'.
 
     LOS CINCO NIVELES NO SE REDEFINEN AQUI
     --------------------------------------
