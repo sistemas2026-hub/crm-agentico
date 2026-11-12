@@ -1,13 +1,11 @@
 <!doctype html>
 <html lang="es">
   <head>
-    <!-- Google Fonts - Geist (kept for back-compat), Inter (new primary), JetBrains Mono (kbd chips) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Fuentes AUTOALOJADAS (12/11/2026), sin Google: ver static/fuentes/fuentes.css.
+         Declara todas las familias de la plataforma (Inter, JetBrains Mono, Geist,
+         y las de la Bandeja, el Supervisor NOC y el Inventario); cada archivo se
+         baja solo si algo en pantalla lo usa. -->
+    <link rel="stylesheet" href="%sveltekit.assets%/fuentes/fuentes.css" />
     <!-- Sin analitica de terceros. Aca estaba el Google Analytics de BottleCRM
          (G-JNWHD22PPN), heredado al vendorizar el 08/08/2026: mandaba la URL de
          cada pagina a una cuenta ajena, y hay URLs que SON la llave de acceso
