@@ -110,7 +110,11 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
                           _medicion(orden, pendientes), _material(orden, cierre),
                           _fotos(orden), _potencia(orden, cierre),
-                          _en_rango(orden, cierre))
+                          _en_rango(orden, cierre),
+                          #  EL NOVENO (12/11/2026): los ocho de arriba miran
+                          #  si el trabajo esta COMPLETO; este mira si es el
+                          #  trabajo que se pidio. Ver `_cuadra_con_el_ticket`.
+                          _cuadra_con_el_ticket(orden))
               if p is not None]
     if any(p["ok"] is False for p in puntos):
         veredicto = NO_CERRAR
@@ -1301,6 +1305,70 @@ def el_ticket(orden) -> dict:
 def _solucion(cierre) -> str:
     respuestas = ((cierre.datos or {}).get("respuestas") or {}) if cierre else {}
     return str(respuestas.get("solucion") or "")
+
+
+def _cuadra_con_el_ticket(orden):
+    """¿Lo que el tecnico reporto explica el ticket? None si no se sabe.
+
+    El usuario, el 12/11/2026: «no puede haber una respuesta correcta en un
+    asunto que ni por ahi iba al caso».
+
+    NUNCA DEVUELVE False, Y ESA ES LA DECISION ENTERA
+    --------------------------------------------------
+    `campo/inspeccion_visual.py:24-36` (31/10/2026): un punto de IA en
+    `False` produce veredicto `NO_CERRAR`, y eso le daria a la IA el poder de
+    negar el trabajo de un tecnico. Aca vale `True` o `None`.
+
+    Y aun asi se cumple lo que el usuario pidio: `None` produce `REVISAR`
+    (ver `revisar()`), y una orden en `REVISAR` **no cierra sola**. La
+    contradiccion frena la orden para que la mire una persona, sin que
+    ninguna IA repruebe a nadie.
+
+    POR QUE LEE Y NO PREGUNTA
+    --------------------------
+    Programacion se refresca cada 15 segundos y cada refresco llama a
+    `revisar()`. Preguntarle al modelo aca seria ~1.920 llamadas por orden
+    por dia, multiplicado por cada supervisor con la pantalla abierta. El
+    cotejo lo calcula UNA vez `campo/tasks.revisar_el_cierre_ya` y lo guarda
+    en `CotejoDelReporte`; esto solo lo lee.
+
+    SIN FILA, EL PUNTO NO APARECE
+    ------------------------------
+    Devuelve None (el punto entero, no el `ok`) cuando todavia no se cotejo o
+    cuando la empresa lo tiene apagado. Un punto que dijera «no se pudo
+    comparar» en toda orden de toda empresa que no encendio esto seria un
+    interrogante permanente que la gente aprende a ignorar -- y entonces
+    tampoco veria el que importa.
+    """
+    from campo.cotejo_del_reporte import (CUADRA, NO_CUADRA,
+                                          del_cierre_de_esta_vuelta)
+
+    try:
+        fila = del_cierre_de_esta_vuelta(orden)
+    except Exception:                                            # noqa: BLE001
+        return None
+    if fila is None:
+        return None
+
+    if fila.veredicto == CUADRA:
+        return _punto("cuadra", True,
+                      "Lo que el técnico hizo explica el caso del ticket.")
+    if fila.veredicto == NO_CUADRA:
+        #  EL MOTIVO VA EN EL TEXTO, no en un campo aparte: quien lee la
+        #  tarjeta tiene que entender QUE no cuadra sin abrir nada mas. Sin
+        #  el, «no cuadra» es una acusacion sin evidencia.
+        detalle = (fila.motivo or "").strip()
+        return _punto("cuadra", None,
+                      "Revisá si el trabajo corresponde al caso: "
+                      + (detalle or "lo que se reportó no parece explicar lo "
+                                    "que decía el ticket."),
+                      motivo=detalle)
+    #  `no_se_sabe`: se intento y no alcanzo. NO es lo mismo que no haberlo
+    #  intentado --eso no deja fila-- y por eso se dice.
+    return _punto("cuadra", None,
+                  "No se pudo comparar el reporte con el ticket"
+                  + (f" ({fila.motivo})" if fila.motivo else "") + ".",
+                  motivo=(fila.motivo or ""))
 
 
 def _checklist(orden):

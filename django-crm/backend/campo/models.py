@@ -1532,3 +1532,4 @@ from campo.niveles import (  # noqa: E402,F401
 from campo.novedades import NovedadDeCuadrilla  # noqa: E402,F401
 from campo.ubicacion_de_cuadrilla import PosicionDeTecnico  # noqa: E402,F401
 from campo.analisis_de_evidencia import AnalisisDeEvidencia  # noqa: E402,F401
+from campo.cotejo_del_reporte import CotejoDelReporte  # noqa: E402,F401

@@ -5963,9 +5963,22 @@ def interno_cotejar_reporte():
     se_pidio = str(datos.get("se_pidio") or "")
     que_hizo = str(datos.get("que_hizo") or "")
 
-    def sin_juicio(motivo: str):
-        """La unica forma de contestar que no es un juicio del modelo."""
+    def sin_juicio(motivo: str, apagado: bool = False):
+        """La unica forma de contestar que no es un juicio del modelo.
+
+        `apagado` SEPARA «no se pregunto» DE «se pregunto y no se supo», y no
+        es cosmetico (12/11/2026, encontrado antes de desplegar). El CRM
+        llama a esta ruta en CADA cierre, tenga la empresa el cotejo
+        encendido o no. Si no pudiera distinguir los dos casos, guardaria un
+        `no_se_sabe` por cada cierre de cada empresa que NO lo encendio, el
+        punto noveno lo leeria, valdria None, y **toda orden de esa empresa
+        dejaria de cerrarse sola** -- por una funcion apagada.
+
+        Un campo y no el texto del motivo: acoplar dos servicios por una
+        cadena de texto se rompe el dia que alguien la reescribe.
+        """
         return jsonify({"veredicto": cotejo.NO_SE_SABE, "motivo": motivo,
+                        "apagado": apagado,
                         "error": "", "segundos": 0, "tokens": 0}), 200
 
     try:
@@ -5981,7 +5994,8 @@ def interno_cotejar_reporte():
 
     #  EL INTERRUPTOR DE ESTA EMPRESA, y falla CERRADO.
     if not getattr(config, cotejo.BANDERA, False):
-        return sin_juicio("esta empresa no tiene habilitado el cotejo")
+        return sin_juicio("esta empresa no tiene habilitado el cotejo",
+                          apagado=True)
 
     #  EL TOPE DE GASTO, antes de pagar. Mismo criterio que vision: si no se
     #  puede saber, se sigue -- no dejar sin servicio por una estadistica.
@@ -6013,6 +6027,7 @@ def interno_cotejar_reporte():
                        "origen": "cotejo_reporte_campo"})
 
     return jsonify({"veredicto": r.veredicto, "motivo": r.motivo,
+                    "apagado": False,
                     "error": r.error, "segundos": r.segundos,
                     "tokens": r.tokens}), 200
 
