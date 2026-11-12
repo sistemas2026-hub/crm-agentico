@@ -28,7 +28,14 @@ import { leerAccionesDeAgentes } from '$lib/server/v2/acciones-de-agente.js';
  *
  * @type {import('./$types').PageServerLoad}
  */
-export async function load({ locals, fetch }) {
+export async function load(event) {
+  //  El rol de quien mira (12/11/2026): la ficha de un puesto ofrece el
+  //  tablero del Supervisor solo a quien su servidor deja pasar.
+  return { ...(await leerOficina(event)), rol: event.locals.profile?.role ?? null };
+}
+
+/** @param {{ locals: App.Locals, fetch: typeof globalThis.fetch }} event */
+async function leerOficina({ locals, fetch }) {
   const baseUrl = env.PRIVATE_ASISTENTE_URL;
   const tenant = await tenantDeLaSesion(locals, fetch);
   if (!baseUrl || !tenant) {
@@ -50,18 +57,27 @@ export async function load({ locals, fetch }) {
     };
   }
 
-  const { areas } = await leerAreas(locals, fetch);
-
-  //  QUE PUEDE HACER HOY CADA AGENTE. Va en paralelo y degrada a `null`: la
-  //  oficina se dibuja igual sin esto, y la ficha dice que no lo pudo leer en
-  //  vez de mostrar una lista vacia, que se leeria como «no puede hacer nada».
-  const acciones = await leerAccionesDeAgentes(locals, fetch);
+  //  QUE PUEDE HACER HOY CADA AGENTE. Degrada a `null`: la oficina se dibuja
+  //  igual sin esto, y la ficha dice que no lo pudo leer en vez de mostrar una
+  //  lista vacia, que se leeria como «no puede hacer nada».
+  //
+  //  EN PARALELO DE VERDAD (12/11/2026). El comentario decia «va en paralelo»
+  //  y las tres lecturas iban una detras de otra: la pantalla esperaba la
+  //  suma de las tres. Ahora salen juntas y espera a la mas lenta.
+  const [{ areas }, acciones, centro] = await Promise.all([
+    leerAreas(locals, fetch),
+    leerAccionesDeAgentes(locals, fetch),
+    fetch(`${baseUrl}/centro-mando?tenant=${encodeURIComponent(tenant)}&ventana=10`, {
+      headers: headersMotor()
+    }).then(
+      (resp) => ({ resp, err: null }),
+      (err) => ({ resp: null, err })
+    )
+  ]);
 
   try {
-    const resp = await fetch(
-      `${baseUrl}/centro-mando?tenant=${encodeURIComponent(tenant)}&ventana=10`,
-      { headers: headersMotor() }
-    );
+    if (centro.err) throw centro.err;
+    const resp = /** @type {Response} */ (centro.resp);
     const datos = await resp.json();
     if (!resp.ok) {
       return {

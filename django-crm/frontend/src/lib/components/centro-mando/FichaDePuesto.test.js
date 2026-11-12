@@ -418,3 +418,32 @@ describe('una persona del equipo no es un puesto vacío', () => {
     expect(html).not.toContain('Esta estación existe en la sala y no tiene agente');
   });
 });
+
+/*
+ * A DÓNDE SE VA DESDE EL PUESTO  --  12/11/2026
+ * La auditoría midió cero enlaces salientes en el Centro de mando.
+ */
+describe('la ficha lleva a donde se cambia y a lo que atiende', () => {
+  const href = (html) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+
+  it('un agente de clientes: configurarlo en /agentes y ver las conversaciones', () => {
+    const html = pintar({
+      puesto: { id: 'p1', agente: 'soporte_tecnico_cliente', nombre: 'Soporte', area: 'Soporte' },
+      veredicto: alDia,
+      rol: 'USER'
+    });
+    expect(href(html)).toEqual(['/agentes#agente-soporte_tecnico_cliente', '/conversaciones']);
+  });
+
+  it('el Supervisor: su tablero a gestión, y no a un USER', () => {
+    expect(href(pintar({ puesto, veredicto: alDia, rol: 'SUPERVISOR' }))).toEqual([
+      '/supervisor-noc',
+      '/agentes'
+    ]);
+    expect(href(pintar({ puesto, veredicto: alDia, rol: 'USER' }))).toEqual(['/agentes']);
+  });
+
+  it('un puesto libre no ofrece enlaces', () => {
+    expect(href(pintar({ puesto: vacio, veredicto: alDia, rol: 'ADMIN' }))).toEqual([]);
+  });
+});

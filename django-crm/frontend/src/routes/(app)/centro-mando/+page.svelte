@@ -1,15 +1,19 @@
 <script>
   /**
-   * LA OFICINA VIRTUAL — PROTOTIPO DEL NOC.
+   * EL CENTRO DE MANDO: LA OFICINA VIRTUAL DEL NOC.
    *
-   * ESTA ES `/centro-mando`. Nació como `/v2`, una ruta aparte para no
-   * tocar lo que estaba en producción mientras se construía; el 04/11/2026
-   * la reemplazó. La pantalla anterior sigue entera en
-   * el 04/11/2026 la reemplazó y la anterior se borró: una pantalla que
-   * nadie abre no es un respaldo, es codigo muerto que alguien va a creer
-   * vivo. Esta es la unica. El centro de mando que estaba
-   * no se toca: comparte los módulos de datos (`proyeccion`, `frescura`) y nada
-   * más. Si esto se cae, aquello sigue.
+   * ESTA ES `/centro-mando`, y es la única. Nació como `/v2`, una ruta aparte
+   * para no tocar lo que estaba en producción mientras se construía; el
+   * 04/11/2026 reemplazó a la pantalla anterior, que se borró con sus
+   * componentes: una pantalla que nadie abre no es un respaldo, es código
+   * muerto que alguien va a creer vivo. `/centro-mando/v2` redirige acá.
+   *
+   * (Hasta el 12/11/2026 esta cabecera decía a la vez que la anterior «sigue
+   * entera» y que «se borró», y que «no se toca»: tres frases de dos
+   * versiones distintas pegadas. Lo cierto es lo de arriba.)
+   *
+   * Queda aparte `/centro-mando/spike-three`, el prototipo con Three.js para
+   * decidir el motor de dibujo (Pixi o Three, decisión pendiente). Solo ADMIN.
    *
    * CÓMO SE COMPONE, DE FUERA HACIA DENTRO
    *
@@ -757,6 +761,7 @@
         sala={salaDelPuesto}
         acciones={accionesDelPuesto}
         autonomia={data.acciones?.autonomia ?? null}
+        rol={data.rol ?? null}
         simulado={demostracion}
         {diagnostico}
         alCerrar={() => {

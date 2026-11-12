@@ -25,6 +25,7 @@
    * navegador y con `render()` de 'svelte/server'—, que en este repositorio es
    * la única forma de probar un componente: jsdom no arranca acá.
    */
+  import { enlacesDelPuesto } from '$lib/centro-mando/enlaces.js';
 
   /**
    * @typedef {{ id: string, agente: string, tipo: string, etiqueta: string|null,
@@ -76,8 +77,14 @@
     acciones = null,
     /** Techo e interruptor de la empresa, para explicar un bloqueo. */
     autonomia = null,
+    /** El rol de quien mira (del servidor): decide qué enlaces se ofrecen. */
+    rol = null,
     alCerrar = () => {}
   } = $props();
+
+  /** A dónde se va desde este puesto (12/11/2026): configurarlo, lo que
+   *  atiende, y el tablero si es el Supervisor. Ver lib/centro-mando/enlaces.js. */
+  let enlaces = $derived(enlacesDelPuesto(puesto, rol));
 
   /** Las palabras de cada motivo. La clave la pone el código; la redacción,
    *  acá: un motivo es un dato y una frase es presentación. */
@@ -219,6 +226,14 @@
       </div>
       <button type="button" class="cerrar" onclick={alCerrar} aria-label="Cerrar la ficha">×</button>
     </header>
+
+    {#if enlaces.length}
+      <nav class="enlaces" aria-label="Ir a" data-prueba="enlaces-del-puesto">
+        {#each enlaces as e (e.href)}
+          <a href={e.href}>{e.texto} →</a>
+        {/each}
+      </nav>
+    {/if}
 
     {#if simulado}
       <!-- Primero y sin disimulo. Si alguien mira esta ficha durante una
@@ -772,5 +787,21 @@
     margin: 6px 0 0;
     color: #ff7b6b;
     font-size: 11.5px;
+  }
+  .enlaces {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 0 0 12px;
+  }
+  .enlaces a {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--v2-ember-text, #9a3412);
+    text-decoration: none;
+  }
+  .enlaces a:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 </style>
