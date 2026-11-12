@@ -11,10 +11,28 @@
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
   import MarcarEjemplo from '$lib/components/manual/MarcarEjemplo.svelte';
+  import TrazaDelTurno from '$lib/components/manual/TrazaDelTurno.svelte';
+  import { page } from '$app/state';
+  import { onMount } from 'svelte';
+  import { esperarTraza } from '$lib/components/manual/traza.js';
 
   /** @type {{ data: any }} */
   let { data } = $props();
   let casos = $state(data.casos ?? []);
+
+  /**
+   * LA TRAZA DE CADA TURNO (12/11/2026), por id del mensaje del agente.
+   *
+   * El simulador pasa por atender_turno() --lo que cli/evaluar.py no hace--
+   * pero mostraba solo la respuesta: qué herramientas llamó el agente, a qué
+   * área derivó y qué falló había que ir a buscarlo a la base. Va en un mapa
+   * aparte y no dentro de cada burbuja porque el hilo se REEMPLAZA cada pocos
+   * segundos con lo que hay en la conversación (traerNuevos): pegada a la
+   * burbuja, la traza desaparecería en el siguiente sondeo.
+   *
+   * @type {Record<string, any>}
+   */
+  let trazas = $state({});
 
   let telefono = $state('3001234567');
   let mensajes = $state([]);
@@ -40,6 +58,7 @@
   let error = $state('');
 
   function reiniciar() {
+    trazas = {};
     mensajes = [];
     verificado = false;
     cerrada = false;
@@ -140,6 +159,11 @@
             casoMarcado: null
           });
         }
+        if (datos.mensaje_id && datos.conversacion_id && datos.mensaje_usuario_id) {
+          // Sin await: la traza llega un instante después de la respuesta y
+          // la conversación no tiene por qué esperarla.
+          cargarTraza(datos.mensaje_id, datos.conversacion_id, datos.mensaje_usuario_id);
+        }
         verificado = !!datos.verificado;
         cerrada = !!datos.cerrada;
         // Solo si vino: los caminos de escalada y de conversacion pausada
@@ -159,6 +183,73 @@
     }
   }
 
+  /**
+   * @param {string} mensajeId  la respuesta del agente bajo la que se dibuja
+   * @param {string} conversacion
+   * @param {string} desde      el mensaje del cliente que abrió el turno
+   */
+  async function cargarTraza(mensajeId, conversacion, desde) {
+    trazas = { ...trazas, [mensajeId]: 'cargando' };
+    const traza = await esperarTraza((url) => fetch(url), conversacion, desde);
+    trazas = { ...trazas, [mensajeId]: traza };
+  }
+
+  // --- Reproducir una conversación real ------------------------------------
+  //
+  // /simulador-whatsapp?reproducir=<id de conversación> (12/11/2026). Trae lo
+  // que escribió el cliente (solo texto, redactado) y lo reenvía, uno por uno,
+  // a una conversación NUEVA. El identificador no es un teléfono a propósito:
+  // uno inventado podría ser el de un cliente real, y el motor lo buscaría.
+  /** @type {string[]} */
+  let pendientes = $state([]);
+  let reproduciendo = $state(false);
+  let origenReproduccion = $state('');
+
+  onMount(() => {
+    const id = page.url.searchParams.get('reproducir');
+    if (id) prepararReproduccion(id);
+  });
+
+  /** @param {string} id */
+  async function prepararReproduccion(id) {
+    error = '';
+    try {
+      const resp = await fetch(`/api/simulador-whatsapp/reproduccion?conversacion=${encodeURIComponent(id)}`);
+      const datos = await resp.json();
+      if (!resp.ok) {
+        error = datos.error || 'No se pudo leer la conversación a reproducir.';
+        return;
+      }
+      if (!(datos.mensajes ?? []).length) {
+        error = 'Esa conversación no tiene mensajes de texto del cliente para reproducir.';
+        return;
+      }
+      reiniciar();
+      telefono = `reproduccion-${crypto.randomUUID().slice(0, 8)}`;
+      pendientes = datos.mensajes;
+      origenReproduccion = id;
+    } catch {
+      error = 'No se pudo contactar al asistente.';
+    }
+  }
+
+  async function enviarSiguiente() {
+    const [siguiente, ...resto] = pendientes;
+    if (siguiente === undefined || enviando) return;
+    pendientes = resto;
+    entrada = siguiente;
+    await enviar();
+  }
+
+  async function enviarTodos() {
+    reproduciendo = true;
+    try {
+      while (pendientes.length && reproduciendo && !error) await enviarSiguiente();
+    } finally {
+      reproduciendo = false;
+    }
+  }
+
   /** @param {SubmitEvent} evento */
   function alEnviar(evento) {
     evento.preventDefault();
@@ -169,8 +260,30 @@
 <PageHeader title="Simulador de WhatsApp">
   {#snippet sub()}
     Prueba al agente de atención al cliente (<code>cliente_final</code>) como si fueras un cliente escribiendo por WhatsApp.
+    Debajo de cada respuesta, lo que hizo el agente: herramientas, área a la que derivó y errores.
   {/snippet}
 </PageHeader>
+
+{#if origenReproduccion}
+  <div class="reproduccion" role="status">
+    <div>
+      <b>Reproduciendo una conversación real</b>
+      — lo que escribió el cliente, redactado, en una conversación simulada nueva.
+      <a href="/conversaciones/{origenReproduccion}">Ver la original</a>
+    </div>
+    <div class="reproduccion-acciones">
+      <span class="v2-sub">{pendientes.length} mensaje(s) por enviar</span>
+      <button class="v2-btn v2-btn-sm" type="button" onclick={enviarSiguiente}
+        disabled={enviando || pendientes.length === 0}>Enviar el siguiente</button>
+      {#if reproduciendo}
+        <button class="v2-btn v2-btn-sm" type="button" onclick={() => (reproduciendo = false)}>Detener</button>
+      {:else}
+        <button class="v2-btn v2-btn-primary v2-btn-sm" type="button" onclick={enviarTodos}
+          disabled={enviando || pendientes.length === 0}>Enviar todos</button>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <div class="simulador">
   <div class="fila-telefono">
@@ -204,6 +317,9 @@
       {#each mensajes as m}
         <div class="chat-burbuja chat-{m.rol}">
           <div>{m.texto}</div>
+          {#if m.rol === 'asistente' && m.mensajeId && trazas[m.mensajeId]}
+            <TrazaDelTurno traza={trazas[m.mensajeId]} />
+          {/if}
           {#if m.rol === 'asistente' && casos.length > 0}
             <MarcarEjemplo
               conversacionId={m.conversacionId}
@@ -365,6 +481,25 @@
       opacity: 1;
       transform: translateY(-2px);
     }
+  }
+  .reproduccion {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    max-width: 720px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    border: 1px solid var(--v2-line-strong);
+    background: var(--v2-paper);
+  }
+  .reproduccion-acciones {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .chat-form {
     display: flex;
