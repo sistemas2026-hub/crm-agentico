@@ -1074,6 +1074,18 @@ def test_no_existe_ninguna_ruta_de_ejecucion():
                        #  sobre el efecto: lo que ve el ciclo ('esta_delegada')
                        #  y el chat ('tareas_activas') despues del clic.
                        "supervisor-ajustes",
+                       #  12/11/2026. 'deshacer-hecho' ESCRIBE, y se declara
+                       #  entero: una PERSONA (EsJefeDeOperaciones, con motivo
+                       #  obligatorio) deshace un pase a Despacho que el
+                       #  Supervisor hizo SOLO. Lo unico que escribe: la
+                       #  propuesta pasa a RECHAZADA a nombre de esa persona y
+                       #  una fila de auditoria REJECTED. No crea ni cancela
+                       #  ordenes, no toca WispHub ni ningun sistema externo, y
+                       #  se niega (409) si el caso ya tiene orden o si el
+                       #  hecho no es del Supervisor o es de otra empresa
+                       #  ('operaciones/deshacer.py'). Su suite:
+                       #  test_hecho_y_deshacer.py, por la API real.
+                       "deshacer-hecho",
                        #  31/10/2026 (PRD §8.17, Ola 2). 'fallas-de-red' es un
                        #  GET: las caidas de PON vivas, con su aviso. Y
                        #  'fallas-de-red-aviso' PRODUCE UN EFECTO AFUERA, y por
