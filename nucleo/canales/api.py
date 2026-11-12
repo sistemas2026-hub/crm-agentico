@@ -11623,11 +11623,20 @@ def acciones_propuesta_rechazar(id_accion):
     tenant = cuerpo.get("tenant")
     if not tenant:
         return jsonify({"error": "Falta el campo 'tenant'."}), 400
+    # Quien rechaza y por que, obligatorios (12/11/2026, contrato T14): un «no»
+    # sin autor no se puede auditar y sin motivo no le enseña nada a la
+    # evidencia de autonomia ganada. Mismo criterio que /cancelar.
+    revisado_por = (cuerpo.get("revisado_por") or "").strip()
+    motivo = (cuerpo.get("motivo") or "").strip()
+    if not revisado_por:
+        return jsonify({"error": "Falta quién rechaza ('revisado_por')."}), 400
+    if not motivo:
+        return jsonify({"error": "Falta el motivo del rechazo ('motivo')."}), 400
 
     try:
         existe = persistencia.resolver_accion_propuesta(
-            tenant, id_accion, "rechazada", cuerpo.get("revisado_por"),
-            motivo_rechazo=cuerpo.get("motivo"))
+            tenant, id_accion, "rechazada", revisado_por[:200],
+            motivo_rechazo=motivo[:500])
     except Exception as e:
         registrar("acciones", "fallo al rechazar", error=e)
         return jsonify({"error": "No se pudo guardar."}), 500

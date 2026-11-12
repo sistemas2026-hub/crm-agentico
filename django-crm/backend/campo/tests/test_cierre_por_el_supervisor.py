@@ -127,13 +127,16 @@ def _fase(org, **kw):
 # ---------------------------------------------------------------------------
 
 def test_p_sin_la_tarea_queda_en_sombra(org_a, orden, admin_profile, monkeypatch):
+    # Desde el 12/11/2026 la tarea nace delegada (no es critica, PRD §2): «sin
+    # la tarea» ya no es la ausencia de fila sino una persona que la QUITO.
+    td.quitar(org_a, td.CERRAR_LO_REVISADO, actor=admin_profile, motivo="x")
     autonomia.cambiar(org_a, 3, actor=admin_profile, motivo="x", criterios="y")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
     monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "t")
     with mock.patch("requests.post") as post:
         r = _fase(org_a)
     assert (r["modo"], r["cerraria"], r["cerradas"]) == (CS.SOMBRA, 1, 0)
-    assert "delego" in r["por_que"]
+    assert "quitó" in r["por_que"]
     post.assert_not_called()
     orden.refresh_from_db()
     assert orden.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO
@@ -144,6 +147,9 @@ def test_p2_sin_el_nivel_o_con_el_interruptor_detenido_tampoco(
     td.delegar(org_a, td.CERRAR_LO_REVISADO, actor=admin_profile)
     monkeypatch.setattr("operaciones.areas_del_tenant.tenant_de_organizacion", lambda org_id: "t")
     monkeypatch.setattr("operaciones.autonomia._interruptor_de", lambda org: (True, ""))
+    # Sin fila la empresa nace en 3 desde el 12/11/2026: «sin el nivel» es una
+    # persona que lo BAJO, y eso se respeta siempre.
+    autonomia.cambiar(org_a, 1, actor=admin_profile, motivo="x", criterios="y")
     with mock.patch("requests.post") as post:
         assert _fase(org_a)["modo"] == CS.SOMBRA, "sin nivel 3"
         autonomia.cambiar(org_a, 3, actor=admin_profile, motivo="x", criterios="y")

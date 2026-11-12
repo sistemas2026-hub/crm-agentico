@@ -273,7 +273,8 @@ def test_p5_una_persona_de_una_empresa_no_toca_otra(org_a, org_b, admin_profile)
 def test_h_leer_cualquiera_de_campo(user_client):
     r = user_client.get(URL)
     assert r.status_code == 200
-    assert r.json() == {"niveles": FABRICA, "asuntos": [], "ubica_el_supervisor": False}
+    # Ubicar los asuntos nace delegado desde el 12/11/2026 (no es critico, PRD §2).
+    assert r.json() == {"niveles": FABRICA, "asuntos": [], "ubica_el_supervisor": True}
 
 
 def test_h2_escribir_es_de_la_gestion(user_client, org_a):
@@ -319,7 +320,7 @@ def test_h5_cada_empresa_ve_lo_suyo(admin_client, org_b_client, org_a):
                      format="json")
 
     r = org_b_client.get(URL)
-    assert r.json() == {"niveles": FABRICA, "asuntos": [], "ubica_el_supervisor": False}
+    assert r.json() == {"niveles": FABRICA, "asuntos": [], "ubica_el_supervisor": True}
 
 
 def test_h7_los_asuntos_de_las_plantillas_aparecen_aunque_nadie_los_ubico(

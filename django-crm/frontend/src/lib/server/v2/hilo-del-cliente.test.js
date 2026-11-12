@@ -11,6 +11,13 @@ vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (/** @type {any[]} */ ...a) 
 vi.mock('$env/dynamic/private', () => ({ env: { PRIVATE_ASISTENTE_URL: 'http://motor' } }));
 vi.mock('./tenant.js', () => ({ tenantDeLaSesion: async () => 'empresa_a' }));
 vi.mock('./motor-headers.js', () => ({ headersMotor: () => ({ 'X-Token': 't' }) }));
+// La lista de personas de la organización, de donde sale el Profile.id de quien
+// mira (el JWT no lo trae). `resolveMe` es el real: empareja por correo.
+const gente = vi.fn();
+vi.mock('./org-people.js', async (orig) => ({
+  ...(/** @type {any} */ (await orig())),
+  getOrgPeopleAndTeams: (/** @type {any[]} */ ...a) => gente(...a)
+}));
 
 const { leerOrdenesDelCaso, leerHiloDeOrden, leerFichaDelCliente, conversacionDelCaso } =
   await import('./hilo-del-cliente.js');
@@ -29,6 +36,8 @@ const FILA = {
 
 beforeEach(() => {
   apiRequest.mockReset();
+  gente.mockReset();
+  gente.mockResolvedValue({ people: [] });
 });
 
 describe('el bloque «Campo» del ticket', () => {
@@ -90,6 +99,32 @@ describe('la ficha del cliente junta el CRM y el motor', () => {
     expect(r.crm).toEqual(crm);
     expect(r.motor).toEqual(motor);
     expect(r.error).toBeNull();
+  });
+
+  it('el perfil de quien mira viaja al motor: sin él, ADMIN recibiría el defecto restringido', async () => {
+    apiRequest.mockResolvedValue({ servicio: '4986', tickets: [], ordenes: [], solicitudes: [] });
+    gente.mockResolvedValue({ people: [{ id: 'perfil-9', email: 'ana@rapilink' }] });
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    await leerFichaDelCliente({
+      cookies: {}, locals: { profile: { role: 'ADMIN' }, user: { email: 'Ana@Rapilink' } },
+      fetch: /** @type {any} */ (fetch)
+    }, '4986');
+    const url = new URL(String(/** @type {any} */ (fetch.mock.calls[0])[0]));
+    expect(url.searchParams.get('rol')).toBe('ADMIN');
+    expect(url.searchParams.get('perfil')).toBe('perfil-9');
+  });
+
+  it('si la lista de personas falla, la ficha se pide igual, sin perfil', async () => {
+    apiRequest.mockResolvedValue({ servicio: '4986', tickets: [], ordenes: [], solicitudes: [] });
+    gente.mockRejectedValue(new Error('caído'));
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    await leerFichaDelCliente({
+      cookies: {}, locals: { profile: { role: 'USER' }, user: { email: 'x@y' } },
+      fetch: /** @type {any} */ (fetch)
+    }, '4986');
+    const url = new URL(String(/** @type {any} */ (fetch.mock.calls[0])[0]));
+    expect(url.searchParams.get('perfil')).toBeNull();
+    expect(url.searchParams.get('rol')).toBe('USER');
   });
 
   it('sin motor, la ficha sale igual con lo del CRM', async () => {

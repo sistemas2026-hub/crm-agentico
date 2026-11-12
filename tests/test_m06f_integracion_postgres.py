@@ -205,9 +205,11 @@ def preparar():
                  (id, name, created_at, updated_at, api_key, is_active,
                   default_currency, address_line, city, company_name, country,
                   email, phone, postcode, state, tax_id, website, csat_enabled,
-                  auto_close_children_on_parent_close, terminology, vertical, timezone)
+                  auto_close_children_on_parent_close, terminology, vertical, timezone,
+                  correo_solicitudes)
                values (%s, %s, now(), now(), %s, true, 'COP', '', '', %s, 'CO', '',
-                       '', '', '', '', '', false, false, '{}'::jsonb, 'isp', 'America/Bogota')""",
+                       '', '', '', '', '', false, false, '{}'::jsonb, 'isp', 'America/Bogota',
+                       '')""",
             (org, f"prueba {slug}", uuid.uuid4().hex, f"prueba {slug}"))
         sql("insert into asistente.tenant_config (slug, organization_id) values (%s, %s)",
             (slug, org))
@@ -467,6 +469,29 @@ def main() -> int:
                 "liberar la devuelve a 'pendiente' y el trigger le borra el sello")
         afirmar(persistencia.resolver_accion_propuesta(TENANT, p7, "rechazada", "otro", "no"),
                 "una pendiente si se puede rechazar")
+        # 12/11/2026, contrato T14: el rechazo deja su evento con quien y por que,
+        # en la misma transaccion que el cambio de estado.
+        ev7 = sql("""select tipo, motivo, actor_nombre from asistente.acciones_eventos
+                     where accion_id = %s and tipo = 'accion_rechazada'""", (p7,))
+        afirmar(len(ev7) == 1 and tuple(ev7[0])[1:] == ("no", "otro"),
+                f"el rechazo deja UN evento accion_rechazada con su motivo y su autor: {ev7}")
+
+        seccion("Rechazar exige quien y por que (T14)")
+        from nucleo.canales import api as _api
+        p7b = proponer(TENANT, conversacion(TENANT))
+        cli = _api.app.test_client()
+        r_sin_motivo = cli.post(f"/acciones/propuestas/{p7b}/rechazar",
+                                json={"tenant": TENANT, "revisado_por": "Ana"})
+        r_sin_autor = cli.post(f"/acciones/propuestas/{p7b}/rechazar",
+                               json={"tenant": TENANT, "motivo": "no corresponde"})
+        afirmar(r_sin_motivo.status_code == 400 and r_sin_autor.status_code == 400
+                and fila(TENANT, p7b).get("estado") == "pendiente",
+                f"sin motivo o sin autor: 400 y la accion sigue pendiente "
+                f"({r_sin_motivo.status_code}, {r_sin_autor.status_code})")
+        r_ok = cli.post(f"/acciones/propuestas/{p7b}/rechazar",
+                        json={"tenant": TENANT, "revisado_por": "Ana", "motivo": "no corresponde"})
+        afirmar(r_ok.status_code == 200 and fila(TENANT, p7b).get("estado") == "rechazada",
+                f"con los dos: rechazada ({r_ok.status_code})")
 
         seccion("El boton de reinicio de la Bandeja: la MISMA cadena")
         from nucleo.canales import api

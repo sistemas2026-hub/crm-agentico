@@ -269,13 +269,11 @@ class CaseCreateSerializer(serializers.ModelSerializer):
                     case_id=self.instance.pk, rule=rule, state="approved"
                 ).exists()
             ):
+                # El mismo texto que la vista (12/11/2026): esta capa queda
+                # como segunda guarda y antes respondia en ingles.
+                from cases.cierre_con_aprobacion import mensaje_cierre_requiere_aprobacion
                 raise serializers.ValidationError(
-                    {
-                        "status": (
-                            "An approval is required before this case can be "
-                            f"closed (rule: {rule.name})."
-                        )
-                    }
+                    {"status": mensaje_cierre_requiere_aprobacion(rule.name, pedida=False)}
                 )
         return attrs
 

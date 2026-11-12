@@ -4592,17 +4592,32 @@ def resolver_accion_propuesta(tenant: str, accion_id: str, estado: str,
     intento ejecutar. M06-F: solo actua sobre una fila 'pendiente' (hoy la
     usa unicamente /rechazar); una reservada o ya resuelta no se pisa.
     Devuelve False si el id no existe, no es de este tenant o ya no estaba
-    pendiente -- el llamador distingue releyendo."""
+    pendiente -- el llamador distingue releyendo.
+
+    Un rechazo deja su evento `accion_rechazada` {motivo} en la MISMA
+    transaccion (contrato del relevo, T14 e I12). Hasta el 12/11/2026 no lo
+    dejaba: el expediente de la accion decia 'rechazada' sin quien ni por que.
+    """
     with sesion(tenant) as (cur, org):
         cur.execute(
             """update asistente.acciones_propuestas
                set estado = %s, revisado_por = %s, revisado_en = now(),
                    motivo_rechazo = %s, resultado_ejecucion = %s, codigo_error = %s
-               where organization_id = %s and id = %s and estado = 'pendiente'""",
+               where organization_id = %s and id = %s and estado = 'pendiente'
+               returning conversation_id""",
             (estado, revisado_por, motivo_rechazo,
              json.dumps(resultado_ejecucion, ensure_ascii=False) if resultado_ejecucion is not None else None,
              codigo_error, org, accion_id))
-        return cur.rowcount > 0
+        fila = cur.fetchone()
+        if not fila:
+            return False
+        if estado == "rechazada":
+            registrar_evento_de_accion(
+                cur, org, accion_id, "accion_rechazada",
+                motivo=(motivo_rechazo or None) and motivo_rechazo[:500],
+                actor_tipo="operador", actor_nombre=revisado_por,
+                conversation_id=fila["conversation_id"])
+        return True
 
 
 # =============================================================================

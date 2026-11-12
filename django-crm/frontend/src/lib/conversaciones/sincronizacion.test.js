@@ -93,3 +93,31 @@ describe('el resto de la línea', () => {
     expect(lineaDeSincronizacion(null).clave).toBe('sin_registro');
   });
 });
+
+describe('un cierre que espera una aprobación no es una falla (12/11/2026)', () => {
+  it('pendiente por una regla de cierre: dice que espera una aprobación, sin contar intentos', () => {
+    const d = lineaDeSincronizacion(
+      s({ tipo: 'cerrar_caso', estado: 'pendiente', intentos: 5, ultimo_error_codigo: 'espera_aprobacion' }));
+    expect(d.texto).toMatch(/aprobación/i);
+    expect(d.texto).not.toMatch(/reintenta|no se pudo/i);
+    expect(d.intentos).toBeNull();
+    expect(d.revisar).toBe(false);
+  });
+
+  it('rechazado: es una decisión, no un error a revisar', () => {
+    const d = lineaDeSincronizacion(
+      s({ tipo: 'cerrar_caso', estado: 'fallida_definitiva', ultimo_error_codigo: 'cierre_rechazado' }));
+    expect(d.texto).toMatch(/rechazaron el cierre/i);
+    expect(d.texto).not.toMatch(/no se pudo/i);
+    expect(hayQueRevisar([
+      s({ estado: 'fallida_definitiva', ultimo_error_codigo: 'cierre_rechazado' })
+    ])).toBe(false);
+  });
+
+  it('un código desconocido no cambia nada: manda el estado', () => {
+    const d = lineaDeSincronizacion(s({ estado: 'fallida_definitiva', ultimo_error_codigo: 'http_400' }));
+    expect(d.texto).toMatch(/no se pudo/i);
+    expect(estadoDeSincronizacion(s({ estado: 'pendiente', ultimo_error_codigo: '__proto__' })).clave)
+      .toBe('pendiente');
+  });
+});

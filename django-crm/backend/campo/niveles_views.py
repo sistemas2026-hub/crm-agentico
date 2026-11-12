@@ -42,7 +42,8 @@ def _error(e: N.ErrorNivel):
 
 
 def _ubica_el_supervisor(org) -> bool:
-    """Si alguien le delego al Supervisor que ubique los asuntos (H-21). Solo
+    """Si el Supervisor ubica los asuntos (H-21): nace delegado desde el
+    12/11/2026 y es False solo si una persona se lo quito en Ajustes. Solo
     la tarea: el nivel de la empresa lo lee el motor y no se pregunta aca. Sin
     poder comprobarlo, no: la pantalla lo dice en vez de prometerlo."""
     from operaciones import tareas_delegadas as td

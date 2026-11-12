@@ -99,8 +99,10 @@ def puertas(org) -> str:
         return f"{areas_del_tenant.SIN_EMPRESA}: sin saber de que empresa es el ticket, no se cierra"
     try:
         if not td.esta_delegada(org, _tarea()):
-            return ("nadie le delego al Supervisor que cierre lo que da por "
-                    "bueno: se le pide desde su chat")
+            # Desde el 12/11/2026 la tarea nace delegada (no es critica, PRD §2):
+            # si no lo esta, es porque una persona se la quito en Ajustes.
+            return ("una persona le quitó al Supervisor la tarea de cerrar lo que "
+                    "da por bueno: se le devuelve en Ajustes o se le pide desde su chat")
     except Exception as e:                                       # noqa: BLE001
         return f"no se pudo comprobar la tarea ({type(e).__name__})"
     try:

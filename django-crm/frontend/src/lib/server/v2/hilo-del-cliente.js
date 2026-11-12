@@ -17,6 +17,9 @@ import { apiRequest } from '$lib/api-helpers.js';
 import { headersMotor } from './motor-headers.js';
 import { tenantDeLaSesion } from './tenant.js';
 import { traducirError } from './supervisor-noc.js';
+import { quienMira } from './ficha-visible.js';
+import { getOrgPeopleAndTeams, resolveMe } from './org-people.js';
+import { conPlazo } from './plazo.js';
 
 /** El mismo criterio que `campo/hilo_del_cliente.py::SERVICIO_VALIDO`. */
 export const SERVICIO_VALIDO = /^[A-Za-z0-9_-]{1,64}$/;
@@ -123,11 +126,16 @@ export async function leerFichaDelCliente({ cookies, locals, fetch }, servicio) 
       const base = env.PRIVATE_ASISTENTE_URL;
       const tenant = await tenantDeLaSesion(locals, fetch);
       if (!base || !tenant) return null;
-      const q = new URLSearchParams({ tenant });
-      const rol = locals?.profile?.role;
-      const perfil = locals?.profile?.id;
-      if (rol) q.set('rol', String(rol));
-      if (perfil) q.set('perfil', String(perfil));
+      // Quién mira, con el MISMO criterio que la Bandeja y el ticket
+      // (12/11/2026): el rol del JWT verificado y el Profile.id buscado por
+      // correo, porque `locals.profile` no trae id. Si el CRM no contesta a
+      // tiempo, sin perfil: el motor cae al defecto, que es el lado seguro.
+      const perfil = await conPlazo(
+        getOrgPeopleAndTeams(cookies).then((g) => resolveMe(g.people, locals?.user?.email)),
+        5000,
+        'ficha del cliente perfil de quien mira'
+      ).catch(() => null);
+      const q = new URLSearchParams({ tenant, ...quienMira(locals, perfil) });
       const r = await fetch(`${base}/clientes/${encodeURIComponent(servicio)}/ficha?${q}`, {
         headers: headersMotor(),
         signal: AbortSignal.timeout(20000)
