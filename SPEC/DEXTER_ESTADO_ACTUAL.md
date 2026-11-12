@@ -119,75 +119,195 @@ Vale anotarlo junto, porque es la lección y no el detalle:
 | `str(e)` en `operaciones_externas.error` | preexistente; no filtra la coordenada pero sí el id de servicio y el serial |
 | Los servicios **5345** y **5394** | coordenada en un formato que el parser no reconoce: puede ser basura o un quinto formato |
 
-## App de campo: nueve de las diez mejoras — 11/11/2026
+## App de campo: LAS DIEZ MEJORAS — 11/11/2026
 
-Medido contra el código, no contra el documento del encargo
+Medido contra el código y contra producción, no contra el documento del encargo
 (`SPEC/APP_CAMPO_DIEZ_MEJORAS.md`, que es el pedido y no lleva estados).
 
-**Hechas:** 1 (campana), 2 (las cifras del inicio), 3 (el conteo de «Mi
-Trabajo»), 3b («Cerca mío»), 4 y 9 (el material en un solo lugar), 5 (ticket
-desplegable, mapa y coordenadas), 6 (galería), 8 («Otro» con texto libre), 10
-(finalizar con resumen).
+**Las diez están hechas.** 1 (campana), 2 (las cifras del inicio), 3 (el conteo
+de «Mi Trabajo»), 3b («Cerca mío»), 4 y 9 (el material en un solo lugar), 5
+(ticket desplegable, mapa, coordenadas y corrección), 6 (galería), 7 (el
+bloqueo), 8 («Otro» con texto libre), 10 (finalizar con resumen).
 
-**La décima no es trabajo pendiente: es una decisión pendiente.**
+### ESTE ARCHIVO DECLARÓ LA 8 CERRADA ESTANDO ROTA, y eso es lo que hay que leer
 
-- **7 — el bloqueo.** Ya funciona con sus dos casillas y foto opcional. El
-  pedido era «mirá qué le puede mejorar», y **qué mejorar no está definido**.
-  Medido antes de proponer algo: **cero bloqueos reportados desde que existe**.
-  La recomendación fue no tocarlo — diseñar contra cero casos reales es
-  adivinar, y el formulario que se adivine es el que el técnico va a tener que
-  llenar el día que sí se le bloquee una visita.
+Horas antes, esta misma sección decía que la mejora 8 estaba hecha, con su
+tabla de evidencia: cuatro campos, cuatro versiones publicadas, el listado de
+las cinco plantillas pegado. **Todo eso era cierto y la función no servía.**
 
-### Lo que cerró esta tarde, y con qué se midió
+`permitir_otro` escribía la bandera `permite_otro` y copiaba las opciones entre
+las dos claves, pero **nunca agregaba la opción «Otro» a la lista**. La app lee
+`reglas.options` con prioridad (`campo_del_formulario.dart:244`: «las opciones
+viajan en `reglas.options`; `opciones` es la forma vieja») y ahí no estaba, así
+que **el técnico nunca vio la opción**. Y si la hubiera elegido, el servidor la
+rechazaba con «Opción inválida» (`validador._validar_reglas`). Quien agrega
+«Otro» a la lista en el camino normal es `componer`, y ese comando no recompone
+a propósito — la v16 de `correctivo_fibra` tiene campos que el editor no sabe
+crear.
 
-| Mejora | Qué cambió | Evidencia |
+**Nueve guardas en verde con el síntoma vivo.** Todas afirmaban sobre el
+mecanismo —que la bandera se escribiera, que la versión se publicara, que nada
+más cambiara— y ninguna sobre el efecto: que la opción llegue a la lista de la
+que se elige. Es `§6` en estado puro, y el síntoma lo encontró **leer el código
+de la app**, no la suite.
+
+Las cuatro guardas que se agregaron miran la lista con la **misma precedencia
+que la app**, y una pasa el valor «Otro» por el validador real del servidor.
+Antes del arreglo las cuatro morían; el estado anterior del código fue la
+mutación.
+
+**«Ya lo tiene» pasó a medirse por la lista y no por la bandera**, y sin eso las
+cuatro plantillas quedaban inarreglables por ese camino: el comando contestaba
+«ya lo tiene» y se iba mientras el técnico seguía sin ver la opción.
+
+**La reparación, corrida en producción el 11/11/2026 — los cuatro campos
+dijeron «A MEDIO HACER»**, o sea que el defecto estaba en los cuatro:
+
+| Plantilla | Campo | |
 |---|---|---|
-| **2** — las cifras del inicio | «Asignadas» pasó a ser **lo que le queda**, sin las cerradas adentro. Antes un técnico que cerró cuatro de siete veía un 7 toda la tarde — el mismo defecto que «Mi Trabajo» corrigió el 09/11 | `inicio_screen_test.dart`, con las dos guardas **endurecidas**: la rejilla ahora cierra exacto (`en curso + pendientes == asignadas`), antes solo se afirmaba que no se pasara |
-| **3b** — «Cerca mío» | el chip **se retiró**; la distancia se lee en cada tarjeta y **no se reordena nada**. El filtro reordenaba la lista entera, y eso le costaba el orden del Supervisor a quien quería un dato | `cercania_test.dart`: la guarda que cuidaba «una orden con ventana prometida se atiende cuando se prometió» ahora es **más fuerte** — antes dependía de que el técnico no tocara el chip |
-| **8** — «Otro» con texto libre | **cuatro campos** en producción: `que_encontro` (correctivo_fibra v17), `estado_de_lo_recogido` (retiro_equipos v2), `que_se_hizo` (servicio_tv v2), `resultado` (trabajo_general v2) | el listado de las cinco plantillas vigentes, pegado al cerrar: los cuatro con `OTRO` |
+| correctivo_fibra v17 → **v19** | que_encontro | 7 opciones → 8 |
+| retiro_equipos v2 → **v4** | estado_de_lo_recogido | 4 → 5 |
+| trabajo_general v2 → **v4** | resultado | 3 → 4 |
+| servicio_tv v2 → **v4** | que_se_hizo | 4 → 5 |
 
-**La mejora 8 no era configuración del tenant.** Este estado decía que
-`permite_otro` «no aparece en `tenants/rapilink.config.yaml`» y que por eso era
-«la más barata». Eso estaba mal: la bandera vive en el **esquema de la
-plantilla** del CRM (`campo_worktypeversion.esquema`), no en la config del
-motor. Costo real: un comando nuevo (`permitir_otro`) que falló **cuatro veces
-contra producción** antes de publicar algo — y la cuarta la encontró el usuario,
-no la prueba:
+Y la evidencia del EFECTO es el diff que imprimió `repuntar_plantilla`, porque
+mira el dato real y no la intención del comando:
 
-| Intento | Por qué falló |
-|---|---|
-| 1 | las opciones viven en `reglas.options` **o** en `opciones`; mirar una sola dio «0 opciones» en un campo que sí las tiene |
-| 2 | la variable `opciones` pisó el dict de argumentos del comando — `TypeError` |
-| 3 | llamar a `plantillas.publicar` pasa por `componer`, **el validador del editor**, y la v16 de `correctivo_fibra` tiene campos que el editor no sabe crear (`decimal`): un esquema que lleva meses en producción no entra por ahí |
-| 4 | el bucle marcaba **todos** los campos, no el nombrado: le agregó la bandera a `servicio_probado_con_el_cliente`, que nadie pidió tocar. **La guarda no lo vio porque se escribió copiando el mismo bucle con el defecto** |
+```
+~ campo que_encontro.reglas: {'options': [... 7 ...], 'required': True}
+                          -> {'options': [... 7 ..., 'Otro'], 'required': True}
+```
 
-Lo que reemplazó a `componer` es más estrecho y más fuerte para este caso: se
-compara el esquema nuevo contra el vigente y se exige que **la única diferencia
-sea la bandera**. `componer` valida que un esquema sea construible; esto valida
-que no se tocó nada más, que es justo lo que el comando promete.
+**234 órdenes repuntadas**: 205 de `correctivo_fibra`, 27 de `retiro_equipos`,
+2 de `traslado_servicio`. `trabajo_general` y `servicio_tv` no tenían órdenes
+abiertas sin empezar.
 
-**Un «Otro» no va en un campo de sí/no, y eso es decisión, no omisión.** Los
-cinco campos de selección que quedan sin la bandera son confirmaciones
-(`servicio_probado_con_el_cliente`, `retiro_la_acometida`,
-`canales_verificados_con_el_cliente`,
+**Los cinco campos de selección que siguen sin «Otro» es decisión, no
+omisión**: son confirmaciones (`servicio_probado_con_el_cliente`,
+`retiro_la_acometida`, `canales_verificados_con_el_cliente`,
 `nueva_direccion_confirmada_con_el_cliente`). Un «Otro» ahí le da salida a
-quien no quiere contestar, que es lo contrario de lo que el campo busca. El
-comando lo rechaza y exige nombrar el campo: no hay modo «marcá todos».
+quien no quiere contestar. El comando lo rechaza y exige nombrar el campo.
 
-**`estado_luces` / `ftth_correctivo` no existen en producción.** Figuraban en la
-lista de pendientes de esta sesión; están en `seed_campo_demo.py`. Una lista de
-tareas armada leyendo la siembra y no la base inventa trabajo que nadie pidió.
+**`estado_luces` / `ftth_correctivo` no existen en producción**: estaban en
+`seed_campo_demo.py`. Una lista de tareas armada leyendo la siembra y no la
+base inventa trabajo que nadie pidió.
 
-**«Arrancó con N» quedó afuera, y se retiró después de ponerlo.** El usuario
-pidió «con cuántas inició la jornada, es del día». La nota deciía **«arrancó con
-38»** al lado de un 2: `resumen.totalDeTrabajos` es todo el historial que el
-teléfono descargó, no la jornada. Se intentaron tres formas de derivarlo de lo
-que la app ya tiene y **las tres eran una suposición sobre la forma del dato**;
-se retiró el número en vez de adivinar una cuarta. Para darlo bien hace falta
-**una columna en `local_jornada`** que selle el conteo al abrir el día — es el
-único lugar donde el dato existe sin inferirlo. Decisión del usuario.
+### La 7 — el bloqueo, y la columna que esperaba un dato desde el principio
 
----
+El pedido era «mirá qué le puede mejorar», con **cero bloqueos reportados**
+desde que existe. De los cuatro puntos del encargo, **tres ya estaban hechos**
+—las dos casillas explican su consecuencia, la foto sigue opcional, los tres
+botones dicen qué piden (`descripcion:` en
+`seguimiento_de_la_intervencion.dart:541`)— y el único pendiente era el motivo
+en botones.
+
+**Y no hacía falta tocar la app.** El formulario de cada momento sale del
+esquema de la plantilla: `seguimiento_campo.formulario_de` —«la app y la
+pantalla dibujan ESTO; ninguna de las dos sabe qué campos existen hasta
+preguntar»—. Ninguna plantilla declaraba su bloqueo, así que se usaba el
+mínimo genérico de `seguimiento_campo.MINIMO`: **dos campos de texto, los dos
+obligatorios**. Ese era el campo vacío del pedido.
+
+**`BloqueoDeTrabajo.categoria` estaba en el modelo desde el principio**, con su
+comentario diciendo para qué —«lo que el tenant eligió en su formulario,
+copiado como texto para poder agrupar»— y `bloqueos.py:139` ya la leía de las
+respuestas. Nadie declaró nunca un campo con ese id, así que **la columna
+estaba vacía en todos los bloqueos**: el lector escrito y esperando un dato que
+nadie mandaba. Es «código construido no es código que corre» visto desde el
+otro lado.
+
+Lo que queda, publicado en producción el 11/11/2026 (correctivo_fibra v19,
+retiro_equipos v4, trabajo_general v4, servicio_tv v4, traslado_servicio v2):
+
+```
+categoria        seleccion, OBLIGATORIA  -- Falta material · Sin acceso al
+                 sitio · Daño en la red · Otro (con texto libre)
+motivo           texto, OPCIONAL         -- el detalle que la lista no cubre
+necesita_de_noc  texto, OBLIGATORIO      -- igual que el minimo de hoy
+```
+
+Lo obligatorio pasa de **escribir dos textos** a **tocar un botón y escribir un
+texto**. Dos decisiones, con su motivo:
+
+- **`necesita_de_noc` sigue obligatorio.** El mínimo lo exige con su razón
+  escrita —«sin eso un bloqueo no es accionable y vuelve a ser un mensaje de
+  chat»— y con cero bloqueos reportados **no hay medición nueva para reabrir
+  esa decisión** (§10).
+- **`motivo` baja a opcional.** Lo que el `required` protegía —que el bloqueo
+  diga algo— ahora lo garantiza la categoría, que no se puede dejar sin
+  elegir; y si la lista no alcanza, «Otro» exige el texto.
+
+**Las categorías son de la empresa, no de la plataforma**: las tres son un
+default y `--opciones` las cambia sin tocar código (§3.3, y el propio
+comentario de la columna lo decía).
+
+**Y con «Otro» encendido, adivinar mal cuesta poco.** Esa es la respuesta a la
+objeción de «diseñar contra cero casos es adivinar»: el técnico que no
+encuentra su caso escribe el suyo, y en dos meses la columna dice cuáles se
+usaron de verdad. Es sembrar y medir, no adivinar.
+
+La guarda central **no afirma que el esquema quedó declarado** sino que la
+categoría **aterriza en su columna**, pasando por lo que la app dibuja y por lo
+que el servidor guarda. Tres mutaciones medidas: quitarle el id mata 5, no
+agregar «Otro» a la lista mata 3, volver el motivo obligatorio mata 4.
+
+### La 2 — «arrancó con N», que se puso, se retiró y volvió sellado
+
+La pantalla decía **«2 asignadas · arrancó con 38»**: el 38 era
+`trabajos.length`, todo el historial descargado con las 36 cerradas de días
+anteriores adentro. Se intentó derivar el número del día de tres formas
+—filtrando por `completadaEn`, por estado, por fecha de despacho— y **las tres
+eran una suposición sobre un dato que puede faltar**: una orden cerrada hace un
+minuto todavía no trae su fecha de cierre. El número se retiró en vez de
+adivinar una cuarta vez.
+
+Ahora el día se **sella**: `local_arranque_del_dia` (v28 de la base del
+teléfono) guarda cuántas órdenes tuvo cada día, por empresa y persona.
+
+**EL SELLO SOLO SUBE, Y ESO NO ES PRUDENCIA: ES EL ARREGLO.** La orden que por
+unos segundos no está ni en las abiertas ni en las cerradas de hoy ya se contó
+cuando estaba abierta. Dos consecuencias dichas por adelantado: si el despacho
+AGREGA una orden a media mañana el sello sube (correcto para un denominador);
+si la REASIGNA a otro, no baja (el avance queda contra el trabajo que tuvo).
+
+Y las tres cifras **dejan de depender de fechas**:
+
+```
+asignadas    = las que siguen abiertas      (un hecho, hoy)
+arranco con  = el sello                     (un hecho, escrito)
+lleva hechas = sello - abiertas             (resta, sin fechas)
+```
+
+**Un defecto que apareció al pasar**: la barra decía «36 de 38» el día que el
+técnico había cerrado dos, porque `resumen.completados` cuenta todas las
+terminadas del historial. Ahora cuenta por resta.
+
+**Tabla propia y no una columna de `local_jornada`**, aunque el comentario que
+pedía esto dijera «una columna»: `guardarJornada` escribe con
+`ConflictAlgorithm.replace`, así que el sello se habría borrado en **cada
+sincronización**. Mismo motivo por el que la v27 puso la marca de
+sincronización aparte.
+
+**El banco de pruebas de la pantalla DECLARA el sello** en vez de dejarlo salir
+del entorno: el camino real lee la sesión, y sin sesión devuelve `null`, así
+que una guarda sobre la nota no habría afirmado nada. La mutación que devuelve
+el número al historial mata las dos guardas escritas para eso.
+
+### La 3b — «Cerca mío» sale de los filtros
+
+El chip **se retiró**: era un filtro que reordenaba la lista entera, y eso le
+costaba el orden del Supervisor a quien solo quería saber qué tan lejos está.
+Ahora la distancia se lee en cada tarjeta y el orden no se toca. La guarda que
+cuidaba «una orden con ventana prometida se atiende cuando se prometió» es más
+fuerte que antes: ya no depende de que el técnico no toque el chip.
+
+### Lo que queda abierto de la app
+
+| | |
+|---|---|
+| La APK con el sello **no está instalada todavía** | `dexter-campo-sello.apk`, 11/11 18:53. Las cifras del inicio no cambian hasta que se instale |
+| Los rojos intermitentes de `e2e_*` | la corrida completa (1376 pruebas) deja 2 en rojo, y **sin los cambios también falla, en pruebas distintas**. Corriendo solas pasan. Suites que comparten archivos de base |
+| Un «Otro» en el **bloqueo** no se puede medir todavía | cero bloqueos reportados. Dentro de dos meses la columna `categoria` dice cuáles motivos se usaron de verdad, y eso sí es una medición para decidir |
 
 ## Los seis silencios del despacho — cerrados el 19/10/2026
 
