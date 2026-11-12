@@ -48,6 +48,9 @@ def _publicas() -> tuple[type, ...]:
     desde api.py."""
     from nucleo.canales.whatsapp import ErrorWhatsApp
     from nucleo.conectores.catalogo import ErrorConector
+    # 12/11/2026: por que una conversacion no da un caso dorado. Sus mensajes
+    # son fijos, escritos en nucleo/habilidades/casos_dorados.py.
+    from nucleo.habilidades.casos_dorados import SinCaso
     from nucleo.config.editor import ErrorEdicion
     from nucleo.config.fusion import FusionInvalida
     from nucleo.ingesta.corpus import RolesInvalidos, VersionAprobadaInmutable
@@ -56,7 +59,7 @@ def _publicas() -> tuple[type, ...]:
     from nucleo.seguridad.secretos import ErrorSecreto
     return (ErrorWhatsApp, ErrorConector, ErrorEdicion, FusionInvalida, RolesInvalidos,
             VersionAprobadaInmutable, ErrorMotor, TenantSinConfiguracion, ErrorSecreto,
-            AutorInvalido)
+            AutorInvalido, SinCaso)
 
 
 def mensaje_publico(e: BaseException, por_defecto: str) -> str:

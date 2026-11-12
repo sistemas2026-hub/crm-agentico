@@ -10255,6 +10255,10 @@ def manual_ejemplos():
         registrar("manual", "fallo al leer ejemplos", error=e)
         return jsonify({"error": "No se pudieron leer los ejemplos."}), 500
 
+    # Real o ensayado lo decide el motor, con la misma lista que la autonomia
+    # ganada y el analista (12/11/2026): la pantalla rotula, no clasifica.
+    for e in ejemplos:
+        e["real"] = e.get("canal") in canales.REALES
     return jsonify({"ejemplos": ejemplos})
 
 
@@ -10270,6 +10274,8 @@ def manual_revisiones():
         registrar("supervisor", "fallo al leer revisiones", error=e)
         return jsonify({"error": "No se pudieron leer las revisiones."}), 500
 
+    for r in revisiones:
+        r["real"] = r.get("canal") in canales.REALES
     return jsonify({"revisiones": revisiones})
 
 
@@ -10293,7 +10299,233 @@ def _actualizar_revision(id_revision, estado_nuevo):
 
 @app.post("/manual/revisiones/<id_revision>/aprobar")
 def manual_revisiones_aprobar(id_revision):
-    return _actualizar_revision(id_revision, "aprobado")
+    """
+    Aprobar una revision TIENE UN EFECTO (12/11/2026): la conversacion pasa a
+    ser un caso dorado. Hasta hoy el estado 'aprobado' no lo leia nadie
+    (SPEC/AUDITORIA_MENU_2026-11-12.md): el boton existia y no hacia nada.
+
+    Ahora una revision aprobada entra en lo que trae
+    cli/importar_casos_dorados.py al archivo de casos del tenant, y la
+    respuesta devuelve el caso ya armado para que quien aprueba lo vea (o lo
+    copie) en el momento. Ver nucleo/habilidades/casos_dorados.py.
+
+    SOLO UNA REVISION DE BUEN EJEMPLO SE APRUEBA. Una «con problemas» no tiene
+    una traza que valga como lo que deberia pasar: aprobarla no puede hacer
+    nada util, y un estado que no hace nada es justo lo que se vino a quitar.
+    Para esas el camino es «Corregir» (una habilidad propuesta para el agente
+    que se equivoco) y despues descartar la revision. Falla cerrado: se
+    rechaza aca, no solo se esconde el boton.
+    """
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute(
+                """select es_buen_ejemplo from asistente.revisiones_supervisor
+                    where organization_id = %s and id = %s""", (org, id_revision))
+            fila = cur.fetchone()
+    except Exception as e:
+        registrar("supervisor", "fallo al leer revision", error=e)
+        return jsonify({"error": "No se pudo leer la revision."}), 500
+    if not fila:
+        return jsonify({"error": f"La revision '{id_revision}' no existe."}), 404
+    if not fila["es_buen_ejemplo"]:
+        return jsonify({"error": "Esta revision dice que la conversacion tuvo "
+                                 "problemas: no se aprueba como caso dorado. "
+                                 "Usa «Corregir» para escribir el procedimiento "
+                                 "que falto y despues descartala."}), 409
+
+    respuesta = _actualizar_revision(id_revision, "aprobado")
+    if respuesta.status_code != 200:
+        return respuesta
+    # El caso se arma DESPUES de guardar: que una conversacion no tenga con que
+    # armarlo (sin mensajes de texto, un canal interno) no deshace una
+    # aprobacion valida. Se dice por que, en vez de callarlo.
+    salida = respuesta.get_json()
+    try:
+        salida.update(_caso_dorado_de("revision", tenant, id_revision))
+    except Exception as e:
+        registrar("manual", "aprobada, pero no se pudo armar el caso dorado", error=e)
+        salida["sin_caso"] = ("Aprobada. El caso dorado no se pudo armar ahora: "
+                              "lo trae igual cli/importar_casos_dorados.py.")
+    return jsonify(salida)
+
+
+def _caso_dorado_de(tipo: str, tenant: str, id_origen: str) -> dict:
+    """{'caso_dorado': yaml, 'avisos': [...]} o {'sin_caso': motivo}."""
+    from nucleo.habilidades import casos_dorados
+    try:
+        config = _config_de(tenant)
+        armar = (casos_dorados.caso_de_ejemplo if tipo == "ejemplo"
+                 else casos_dorados.caso_de_revision)
+        caso, avisos = armar(config, tenant, id_origen)
+    except casos_dorados.SinCaso as e:
+        return {"sin_caso": mensaje_publico(e, "No hay con que armar el caso.")}
+    return {"caso_dorado": casos_dorados.a_yaml(caso, avisos), "avisos": avisos,
+            "origen": caso["origen"]}
+
+
+@app.get("/manual/<tipo>/<id_origen>/caso-dorado")
+def manual_caso_dorado(tipo, id_origen):
+    """
+    El caso dorado de un ejemplo marcado o de una revision, como YAML listo
+    para pegar al final de evaluacion/<slug>.casos.yaml (12/11/2026).
+
+    Produccion no puede escribir el repositorio: el caso se MUESTRA, y lo
+    lleva al archivo una persona (copiar/descargar desde /manual) o
+    cli/importar_casos_dorados.py, que los trae todos sin duplicar.
+
+    El texto del cliente sale redactado por patron
+    (nucleo/seguridad/redaccion.py): un caso dorado va a git.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    if tipo not in ("ejemplos", "revisiones"):
+        return jsonify({"error": "Origen desconocido."}), 404
+    try:
+        salida = _caso_dorado_de(tipo[:-1] if tipo == "ejemplos" else "revision",
+                                 tenant, id_origen)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    except Exception as e:
+        registrar("manual", "fallo al armar el caso dorado", error=e)
+        return jsonify({"error": "No se pudo armar el caso dorado."}), 500
+    if "sin_caso" in salida:
+        return jsonify({"error": salida["sin_caso"]}), 422
+    return jsonify(salida)
+
+
+# =============================================================================
+#  SIMULADOR  -  la traza de cada turno y reproducir una conversacion real
+#  (12/11/2026). El simulador ya pasaba por atender_turno() -- a diferencia de
+#  cli/evaluar.py-- pero solo mostraba la respuesta: lo que hizo el agente
+#  (herramientas, area, errores) habia que ir a buscarlo a la base.
+# =============================================================================
+
+@app.get("/simulador/traza")
+def simulador_traza():
+    """
+    Lo que hizo el agente en UN turno del simulador: herramientas, a que area
+    derivo y que fallo.
+
+    'desde_mensaje' es el mensaje del cliente que abrio el turno (el
+    'mensaje_usuario_id' que devuelve /chat). La traza se escribe en un hilo
+    DESPUES de responder (_guardar_traza), asi que puede no estar todavia
+    cuando la pantalla pregunta: 'completa' dice si el cierre de la ejecucion
+    de ese turno ya quedo escrito -- va en la MISMA transaccion que la traza
+    (registrar_llamadas_herramienta), asi que si el cierre esta, la traza
+    tambien. La pantalla reintenta mientras sea false.
+
+    Solo conversaciones que no son de un canal real: la de un cliente se mira
+    en «Ver proceso» de /conversaciones, con sus propios permisos. Y solo
+    metadatos: nombre, exito, codigo de error; de los parametros, solo el
+    area de una derivacion.
+    """
+    tenant = request.args.get("tenant")
+    id_conv = request.args.get("conversacion_id")
+    desde = request.args.get("desde_mensaje")
+    if not tenant or not id_conv or not desde:
+        return jsonify({"error": "Faltan parametros: tenant, conversacion_id, "
+                                 "desde_mensaje."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    derivadoras = {h.nombre for h in (config.herramientas or [])
+                   if getattr(h, "deriva_rol", False)}
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute(
+                """select c.canal, m.creado_en
+                     from asistente.conversations c
+                     join asistente.messages m
+                       on m.conversation_id = c.id and m.id = %s
+                    where c.organization_id = %s and c.id = %s""",
+                (desde, org, id_conv))
+            base = cur.fetchone()
+            if not base:
+                return jsonify({"error": "Ese turno no existe."}), 404
+            if base["canal"] in canales.REALES:
+                return jsonify({"error": "La traza de una conversacion real se "
+                                         "mira en Conversaciones."}), 403
+            cur.execute(
+                """select min(creado_en) as siguiente from asistente.messages
+                    where organization_id = %s and conversation_id = %s
+                      and rol = 'user' and creado_en > %s""",
+                (org, id_conv, base["creado_en"]))
+            siguiente = (cur.fetchone() or {}).get("siguiente")
+            cur.execute(
+                """select herramienta, parametros, exito, codigo_error,
+                          es_bloqueo, es_escritura, duracion_ms
+                     from asistente.tool_calls
+                    where organization_id = %s and conversation_id = %s
+                      and creado_en >= %s
+                      and (%s::timestamptz is null or creado_en < %s)
+                    order by creado_en, id""",
+                (org, id_conv, base["creado_en"], siguiente, siguiente))
+            llamadas = [dict(f) for f in cur.fetchall()]
+            cur.execute(
+                """select exists (select 1 from asistente.ejecuciones
+                                   where organization_id = %s
+                                     and conversation_id = %s
+                                     and estado <> 'iniciada'
+                                     and terminada_en >= %s) as completa""",
+                (org, id_conv, base["creado_en"]))
+            completa = bool((cur.fetchone() or {}).get("completa"))
+    except Exception as e:
+        registrar("simulador", "fallo al leer la traza", error=e)
+        return jsonify({"error": "No se pudo leer la traza."}), 500
+
+    herramientas, derivo_a = [], None
+    for l in llamadas:
+        area = None
+        if l["herramienta"] in derivadoras and l["exito"]:
+            area = (l.get("parametros") or {}).get("area")
+            if isinstance(area, str) and area:
+                derivo_a = area
+        herramientas.append({
+            "herramienta": l["herramienta"], "exito": bool(l["exito"]),
+            "bloqueo": bool(l.get("es_bloqueo")),
+            "escritura": bool(l.get("es_escritura")),
+            "codigo_error": l.get("codigo_error"),
+            "duracion_ms": l.get("duracion_ms"),
+            "area": area if isinstance(area, str) else None})
+    return jsonify({
+        "completa": completa,
+        "herramientas": herramientas,
+        "derivo_a": derivo_a,
+        "errores": [h for h in herramientas if not h["exito"] and not h["bloqueo"]],
+    })
+
+
+@app.get("/simulador/reproduccion")
+def simulador_reproduccion():
+    """
+    Lo que escribio el cliente en una conversacion, para reenviarlo en el
+    simulador (12/11/2026).
+
+    Solo texto, en orden y REDACTADO por patron: el simulador lo reenvia a una
+    conversacion NUEVA con canal simulado y un identificador que no es un
+    telefono, asi que nada de esto toca al cliente ni a su conversacion. Sirve
+    para ver que haria Dexter HOY con la misma conversacion -- por ejemplo,
+    antes de aprobar una habilidad motivada por ella.
+    """
+    tenant = request.args.get("tenant")
+    id_conv = request.args.get("conversacion_id")
+    if not tenant or not id_conv:
+        return jsonify({"error": "Faltan parametros: tenant, conversacion_id."}), 400
+    from nucleo.habilidades import casos_dorados
+    try:
+        mensajes = casos_dorados.mensajes_para_reproducir(tenant, id_conv)
+    except casos_dorados.SinCaso as e:
+        return jsonify({"error": mensaje_publico(e, "No se puede reproducir.")}), 404
+    except Exception as e:
+        registrar("simulador", "fallo al leer la conversacion a reproducir", error=e)
+        return jsonify({"error": "No se pudo leer la conversacion."}), 500
+    return jsonify({"mensajes": mensajes})
 
 
 @app.post("/manual/revisiones/<id_revision>/descartar")

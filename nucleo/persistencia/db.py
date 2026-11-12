@@ -4294,6 +4294,10 @@ def ejemplos_por_caso(tenant: str, caso: str | None = None) -> list[dict]:
         cur.execute(
             """select e.id, e.caso, e.marcado_por, e.creado_en,
                       e.conversation_id, e.mensaje_id,
+                      -- El canal, para que /manual distinga lo ensayado en el
+                      -- simulador de lo que paso con un cliente (12/11/2026).
+                      (select c.canal from asistente.conversations c
+                        where c.id = e.conversation_id) as canal,
                       m.contenido as respuesta,
                       (select contenido from asistente.messages mu
                         where mu.conversation_id = m.conversation_id
@@ -5182,7 +5186,7 @@ def revisiones_de(tenant: str, estado: str | None = None) -> list[dict]:
             """select r.id, r.conversation_id, r.es_buen_ejemplo, r.caso,
                       r.justificacion, r.aporte_sugerido, r.estado,
                       r.revisado_por, r.creado_en, r.revisado_en,
-                      c.usuario_externo,
+                      c.usuario_externo, c.canal, c.rol_efectivo,
                       (select contenido from asistente.messages m
                         where m.conversation_id = r.conversation_id
                           and m.rol = 'user'
