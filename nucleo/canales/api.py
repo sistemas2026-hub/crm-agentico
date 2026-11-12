@@ -9292,6 +9292,10 @@ Lo que NO esta, y por que: contrasenas de cualquier tipo, coordenadas y
 cualquier campo de red del equipo. La ficha responde "quien es este cliente y
 como esta su servicio", no "como entro a su router".
 """
+#  Importado aca y no arriba (12/11/2026): todo lo de la ficha por area vive
+#  en este bloque contiguo, para que el archivo compartido se fusione limpio.
+from nucleo.seguridad import ficha_por_area                     # noqa: E402
+
 CAMPOS_FICHA_CLIENTE = (
     "id_servicio", "nombre", "cedula", "estado", "telefono", "email",
     "direccion", "localidad", "ciudad", "plan_internet", "zona",
@@ -9389,9 +9393,44 @@ def conversaciones_cliente(id_conversacion):
         if valor not in (None, ""):
             ficha[campo] = valor
 
+    # SEGUN QUIEN MIRA (12/11/2026). La lista de arriba dice que puede salir
+    # del sistema del ISP hacia una pantalla; esta, que puede ver ESTA persona
+    # (nucleo/seguridad/ficha_por_area.py). Sin 'rol' ni 'perfil' -- un
+    # llamador viejo -- no es "todo": es el defecto seguro. La forma de la
+    # respuesta no cambia; la ficha trae ademas '_ocultos' para que la
+    # pantalla diga «oculto para tu area» y no un vacio que mentiria.
+    ficha = ficha_por_area.ficha_para(
+        config, tenant, request.args.get("rol"), request.args.get("perfil"), ficha)
+
     # Sin 'registrar' de los valores: esta respuesta es la ficha personal de
     # alguien y no entra a ningun log ni a ninguna traza.
     return jsonify({"disponible": True, "motivo": None, "cliente": ficha})
+
+
+@app.get("/ficha-cliente/visibilidad")
+def ficha_cliente_visibilidad():
+    """
+    Que campos de la ficha del cliente puede ver quien mira (12/11/2026).
+
+    Para las pantallas que reciben la ficha por OTRO camino que la ruta de
+    arriba -- el detalle del ticket la recibe dentro del contexto de
+    /conversaciones/por-caso, que tambien lee el despacho del backend y por
+    eso no se filtra ahi -- y la filtran en su capa servidor con ESTA
+    respuesta. Un solo criterio, decidido aca; la pantalla solo conserva las
+    claves de 'campos'.
+
+    ?tenant=&rol=<rol del CRM>&perfil=<Profile.id>. Sin rol ni perfil
+    contesta el defecto, nunca la ficha entera.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": "No existe esa empresa."}), 404
+    return jsonify(ficha_por_area.visibilidad_para(
+        config, tenant, request.args.get("rol"), request.args.get("perfil")))
 
 
 @app.get("/conversaciones/<id_conversacion>/cuenta")

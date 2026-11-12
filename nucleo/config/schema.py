@@ -2364,6 +2364,24 @@ class AreaDeTrabajo(Base):
     # Rapilink": el vocabulario es del producto, la eleccion es de la empresa.
     icono: str = ""
     color: str = ""
+    # QUE VE ESTA AREA DE LA FICHA DEL CLIENTE (12/11/2026). Los campos de
+    # CAMPOS_FICHA_DEL_CLIENTE (abajo) que una persona de esta area puede leer
+    # en la Bandeja, en el detalle de un ticket y en la ficha por servicio.
+    #
+    # None -- no declararlo -- NO es "todo": es el defecto seguro del motor
+    # (nucleo/seguridad/ficha_por_area.py), que deja afuera la cedula, el
+    # correo y las coordenadas. Una lista vacia es valida y significa "nada de
+    # la ficha": el area existe para organizar gente que no atiende clientes.
+    #
+    # Va en el AREA y no en el agente por el mismo motivo que la columna
+    # 'asistente.area_colaborador': el area es lo que alguien decidio sobre la
+    # persona; los agentes son capacidades que se le suman despues. Que
+    # alguien de soporte reciba ademas el agente de facturacion no le tiene
+    # que abrir la cedula de nadie.
+    #
+    # Los roles de gestion del CRM (ADMIN, SUPERVISOR, OPERACIONES) ven la
+    # ficha entera sin mirar esto: deciden sobre el caso completo.
+    ficha_cliente: list[str] | None = None
 
     @field_validator("color")
     @classmethod
@@ -2377,6 +2395,44 @@ class AreaDeTrabajo(Base):
             raise ValueError(
                 f"areas: color '{v}' invalido -- se espera '#rrggbb' (ej. '#2f6fed')")
         return v
+
+    @field_validator("ficha_cliente")
+    @classmethod
+    def _campos_de_ficha(cls, v: list[str] | None) -> list[str] | None:
+        """
+        Solo campos del catalogo, sin repetir. Un nombre mal escrito
+        ('cédula', 'telefono_1') no falla al usarse: deja el dato oculto y la
+        pantalla dice «oculto para tu area» sin que nadie entienda por que.
+        Se cae al cargar, que es donde se nota.
+        """
+        if v is None:
+            return None
+        desconocidos = sorted({c for c in v if c not in CAMPOS_FICHA_DEL_CLIENTE})
+        if desconocidos:
+            raise ValueError(
+                f"areas: ficha_cliente nombra campos que no existen "
+                f"({', '.join(desconocidos)}). Disponibles: "
+                f"{', '.join(CAMPOS_FICHA_DEL_CLIENTE)}")
+        return list(dict.fromkeys(v))
+
+
+#  EL CATALOGO DE LA FICHA DEL CLIENTE (12/11/2026)
+#  ------------------------------------------------
+#  Lo que una persona del equipo puede llegar a ver del titular de un
+#  servicio, con el nombre con que lo trae la ficha. Es vocabulario del
+#  PRODUCTO, no de una empresa: cada empresa elige en su configuracion cuales
+#  ve cada area ('AreaDeTrabajo.ficha_cliente'); cual es el criterio y como se
+#  filtra vive en nucleo/seguridad/ficha_por_area.py.
+#
+#  Un campo que no esta aca no se entrega a ninguna persona, ni a gestion:
+#  agregar uno a la lectura de la ficha sin agregarlo aca lo deja oculto para
+#  todos, que es el lado seguro de equivocarse.
+CAMPOS_FICHA_DEL_CLIENTE: tuple[str, ...] = (
+    "id_servicio", "nombre", "cedula", "estado", "telefono", "email",
+    "direccion", "localidad", "ciudad", "zona", "coordenadas",
+    "plan_internet", "fecha_instalacion", "estado_facturas", "saldo",
+    "fecha_corte",
+)
 
 
 # =============================================================================
