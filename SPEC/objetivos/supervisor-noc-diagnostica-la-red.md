@@ -134,6 +134,50 @@ El juicio es de lenguaje, no de cuenta, así que lo hace el modelo — y aquí
   proveedor pasa por lo mismo que el resto (§5), y el revisor de PII mira este
   camino antes de que salga.
 
+### MEDIDO EN PRODUCCION EL 12/11/2026: la pieza 2 funciona, y la 3 puede no hacer falta
+
+Encendido `cotejo_reporte_campo` para Rapilink (version 214 de `tenant_config`)
+y cotejadas cuatro ordenes reales de la base, sin escribir nada:
+
+| OT | Se pidio | Que hizo | Veredicto |
+|---|---|---|---|
+| 215 | cambio de clave de wifi, *"no una falla del enlace"* | conector dañado, se cambia APC | **no** |
+| 200 | cambio de router, *"el servicio esta sano"* | conector dañado | **no** |
+| 213 | problema del router, *"la ONU esta en linea"* | conector dañado | **no** |
+| **210** | *"verifique y reemplace el conector optico"* | se cambia conector APC | **si** |
+
+**4 de 4**, con el control negativo incluido — la #210 es el caso donde el
+trabajo SI corresponde, y si hubiera salido `no` el cotejo no serviría para
+nada.
+
+**Lo que el modelo usó como evidencia, y es mejor de lo que se esperaba.** No
+comparó palabras: comparó el dato técnico.
+
+> *"el ticket afirma servicio operativo y que no hay falla del enlace,
+> mientras el reporte da **-50 dBm al llegar** y un conector dañado
+> reemplazado"*
+
+En las tres contradicciones se apoyó en la potencia. **Ya sabe que -50 dBm
+contradice «señal buena»** sin que nadie le cargara un manual de FTTH.
+
+**Consecuencia para la pieza 3:** la evidencia apunta a que el conocimiento
+FTTH no es necesario para ESTE juicio. Cuatro casos no lo cierran, y la pieza
+queda abierta — pero baja de prioridad hasta que aparezca un caso que el
+modelo no sepa juzgar.
+
+**Y valida una decisión de diseño que podría haber sido al revés:** se mandan
+TODOS los campos del reporte, no solo `solucion`. Con solo la solución el
+`-50 dBm` no habría viajado y las tres contradicciones se habrían apoyado
+únicamente en las palabras.
+
+**Costo medido:** ~1.100 tokens y 1-7 segundos por cotejo, una vez por cierre.
+
+**Lo que esta medición NO dice:** cuántas órdenes REALES tienen el problema.
+Las 30 últimas de producción son pruebas — todas del servicio 5832, el mismo
+técnico, y *"se cambia conector APC"* palabra por palabra en ~20 de 30. El
+número de frecuencia se mide cuando entren clientes de verdad, con
+`python manage.py cuantas_no_cuadran`.
+
 ### Pieza 3 — el conocimiento que hace bueno el juicio
 
 Sin saber de FTTH, el modelo acepta cualquier par de frases que suenen
