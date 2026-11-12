@@ -282,13 +282,17 @@
                        reporte, no en el aviso anterior. -->
                   <label class="snoc-body-sm snoc-fila" style="gap:var(--snoc-xs); align-items:center; flex-wrap:wrap;">
                     Y se lo vuelve a recordar cada
+                    <!-- `snoc-campo` ES EL RECUADRO (11/11/2026): sin la clase
+                         el numero se ve como texto plano y no parece editable;
+                         el ancho se pisa porque la clase trae `width:100%`. -->
                     <input
+                      class="snoc-campo"
                       type="number"
                       name="repetir_recordatorio_cada_minutos"
                       min="0"
                       max="1440"
                       step="1"
-                      style="width:5.5rem;"
+                      style="width:4.5rem;"
                       value={data.seguimiento.repetir_recordatorio_cada_minutos}
                     />
                     minutos mientras siga sin reportar
