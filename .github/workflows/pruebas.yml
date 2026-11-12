@@ -67,6 +67,16 @@
 # que corriera solo las 50 que pasan seria exactamente el falso verde que
 # este archivo existe para no producir.
 #
+# DECIDIDO EL 12/11/2026: NO SE TOCA EL ESQUEMA DE PRODUCCION POR ESTO.
+# El usuario lo cerro con un dato que ningun archivo del repo dice: la
+# aplicacion de Django no se usa, asi que como llena ESA columna no es un
+# problema de nadie. Queda entonces UN solo camino abierto para CI, y no toca
+# produccion: que las ~28 pruebas pasen `created_at` al insertar su empresa de
+# mentira. Son ~2 h. Mientras eso no se haga, las 88 NO corren en CI y este
+# archivo lo dice en vez de taparlo.
+#
+# No reabrir proponiendo el default en una migracion: ya se decidio que no.
+#
 # Para repetir la medicion: `cli/correr_pruebas.py --solo-base` corre solo
 # esas 88.
 #

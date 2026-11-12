@@ -131,6 +131,11 @@ _PAR_ESPACIO = re.compile(
 #  ninguno de los 4.644 clientes medidos trae esa forma, y cambiarlo moveria
 #  los 1.071 que `_PAR` ya lee bien-- pero queda escrito para que el proximo
 #  que mida sepa que esa puerta esta abierta y no la descubra desde un mapa.
+#
+#  DECIDIDO EL 12/11/2026 por el usuario, con esa medicion a la vista: se deja
+#  asi. No reabrir sin una medicion NUEVA que encuentre al menos un cliente con
+#  esta forma -- ese es el numero que cerro la decision, y es el unico que la
+#  puede reabrir.
 _PAR_PEGADO = re.compile(
     r"^\s*(-?\d{1,3}[.,]\d+)\s*(-\d{1,3}[.,]\d+)\s*$")
 
