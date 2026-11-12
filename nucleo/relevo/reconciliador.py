@@ -70,6 +70,10 @@ class ResultadoEfecto:
       permanente   no se va a poder: el pedido estaba mal y reintentarlo
                    igual daria el mismo error
       incierto     el pedido PUDO haber llegado. No se sabe.
+      espera       no se hizo NADA a proposito: el sistema externo espera una
+                   decision de una persona (hoy: un cierre que una regla del
+                   CRM manda a aprobar). Se vuelve a mirar sin gastar el tope
+                   de reintentos -- esperar a una persona no es fallar.
     """
 
     def __init__(self, clase: str, *, referencia: str | None = None,
@@ -87,6 +91,12 @@ def _desenlace(tipo: str, resultado: ResultadoEfecto, intentos: int) -> tuple[st
     """
     if resultado.clase == "exito":
         return "hecha", None
+    if resultado.clase == "espera":
+        # 12/11/2026. Sin clase de error: no fallo nada. Vuelve a la cola con
+        # la espera mas larga y sin tope, porque lo que se espera es a una
+        # persona y no a un sistema. Antes esto caia en 'permanente' y quedaba
+        # "esperando a alguien" que no tenia donde enterarse.
+        return "pendiente", None
     if resultado.clase == "permanente":
         # No se va a arreglar solo. Que lo vea alguien.
         return "fallida_definitiva", "permanente"

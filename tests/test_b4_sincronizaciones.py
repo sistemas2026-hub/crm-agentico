@@ -464,9 +464,90 @@ try:
 
     f = cerrar_con([{"status": "New"}], cerrar_400)
     revisar(f[0] == "fallida_definitiva" and f[2] == "permanente",
-            "un 400 del CRM (hace falta una aprobacion) no se reintenta",
-            "Necesita que una persona apruebe, no un temporizador. Medido: "
-            "TestCerrarCasoPuedeSerRechazado.")
+            "un 400 sin solicitud a la vista (CRM viejo) sigue siendo permanente",
+            "Si el CRM no publica 'aprobacion_de_cierre', no hay nada que esperar.")
+
+    # --- 12/11/2026: el cierre frenado ESPERA la decision, y TERMINA ---------
+    # El CRM ahora deja la solicitud al frenar el cierre y la publica en el
+    # detalle del caso ('aprobacion_de_cierre'). Aprobarla cierra el caso
+    # alla; rechazarla lo deja abierto. Ver cases/cierre_con_aprobacion.py.
+    APROB = str(uuid.uuid4())
+
+    def pendiente_de(aid=APROB):
+        return {"status": "New",
+                "aprobacion_de_cierre": {"id": aid, "estado": "pending"}}
+
+    def otra_vuelta(sid, lecturas, cerrar):
+        """Procesa el MISMO trabajo otra vez, aunque su hora no haya llegado:
+        lo que se prueba es la decision, no el reloj."""
+        t = admin.execute(
+            "select id, tipo, datos_intencion, referencia_externa, intentos "
+            "from asistente.sincronizaciones_externas where id = %s", (sid,)).fetchone()
+        trabajo = {"id": t[0], "tipo": t[1], "datos_intencion": t[2],
+                   "referencia_externa": t[3], "intentos": t[4]}
+        pendientes = list(lecturas)
+
+        def leer(_id):
+            return pendientes.pop(0)
+        reconciliador.procesar_una(
+            T_A, trabajo,
+            efectos_externos.ejecutor(None, T_A, crear=crear_ok,
+                                      buscar_por_nombre=lambda n: None,
+                                      leer_caso=leer, cerrar_caso_crm=cerrar))
+        return fila(sid)
+
+    escrituras.clear()
+    intentos_400 = []
+
+    def cerrar_400_contado(caso_id):
+        intentos_400.append(caso_id)
+        cerrar_400(caso_id)
+
+    c = conversacion(ORG_A)
+    s_esp = encolar(T_A, ORG_A, c, "cerrar_caso", f"espera:{c}", datos={"caso_id": CASO})
+    f = otra_vuelta(s_esp, [{"status": "New"}, pendiente_de()], cerrar_400_contado)
+    revisar(f[0] == "pendiente" and f[2] is None and f[3] == "espera_aprobacion"
+            and f[4] == f"aprobacion:{APROB}",
+            "frenado por una regla: queda ESPERANDO la solicitud, no 'permanente'",
+            f"Recuerda cual espera para no confundirla con una vieja. {f}")
+
+    # Siguen sin decidir, varias vueltas: no se vuelve a escribir y no se
+    # gasta el tope de reintentos (esperar a una persona no es fallar).
+    for _ in range(db.MAX_INTENTOS_SINCRONIZACION + 2):
+        f = otra_vuelta(s_esp, [pendiente_de()], cerrar_400_contado)
+    revisar(f[0] == "pendiente" and len(intentos_400) == 1,
+            "mientras esta pendiente no se escribe y no se agota la cola",
+            f"PATCHs: {len(intentos_400)}, fila: {f}")
+
+    # La aprueban: el CRM cerro el caso. Se adopta SIN escribir.
+    f = otra_vuelta(s_esp, [{"status": "Closed", "aprobacion_de_cierre":
+                             {"id": APROB, "estado": "approved"}}], cerrar_ok)
+    revisar(f[0] == "hecha" and escrituras == [] and f[4] == CASO,
+            "aprobada: el caso ya esta cerrado y se adopta, sin reescribir closed_on",
+            f"{f}")
+
+    # Otra, y la rechazan: termina como rechazada, no colgada.
+    c = conversacion(ORG_A)
+    s_rech = encolar(T_A, ORG_A, c, "cerrar_caso", f"rech:{c}", datos={"caso_id": CASO})
+    APROB2 = str(uuid.uuid4())
+    otra_vuelta(s_rech, [{"status": "New"}, pendiente_de(APROB2)], cerrar_400)
+    f = otra_vuelta(s_rech, [{"status": "New", "aprobacion_de_cierre":
+                              {"id": APROB2, "estado": "rejected"}}], cerrar_ok)
+    revisar(f[0] == "fallida_definitiva" and f[3] == "cierre_rechazado"
+            and escrituras == [],
+            "rechazada: la accion termina como rechazada y el caso queda abierto",
+            f"{f}")
+
+    # Un rechazo VIEJO (no el que este trabajo espera) no frena un cierre
+    # nuevo: se intenta, y si la regla frena, nace otra solicitud.
+    c = conversacion(ORG_A)
+    s_nuevo = encolar(T_A, ORG_A, c, "cerrar_caso", f"nuevo:{c}", datos={"caso_id": CASO})
+    f = otra_vuelta(s_nuevo, [{"status": "New", "aprobacion_de_cierre":
+                               {"id": APROB2, "estado": "rejected"}},
+                              {"status": "Closed"}], cerrar_ok)
+    revisar(f[0] == "hecha" and escrituras == [CASO],
+            "una solicitud rechazada de antes no impide un cierre nuevo", f"{f}")
+    escrituras.clear()
 
     # Sin LAS DOS capacidades no se intenta nada.
     c = conversacion(ORG_A)

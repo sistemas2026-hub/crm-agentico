@@ -147,6 +147,42 @@ def _estado_de(respuesta) -> str | None:
     return str(estado) if estado else None
 
 
+#: La referencia de un 'cerrar_caso' que espera una aprobacion del CRM: el id
+#: de la solicitud que se esta esperando, para no confundirla despues con una
+#: vieja (12/11/2026).
+PREFIJO_APROBACION = "aprobacion:"
+
+
+def _aprobacion_de(respuesta) -> dict | None:
+    """La ultima solicitud de cierre del caso, como la publica el detalle."""
+    if not isinstance(respuesta, dict):
+        return None
+    a = respuesta.get("aprobacion_de_cierre")
+    return a if isinstance(a, dict) and a.get("id") and a.get("estado") else None
+
+
+def _por_la_aprobacion(aprobacion: dict | None, esperada: str | None):
+    """Que hacer segun la solicitud de cierre. None = seguir con el cierre.
+
+    Pendiente -> 'espera' (no se escribe; se vuelve a leer).
+    Rechazada o retirada, y es LA que este trabajo esperaba -> termina.
+    Cualquier otra cosa (sin solicitud, aprobada, o una vieja que no es la
+    de este trabajo) -> se intenta cerrar: si una regla frena, el CRM deja
+    una solicitud nueva y el paso 2 la ve.
+    """
+    if aprobacion is None:
+        return None
+    estado, aid = str(aprobacion["estado"]), str(aprobacion["id"])
+    if estado == "pending":
+        return ResultadoEfecto("espera", referencia=PREFIJO_APROBACION + aid,
+                               codigo="espera_aprobacion")
+    if esperada and aid == esperada and estado in ("rejected", "cancelled"):
+        return ResultadoEfecto(
+            "permanente",
+            codigo="cierre_rechazado" if estado == "rejected" else "aprobacion_retirada")
+    return None
+
+
 def cerrar_caso(config, tenant: str, datos: dict, referencia: str | None,
                 *, leer_caso, cerrar) -> ResultadoEfecto:
     """
@@ -162,16 +198,36 @@ def cerrar_caso(config, tenant: str, datos: dict, referencia: str | None,
     Asi que el orden es el mismo que en crear_caso y por el mismo motivo: si
     ya esta cerrado, se ADOPTA y no se escribe nada.
 
-    UN RECHAZO PUEDE SER LEGITIMO. El CRM puede exigir una aprobacion antes de
-    cerrar (ApprovalRule 'pre_close') y responder 400. Eso no es una falla que
-    se resuelva insistiendo: necesita que una persona apruebe. Cae en
-    'permanente' por la clase de error, que es donde tiene que quedar --
-    visible, sin reintentos, esperando a alguien.
+    UN CIERRE FRENADO ESPERA, Y TERMINA (12/11/2026). El CRM puede exigir una
+    aprobacion antes de cerrar (ApprovalRule 'pre_close') y responder 400.
+    Hasta ese dia eso caia en 'permanente' "esperando a alguien" -- y nadie se
+    enteraba: el CRM no dejaba la solicitud en ningun lado. Ahora el CRM SI la
+    deja (cases/cierre_con_aprobacion.py) y aprobarla cierra el caso alla. Lo
+    que queda de este lado es no quedarse colgado:
+
+      * con una solicitud PENDIENTE no se escribe nada: se espera ('espera')
+        y se vuelve a LEER en el proximo ciclo. Insistir con el PATCH no
+        cambia nada y el CRM ya tiene la solicitud.
+      * cuando la aprueban, el CRM cierra el caso; la proxima lectura lo ve
+        cerrado y lo adopta sin escribir (no se corre 'closed_on').
+      * cuando la RECHAZAN, la accion termina como rechazada
+        ('cierre_rechazado'), no como una falla a reintentar. Para no
+        confundir una solicitud vieja con la de este trabajo, se recuerda cual
+        se estaba esperando en la referencia ('aprobacion:<id>').
+
+    Lo que decide es LO QUE SE LEE del caso ('aprobacion_de_cierre' del
+    detalle), nunca el cuerpo del 400: un codigo de estado no prueba nada, y
+    el cuerpo no se guarda (X19).
 
     CERRADO NO ES PARA SIEMPRE. Un caso cerrado se puede reabrir (probado). Por
     eso esto devuelve 'exito' sobre lo que HIZO, no sobre lo que es cierto
     ahora: la cola registra actos, no estados del mundo.
     """
+    esperada = None
+    if referencia and str(referencia).startswith(PREFIJO_APROBACION):
+        # La referencia de un trabajo en espera es la solicitud, no el caso.
+        esperada = str(referencia)[len(PREFIJO_APROBACION):]
+        referencia = None
     caso_id = (datos or {}).get("caso_id") or referencia
     if not caso_id:
         return ResultadoEfecto("permanente", codigo="sin_caso")
@@ -180,11 +236,12 @@ def cerrar_caso(config, tenant: str, datos: dict, referencia: str | None,
     #    precio de escribir sin saber es mover la fecha de cierre de un caso
     #    que ya estaba bien.
     try:
-        estado = _estado_de(leer_caso(str(caso_id)))
+        leido = leer_caso(str(caso_id))
     except Exception as e:
         clase, codigo = _clase_de_error(e)
         return ResultadoEfecto("transitorio" if clase != "permanente" else clase,
                                codigo=codigo)
+    estado = _estado_de(leido)
     if estado is None:
         # Respondio algo que no se entiende. Tampoco se escribe.
         return ResultadoEfecto("transitorio", codigo="estado_ilegible")
@@ -193,11 +250,27 @@ def cerrar_caso(config, tenant: str, datos: dict, referencia: str | None,
                   tenant=tenant)
         return ResultadoEfecto("exito", referencia=str(caso_id))
 
+    # 1b. ¿Hay una solicitud de cierre? Pendiente: se espera sin escribir.
+    #     Rechazada (la que este trabajo esperaba): termina como rechazada.
+    decision = _por_la_aprobacion(_aprobacion_de(leido), esperada)
+    if decision is not None:
+        return decision
+
     # 2. Sigue abierto: cerrarlo.
     try:
         cerrar(str(caso_id))
     except Exception as e:
         clase, codigo = _clase_de_error(e)
+        if clase == "permanente":
+            # ¿Lo freno una regla? Se LEE: el CRM deja la solicitud al frenar,
+            # y si esta pendiente esto no es una falla sino una espera.
+            try:
+                decision = _por_la_aprobacion(
+                    _aprobacion_de(leer_caso(str(caso_id))), esperada)
+            except Exception:
+                decision = None
+            if decision is not None and decision.clase == "espera":
+                return decision
         return ResultadoEfecto(clase, codigo=codigo)
 
     # 3. RELEER SIEMPRE. El codigo de estado dice que el pedido se acepto, no
