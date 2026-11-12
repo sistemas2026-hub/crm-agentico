@@ -43,6 +43,7 @@ from cases.access import (
     reparte_tickets,
     visible_cases_qs,
 )
+from cases.cierre_con_aprobacion import aprobacion_de_cierre, frenar_si_hace_falta
 from cases.models import Case, ReopenPolicy, Solution
 from cases.models import EmailMessage as _EmailMessageModel  # noqa: F401  (used below)
 from cases.serializer import (
@@ -708,6 +709,11 @@ class CaseDetailView(APIView):
         cases_object = self.get_object(pk=pk)
         assert_case_write_access(request.profile, cases_object)
 
+        # Un cierre que frena una regla deja la solicitud pedida (12/11/2026).
+        frenado = frenar_si_hace_falta(request, cases_object, params)
+        if frenado is not None:
+            return frenado
+
         serializer = CaseCreateSerializer(
             cases_object,
             data=params,
@@ -872,6 +878,11 @@ class CaseDetailView(APIView):
 
         context = {}
         context["cases_obj"] = CaseSerializer(self.cases).data
+        # La ultima solicitud de cierre del caso, solo su estado (12/11/2026).
+        # La lee el motor antes de volver a intentar un cierre frenado: si
+        # sigue pendiente espera, si la rechazaron cierra su accion como
+        # rechazada. Ver nucleo/relevo/efectos_externos.py::cerrar_caso.
+        context["aprobacion_de_cierre"] = aprobacion_de_cierre(self.cases)
 
         # `comment_permission` used to be creator-or-admin while `post` below
         # accepted creator, admin *or assignee*. The flag told an assignee they
@@ -1080,6 +1091,14 @@ class CaseDetailView(APIView):
         params = request.data
         cases_object = self.get_object(pk=pk)
         assert_case_write_access(request.profile, cases_object)
+
+        # Un cierre que frena una regla `pre_close` ya no termina en un 400
+        # mudo: deja la solicitud en Tickets -> Aprobaciones y aprobarla cierra
+        # el caso. Es el camino del motor (`cerrar_caso_crm`). 12/11/2026, ver
+        # cases/cierre_con_aprobacion.py.
+        frenado = frenar_si_hace_falta(request, cases_object, params)
+        if frenado is not None:
+            return frenado
 
         serializer = CaseCreateSerializer(
             cases_object,

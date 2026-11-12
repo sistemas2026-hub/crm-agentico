@@ -6,10 +6,11 @@
    * answers "what will be gated next time, and by whom", the same rows, a
    * different question, which is why it is a settings page and not a tab.
    *
-   * One configuration state the model permits and the form does not warn
-   * about, shown here: approver_role MANAGER with no named approvers.
-   * Profile.role is only ADMIN or USER, so the rule matches nobody and the
-   * cases it gates can never be closed by anyone.
+   * 'MANAGER' (Gestión) la resuelve desde el 12/11/2026 cualquier perfil
+   * ADMIN, SUPERVISOR u OPERACIONES: los ROLES_GESTION del backend
+   * (cases/approvals.py::roles_del_aprobador). Antes no alcanzaba a ningún
+   * perfil y esta página avisaba «nadie puede destrabarla»; el aviso se fue
+   * porque el hueco se cerró en el servidor, no en la pantalla.
    *
    * Separation of duties, an admin clearing their own requested close, is
    * NOT a gap to warn about: `ApprovalApproveView` rejects an approval whose
@@ -38,12 +39,12 @@
   const MATCH_PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
   const MATCH_CASE_TYPES = ['Question', 'Incident', 'Problem'];
 
-  // `ROLE_LABEL` covers `Profile.role` (ADMIN/USER), not the approver-role
-  // vocabulary this form offers (ADMIN/MANAGER). MANAGER is not a real
-  // `Profile.role` value (see the module docstring), so it has no entry in
-  // that map and would render as `undefined`. Labelled here instead.
+  // El vocabulario del aprobador no es el de `Profile.role`: 'MANAGER' es
+  // gestión, un conjunto de roles (12/11/2026). Se nombra acá.
   function approverRoleLabel(role) {
-    return role === 'MANAGER' ? 'Gerente' : (ROLE_LABEL[role] ?? role);
+    return role === 'MANAGER'
+      ? 'Gestión (administración, supervisión u operaciones)'
+      : (ROLE_LABEL[role] ?? role);
   }
 
   // `null` when the panel is closed, `'new'` when adding, or the rule object
@@ -71,9 +72,6 @@
     editing && editing !== 'new' ? missingOptions(data.people, editing.approvers) : []
   );
 
-  /** MANAGER matches no Profile.role, so an empty approvers list means nobody. */
-  const clearableByNobody = (r) =>
-    r.is_active && r.approver_role === 'MANAGER' && !r.approvers.length;
 
   /** What the rule matches, as the sentence a person would say. */
   function matches(r) {
@@ -268,7 +266,6 @@
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <b style="font-size:13.5px">{r.name}</b>
                 {#if !r.is_active}<Pill tone="slate">Apagada</Pill>{/if}
-                {#if clearableByNobody(r)}<Pill tone="rust">Nadie puede destrabarla</Pill>{/if}
               </div>
 
               <div class="v2-sub" style="font-size:12.5px;margin-top:5px;white-space:normal">
@@ -279,20 +276,11 @@
                 {#if r.approvers.length}
                   {r.approvers.map((a) => a.email).join(' o ')}
                 {:else}
-                  cualquier {approverRoleLabel(r.approver_role).toLowerCase()}
+                  {r.approver_role === 'MANAGER' ? 'cualquier perfil de' : 'cualquier'}
+                  {approverRoleLabel(r.approver_role).toLowerCase()}
                 {/if}
               </div>
 
-              {#if clearableByNobody(r)}
-                <div class="v2-rule-flag">
-                  <TriangleAlert size={14} style="color:var(--v2-rust);flex:none" />
-                  <span>
-                    Esta organización tiene administradores y miembros. No existe el rol de gerente.
-                    Sin aprobadores nombrados, el primer ticket que bloquee esto no lo puede cerrar
-                    nadie. Nombrá aprobadores, o cambiala a administrador.
-                  </span>
-                </div>
-              {/if}
             </div>
 
             <div style="flex:none;text-align:right">

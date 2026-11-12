@@ -439,10 +439,15 @@ class Case(AssignableMixin, BaseModel):
                         case_id=self.pk, rule=rule, state="approved"
                     ).exists()
                     if not has_approved:
-                        errors["status"] = _(
-                            "An approval is required before this case can be "
-                            "closed (rule: %(rule)s)."
-                        ) % {"rule": rule.name}
+                        # En español y con el mismo texto que la API
+                        # (12/11/2026): antes llegaba en ingles a la pantalla.
+                        from cases.cierre_con_aprobacion import (
+                            mensaje_cierre_requiere_aprobacion,
+                        )
+
+                        errors["status"] = mensaje_cierre_requiere_aprobacion(
+                            rule.name, pedida=False
+                        )
 
         # Parent/child guards.
         if self.parent_id is not None:

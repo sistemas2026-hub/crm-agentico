@@ -27,6 +27,7 @@ from rest_framework.views import APIView
 
 from cases.access import assert_case_write_access, has_case_read_access
 from cases.approvals import Approval, ApprovalRule, find_matching_rule
+from cases.cierre_con_aprobacion import origen_del_pedido
 from cases.models import Case
 from cases.serializer import (
     ApprovalRequestSerializer,
@@ -92,9 +93,41 @@ def _approval_rule_analytics(org):
 
 def _admin_required():
     return Response(
-        {"error": True, "errors": "Admin access required"},
+        {"error": True, "errors": "Solo un administrador puede hacer esto."},
         status=status.HTTP_403_FORBIDDEN,
     )
+
+
+_ESTADO_EN_ESPAÑOL = {
+    "pending": "pendiente",
+    "approved": "aprobada",
+    "rejected": "rechazada",
+    "cancelled": "retirada",
+}
+
+
+def _ya_decidida(estado):
+    """El 400 de decidir algo ya decidido, en español (12/11/2026)."""
+    return f"Esta solicitud ya está {_ESTADO_EN_ESPAÑOL.get(estado, estado)}."
+
+
+def _con_origen(datos, approvals):
+    """Suma a cada fila quien la pidio y si se cierra sola al aprobarla.
+
+    Va aca y no en `ApprovalSerializer` porque el serializer es de otro
+    frente de trabajo; son tres claves de lectura, sin escritura.
+    `solicitante` es 'Dexter' cuando la pidio el asistente: el correo del
+    perfil dueño del token no le dice nada a quien aprueba.
+    """
+    from cases.cierre_con_aprobacion import solicitante_visible
+
+    filas = datos if isinstance(datos, list) else [datos]
+    objetos = approvals if isinstance(approvals, list) else [approvals]
+    for fila, a in zip(filas, objetos):
+        fila["origen"] = a.origen
+        fila["solicitante"] = solicitante_visible(a)
+        fila["cerrar_al_aprobar"] = a.cerrar_al_aprobar
+    return datos
 
 
 def _record(case, action, metadata, actor):
@@ -150,13 +183,13 @@ class ApprovalRuleListCreateView(APIView):
         for p in approvers:
             if p.org_id != org.id:
                 return Response(
-                    {"error": True, "errors": "Approver is outside this org."},
+                    {"error": True, "errors": "Ese aprobador no es de esta organización."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         match_team = serializer.validated_data.get("match_team")
         if match_team is not None and match_team.org_id != org.id:
             return Response(
-                {"error": True, "errors": "Team is outside this org."},
+                {"error": True, "errors": "Ese equipo no es de esta organización."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         rule = serializer.save(org=org)
@@ -175,7 +208,7 @@ class ApprovalRuleDetailView(APIView):
         rule = self._get(pk, request.profile.org)
         if rule is None:
             return Response(
-                {"error": True, "errors": "Rule not found"},
+                {"error": True, "errors": "No se encontró la regla."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(ApprovalRuleSerializer(rule).data)
@@ -186,7 +219,7 @@ class ApprovalRuleDetailView(APIView):
         rule = self._get(pk, request.profile.org)
         if rule is None:
             return Response(
-                {"error": True, "errors": "Rule not found"},
+                {"error": True, "errors": "No se encontró la regla."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         serializer = ApprovalRuleSerializer(
@@ -209,7 +242,7 @@ class ApprovalRuleDetailView(APIView):
         rule = self._get(pk, request.profile.org)
         if rule is None:
             return Response(
-                {"error": True, "errors": "Rule not found"},
+                {"error": True, "errors": "No se encontró la regla."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         # Hard delete is fine. Approval.rule is on_delete=PROTECT, so any
@@ -259,12 +292,12 @@ class CaseRequestApprovalView(APIView):
             ).first()
             if rule is None:
                 return Response(
-                    {"error": True, "errors": "Rule not found or inactive."},
+                    {"error": True, "errors": "La regla no existe o está apagada."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if not rule.matches(case):
                 return Response(
-                    {"error": True, "errors": "Rule does not match this case."},
+                    {"error": True, "errors": "Esa regla no aplica a este caso."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
@@ -273,7 +306,7 @@ class CaseRequestApprovalView(APIView):
                 return Response(
                     {
                         "error": True,
-                        "errors": "No active approval rule matches this case.",
+                        "errors": "Ninguna regla de aprobación activa aplica a este caso.",
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -288,7 +321,7 @@ class CaseRequestApprovalView(APIView):
             return Response(
                 {
                     "error": True,
-                    "errors": "An approval is already pending for this case.",
+                    "errors": "Este caso ya tiene una aprobación pendiente.",
                     "approval_id": str(existing.id),
                 },
                 status=status.HTTP_409_CONFLICT,
@@ -300,6 +333,7 @@ class CaseRequestApprovalView(APIView):
             rule=rule,
             requested_by=request.profile,
             note=note,
+            origen=origen_del_pedido(request),
         )
         _record(
             case,
@@ -377,12 +411,9 @@ class ApprovalInboxView(APIView):
                 if a.can_be_acted_on_by(profile) and a.requested_by_id != profile.id
             ]
 
+        datos = ApprovalSerializer(rows, many=True, context={"request": request}).data
         return Response(
-            {
-                "approvals": ApprovalSerializer(
-                    rows, many=True, context={"request": request}
-                ).data
-            },
+            {"approvals": _con_origen(list(datos), list(rows))},
             status=status.HTTP_200_OK,
         )
 
@@ -406,20 +437,20 @@ class ApprovalApproveView(APIView):
         approval = _load_pending(pk, org)
         if approval is None:
             return Response(
-                {"error": True, "errors": "Approval not found"},
+                {"error": True, "errors": "No se encontró la solicitud de aprobación."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         if approval.state != "pending":
             return Response(
                 {
                     "error": True,
-                    "errors": f"Approval already {approval.state}.",
+                    "errors": _ya_decidida(approval.state),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not approval.can_be_acted_on_by(request.profile):
             return Response(
-                {"error": True, "errors": "You are not an approver for this rule."},
+                {"error": True, "errors": "No estás entre quienes resuelven esta regla."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # Separation of duties: the person who filed the request cannot approve
@@ -429,8 +460,8 @@ class ApprovalApproveView(APIView):
             return Response(
                 {
                     "error": True,
-                    "errors": "You cannot approve your own request; "
-                    "another approver must decide it.",
+                    "errors": "No podés aprobar una solicitud que pediste vos: "
+                    "la tiene que decidir otra persona que apruebe.",
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -450,7 +481,15 @@ class ApprovalApproveView(APIView):
             },
             actor=request.profile,
         )
-        return Response(ApprovalSerializer(approval).data, status=status.HTTP_200_OK)
+        # Aprobar un cierre que alguien intento hacer lo COMPLETA, en esta
+        # misma transaccion (12/11/2026). Antes habia que volver a cerrar a
+        # mano, y el motor ya no lo intentaba. Ver cases/cierre_con_aprobacion.py.
+        from cases.cierre_con_aprobacion import completar_cierre
+
+        cerrado = completar_cierre(approval)
+        datos = _con_origen(dict(ApprovalSerializer(approval).data), approval)
+        datos["caso_cerrado"] = cerrado
+        return Response(datos, status=status.HTTP_200_OK)
 
 
 class ApprovalRejectView(APIView):
@@ -462,26 +501,26 @@ class ApprovalRejectView(APIView):
         reason = (request.data.get("reason") or "").strip()
         if not reason:
             return Response(
-                {"error": True, "errors": "Rejection reason is required."},
+                {"error": True, "errors": "Un rechazo necesita un motivo."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         approval = _load_pending(pk, org)
         if approval is None:
             return Response(
-                {"error": True, "errors": "Approval not found"},
+                {"error": True, "errors": "No se encontró la solicitud de aprobación."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         if approval.state != "pending":
             return Response(
                 {
                     "error": True,
-                    "errors": f"Approval already {approval.state}.",
+                    "errors": _ya_decidida(approval.state),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not approval.can_be_acted_on_by(request.profile):
             return Response(
-                {"error": True, "errors": "You are not an approver for this rule."},
+                {"error": True, "errors": "No estás entre quienes resuelven esta regla."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         # Separation of duties: the requester cannot reject their own request
@@ -490,8 +529,8 @@ class ApprovalRejectView(APIView):
             return Response(
                 {
                     "error": True,
-                    "errors": "You cannot reject your own request; "
-                    "another approver must decide it.",
+                    "errors": "No podés rechazar una solicitud que pediste vos: "
+                    "la tiene que decidir otra persona que apruebe.",
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -530,14 +569,14 @@ class ApprovalCancelView(APIView):
         approval = _load_pending(pk, org)
         if approval is None:
             return Response(
-                {"error": True, "errors": "Approval not found"},
+                {"error": True, "errors": "No se encontró la solicitud de aprobación."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         if approval.state != "pending":
             return Response(
                 {
                     "error": True,
-                    "errors": f"Approval already {approval.state}.",
+                    "errors": _ya_decidida(approval.state),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -546,7 +585,7 @@ class ApprovalCancelView(APIView):
             request.profile
         ):
             return Response(
-                {"error": True, "errors": "Only the requester can cancel."},
+                {"error": True, "errors": "Solo quien la pidió (o un administrador) puede retirarla."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         approval.state = "cancelled"

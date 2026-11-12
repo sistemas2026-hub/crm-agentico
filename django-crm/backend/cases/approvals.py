@@ -22,23 +22,49 @@ from common.base import BaseModel
 from common.models import Org, Profile, Teams
 from common.utils import CASE_TYPE, PRIORITY_CHOICE
 
-# Approver roles. Mirrors the spec's ``ADMIN``/``MANAGER`` choices even though
-# the project's ``Profile.role`` only knows ``ADMIN``/``USER`` today, keeping
-# ``MANAGER`` as a reserved value avoids a future schema change when the role
-# model expands. Today, MANAGER simply matches no profiles.
+#  'MANAGER' = GESTION, Y AHORA SI ALCANZA A ALGUIEN  --  12/11/2026
+#
+#  Era un valor "reservado": `Profile.role` no tenia gerentes, asi que una
+#  regla con approver_role=MANAGER y sin aprobadores nombrados no la podia
+#  resolver NADIE, y la pantalla tenia que avisarlo. Pero el sistema SI tiene
+#  un concepto de gestion, y uno solo: `campo.permissions.ROLES_GESTION`
+#  (ADMIN, SUPERVISOR, OPERACIONES), el mismo que decide quien reparte
+#  trabajo, valida ordenes y revisa al Supervisor NOC. Se importa en vez de
+#  copiarse: dos listas que deberian ser iguales terminan divergiendo.
+#
+#  Se conserva el valor guardado 'MANAGER' y se le cambia el significado, en
+#  vez de migrar las reglas a otro valor: las reglas existentes empiezan a
+#  funcionar sin tocarlas, y ninguna se pierde. Lo que cambia en produccion:
+#  una regla MANAGER sin aprobadores, que hoy no la resuelve nadie, pasa a
+#  resolverla cualquier perfil ADMIN, SUPERVISOR u OPERACIONES.
 APPROVER_ROLE_CHOICES = (
-    ("ADMIN", "Admin"),
-    ("MANAGER", "Manager"),
+    ("ADMIN", "Administración"),
+    ("MANAGER", "Gestión (administración, supervisión u operaciones)"),
 )
 
-TRIGGER_EVENT_CHOICES = (("pre_close", "Pre-Close"),)
+TRIGGER_EVENT_CHOICES = (("pre_close", "Antes de cerrar"),)
 
 APPROVAL_STATE_CHOICES = (
-    ("pending", "Pending"),
-    ("approved", "Approved"),
-    ("rejected", "Rejected"),
-    ("cancelled", "Cancelled"),
+    ("pending", "Pendiente"),
+    ("approved", "Aprobada"),
+    ("rejected", "Rechazada"),
+    ("cancelled", "Retirada"),
 )
+
+#: Quien pidio la aprobacion (ver cases/cierre_con_aprobacion.py).
+APPROVAL_ORIGIN_CHOICES = (
+    ("persona", "Una persona"),
+    ("agente", "El asistente (token de acceso)"),
+)
+
+
+def roles_del_aprobador(approver_role: str) -> frozenset:
+    """Los `Profile.role` que resuelven una regla con este approver_role."""
+    if approver_role == "MANAGER":
+        from campo.permissions import ROLES_GESTION
+
+        return frozenset(ROLES_GESTION)
+    return frozenset({approver_role}) if approver_role else frozenset()
 
 
 class ApprovalRule(BaseModel):
@@ -161,6 +187,15 @@ class Approval(BaseModel):
     reason = models.TextField(blank=True, default="")
     decided_at = models.DateTimeField(null=True, blank=True)
 
+    # 12/11/2026 -- ver cases/cierre_con_aprobacion.py. Una solicitud nacida
+    # de un intento de cierre frenado se completa sola al aprobarla, con la
+    # fecha que pidio quien intento cerrar.
+    origen = models.CharField(
+        max_length=16, choices=APPROVAL_ORIGIN_CHOICES, default="persona"
+    )
+    cerrar_al_aprobar = models.BooleanField(default=False)
+    fecha_cierre_pedida = models.DateField(null=True, blank=True)
+
     class Meta:
         verbose_name = "Approval"
         verbose_name_plural = "Approvals"
@@ -184,6 +219,6 @@ class Approval(BaseModel):
             return False
         if self.rule.approvers.filter(id=profile.id).exists():
             return True
-        if self.rule.approver_role and profile.role == self.rule.approver_role:
+        if profile.role in roles_del_aprobador(self.rule.approver_role):
             return True
         return False

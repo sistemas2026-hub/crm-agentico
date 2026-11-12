@@ -57,8 +57,18 @@
   function blockedReason(a) {
     if (a.rule.approvers.length)
       return `Solo ${a.rule.approvers.join(' o ')} puede resolver esta regla.`;
-    return `Esta regla la resuelven ${a.rule.approver_role.toLowerCase()}s, y vos no lo sos.`;
+    return `Esta regla la resuelve ${QUIEN_RESUELVE[a.rule.approver_role] ?? a.rule.approver_role}, y vos no.`;
   }
+
+  /**
+   * Quién resuelve una regla sin aprobadores nombrados. 'MANAGER' es gestión
+   * desde el 12/11/2026: ADMIN, SUPERVISOR u OPERACIONES (los ROLES_GESTION
+   * del backend). Antes no alcanzaba a nadie y esta pantalla lo avisaba.
+   */
+  const QUIEN_RESUELVE = /** @type {Record<string, string>} */ ({
+    ADMIN: 'un administrador',
+    MANAGER: 'gestión (administración, supervisión u operaciones)'
+  });
 </script>
 
 <PageHeader title="Aprobaciones">
@@ -126,7 +136,18 @@
                 <div style="display:flex;gap:6px;align-items:center;margin-top:7px;flex-wrap:wrap">
                   <Pill tone={PRIORITY_TONE[a.case.priority]}>{CASE_PRIORITY_LABEL[a.case.priority] ?? a.case.priority}</Pill>
                   <span class="v2-sub" style="font-size:11.5px">{a.rule.name}</span>
+                  {#if a.cierra_al_aprobar}
+                    <!-- Nació de un intento de cierre frenado (12/11/2026):
+                         aprobarla cierra el caso, nadie tiene que volver. -->
+                    <Pill tone="moss">Al aprobarla se cierra sola</Pill>
+                  {/if}
                 </div>
+                {#if a.note}
+                  <!-- El porqué: quién intentó cerrar y qué regla lo frenó. -->
+                  <div class="v2-sub" style="font-size:12px;margin-top:6px;white-space:normal">
+                    {a.note}
+                  </div>
+                {/if}
               </div>
 
               <!-- The decision, in the row. Approve is the one ember control
@@ -254,7 +275,7 @@
                 .join(' · ') || 'Todo caso'}
               → lo resuelve {r.approvers.length
                 ? r.approvers.join(' o ')
-                : `cualquier ${r.approver_role.toLowerCase()}`}
+                : (QUIEN_RESUELVE[r.approver_role] ?? r.approver_role)}
             </span>
           </div>
           {#if r.pending_count}
@@ -266,16 +287,6 @@
       {/each}
     </div>
 
-    <!-- MANAGER is a valid approver_role on the model but not a valid
-         Profile.role, so a rule set to MANAGER currently matches nobody. Said
-         here rather than left for someone to discover via a stuck queue. -->
-    {#if rules.some((r) => r.is_active && r.approver_role === 'MANAGER' && !r.approvers.length)}
-      <p class="v2-sub" style="font-size:12px;margin-top:12px">
-        Una regla activa la resuelven los gerentes, pero esta organización solo tiene
-        administradores y miembros. Nadie puede resolverla. Nombrá aprobadores en la regla, o
-        cambiala a administrador.
-      </p>
-    {/if}
   </div>
 </div>
 

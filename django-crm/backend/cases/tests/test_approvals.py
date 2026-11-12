@@ -114,7 +114,7 @@ class TestCloseGate:
         case.closed_on = timezone.localdate()
         with pytest.raises(ValidationError) as exc:
             case.clean()
-        assert "approval" in str(exc.value).lower()
+        assert "aprobación" in str(exc.value).lower()
 
     def test_close_allowed_with_approved_request(
         self, admin_user, admin_profile, org_a
@@ -182,7 +182,7 @@ class TestRequestApprovalEndpoint:
             f"/api/cases/{case.id}/request-approval/", data={}, format="json"
         )
         assert res.status_code == 400
-        assert "no active" in str(res.data).lower()
+        assert "ninguna regla" in str(res.data).lower()
 
     def test_double_request_returns_409(
         self, admin_client, admin_user, admin_profile, org_a
@@ -266,7 +266,7 @@ class TestStateTransitions:
             f"/api/cases/approvals/{approval.id}/approve/", data={}, format="json"
         )
         assert res.status_code == 403
-        assert "your own" in str(res.data).lower()
+        assert "pediste vos" in str(res.data).lower()
         approval.refresh_from_db()
         assert approval.state == "pending"  # untouched
 
@@ -379,7 +379,7 @@ class TestStateTransitions:
             format="json",
         )
         assert b.status_code == 400
-        assert "already" in str(b.data).lower()
+        assert "ya está aprobada" in str(b.data).lower()
 
 
 @pytest.mark.django_db
@@ -588,9 +588,14 @@ class TestApprovalRuleAnalytics:
     def _pending(self, org, rule, requester, n):
         for _ in range(n):
             case = _make_case(org, requester.user)
-            Approval.objects.create(
-                org=org, case=case, rule=rule, requested_by=requester, state="pending"
-            )
+            # Dentro del contexto de ESA organizacion: la politica de RLS de
+            # 'approval' compara contra app.current_org, y sembrar filas de
+            # org_b desde el contexto de org_a fallaba (rojo previo, 12/11/2026).
+            with rls_org(org):
+                Approval.objects.create(
+                    org=org, case=case, rule=rule, requested_by=requester,
+                    state="pending",
+                )
 
     def test_pending_count_and_total(self, admin_client, admin_profile, org_a):
         a = _make_rule(org_a, name="Rule A")

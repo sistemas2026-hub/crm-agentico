@@ -30,7 +30,12 @@ function toRow(/** @type {any} */ a) {
     decided_at: a.decided_at,
     can_act: !!a.can_act,
     is_own_request: !!a.is_own_request,
-    requested_by: label(a.requested_by),
+    // «Dexter» cuando la pidió el asistente (12/11/2026): el correo del
+    // perfil dueño de su token no le dice nada a quien aprueba.
+    requested_by: a.solicitante || label(a.requested_by),
+    origen: a.origen === 'agente' ? 'agente' : 'persona',
+    // Aprobarla cierra el caso sola, sin que nadie vuelva a cerrarlo.
+    cierra_al_aprobar: !!a.cerrar_al_aprobar,
     approver: label(a.approver),
     case: {
       id: cs.id,

@@ -97,7 +97,7 @@ describe('createApprovalRule', () => {
 
   it('refuses a rule with no name before making a request', async () => {
     await expect(createApprovalRule(event, { ...base, name: '' })).rejects.toThrow(
-      /needs a name/i
+      /necesita un nombre/i
     );
     expect(apiRequest).not.toHaveBeenCalled();
   });
@@ -153,7 +153,7 @@ describe('updateApprovalRule', () => {
   });
 
   it('throws when the id is missing', async () => {
-    await expect(updateApprovalRule(event, '', base)).rejects.toThrow(/which rule/i);
+    await expect(updateApprovalRule(event, '', base)).rejects.toThrow(/qué regla/i);
     expect(apiRequest).not.toHaveBeenCalled();
   });
 });
@@ -194,7 +194,7 @@ describe('deleteApprovalRule', () => {
   });
 
   it('throws when the id is missing', async () => {
-    await expect(deleteApprovalRule(event, '')).rejects.toThrow(/which rule/i);
+    await expect(deleteApprovalRule(event, '')).rejects.toThrow(/qué regla/i);
     expect(apiRequest).not.toHaveBeenCalled();
   });
 });
