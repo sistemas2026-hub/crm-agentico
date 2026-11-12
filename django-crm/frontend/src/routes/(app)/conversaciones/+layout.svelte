@@ -31,6 +31,7 @@
    * (11/11/2026): con 3 letras o mas el buscador ademas le pregunta al motor
    * por el contenido de todos los mensajes, que la cola no tiene cargado.
    */
+  import { untrack } from 'svelte';
   import { page } from '$app/state';
   import { invalidate } from '$app/navigation';
   // El sistema visual de la Bandeja. Todo cuelga de `.bandeja`, que es la
@@ -40,6 +41,7 @@
   import { pendiente, resuelta } from '$lib/conversaciones/estado.js';
   import { ordenar, tramoEspera, esperaMaximaDe } from '$lib/conversaciones/cola/ordenamiento.js';
   import { deLaPestana, contarPestanas, titularDeCola } from '$lib/conversaciones/cola/pestanas.js';
+  import { intencionDelEnlace, deLaBanda } from '$lib/conversaciones/cola/enlace.js';
   import { rotuloDe } from '$lib/conversaciones/rotulos.js';
   import CargaEquipo from '$lib/conversaciones/cola/CargaEquipo.svelte';
   import { restanteDeVentana } from '$lib/conversaciones/ventana.js';
@@ -370,6 +372,28 @@
     orden = ORDEN_POR_PESTANA[id] ?? 'actividad';
   }
 
+  /* EL ENLACE CON INTENCIÓN (12/11/2026, auditoría del menú §4 ítem 13).
+     `/conversaciones?pestana=…` abre esa pestaña, o «Todos» filtrado por una
+     banda del motor (lib/conversaciones/cola/enlace.js dice qué valores se
+     aceptan y por qué). Se aplica cuando CAMBIA el valor de la URL, no en
+     cada sondeo: el $derived es un texto, así que la invalidación de cada
+     8 s no lo vuelve a disparar y no le pisa la pestaña a quien ya eligió
+     otra. Abrir una conversación cambia la URL y quita el parámetro: no se
+     aplica nada, y lo que la persona eligió se queda. */
+  let bandaDelEnlace = $state(/** @type {number|null} */ (null));
+  let etiquetaBanda = $state('');
+  const pedidoDelEnlace = $derived(page.url.searchParams.get('pestana') ?? '');
+  $effect(() => {
+    if (!pedidoDelEnlace) return;
+    const intencion = untrack(() => intencionDelEnlace(page.url.searchParams));
+    if (!intencion) return;
+    untrack(() => {
+      irA(intencion.pestana);
+      bandaDelEnlace = intencion.banda;
+      etiquetaBanda = intencion.etiqueta;
+    });
+  });
+
   // Los motivos que de verdad hay en la bandeja, no una lista fija: los
   // declara cada empresa en su config, y una lista hardcodeada aca dejaria
   // de coincidir en cuanto alguien agregue uno.
@@ -439,6 +463,8 @@
     // La vista por canal ya esta aplicada en 'base': la lista y las cuentas
     // de la cabecera salen del MISMO conjunto, o dicen numeros distintos.
     let lista = deLaPestana(base, filtro);
+    // La banda que pidió un enlace (Hoy). Se ve como chip y se quita con un clic.
+    lista = deLaBanda(lista, bandaDelEnlace);
 
     if (soloEscaladas) lista = lista.filter((/** @type {any} */ c) => c.escalada_a_humano);
     // «Mi área» (T22): lo escalado al área de quien mira.
@@ -640,6 +666,18 @@
         />
       {/if}
 
+      {#if bandaDelEnlace != null}
+        <!-- Un filtro activo que no se ve es la forma más rápida de creer que
+             la bandeja está vacía: el que vino en el enlace se muestra y se
+             quita acá. -->
+        <p class="filtro-enlace" role="status">
+          <span>Mostrando: <b>{etiquetaBanda}</b></span>
+          <button type="button" class="v2-btn v2-btn-sm v2-btn-quiet"
+            onclick={() => { bandaDelEnlace = null; etiquetaBanda = ''; }}
+            aria-label="Quitar el filtro {etiquetaBanda}">Quitar</button>
+        </p>
+      {/if}
+
       <QueueFilters
         bind:vista bind:orden bind:ordenElegido
         bind:soloEscaladas bind:motivo
@@ -712,10 +750,22 @@
 </footer>
 
 <style>
+  /* El filtro que trajo un enlace (12/11/2026): un renglón, quitable. */
+  .filtro-enlace {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 4px 12px;
+    font-size: 12px;
+    color: var(--bandeja-texto-2);
+  }
+
   /* ── la barra de consola ────────────────────────────────────────────────
      Fina, de borde a borde y con una sola línea de contenido. 40px contra los
      76 del encabezado de página que reemplaza: 36px que se van enteros a las
      tres columnas. */
+
   .consola {
     flex: none;
     display: flex;
