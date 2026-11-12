@@ -191,6 +191,32 @@
     }
   }
 
+  /**
+   * Los usos de una habilidad vigente, pedidos al abrir el detalle
+   * (12/11/2026). La tabla decía «N usos» y nada más: no se podía ver en qué
+   * conversaciones se cargó ni si escaló igual, que es justo lo que dice si el
+   * procedimiento sirve. Los totales vienen calculados del motor.
+   *
+   * @type {Record<string, any>}
+   */
+  let usos = $state({});
+
+  async function verUsos(/** @type {any} */ h) {
+    if (usos[h.id] && usos[h.id] !== 'error') {
+      usos = { ...usos, [h.id]: undefined };
+      return;
+    }
+    usos = { ...usos, [h.id]: 'cargando' };
+    try {
+      const resp = await fetch(`/api/habilidades?usos=${encodeURIComponent(h.id)}`);
+      const datos = await resp.json();
+      usos = { ...usos, [h.id]: resp.ok ? datos : 'error' };
+      if (!resp.ok) toast.error(datos?.error || 'No se pudieron leer los usos.');
+    } catch {
+      usos = { ...usos, [h.id]: 'error' };
+    }
+  }
+
   async function retirar(/** @type {any} */ h) {
     ocupado = { ...ocupado, [h.id]: true };
     try {
@@ -268,6 +294,16 @@
                       : hu.senal === 'sin_procedimiento' ? 'dijo no tener el procedimiento'
                       : `${hu.codigo_habilidad} no alcanzó`}
                   </span>
+                  {#if (hu.conversaciones ?? []).length > 0}
+                    <div class="casos-enlaces">
+                      {#each hu.conversaciones.slice(0, 5) as cid, i (cid)}
+                        <a href="/conversaciones/{cid}">caso {i + 1}</a>
+                      {/each}
+                      {#if hu.conversaciones.length > 5}
+                        <span class="v2-muted">y {hu.conversaciones.length - 5} más</span>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               </div>
             {/each}
@@ -324,6 +360,24 @@
                   {#if h.evidencia.motivo} — {h.evidencia.motivo}{/if}
                   en los últimos {h.evidencia.dias_analizados ?? '?'} días.
                 </p>
+                <!-- LA EVIDENCIA SE PUEDE ABRIR (12/11/2026). El motor guarda
+                     hasta 20 conversaciones por propuesta y la pantalla solo
+                     decía cuántas: quien aprueba lo que el agente seguirá «al
+                     pie de la letra» decidía sin poder leer los casos. -->
+                {#if (h.evidencia.conversaciones ?? []).length > 0}
+                  <details class="evidencia">
+                    <summary class="v2-sub">Leer los casos que la motivaron ({h.evidencia.conversaciones.length})</summary>
+                    <ul>
+                      {#each h.evidencia.conversaciones as cid, i (cid)}
+                        <li>
+                          <a href="/conversaciones/{cid}">Caso {i + 1}</a>
+                          · <a class="v2-muted" href="/simulador-whatsapp?reproducir={cid}"
+                            title="Reenvía lo que escribió el cliente a una conversación simulada nueva">reproducir en el simulador</a>
+                        </li>
+                      {/each}
+                    </ul>
+                  </details>
+                {/if}
               {/if}
 
               <div style="margin-top:10px">
@@ -413,13 +467,51 @@
                   <td class="v2-num" style="font-size:11.5px">{h.codigo}</td>
                   <td>{h.nombre}</td>
                   <td class="v2-sub" style="font-size:12px">{(h.roles_permitidos ?? []).join(', ')}</td>
-                  <td class="v2-num">{h.usos}</td>
+                  <td class="v2-num">
+                    {#if h.usos > 0}
+                      <button type="button" class="usos-boton" onclick={() => verUsos(h)}
+                        aria-expanded={!!usos[h.id] && usos[h.id] !== 'error'}>
+                        {h.usos}
+                      </button>
+                    {:else}
+                      {h.usos}
+                    {/if}
+                  </td>
                   <td>
                     <button class="v2-btn v2-btn-sm" onclick={() => retirar(h)} disabled={ocupado[h.id]}>
                       Retirar
                     </button>
                   </td>
                 </tr>
+                {#if usos[h.id] === 'cargando'}
+                  <tr><td colspan="5" class="v2-sub">Leyendo los usos…</td></tr>
+                {:else if usos[h.id] && usos[h.id] !== 'error'}
+                  <tr>
+                    <td colspan="5" class="usos-detalle">
+                      <p class="v2-sub" style="margin:0 0 6px">
+                        {usos[h.id].usos} uso(s) · {usos[h.id].usos_reales} con clientes ·
+                        <b>{usos[h.id].escalo_igual_reales} escalaron igual</b>
+                        {#if usos[h.id].usos > usos[h.id].usos_reales}
+                          · el resto es del simulador o del asistente interno
+                        {/if}
+                      </p>
+                      <ul>
+                        {#each usos[h.id].detalle as u, i (i)}
+                          <li>
+                            {#if u.conversation_id}
+                              <a href="/conversaciones/{u.conversation_id}">{relativeTime(u.creado_en)}</a>
+                            {:else}
+                              {relativeTime(u.creado_en)}
+                            {/if}
+                            · {u.rol ?? '—'}
+                            {#if !u.real}<Pill tone="slate">{u.canal ?? 'sin canal'}</Pill>{/if}
+                            {#if u.escalo}<Pill tone="rust">escaló igual</Pill>{/if}
+                          </li>
+                        {/each}
+                      </ul>
+                    </td>
+                  </tr>
+                {/if}
               {/each}
             </tbody>
           </table>
@@ -476,6 +568,43 @@
     font-size: 12px;
     white-space: pre-wrap;
     line-height: 1.5;
+  }
+
+  .evidencia {
+    margin-top: 6px;
+    font-size: 12px;
+  }
+  .evidencia summary {
+    cursor: pointer;
+    font-size: 11.5px;
+  }
+  .evidencia ul,
+  .usos-detalle ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+  }
+  .casos-enlaces {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11.5px;
+    margin-top: 2px;
+  }
+  .usos-boton {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--v2-ember-text);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .usos-detalle {
+    background: var(--v2-paper);
   }
 
   .chip-rol {

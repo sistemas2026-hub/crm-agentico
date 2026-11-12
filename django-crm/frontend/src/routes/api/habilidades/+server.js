@@ -17,6 +17,8 @@ import { destinoDelAsistente } from '$lib/server/v2/tenant.js';
  * que /api/agentes y /api/configuracion-guiada.
  */
 
+const ES_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Gate comun: ADMIN autenticado y motor configurado. */
 async function guardia(locals, fetch) {
   if (!locals.user) return json({ error: 'No autenticado' }, { status: 401 });
@@ -42,9 +44,18 @@ export async function GET({ locals, fetch, url }) {
   // pega contra otro endpoint del motor.
   const quiereHuecos = url.searchParams.get('huecos') === '1';
   const dias = url.searchParams.get('dias') || '30';
-  const destino = quiereHuecos
-    ? `${baseUrl}/habilidades/huecos?tenant=${encodeURIComponent(tenant)}&dias=${encodeURIComponent(dias)}`
-    : `${baseUrl}/habilidades?tenant=${encodeURIComponent(tenant)}`;
+  // 'usos' (12/11/2026): en que conversaciones se cargo una habilidad y si
+  // escalo igual. El id viaja en la RUTA del motor, asi que se exige la forma
+  // de un UUID: un valor con '/' o '?' cambiaria a que endpoint se le pega.
+  const usosDe = url.searchParams.get('usos');
+  if (usosDe !== null && !ES_UUID.test(usosDe)) {
+    return json({ error: 'Identificador de habilidad inválido.' }, { status: 400 });
+  }
+  const destino = usosDe
+    ? `${baseUrl}/habilidades/${usosDe}/usos?tenant=${encodeURIComponent(tenant)}`
+    : quiereHuecos
+      ? `${baseUrl}/habilidades/huecos?tenant=${encodeURIComponent(tenant)}&dias=${encodeURIComponent(dias)}`
+      : `${baseUrl}/habilidades?tenant=${encodeURIComponent(tenant)}`;
 
   try {
     const resp = await fetch(destino, { headers: headersMotor() });

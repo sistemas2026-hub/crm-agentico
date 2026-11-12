@@ -10797,6 +10797,68 @@ def habilidades_proponer():
     return jsonify({"ok": True, "resultados": resultados})
 
 
+#: Cuantos usos se devuelven en el detalle. Es para leer, no para contar: los
+#: totales salen aparte, calculados en SQL sobre todos.
+USOS_EN_DETALLE = 50
+
+
+@app.get("/habilidades/<id_habilidad>/usos")
+def habilidades_usos(id_habilidad):
+    """En que conversaciones se cargo una habilidad, y si escalo igual
+    (12/11/2026).
+
+    La pantalla solo decia «N usos». Quien decide si un procedimiento sirve
+    --o si hay que reescribirlo-- necesita lo que el analista ya mira en su
+    senal (3): las conversaciones donde se cargo y AUN ASI paso a una persona.
+    El dato estaba (habilidad_usos x conversations.escalada_a_humano); faltaba
+    que llegara a la pantalla, con el enlace a cada conversacion.
+
+    Los totales los calcula el codigo, no la pantalla (PRD 12.5), y separan lo
+    real de lo simulado: una habilidad probada veinte veces en el simulador no
+    tiene veinte usos con clientes. Solo identificadores, canal y fechas:
+    nunca texto de la conversacion.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    reales = sorted(canales.REALES)
+    try:
+        with persistencia.sesion(tenant) as (cur, org):
+            cur.execute("""select 1 from asistente.habilidades
+                            where organization_id = %s and id = %s""",
+                        (org, id_habilidad))
+            if not cur.fetchone():
+                return jsonify({"error": "Esa habilidad no existe."}), 404
+            cur.execute(
+                """select count(*) as usos,
+                          count(*) filter (where c.canal = any(%s)) as usos_reales,
+                          count(*) filter (where c.canal = any(%s)
+                                             and c.escalada_a_humano) as escalo_igual_reales
+                     from asistente.habilidad_usos u
+                     left join asistente.conversations c on c.id = u.conversation_id
+                    where u.organization_id = %s and u.habilidad_id = %s""",
+                (reales, reales, org, id_habilidad))
+            totales = dict(cur.fetchone() or {})
+            cur.execute(
+                """select u.conversation_id::text as conversation_id, u.rol,
+                          u.creado_en, c.canal,
+                          coalesce(c.escalada_a_humano, false) as escalo,
+                          (c.canal = any(%s)) as real
+                     from asistente.habilidad_usos u
+                     left join asistente.conversations c on c.id = u.conversation_id
+                    where u.organization_id = %s and u.habilidad_id = %s
+                    order by u.creado_en desc
+                    limit %s""",
+                (reales, org, id_habilidad, USOS_EN_DETALLE))
+            detalle = [dict(f) for f in cur.fetchall()]
+    except Exception as e:
+        registrar("habilidades", "fallo al leer los usos", error=e)
+        return jsonify({"error": "No se pudieron leer los usos."}), 500
+    for d in detalle:
+        d["real"] = bool(d.get("real"))
+    return jsonify({**totales, "detalle": detalle})
+
+
 # =============================================================================
 #  ACCIONES PROPUESTAS  -  escrituras con aprobacion_humana=True, pendientes
 #  hasta que alguien las apruebe o rechace. Ver Herramienta.aprobacion_humana
