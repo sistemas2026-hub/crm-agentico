@@ -89,6 +89,8 @@
     return `No se pudo avisar al cliente: ${a.texto || a.motivo || 'motivo desconocido'}.`;
   };
   let reintentando = $state('');
+  // Qué tarjeta tiene abierta la advertencia del mapa (ver «Ver en el mapa…»).
+  let mapaAbierto = $state('');
   const fecha = (s) => (s ? new Date(s).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '—');
 </script>
 
@@ -190,9 +192,25 @@
 
       <div class="acciones-datos">
         {#if s.gps}
-          <a class="chip" href={mapa(s.gps)} target="_blank" rel="noopener">
-            <MapPin size={14} /> Ver en el mapa
-          </a>
+          <!-- EL GPS DE LA VIVIENDA NO SALE SIN QUE ALGUIEN LO DECIDA
+               (12/11/2026). Era un enlace que mandaba las coordenadas exactas
+               a Google en la URL con un clic distraído. Ahora el primer clic
+               solo explica; el segundo, explícito, abre el servicio externo
+               sin 'Referer'. -->
+          {#if mapaAbierto === s.id}
+            <span class="aviso-mapa" role="status">
+              Esto abre Google Maps y le manda a Google la ubicación exacta de la vivienda.
+              <a class="chip" href={mapa(s.gps)} target="_blank" rel="noopener noreferrer"
+                 referrerpolicy="no-referrer" onclick={() => (mapaAbierto = '')}>
+                <MapPin size={14} /> Abrir en Google Maps
+              </a>
+              <button type="button" class="chip" onclick={() => (mapaAbierto = '')}>No abrir</button>
+            </span>
+          {:else}
+            <button type="button" class="chip" onclick={() => (mapaAbierto = s.id)}>
+              <MapPin size={14} /> Ver en el mapa…
+            </button>
+          {/if}
           {#if Number(s.gps.precision_m) > PRECISION_DUDOSA_M}
             <span class="chip dudoso">
               <AlertTriangle size={14} />
@@ -441,6 +459,12 @@
     color: var(--v2-ink); text-decoration: none; background: var(--v2-paper);
   }
   .chip.tenue { color: var(--v2-slate); }
+  button.chip { font: inherit; font-size: .83rem; cursor: pointer; }
+  .aviso-mapa {
+    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    font-size: .83rem; color: var(--v2-ink); background: var(--v2-paper);
+    border: 1px dashed var(--v2-line-strong); border-radius: 8px; padding: 6px 10px;
+  }
   .chip.dudoso {
     background: color-mix(in srgb, var(--v2-clay) 10%, var(--v2-card));
     border-color: color-mix(in srgb, var(--v2-clay) 35%, var(--v2-card));
