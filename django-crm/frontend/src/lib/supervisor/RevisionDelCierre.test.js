@@ -125,6 +125,56 @@ describe('la revisión del cierre en la tarjeta', () => {
     expect(h).not.toMatch(/class="[^"]*rc-cotejo/);
   });
 
+  //  EL RECORTE  --  12/11/2026. El usuario, mirando la primera tarjeta real
+  //  con el cotejo puesto: «y esta muy largo este texto». El resumen del
+  //  Supervisor es un parrafo de cinco lineas y tapaba lo que hay que
+  //  comparar. Un cotejo que hay que LEER deja de ser un cotejo.
+  const LARGO = ('El cliente pide el cambio de router wifi como gestión '
+    + 'comercial/técnica, no por una falla: el equipo está en línea y con '
+    + 'señal buena. El único indicio técnico es un desajuste de configuración '
+    + 'respecto de su perfil en la OLT, que podría estar motivando el pedido.');
+
+  it('un texto largo sale recortado, y el principio es lo que se ve', () => {
+    const h = html(conTicket({ caso: LARGO }));
+    //  Lo que importa del caso real esta al principio y tiene que verse.
+    expect(h).toContain('no por una falla');
+    //  Y la cola NO, hasta que alguien la pida.
+    expect(h).not.toContain('motivando el pedido');
+    expect(h).toContain('…');
+    expect(h).toContain('Ver todo');
+  });
+
+  it('un texto corto no se recorta ni ofrece expandir', () => {
+    //  Un boton que no expande nada es ruido en el bloque que se compara.
+    const h = html(conTicket({ caso: 'Sin internet desde ayer.' }));
+    expect(h).toContain('Sin internet desde ayer.');
+    expect(h).not.toContain('Ver todo');
+    expect(h).not.toContain('…');
+  });
+
+  it('el recorte no parte una palabra por la mitad', () => {
+    const h = html(conTicket({ caso: LARGO }));
+    //  Corta en un espacio: si partiera, quedaria algo como «configur…».
+    const m = h.match(/([^\s<>]+)…/);
+    expect(m, 'no se encontró el texto recortado').toBeTruthy();
+    expect(LARGO.split(/\s+/)).toContain(m[1]);
+  });
+
+  it('«Qué hizo» también se recorta: los dos lados, la misma regla', () => {
+    //  El reporte del tecnico tambien puede ser largo --el del caso real
+    //  tiene cuatro mediciones--, y recortar solo un lado desbalancea el
+    //  cotejo.
+    const h = html(orden({
+      revision: revision({
+        solucion: LARGO,
+        el_ticket: { asunto: 'Soporte', caso: 'Sin internet.',
+                     diagnostico_previo: '', origen: '' }
+      })
+    }));
+    expect(h).not.toContain('motivando el pedido');
+    expect(h).toContain('Ver todo');
+  });
+
   it('las dos decisiones, con la orden y su vuelta', () => {
     const h = html(orden({ vuelta: 2 }));
     expect(h).toMatch(/action="\?\/aprobar"/);
