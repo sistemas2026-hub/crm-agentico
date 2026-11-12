@@ -89,6 +89,37 @@ IA de por medio**: hoy quien revisa tampoco los ve juntos.
 Es la pieza más barata y la que desbloquea las otras dos. Nada se puede juzgar
 sin ella.
 
+### El caso real que la pieza 2 tiene que atrapar — capturado el 12/11/2026
+
+Apenas la pieza 1 salió a producción, la primera tarjeta que el usuario miró
+ya mostraba el problema entero. **No hay que inventar un caso de prueba: este
+es.**
+
+| | |
+|---|---|
+| **Se pidió** | *"Soporte en campo · Según el Supervisor: El cliente pide el cambio de router wifi como gestión comercial/técnica, **no por una falla**: el equipo está **en línea y con señal buena**. El único indicio técnico es un desajuste de configuración respecto a su perfil en la OLT (confianza baja). Recomienda: Va a Soporte Técnico / agenda de instalaciones con trabajo pedido, **no como correctivo**."* |
+| **Qué hizo** | *"Potencia al llegar: **-50.0 dBm**. Qué encontró: **fibra partida antes del conector**. Qué hizo: se prepara nuevamente el conector y se restablece el servicio. Potencia al salir: -21.0 dBm. Servicio probado con el cliente: Hecho"* |
+
+**Las dos cosas no pueden ser ciertas a la vez.** Un equipo en línea y con
+señal buena no tiene la fibra partida ni recibe -50.0 dBm; un equipo con la
+fibra partida no está en línea. Una de las dos lecturas está mal, o pasaron
+cosas distintas en momentos distintos y nadie lo escribió.
+
+**Y los ocho puntos estaban en verde.** *"El checklist está completo"*, *"El
+técnico afirma que el servicio quedó funcionando"*, *"Registró 1 material"*,
+*"La medida al salir (-21 dBm) está dentro de lo que la empresa considera
+bueno"*. El único amarillo era de fotos. La orden se podía cerrar.
+
+Lo que la pieza 2 tiene que devolver acá es `None` —no `False`— con el motivo
+escrito: *"el ticket dice que el equipo estaba en línea y sin falla; el
+reporte describe una fibra partida y -50 dBm al llegar"*. Y la orden queda en
+`REVISAR` para que una persona decida cuál de las dos es la buena.
+
+**Qué NO puede hacer:** afirmar que el técnico mintió. Puede que el
+diagnóstico del Supervisor estuviera viejo, que el cliente tuviera dos
+problemas, o que la fibra se partiera entre el diagnóstico y la visita. El
+punto noveno nombra la contradicción; no la resuelve.
+
 ### Pieza 2 — el punto noveno: ¿el reporte explica el ticket?
 
 El juicio es de lenguaje, no de cuenta, así que lo hace el modelo — y aquí
@@ -144,10 +175,13 @@ parece a ninguna de las tres.**
 | 0.2 | Que la guarda de arquitectura cace un umbral numérico declarado del tenant | pendiente |
 | 0.3 | `consultar_topologia_ont` al catálogo de `supervisor_noc` — la herramienta existe y el rol no la tiene | pendiente, **config** |
 
-**Decisión pendiente del usuario:** cuál es el piso bueno para Rapilink. Dos
-candidatos vivos: **-25** (lo que el motor usa, confirmado como límite de la
-guía el 18/10 en `correcciones-al-diagnostico.md`) y **-27** (lo que editaron en
-la plantilla de campo). El mecanismo ya acepta los dos.
+**Decisión, contestada por la captura del 12/11/2026:** el rango efectivo de
+Rapilink es **-27 a -8** — lo dice la propia pantalla de revisión de una orden
+real: *"La medida al salir (-21 dBm) está dentro de lo que la empresa
+considera bueno (-27 a -8)"*. Ese es el número que hay que cargar en
+`umbral_rx_dbm`; el -25 del motor es el que estaba mal. Falta **cargarlo en
+producción**, que es acción de una persona (`cli/cargar_config.py` o el editor),
+no de una sesión.
 
 ## Lo que NO se construye, porque ya existe
 
