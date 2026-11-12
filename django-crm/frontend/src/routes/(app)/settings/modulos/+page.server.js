@@ -22,7 +22,7 @@ export const actions = {
       locals.profile?.role,
       await request.formData()
     );
-    if (!r.ok) return fail(r.status, { error: r.error });
+    if ('error' in r) return fail(r.status, { error: r.error });
     return { guardado: true, ocultos: r.ocultos };
   }
 };

@@ -33,9 +33,9 @@ describe('/settings/modulos', () => {
   });
 
   it('el POST de un USER es 403 y no viaja', async () => {
-    const r = await actions.guardar(
+    const r = /** @type {any} */ (await actions.guardar(
       /** @type {any} */ ({ request: pedido(), locals: { profile: { role: 'USER' } }, cookies })
-    );
+    ));
     expect(r?.status).toBe(403);
     expect(apiRequest).not.toHaveBeenCalled();
   });

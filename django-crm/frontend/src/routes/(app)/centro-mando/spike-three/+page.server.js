@@ -20,5 +20,5 @@ import { load as cargaDelCentro } from '../+page.server.js';
  */
 export async function load(event) {
   if (event.locals.profile?.role !== 'ADMIN') redirect(303, '/centro-mando');
-  return cargaDelCentro(event);
+  return cargaDelCentro(/** @type {any} */ (event));
 }

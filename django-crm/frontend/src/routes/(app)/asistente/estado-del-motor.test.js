@@ -11,7 +11,10 @@ vi.mock('$env/dynamic/private', () => ({ env: m.env }));
 vi.mock('$lib/server/v2/tenant.js', () => ({ tenantDeLaSesion: async () => m.tenant }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
-const { load, PLAZO_ASISTENTE_MS } = await import('./+page.server.js');
+const modulo = await import('./+page.server.js');
+const { PLAZO_ASISTENTE_MS } = modulo;
+/** @type {(e: any) => Promise<any>} */
+const load = /** @type {any} */ (modulo.load);
 
 /** @param {(url: string) => any} responder @param {string} [rol] */
 const ev = (responder, rol = 'USER') =>
