@@ -202,6 +202,76 @@ def test_PERO_UNA_LECTURA_SANA_SI_LLEGA():
     assert valor == -21.0
 
 
+#  La unica de este archivo que toca la base: las demas son funciones puras.
+@pytest.mark.django_db
+def test_EL_MENSAJE_NO_CULPA_A_LA_LECTURA_CUANDO_ESTA_BIEN():
+    """EL ERROR QUE ESTO ARREGLA, visto en pantalla el 12/11/2026.
+
+    El usuario abrió la OT #214 y leyó: «La medición al salir no se pudo
+    verificar: lo que se leyó en esa foto no puede salir de ese medidor».
+    **Eso era falso.** El modelo había leído `-21.0 dBm`, que es un valor
+    perfectamente posible —el bug del punto decimal ya estaba arreglado— y
+    lo que fallaba era el cruce con los µW.
+
+    Un mensaje que nombra la causa equivocada es peor que no decir nada:
+    manda a buscar un problema de lectura que ya no existe, y tapa el
+    arreglo del día anterior."""
+    from campo import revision_del_cierre as RC
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+    from campo.models import (EventoTrabajo, EvidenciaTrabajo, OrdenTrabajo,
+                              WorkType, WorkTypeVersion)
+    from common.models import Org
+
+    #  LAS DOS MEDICIONES, como en la orden real. No es decoracion: con una
+    #  sola, `_potencia` devuelve None y el punto no aparece -- decision ya
+    #  fijada por `test_una_lectura_IMPOSIBLE_no_dispara_el_punto`. La
+    #  primera version de esta guarda puso solo la de salir, el punto
+    #  desaparecio, y «lo arregle» cambiando esa condicion: 21 guardas en
+    #  rojo. No era un bug, era una decision, y la guarda estaba mal armada.
+    org = Org.objects.create(name="cruzada")
+    wt = WorkType.objects.create(org=org, codigo="cz1", nombre="Soporte",
+                                 labor="correctivo")
+    reglas = {"min": -60.0, "max": -8.0}
+    v = WorkTypeVersion.objects.create(
+        work_type=wt, version=1, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [{"id": "potencia_al_llegar", "tipo": "decimal",
+                             "reglas": reglas},
+                            {"id": "potencia_al_salir", "tipo": "decimal",
+                             "reglas": reglas}],
+                 "evidencias": [{"id": "medicion_al_llegar",
+                                 "titulo": "Medición al llegar"},
+                                {"id": "medicion_al_salir",
+                                 "titulo": "Medición al salir"}]})
+    o = OrdenTrabajo.objects.create(
+        org=org, numero=7001, tipo_trabajo_version=v,
+        estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+        estado_validacion=OrdenTrabajo.PENDIENTE,
+        datos={"potencia_al_llegar": -50.0, "potencia_al_salir": -21.0})
+    EventoTrabajo.objects.create(org=org, orden=o, tipo="cierre_campo",
+                                 datos={"respuestas": {}})
+
+    def _foto(requisito, texto):
+        ev = EvidenciaTrabajo.objects.create(
+            org=org, orden_trabajo=o, requisito_id=requisito, vuelta=1,
+            estado_archivo="recibido", storage_key=requisito)
+        AnalisisDeEvidencia.objects.create(
+            org=org, evidencia=ev, vuelta=1, origen=AnalisisDeEvidencia.IA,
+            texto=texto)
+
+    #  La de llegar se verifica bien: mantiene el punto vivo, igual que en
+    #  la orden real.
+    _foto("medicion_al_llegar", EN_EL_PISO)
+    #  Y la de salir trae el dBm BIEN LEIDO con un µW que no le corresponde.
+    _foto("medicion_al_salir", CON_BUG.replace("-2.10", "-21.0"))
+
+    p = next(x for x in RC.revisar(o)["puntos"] if x["clave"] == "potencia")
+
+    #  LO QUE NO PUEDE DECIR: que el número no puede salir del medidor.
+    assert "no puede salir de ese medidor" not in p["texto"], p["texto"]
+    #  LO QUE TIENE QUE DECIR: cuál es el problema de verdad.
+    assert "no son la misma potencia" in p["texto"], p["texto"]
+
+
 def test_ENTRE_DOS_LECTURAS_SOBREVIVE_LA_COHERENTE():
     """El caso que junta los dos mecanismos: la doble lectura trae un texto
     bueno y uno con el punto corrido. Antes del 12/11 los dos eran

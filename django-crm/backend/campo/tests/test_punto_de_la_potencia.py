@@ -23,8 +23,14 @@ pytestmark = pytest.mark.django_db
 
 ANALISIS_70 = ('La pantalla se lee: 1310 nm, "Lo" y -70.00 dBm; no hay luces '
                "indicadoras visibles. MUESTRA: si ATENCION: no")
+#  LOS 7.943 µW NO SON DECORACION: son los que le corresponden a -21.0 dBm
+#  (`10*log10(7.943/1000) = -21.0`). La version anterior decia «0.682 uW»,
+#  copiado de una foto que resulto ser la imagen promocional del fabricante,
+#  y esos µW son -31.7 dBm. Desde que el codigo cruza las dos unidades
+#  (12/11/2026), una pantalla imposible se descarta -- y estas guardas,
+#  que miden el camino bueno, quedaban en rojo por su propio dato.
 ANALISIS_21 = ("En el display aparecen 1550 nm, la lectura -21.0 dBm con "
-               "0.682 uW y 2 KHz. MUESTRA: si ATENCION: no")
+               "7.943 uW y 2 KHz. MUESTRA: si ATENCION: no")
 
 
 def _armar(org_a, user_profile, numero, potencia, analisis,
@@ -258,9 +264,28 @@ def _orden_con_limites(org, numero, *, escrito, en_la_foto, limites=(-60.0, -8.0
         storage_key=f"k/c{numero}", nombre_original="m.jpg",
         mime_type="image/jpeg", bytes=1,
         estado_archivo=EvidenciaTrabajo.RECIBIDO)
+    #  EL µW TIENE QUE CORRESPONDER AL dBm  --  12/11/2026
+    #
+    #  Este helper ponia «0.682 uW» fijo para cualquier dBm. Ese numero
+    #  salio de copiar el texto de una foto real, que resulto ser la imagen
+    #  promocional del fabricante con valores decorativos: 0.682 µW son
+    #  -31.7 dBm y no coinciden con ningun escrito de estas guardas.
+    #
+    #  No molestaba hasta que el codigo empezo a CRUZAR las dos unidades
+    #  (`PF.coherente_con_los_microwatts`). Con el µW fijo, las siete
+    #  guardas de este archivo se pusieron en rojo -- y tenian razon: una
+    #  pantalla que dice -21.0 dBm y 0.682 µW es imposible.
+    #
+    #  Se calcula desde el dBm para que la pantalla de prueba sea una
+    #  pantalla posible. Una guarda con datos fisicamente imposibles mide
+    #  lo que el codigo hace con basura, no lo que hace con una medicion.
+    import math as _m
+
+    _dbm = float(str(en_la_foto).replace(",", "."))
+    _uw = 10 ** (_dbm / 10.0) * 1000.0
     AnalisisDeEvidencia.objects.create(
         org=org, evidencia=ev, vuelta=orden.vuelta,
-        texto=f"se lee 1550 nm, {en_la_foto} dBm y 0.682 uW")
+        texto=f"se lee 1550 nm, {en_la_foto} dBm y {_uw:.3f} uW")
     return orden, cierre
 
 

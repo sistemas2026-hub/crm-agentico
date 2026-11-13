@@ -181,8 +181,13 @@ def test_UNA_LECTURA_DESCARTADA_NO_DEJA_DECIR_QUE_COINCIDE(org_a):
 
     orden = _orden_200(
         org_a, 9943,
+        #  616.595 µW son los que le corresponden a -2.10 dBm. El «0.682»
+        #  que habia aca venia de una foto promocional y, desde que el
+        #  codigo cruza las dos unidades, hacia que la lectura se
+        #  descartara por INCOHERENTE en vez de por imposible -- que es lo
+        #  que esta guarda mide.
         texto_al_salir="Medidor Rouhan; pantalla legible: 1550 nm, -2.10 dBm, "
-                       "0.682 µW. CATALOGO: no MUESTRA: si ATENCION: no")
+                       "616.595 µW. CATALOGO: no MUESTRA: si ATENCION: no")
 
     revision = RC.revisar(orden, pendientes=set())
     punto = next(p for p in revision["puntos"] if p["clave"] == "potencia")

@@ -92,9 +92,28 @@ ESQUEMA = {
 }
 
 #: Como queda un texto del analizador. El numero es lo unico que cambia.
+#:
+#: EL µW SE CALCULA DEL dBm  --  12/11/2026
+#: Este helper ponia «0.682 µW» fijo, copiado de una foto real que resulto
+#: ser la imagen promocional del fabricante: esos µW son -31.7 dBm y no
+#: corresponden a ningun numero de estas guardas. Desde que el codigo cruza
+#: las dos unidades, una pantalla imposible se descarta, y siete guardas de
+#: este archivo se pusieron en rojo por su propio dato -- con razon.
+#:
+#: Las que prueban una lectura IMPOSIBLE (-2.10) siguen siendo imposibles
+#: por el rango, que es lo que esas guardas miden; lo que cambia es que
+#: ahora su pantalla es internamente coherente y el descarte ocurre por el
+#: motivo que la guarda dice medir, no por un µW de adorno.
 def _texto(dbm: str) -> str:
+    #  Hay guardas que pasan algo que NO es un numero, a proposito: miden la
+    #  foto que no deja leer nada. Ahi no hay µW que calcular.
+    try:
+        uw = 10 ** (float(str(dbm).replace(",", ".")) / 10.0) * 1000.0
+        par = f"{dbm} dBm, {uw:.3f} µW"
+    except ValueError:
+        par = f"{dbm} dBm"
     return (f"Medidor de potencia óptico Rouhan; pantalla legible: 1550 nm, "
-            f"{dbm} dBm, 0.682 µW, 2kHz. "
+            f"{par}, 2kHz. "
             f"CATALOGO: no MUESTRA: si ATENCION: no")
 
 

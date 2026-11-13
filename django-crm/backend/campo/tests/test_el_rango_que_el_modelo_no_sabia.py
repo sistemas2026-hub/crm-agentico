@@ -78,9 +78,18 @@ ESQUEMA = {
 }
 
 
+#  EL µW SE CALCULA DEL dBm (12/11/2026). Ver el mismo cambio en
+#  `test_la_lectura_que_se_pide_dos_veces`: el «0.682 µW» fijo venia de una
+#  foto promocional y hace imposible cualquier pantalla de prueba desde que
+#  el codigo cruza las dos unidades.
 def _texto(dbm: str) -> str:
-    return (f"Medidor óptico Rouhan; pantalla legible: 1550 nm, {dbm} dBm, "
-            f"0.682 µW, 2kHz. CATALOGO: no MUESTRA: si ATENCION: no")
+    try:
+        uw = 10 ** (float(str(dbm).replace(",", ".")) / 10.0) * 1000.0
+        par = f"{dbm} dBm, {uw:.3f} µW"
+    except ValueError:
+        par = f"{dbm} dBm"
+    return (f"Medidor óptico Rouhan; pantalla legible: 1550 nm, {par}, "
+            f"2kHz. CATALOGO: no MUESTRA: si ATENCION: no")
 
 
 def _orden(org, numero, *, esquema=None, escrito_al_salir="-18.0",

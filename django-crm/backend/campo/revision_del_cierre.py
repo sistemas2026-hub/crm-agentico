@@ -892,6 +892,7 @@ def _potencia(orden, cierre):
                       if isinstance(e, dict) and e.get("id")}
         dudas, vistos, rehacer, sin_mirar, ilegibles = [], 0, [], [], []
         sin_analizar, verificadas, discordantes = [], [], []
+        incoherentes = []
         for campo, requisito, cuando in pares:
             escrito = _a_numero(respuestas.get(campo))
             #  TODAS LAS LECTURAS DE ESA FOTO, no la ultima  --  11/11/2026
@@ -1002,8 +1003,31 @@ def _potencia(orden, cierre):
                 #  Y SOLO ESO: si la foto no dejaba leer nada ya se conto
                 #  en `ilegibles`, y si las lecturas discordaron ya se conto
                 #  arriba. Tres ausencias distintas, una frase cada una.
+                #  LA CUARTA AUSENCIA  --  12/11/2026, OT #214
+                #
+                #  Desde que el codigo cruza el dBm con los µW
+                #  (`PF.coherente_con_los_microwatts`), una lectura puede
+                #  caer aca por un motivo NUEVO: los dos numeros de la misma
+                #  pantalla no son la misma potencia. Y el mensaje de abajo
+                #  decia «lo que se leyo no puede salir de ese medidor», que
+                #  en ese caso ES FALSO -- el usuario vio «-21.0 dBm» en la
+                #  pantalla, que es un valor perfectamente posible, y un
+                #  texto diciendo lo contrario.
+                #
+                #  Un mensaje que nombra la causa equivocada es peor que no
+                #  decir nada: manda a buscar un problema de lectura que ya
+                #  no existe. El punto decimal se arreglo el 12/11 y esto lo
+                #  tapaba.
+                #
+                #  SE RECALCULA ACA en vez de devolverlo desde
+                #  `_numero_de_la_foto`: esa funcion responde «cual es el
+                #  numero», y sumarle un canal de diagnostico la convertiria
+                #  en dos funciones con un solo nombre.
+                incoherente = False
                 if crudos and escrito is not None and not discordaron:
-                    sin_mirar.append(cuando)
+                    coherente, _ = PF.coherente_con_los_microwatts(texto_foto)
+                    incoherente = coherente is False
+                    (incoherentes if incoherente else sin_mirar).append(cuando)
                 de_la_foto = None
             if escrito is None or de_la_foto is None:
                 continue
@@ -1041,6 +1065,15 @@ def _potencia(orden, cierre):
             nota += (" La medición " + " ni ".join(discordantes)
                      + " no se pudo verificar: la foto se leyó dos veces y "
                        "dio números distintos.")
+        if incoherentes:
+            #  SE DICE QUE LA LECTURA ESTA BIEN, porque lo esta: el problema
+            #  es que la pantalla muestra dos numeros que no son la misma
+            #  potencia. Sin esa aclaracion, quien lee sale a revisar una
+            #  lectura que no tiene nada de malo.
+            nota += (" La medición " + " ni ".join(incoherentes)
+                     + " no se pudo verificar: en esa pantalla los dBm y los "
+                       "µW no son la misma potencia, así que uno de los dos "
+                       "está mal leído o la foto no es de una medición real.")
         if dudas:
             return _punto("potencia", None,
                           "La foto y el reporte no dicen lo mismo: "
