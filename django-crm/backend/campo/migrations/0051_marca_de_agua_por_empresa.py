@@ -9,7 +9,14 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('campo', '0049_cotejo_del_reporte'),
+        #  CUELGA DE LA 0050 DE LA OTRA SESION, no de la 0049  --
+        #  12/11/2026. Esta migracion nacio como `0050_marca_de_agua...`
+        #  mientras otra sesion creaba `0050_orden_unida_al_caso`. Dos 0050
+        #  en la misma app son dos hojas del grafo y Django se niega a
+        #  migrar: es el mismo choque que esa sesion acababa de arreglar con
+        #  dos 0049. Se renumera y se encadena en vez de dejar la rama
+        #  bifurcada.
+        ('campo', '0050_orden_unida_al_caso'),
         ('common', '0047_comentario_sin_tope_de_255'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
