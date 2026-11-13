@@ -109,7 +109,7 @@ def _orden_vieja(org, ref):
 
 def test_d_el_relleno_une_las_suyas_y_no_las_ajenas_sin_contexto(org_a, org_b):
     rellenar = importlib.import_module(
-        "campo.migrations.0049_orden_unida_al_caso").rellenar
+        "campo.migrations.0050_orden_unida_al_caso").rellenar
     caso_a = _caso(org_a)
     with rls_org(org_b):
         caso_b = _caso(org_b)

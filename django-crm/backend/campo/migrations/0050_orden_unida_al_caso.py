@@ -61,7 +61,10 @@ def rellenar(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("campo", "0048_insistir_con_el_recordatorio"),
+        #  0050 y no 0049 (13/11/2026): la 0049 de produccion es el cotejo del
+        #  reporte, y dos hojas en la misma app frenan el 'migrate' del
+        #  despliegue ("Conflicting migrations detected").
+        ("campo", "0049_cotejo_del_reporte"),
         ("cases", "0034_primera_respuesta_desde_el_hilo_externo"),
     ]
 
