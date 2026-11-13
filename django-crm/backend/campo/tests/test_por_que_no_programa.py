@@ -29,6 +29,12 @@ def _correr(org, **extra) -> str:
     return salida.getvalue()
 
 
+def _correr_sin_org(**extra) -> str:
+    salida = io.StringIO()
+    call_command("por_que_no_programa", stdout=salida, **extra)
+    return salida.getvalue()
+
+
 def _cuadrilla(org, nombre, labor, *, zona=None, activa=True):
     c = Cuadrilla.objects.create(org=org, nombre=nombre, labor_habitual=labor,
                                  activa=activa)
@@ -167,3 +173,26 @@ def test_sin_fila_de_configuracion_igual_corre(org_a):
 
     assert "valores de fabrica" in salida, salida
     assert "APAGADO" in salida
+
+
+def test_SIN_pasar_la_org_igual_corre(org_a):
+    """Sin `--org` se recorren todas, y la cabecera NOMBRA la empresa.
+
+    Pedir el UUID obligaba a sacarlo con otro comando antes de poder
+    diagnosticar nada. Con una sola empresa, ese paso no existe.
+    """
+    ConfiguracionDeReparto.objects.create(org=org_a, activo=False)
+    salida = _correr_sin_org()
+
+    assert org_a.name in salida, salida
+    assert "APAGADO" in salida
+
+
+def test_sin_org_recorre_LAS_DOS(org_a, org_b):
+    #  Que nombre a las dos y no se quede en la primera: con dos empresas, un
+    #  informe que habla de una sola manda a mirar la configuracion equivocada.
+    ConfiguracionDeReparto.objects.create(org=org_a, activo=False)
+    ConfiguracionDeReparto.objects.create(org=org_b, activo=False)
+    salida = _correr_sin_org()
+
+    assert org_a.name in salida and org_b.name in salida, salida

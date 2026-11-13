@@ -55,8 +55,11 @@ class Command(BaseCommand):
     help = "Dice en que puerta se corta la programacion de una labor."
 
     def add_arguments(self, parser):
-        parser.add_argument("--org", required=True,
-                            help="id (UUID) de la organizacion")
+        #  OPCIONAL, como en 'informe_de_labores': hoy hay una sola empresa y
+        #  pedir su UUID obliga a sacarlo con otro comando antes. Sin el, se
+        #  recorren todas.
+        parser.add_argument("--org", default="",
+                            help="id (UUID) de una sola empresa; sin esto, todas")
         parser.add_argument("--labor", default=LABOR_POR_DEFECTO,
                             help=f"la labor a diagnosticar (def. {LABOR_POR_DEFECTO})")
         parser.add_argument("--fecha", default="",
@@ -81,10 +84,38 @@ class Command(BaseCommand):
         from campo.zonas import ZonaOperativa
         from operaciones import armado_de_jornadas as adj
 
-        try:
-            org = Org.objects.get(pk=options["org"])
-        except (Org.DoesNotExist, ValueError, ValidationError):
-            raise CommandError("No existe una organizacion con ese id.")
+        if options["org"]:
+            try:
+                orgs = [Org.objects.get(pk=options["org"])]
+            except (Org.DoesNotExist, ValueError, ValidationError):
+                raise CommandError("No existe una organizacion con ese id.")
+        else:
+            orgs = list(Org.objects.all().order_by("name"))
+            if not orgs:
+                raise CommandError("No hay ninguna organizacion.")
+
+        for org in orgs:
+            self._una(org, options)
+
+    def _una(self, org, options):
+        from datetime import date
+
+        from django.utils import timezone
+
+        from campo import jornada_automatica as ja
+        from campo import tasks as T
+        from campo.cuadrillas import (
+            INSTALACION_NUEVA,
+            ConfiguracionDeReparto,
+            Cuadrilla,
+            configuracion_de_reparto,
+            labor_de_cada_grupo,
+        )
+        from campo.labores import labor_valida
+        from campo.reparto import _zona_de
+        from campo.zonas import ZonaOperativa
+        from operaciones import armado_de_jornadas as adj
+
         set_rls_context(org.id)
 
         labor_pedida = options["labor"]
@@ -98,7 +129,7 @@ class Command(BaseCommand):
 
         w = self.stdout.write
         w("=" * 78)
-        w(f" POR QUE NO SE PROGRAMA '{labor_pedida}'   --   {fecha}")
+        w(f" {org.name}  --  POR QUE NO SE PROGRAMA '{labor_pedida}'  --  {fecha}")
         w("=" * 78)
 
         cortes = []     # las puertas cerradas, en orden
