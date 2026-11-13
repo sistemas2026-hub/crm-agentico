@@ -68,7 +68,10 @@ export async function DELETE({ params, locals, fetch }) {
 
   try {
     const resp = await fetch(
-      `${cfg.baseUrl}/agentes/${encodeURIComponent(params.nombre)}?tenant=${encodeURIComponent(cfg.tenant)}`,
+      //  El autor va en la query porque un DELETE no lleva cuerpo: el motor lo
+      //  anota en el historial de la config (13/11/2026). Sale de la sesion.
+      `${cfg.baseUrl}/agentes/${encodeURIComponent(params.nombre)}?${new URLSearchParams({
+        tenant: cfg.tenant, autor: autorDeSesion(locals).autor })}`,
       { method: 'DELETE', headers: headersMotor() }
     );
     if (!resp.ok) {

@@ -5,7 +5,7 @@ import {
 } from './presentacion.js';
 
 const escribe = (nombre, aprobacion_humana, extra = {}) =>
-  ({ nombre, solo_lectura: false, requiere_confirmacion: true, aprobacion_humana, ...extra });
+  ({ nombre, solo_lectura: false, requiere_confirmacion: true, aprobacion_humana, resumen: `Hace ${nombre}`, ...extra });
 const lee = (nombre, tipo = 'http') => ({ nombre, solo_lectura: true, tipo });
 
 const soporteCliente = {
@@ -106,6 +106,7 @@ describe('quien puede que', () => {
     expect(reiniciar.celdas).toEqual({ soporte: 'espera', soporte_tecnico_cliente: 'espera' });
     expect(m.filas.find((f) => f.nombre === 'registrar_pedido_wifi').celdas).toEqual({ soporte_tecnico_cliente: 'sola' });
     expect(m.sinAcciones.map((a) => a.nombre)).toEqual(['cliente_final']);
+    expect(reiniciar.resumen).toBe('Hace reiniciar_ont');
   });
 });
 

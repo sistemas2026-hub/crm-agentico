@@ -51,7 +51,7 @@
             {#each m.filas as f (f.nombre)}
               <tr>
                 <th scope="row">
-                  <span class="nombre">{humanizar(f.nombre)}</span>
+                  <span class="nombre" title={f.resumen || undefined}>{humanizar(f.nombre)}</span>
                   <span class="clave">{f.nombre}</span>
                 </th>
                 {#each m.columnas as a (a.nombre)}

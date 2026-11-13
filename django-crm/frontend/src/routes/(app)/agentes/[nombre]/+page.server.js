@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
+import { autorDeSesion } from '$lib/server/v2/autor.js';
 import { leerAutonomiaGanada } from '$lib/server/v2/capacidad.js';
 import { accionesDeAutonomia } from '$lib/server/v2/acciones-autonomia.js';
 import {
@@ -64,14 +65,14 @@ export const actions = {
 
   async pausar({ params, locals, fetch }) {
     if (!soloAdmin(locals)) return fail(403, { pausa: { error: 'Solo un administrador puede pausar un agente.' } });
-    const r = await pausarAgente(await destino(locals, fetch), fetch, params.nombre, true);
+    const r = await pausarAgente(await destino(locals, fetch), fetch, params.nombre, true, autorDeSesion(locals).autor);
     if (!r.ok) return fail(r.status === 400 ? 400 : 502, { pausa: { error: r.error } });
     return { pausa: { ok: 'pausado' } };
   },
 
   async reanudar({ params, locals, fetch }) {
     if (!soloAdmin(locals)) return fail(403, { pausa: { error: 'Solo un administrador puede reanudar un agente.' } });
-    const r = await pausarAgente(await destino(locals, fetch), fetch, params.nombre, false);
+    const r = await pausarAgente(await destino(locals, fetch), fetch, params.nombre, false, autorDeSesion(locals).autor);
     if (!r.ok) return fail(r.status === 400 ? 400 : 502, { pausa: { error: r.error } });
     return { pausa: { ok: 'reanudado' } };
   },
@@ -82,7 +83,7 @@ export const actions = {
     const version = Number(form.get('version'));
     if (!Number.isInteger(version) || version < 1) return fail(400, { restaurar: { error: 'Esa versión no se reconoce.' } });
     if (form.get('confirmo') !== 'si') return fail(400, { restaurar: { version, error: 'Confirmá que querés volver a esa versión.' } });
-    const r = await restaurarAgente(await destino(locals, fetch), fetch, params.nombre, version);
+    const r = await restaurarAgente(await destino(locals, fetch), fetch, params.nombre, version, autorDeSesion(locals).autor);
     if (!r.ok) return fail(r.status === 404 || r.status === 400 ? r.status : 502, { restaurar: { version, error: r.error } });
     return { restaurar: { version, ok: true } };
   }

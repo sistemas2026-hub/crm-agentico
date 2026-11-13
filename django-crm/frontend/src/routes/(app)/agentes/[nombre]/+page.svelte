@@ -93,14 +93,6 @@
       : { href: '/asistente', titulo: 'Abre el Asistente interno' }
   );
 
-  /** Primera oracion de una descripcion de herramienta, para la lista. @param {string} t */
-  const primeraFrase = (t) => {
-    const s = (t || '').replace(/\s+/g, ' ').trim();
-    const corte = s.search(/[.!?](\s|$)/);
-    const frase = corte > 0 ? s.slice(0, corte + 1) : s;
-    return frase.length > 180 ? `${frase.slice(0, 177)}…` : frase;
-  };
-
   async function borrar() {
     if (!borradoArmado) { borradoArmado = true; return; }
     const res = await fetch(`/api/agentes/${encodeURIComponent(a.nombre)}`, { method: 'DELETE' });
@@ -310,7 +302,13 @@
                 {#if h.irreversible}<span class="chip critica">Irreversible</span>{/if}
               </div>
               <span class="clave">{h.nombre}{h.campos_permitidos?.length ? ` · ve ${h.campos_permitidos.length} campo${h.campos_permitidos.length === 1 ? '' : 's'}` : ''}</span>
-              {#if h.descripcion}<p class="accion-desc">{primeraFrase(h.descripcion)}</p>{/if}
+              {#if h.resumen}<p class="accion-desc">{h.resumen}</p>{/if}
+              {#if h.descripcion}
+                <details class="para-modelo">
+                  <summary>Lo que le dice al modelo</summary>
+                  <p>{h.descripcion}</p>
+                </details>
+              {/if}
               {#if autonomiaDe?.[h.nombre]}
                 <AutonomiaDeAccion accion={autonomiaDe[h.nombre]} agente={a.nombre} esAdmin={data.esAdmin}
                   resultado={form?.autonomia ?? null} mostrarEstado={false} />
@@ -336,11 +334,18 @@
                     <span class="v2-sub num">
                       {h.campos_permitidos?.length ? `${h.campos_permitidos.length} campo${h.campos_permitidos.length === 1 ? '' : 's'}` : 'sin datos del cliente'}
                     </span>
+                    {#if h.resumen}<span class="consulta-resumen">{h.resumen}</span>{/if}
                   </button>
                   {#if abierta[h.nombre]}
                     <div class="consulta-detalle">
                       <span class="clave">{h.nombre}</span>
-                      {#if h.descripcion}<p class="accion-desc">{primeraFrase(h.descripcion)}</p>{/if}
+                      {#if h.resumen}<p class="accion-desc">{h.resumen}</p>{/if}
+                      {#if h.descripcion}
+                        <details class="para-modelo">
+                          <summary>Lo que le dice al modelo</summary>
+                          <p>{h.descripcion}</p>
+                        </details>
+                      {/if}
                       {#if h.campos_permitidos?.length}
                         <div class="campos">{#each h.campos_permitidos as c (c)}<code>{c}</code>{/each}</div>
                       {/if}
@@ -414,7 +419,7 @@
       {:else if pestana === 'cambios'}
         <section class="caja" aria-labelledby="t-cam">
           <h2 id="t-cam">Cambios a este agente</h2>
-          <p class="v2-sub">Cada versión en que cambió, la más nueva primero. Restaurar guarda una versión nueva con lo de antes: nada se pierde. Quién hizo cada cambio no se registra todavía.</p>
+          <p class="v2-sub">Cada versión en que cambió, la más nueva primero. Restaurar guarda una versión nueva con lo de antes: nada se pierde. Las versiones anteriores al 13/11/2026 no registran quién las hizo.</p>
           {#if form?.restaurar?.error}<p class="txt-rojo">{form.restaurar.error}</p>{/if}
           {#if data.historial === null}
             <p class="v2-sub">No se pudo leer el historial ahora.</p>
@@ -427,6 +432,7 @@
                   <strong class="num">v{c.version}</strong>
                   {#if c.actual}<span class="chip sola">Actual</span>{/if}
                   <span class="v2-sub num">{cuandoCorto(c.creado_en)}</span>
+                  <span class="autor" class:sin-autor={!c.autor}>{c.autor ? `por ${c.autor}` : 'autor sin registro'}</span>
                 </div>
                 <ul class="cambio-que">{#each c.resumen as frase, i (i)}<li>{frase}</li>{/each}</ul>
                 <div class="cambio-botones">
@@ -587,6 +593,17 @@
   .giro.abierto { transform: rotate(90deg); }
   .consulta-detalle { padding: 0 2px 12px 28px; display: flex; flex-direction: column; gap: 6px; }
   .campos { display: flex; flex-wrap: wrap; gap: 6px; }
+  /* La descripcion que lee el modelo, plegada: sirve para depurar, no para
+     entender que hace la herramienta (para eso esta 'resumen'). */
+  .para-modelo { font-size: 12px; color: var(--v2-slate); }
+  .para-modelo summary { cursor: pointer; width: fit-content; }
+  .para-modelo p {
+    margin: 6px 0 0; padding: 7px 9px; border-radius: 8px; background: var(--v2-line-soft);
+    white-space: pre-wrap; line-height: 1.5; max-width: 90ch;
+  }
+  .consulta-resumen { grid-column: 2 / -1; font-size: 12.5px; color: var(--v2-slate); margin-top: -2px; }
+  .autor { font-size: 12px; color: var(--v2-ink); }
+  .autor.sin-autor { color: var(--v2-slate); font-style: italic; }
   .campos code {
     font-family: var(--v2-mono); font-size: 11.5px; padding: 3px 7px; border-radius: 6px;
     background: var(--v2-line-soft); border: 1px solid var(--v2-line);

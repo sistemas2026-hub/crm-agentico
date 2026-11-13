@@ -201,7 +201,7 @@ export function matriz(agentes, autonomiaDe) {
   const filas = new Map();
   for (const a of columnas) {
     for (const h of porLoQueHace(a.herramientas).actua) {
-      if (!filas.has(h.nombre)) filas.set(h.nombre, { nombre: h.nombre, descripcion: h.descripcion, celdas: {} });
+      if (!filas.has(h.nombre)) filas.set(h.nombre, { nombre: h.nombre, resumen: h.resumen || '', celdas: {} });
       filas.get(h.nombre).celdas[a.nombre] = modoDeAccion(h, autonomiaDe, a.nombre);
     }
   }

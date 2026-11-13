@@ -36,7 +36,7 @@ function motor(respuestas) {
 }
 
 const evento = (rol = 'ADMIN', extra = {}) => ({
-  params: { nombre: 'soporte' }, locals: { profile: { role: rol }, user: {} },
+  params: { nombre: 'soporte' }, locals: { profile: { role: rol }, user: { name: 'Ana Pérez', id: 'u1' } },
   fetch: (/** @type {any} */ url, /** @type {any} */ op) => globalThis.fetch(url, op), ...extra
 });
 
@@ -93,12 +93,12 @@ describe('pausar, reanudar y restaurar', () => {
   it('pausar viaja al motor con el tenant de la sesion', async () => {
     const r = await actions.pausar(/** @type {any} */ (evento()));
     expect(r).toEqual({ pausa: { ok: 'pausado' } });
-    expect(pedidos).toEqual([{ url: '/agentes/soporte/pausa', metodo: 'PUT', cuerpo: { pausado: true, tenant: 'rapilink' } }]);
+    expect(pedidos).toEqual([{ url: '/agentes/soporte/pausa', metodo: 'PUT', cuerpo: { pausado: true, autor: 'Ana Pérez', tenant: 'rapilink' } }]);
   });
 
   it('reanudar manda pausado: false', async () => {
     await actions.reanudar(/** @type {any} */ (evento()));
-    expect(pedidos[0].cuerpo).toEqual({ pausado: false, tenant: 'rapilink' });
+    expect(pedidos[0].cuerpo).toEqual({ pausado: false, autor: 'Ana Pérez', tenant: 'rapilink' });
   });
 
   it('sin ser ADMIN no viaja nada', async () => {
@@ -117,7 +117,7 @@ describe('pausar, reanudar y restaurar', () => {
     expect(/** @type {any} */ (await pedir({ version: 'abc', confirmo: 'si' })).status).toBe(400);
     expect(pedidos).toEqual([]);
     expect(await pedir({ version: '206', confirmo: 'si' })).toEqual({ restaurar: { version: 206, ok: true } });
-    expect(pedidos).toEqual([{ url: '/agentes/soporte/restaurar', metodo: 'POST', cuerpo: { version: 206, tenant: 'rapilink' } }]);
+    expect(pedidos).toEqual([{ url: '/agentes/soporte/restaurar', metodo: 'POST', cuerpo: { version: 206, autor: 'Ana Pérez', tenant: 'rapilink' } }]);
   });
 
   it('si el motor rechaza, se dice por que', async () => {

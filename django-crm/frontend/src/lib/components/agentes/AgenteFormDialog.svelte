@@ -142,7 +142,11 @@
   );
   const bloqueado = $derived(avisos.some((a) => a.bloquea));
 
-  const nombreValido = $derived(/^[a-z][a-z0-9_]{1,29}$/.test(nombre));
+  //  Nombres de pantallas fijas bajo /agentes (13/11/2026): un agente asi no
+  //  tendria pagina. El motor tambien los rechaza (editor.NOMBRES_DE_ROL_RESERVADOS).
+  const RESERVADOS = new Set(['permisos', 'flujo', 'asignaciones']);
+  const nombreReservado = $derived(RESERVADOS.has(nombre));
+  const nombreValido = $derived(/^[a-z][a-z0-9_]{1,29}$/.test(nombre) && !nombreReservado);
   const puedeGuardar = $derived(nombreValido && descripcion.trim().length > 0 && !submitting && !bloqueado);
 
   function toggleHerramienta(/** @type {string} */ n) {
@@ -306,7 +310,9 @@
               class="{campo} font-mono disabled:opacity-60"
             />
             <span class="text-xs text-[var(--text-secondary)]">
-              {#if nombre && !nombreValido}
+              {#if nombreReservado}
+                <span class="text-destructive">«{nombre}» es el nombre de una pantalla de Agentes: elegí otro.</span>
+              {:else if nombre && !nombreValido}
                 <span class="text-destructive">Minúsculas, empieza con letra, solo letras, números y _ (2 a 30).</span>
               {:else}
                 Es el nombre interno del agente. Se sugiere solo; no se puede cambiar después.

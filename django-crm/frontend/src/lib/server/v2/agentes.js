@@ -79,10 +79,13 @@ async function escribir(cfg, fetch, metodo, ruta, cuerpo) {
   }
 }
 
-/** @param {any} cfg @param {typeof fetch} fetch @param {string} nombre @param {boolean} pausado */
-export const pausarAgente = (cfg, fetch, nombre, pausado) =>
-  escribir(cfg, fetch, 'PUT', `/agentes/${encodeURIComponent(nombre)}/pausa`, { pausado });
+//  'autor' (13/11/2026): quien lo hace, de la SESION (autorDeSesion), para que
+//  la version nueva del historial diga quien la hizo. El motor solo lo anota.
 
-/** @param {any} cfg @param {typeof fetch} fetch @param {string} nombre @param {number} version */
-export const restaurarAgente = (cfg, fetch, nombre, version) =>
-  escribir(cfg, fetch, 'POST', `/agentes/${encodeURIComponent(nombre)}/restaurar`, { version });
+/** @param {any} cfg @param {typeof fetch} fetch @param {string} nombre @param {boolean} pausado @param {string} [autor] */
+export const pausarAgente = (cfg, fetch, nombre, pausado, autor = '') =>
+  escribir(cfg, fetch, 'PUT', `/agentes/${encodeURIComponent(nombre)}/pausa`, { pausado, ...(autor ? { autor } : {}) });
+
+/** @param {any} cfg @param {typeof fetch} fetch @param {string} nombre @param {number} version @param {string} [autor] */
+export const restaurarAgente = (cfg, fetch, nombre, version, autor = '') =>
+  escribir(cfg, fetch, 'POST', `/agentes/${encodeURIComponent(nombre)}/restaurar`, { version, ...(autor ? { autor } : {}) });
