@@ -9,7 +9,12 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('campo', '0051_marca_de_agua_por_empresa'),
+        #  CUELGA DE LA 0052 DE LA OTRA SESION  --  13/11/2026. Nacio como
+        #  `0052_contrato_de_servicio` mientras otra sesion empujaba
+        #  `0052_areas_que_mira_el_supervisor`. Dos 0052 en `campo` son dos
+        #  hojas y Django se niega a migrar: es la tercera vez en dos dias
+        #  (0049, 0050 y ahora 0052). Se renumera y se encadena.
+        ('campo', '0052_areas_que_mira_el_supervisor'),
         ('common', '0048_modulos_ocultos_por_empresa'),
         ('solicitudes', '0006_efectos_de_la_decision'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
