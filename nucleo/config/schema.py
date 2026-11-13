@@ -262,6 +262,23 @@ class Rol(Base):
     # como destino. Es lo que hace que la pantalla pueda avisar "este agente
     # esta conectado pero nunca le va a llegar una conversacion".
     atiende: str = Field(default="", max_length=400)
+    # COMO SE LLAMA Y QUE HACE, PARA UNA PERSONA  --  13/11/2026.
+    # La clave del rol ('soporte_tecnico_cliente') es un identificador: la
+    # pantalla de Agentes la mostraba capitalizada ("Soporte_tecnico_cliente")
+    # y la descripcion que tenia a mano era el primer parrafo del PROMPT, que
+    # le habla al modelo ("TODAVIA NO es cliente -- ...") y no a quien revisa.
+    # Solo de presentacion: no entran al prompt ni cambian que puede hacer o
+    # ver el rol. Vacios = la pantalla cae a la clave y al cargo, como antes.
+    nombre_visible: str = Field(default="", max_length=60)
+    resumen: str = Field(default="", max_length=280)
+    # EN PAUSA  --  13/11/2026. Un agente en pausa NO llama al modelo: el turno
+    # que le toca contesta un aviso fijo y deja la conversacion marcada para
+    # una persona (nucleo/canales/api.py, mismo camino que el tope de gasto).
+    # Existe para frenar a UN agente que se esta portando mal sin borrarlo
+    # --borrar no tiene vuelta atras y se lleva su prompt y sus permisos-- y
+    # sin detener la autonomia de toda la empresa. Por defecto False: ninguna
+    # config existente cambia de comportamiento.
+    pausado: bool = False
 
     @model_validator(mode="after")
     def _coherencia(self) -> "Rol":

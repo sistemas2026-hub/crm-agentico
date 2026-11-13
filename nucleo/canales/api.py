@@ -755,6 +755,11 @@ def _agente_json(nombre: str, rol, config) -> dict:
     return {
         "nombre": nombre,
         "descripcion": rol.descripcion.strip(),
+        #  Para personas (13/11/2026): ver Rol.nombre_visible. Vacios = la
+        #  pantalla cae a la clave y al cargo.
+        "nombre_visible": rol.nombre_visible,
+        "resumen": rol.resumen,
+        "pausado": rol.pausado,
         "area": rol.area,
         "cargo": rol.cargo,
         "orientado_a": rol.orientado_a,
@@ -782,7 +787,22 @@ def _agente_json(nombre: str, rol, config) -> dict:
                 # primero que hay que ver para revisar que puede hacer un
                 # agente, no un detalle.
                 "solo_lectura": h.solo_lectura,
+                #  DECLARADO, NO APLICADO: el validador se lo exige a toda
+                #  escritura y nada lo frena en ejecucion (motor.py, comentario
+                #  de _ejecutar_propuesta_de_accion). Se sigue mandando por
+                #  compatibilidad; la pantalla NO debe leerlo como "pide
+                #  confirmacion" -- hasta el 13/11/2026 lo hacia, y afirmaba un
+                #  freno que no existe.
                 "requiere_confirmacion": h.requiere_confirmacion,
+                #  EL freno real (13/11/2026): con True el motor no ejecuta, deja
+                #  la accion pendiente hasta que una persona la apruebe. Si un
+                #  agente la hace sola por autonomia ganada lo dice
+                #  /reportes/autonomia-ganada (por agente), no este campo.
+                "aprobacion_humana": h.aprobacion_humana,
+                "irreversible": h.irreversible,
+                #  True por omision (falla cerrado): False solo si la empresa la
+                #  DECLARO no critica. Un True no es una clasificacion hecha.
+                "critica": h.critica,
             }
             for h in herramientas
         ],
@@ -1789,6 +1809,50 @@ def _atender_turno(config, tenant: str, rol: str, id_sesion: str,
     if veredicto_accion:
         estado["historial"].append(
             {"role": "system", "content": veredicto_accion["nota"]})
+
+    # --- agente en pausa (13/11/2026) ----------------------------------------
+    # Una persona lo freno desde la pantalla de Agentes (Rol.pausado). Mismo
+    # camino que el tope de gasto de abajo, por las mismas razones: NO se llama
+    # al modelo, el cliente no se queda sin respuesta, y la conversacion queda
+    # marcada para una persona sin afirmar un traspaso con caso y ticket que no
+    # ocurrio (NO_DETERMINADO, no 'escalada_a_humano').
+    #
+    # 'rol' aca ya es el agente que atiende ESTE turno (el derivado, si hubo
+    # derivacion -- ver 'rol_activo' mas arriba). Pausar al de entrada pasa a
+    # personas todo lo que entra; pausar a un especialista, solo lo suyo.
+    #
+    # El aviso se dice UNA vez: si lo ultimo que contesto el asistente ya fue
+    # el aviso, el turno queda en silencio (sigue marcado). Repetirle la misma
+    # frase a cada mensaje del cliente es peor que callar.
+    rol_del_turno = config.roles.get(rol)
+    if rol_del_turno is not None and getattr(rol_del_turno, "pausado", False):
+        respuesta = (
+            "En este momento te va a atender una persona del equipo. Ya le dejé "
+            "tu mensaje y te escribe por aquí."
+            if rol_del_turno.orientado_a == "cliente_final" else
+            "Este agente está en pausa: un administrador lo detuvo desde Agentes. "
+            "Tu consulta quedó marcada para una persona.")
+        ya_avisado = next((m.get("content") for m in reversed(estado["historial"])
+                           if m.get("role") == "assistant"), None) == respuesta
+        registrar("agentes", "turno de un agente en pausa: pasa a una persona sin llamar al modelo",
+                  tenant=tenant, agente=rol, repetido=ya_avisado)
+        estado["historial"].append({"role": "user", "content": mensaje})
+        if not ya_avisado:
+            estado["historial"].append({"role": "assistant", "content": respuesta})
+        try:
+            conv_id, _ = _guardar_del_cliente()
+            if not ya_avisado:
+                persistencia.registrar_mensaje(
+                    tenant, canal, id_sesion, rol, "assistant", respuesta, origen="sistema")
+            if conv_id:
+                persistencia.registrar_estado_escalada(
+                    tenant, conv_id, estado_escalada.NO_DETERMINADO,
+                    f"agente en pausa: {rol}", necesita_atencion=True)
+        except Exception as e:
+            registrar("agentes", "no se pudo registrar el turno de un agente en pausa", error=e)
+        return {"respuesta": "" if ya_avisado else respuesta,
+                "verificado": bool(getattr(estado["sesion"], "verificado", False)),
+                "pausada": True}
 
     # --- tope de gasto de la empresa ----------------------------------------
     # Va aca y no despues: si esperara al final, el turno que descubre el tope
@@ -4168,6 +4232,144 @@ def agentes_borrar(nombre):
 
     olvidar_config(tenant)
     return "", 204
+
+
+# =============================================================================
+#  UN AGENTE EN DETALLE  --  13/11/2026
+# =============================================================================
+#  Lo que la pagina de cada agente (/agentes/<nombre> en el CRM) necesita y
+#  /agentes no da: pausarlo, ver y restaurar sus versiones, y lo que hizo
+#  (desempeno y bitacora). Las escrituras pasan por el editor, como crear o
+#  editar; el permiso (solo ADMIN) lo exige el proxy del CRM, igual que en
+#  POST/PUT/DELETE /agentes.
+
+def _tenant_y_config():
+    tenant = request.args.get("tenant") or (request.get_json(silent=True) or {}).get("tenant")
+    if not tenant:
+        return None, None, (jsonify({"error": "Falta el parametro 'tenant'."}), 400)
+    try:
+        return tenant, _config_de(tenant), None
+    except FileNotFoundError:
+        return None, None, (jsonify({"error": f"El tenant '{tenant}' no existe."}), 404)
+
+
+def _dias(defecto: int = 30) -> int:
+    try:
+        return max(1, min(int(request.args.get("dias", defecto)), 365))
+    except (TypeError, ValueError):
+        return defecto
+
+
+@app.put("/agentes/<nombre>/pausa")
+def agentes_pausa(nombre):
+    """Cuerpo: {tenant, pausado: bool}. Ver Rol.pausado y editor.pausar_rol."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant or not isinstance(cuerpo.get("pausado"), bool):
+        return jsonify({"error": "Faltan 'tenant' o 'pausado' (true/false)."}), 400
+    try:
+        config = editor.pausar_rol(tenant, nombre, cuerpo["pausado"])
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    registrar("agentes", "agente pausado" if cuerpo["pausado"] else "agente reanudado",
+              tenant=tenant, agente=nombre)
+    return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)})
+
+
+@app.get("/agentes/<nombre>/historial")
+def agentes_historial(nombre):
+    """Los cambios de ESTE agente, version a version. Ver config/cambios_de_rol.py."""
+    from nucleo.config import cambios_de_rol
+    from nucleo.persistencia import agentes as datos_agentes
+
+    tenant, _config, error = _tenant_y_config()
+    if error:
+        return error
+    try:
+        versiones = datos_agentes.versiones_del_rol(tenant, nombre)
+    except Exception as e:
+        return fallo(503, "historial_de_agente", "No se pudo leer el historial.",
+                     componente="agentes", e=e)
+    cambios = cambios_de_rol.historial(versiones)
+    vigente = versiones[0]["version"] if versiones else None
+    for c in cambios:
+        c["actual"] = c["version"] == vigente
+    return jsonify({"cambios": cambios, "versiones_leidas": len(versiones)})
+
+
+@app.post("/agentes/<nombre>/restaurar")
+def agentes_restaurar(nombre):
+    """Cuerpo: {tenant, version}. Guarda una version NUEVA con el rol de antes."""
+    from nucleo.persistencia import agentes as datos_agentes
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant, version = cuerpo.get("tenant"), cuerpo.get("version")
+    if not tenant or not isinstance(version, int) or isinstance(version, bool):
+        return jsonify({"error": "Faltan 'tenant' o 'version' (numero)."}), 400
+    try:
+        anterior = datos_agentes.rol_en_version(tenant, nombre, version)
+    except Exception as e:
+        return fallo(503, "historial_de_agente", "No se pudo leer esa version.",
+                     componente="agentes", e=e)
+    if anterior is None:
+        return jsonify({"error": "En esa version este agente no existia."}), 404
+    try:
+        config = editor.restaurar_rol(tenant, nombre, anterior)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo restaurar esa version.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    registrar("agentes", "agente restaurado a una version anterior",
+              tenant=tenant, agente=nombre, version=version)
+    return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)})
+
+
+@app.get("/agentes/<nombre>/bitacora")
+def agentes_bitacora(nombre):
+    """Lo que este agente cambio en el mundo real. Ver persistencia/agentes.py."""
+    from nucleo.persistencia import agentes as datos_agentes
+
+    tenant, _config, error = _tenant_y_config()
+    if error:
+        return error
+    try:
+        filas = datos_agentes.bitacora(tenant, nombre, _dias(30))
+    except Exception as e:
+        return fallo(503, "bitacora_de_agente", "No se pudo leer la bitacora.",
+                     componente="agentes", e=e)
+    return jsonify({"acciones": filas, "dias": _dias(30)})
+
+
+@app.get("/reportes/agentes")
+def reporte_agentes():
+    """
+    Desempeno POR AGENTE (13/11/2026): conversaciones, cuantas pasaron a una
+    persona y por que, y como le fue a cada herramienta. Ademas, por agente,
+    las herramientas que TIENE y no uso en el periodo -- candidatas a quitar.
+    """
+    from nucleo.persistencia import agentes as datos_agentes
+
+    tenant, config, error = _tenant_y_config()
+    if error:
+        return error
+    dias = _dias(30)
+    try:
+        datos = datos_agentes.desempeno(tenant, dias)
+    except Exception as e:
+        return fallo(503, "desempeno_de_agentes", "No se pudo calcular el desempeno.",
+                     componente="agentes", e=e)
+    for nombre, rol in config.roles.items():
+        a = datos["agentes"].get(nombre)
+        if not a:
+            #  Sin conversaciones no se afirma "sin uso": no hubo con que medir.
+            continue
+        tiene = {h.nombre for h in motor.herramientas_del_rol(config, rol)}
+        a["sin_uso"] = sorted(tiene - set(a["herramientas"]))
+    return jsonify(datos)
 
 
 # =============================================================================

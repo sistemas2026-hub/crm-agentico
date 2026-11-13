@@ -768,6 +768,12 @@ def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
     atiende = extras.get("atiende")
     if atiende is not None:
         rol["atiende"] = str(atiende).strip()
+    #  Solo de presentacion (13/11/2026): ver Rol.nombre_visible en schema.py.
+    #  Vacio se guarda vacio: es la forma de volver a mostrar la clave.
+    for clave in ("nombre_visible", "resumen"):
+        valor = extras.get(clave)
+        if valor is not None:
+            rol[clave] = " ".join(str(valor).split())
     conectar = extras.get("conectar_al_router")
     if conectar is None:
         return
@@ -1292,6 +1298,56 @@ def editar_rol(tenant: str, nombre: str, area: str | None, cargo: str | None,
 
 def borrar_rol(tenant: str, nombre: str) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_borrar(doc, nombre))
+
+
+def _mutar_pausa(doc: dict, nombre: str, pausado: bool) -> None:
+    if nombre not in (doc.get("roles") or {}):
+        raise ErrorEdicion(f"no existe el agente '{nombre}'.")
+    rol = doc["roles"][nombre]
+    if pausado:
+        rol["pausado"] = True
+    else:
+        #  Se quita la clave en vez de escribir False: el documento queda igual
+        #  al de un agente que nunca se pauso, y el historial no se llena de
+        #  'pausado: false' que no dicen nada.
+        rol.pop("pausado", None)
+
+
+def pausar_rol(tenant: str, nombre: str, pausado: bool) -> TenantConfig:
+    """
+    Pone o saca a un agente de la pausa (13/11/2026). Solo toca 'pausado':
+    no pasa por el formulario completo, asi pausar no puede cambiar por
+    accidente sus herramientas ni sus permisos. Ver Rol.pausado.
+    """
+    return _editar(tenant, lambda doc: _mutar_pausa(doc, nombre, bool(pausado)))
+
+
+def _mutar_restaurar(doc: dict, nombre: str, anterior: dict) -> None:
+    if nombre not in (doc.get("roles") or {}):
+        raise ErrorEdicion(
+            f"el agente '{nombre}' ya no existe: restaurar una version no lo vuelve a crear.")
+    #  Copia del rol COMPLETO de esa version, salvo la pausa: volver a una
+    #  version vieja no tiene por que reanudar ni pausar a nadie -- eso es una
+    #  decision aparte y se toma con su propio boton.
+    nuevo = dict(anterior)
+    if doc["roles"][nombre].get("pausado"):
+        nuevo["pausado"] = True
+    else:
+        nuevo.pop("pausado", None)
+    doc["roles"][nombre] = nuevo
+
+
+def restaurar_rol(tenant: str, nombre: str, anterior: dict) -> TenantConfig:
+    """
+    Vuelve el rol a como estaba en una version anterior (13/11/2026). NO
+    reescribe el historial: guarda una version NUEVA con el rol de antes, asi
+    la que se deshace sigue ahi y tambien se puede restaurar. Pasa por la
+    misma validacion que cualquier edicion: si la version vieja nombra una
+    herramienta que ya no existe, se rechaza en vez de guardar algo roto.
+    """
+    if not isinstance(anterior, dict):
+        raise ErrorEdicion("esa version no tiene a este agente.")
+    return _editar(tenant, lambda doc: _mutar_restaurar(doc, nombre, anterior))
 
 
 def guardar_persona(tenant: str, nombre_asistente: str, tono: str,
