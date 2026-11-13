@@ -420,3 +420,60 @@ def test_i4_un_plazo_fuera_de_rango_no_se_guarda(admin_client, plazo):
                                                "plazo_dias": plazo}, format="json")
     assert r.status_code == 400, r.content
     assert WorkType.objects.get(pk=tipo_id).plazo_dias is None
+
+
+# =============================================================================
+#  EL CAMPO QUE SE LEE CON LA CAMARA  --  12/11/2026
+# =============================================================================
+#  El usuario, sobre las instalaciones: «al momento de digitar los datos hay
+#  muchos errores, mala escritura del nombre, direcciones mal digitalizadas».
+#  La app ya tiene lector de codigos --lo usa para materiales-- y no estaba
+#  conectado a ningun campo del formulario.
+#
+#  Que un campo se pueda leer con la camara lo decide LA PLANTILLA, no la app:
+#  un serial de ONU se lee de una etiqueta, «conta que paso» no se lee de
+#  ninguna parte. Estas pruebas afirman que la bandera viaja, y que NO viaja
+#  donde no corresponde -- el defecto simetrico es igual de malo, porque una
+#  camara en cada campo de texto ensucia los formularios de todas las empresas.
+def test_j1_un_texto_escaneable_lo_dice_en_el_esquema():
+    esquema = P.componer({"campos": [
+        {"titulo": "Serial de la ONU", "escaneable": True},
+    ]})
+    assert esquema["campos"][0]["escaneable"] is True
+
+
+def test_j2_un_texto_cualquiera_NO_lo_dice():
+    #  AUSENTE, no `False`: la app lee `campo['escaneable'] == true`, asi que
+    #  una clave que no viaja es lo mismo que un `false` y ahorra bytes en
+    #  cada formulario de cada orden. Lo que importa es que no aparezca sola.
+    esquema = P.componer({"campos": [{"titulo": "Comentarios"}]})
+    assert "escaneable" not in esquema["campos"][0]
+
+
+def test_j3_en_un_numero_no_viaja_aunque_se_pida():
+    #  Un numero no esta en ninguna etiqueta de codigo de barras. Si alguien lo
+    #  marca, se ignora en vez de ensuciar el esquema con algo que la app no va
+    #  a dibujar igual.
+    esquema = P.componer({"campos": [
+        {"titulo": "Metros de fibra", "tipo": "numero", "escaneable": True},
+    ]})
+    assert "escaneable" not in esquema["campos"][0]
+
+
+def test_j4_en_una_seleccion_tampoco():
+    esquema = P.componer({"campos": [
+        {"titulo": "Que encontro", "tipo": "seleccion",
+         "opciones": ["Una", "Otra"], "escaneable": True},
+    ]})
+    assert "escaneable" not in esquema["campos"][0]
+
+
+def test_j5_la_bandera_no_cambia_nada_mas_del_campo():
+    #  EL CONTROL: una bandera nueva que de paso moviera el tipo, el id o las
+    #  reglas seria un cambio silencioso en plantillas que ya estan publicadas.
+    sin = P.componer({"campos": [{"titulo": "Serial de la ONU"}]})["campos"][0]
+    con = P.componer({"campos": [
+        {"titulo": "Serial de la ONU", "escaneable": True},
+    ]})["campos"][0]
+    assert con.pop("escaneable") is True
+    assert con == sin

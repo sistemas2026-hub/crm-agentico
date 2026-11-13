@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/acciones/lector_de_codigo.dart';
 import '../../../demo/field_mock_data.dart';
 import '../../../core/theme/app_theme.dart';
 import '../campo_del_formulario.dart';
@@ -183,6 +184,8 @@ class FormularioDeCampo extends StatelessWidget {
                 tipo,
                 unidad,
                 conError: campo.estado == EstadoDeCampo.error,
+                escaneable: campo.escaneable,
+                etiqueta: campo.titulo,
               ),
             ],
           ),
@@ -500,6 +503,32 @@ class FormularioDeCampo extends StatelessWidget {
     );
   }
 
+  /// Lee un código con la cámara y lo escribe en el campo.
+  ///
+  /// CANCELAR NO BORRA LO QUE HABIA. El lector devuelve `null` cuando la
+  /// persona salió sin leer, y eso es distinto de una lectura vacía: alguien
+  /// que tecleó medio serial, abrió el lector por las dudas y salió no puede
+  /// perder lo que llevaba. Es la misma distinción que el propio lector
+  /// documenta, y la que ya respeta el consumo de material.
+  ///
+  /// NO VALIDA LO LEIDO. El lector entrega el texto crudo; un plan de seriales
+  /// no es igual en dos marcas de ONT, y rechazar el que no encaja le quitaría
+  /// al técnico la única forma rápida que tiene. Lo que llegue queda en el
+  /// campo, a la vista, y se puede corregir a mano.
+  Future<void> _leerConLaCamara(
+      BuildContext contexto, String clave, String etiqueta) async {
+    final String? leido = await LectorDeCodigo.abrir(
+      contexto,
+      titulo: etiqueta.isEmpty ? 'Leer el código' : etiqueta,
+      ayuda: 'Apuntá al código. Si no se lee, se puede escribir a mano.',
+    );
+    if (leido == null || leido.isEmpty) {
+      return;
+    }
+    controladores[clave]?.text = leido;
+    alCambiar(clave, leido);
+  }
+
   /// Texto y números. La lectura óptica se escribe grande y centrada porque es
   /// el dato que el técnico compara contra el umbral mientras lo mide.
   /// La caja de «Otro». Su controlador se crea acá la primera vez: la
@@ -518,9 +547,14 @@ class FormularioDeCampo extends StatelessWidget {
   }
 
   Widget _entrada(String clave, String tipo, String? unidad,
-      {bool conError = false}) {
+      {bool conError = false, bool escaneable = false, String etiqueta = ''}) {
     final bool esNumero = tipo == 'numero' || tipo == 'decimal' || tipo == 'integer';
     final bool esMedicionOptica = (unidad ?? '').toLowerCase().contains('dbm');
+
+    //  SOLO EN TEXTO. Un número no está en ninguna etiqueta de código de
+    //  barras, y la caja del número ya está ocupada por la unidad a la
+    //  derecha: meter ahí un botón taparía el `dBm`.
+    final bool conLector = escaneable && !esNumero;
 
     final Widget caja = Container(
       height: esNumero ? AppSpacing.objetivoTactilAmplio : AppSpacing.objetivoTactil,
@@ -548,9 +582,12 @@ class FormularioDeCampo extends StatelessWidget {
             decoration: InputDecoration(
               border: InputBorder.none,
               isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
+              contentPadding: EdgeInsets.only(
+                left: AppSpacing.md,
+                //  Lugar para el botón: sin esto el serial pasa por debajo.
+                right: conLector ? AppSpacing.objetivoTactil : AppSpacing.md,
+                top: AppSpacing.sm,
+                bottom: AppSpacing.sm,
               ),
               hintText: esNumero ? '-00.0' : null,
             ),
@@ -569,6 +606,23 @@ class FormularioDeCampo extends StatelessWidget {
               child: Text(
                 unidad,
                 style: AppTypography.etiquetaChica.copyWith(color: AppColors.outline),
+              ),
+            ),
+          //  EL LECTOR, cuando la plantilla lo pidió.
+          //
+          //  `Builder` para tener un `context` sin pasarlo por toda la cadena
+          //  de helpers: este widget es `StatelessWidget` y `_entrada` se
+          //  llama desde tres lugares distintos.
+          if (conLector)
+            Positioned(
+              right: 0,
+              child: Builder(
+                builder: (BuildContext contexto) => IconButton(
+                  onPressed: () => _leerConLaCamara(contexto, clave, etiqueta),
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  color: AppColors.secondary,
+                  tooltip: 'Leer con la cámara',
+                ),
               ),
             ),
         ],

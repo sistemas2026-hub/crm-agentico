@@ -47,7 +47,8 @@ from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
 from nucleo.canales import en_vuelo
-from nucleo.canales import avisos, media, transcripcion, vision, whatsapp
+from nucleo.canales import (avisos, cotejo, media, transcripcion, vision,
+                            whatsapp)
 from nucleo.canales.errores import estado_http_de, fallo, mensaje_publico
 from nucleo.relevo import desenlaces
 from nucleo.relevo import historial as regla_historial
@@ -3699,7 +3700,13 @@ def agentes_crear_area():
     try:
         editor._editar(tenant, mutar)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 409
+        #  `mensaje_publico` Y NO `str(e)`: este except atrapa una clase AMPLIA.
+        #  `ErrorEdicion` es nuestra y su texto explica la regla al usuario;
+        #  un `ValueError` de una biblioteca trae lo que la biblioteca quiso
+        #  decir. La diferencia la decide la clase de la instancia, no el
+        #  except (12/11/2026).
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo guardar el area.")}), 409
     except Exception as e:                                   # noqa: BLE001
         registrar("agentes", "fallo al crear un area", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo crear el area: "
@@ -3766,7 +3773,9 @@ def agentes_editar_area(nombre):
         # un "no existe el area".
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+        #  Clase amplia: ver el comentario en la ruta de crear un area.
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo guardar el area.")}), 404
     except Exception as e:                                   # noqa: BLE001
         registrar("agentes", "fallo al editar un area", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo guardar: " + type(e).__name__}), 400
@@ -3812,7 +3821,9 @@ def agentes_borrar_area(nombre):
     try:
         editor._editar(tenant, mutar)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+        #  Clase amplia: ver el comentario en la ruta de crear un area.
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo borrar el area.")}), 404
     except Exception as e:                                   # noqa: BLE001
         registrar("agentes", "fallo al borrar un area", tenant=tenant, error=e)
         return jsonify({"error": "No se pudo borrar: " + type(e).__name__}), 400
@@ -6093,6 +6104,118 @@ def interno_analizar_evidencia():
                         r, pie, proposito=proposito)}), 200
 
 
+@app.post("/interno/cotejo/reporte-contra-ticket")
+def interno_cotejar_reporte():
+    """
+    ¿Lo que el tecnico reporto explica el ticket que origino la orden?
+
+    El usuario, el 12/11/2026: «debe haber relacion entre el asunto, la
+    descripcion del ticket y la respuesta del tecnico. No puede haber una
+    respuesta correcta en un asunto que ni por ahi iba al caso.»
+
+    POR QUE EL MOTOR Y NO EL CRM. Mismo reparto que
+    '/interno/vision/analizar-evidencia': la credencial del proveedor vive
+    SOLO aca. El CRM manda dos textos y recibe un veredicto; no sabe a quien
+    se le pregunto.
+
+    LAS CINCO GARANTIAS QUE REUSA, y por eso no es un atajo:
+      - el interruptor de ESTA empresa ('cotejo_reporte_campo'), que es
+        propio y no el de las fotos: mandar el texto que escribe el personal
+        no es el mismo permiso que mandar la foto de una casa
+      - el tope de gasto del tenant, consultado ANTES de pagarle a nadie
+      - la redaccion del texto que vuelve, que la hace `cotejo.cotejar`
+      - el evento de consumo, para que esto aparezca en /consumo y no en una
+        factura que nadie mira
+      - NUNCA 500: si algo falla vuelve 200 con veredicto 'no_se_sabe'. Quien
+        llama tiene que poder distinguir «no se pudo juzgar» de «la peticion
+        estaba mal», y un 500 obligaria al CRM a decidir que hacer con una
+        excepcion -- que es justo donde se cuela un fail-open.
+
+    NUNCA DEVUELVE 'si' POR UN ERROR. Apagado, sin tenant, sin tope, sin
+    config: todos 'no_se_sabe'. La asimetria esta escrita en
+    `nucleo/canales/cotejo.py`: un «no cuadra» de mas cuesta que alguien mire
+    una orden; un «cuadra» de mas cuesta un cliente sin servicio.
+
+    EL CUERPO: JSON con 'se_pidio' y 'que_hizo'. No se acepta el modelo ni la
+    instruccion -- los fija este lado, igual que en vision.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+
+    datos = request.get_json(silent=True) or {}
+    se_pidio = str(datos.get("se_pidio") or "")
+    que_hizo = str(datos.get("que_hizo") or "")
+
+    def sin_juicio(motivo: str, apagado: bool = False):
+        """La unica forma de contestar que no es un juicio del modelo.
+
+        `apagado` SEPARA «no se pregunto» DE «se pregunto y no se supo», y no
+        es cosmetico (12/11/2026, encontrado antes de desplegar). El CRM
+        llama a esta ruta en CADA cierre, tenga la empresa el cotejo
+        encendido o no. Si no pudiera distinguir los dos casos, guardaria un
+        `no_se_sabe` por cada cierre de cada empresa que NO lo encendio, el
+        punto noveno lo leeria, valdria None, y **toda orden de esa empresa
+        dejaria de cerrarse sola** -- por una funcion apagada.
+
+        Un campo y no el texto del motivo: acoplar dos servicios por una
+        cadena de texto se rompe el dia que alguien la reescribe.
+        """
+        return jsonify({"veredicto": cotejo.NO_SE_SABE, "motivo": motivo,
+                        "apagado": apagado,
+                        "error": "", "segundos": 0, "tokens": 0}), 200
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        #  A DIFERENCIA DE CASI TODO EL RESTO DE ESTE ARCHIVO, esto NO es un
+        #  500: una config que no carga no puede frenar el cierre de una
+        #  orden. Se contesta «no se sabe» y el punto queda en None, que es
+        #  exactamente lo que significa.
+        registrar("cotejo", "no se pudo cargar la configuracion",
+                  tenant=tenant, error=e)
+        return sin_juicio("no se pudo leer la configuracion de la empresa")
+
+    #  EL INTERRUPTOR DE ESTA EMPRESA, y falla CERRADO.
+    if not getattr(config, cotejo.BANDERA, False):
+        return sin_juicio("esta empresa no tiene habilitado el cotejo",
+                          apagado=True)
+
+    #  EL TOPE DE GASTO, antes de pagar. Mismo criterio que vision: si no se
+    #  puede saber, se sigue -- no dejar sin servicio por una estadistica.
+    try:
+        frenar = consumo.estado_del_gasto(config, tenant)["accion"] == "frenar"
+    except Exception:                                         # noqa: BLE001
+        frenar = False
+    if frenar:
+        registrar("cotejo", "tope alcanzado: no se coteja", tenant=tenant)
+        return sin_juicio("la empresa alcanzo su tope de gasto")
+
+    modelo = getattr(getattr(config, "llm", None), "modelo_por_defecto", "")
+    r = cotejo.cotejar(se_pidio, que_hizo, modelo)
+
+    #  TEXTO FIJO y conteos. Del contenido no va NADA al log: ni los dos
+    #  textos, ni el motivo que el modelo escribio citandolos. La orden no se
+    #  nombra porque esta ruta no la conoce -- recibe dos cadenas.
+    registrar("cotejo", "reporte cotejado contra el ticket", tenant=tenant,
+              veredicto=r.veredicto, segundos=r.segundos, tokens=r.tokens,
+              caracteres=len(r.motivo), error=r.error or None)
+
+    if r.tokens:
+        proveedor_c, modelo_c = consumo.partir_referencia(modelo)
+        costo_c, tarifa_c = consumo.costo_de(config, modelo, r.tokens, 0)
+        eventos_consumo.anotar_evento(
+            tenant, eventos_consumo.VISION, proveedor_c, modelo_c,
+            entrada=r.tokens, costo_usd=costo_c, hay_tarifa=tarifa_c,
+            metadatos={"segundos": r.segundos, "veredicto": r.veredicto,
+                       "origen": "cotejo_reporte_campo"})
+
+    return jsonify({"veredicto": r.veredicto, "motivo": r.motivo,
+                    "apagado": False,
+                    "error": r.error, "segundos": r.segundos,
+                    "tokens": r.tokens}), 200
+
+
 @app.get("/autonomia")
 def autonomia_estado():
     """
@@ -7953,7 +8076,9 @@ def canales_plantillas_crear():
         config = _config_de(tenant)
         creada = whatsapp.crear_plantilla(config, tenant, cuerpo.get("plantilla") or {})
     except whatsapp.PlantillaInvalida as e:
-        return jsonify({"error": str(e), "codigo": "plantilla_invalida"}), 400
+        return jsonify({"error": mensaje_publico(
+            e, "La plantilla no es valida."),
+            "codigo": "plantilla_invalida"}), 400
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -7980,7 +8105,9 @@ def canales_plantillas_borrar(nombre):
         config = _config_de(tenant)
         whatsapp.borrar_plantilla(config, tenant, nombre)
     except whatsapp.PlantillaInvalida as e:
-        return jsonify({"error": str(e), "codigo": "plantilla_invalida"}), 400
+        return jsonify({"error": mensaje_publico(
+            e, "La plantilla no es valida."),
+            "codigo": "plantilla_invalida"}), 400
     except FileNotFoundError:
         return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
     except Exception as e:
@@ -13581,9 +13708,16 @@ def conversaciones_borrador(id_conversacion):
         texto = borrador.redactar(_config_de(tenant), rol=conv.get("rol_efectivo"),
                                   mensajes=resultado.get("mensajes") or [])
     except borrador.BorradorNoDisponible as e:
-        # El texto es nuestro (borrador.py), no de una biblioteca: se puede mostrar.
-        codigo = 502 if "no respondió" in str(e) else 422
-        return jsonify({"error": f"No hay sugerencia: {e}.", "codigo": "sin_borrador"}), codigo
+        #  EL TEXTO POR EL REGISTRO Y EL CODIGO POR LA EXCEPCION  --
+        #  12/11/2026. Aca habia un comentario que decia "el texto es nuestro,
+        #  se puede mostrar" y un `502 if "no respondió" in str(e)`: la
+        #  decision de mostrar vivia en un comentario, y la del codigo HTTP en
+        #  una comparacion contra una frase en español escrita en otro archivo.
+        #  Las dos pasaron a donde se pueden hacer cumplir -- `_publicas()` y
+        #  `BorradorNoDisponible.http`.
+        return jsonify({"error": "No hay sugerencia: " + mensaje_publico(
+            e, "no se pudo preparar una.") + ".",
+            "codigo": "sin_borrador"}), e.http
     return jsonify({"borrador": texto})
 
 
@@ -14313,7 +14447,26 @@ def mantenimiento_purgar(tenant):
 
 @app.get("/salud")
 def salud():
-    return jsonify({"estado": "ok"})
+    """Que el motor respira, Y QUE CODIGO ES EL QUE RESPIRA.
+
+    `codigo` es una huella del contenido de `nucleo/` tal como esta en esta
+    imagen. Para saber si un arbol es el que esta corriendo:
+
+        py -3.13 -m nucleo.observabilidad.version     <- en el arbol
+        curl https://<motor>/salud                    <- en el que vive
+
+    Iguales: es ese codigo. Distintas: no lo es. No hay tercer resultado, y
+    no depende de que la plataforma de despliegue pase ninguna etiqueta --
+    el motivo largo esta en `nucleo/observabilidad/version.py`.
+
+    SIGUE SIN AUTENTICACION, y la huella no la pide: es un numero derivado de
+    codigo que ya es visible para quien tiene el repositorio, no dice que
+    version del software es ni que vulnerabilidades tendria, y sin ella esta
+    ruta no contesta la unica pregunta por la que alguien la llama despues de
+    un despliegue.
+    """
+    from nucleo.observabilidad import version
+    return jsonify({"estado": "ok", "codigo": version.huella()})
 
 
 if __name__ == "__main__":

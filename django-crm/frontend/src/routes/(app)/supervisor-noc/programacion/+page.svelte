@@ -276,6 +276,30 @@
                     <input type="checkbox" name="recordar_al_tecnico" checked={data.seguimiento.recordar_al_tecnico} />
                     Le recuerda al técnico, en su teléfono, la orden que pasa la ventana sin reporte
                   </label>
+                  <!-- INSISTE HASTA QUE LLEGA EL REPORTE (11/11/2026): antes
+                       avisaba una sola vez por atraso, y una orden que nadie
+                       reportaba quedaba así. La cuenta arranca en el último
+                       reporte, no en el aviso anterior. -->
+                  <label class="snoc-body-sm snoc-fila" style="gap:var(--snoc-xs); align-items:center; flex-wrap:wrap;">
+                    Y se lo vuelve a recordar cada
+                    <!-- `snoc-campo` ES EL RECUADRO (11/11/2026): sin la clase
+                         el numero se ve como texto plano y no parece editable;
+                         el ancho se pisa porque la clase trae `width:100%`. -->
+                    <input
+                      class="snoc-campo"
+                      type="number"
+                      name="repetir_recordatorio_cada_minutos"
+                      min="0"
+                      max="1440"
+                      step="1"
+                      style="width:4.5rem;"
+                      value={data.seguimiento.repetir_recordatorio_cada_minutos}
+                    />
+                    minutos mientras siga sin reportar
+                  </label>
+                  <span class="snoc-body-sm snoc-secundario">
+                    En 0 avisa una sola vez por atraso, como antes. La tarea mira cada 5 minutos, así que un valor más chico que eso no lo hace más preciso.
+                  </span>
                   <span class="snoc-body-sm snoc-secundario">
                     Para que apruebe y cierre solo las órdenes que da por buenas, pedíselo en su chat («aprobá y cerrá las órdenes que des por buenas»). Necesita el nivel 3 de autonomía, y el ticket del ISP lo cierra solo si el motor lo deja: hoy esa herramienta exige aprobación humana.
                   </span>

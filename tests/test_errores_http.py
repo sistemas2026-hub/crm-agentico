@@ -66,9 +66,59 @@ USOS_PERMITIDOS = {"mensaje_publico", "estado_http_de", "registrar"}
 # =============================================================================
 titulo("1. el codigo: las respuestas no usan el texto de la excepcion")
 # =============================================================================
+#: Atributos de una excepcion que NO son su mensaje y si se pueden devolver.
+#:
+#: POR QUE UNA LISTA Y NO "cualquier atributo"  --  12/11/2026
+#: ----------------------------------------------------------
+#: Estos tres los ponen NUESTRAS excepciones a proposito para que la respuesta
+#: pueda decir que paso sin copiar ningun texto: `e.codigo` es un codigo
+#: estable, `e.http` el estado que le corresponde, `e.faltan` que requisitos no
+#: se cumplieron. Son metadatos.
+#:
+#: Lo que queda AFUERA es lo que importa: `e.args`, `e.msg`, `e.message`,
+#: `e.reason`, `e.response`, `e.text` SI son el mensaje o el cuerpo del
+#: proveedor, y siguen marcandose. Una regla de "cualquier atributo es seguro"
+#: dejaria pasar `e.args[0]`, que es `str(e)` escrito distinto.
+ATRIBUTOS_DE_METADATO = {"codigo", "http", "faltan"}
+
+
+def _metadato_seguro(nodo: ast.AST, nombre: str) -> set[int]:
+    """Los ids de los usos de 'nombre' que NO dejan salir su texto.
+
+    POR QUE ESTO EXISTE  --  12/11/2026
+    -----------------------------------
+    Esta seccion estuvo en ROJO con 16 sitios reportados, y 10 de ellos NO eran
+    defectos: `type(e).__name__` es justo lo seguro --el nombre de la clase, que
+    es lo que `registrar()` deja en el log-- y `e.codigo`/`e.http` son
+    metadatos que nuestras propias excepciones traen para esto.
+
+    Una guarda que marca lo correcto junto con lo incorrecto no se arregla: se
+    deja de mirar. Y mientras se dejaba de mirar, los 6 que SI eran defectos
+    --`str(e)` en un `except ValueError`, que atrapa tanto el nuestro como el
+    de una biblioteca-- vivieron ahi a la vista de todos.
+
+    La regla pasa a ser "QUE SALE" en vez de "aparece 'e'".
+    """
+    seguros: set[int] = set()
+    for n in ast.walk(nodo):
+        #  type(e).__name__  -- sale el nombre de la CLASE, nunca el mensaje.
+        if (isinstance(n, ast.Attribute) and n.attr == "__name__"
+                and isinstance(n.value, ast.Call)
+                and ast.unparse(n.value.func) == "type"
+                and len(n.value.args) == 1
+                and isinstance(n.value.args[0], ast.Name)
+                and n.value.args[0].id == nombre):
+            seguros.add(id(n.value.args[0]))
+        #  e.codigo / e.http / e.faltan  -- metadato, no texto.
+        if (isinstance(n, ast.Attribute) and n.attr in ATRIBUTOS_DE_METADATO
+                and isinstance(n.value, ast.Name) and n.value.id == nombre):
+            seguros.add(id(n.value))
+    return seguros
+
+
 def usos_prohibidos(nodo: ast.AST, nombre: str) -> list[str]:
     """Usos de 'nombre' dentro de 'nodo' que no pasan por un helper permitido."""
-    permitidos = set()
+    permitidos = _metadato_seguro(nodo, nombre)
     for n in ast.walk(nodo):
         if isinstance(n, ast.Call):
             f = ast.unparse(n.func).split(".")[-1]
@@ -110,6 +160,61 @@ for ruta in sorted((RAIZ / "nucleo" / "canales").glob("*.py")):
             malos.append(f"{rel}:{n.lineno} devuelve r.text")
 revisar(not malos, "ninguna respuesta de error usa el texto de la excepcion ni el cuerpo de un proveedor",
         "\n         ".join(malos))
+
+
+# --- LA GUARDA SE PRUEBA A SI MISMA  --  12/11/2026 ------------------------
+#
+# Se acaba de aflojar: `type(e).__name__` y tres atributos de metadato dejaron
+# de marcarse. Aflojar una guarda sin demostrar que sigue atrapando lo que
+# importa es como borrarla, y mas peligroso: queda en verde.
+#
+# Cada canario es un fragmento REAL que se pasa por el mismo analizador. Los de
+# arriba TIENEN que marcarse; los de abajo NO.
+def _marca(fragmento: str) -> bool:
+    """True si el analizador marcaria este fragmento."""
+    arbol = ast.parse(fragmento)
+    for h in (n for n in ast.walk(arbol) if isinstance(n, ast.ExceptHandler)):
+        for n in (x for s in h.body for x in ast.walk(s)):
+            if (isinstance(n, ast.Call)
+                    and ast.unparse(n.func).split(".")[-1] in
+                    ("jsonify", "fallo", "Response", "make_response")
+                    and h.name and usos_prohibidos(n, h.name)):
+                return True
+    return False
+
+
+_ENVOLTORIO = "try:\n    pass\nexcept ValueError as e:\n    %s\n"
+
+DEBEN_MARCARSE = [
+    ('return jsonify({"error": str(e)})', "str(e) pelado"),
+    ('return jsonify({"error": f"fallo: {e}"})', "interpolado en una f-string"),
+    ('return jsonify({"error": "fallo: " + str(e)})', "concatenado"),
+    ('return jsonify({"error": e.args[0]})', "e.args, que es str(e) escrito distinto"),
+    ('return jsonify({"error": e.msg})', "un atributo que SI es el mensaje"),
+    ('return jsonify({"error": repr(e)})', "repr, que trae el mensaje adentro"),
+    ('return fallo(500, "x", str(e), componente="c")', "por fallo(), en el mensaje"),
+]
+
+NO_DEBEN_MARCARSE = [
+    ('return jsonify({"error": type(e).__name__})', "el nombre de la clase"),
+    ('return jsonify({"error": e.codigo})', "un codigo estable"),
+    ('return jsonify({"error": e.codigo, "faltan": e.faltan}), e.http',
+     "codigo, faltan y http juntos"),
+    ('return jsonify({"error": mensaje_publico(e, "fijo")})',
+     "por el registro de clases publicas"),
+    ('return fallo(500, "x", "mensaje fijo", componente="c", e=e)',
+     "por fallo(), que lo manda al log"),
+]
+
+for fragmento, que in DEBEN_MARCARSE:
+    revisar(_marca(_ENVOLTORIO % fragmento),
+            f"canario: la guarda SIGUE marcando {que}",
+            f"no la marco: {fragmento}")
+
+for fragmento, que in NO_DEBEN_MARCARSE:
+    revisar(not _marca(_ENVOLTORIO % fragmento),
+            f"canario: la guarda NO marca {que}",
+            f"la marco de mas: {fragmento}")
 
 
 # =============================================================================

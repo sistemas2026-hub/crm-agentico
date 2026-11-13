@@ -43,6 +43,7 @@ foto que el modelo no supo leer no es un tecnico que mintio.
 """
 from __future__ import annotations
 
+import math
 import re
 
 #:  UN NIVEL, tal como aparece escrito: "-70.00 dBm", "-21,0dBm", "-7 dBm".
@@ -85,6 +86,116 @@ MAXIMO = -1.0
 #:  punto decimal corrido, medido 3 de 7 veces el 10/11-- y se ataca leyendo
 #:  la foto dos veces, no moviendo este numero.
 TOLERANCIA_DBM = 2.0
+
+
+#:  LO QUE EL MEDIDOR MUESTRA EN LA OTRA UNIDAD. "0.682 µW", "0.000 uW",
+#:  "7.94 microwatts". Sin signo: una potencia en µW es positiva.
+_MICROWATTS = re.compile(
+    r"(\d{1,6}(?:[.,]\d{1,4})?)\s*(?:µ|u|μ)\s*w\b"
+    r"|(\d{1,6}(?:[.,]\d{1,4})?)\s*microwatts?\b",
+    re.IGNORECASE)
+
+#:  CUANTO PUEDEN DIFERIR LAS DOS UNIDADES Y SEGUIR SIENDO LA MISMA LECTURA.
+#:
+#:  El display redondea las dos a pocos decimales, asi que la conversion
+#:  nunca da exacto. 1.0 dB es holgado a proposito: lo que esto busca no es
+#:  un desajuste fino sino una lectura IMPOSIBLE, y las que importan fallan
+#:  por decenas de dB. Medido el 12/11/2026 sobre la foto de la OT #214:
+#:
+#:      el modelo leyo   -2.10 dBm  y  0.682 µW
+#:      -2.10 dBm serian          616.6 µW
+#:      0.682 µW serian           -31.7 dBm
+#:
+#:  casi 30 dB de diferencia. Un umbral de 1.0 no deja pasar nada de eso y
+#:  perdona cualquier redondeo real.
+TOLERANCIA_CRUZADA_DB = 1.0
+
+#:  Por debajo de esto el display esta en su piso ("0.000 µW") y no dice
+#:  nada: es consistente con cualquier dBm muy bajo. No se verifica.
+MICROWATTS_MINIMOS = 0.0005
+
+
+def microwatts(texto: str) -> float | None:
+    """Los µW que el medidor muestra, o None si no vienen o hay mas de uno.
+
+    Con dos numeros no se verifica nada, por el mismo motivo que
+    `uno_solo`: elegir uno seria inventar la mitad del juicio.
+    """
+    vistos = []
+    for a, b in _MICROWATTS.findall(texto or ""):
+        try:
+            v = float((a or b).replace(",", "."))
+        except ValueError:
+            continue
+        if v not in vistos:
+            vistos.append(v)
+    return vistos[0] if len(vistos) == 1 else None
+
+
+def dbm_de_microwatts(uw: float) -> float | None:
+    """La misma potencia, en dBm. `dBm = 10 * log10(mW)`, y 1 mW = 1000 µW."""
+    try:
+        if uw is None or uw <= 0:
+            return None
+        return 10.0 * math.log10(float(uw) / 1000.0)
+    except (TypeError, ValueError):
+        return None
+
+
+def coherente_con_los_microwatts(texto: str) -> tuple[bool | None, str]:
+    """¿El dBm y el µW de esta pantalla son el mismo valor?
+
+    POR QUE ESTO EXISTE  --  12/11/2026
+    ------------------------------------
+    El modelo corre el punto decimal al leer un medidor: dice «-2.10» donde
+    la pantalla muestra «-21.0». Se atacó de dos formas y ninguna alcanzó:
+
+      * la DOBLE LECTURA (11/11) ataca la varianza, y esto resultó ser
+        SESGO -- 4 de 4 lecturas de la misma foto dijeron -2.10, una de
+        ellas agregando «punto decimal visible»;
+      * el RANGO DE LA EMPRESA en el pie (11/11) sí llegó y el modelo sí lo
+        usó --contestó «lectura legible, fuera del rango declarado»-- y
+        reportó -2.10 igual. La instrucción le daba permiso explícito: «si
+        después de mirarlo otra vez seguís leyendo lo mismo, escribí lo que
+        ves». Obedeció.
+
+    Esto es otra cosa: **no le pide al modelo que se corrija**. Un medidor
+    óptico muestra la MISMA potencia en dBm y en µW, y son convertibles. Si
+    los dos números que el modelo leyó de una sola pantalla no son el mismo
+    valor, la lectura no sirve -- cualquiera sea cuál de los dos está mal.
+
+    Es más fuerte que el rango por dos motivos: es física y no configuración
+    (no depende de la planta de ninguna empresa), y no requiere que el
+    modelo admita nada.
+
+    DEVUELVE None CUANDO NO SE PUEDE SABER, y eso es la mitad del valor:
+      * la lectura no trae µW, o trae más de uno
+      * el µW está en el piso del display ("0.000"), consistente con
+        cualquier dBm muy bajo -- es el caso de toda foto de «al llegar» con
+        pérdida de señal
+      * no hay un solo dBm que comparar
+
+    Medido sobre las lecturas reales de producción del 11 y 12/11/2026: el
+    µW viene en 10 de 10 textos no vacíos.
+    """
+    dbm = uno_solo(texto)
+    if dbm is None:
+        return None, "no hay un solo dBm que verificar"
+    uw = microwatts(texto)
+    if uw is None:
+        return None, "la lectura no trae los µW"
+    if uw < MICROWATTS_MINIMOS:
+        return None, "los µW están en el piso del display: no dicen nada"
+    equivalente = dbm_de_microwatts(uw)
+    if equivalente is None:
+        return None, "los µW no se pudieron convertir"
+    diferencia = abs(dbm - equivalente)
+    if diferencia <= TOLERANCIA_CRUZADA_DB:
+        return True, (f"{dbm} dBm y {uw} µW son la misma potencia "
+                      f"(±{diferencia:.1f} dB)")
+    return False, (f"la pantalla no puede decir {dbm} dBm y {uw} µW a la vez: "
+                   f"esos µW son {equivalente:.1f} dBm, "
+                   f"{diferencia:.0f} dB de diferencia")
 
 
 def niveles(texto: str) -> list[float]:

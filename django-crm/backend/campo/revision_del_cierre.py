@@ -110,7 +110,11 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
                           _medicion(orden, pendientes), _material(orden, cierre),
                           _fotos(orden), _potencia(orden, cierre),
-                          _en_rango(orden, cierre))
+                          _en_rango(orden, cierre),
+                          #  EL NOVENO (12/11/2026): los ocho de arriba miran
+                          #  si el trabajo esta COMPLETO; este mira si es el
+                          #  trabajo que se pidio. Ver `_cuadra_con_el_ticket`.
+                          _cuadra_con_el_ticket(orden))
               if p is not None]
     if any(p["ok"] is False for p in puntos):
         veredicto = NO_CERRAR
@@ -137,6 +141,12 @@ def revisar(orden, *, pendientes=None) -> dict | None:
         "evidencias": _evidencias_para_revisar(orden, esquema),
         "sugeridas": _que_rehacer(puntos, esquema, orden),
         "solucion": _solucion(cierre),
+        #  EL OTRO LADO DE LA COMPARACION (12/11/2026). Hasta hoy esto
+        #  devolvia lo que el tecnico hizo y nada de lo que se le pidio: no
+        #  habia con que compararlo. Ver `el_ticket`.
+        "el_ticket": el_ticket(orden),
+        "lo_que_el_tecnico_escribio": _lo_que_escribio_el_tecnico(orden,
+                                                                 cierre),
     }
 
 
@@ -663,6 +673,27 @@ def _numero_de_la_foto(textos, limites):
     for t in textos:
         v = PF.uno_solo(t)
         if v is None or not _lectura_creible(v, limites):
+            continue
+        #  LA PANTALLA SE CONTRADICE A SI MISMA  --  12/11/2026
+        #
+        #  Un medidor optico muestra la MISMA potencia en dBm y en µW, y son
+        #  convertibles. Si los dos numeros que el modelo leyo de una sola
+        #  pantalla no son el mismo valor, esa lectura no sirve, cualquiera
+        #  sea cual de los dos esta mal.
+        #
+        #  Esto ataca el sesgo que ni la doble lectura ni el rango pudieron:
+        #  el modelo corre el punto decimal y lo sostiene. Medido en la foto
+        #  de la OT #214: leyo «-2.10 dBm, 0.682 µW», y esos µW son -31.7
+        #  dBm. Casi 30 dB de diferencia en la misma frase.
+        #
+        #  Es mas fuerte que el rango porque es FISICA, no configuracion: no
+        #  depende de la planta de ninguna empresa, y no le pide al modelo
+        #  que admita nada -- ya se midio que no lo hace.
+        #
+        #  `None` (no se puede saber) NO descarta: el µW en el piso del
+        #  display, o una lectura que no lo trae, siguen valiendo como antes.
+        coherente, _ = PF.coherente_con_los_microwatts(t)
+        if coherente is False:
             continue
         if v not in creibles:
             creibles.append(v)
@@ -1232,9 +1263,133 @@ def _cierre_de_esta_vuelta(orden):
     return cierres.order_by("-created_at").first()
 
 
+def el_ticket(orden) -> dict:
+    """Lo que ORIGINO la orden, para poder compararlo con lo que se hizo.
+
+    POR QUE  --  12/11/2026
+    -----------------------
+    El usuario: «debe haber relacion entre el asunto, la descripcion del
+    ticket y la respuesta del tecnico. No puede haber una respuesta correcta
+    en un asunto que ni por ahi iba al caso.»
+
+    `revisar()` evaluaba ocho puntos --checklist, reporte, servicio, medicion,
+    material, fotos, potencia, rango-- y NINGUNO miraba el ticket. El tecnico
+    podia escribir cualquier cosa coherente consigo misma y los ocho daban
+    verde, porque no habia contra que compararla.
+
+    ES EL MISMO HUECO DEL 06/11, CON TEXTO EN VEZ DE FOTOS. Ese dia el usuario
+    pidio que el supervisor viera si las fotos coinciden con lo pedido, y la
+    nota de `revisar()` lo dejo escrito: «el hueco era de informacion, no de
+    poder: el boton ya existia, pero esta lista mandaba solo el id y el
+    titulo, asi que NO HABIA CON QUE COMPARAR». Esto trae el otro lado.
+
+    DE DONDE SALE CADA COSA, MEDIDO EN PRODUCCION EL 12/11/2026
+    -----------------------------------------------------------
+    Sobre las ultimas ordenes de Rapilink:
+
+      272 | resumen: 'Enviar a correctivo de planta: el tecnico ya asignado...'
+      270 | resumen: 'Enviar a correctivo de red/planta externa: verificar el
+                      puerto 3/4/4...'
+      264 | resumen: 'Llamar al cliente para ubicarlo: es una instalacion
+                      nueva y el ISP no tiene su direccion...'
+
+    `resumen` ES el caso, y esta lleno: lo precarga la lectura del Supervisor
+    (ver el comentario del campo en `campo/models.py`). `diagnostico_previo`
+    sale VACIO en todas: el campo existe, `crear_orden` lo acepta, y ninguno
+    de sus dos llamadores --`despacho_views.py:191` y
+    `operaciones/ordenes_de_despacho.py:654`-- se lo pasa. Se lee igual, para
+    el dia que alguien lo llene; hoy devuelve "".
+
+    (Las ordenes 1842-1844 de produccion SI lo traen y tienen `resumen`
+    vacio. No son otra poblacion: son datos de demostracion que quedaron ahi,
+    con su historia escrita en `seed_campo_demo.py`.)
+
+    NO JUZGA NADA. Devuelve los dos lados; quien compara es el punto noveno,
+    y por encima de el, una persona.
+    """
+    version = getattr(orden, "tipo_trabajo_version", None)
+    tipo = getattr(version, "work_type", None)
+    #  El diagnostico previo es un JSON libre del asistente. Se toma su
+    #  'resumen' si lo trae; lo demas son datos sueltos que no se leen como
+    #  prosa --y volcarlos enteros meteria claves internas en una pantalla.
+    previo = getattr(orden, "diagnostico_previo", None) or {}
+    return {
+        "asunto": str(getattr(tipo, "nombre", "") or ""),
+        "caso": str(getattr(orden, "resumen", "") or "").strip(),
+        "diagnostico_previo": str(previo.get("resumen") or "").strip(),
+        "origen": " ".join(x for x in (
+            str(getattr(orden, "origen_tipo", "") or ""),
+            str(getattr(orden, "origen_ref", "") or "")) if x).strip(),
+    }
+
+
 def _solucion(cierre) -> str:
     respuestas = ((cierre.datos or {}).get("respuestas") or {}) if cierre else {}
     return str(respuestas.get("solucion") or "")
+
+
+def _cuadra_con_el_ticket(orden):
+    """¿Lo que el tecnico reporto explica el ticket? None si no se sabe.
+
+    El usuario, el 12/11/2026: «no puede haber una respuesta correcta en un
+    asunto que ni por ahi iba al caso».
+
+    NUNCA DEVUELVE False, Y ESA ES LA DECISION ENTERA
+    --------------------------------------------------
+    `campo/inspeccion_visual.py:24-36` (31/10/2026): un punto de IA en
+    `False` produce veredicto `NO_CERRAR`, y eso le daria a la IA el poder de
+    negar el trabajo de un tecnico. Aca vale `True` o `None`.
+
+    Y aun asi se cumple lo que el usuario pidio: `None` produce `REVISAR`
+    (ver `revisar()`), y una orden en `REVISAR` **no cierra sola**. La
+    contradiccion frena la orden para que la mire una persona, sin que
+    ninguna IA repruebe a nadie.
+
+    POR QUE LEE Y NO PREGUNTA
+    --------------------------
+    Programacion se refresca cada 15 segundos y cada refresco llama a
+    `revisar()`. Preguntarle al modelo aca seria ~1.920 llamadas por orden
+    por dia, multiplicado por cada supervisor con la pantalla abierta. El
+    cotejo lo calcula UNA vez `campo/tasks.revisar_el_cierre_ya` y lo guarda
+    en `CotejoDelReporte`; esto solo lo lee.
+
+    SIN FILA, EL PUNTO NO APARECE
+    ------------------------------
+    Devuelve None (el punto entero, no el `ok`) cuando todavia no se cotejo o
+    cuando la empresa lo tiene apagado. Un punto que dijera «no se pudo
+    comparar» en toda orden de toda empresa que no encendio esto seria un
+    interrogante permanente que la gente aprende a ignorar -- y entonces
+    tampoco veria el que importa.
+    """
+    from campo.cotejo_del_reporte import (CUADRA, NO_CUADRA,
+                                          del_cierre_de_esta_vuelta)
+
+    try:
+        fila = del_cierre_de_esta_vuelta(orden)
+    except Exception:                                            # noqa: BLE001
+        return None
+    if fila is None:
+        return None
+
+    if fila.veredicto == CUADRA:
+        return _punto("cuadra", True,
+                      "Lo que el técnico hizo explica el caso del ticket.")
+    if fila.veredicto == NO_CUADRA:
+        #  EL MOTIVO VA EN EL TEXTO, no en un campo aparte: quien lee la
+        #  tarjeta tiene que entender QUE no cuadra sin abrir nada mas. Sin
+        #  el, «no cuadra» es una acusacion sin evidencia.
+        detalle = (fila.motivo or "").strip()
+        return _punto("cuadra", None,
+                      "Revisá si el trabajo corresponde al caso: "
+                      + (detalle or "lo que se reportó no parece explicar lo "
+                                    "que decía el ticket."),
+                      motivo=detalle)
+    #  `no_se_sabe`: se intento y no alcanzo. NO es lo mismo que no haberlo
+    #  intentado --eso no deja fila-- y por eso se dice.
+    return _punto("cuadra", None,
+                  "No se pudo comparar el reporte con el ticket"
+                  + (f" ({fila.motivo})" if fila.motivo else "") + ".",
+                  motivo=(fila.motivo or ""))
 
 
 def _checklist(orden):

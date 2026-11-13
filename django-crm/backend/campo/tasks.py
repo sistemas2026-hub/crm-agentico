@@ -332,6 +332,31 @@ def revisar_el_cierre_ya(org_id: str, orden_id: str) -> dict:
         except Exception as e:                                   # noqa: BLE001
             logger.warning("mirada inmediata: fallo (%s)", type(e).__name__)
 
+        #  Y EL COTEJO CONTRA EL TICKET  --  12/11/2026
+        #
+        #  El usuario: «no puede haber una respuesta correcta en un asunto
+        #  que ni por ahi iba al caso». Va AQUI y no dentro de `revisar()`
+        #  porque Programacion se refresca cada 15 segundos y cada refresco
+        #  pasa por ahi: serian ~1.920 llamadas al modelo por orden y por
+        #  dia, por cada supervisor con la pantalla abierta. Se calcula una
+        #  vez, cuando el reporte llega, y la revision LEE la fila.
+        #
+        #  ANTES DE `cerrar_esta_orden` Y NO DESPUES: el cierre automatico
+        #  consulta la revision, y la revision lee esta fila. Despues, la
+        #  orden ya habria cerrado sin el punto -- el mismo error que el
+        #  analisis de fotos tuvo el 09/11.
+        #
+        #  ENVUELTO, como la medicion y las fotos: si el motor no contesta,
+        #  el cierre se intenta igual. Sin fila, el punto no aparece y la
+        #  orden queda como estaba, que es lo correcto -- nunca se cierra de
+        #  mas por un cotejo que no se pudo hacer.
+        try:
+            from campo.cotejo_del_reporte import cotejar_y_anotar
+
+            cotejar_y_anotar(orden)
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("cotejo inmediato: fallo (%s)", type(e).__name__)
+
         return cerrar_esta_orden(orden)
     except Exception as e:                                       # noqa: BLE001
         logger.warning("cierre inmediato: fallo (%s)", type(e).__name__)

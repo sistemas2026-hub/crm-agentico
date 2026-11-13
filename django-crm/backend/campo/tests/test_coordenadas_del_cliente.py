@@ -269,6 +269,73 @@ class TestLasFormasMedidasEl10De11:
         assert cc.leer("0.0 0.0") == (None, None)
 
 
+class TestLaFormaSinSeparadorDel12De11:
+    """La quinta forma: el menos de la longitud hace de separador.
+
+    MEDIDA EL 12/11/2026 con `cli/medir_coordenadas.py rapilink 5345 5394`,
+    que devolvio estas dos siluetas y ninguna coordenada:
+
+        5345   DD.DDDDDD-DD.DDDDDD
+        5394   DD.DDDDD-DD,DDDDDD
+
+    Los digitos de aca abajo son otros: una coordenada de un cliente de verdad
+    no va en un archivo del repositorio. Lo que se conserva es LA FORMA, que es
+    lo unico que la guarda necesita.
+    """
+
+    #  Mismo punto escrito de las dos maneras. Que las dos den LO MISMO es la
+    #  afirmacion: no alcanza con que cada una parsee, tienen que coincidir.
+    PEGADA = "10.910800-74.818600"
+    PEGADA_CON_COMA = "10.91080-74,818600"
+
+    def test_sin_separador_se_lee(self):
+        assert cc.leer(self.PEGADA) == (10.9108, -74.8186)
+
+    def test_con_la_coma_como_decimal_tambien(self):
+        #  EL CASO QUE MUERDE. Partir esto por la coma --que es lo que hace la
+        #  forma buena-- da '10.91080-74' y '818600'. Antes de hoy salia
+        #  ausente por accidente: lo atajaba el patron de la coma fallando.
+        assert cc.leer(self.PEGADA_CON_COMA) == (10.9108, -74.8186)
+
+    def test_las_dos_escrituras_dan_el_MISMO_punto(self):
+        assert cc.leer(self.PEGADA) == cc.leer(self.PEGADA_CON_COMA)
+
+    def test_el_orden_sigue_siendo_lat_lng(self):
+        #  EL ERROR QUE MANDA AL TECNICO AL MAR, otra vez: con la latitud y la
+        #  longitud al reves el pin cae en el Atlantico y se lee como un hecho.
+        #  Barranquilla es ~10.9 N y ~-74.8 W.
+        lat, lng = cc.leer(self.PEGADA)
+        assert 0 < lat < 15, "la latitud es el PRIMER componente"
+        assert -80 < lng < -70, "la longitud es el SEGUNDO, y es negativa"
+
+    def test_la_longitud_POSITIVA_pegada_no_se_adivina(self):
+        #  SIN EL MENOS NO HAY CORTE UNIVOCO: '10.9108074.818600' podria
+        #  partirse en cualquier lado. Que salga ausente es el resultado
+        #  correcto, no una limitacion -- es la diferencia entre leer y
+        #  adivinar.
+        assert cc.leer("10.9108074.818600") == (None, None)
+
+    def test_el_doble_signo_sigue_sin_entrar_por_aca(self):
+        #  La forma nueva admite un menos en el segundo componente. Dos no.
+        assert cc.leer("10.910800--74.818600") == (None, None)
+
+    def test_fuera_del_planeta_no_pasa_por_la_puerta_nueva(self):
+        #  La validacion de planeta vive en `leer`, no en cada patron: una
+        #  forma nueva NO puede traer su propia puerta de atras.
+        assert cc.leer("91.500000-74.818600") == (None, None)
+        assert cc.leer("10.910800-274.818600") == (None, None)
+
+    def test_el_cero_tampoco(self):
+        assert cc.leer("0.000000-0.000000") == (None, None)
+
+    def test_la_forma_buena_sigue_leyendose_igual(self):
+        #  EL CONTROL QUE IMPORTA: el patron nuevo se prueba ANTES que varios
+        #  de los viejos, asi que podria robarles un caso. 1.071 clientes
+        #  dependen de que este siga dando lo mismo.
+        assert cc.leer(BUENA) == (10.9108, -74.8186)
+        assert cc.leer("10.9108 -74.8186") == (10.9108, -74.8186)
+
+
 class TestNoFiltraElDomicilio:
     def test_una_forma_rara_se_registra_SIN_el_valor(self, caplog):
         #  Un log con la coordenada seria el domicilio de una persona en un

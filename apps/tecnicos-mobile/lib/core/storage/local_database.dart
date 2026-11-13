@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 27,
+      version: 28,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -138,6 +138,29 @@ class LocalDatabase {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // v28: con cuantas ordenes arranco el dia, SELLADO.
+    //
+    // Hasta hoy la pantalla de inicio lo deducia de la lista descargada y
+    // decia «arrancó con 38» al lado de un 2: las 36 cerradas de dias
+    // anteriores estaban adentro. Se intento derivarlo de tres formas
+    // distintas --filtrando por `completadaEn`, por estado, por fecha-- y las
+    // tres eran una suposicion sobre un dato que puede faltar: una orden
+    // cerrada hace un minuto todavia no trae su fecha de cierre. El numero se
+    // retiro en vez de adivinar una cuarta vez.
+    //
+    // Sellarlo lo convierte en un hecho: el dia tuvo tantas, y eso se escribe
+    // una vez y se lee. Ver `sellarArranqueDelDia`.
+    //
+    // TABLA PROPIA Y NO UNA COLUMNA DE `local_jornada`, aunque el comentario
+    // que pedia esto dijera «una columna»: `guardarJornada` escribe con
+    // `ConflictAlgorithm.replace`, asi que una columna ahi se borraria en
+    // CADA sincronizacion -- el sello duraria hasta el proximo `mi-dia`. Es
+    // el mismo motivo por el que la v27 puso la marca de sincronizacion
+    // aparte.
+    if (oldVersion < 28) {
+      await _crearSelloDelArranque(db);
+    }
+
     // v15: el seguimiento de la intervencion, para poder leerlo sin señal.
     //
     // Es un espejo, como `local_jornada`: se reemplaza entero en cada
@@ -844,6 +867,109 @@ class LocalDatabase {
     ''');
   }
 
+  /// Con cuantas ordenes arranco cada dia, por (empresa, persona).
+  ///
+  /// `dia` es la fecha LOCAL del telefono en AAAA-MM-DD, y no una marca de
+  /// tiempo: lo que se pregunta es «de que dia es esto», y eso lo contesta un
+  /// calendario, no un instante. Guardar epoch obligaria a volver a decidir
+  /// la franja horaria en cada lectura.
+  static Future<void> _crearSelloDelArranque(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_arranque_del_dia (
+        org_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        dia TEXT NOT NULL,
+        cuantas INTEGER NOT NULL,
+        sellado_en INTEGER NOT NULL,
+        PRIMARY KEY (org_id, profile_id, dia)
+      )
+    ''');
+  }
+
+  /// Sella con cuantas ordenes tuvo el dia y devuelve el sello vigente.
+  ///
+  /// `trabajoDelDia` es lo que el llamador puede contar AHORA: las que siguen
+  /// abiertas mas las que cerro hoy. No se calcula aca a proposito -- la regla
+  /// de que estado cuenta como cerrado vive en `TrabajoVista`, y reescribirla
+  /// en SQL seria tenerla en dos lados para que uno se quede viejo.
+  ///
+  /// EL SELLO SOLO SUBE, Y ESO NO ES PRUDENCIA: ES EL ARREGLO.
+  ///
+  /// El dato que falta es la fecha de cierre de una orden que se acaba de
+  /// cerrar: por unos segundos no esta ni en las abiertas ni en las cerradas
+  /// de hoy, asi que `trabajoDelDia` baja en uno. Con `max` eso no importa:
+  /// esa orden ya se conto cuando estaba abierta, y el sello se queda con el
+  /// valor mas alto que vio en el dia.
+  ///
+  /// Dos consecuencias, dichas para que nadie las descubra despues:
+  ///   * si el despacho le AGREGA una orden a media mañana, el sello sube. Es
+  ///     correcto para un denominador: el dia terminó teniendo esa orden.
+  ///   * si le QUITAN una (reasignada a otro tecnico), el sello NO baja. El
+  ///     avance queda contra el trabajo que efectivamente tuvo.
+  ///
+  /// Si el telefono se abre por primera vez a media tarde, el sello es lo que
+  /// se puede saber en ese momento: no hay forma de reconstruir la mañana de
+  /// un telefono que estaba apagado, y inventarla seria el mismo error que
+  /// este metodo existe para no repetir.
+  Future<int> sellarArranqueDelDia({
+    required String orgId,
+    required String profileId,
+    required int trabajoDelDia,
+    DateTime? ahora,
+  }) async {
+    final db = await database;
+    final DateTime cuando = (ahora ?? DateTime.now()).toLocal();
+    final String dia = '${cuando.year.toString().padLeft(4, '0')}-'
+        '${cuando.month.toString().padLeft(2, '0')}-'
+        '${cuando.day.toString().padLeft(2, '0')}';
+    final int piso = trabajoDelDia < 0 ? 0 : trabajoDelDia;
+
+    final filas = await db.query(
+      'local_arranque_del_dia',
+      columns: <String>['cuantas'],
+      where: 'org_id = ? AND profile_id = ? AND dia = ?',
+      whereArgs: <Object?>[orgId, profileId, dia],
+      limit: 1,
+    );
+    final int sellado = filas.isEmpty ? -1 : (filas.first['cuantas'] as int);
+    if (sellado >= piso) {
+      return sellado;
+    }
+    await db.insert('local_arranque_del_dia', <String, Object?>{
+      'org_id': orgId,
+      'profile_id': profileId,
+      'dia': dia,
+      'cuantas': piso,
+      'sellado_en': cuando.millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return piso;
+  }
+
+  /// El sello de hoy, o `null` si todavia no se sello ninguno.
+  ///
+  /// Devuelve `null` y no `0` a proposito: «no se sello» y «arranco con cero»
+  /// son dos cosas distintas, y la pantalla las dibuja distinto -- con `null`
+  /// no muestra la nota, con `0` diria «arrancó con 0».
+  Future<int?> arranqueDelDia({
+    required String orgId,
+    required String profileId,
+    DateTime? ahora,
+  }) async {
+    final db = await database;
+    final DateTime cuando = (ahora ?? DateTime.now()).toLocal();
+    final String dia = '${cuando.year.toString().padLeft(4, '0')}-'
+        '${cuando.month.toString().padLeft(2, '0')}-'
+        '${cuando.day.toString().padLeft(2, '0')}';
+    final filas = await db.query(
+      'local_arranque_del_dia',
+      columns: <String>['cuantas'],
+      where: 'org_id = ? AND profile_id = ? AND dia = ?',
+      whereArgs: <Object?>[orgId, profileId, dia],
+      limit: 1,
+    );
+    return filas.isEmpty ? null : filas.first['cuantas'] as int;
+  }
+
   static Future<void> _crearColaDeNovedades(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS cola_novedades (
@@ -1213,6 +1339,7 @@ class LocalDatabase {
     await _crearTablaDeJornada(db);
     await _crearTablaDeIncidencias(db);
     await _crearMarcaDeSincronizacion(db);
+    await _crearSelloDelArranque(db);
 
     // Índices para optimizar consultas por tenant/usuario
     await db.execute(

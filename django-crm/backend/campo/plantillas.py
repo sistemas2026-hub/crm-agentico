@@ -459,6 +459,30 @@ def componer(definicion: dict) -> dict:
 
         if tipo == TEXTO:
             salida["tipo"] = "texto"
+            #  SE PUEDE LEER CON LA CÁMARA  --  12/11/2026
+            #
+            #  El usuario, sobre las instalaciones: «al momento de digitar los
+            #  datos hay muchos errores, mala escritura del nombre,
+            #  direcciones mal digitalizadas». Y el lector de códigos de la app
+            #  ya explica en su propio comentario por qué eso no se arregla
+            #  validando: «un dígito mal no da error: queda un equipo
+            #  registrado con un serial que no existe, y el problema aparece
+            #  semanas después cuando alguien busca ese equipo y no está».
+            #
+            #  LO DECIDE LA PLANTILLA, NO LA APP, y ahí está el punto. Un
+            #  serial de ONU se lee de una etiqueta; «contá qué pasó» no se lee
+            #  de ninguna parte. Un botón de cámara en TODOS los campos de
+            #  texto llenaría de cámaras los que no tienen nada que escanear;
+            #  y elegir en el código cuál la lleva obligaría a que la app
+            #  conozca los campos de cada empresa — justo lo que el formulario
+            #  dirigido por esquema existe para evitar.
+            #
+            #  No valida lo leído, a propósito: el lector devuelve el texto
+            #  crudo y quien lo recibe decide. Un plan de seriales no es igual
+            #  en dos marcas de ONT, y rechazar el que no encaja le quitaría al
+            #  técnico la única forma rápida que tiene.
+            if bool(c.get("escaneable")):
+                salida["escaneable"] = True
         elif tipo == NUMERO:
             salida["tipo"] = "decimal"
             mn = _numero(c.get("min"), f"El minimo de «{titulo}»")

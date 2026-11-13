@@ -1141,6 +1141,52 @@ Guarda: `sesion.test.js` recorre `atenderSesion()` entera con el backend doblado
 
 ---
 
+### 8.23 DECISIÓN — Una orden no cierra sola cuando el trabajo reportado no explica el ticket (12/11/2026)
+
+**El pedido del usuario**, después de ver la primera pantalla donde el ticket y el reporte del técnico aparecían juntos:
+
+> *"el supervisor debe tener el conocimiento de su trabajo y debe saber identificar y relacionar lo que escribe el técnico. Debe haber relación entre el asunto, la descripción del ticket y la respuesta del técnico. No puede haber una respuesta correcta en un asunto que ni por ahí iba al caso."*
+
+**El hueco, medido.** `campo/revision_del_cierre.py::revisar()` evaluaba **ocho puntos** —checklist, reporte, servicio, medición, material, fotos, potencia, rango— y **ninguno miraba el ticket**. Los campos estaban en la orden (`resumen`, `diagnostico_previo`) y la revisión no los leía, así que un técnico podía escribir cualquier cosa coherente consigo misma y los ocho daban verde: no había contra qué compararla.
+
+Es el mismo hueco que el del **06/11** con las fotos —*"el hueco era de información, no de poder: el botón ya existía, pero esta lista mandaba solo el id y el título, así que no había con qué comparar"*— con texto en vez de imagen, y se cierra igual: dando con qué.
+
+**El caso real, capturado en producción el 12/11/2026** apenas salió la pantalla:
+
+| | |
+|---|---|
+| **Se pidió** | *"El cliente pide el cambio de router wifi como gestión comercial/técnica, **no por una falla**: el equipo está **en línea y con señal buena**."* |
+| **Qué hizo** | *"Potencia al llegar: **-50.0 dBm**. Qué encontró: **fibra partida** antes del conector."* |
+
+Las dos cosas no pueden ser ciertas a la vez, y **los ocho puntos estaban en verde**. La orden se podía cerrar.
+
+**Lo que se decidió.** Un noveno punto, que compara los dos lados con el modelo y vale `True` o `None`, **nunca `False`**:
+
+| Veredicto | Punto | Efecto en la orden |
+|---|---|---|
+| El reporte explica el ticket | `True` | no estorba |
+| **Contradicción, o no se pudo juzgar** | **`None`** | **veredicto `REVISAR`: no cierra sola** |
+| No se cotejó, o la empresa lo tiene apagado | el punto no aparece | como antes |
+
+**Por qué `None` y no `False`, y por qué aun así se cumple lo que el usuario pidió.** La decisión del **31/10/2026** (`campo/inspeccion_visual.py:24-36`) dice que un punto de IA en `False` produce `NO_CERRAR`, y eso le daría a la IA el poder de **negar el trabajo de un técnico**. No se invierte. Pero `None` produce `REVISAR`, y una orden en `REVISAR` **no entra al cierre automático**: la contradicción frena la orden para que la mire una persona, sin que ninguna IA repruebe a nadie.
+
+**Lo que el punto no puede hacer: acusar.** Que dos textos se contradigan no prueba que alguien mintió. El diagnóstico pudo quedar viejo, el cliente pudo tener dos problemas, la fibra pudo partirse entre el diagnóstico y la visita. La instrucción al modelo se lo prohíbe con todas las letras, porque sin eso contesta como fiscal. **Nombra la contradicción; no la resuelve.**
+
+**La asimetría que ordenó todo el diseño.** Los dos errores no cuestan lo mismo:
+
+- decir *"no cuadra"* cuando cuadraba → alguien mira una orden de más
+- decir *"cuadra"* cuando no cuadraba → **un cliente sin servicio, un ticket cerrado, y nadie se entera**
+
+El segundo es invisible: una orden que cerró sola y no debía se ve igual que una que cerró bien. Por eso **todo** lo que sale mal —proveedor caído, respuesta fuera de formato, un lado vacío, la empresa sin el interruptor— devuelve `no_se_sabe`, **jamás** `si`.
+
+**Se calcula una vez, no por pantalla.** Programación se refresca cada **15 segundos** y cada refresco llama a `revisar()`. Con el cotejo ahí dentro serían ~1.920 llamadas al modelo por orden y por día, multiplicado por cada supervisor con la pantalla abierta — una factura disparada por un camino que nadie mira, que es textualmente lo que le pasó a `vision`. Se calcula cuando el técnico manda su reporte, se guarda en `campo_cotejo_del_reporte`, y la revisión **lee**.
+
+**Tercer interruptor, y apagado por defecto.** `TenantConfig.cotejo_reporte_campo` se separa de `vision_habilitada` y `vision_evidencias_campo` por el mismo argumento del 31/10: las otras dos mandan una **imagen** y esta manda **texto que escribió el personal de la empresa**. Una puede aceptarse sin la otra.
+
+**Lo que los 10 módulos de conocimiento FTTH son, y lo que no.** El usuario pasó una especificación de 10 módulos (arquitectura FTTH, potencias ópticas, equipos, conectividad, fallas físicas, alarmas, tickets, imágenes, procedimientos NOC, analítica). **No son capacidades a construir: son el insumo de este juicio.** Sin saber de FTTH, el modelo acepta cualquier par de frases que suenen técnicas; con ese conocimiento sabe que si el ticket dice **LOS** y el técnico reporta *"estaba desenchufado"*, eso **sí cuadra** —desde la OLT una fibra cortada y un equipo sin luz se ven idénticos—. El carril para cargarlo ya existe y está decidido: `asistente.habilidades` y `corpus/<tenant>/`, no código (`SPEC/objetivos/entrenar-un-agente.md`).
+
+Ficha y plan: [SPEC/objetivos/supervisor-noc-diagnostica-la-red.md](SPEC/objetivos/supervisor-noc-diagnostica-la-red.md).
+
 ## 9. Despliegue
 
 Un VPS gestionado con **Dokploy**: el motor, el CRM (backend, Celery, frontend) y un Supabase autoalojado del que se usa solo Postgres. **Pushear la rama de despliegue publica a producción** (autodeploy). El procedimiento, las variables, el webhook de WhatsApp y el diagnóstico de fallos viven en [DESPLIEGUE.md](DESPLIEGUE.md); las reglas de quién despliega y cómo se verifica, en CLAUDE.md §6–§8.

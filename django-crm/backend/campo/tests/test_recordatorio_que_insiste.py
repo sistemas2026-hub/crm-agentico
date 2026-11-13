@@ -85,7 +85,15 @@ def fcm():
 
     def mandar(token, titulo, texto, enlace, *, aviso_id="", verbo="",
                contenido=None):
-        enviados.append({"texto": texto, "contenido": contenido or {}})
+        #  SE GUARDA TODO LO QUE SALE, NO SOLO EL CUERPO (12/11/2026). La
+        #  primera version descartaba `titulo`, `enlace` y `aviso_id`, asi
+        #  que `test_SIN_DATOS_DEL_CLIENTE_EN_NINGUNO` afirmaba sobre el
+        #  cuerpo y el `data` nada mas: alguien podia ponerle el nombre del
+        #  cliente al asunto y la guarda seguia en verde. Lo encontro el
+        #  revisor de PII. Una guarda que no mira un campo no lo protege.
+        enviados.append({"titulo": titulo, "texto": texto, "enlace": enlace,
+                         "aviso_id": str(aviso_id),
+                         "verbo": verbo, "contenido": contenido or {}})
         return push_fcm.ENTREGADO
 
     with mock.patch.object(push_fcm, "esta_configurado", return_value=True), \
@@ -227,6 +235,67 @@ def test_Y_PUEDE_ELEGIR_OTRA_CADENCIA(org, orden, fcm, mediodia):
     assert len(fcm) == 2
 
 
+def test_SUBIR_LA_CADENCIA_SIGUE_AVISANDO(org, orden, fcm, mediodia):
+    """EL APAGON DEL 12/11/2026, encontrado por el auditor de frontera.
+
+    La primera version puso en la clave solo el ORDINAL del recordatorio. El
+    ordinal es `1 + (minutos - ventana) // cada`, asi que subir la cadencia
+    lo hace BAJAR, de vuelta al rango que la cadencia vieja ya gasto: el
+    reclamo por clave lo rechaza como repetido y no sale nada.
+
+    Medido entonces: vencida desde las 7:00 con cadencia 15, 23 avisos al
+    mediodia; el supervisor pone 60 esperando uno por hora y recibe CERO por
+    el resto del dia. Al dia siguiente la referencia ya no es de hoy, asi que
+    no vuelve nunca. Y la pantalla contestaba «Vuelve a avisarle cada 60
+    minutos hasta que reporte» justo despues de apagarla.
+
+    Las 17 guardas que habia estaban en verde con el sintoma vivo: ninguna
+    cambiaba la configuracion con la orden YA contando. Esta lo hace.
+    """
+    fila = ConfiguracionDeSeguimiento.objects.create(
+        org=org, repetir_recordatorio_cada_minutos=15)
+    _reporte(orden, mediodia)
+
+    #  Con 15: los avisos 1..5 (minutos 30, 45, 60, 75, 90).
+    con_quince = sum(_a_los(org, orden, mediodia, m)
+                     for m in (31, 46, 61, 76, 91))
+    assert con_quince == 5, con_quince
+
+    #  El supervisor sube a 60 esperando uno por hora.
+    fila.repetir_recordatorio_cada_minutos = 60
+    fila.save(update_fields=["repetir_recordatorio_cada_minutos"])
+
+    #  LO QUE TIENE QUE PASAR: sigue avisando. Con 60 las ranuras caen en los
+    #  minutos 30, 90, 150, 210... asi que de aca en adelante toca una por
+    #  hora. Lo que NO puede pasar es cero.
+    con_sesenta = sum(_a_los(org, orden, mediodia, m)
+                      for m in (151, 211, 271))
+    assert con_sesenta == 3, (
+        f"la insistencia se apago al subir la cadencia: {con_sesenta} avisos")
+
+
+def test_Y_VOLVER_A_LA_CADENCIA_ANTERIOR_TAMPOCO_LA_APAGA(org, orden, fcm,
+                                                          mediodia):
+    """El caso real: se baja a 5 para probar y se vuelve a 15. Si el espacio
+    de claves fuera solo el ordinal, los numeros de 15 ya estarian todos
+    gastados por la corrida de 5 --toda ranura de 15 es tambien ranura de
+    5-- y el silencio seria total."""
+    fila = ConfiguracionDeSeguimiento.objects.create(
+        org=org, repetir_recordatorio_cada_minutos=5)
+    _reporte(orden, mediodia)
+
+    de_a_cinco = sum(_a_los(org, orden, mediodia, m)
+                     for m in (31, 36, 41, 46, 51, 56, 61))
+    assert de_a_cinco == 7, de_a_cinco
+
+    fila.repetir_recordatorio_cada_minutos = 15
+    fila.save(update_fields=["repetir_recordatorio_cada_minutos"])
+
+    de_a_quince = sum(_a_los(org, orden, mediodia, m) for m in (76, 91, 106))
+    assert de_a_quince == 3, (
+        f"volver a la cadencia anterior la apago: {de_a_quince} avisos")
+
+
 def test_APAGADO_DEL_TODO_SIGUE_APAGADO(org, orden, fcm, mediodia):
     """`recordar_al_tecnico` manda sobre todo lo demas: la insistencia no
     puede resucitar un aviso que la empresa apago."""
@@ -249,8 +318,15 @@ def test_SIN_DATOS_DEL_CLIENTE_EN_NINGUNO(org, orden, fcm, mediodia):
     _a_los(org, orden, mediodia, 46)
     _a_los(org, orden, mediodia, 61)
 
+    #  El `json.dumps` del fixture completo: titulo, texto, enlace, aviso_id,
+    #  verbo y contenido. Si manana alguien le agrega un dato del cliente a
+    #  CUALQUIERA de esos, esto se pone rojo.
     crudo = json.dumps(fcm, ensure_ascii=False)
     assert "Beatriz" not in crudo and "Calle 50" not in crudo, crudo
+    #  Y el titulo se mira aparte, porque es el campo que la version vieja
+    #  del fixture descartaba: que exista en el json no prueba que se haya
+    #  armado, podria ser la cadena vacia.
+    assert all(f"OT #{orden.numero}" in e["titulo"] for e in fcm),         [e["titulo"] for e in fcm]
 
 
 def test_EL_PRIMERO_CONSERVA_SU_CLAVE_VIEJA(org, orden, fcm, mediodia):

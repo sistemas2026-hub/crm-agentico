@@ -374,8 +374,24 @@ with banco(Tabla()) as tabla:
     fila = list(tabla.filas.values())[0]
     afirmar(fila["estado"] == "fallida",
             f"la operacion queda 'fallida' (quedo '{fila['estado']}')")
-    afirmar("502 del proveedor" in (fila["error"] or ""),
-            f"con el error guardado ({fila['error']})")
+    #  EL ERROR QUEDA GUARDADO, PERO NO EL TEXTO DEL PROVEEDOR  --  12/11/2026.
+    #
+    #  Esta afirmacion decia `"502 del proveedor" in fila["error"]`: exigia que
+    #  el mensaje de la excepcion ajena ESTUVIERA en la columna. Y la columna
+    #  es nuestra y es un metadato: el `{e}` de un `HTTPError` real --el que
+    #  llega cuando el ISP contesta mal-- es "400 Client Error ... for url:
+    #  <LA URL ENTERA>", con la cedula y la coordenada de la casa en la query.
+    #
+    #  Se invierte a proposito, no se afloja: se sigue exigiendo que la fila
+    #  diga QUE fallo --si no, un error vacio pasaria-- y ademas que no lleve
+    #  el texto. El detalle completo sigue en el log. Ver
+    #  `nucleo/observabilidad/registro.py::error_para_guardar` y
+    #  `tests/test_error_guardado_sin_pii.py`, que lo mide por el efecto.
+    guardado = fila["error"] or ""
+    afirmar("ErrorDelProveedor" in guardado,
+            f"con el TIPO del error guardado ({guardado})")
+    afirmar("502 del proveedor" not in guardado,
+            f"y SIN el texto del proveedor ({guardado})")
 
 # ===========================================================================
 seccion("8. despues de un fallo, el reintento es una DECISION, no un reflejo")

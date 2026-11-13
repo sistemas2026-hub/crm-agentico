@@ -15,6 +15,9 @@ Lo que estas guardas afirman es el EFECTO, no que el comando exista:
   2. la bitacora queda EXACTAMENTE igual: cero eventos nuevos
   3. el estado de la orden queda igual
   4. no imprime el nombre del cliente (CLAUDE.md §5)
+  5. no imprime la PROSA que el modelo escribio de una foto, salvo
+     que se pida con `--con-texto` (12/11/2026); el NUMERO si sale
+     siempre, o el comando deja de servir para lo que existe
 ================================================================================
 """
 from __future__ import annotations
@@ -165,6 +168,64 @@ def test_no_imprime_el_nombre_del_cliente(org_a):
     texto = _correr(org_a, ot=[9806])
 
     assert "MARIO" not in texto.upper()
+
+
+def test_LA_PROSA_DEL_MODELO_NO_SALE_POR_DEFECTO(org_a):
+    """Lo que el modelo ESCRIBIO mirando la foto es texto libre, y esta
+    salida se pega en un chat despues de correrla en el contenedor de
+    PRODUCCION.
+
+    `redactar()` ya tapo cedula, celular, correo y coordenadas antes de
+    guardar --medido-- pero un NOMBRE PROPIO o una DIRECCION en prosa
+    sobrevive. El encabezado del comando decia «sin datos del cliente» y este
+    bloque la imprimia igual; lo encontro el revisor de PII el 12/11/2026.
+
+    Lo que tiene que SEGUIR saliendo es el NUMERO: la diferencia entre
+    «-21.0» y «-2.10» es todo el caso de la OT #200 y la #201. Un comando que
+    tapa la prosa Y el numero no sirve para nada, y por eso la guarda afirma
+    las dos direcciones.
+    """
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+    from campo.models import EvidenciaTrabajo
+
+    orden = _orden(org_a, 9820, vuelta=1)
+    foto = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    AnalisisDeEvidencia.objects.create(
+        org=org_a, evidencia=foto, vuelta=1, origen=AnalisisDeEvidencia.IA,
+        texto=("Pantalla del medidor: -21.0 dBm. Al fondo se ve un papel a "
+               "nombre de Sofia Munoz y la fachada de Calle 50 # 10-20."
+               + chr(10) + "MUESTRA: si" + chr(10) + "ATENCION: no"))
+
+    texto = _correr(org_a, ot=[9820])
+
+    #  LO QUE NO PUEDE SALIR.
+    assert "Sofia" not in texto, texto
+    assert "Calle 50" not in texto, texto
+    #  LO QUE SI TIENE QUE SALIR, O EL COMANDO DEJA DE SERVIR.
+    assert "numero=-21.0" in texto, texto
+    assert "MUESTRA: si" in texto, texto
+    #  Y dice que hay prosa oculta: si no, quien lee cree que la foto no
+    #  tenia texto, cuando lo que pasa es que no se muestra.
+    assert "--con-texto" in texto, texto
+
+
+def test_CON_TEXTO_LA_MUESTRA_ENTERA_Y_LO_ADVIERTE(org_a):
+    """La bandera existe porque hay fallas que solo se ven leyendo la prosa
+    --asi se diagnostico la #201--. Lo que no puede pasar es que salga sin
+    que quien la pidio sepa que puede traer un nombre."""
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+    from campo.models import EvidenciaTrabajo
+
+    orden = _orden(org_a, 9821, vuelta=1)
+    foto = EvidenciaTrabajo.objects.filter(orden_trabajo=orden).first()
+    AnalisisDeEvidencia.objects.create(
+        org=org_a, evidencia=foto, vuelta=1, origen=AnalisisDeEvidencia.IA,
+        texto="Medidor -21.0 dBm. Se ve un papel a nombre de Sofia Munoz.")
+
+    texto = _correr(org_a, ot=[9821], con_texto=True)
+
+    assert "Sofia Munoz" in texto, texto
+    assert "puede traer un nombre o una direccion" in texto, texto
 
 
 def test_el_texto_libre_de_un_evento_no_sale(org_a):

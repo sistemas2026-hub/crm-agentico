@@ -127,8 +127,14 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute=5),
     },
     # El Supervisor le recuerda al tecnico la orden que paso la ventana sin
-    # reporte (campo/recordatorio_de_reporte.py). Uno por atraso: mirar cada 5
-    # minutos no manda un aviso cada 5 minutos.
+    # reporte (campo/recordatorio_de_reporte.py). Mirar cada 5 minutos no manda
+    # un aviso cada 5 minutos: el aviso que toca lo decide
+    # `cual_recordatorio()` sobre los minutos desde el ultimo reporte, y la
+    # clave de `AvisoEnviado` excluye el repetido. La consecuencia de este
+    # `*/5` es el PISO de precision: con `repetir_recordatorio_cada_minutos`
+    # en 15, el segundo aviso sale entre el minuto 45 y el 50, no a los 45
+    # exactos. Bajar la repeticion por debajo de 5 minutos no la haria mas
+    # fina; habria que acelerar esta tarea tambien.
     "recordar-reportes-de-campo": {
         "task": "campo.tasks.recordar_reportes",
         "schedule": crontab(minute="*/5"),

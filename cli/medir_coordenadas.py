@@ -64,6 +64,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+#  EL .env, COMO TODOS SUS HERMANOS  --  12/11/2026.
+#
+#  Este script no lo cargaba, y entonces no podia correrse desde una maquina
+#  de desarrollo: `fuente.cargar()` pide las cinco variables de conexion y sin
+#  ellas muere con "No hay datos de conexion en el entorno" -- un mensaje que
+#  suena a que falta configuracion del servidor y lo que faltaba era esta
+#  linea. Medido hoy al intentar usarlo para mirar los servicios 5345 y 5394.
+#
+#  override=False: el entorno explicito gana, el archivo solo rellena.
+from dotenv import find_dotenv, load_dotenv                # noqa: E402
+
+#  DOS BUSQUEDAS, Y LA SEGUNDA NO ES REDUNDANTE. `load_dotenv()` pelado busca
+#  desde la carpeta DEL SCRIPT hacia arriba; con el script en un worktree y el
+#  `.env` en la copia principal, no lo encuentra nunca y el mensaje que sale
+#  --"No hay datos de conexion"-- apunta al entorno y no a la ruta. Medido el
+#  12/11/2026. `usecwd=True` busca desde donde esta parado quien lo corre.
+load_dotenv(override=False)
+load_dotenv(find_dotenv(usecwd=True), override=False)
+
 from nucleo.config import fuente as fuente_config          # noqa: E402
 from nucleo.herramientas import http as ejecutor_http      # noqa: E402
 

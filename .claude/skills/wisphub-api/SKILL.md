@@ -1050,6 +1050,139 @@ no distingue «funciono» de «no hizo nada» no prueba nada. Mover el ultimo
 decimal (misma ubicacion, ~10 cm) deja las dos preguntas separadas: que APLICO
 se ve en el campo, y que NO PISO se ve en el diff.
 
+### La IDENTIDAD del cliente no esta donde uno la busca (12/11/2026)
+
+**El detalle del servicio NO trae el nombre, la direccion, la cedula ni el
+telefono.** Medido sobre el 5832: `GET /api/clientes/5832/` devuelve 34 campos
+y esos cuatro NO ESTAN -- ni vacios, AUSENTES. Son dos recursos distintos con
+la misma raiz:
+
+| Recurso | Campos | Que es |
+|---|---|---|
+| `/api/clientes/{id}/` | 34 | EL SERVICIO: ip, plan, zona, router, sn_onu, coordenadas, las cuatro contrasenas |
+| `/api/clientes/{id}/perfil/` | 33 | LA PERSONA: nombre, apellidos, cedula, direccion, telefono, email |
+
+La trampa no es que falte documentacion: es que el nombre del endpoint dice
+"clientes" y lo que devuelve es el servicio. Buscar `nombre` ahi y encontrar
+que no esta lleva a concluir que la API no lo expone. Y el error simetrico ya
+estaba medido en el otro sentido: `/perfil/` NO trae `coordenadas`.
+
+### VERIFICADO el 12/11/2026: el PUT parcial del PERFIL aplica, y es la via
+### para que un tecnico corrija la identidad desde la puerta
+
+Hasta hoy de `/perfil/` solo se habia verificado el **DELETE** (el borrado
+real). Tambien acepta escritura, y con la misma propiedad que ya se habia
+medido en el servicio: **un PUT con SOLO los campos que cambian aplica y NO
+pisa el resto.** Escritura real autorizada por el usuario sobre el servicio de
+prueba **5832**:
+
+    OPTIONS /api/clientes/5832/perfil/
+      -> 200  Allow: GET, PUT, PATCH, DELETE, HEAD, OPTIONS
+
+    PUT /api/clientes/5832/perfil/
+        {"nombre": ..., "direccion": ..., "cedula": ..., "telefono": ...}
+      -> 200
+    GET /api/clientes/5832/perfil/   (aparte, no el eco)
+      -> los CUATRO aplicaron
+         los otros 29 campos intactos
+         24 campos con valor antes, 24 despues
+    PUT con los valores originales   -> 200, los cuatro restaurados
+
+Cada campo se escribio con un valor DISTINTO del que tenia, por la razon que
+esta seccion ya explica mas arriba: con un valor identico, «nada cambio» es
+indistinguible de «la API ignoro la llamada».
+
+**POR QUE IMPORTA.** Una instalacion nueva entra como ticket del cliente
+ficticio del ISP (un prospecto sin identidad resuelta), y hoy el nombre, la
+cedula y la direccion los teclea alguien que no tiene el documento delante. Con
+esto, quien SI lo tiene --el tecnico, parado en la puerta-- puede corregirlos,
+y el alta de red (ip, usuario_rb, plan, zona) sigue siendo de la oficina, que
+es la unica que conoce la topologia.
+
+### MEDIDO el 12/11/2026: Rapilink NO usa el modulo de instalaciones
+
+Solo lectura, sin una sola escritura. Y el resultado cambia el diseño, asi que
+conviene leerlo antes de construir cualquier cosa sobre `/api/instalaciones/`:
+
+    GET /api/instalaciones/                          count = 1
+        ?estado_instalacion=1  Nueva                 0
+        ?estado_instalacion=2  Progreso              0
+        ?estado_instalacion=3  Activada              0
+        ?estado_instalacion=4  Terminada             0
+        ?estado_instalacion=7  Pendiente             0
+        ?estado_instalacion=8  Planificacion         1   <- la unica
+                               suma de los seis      1   = el total
+
+**UN registro, y esta en pre-instalacion.** El trabajo de instalacion de esta
+empresa NO vive aca: vive en los TICKETS, con asunto «Instalacion Nueva» y
+departamento «Ventas». Construir la app contra este endpoint seria construir
+contra una tabla vacia.
+
+(Limite de la medicion, que hay que decir: esta API aplica recortes propios sin
+filtro de fecha --medido en tickets y facturas--, asi que «1» puede ser «1 en la
+ventana reciente» y no «1 en la historia». Para lo que se decidio hoy no cambia
+nada: de las seis listas que un tecnico mirarian, cinco estan en cero.)
+
+**El filtro `estado_instalacion` SI se respeta**: un valor imposible
+(`999999999`) devuelve 0, y la suma de los seis estados cuadra con el total.
+
+**La fila NO trae `estado_instalacion`.** Son 54 campos y ese NO esta --
+AUSENTE, no vacio--. Lo que trae es `estado`, y como TEXTO: `'Instalación'`,
+no un numero. O sea: se puede FILTRAR por `estado_instalacion` y no se puede
+LEER de vuelta. Quien quiera saber en que estado quedo algo tiene que deducirlo
+de la lista en la que aparece.
+
+**`tecnico` vino `null`** en esa fila, consistente con el hallazgo de que en
+instalaciones asignadas la asignacion real viaja en `email_tecnico`. Su filtro
+devuelve 0 ante un imposible (buena senal) pero NO se pudo validar con un valor
+real: con una sola fila y su tecnico en null, ningun id devuelve un
+subconjunto. **No es «no funciona», es «no se puede medir con estos datos»** --
+y la diferencia importa: declararlo verificado seria inventar.
+
+### Lo que NO hace falta verificar, y por que
+
+Se iba a medir si `estado_instalacion` se puede MOVER por API (1 -> 2 -> 4),
+con una escritura sobre el servicio de prueba. **Se descarto antes de hacerla**,
+por dos razones:
+
+1. No hay nada que mover: cinco de los seis estados estan en cero.
+2. El sujeto estaba mal elegido. El 5832 esta **Activo**, y
+   `estado_instalacion` no es una etiqueta como `nombre`: es una posicion en una
+   fila de trabajo. Escribirselo podria meter un cliente real en la «Lista de
+   instalaciones» del panel --inventandole trabajo al equipo-- o moverle el
+   `estado` del servicio, que reserva el `0` para «instalacion». El riesgo no es
+   perder un dato: es cortarle el servicio a alguien o ensuciarle la cola a
+   quien despacha.
+
+Para cerrar una instalacion se usa lo que YA esta verificado:
+`POST /api/tickets/{id}/respuesta/` con `ticket-estado`, que es la unica forma
+confirmada de mover el estado de un ticket.
+
+### `/api/instalaciones/` es la pantalla del panel, y sin filtro no la devuelve
+
+La entrada anterior de esta skill decia «1 registro, parece ser instalaciones
+pendientes, sin confirmar». El spec lo aclara: es el
+«Lista de instalaciones» Y «Lista de pre-instalaciones» de WispHub, y **se
+filtra por `estado_instalacion`**:
+
+    1 Nueva · 2 Progreso · 3 Activada · 4 Terminada · 7 Pendiente
+    8 Planificacion   <- las PRE-instalaciones
+
+Pide el permiso «Lista de Clientes». Cada fila trae **54 campos**, con las
+cuatro contrasenas, la cedula y las coordenadas: lista blanca obligatoria.
+
+**No hay catalogo de `localidad` ni de `ciudad`** en ninguna de las 54 rutas
+(si hay `/zonas/`, `/router/`, `/sectorial/`, `/plan-internet/`, `/staff/`,
+`/modelo-antena/`, `/proveedores/`, `/formas-de-pago/`). Son texto libre, y esa
+es la causa estructural de las direcciones mal escritas. Los valores que YA
+existen se pueden cosechar de la base de clientes: `localidad` y `ciudad` son
+filtros verificados.
+
+**`/api/solicitar-instalacion/` no es para el tecnico.** Es un alta de
+PRE-instalacion y exige `front_dni_proof`, `back_dni_proof` y
+`proof_of_address` (archivos binarios), ademas de nombre, apellido, direccion y
+telefono. Es un flujo de ventas, no de campo.
+
 ## Antes de dar por buena una integracion
 
 - [ ] Cada filtro del catalogo tiene `verificado_el`

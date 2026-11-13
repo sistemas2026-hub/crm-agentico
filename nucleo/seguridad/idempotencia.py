@@ -67,7 +67,7 @@ anotado, en vez de N sin registro. Decir mas seria mentir.
 
 from __future__ import annotations
 
-from nucleo.observabilidad.registro import registrar  # noqa: E402
+from nucleo.observabilidad.registro import error_para_guardar, registrar  # noqa: E402
 
 import hashlib
 import json
@@ -336,8 +336,13 @@ def ejecutar(tenant: str, herramienta: str, argumentos: Any, origen: str,
     try:
         respuesta = hacer()
     except BaseException as e:                                   # noqa: BLE001
+        #  SIN EL TEXTO DE LA EXCEPCION AJENA (12/11/2026). Era
+        #  `f"{type(e).__name__}: {e}"`, y el `{e}` de un `HTTPError` trae la
+        #  URL entera con su query: la cedula, el id del servicio y, en la
+        #  escritura de ubicacion, la coordenada de la casa. Esta columna es
+        #  un metadato, no un eco del proveedor -- ver `error_para_guardar`.
         persistencia.finalizar_operacion_externa(
-            tenant, clave, "fallida", error=f"{type(e).__name__}: {e}")
+            tenant, clave, "fallida", error=error_para_guardar(e))
         #  EL EFECTO SE INTENTO Y VOLVIO CON ERROR: eso SI es fallida, y es la
         #  unica diferencia que separa "no salio" de "salio y salio mal". El
         #  error no se copia -- ya quedo en operaciones_externas, y la clave

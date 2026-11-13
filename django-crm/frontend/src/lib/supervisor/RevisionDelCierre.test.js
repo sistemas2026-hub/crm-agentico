@@ -49,10 +49,130 @@ describe('la revisión del cierre en la tarjeta', () => {
     const h = html(orden());
     expect(h).toContain('El Supervisor revisó el cierre:');
     expect(h).toContain('Se puede cerrar');
-    expect(h).toContain('Qué hizo: «Cambié el conector»');
+    //  EL ROTULO Y EL TEXTO VAN SEPARADOS desde el 12/11/2026 (el cotejo),
+    //  asi que se afirman por separado: lo que importa es que lo que el
+    //  tecnico escribio SE VEA, no como esta maquetado.
+    expect(h).toContain('Qué hizo');
+    expect(h).toContain('«Cambié el conector»');
     expect(h).toContain('✔');
     expect(h).toContain('El técnico afirma que el servicio quedó funcionando.');
     expect(h).toMatch(/class="rc rc-se_puede_cerrar/);
+  });
+
+  //  EL COTEJO  --  12/11/2026
+  //  El usuario: «debe haber relación entre el asunto, la descripción del
+  //  ticket y la respuesta del técnico. No puede haber una respuesta correcta
+  //  en un asunto que ni por ahí iba al caso». Hasta hoy la tarjeta mostraba
+  //  «Qué hizo» y nada de lo que se le pidió: para cruzarlos había que abrir
+  //  otra pantalla. Mismo hueco del 06/11 con las fotos, con texto.
+  const conTicket = (extra = {}) => orden({
+    revision: revision({
+      el_ticket: {
+        asunto: 'Soporte Técnico',
+        caso: 'Verificar el puerto 3/4/4 de la OLT, hay tres clientes en LOS.',
+        diagnostico_previo: '',
+        origen: 'case 91288',
+        ...extra
+      }
+    })
+  });
+
+  it('muestra lo que se pidió junto a lo que el técnico hizo', () => {
+    const h = html(conTicket());
+    //  LOS DOS LADOS, en el mismo bloque.
+    expect(h).toContain('Se pidió');
+    expect(h).toContain('Soporte Técnico');
+    expect(h).toContain('puerto 3/4/4');
+    expect(h).toContain('«Cambié el conector»');
+    //  Agrupados: si se renderizaran como dos párrafos sueltos, el ojo los
+    //  lee por separado y vuelve el problema que esto resuelve.
+    //  La comilla de cierre NO va: Svelte agrega su hash de scope
+    //  (`class="rc-cotejo svelte-1dh0iii"`). Con ella, esta afirmacion no
+    //  podia coincidir nunca -- y su gemela negativa de abajo habria pasado
+    //  en verde aunque el bloque apareciera.
+    expect(h).toMatch(/class="[^"]*rc-cotejo/);
+  });
+
+  it('el diagnóstico previo sale solo cuando lo hay', () => {
+    //  En producción está vacío en toda orden real (12/11/2026): ningún
+    //  llamador de `crear_orden` lo pasa. No puede dejar un rótulo huérfano.
+    expect(html(conTicket())).not.toContain('Ya se había diagnosticado');
+
+    const h = html(conTicket({ diagnostico_previo: 'ONT en LOS desde las 14:02.' }));
+    expect(h).toContain('Ya se había diagnosticado');
+    expect(h).toContain('LOS desde las 14:02');
+  });
+
+  it('si el técnico no escribió qué hizo, el cotejo lo dice en vez de callarlo', () => {
+    //  Un lado vacío es exactamente lo que hay que notar: antes se omitía la
+    //  línea entera y la ausencia no se veía.
+    const h = html(orden({
+      revision: revision({
+        solucion: '',
+        el_ticket: { asunto: 'Soporte Técnico', caso: 'Sin internet.',
+                     diagnostico_previo: '', origen: '' }
+      })
+    }));
+    expect(h).toContain('no lo escribió');
+    expect(h).toMatch(/class="[^"]*rc-sin-solucion/);
+  });
+
+  it('sin ticket sigue mostrando qué hizo, como antes', () => {
+    //  Las órdenes viejas no traen `el_ticket`. No pueden perder lo que ya
+    //  mostraban.
+    const h = html(orden());
+    expect(h).toContain('«Cambié el conector»');
+    expect(h).not.toMatch(/class="[^"]*rc-cotejo/);
+  });
+
+  //  EL RECORTE  --  12/11/2026. El usuario, mirando la primera tarjeta real
+  //  con el cotejo puesto: «y esta muy largo este texto». El resumen del
+  //  Supervisor es un parrafo de cinco lineas y tapaba lo que hay que
+  //  comparar. Un cotejo que hay que LEER deja de ser un cotejo.
+  const LARGO = ('El cliente pide el cambio de router wifi como gestión '
+    + 'comercial/técnica, no por una falla: el equipo está en línea y con '
+    + 'señal buena. El único indicio técnico es un desajuste de configuración '
+    + 'respecto de su perfil en la OLT, que podría estar motivando el pedido.');
+
+  it('un texto largo sale recortado, y el principio es lo que se ve', () => {
+    const h = html(conTicket({ caso: LARGO }));
+    //  Lo que importa del caso real esta al principio y tiene que verse.
+    expect(h).toContain('no por una falla');
+    //  Y la cola NO, hasta que alguien la pida.
+    expect(h).not.toContain('motivando el pedido');
+    expect(h).toContain('…');
+    expect(h).toContain('Ver todo');
+  });
+
+  it('un texto corto no se recorta ni ofrece expandir', () => {
+    //  Un boton que no expande nada es ruido en el bloque que se compara.
+    const h = html(conTicket({ caso: 'Sin internet desde ayer.' }));
+    expect(h).toContain('Sin internet desde ayer.');
+    expect(h).not.toContain('Ver todo');
+    expect(h).not.toContain('…');
+  });
+
+  it('el recorte no parte una palabra por la mitad', () => {
+    const h = html(conTicket({ caso: LARGO }));
+    //  Corta en un espacio: si partiera, quedaria algo como «configur…».
+    const m = h.match(/([^\s<>]+)…/);
+    expect(m, 'no se encontró el texto recortado').toBeTruthy();
+    expect(LARGO.split(/\s+/)).toContain(m[1]);
+  });
+
+  it('«Qué hizo» también se recorta: los dos lados, la misma regla', () => {
+    //  El reporte del tecnico tambien puede ser largo --el del caso real
+    //  tiene cuatro mediciones--, y recortar solo un lado desbalancea el
+    //  cotejo.
+    const h = html(orden({
+      revision: revision({
+        solucion: LARGO,
+        el_ticket: { asunto: 'Soporte', caso: 'Sin internet.',
+                     diagnostico_previo: '', origen: '' }
+      })
+    }));
+    expect(h).not.toContain('motivando el pedido');
+    expect(h).toContain('Ver todo');
   });
 
   it('las dos decisiones, con la orden y su vuelta', () => {

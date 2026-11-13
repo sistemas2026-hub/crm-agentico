@@ -83,6 +83,10 @@ class DestinoEscrito:
     #: #255 no tiene serial de ONU y si tiene servicio, y cortar en el primero
     #: dejaba la casa sin ubicar en los DOS lados pudiendo escribir en uno.
     no_aplica: bool = False
+    #: El interruptor dijo que no, o no se pudo leer. TAMPOCO ES UN FALLO del
+    #: proveedor: nada salio, y el codigo HTTP que le toca es 409 y no 502 --
+    #: la peticion estaba bien y el sistema decidio no ejecutarla.
+    bloqueado: bool = False
 
 
 @dataclass
@@ -197,26 +201,47 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
             SIN_HERRAMIENTA,
             "el tenant no declara ninguna herramienta que escriba una ubicacion")
 
-    #  EL INTERRUPTOR ANTES DE TODO, y leido sin cache: si no se puede
-    #  comprobar, NO se escribe. Falla CERRADO
-    #  (`nucleo/seguridad/interruptor.py`).
-    try:
-        veredicto = interruptor.veredicto(tenant)
-    except Exception as e:                                   # noqa: BLE001
-        registrar("coordenada_cliente",
-                  "no se pudo leer el interruptor: NO se escribe la ubicacion",
-                  error=e)
-        return ResultadoCoordenada(
-            BLOQUEADO_POR_INTERRUPTOR,
-            f"no se pudo comprobar el interruptor ({type(e).__name__})")
-    if not veredicto.permitido:
-        interruptor.anotar_bloqueo(
-            tenant, actor=actor, recurso="coordenada_del_cliente",
-            motivo=f"{veredicto.estado}: {veredicto.motivo}")
-        return ResultadoCoordenada(BLOQUEADO_POR_INTERRUPTOR,
-                                   f"{veredicto.estado}: {veredicto.motivo}")
-
     destinos: list[DestinoEscrito] = []
+
+    def _puerta(herr) -> DestinoEscrito | None:
+        """El interruptor, leido sin cache. `None` si deja pasar.
+
+        ANTES DE CADA ESCRITURA, Y NO UNA VEZ PARA LAS DOS  --  12/11/2026.
+        -----------------------------------------------------------------
+        Esta lectura estaba arriba de todo, una sola vez, y despues se
+        escribia en DOS sistemas. CLAUDE.md 8 no lo deja a interpretacion: el
+        interruptor "se lee sin cache ANTES DE CADA ESCRITURA y falla
+        CERRADO". Una lectura para dos escrituras es media garantia: entre la
+        primera y la segunda hay una llamada HTTP a un tercero --segundos, con
+        su reintento-- y si alguien baja el interruptor en esa ventana la
+        segunda salia igual.
+
+        No es teorico: el interruptor existe para cortar en caliente, asi que
+        el momento en que se usa de verdad es exactamente el momento en que
+        algo esta saliendo.
+
+        FALLA CERRADO Y SE ANOTA: si no se puede leer, no se escribe, igual
+        que antes. Y cada bloqueo deja su propia marca por `anotar_bloqueo` --
+        dos intentos frenados son dos hechos, no uno.
+        """
+        try:
+            veredicto = interruptor.veredicto(tenant)
+        except Exception as e:                               # noqa: BLE001
+            registrar("coordenada_cliente",
+                      "no se pudo leer el interruptor: NO se escribe la ubicacion",
+                      error=e)
+            return DestinoEscrito(
+                herr.nombre, False,
+                f"no se pudo comprobar el interruptor ({type(e).__name__})",
+                bloqueado=True)
+        if not veredicto.permitido:
+            interruptor.anotar_bloqueo(
+                tenant, actor=actor, recurso="coordenada_del_cliente",
+                motivo=f"{veredicto.estado}: {veredicto.motivo}")
+            return DestinoEscrito(herr.nombre, False,
+                                  f"{veredicto.estado}: {veredicto.motivo}",
+                                  bloqueado=True)
+        return None
 
     def _escribir(herr) -> DestinoEscrito:
         ident = identificadores.get(herr.parametros_de_coordenada.identificador)
@@ -228,6 +253,14 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
                 herr.nombre, False,
                 f"la orden no trae '{herr.parametros_de_coordenada.identificador}'",
                 no_aplica=True)
+        #  EL INTERRUPTOR ACA Y NO ANTES DEL IDENTIFICADOR: un destino que
+        #  no aplica no va a escribir nada, y anotar un bloqueo por una
+        #  escritura que no iba a ocurrir ensucia la auditoria con un hecho
+        #  que no paso.
+        cerrada = _puerta(herr)
+        if cerrada is not None:
+            return cerrada
+
         args = _argumentos(herr, str(ident), lat, lng)
 
         def _hacer():
@@ -331,6 +364,12 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
     if servicio is not None:
         d = _escribir(servicio)
         destinos.append(d)
+        if d.bloqueado:
+            #  MISMO ESTADO QUE ANTES: nada salio, y el 409 de la ruta
+            #  distingue "el sistema decidio no hacerlo" de "el proveedor
+            #  fallo". Lo unico que cambio es DONDE se leyo el interruptor.
+            return ResultadoCoordenada(BLOQUEADO_POR_INTERRUPTOR, d.detalle,
+                                       referencia=origen, destinos=destinos)
         if not d.ok and not d.no_aplica:
             return ResultadoCoordenada(FALLO, d.detalle,
                                        referencia=origen, destinos=destinos)
@@ -342,6 +381,17 @@ def guardar(config, tenant: str, *, actor: str, identificadores: dict,
     if equipo is not None:
         d = _escribir(equipo)
         destinos.append(d)
+        if d.bloqueado and any(x.ok for x in destinos):
+            #  EL INTERRUPTOR BAJO ENTRE LAS DOS ESCRITURAS. La casa ya quedo
+            #  ubicada donde importa; esto es PARCIAL y no un bloqueo, porque
+            #  bloqueado significa "no salio nada" y aca salio una. El boton
+            #  completa la que falta cuando el interruptor vuelva.
+            return ResultadoCoordenada(
+                PARCIAL, f"{equipo.nombre}: {d.detalle}",
+                referencia=origen, destinos=destinos)
+        if d.bloqueado:
+            return ResultadoCoordenada(BLOQUEADO_POR_INTERRUPTOR, d.detalle,
+                                       referencia=origen, destinos=destinos)
         if not d.ok and not d.no_aplica:
             return ResultadoCoordenada(
                 PARCIAL, f"{equipo.nombre}: {d.detalle}",

@@ -532,7 +532,29 @@ py -3.13 cli/cargar_corpus.py rapilink --forzar
 
 Costó 14 minutos el 02/09/2026, vigilando un número que no podía moverse. Y el error es peor que perder tiempo: "el sello no cambió" se lee como "el deploy no corrió", que es exactamente la conclusión contraria a la verdadera.
 
-La comprobación que sí sirve es mirar el archivo dentro del contenedor, en **Dokploy → servicio `motor` → Docker Terminal**:
+**Desde el 12/11/2026 hay una forma directa: `/salud` dice qué código está corriendo.**
+
+```
+curl -s localhost:5000/salud
+{"estado":"ok","codigo":"4d0f02cbb59e"}
+```
+
+Y en el árbol que creés desplegado:
+
+```
+py -3.13 -m nucleo.observabilidad.version
+4d0f02cbb59e
+```
+
+Iguales: ese código es el que corre. Distintas: no lo es. No hay tercer resultado, y no hace falta saber qué archivo tocó el commit.
+
+`codigo` es una huella del contenido de `nucleo/`, no el hash del commit — `.dockerignore` excluye `.git`, así que dentro del build no hay repositorio al que preguntarle, y además CLAUDE.md §11 ya decidió para la pregunta gemela que **se compara el contenido, no el hash**: un commit rebaseado o un cherry-pick dan la misma huella si el código es el mismo, que es lo que de verdad se quiere saber. Detalle en `nucleo/observabilidad/version.py`.
+
+⚠️ **`curl` va DESDE ADENTRO**, en Dokploy → servicio `motor` → Docker Terminal. El motor **no está publicado**: se alcanza como `http://motor:5000` dentro de la red del compose. Medido el 12/11/2026 — `motor.rapilinksas.co` devuelve el 404 de Traefik (no hay ruta) y `agent-api.rapilinksas.co` es el **CRM de Django**, no el motor: su 404 dice *"The requested resource"*, que es el de Django; el de Flask dice *"The requested URL"*. Se perdieron varios minutos confundiéndolos.
+
+---
+
+Si el motor que mirás es viejo y no tiene `/salud` con `codigo`, la comprobación anterior sigue valiendo: mirar el archivo dentro del contenedor, en **Dokploy → servicio `motor` → Docker Terminal**:
 
 ```
 grep -c <algo que solo exista en el commit nuevo> /app/nucleo/<archivo tocado>.py

@@ -27,9 +27,26 @@ fechas. De los `datos` de cada evento salen solo claves conocidas y cortas
 (estado, codigo, ticket, vuelta, requisitos, veredicto); el resto se nombra
 por su clave, sin su contenido, porque ahi vive el texto libre.
 
+LA UNICA EXCEPCION, Y POR QUE NO SALE SOLA (12/11/2026)
+-------------------------------------------------------
+Lo que el modelo ESCRIBIO mirando la foto es prosa libre. Ya paso por
+`redactar()` antes de guardarse, que tapa cedula, celular, correo y
+coordenadas --medido-- pero un NOMBRE PROPIO o una DIRECCION en prosa
+sobrevive: «se ve un papel a nombre de X», «se lee Calle 50 # 10-20 en la
+fachada». Este comando se corre dentro del contenedor de PRODUCCION y su
+salida se pega en un chat, que es el mismo modo de falla que dejo 14 secretos
+en transcripciones.
+
+Por eso **por defecto no se imprime**: sale el NUMERO que el modelo leyo y
+las lineas de marca (`MUESTRA:`, `ATENCION:`, `CATALOGO:`), que es lo que el
+diagnostico usa de verdad. La prosa entera se pide con `--con-texto`, a
+sabiendas. El encabezado decia «sin datos del cliente» mientras el codigo la
+imprimia siempre; lo encontro el revisor de PII el 12/11/2026.
+
 Uso, dentro del contenedor del backend (desde /app):
   python manage.py por_que_no_cerro --org <uuid>
   python manage.py por_que_no_cerro --org <uuid> --ot 212
+  python manage.py por_que_no_cerro --org <uuid> --ot 212 --con-texto
 ================================================================================
 """
 from zoneinfo import ZoneInfo
@@ -41,6 +58,46 @@ from common.models import Org
 from common.tasks import set_rls_context
 
 BOGOTA = ZoneInfo("America/Bogota")
+
+#: Las lineas con las que el modelo le habla al codigo. No son prosa: son un
+#: valor de un conjunto chico, y de ahi sale el veredicto.
+MARCAS = ("MUESTRA:", "ATENCION:", "CATALOGO:")
+
+
+def _lo_que_se_puede_mostrar(texto, con_texto: bool) -> list:
+    """Que se imprime de lo que el modelo escribio mirando una foto.
+
+    POR DEFECTO, NO LA PROSA (12/11/2026). Ver el encabezado: `redactar()` ya
+    tapo cedula, celular, correo y coordenadas antes de guardar, pero un
+    nombre propio o una direccion en prosa sobrevive, y esta salida se pega
+    en un chat.
+
+    Lo que queda alcanza para el diagnostico que este comando existe para
+    hacer: el NUMERO que el modelo leyo --la diferencia entre «-21.0» y
+    «-2.10» es todo el caso de la OT #200 y la #201-- y las lineas de marca,
+    que son un valor de un conjunto chico y no texto libre.
+
+    `--con-texto` devuelve la prosa entera, a sabiendas y con la advertencia
+    pegada arriba, porque hay fallas que solo se ven leyendola.
+    """
+    crudo = (texto or "").strip()
+    if not crudo:
+        return []
+    if con_texto:
+        return ["[prosa del modelo -- puede traer un nombre o una direccion]",
+                crudo.replace(chr(10), " ")[:200]]
+
+    from campo import potencia_de_la_foto as PF
+
+    numero = PF.uno_solo(crudo)
+    salida = [f"numero={numero}" if numero is not None
+              else "sin numero legible"]
+    for linea in crudo.splitlines():
+        limpia = linea.strip()
+        if any(limpia.upper().startswith(m) for m in MARCAS):
+            salida.append(limpia[:80])
+    salida.append(f"({len(crudo)} caracteres de prosa, ocultos: --con-texto)")
+    return salida
 
 #: De los `datos` de un evento solo salen estas claves. Todo lo demas se
 #: nombra sin su valor: ahi van `observacion` y los textos del tecnico.
@@ -79,6 +136,10 @@ class Command(BaseCommand):
                             help="Numero de orden (repetible). Sin esto, las ultimas sin validar.")
         parser.add_argument("--ultimas", type=int, default=ORDEN_POR_DEFECTO,
                             help=f"Cuantas mirar cuando no se dice --ot (por defecto {ORDEN_POR_DEFECTO})")
+        parser.add_argument("--con-texto", action="store_true",
+                            help="Imprime la PROSA que el modelo escribio de cada foto. "
+                                 "Puede traer un nombre o una direccion que leyo de la "
+                                 "imagen: no pegues esa salida en un chat.")
 
     def handle(self, *args, **opciones):
         from datetime import timedelta
@@ -183,13 +244,13 @@ class Command(BaseCommand):
                 self.stdout.write(
                     f"  v{e.vuelta}  {e.requisito_id}  [{e.estado_archivo}]  {marca}")
                 for a in filas:
-                    cabeza = (a.texto or "").strip().replace("\n", " ")[:200]
                     detalle = (f" motivo={a.motivo}" if a.motivo else "")
                     self.stdout.write(
                         f"        {a.origen} {_hora(a.created_at)} "
                         f"v{a.vuelta} atencion={a.pide_atencion}{detalle}")
-                    if cabeza:
-                        self.stdout.write(f"          {cabeza}")
+                    for linea in _lo_que_se_puede_mostrar(
+                            a.texto, opciones.get("con_texto")):
+                        self.stdout.write(f"          {linea}")
 
             #  LOS DOS NUMEROS DE LA POTENCIA, UNO AL LADO DEL OTRO. Son
             #  numeros de un instrumento, no texto del tecnico.

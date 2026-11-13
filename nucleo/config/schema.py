@@ -4298,6 +4298,28 @@ class TenantConfig(Base):
     # NO gobierna si la tarea de analisis esta corriendo: eso es una decision
     # de operacion, como RELOJ_HABILITADO (CLAUDE.md §8).
     vision_evidencias_campo: bool = False
+    # SI EL REPORTE DEL TECNICO SE COTEJA CONTRA EL TICKET  --  12/11/2026
+    #
+    # TERCERA PERILLA, Y TAMPOCO ES LA DE ARRIBA. Las otras dos mandan una
+    # IMAGEN; esta manda TEXTO: lo que el analista escribio del caso y lo que
+    # el tecnico reporto al terminar. Una empresa puede aceptar que se miren
+    # fotos de equipos y no que se mande al proveedor lo que su personal
+    # escribe, o al reves. Juntarlas haria que encender una encienda la otra
+    # sin que nadie lo decida, que es el mismo argumento del 31/10.
+    #
+    # Nace del pedido del usuario: «debe haber relacion entre el asunto, la
+    # descripcion del ticket y la respuesta del tecnico. No puede haber una
+    # respuesta correcta en un asunto que ni por ahi iba al caso.»
+    #
+    # Apagada, la revision del cierre se comporta igual que antes: los dos
+    # textos se muestran juntos en la pantalla --eso no llama a nadie-- y el
+    # punto del cotejo no aparece. Lo que se pierde es el juicio, no la
+    # informacion.
+    #
+    # Encendida, el punto que agrega vale True o None, NUNCA False: la IA
+    # pide atencion y no niega el cierre del trabajo de un tecnico
+    # (`campo/inspeccion_visual.py`, 31/10/2026).
+    cotejo_reporte_campo: bool = False
     # SI SE MIRAN LAS FOTOS QUE UN COLABORADOR ADJUNTA EN EL ASISTENTE
     # INTERNO  --  02/11/2026
     #

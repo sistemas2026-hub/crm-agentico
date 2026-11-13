@@ -106,15 +106,84 @@ _CAUSAS = (
 #  SE CLASIFICA EN CODIGO Y NO EN EL PROMPT porque el modelo no compara numeros:
 #  es la regla del proyecto (el codigo calcula, el modelo redacta). Pedirle que
 #  decida si -20.55 es bueno es pedirle una cuenta, y ahi se equivoca.
+#  EL PISO LO PONE LA EMPRESA, NO ESTE ARCHIVO  --  12/11/2026
+#  ------------------------------------------------------------------
+#  `-25.0` estuvo fijo aca mientras `nucleo/config/schema.py` declaraba, en
+#  DOS lugares, que este dato es del tenant:
+#
+#    :1641  "nucleo/ no sabe que es un dBm ni cuales son los limites de
+#            Rapilink"
+#    :4151  "VA EN LA CONFIG DEL TENANT porque depende de la planta de cada
+#            empresa --el largo de los tramos, los splitters, el tipo de
+#            ONU-- y no de este software"
+#
+#  El efecto, medido el 12/11/2026 en produccion: la pantalla de revision de
+#  cierre de una orden real dijo «La medida al salir (-21 dBm) esta dentro de
+#  lo que la empresa considera bueno (-27 a -8)». Rapilink habia editado su
+#  plantilla de campo a -27 y este archivo seguia en -25, asi que una ONT a
+#  -26 dBm era «debil» para el diagnostico del motor y «buena» para la
+#  revision de campo, el mismo dia y en la misma empresa. Nadie lo reporto
+#  porque las dos pantallas no se miran juntas.
+#
+#  `test_nucleo_sin_tenants.py` no lo cazo y eso es parte del hallazgo: busca
+#  slugs, ramas por tenant y URLs. Un NUMERO fijo que deberia ser
+#  configuracion le pasa por al lado, en verde.
+#
+#  POR QUE EL RESPALDO Y NO «SIN VEREDICTO»
+#  El esquema dice que sin umbral definido la PANTALLA muestra la potencia sin
+#  decir si esta bien o mal. Aca no se puede hacer lo mismo de golpe: ninguna
+#  empresa tiene el campo cargado todavia, y pasar a "sin_dato" apagaria el
+#  veredicto de todas en el mismo deploy. El respaldo es la transicion, no el
+#  destino: cuando cada empresa cargue su `umbral_rx_dbm`, este numero deja de
+#  tocarse.
 SENAL_MINIMA_DBM = -25.0
+
+#  EL TECHO NO SALE DE LA CONFIG, Y ES A PROPOSITO. El piso depende de la
+#  planta --tramos, splitters, tipo de ONU--; el techo es saturacion del
+#  receptor y lo pone el equipo, no el tendido. Si alguna vez una empresa
+#  necesita el suyo, el lugar es un campo nuevo en `TenantConfig`, igual que
+#  `umbral_rx_dbm`, nunca un segundo numero fijo aca.
 SENAL_MAXIMA_DBM = -8.0
 
 
-def _clasificar_senal(dbm) -> str:
-    """'buena', 'debil' o 'sin_dato'. Nunca adivina: sin numero, sin juicio."""
+def piso_de_la_empresa(tenant: str | None) -> float:
+    """El dBm desde el que la empresa considera que el enlace esta atenuado.
+
+    Sale de `TenantConfig.umbral_rx_dbm`. Si no se puede leer la
+    configuracion, o la empresa todavia no lo cargo, devuelve el respaldo
+    historico: un diagnostico con el piso de ayer es mejor que ninguno, y
+    quedarse sin veredicto por un problema de lectura seria peor que el bug
+    que esto arregla.
+    """
+    if not tenant:
+        return SENAL_MINIMA_DBM
+    try:
+        from nucleo.config import fuente as fuente_config
+
+        valor = getattr(fuente_config.cargar(tenant), "umbral_rx_dbm", None)
+    except Exception as e:                                       # noqa: BLE001
+        registrar("diagnostico_servicio",
+                  "no se pudo leer el umbral de senal del tenant", error=e)
+        return SENAL_MINIMA_DBM
+    if valor is None:
+        return SENAL_MINIMA_DBM
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return SENAL_MINIMA_DBM
+
+
+def _clasificar_senal(dbm, piso: float | None = None) -> str:
+    """'buena', 'debil' o 'sin_dato'. Nunca adivina: sin numero, sin juicio.
+
+    `piso` lo trae quien llama, con `piso_de_la_empresa(tenant)`. Sin ese
+    argumento usa el respaldo, que es lo que hacen las guardas que miden la
+    regla y no la configuracion.
+    """
     if dbm is None:
         return "sin_dato"
-    return "buena" if SENAL_MINIMA_DBM <= dbm <= SENAL_MAXIMA_DBM else "debil"
+    suelo = SENAL_MINIMA_DBM if piso is None else piso
+    return "buena" if suelo <= dbm <= SENAL_MAXIMA_DBM else "debil"
 
 
 def _clasificar_causa(crudo: str) -> str:
@@ -450,7 +519,8 @@ def diagnosticar(herramienta, argumentos: dict, tenant: str | None = None,
         "onus_en_los_a_la_vez": vecinos.get("onus_en_los_a_la_vez"),
         #  La clasificacion la hace el codigo, no el modelo. Ver el comentario
         #  de 'SENAL_MINIMA_DBM' para el rango y para lo que NO esta confirmado.
-        "senal": _clasificar_senal(senal),
+        #  El piso es el de ESTA empresa: ver `piso_de_la_empresa`.
+        "senal": _clasificar_senal(senal, piso_de_la_empresa(tenant)),
         #  'Match state' NO habla de la señal: dice si la configuracion del
         #  equipo coincide con su perfil en la OLT. Estuvo mapeado a un campo
         #  llamado 'senal_texto' y la primera corrida real devolvio 'mismatch'

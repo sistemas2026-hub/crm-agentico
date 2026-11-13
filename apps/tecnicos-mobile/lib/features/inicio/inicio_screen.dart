@@ -19,7 +19,9 @@ import 'labor_de_hoy.dart';
 import 'novedad_de_cuadrilla.dart';
 import '../../core/ubicacion/compartir_ubicacion.dart';
 import 'compartir_mi_ubicacion.dart';
+import '../trabajo/orden_operativo.dart';
 import 'resumen_de_inicio.dart';
+import 'sello_del_arranque.dart';
 
 /// Inicio — la pantalla de decisión de la jornada.
 ///
@@ -61,6 +63,7 @@ class InicioScreen extends StatefulWidget {
     this.onVerMateriales,
     this.jornada,
     this.ahora,
+    this.sellador,
     this.abrirOrdenDeUnAviso,
     this.salir = const SalirDeLaApp(),
   });
@@ -99,6 +102,17 @@ class InicioScreen extends StatefulWidget {
 
   /// El reloj, para que una prueba no dependa de la hora en que se corre.
   final DateTime? ahora;
+
+  /// Quien sella con cuántas órdenes arrancó el día. Solo para pruebas: en
+  /// producción es [SelloDelArranque.sellarYLeer], que lee la sesión y
+  /// escribe en SQLite. Inyectable porque la nota «arrancó con N» no se puede
+  /// afirmar sin controlar el sello, y un almacenamiento seguro real dentro
+  /// de una prueba de widget devuelve null y la nota no aparece nunca.
+  final Future<int?> Function({
+    required int abiertas,
+    required int cerradasHoy,
+    DateTime? ahora,
+  })? sellador;
 
   /// Qué pasa al tocar un aviso que apunta a una orden. Nulo deja la lista en
   /// lectura, que es lo correcto cuando quien la monta no sabe navegar.
@@ -145,6 +159,47 @@ class _InicioScreenState extends State<InicioScreen> {
 
   void _alCambiar() {
     if (mounted) setState(() {});
+    //  Y SE RESELLA: la lista cambio, asi que puede haber una orden mas.
+    unawaited(_sellarArranque(widget.ordenes.trabajos));
+  }
+
+  /// El sello del dia, `null` mientras no se leyo o si no se pudo.
+  int? _arrancoCon;
+
+  /// Sella con cuantas ordenes arranco el dia y guarda el resultado.
+  ///
+  /// SE LLAMA EN CADA CAMBIO DE LA LISTA a proposito: el sello solo sube, asi
+  /// que llamarlo de mas no puede empeorarlo --y llamarlo de menos si: una
+  /// orden que el despacho agrega a media mañana tiene que entrar al
+  /// denominador. La escritura se saltea sola cuando no hay nada que subir
+  /// (`sellarArranqueDelDia` consulta antes de insertar).
+  Future<void> _sellarArranque(List<TrabajoVista> trabajos) async {
+    if (trabajos.isEmpty) {
+      return;
+    }
+    final DateTime ahora = widget.ahora ?? DateTime.now();
+    final int abiertas =
+        trabajos.where((TrabajoVista t) => !OrdenOperativo.terminado(t)).length;
+    //  LA FECHA DE CIERRE SOLO ALIMENTA EL SELLO, nunca lo que se muestra.
+    //  Si una cerrada recien no la trae, el sello no baja: esa orden ya se
+    //  conto cuando estaba abierta.
+    final int cerradasHoy = trabajos.where((TrabajoVista t) {
+      final DateTime? c = t.completadaEn?.toLocal();
+      return c != null &&
+          c.year == ahora.year &&
+          c.month == ahora.month &&
+          c.day == ahora.day;
+    }).length;
+
+    final int? sello = await (widget.sellador ?? SelloDelArranque.sellarYLeer)(
+      abiertas: abiertas,
+      cerradasHoy: cerradasHoy,
+      ahora: ahora,
+    );
+    if (!mounted || sello == _arrancoCon) {
+      return;
+    }
+    setState(() => _arrancoCon = sello);
   }
 
   Future<void> _cargarJornada() async {
@@ -583,10 +638,6 @@ class _InicioScreenState extends State<InicioScreen> {
   /// las órdenes; la del medio va rellena de azul, como en la maqueta, porque
   /// es la que está viva.
   Widget _avanceDiario(ResumenDeInicio resumen, List<TrabajoVista> trabajos) {
-    //  CON CUANTAS ARRANCO EL DIA: todas las de la jornada, cerradas
-    //  incluidas. Es el denominador del avance, no lo que le queda.
-    final int arrancoCon = resumen.totalDeTrabajos;
-
     //  ASIGNADAS = LO QUE LE QUEDA HOY  --  11/11/2026, pedido del
     //  usuario: «muestra el total de asignadas y ahi solo deberia
     //  mostrar las asignadas hoy».
@@ -597,7 +648,17 @@ class _InicioScreenState extends State<InicioScreen> {
     //  corrigio el 09/11 --«esta combinando las cerradas y
     //  pendientes»-- y que en esta pantalla habia quedado.
     final int total =
-        (arrancoCon - resumen.completados).clamp(0, arrancoCon);
+        trabajos.where((TrabajoVista t) => !OrdenOperativo.terminado(t)).length;
+
+    //  CON CUANTAS ARRANCO EL DIA: EL SELLO  --  11/11/2026.
+    //
+    //  Esta linea decia `resumen.totalDeTrabajos`, que es el historial
+    //  descargado: en la pantalla se leia «2 asignadas · arrancó con 38». Lo
+    //  que vale es lo que se sello al abrir el dia (`SelloDelArranque`), y
+    //  mientras no haya sello el dia es lo que se ve: las que quedan.
+    final int arrancoCon = (_arrancoCon ?? total) < total
+        ? total
+        : (_arrancoCon ?? total);
     final int enCurso =
         trabajos.where((TrabajoVista t) => t.estado.enMarcha).length;
 
@@ -612,11 +673,18 @@ class _InicioScreenState extends State<InicioScreen> {
     //  Ya no se restan los completados aca porque `total` no los trae.
     final int sinEmpezar = (total - enCurso).clamp(0, total);
 
+    //  LO QUE LLEVA HECHAS, POR RESTA Y NO POR FECHA  --  11/11/2026.
+    //
+    //  `resumen.completados` cuenta TODAS las terminadas del historial, asi
+    //  que la barra decia «36 de 38» el mismo dia que el tecnico habia
+    //  cerrado dos. Restar es exacto y no depende de ninguna fecha de cierre:
+    //  si el dia tuvo 7 y quedan 4 abiertas, cerro 3.
+    final int hechasHoy = (arrancoCon - total).clamp(0, arrancoCon);
+
     //  El avance se mide contra el DIA ENTERO y no contra lo que
     //  queda: con un denominador que baja en cada cierre, la barra
     //  nunca llegaria al final.
-    final double avance =
-        arrancoCon == 0 ? 0 : resumen.completados / arrancoCon;
+    final double avance = arrancoCon == 0 ? 0 : hechasHoy / arrancoCon;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -661,11 +729,15 @@ class _InicioScreenState extends State<InicioScreen> {
                   //  justo esa. Un numero equivocado con cara de dato cierto
                   //  es peor que ninguno.
                   //
-                  //  Para que vuelva hay que guardar el conteo al ABRIR la
-                  //  jornada --una columna en `local_jornada`--, que es el
-                  //  unico lugar donde «con cuantas arranco» es un hecho y no
-                  //  una deduccion.
-                  nota: null,
+                  //  VUELVE, Y AHORA ES UN HECHO  --  11/11/2026, con el
+                  //  sello de `local_arranque_del_dia` detras.
+                  //
+                  //  Solo cuando dice algo que el numero de arriba no dice:
+                  //  si no cerro ninguna, «arrancó con 7» al lado de un 7 es
+                  //  ruido. Y sin sello no hay nota, igual que antes.
+                  nota: (_arrancoCon == null || arrancoCon == total)
+                      ? null
+                      : 'arrancó con $arrancoCon',
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
@@ -717,7 +789,7 @@ class _InicioScreenState extends State<InicioScreen> {
               //  denominador que baja en cada cierre terminaria en «3 de 3»
               //  pasando por «1 de 3», «2 de 2», «3 de 1». Lo que avanza es
               //  el numerador.
-              '${resumen.completados} de $arrancoCon',
+              '$hechasHoy de $arrancoCon',
               style: AppTypography.dato.copyWith(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w700,

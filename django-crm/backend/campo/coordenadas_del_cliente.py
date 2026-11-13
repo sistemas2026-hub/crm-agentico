@@ -97,6 +97,49 @@ _PAR = re.compile(r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
 _PAR_ESPACIO = re.compile(
     r"^\s*(-?\d{1,3}(?:\.\d+)?)\s+(-?\d{1,3}(?:\.\d+)?)\s*$")
 
+#  UNA QUINTA FORMA, MEDIDA EL 12/11/2026 -- la que no tiene separador.
+#
+#  `cli/medir_coordenadas.py rapilink 5345 5394` devolvio estas dos siluetas:
+#
+#      5345   DD.DDDDDD-DD.DDDDDD      10.813300-74.791800
+#      5394   DD.DDDDD-DD,DDDDDD      10.81330-74,791800
+#
+#  No hay separador entre los dos numeros: EL MENOS DE LA LONGITUD hace de
+#  separador. Y el segundo caso, encima, escribe el decimal de la longitud con
+#  COMA, a la europea.
+#
+#  POR QUE ESTE ES EL PEOR DE TODOS LOS QUE APARECIERON. Partir
+#  `10.81330-74,791800` por la coma --que es lo que hace `_PAR`-- da
+#  '10.81330-74' y '791800': dos cosas que no son numeros y una que si, y
+#  ninguna es la casa. No produce un error: produce un punto en el mar o una
+#  ausencia, segun la red que lo ataje. Hasta hoy lo atajaba `_PAR` fallando,
+#  que es el final bueno por accidente.
+#
+#  POR QUE SE PUEDE LEER SIN ADIVINAR, y es toda la justificacion de este
+#  patron: se exige que el SEGUNDO componente empiece con '-'. Eso es lo que
+#  vuelve el corte univoco -- un menos en medio de un numero decimal no tiene
+#  ninguna otra lectura posible. Sin esa exigencia habria que decidir donde
+#  cortar '10.813300 74.791800', y eso ya seria adivinar.
+#
+#  LA COMA COMO DECIMAL SOLO ADENTRO DE ESTA FORMA, y no en general: '10,81'
+#  suelto es ambiguo de verdad --puede ser el par (10, 81) o el numero 10,81--
+#  y aca la estructura desambigua mientras afuera no.
+#
+#  Y AFUERA HOY NO SALE AUSENTE, QUE ES PEOR: medido el 12/11/2026,
+#  `leer("10,81")` devuelve (10.0, 81.0) por `_PAR`, un punto al sur de la
+#  India que la pantalla dibuja como un hecho. No se toca en este cambio --
+#  ninguno de los 4.644 clientes medidos trae esa forma, y cambiarlo moveria
+#  los 1.071 que `_PAR` ya lee bien-- pero queda escrito para que el proximo
+#  que mida sepa que esa puerta esta abierta y no la descubra desde un mapa.
+#
+#  DECIDIDO EL 12/11/2026 por el usuario, con esa medicion a la vista: se deja
+#  asi. No reabrir sin una medicion NUEVA que encuentre al menos un cliente con
+#  esta forma -- ese es el numero que cerro la decision, y es el unico que la
+#  puede reabrir.
+_PAR_PEGADO = re.compile(
+    r"^\s*(-?\d{1,3}[.,]\d+)\s*(-\d{1,3}[.,]\d+)\s*$")
+
+
 #: Grados-minutos-segundos con el hemisferio en letra, la forma de Google Maps.
 #: Los segundos pueden traer decimales; las comillas de segundo son opcionales
 #: porque entre los casos medidos hay de las dos maneras.
@@ -167,6 +210,21 @@ def _partir(texto: str) -> tuple[float | None, float | None]:
             #  en `float()`, pero este `except` es lo que atajo `--74.8186`
             #  cuando una mutacion aflojo el `-?`. Marcarlo como inalcanzable
             #  invitaba a borrarlo, y es la segunda red del doble signo.
+            return (None, None)
+
+    #  RAMA PROPIA Y NO PEGADA A LA DE ARRIBA: esta tiene que cambiar la
+    #  coma por punto antes de `float()`, y la de arriba NO puede hacerlo --
+    #  alla la coma es el separador del par, no un decimal. Mezclarlas
+    #  convertiria '10,81' en 10.81 en vez de en el par (10, 81), que es un
+    #  cambio de significado y no una tolerancia.
+    casa = _PAR_PEGADO.match(texto)
+    if casa is not None:
+        try:
+            return (float(casa.group(1).replace(",", ".")),
+                    float(casa.group(2).replace(",", ".")))
+        except ValueError:
+            #  Misma red que arriba, y por el mismo motivo: el dia que alguien
+            #  afloje el patron, esto es lo que ataja lo que entre de mas.
             return (None, None)
 
     casa = _DMS.match(texto)

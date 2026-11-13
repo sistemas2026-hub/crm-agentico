@@ -180,6 +180,60 @@ describe('Programación: lo que el Supervisor hace solo (30/10/2026)', () => {
     expect(apagado.hecho).toContain('ya no le recuerda');
   });
 
+  //  CADA CUÁNTO INSISTE (11/11/2026). El campo nuevo entra por la misma
+  //  pantalla, y lo que se mide acá es el borde que el backend rechaza: un
+  //  `<input type="number">` pone TEXTO en el FormData y el PUT exige un
+  //  entero. Un test que mandara 15 como número no vería ese bug.
+  it('los minutos viajan como número, no como el texto del formulario', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: true, repetir_recordatorio_cada_minutos: 15 });
+
+    await actions.seguimiento(pedido('ADMIN', { recordar_al_tecnico: 'on', repetir_recordatorio_cada_minutos: '15' }));
+
+    const cuerpo = apiRequest.mock.calls[0][1].body;
+    expect(cuerpo.repetir_recordatorio_cada_minutos).toBe(15);
+    expect(typeof cuerpo.repetir_recordatorio_cada_minutos).toBe('number');
+  });
+
+  it('el 0 sí viaja: es «avisar una sola vez», no un campo vacío', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: true, repetir_recordatorio_cada_minutos: 0 });
+
+    await actions.seguimiento(pedido('ADMIN', { recordar_al_tecnico: 'on', repetir_recordatorio_cada_minutos: '0' }));
+
+    expect(apiRequest.mock.calls[0][1].body.repetir_recordatorio_cada_minutos).toBe(0);
+  });
+
+  //  LA DIFERENCIA ENTRE «VACÍO» Y «CERO» ES EL BUG QUE ESTO EVITA: si el
+  //  campo vacío viajara, llegaría como 0 y APAGARÍA la insistencia de una
+  //  empresa que solo quería tocar la casilla.
+  it('un campo vacío o con letras no se manda, para no pisar el valor guardado', async () => {
+    for (const malo of ['', '   ', 'quince', '7.5']) {
+      apiRequest.mockReset();
+      apiRequest.mockResolvedValue({ recordar_al_tecnico: true, repetir_recordatorio_cada_minutos: 15 });
+
+      await actions.seguimiento(pedido('ADMIN', { recordar_al_tecnico: 'on', repetir_recordatorio_cada_minutos: malo }));
+
+      const cuerpo = apiRequest.mock.calls[0][1].body;
+      expect(Object.keys(cuerpo)).toEqual(['recordar_al_tecnico']);
+    }
+  });
+
+  it('el mensaje de guardado dice con qué cadencia quedó', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: true, repetir_recordatorio_cada_minutos: 20 });
+    const conInsistencia = /** @type {any} */ (await actions.seguimiento(
+      pedido('ADMIN', { recordar_al_tecnico: 'on', repetir_recordatorio_cada_minutos: '20' })));
+    expect(conInsistencia.hecho).toContain('cada 20 minutos');
+
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ recordar_al_tecnico: true, repetir_recordatorio_cada_minutos: 0 });
+    const unaSolaVez = /** @type {any} */ (await actions.seguimiento(
+      pedido('ADMIN', { recordar_al_tecnico: 'on', repetir_recordatorio_cada_minutos: '0' })));
+    expect(unaSolaVez.hecho).toContain('una sola vez');
+    expect(unaSolaVez.hecho).not.toContain('cada 0');
+  });
+
   it('quien no gestiona no lo cambia', async () => {
     apiRequest.mockReset();
     const r = /** @type {any} */ (await actions.seguimiento(pedido('USER', { supervisor_cierra_solo: 'on' })));
