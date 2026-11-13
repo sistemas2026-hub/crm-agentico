@@ -61,7 +61,8 @@ describe('la autonomia llega a /agentes', () => {
           ? { ok: false, status: 500, json: async () => ({ error: 'No se pudo calcular la autonomia ganada.' }) }
           : { ok: true, status: 200, json: async () => structuredClone(AUTONOMIA) };
       }
-      if (u.includes('/agentes/catalogo')) return { ok: true, status: 200, json: async () => ({ herramientas: [] }) };
+      if (u.includes('/agentes/catalogo')) return { ok: true, status: 200, json: async () => ({ herramientas: [],
+        motivos_escalada: [{ clave: 'solicitud_explicita', rotulo: 'Pidió hablar con una persona' }] }) };
       if (u.includes('/agentes')) return { ok: true, status: 200, json: async () => ({ agentes: [{ nombre: 'soporte' }] }) };
       return { ok: true, status: 200, json: async () => ({}) };
     }));
@@ -73,6 +74,8 @@ describe('la autonomia llega a /agentes', () => {
     expect(d.autonomia).toEqual(AUTONOMIA);
     expect(d.autonomia.acciones[0].por_agente.soporte_tecnico_cliente.autonoma).toBe(true);
     expect(d.esAdmin).toBe(true);
+    //  Los motivos de escalada llegan al formulario con su rotulo (04/11/2026).
+    expect(d.motivosEscalada).toEqual([{ clave: 'solicitud_explicita', rotulo: 'Pidió hablar con una persona' }]);
   });
 
   it('las tareas del Supervisor: cuales hace solo, para quien puede verlas', async () => {
@@ -163,6 +166,19 @@ describe('que un agente haga sola una accion, o que vuelva a pedir aprobacion', 
                                                                  confirmo: 'si' })));
     expect(r.status).toBe(409);
     expect(r.data.autonomia.error).toBe('Este agente no usa esa herramienta.');
+  });
+
+  it('criticidad: no critica pide la casilla; viaja al motor con el autor de la sesion', async () => {
+    const sin = /** @type {any} */ (await actions.criticidad(accion({ accion: 'reiniciar_ont', critica: 'no' })));
+    expect(sin.status).toBe(400);
+    expect(pedidos).toEqual([]);
+    const usuario = /** @type {any} */ (await actions.criticidad(accion({ accion: 'reiniciar_ont', critica: 'si' }, 'USER')));
+    expect(usuario.status).toBe(403);
+    const r = await actions.criticidad(accion({ accion: 'reiniciar_ont', critica: 'no', confirmo: 'si' }));
+    expect(pedidos[0].url).toBe('http://motor/agentes/herramientas/reiniciar_ont/critica');
+    expect(pedidos[0].cuerpo).toMatchObject({ tenant: 'rapilink', critica: false, autor: 'Ana Perez',
+                                              autor_rol: 'ADMIN' });
+    expect(r).toEqual({ autonomia: { accion: 'reiniciar_ont', criticidad: true, ok: 'no_critica' } });
   });
 
   it('retirar exige un motivo y manda el agente', async () => {

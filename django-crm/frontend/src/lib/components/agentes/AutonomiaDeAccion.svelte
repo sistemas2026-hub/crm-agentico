@@ -30,7 +30,8 @@
 
   let enEste = $derived(accion?.por_agente?.[agente] ?? null);
   let propio = $derived(
-    !!resultado && resultado.accion === accion?.accion && (resultado.rol || '') === agente
+    !!resultado && !resultado.criticidad && resultado.accion === accion?.accion &&
+      (resultado.rol || '') === agente
   );
 </script>
 
@@ -79,6 +80,32 @@
     {:else}
       {#each accion.faltan ?? [] as f, i (i)}<p class="nota falta">{textoDeFalta(f)}</p>{/each}
     {/if}
+  {/if}
+
+  {#if esAdmin && (accion?.no_critica || accion?.puede_ser_no_critica)}
+    <!-- SI ES CRITICA, decidido por la empresa (04/11/2026). "No critica" solo
+         donde el motor la aceptaria (puede_ser_no_critica: irreversible, con
+         sus garantias en codigo y no escrita por el modelo -- auditoria B4 y
+         M2); volverla critica, siempre. Vale para la accion en TODOS los
+         agentes que la usan. -->
+    <form method="POST" action="?/criticidad" class="form">
+      <input type="hidden" name="accion" value={accion.accion} />
+      {#if accion.no_critica}
+        <input type="hidden" name="critica" value="si" />
+        <button class="v2-btn" type="submit">Marcarla crítica</button>
+        <span class="nota">Vuelve a exigir evidencia en todos los agentes, y la autonomía dada sin evidencia se apaga.</span>
+      {:else}
+        <input type="hidden" name="critica" value="no" />
+        <label class="nota"><input type="checkbox" name="confirmo" value="si" required />
+          Entiendo que, no crítica, se le puede dar autonomía sin evidencia previa de aprobaciones.</label>
+        <button class="v2-btn" type="submit">Marcarla no crítica</button>
+      {/if}
+    </form>
+  {/if}
+  {#if resultado?.criticidad && resultado.accion === accion?.accion}
+    <p class="nota {resultado.error ? 'falta' : ''}">
+      {resultado.error || (resultado.ok === 'critica' ? 'Listo: ahora es crítica.' : 'Listo: ahora no es crítica.')}
+    </p>
   {/if}
 
   {#if propio && resultado.error}

@@ -644,6 +644,10 @@ def catalogo_herramientas(config: TenantConfig) -> list[dict]:
             "critica": bool(getattr(h, "critica", True)),
             "deriva": bool(h.deriva_rol),
             "de_sistema": _es_de_sistema(h),
+            #  Un agente de clientes que no verifica identidad la puede tener
+            #  (04/11/2026): el formulario avisa antes con la MISMA regla que
+            #  aplica _comprobar_sin_verificar al guardar.
+            "segura_sin_verificar": _segura_sin_verificar(h.model_dump()),
         }
         for h in config.herramientas
     ]
@@ -745,6 +749,10 @@ def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
                           que atiende al cliente puede recibir una derivacion
       exige_verificacion  si pide verificar la identidad del cliente
       nunca_revelar       lo que nunca dice, limpio y sin repetir
+      motivos_escalada    por que motivos pasa a una persona (04/11/2026): un
+                          subconjunto de 'escalamiento.activar_si'; vacio =
+                          todos. Uno que la empresa no tiene lo rechaza el
+                          esquema al validar
     """
     if not extras:
         return
@@ -754,6 +762,9 @@ def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
     if extras.get("nunca_revelar") is not None:
         rol["nunca_revelar"] = list(dict.fromkeys(
             t.strip() for t in extras["nunca_revelar"] if isinstance(t, str) and t.strip()))
+    if extras.get("motivos_escalada") is not None:
+        rol["motivos_escalada"] = list(dict.fromkeys(
+            t.strip() for t in extras["motivos_escalada"] if isinstance(t, str) and t.strip()))
     atiende = extras.get("atiende")
     if atiende is not None:
         rol["atiende"] = str(atiende).strip()
@@ -771,6 +782,58 @@ def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
     if conectar:
         destinos.append(nombre)
     _mutar_flujo_derivacion(doc, destinos, {})
+
+
+_SEGURA_SIN_VERIFICAR = ("verifica_identidad", "confirma_identidad", "deriva_rol",
+                         "carga_habilidad", "consulta_documentacion", "apta_sin_verificar",
+                         "consulta_planes_venta", "consulta_servicios_ofrecidos",
+                         "consulta_parrilla", "inyectados_obligatorios")
+
+
+def _segura_sin_verificar(h: dict) -> bool:
+    return any(h.get(b) for b in _SEGURA_SIN_VERIFICAR)
+
+
+def _comprobar_sin_verificar(doc: dict, nombre: str, previas: set[str]) -> None:
+    """
+    Un agente de clientes que NO verifica identidad solo usa lo que es seguro
+    sin verificar (04/11/2026, auditoria del formulario).
+
+    Sin verificacion el motor baja el nivel exigido a 0
+    (motor.py::_cliente_final_verificable) y todas sus herramientas quedan
+    abiertas: con una que devuelve datos de un cliente, cualquier numero pide
+    la cedula de otra persona y recibe su nombre y su telefono. Eso solo se
+    podia hacer en el archivo; el formulario lo puso a un clic.
+
+    Seguras: las que verifican o confirman identidad, derivan, cargan una
+    habilidad, consultan documentacion o un catalogo interno, las que exigen
+    la identidad inyectada (sin sesion verificada fallan cerradas) y las
+    marcadas 'apta_sin_verificar'. 'previas' son las que el agente YA tenia
+    sin verificar: se respetan -- son decisiones de quien diseno ese agente
+    (una pista del nombre, un nombre confirmado, una persona que aprueba), y
+    rechazarlas dejaria sin poder editar un agente que hoy funciona. Lo que no
+    se puede es sumar una nueva.
+    """
+    rol = doc["roles"][nombre]
+    if rol.get("orientado_a") != "cliente_final" or rol.get("exige_verificacion", True):
+        return
+    por_nombre = {h.get("nombre"): h for h in doc.get("herramientas") or []}
+    expuestas = [t for t in rol.get("puede_consultar") or []
+                 if t not in previas and not _segura_sin_verificar(por_nombre.get(t, {}))]
+    if expuestas:
+        raise ErrorEdicion(
+            "este agente atiende clientes sin verificar su identidad, y "
+            + ", ".join(f"'{t}'" for t in expuestas)
+            + " devuelve datos de un cliente: cualquiera que escriba podria verlos. "
+            "Activá la verificación de identidad, o sacá esa herramienta.")
+
+
+def _sin_verificar_previas(doc: dict, nombre: str) -> set[str]:
+    """Las herramientas que el agente ya tenia atendiendo clientes sin verificar."""
+    rol = (doc.get("roles") or {}).get(nombre) or {}
+    if rol.get("orientado_a") != "cliente_final" or rol.get("exige_verificacion", True):
+        return set()
+    return set(rol.get("puede_consultar") or [])
 
 
 def _con_derivacion_si_atiende_clientes(doc: dict, orientado_a: str,
@@ -815,6 +878,7 @@ def _mutar_crear(doc: dict, nombre: str, area: str | None, cargo: str | None,
         nuevo_rol["cargo"] = cargo
     doc.setdefault("roles", {})[nombre] = nuevo_rol
     _aplicar_extras(doc, nombre, extras)
+    _comprobar_sin_verificar(doc, nombre, set())
     _comprobar_nadie_se_queda_sin_roles(doc)
 
 
@@ -826,6 +890,7 @@ def _mutar_editar(doc: dict, nombre: str, area: str | None, cargo: str | None,
 
     herramientas = _con_derivacion_si_atiende_clientes(doc, orientado_a, herramientas)
     anterior = set(doc["roles"][nombre].get("puede_consultar") or [])
+    previas_sin_verificar = _sin_verificar_previas(doc, nombre)
     campos_permitidos: dict = {}
     _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos, anterior)
 
@@ -837,6 +902,7 @@ def _mutar_editar(doc: dict, nombre: str, area: str | None, cargo: str | None,
     rol["puede_consultar"] = [h["nombre"] for h in herramientas]
     rol["campos_permitidos"] = campos_permitidos
     _aplicar_extras(doc, nombre, extras)
+    _comprobar_sin_verificar(doc, nombre, previas_sin_verificar)
     _comprobar_nadie_se_queda_sin_roles(doc)
 
 
@@ -1346,6 +1412,32 @@ def _mutar_ajustes_bandeja(doc, sla_toma_minutos: int,
 def guardar_canal_whatsapp(tenant: str, activo: bool,
                            numero_visible: str | None) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))
+
+
+def _mutar_criticidad(doc: dict, herramienta: str, critica: bool) -> None:
+    """
+    Si una accion es critica, desde la pantalla (04/11/2026, PRD §2).
+
+    Es un dato de cada empresa (CLAUDE.md §3.3) y solo se cambiaba en el
+    archivo. Lo que NO se afloja: declararla no critica exige las garantias en
+    codigo (aprobacion, irreversible, verificacion, previas) y lo rechaza el
+    esquema al validar (Herramienta._coherencia); y volver a declararla
+    critica deja sin efecto la autonomia que se le dio sin evidencia
+    (nucleo/seguridad/autonomia_ganada.vigente, YA_ES_CRITICA).
+    """
+    h = next((x for x in doc.get("herramientas") or [] if x.get("nombre") == herramienta), None)
+    if h is None:
+        raise ErrorEdicion(f"'{herramienta}' no es una herramienta de esta empresa.")
+    if not critica and h.get("nacio_de_propuesta"):
+        raise ErrorEdicion(
+            f"'{herramienta}' la escribio el asistente en una conversacion: sus "
+            "comprobaciones no las reviso nadie todavia. Para declararla no critica, "
+            "alguien del equipo tecnico la tiene que revisar primero.")
+    h["critica"] = bool(critica)
+
+
+def guardar_criticidad(tenant: str, herramienta: str, critica: bool) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_criticidad(doc, herramienta, critica))
 
 
 def guardar_flujo_derivacion(tenant: str, destinos: list[str],
@@ -1883,7 +1975,10 @@ def _mutar_agregar_herramienta(doc: dict, herramienta_propuesta: dict) -> None:
     existentes = {h.get("nombre") for h in doc.get("herramientas", [])}
     if nombre in existentes:
         raise ErrorEdicion(f"ya existe una herramienta llamada '{nombre}' en el catalogo.")
-    doc.setdefault("herramientas", []).append(herramienta_propuesta)
+    #  Entra CRITICA y marcada de donde vino, diga lo que diga el borrador
+    #  (auditoria M2, 04/11/2026): ver Herramienta.nacio_de_propuesta.
+    doc.setdefault("herramientas", []).append(
+        {**herramienta_propuesta, "critica": True, "nacio_de_propuesta": True})
 
 
 def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float,

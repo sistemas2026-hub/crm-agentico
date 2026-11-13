@@ -270,7 +270,11 @@ CATALOGO = {
             "casos a Despacho, y el nivel de la empresa. No crea órdenes ni "
             "asigna técnicos, y no cambia el grupo que leyó el modelo."),
         #  PROPIA, y no la del paso: encender las correcciones es una decision
-        #  aparte, que el usuario toma despues de ver en sombra que harian.
+        #  aparte. Desde el 12/11/2026 nace delegada (esta_delegada: sin fila,
+        #  una no critica esta delegada): pasar un caso a Despacho no es ninguno
+        #  de los cinco criticos (PRD §2). Lo que la frena es el nivel 3 de la
+        #  empresa; y mientras no actua, el Supervisor sigue contando en sombra
+        #  cuales pasarian.
         "exige_nivel": 3,
         "necesita_que_mire": True,
         #  Y NO ANDA SOLA: suma reglas al paso, que es otra tarea. 'delegar_tarea'

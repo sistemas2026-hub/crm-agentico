@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { cambiarAutonomia, leerAutonomiaGanada } from '$lib/server/v2/capacidad.js';
+import { cambiarAutonomia, cambiarCriticidad, leerAutonomiaGanada } from '$lib/server/v2/capacidad.js';
 import { leerAjustes } from '$lib/server/v2/ajustes-supervisor.js';
 import { headersMotor } from '$lib/server/v2/motor-headers.js';
 import { tenantDeLaSesion } from '$lib/server/v2/tenant.js';
@@ -86,6 +86,9 @@ export async function load({ locals, fetch, cookies }) {
     return {
       agentes: datosAgentes.agentes,
       catalogo: respCatalogo.ok ? datosCatalogo.herramientas : [],
+      //  Por que motivos puede pasar a una persona un agente, con su rotulo
+      //  (04/11/2026). Los elige el formulario, paso "Que hace".
+      motivosEscalada: respCatalogo.ok ? (datosCatalogo.motivos_escalada ?? []) : [],
       escalamiento: datosEscalamiento,
       huecosPorRol,
       // La respuesta del motor ENTERA y sin renombrar (CLAUDE.md §6).
@@ -161,5 +164,32 @@ export const actions = {
       return fail(502, { autonomia: { accion, rol, error: e?.message || 'No se pudo cambiar.' } });
     }
     return { autonomia: { accion, rol, ok: 'retirada' } };
+  },
+
+  /**
+   * Si una accion es critica en esta empresa (04/11/2026). Declararla no
+   * critica habilita darle autonomia sin evidencia: pide la casilla.
+   */
+  async criticidad({ locals, fetch, request }) {
+    if (locals.profile?.role !== 'ADMIN') {
+      return fail(403, { autonomia: { error: 'Solo un administrador puede decidir si una acción es crítica.' } });
+    }
+    const form = await request.formData();
+    const accion = form.get('accion')?.toString().trim() ?? '';
+    const critica = form.get('critica')?.toString();
+    if (!NOMBRE.test(accion) || (critica !== 'si' && critica !== 'no')) {
+      return fail(400, { autonomia: { error: 'Esa acción o ese valor no se reconocen.' } });
+    }
+    if (critica === 'no' && form.get('confirmo') !== 'si') {
+      return fail(400, { autonomia: { accion, criticidad: true,
+        error: 'Marcá que entendés que va a poder hacerse sola sin evidencia previa.' } });
+    }
+    try {
+      await cambiarCriticidad(locals, fetch, { accion, critica: critica === 'si' });
+    } catch (/** @type {any} */ e) {
+      return fail(e?.codigo === 'SOLO_ADMIN' ? 403 : 400,
+        { autonomia: { accion, criticidad: true, error: e?.message || 'No se pudo cambiar.' } });
+    }
+    return { autonomia: { accion, criticidad: true, ok: critica === 'si' ? 'critica' : 'no_critica' } };
   }
 };

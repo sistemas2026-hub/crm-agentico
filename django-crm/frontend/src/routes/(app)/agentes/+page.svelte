@@ -156,6 +156,7 @@
     modo={modoDialogo}
     agente={agenteEnEdicion}
     catalogo={data.catalogo || []}
+    motivos={data.motivosEscalada || []}
     autonomia={data.autonomia}
   />
 {/if}
@@ -376,11 +377,13 @@
                     </span>
                   </div>
                   {#if grupo.clave === 'actua'}
-                    <p class="herr-aviso">
-                      Cambia algo real{h.requiere_confirmacion
-                        ? ' · pide confirmación antes'
-                        : ''}
-                    </p>
+                    <!-- Sin "pide confirmacion antes" (04/11/2026): sale de
+                         'requiere_confirmacion', que el schema exige en TODA
+                         escritura y nada aplica en ejecucion (ver su comentario
+                         en nucleo/config/schema.py). Salia en todas las acciones,
+                         tambien junto a "Lo hace solo", y no decia nada. Si pide
+                         aprobacion o no, lo dice el bloque de abajo. -->
+                    <p class="herr-aviso">Cambia algo real</p>
                     {#if autonomiaDe[h.nombre]}
                       <AutonomiaDeAccion
                         accion={autonomiaDe[h.nombre]}

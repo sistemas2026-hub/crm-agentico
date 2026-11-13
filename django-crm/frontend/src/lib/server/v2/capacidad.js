@@ -157,3 +157,31 @@ export async function cambiarAutonomia(locals, fetch, que, datos) {
   }
   return cuerpo;
 }
+
+/**
+ * Si una accion es critica en esta empresa (04/11/2026, PRD §2). Solo ADMIN:
+ * el autor y su rol salen de la SESION y el motor los vuelve a exigir. El
+ * esquema rechaza declarar no critica una accion sin las garantias en codigo.
+ * Lanza un error con `.codigo` si el motor rechaza.
+ *
+ * @param {App.Locals} locals
+ * @param {typeof globalThis.fetch} fetch
+ * @param {{ accion: string, critica: boolean }} datos
+ */
+export async function cambiarCriticidad(locals, fetch, datos) {
+  const { autorDeSesion } = await import('./autor.js');
+  const cfg = await destinoDelAsistente(locals, fetch);
+  if (!cfg) throw Object.assign(new Error('Asistente no configurado para esta empresa.'), { codigo: 'NO_CONFIGURADO' });
+  const resp = await fetch(`${cfg.baseUrl}/agentes/herramientas/${encodeURIComponent(datos.accion)}/critica`, {
+    method: 'PUT',
+    headers: headersMotor({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tenant: cfg.tenant, critica: datos.critica, ...autorDeSesion(locals),
+      autor_rol: locals?.profile?.role ?? '' })
+  });
+  const cuerpo = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw Object.assign(new Error(cuerpo.error || 'El asistente rechazó el cambio.'),
+      { codigo: cuerpo.error || 'RECHAZADO' });
+  }
+  return cuerpo;
+}

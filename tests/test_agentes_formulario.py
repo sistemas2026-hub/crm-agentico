@@ -60,7 +60,21 @@ def editar_falso(tenant, nombre, area, cargo, descripcion, orientado_a, herramie
 
 editor.crear_rol = crear_falso
 editor.editar_rol = editar_falso
-http.post("/agentes", json={"tenant": "t", "nombre": "nuevo", "descripcion": "x",
+#  AUDITORIA B1 (04/11/2026): crear o editar un agente decide que datos ve y si
+#  verifica identidad. El CRM ya lo restringe a ADMIN; el motor lo vuelve a
+#  exigir, con el autor de la sesion, como al promover o cambiar criticidad.
+ADMIN = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+         "autor_rol": "ADMIN"}
+r = http.post("/agentes", json={"tenant": "t", "nombre": "nuevo", "descripcion": "x", "herramientas": []})
+comprobar(r.status_code == 400 and pedidos == [], "crear sin quien lo hace: no llega al editor",
+          str(r.status_code))
+r = http.post("/agentes", json={"tenant": "t", "nombre": "nuevo", "descripcion": "x", "herramientas": [],
+                                **ADMIN, "autor_rol": "SUPERVISOR"})
+comprobar(r.status_code == 403 and pedidos == [], "crear sin ser ADMIN: no", str(r.status_code))
+r = http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": [],
+                                     **ADMIN, "autor_rol": "USER"})
+comprobar(r.status_code == 403 and pedidos == [], "editar sin ser ADMIN: no", str(r.status_code))
+http.post("/agentes", json={"tenant": "t", "nombre": "nuevo", "descripcion": "x", **ADMIN,
                             "orientado_a": "cliente_final", "herramientas": [],
                             "atiende": "saldo y facturas", "conectar_al_router": True,
                             "exige_verificacion": False, "nunca_revelar": ["el costo"]})
@@ -69,10 +83,10 @@ comprobar(pedidos[-1] == {"accion": "crear", "extras": {
     "exige_verificacion": False, "nunca_revelar": ["el costo"]}},
     "POST /agentes: atiende, router, verificacion y lo que nunca revela llegan al editor",
     str(pedidos[-1]))
-http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": []})
+http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": [], **ADMIN})
 comprobar(pedidos[-1] == {"accion": "editar", "extras": {}},
           "PUT sin esos datos: no viaja ninguno (lo que habia no se borra)", str(pedidos[-1]))
-http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": [],
+http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": [], **ADMIN,
                                  "conectar_al_router": "si", "nunca_revelar": "no es lista"})
 comprobar(pedidos[-1]["extras"] == {},
           "un valor con otro tipo no se adivina: no viaja", str(pedidos[-1]))
@@ -93,6 +107,78 @@ comprobar(agentes and all({"atiende", "exige_verificacion", "nunca_revelar", "en
           "GET /agentes trae atiende, verificacion, lo que nunca revela y si esta en el router")
 comprobar(any(x["en_el_router"] for x in de_cliente) or not de_cliente,
           "al menos un agente de clientes figura conectado al router")
+
+print("\nlos motivos de escalada, de la ruta al editor y del catalogo a la pantalla")
+http.put("/agentes/nuevo", json={"tenant": "t", "descripcion": "x", "herramientas": [], **ADMIN,
+                                 "motivos_escalada": ["solicitud_explicita"]})
+comprobar(pedidos[-1]["extras"] == {"motivos_escalada": ["solicitud_explicita"]},
+          "PUT con motivos: llegan al editor", str(pedidos[-1]))
+cat = http.get("/agentes/catalogo?tenant=t").get_json() or {}
+motivos = cat.get("motivos_escalada") or []
+comprobar(motivos and [m["clave"] for m in motivos] == list(CONFIG.escalamiento.activar_si)
+          and all("rotulo" in m for m in motivos),
+          "el catalogo trae los motivos de la empresa, en su orden y con su rotulo", str(motivos[:2]))
+agentes = (http.get("/agentes?tenant=t").get_json() or {}).get("agentes", [])
+comprobar(all("motivos_escalada" in x for x in agentes if not x.get("automatico")),
+          "cada agente dice sus motivos (vacio = todos)")
+
+print("\nsi una accion es critica: solo ADMIN, y llega al editor")
+cambios: list = []
+editor.guardar_criticidad = lambda tenant, herramienta, critica: cambios.append(
+    (herramienta, critica)) or CONFIG
+AUTOR = {"autor": "Ana Perez", "autor_usuario_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+r = http.put("/agentes/herramientas/reiniciar_ont/critica",
+             json={"tenant": "t", "critica": True, "autor_rol": "SUPERVISOR", **AUTOR})
+comprobar(r.status_code == 403 and cambios == [], "quien no es ADMIN no la cambia", str(r.status_code))
+r = http.put("/agentes/herramientas/reiniciar_ont/critica", json={"tenant": "t", "critica": True, **AUTOR,
+                                                                  "autor_rol": "ADMIN"})
+comprobar(r.status_code == 200 and cambios == [("reiniciar_ont", True)], "ADMIN la cambia",
+          f"{r.status_code} {cambios}")
+r = http.put("/agentes/herramientas/reiniciar_ont/critica", json={"tenant": "t", "critica": "no", **AUTOR,
+                                                                  "autor_rol": "ADMIN"})
+comprobar(r.status_code == 400 and len(cambios) == 1, "un valor que no es si/no no se adivina",
+          str(r.status_code))
+r = http.put("/agentes/herramientas/reiniciar_ont/critica", json={"tenant": "t", "critica": False,
+                                                                  "autor_rol": "ADMIN"})
+comprobar(r.status_code == 400 and len(cambios) == 1, "sin quien lo decide, no", str(r.status_code))
+
+print("\nvolver a declararla critica APAGA en la base la autonomia dada sin evidencia (M1, 04/11/2026)")
+#  Antes solo la dejaba sin efecto quien leia la config nueva: un proceso con
+#  la config en cache (el reloj) o el ultimo metro, que no recibe la
+#  herramienta, la seguian viendo vigente. Ahora queda escrito en la base.
+from nucleo.persistencia import autonomia_ganada as registro_ag  # noqa: E402
+from nucleo.seguridad import autonomia_ganada as seg_ag          # noqa: E402
+
+usan = seg_ag.agentes_que_la_usan(CONFIG, "reiniciar_ont")
+degradadas: list = []
+filas: dict = {}
+registro_ag.vigente = lambda tenant, herramienta, rol=None: filas.get(rol)
+registro_ag.degradar = lambda tenant, herramienta, motivo, evidencia=None: degradadas.append(
+    (herramienta, evidencia)) or {"id": "d1"}
+if usan:
+    filas = {usan[0]: {"id": "p5", "estado": "activa", "evidencia": {"no_critica": True}, "rol": usan[0]}}
+    r = http.put("/agentes/herramientas/reiniciar_ont/critica",
+                 json={"tenant": "t", "critica": True, "autor_rol": "ADMIN", **AUTOR})
+    comprobar(r.status_code == 200 and len(degradadas) == 1 and degradadas[0][0] == "reiniciar_ont"
+              and "p5" in str(degradadas[0][1]),
+              "critica con una promocion activa sin evidencia: se degrada", f"{r.status_code} {degradadas}")
+    comprobar(r.get_json().get("autonomia_apagada") is True, "y la respuesta lo dice")
+    degradadas.clear()
+    filas = {usan[0]: {"id": "p6", "estado": "activa", "evidencia": {"aprobadas": 20}, "rol": usan[0]}}
+    http.put("/agentes/herramientas/reiniciar_ont/critica",
+             json={"tenant": "t", "critica": True, "autor_rol": "ADMIN", **AUTOR})
+    comprobar(degradadas == [], "una ganada CON evidencia no se toca: vale igual siendo critica")
+    filas = {usan[0]: {"id": "p7", "estado": "activa", "evidencia": {"no_critica": True}, "rol": usan[0]}}
+    http.put("/agentes/herramientas/reiniciar_ont/critica",
+             json={"tenant": "t", "critica": False, "autor_rol": "ADMIN", **AUTOR})
+    comprobar(degradadas == [], "declararla NO critica no degrada nada")
+    filas = {None: {"id": "g1", "estado": "activa", "evidencia": {"no_critica": True}}}
+    http.put("/agentes/herramientas/reiniciar_ont/critica",
+             json={"tenant": "t", "critica": True, "autor_rol": "ADMIN", **AUTOR})
+    comprobar(len(degradadas) == 1 and "g1" in str(degradadas[0][1]),
+              "la general sin evidencia tambien", str(degradadas))
+else:
+    print("  (ningun agente usa esa accion en este tenant: se saltea)")
 
 if fallos:
     print(f"\n[FALLA] {len(fallos)} caso(s)")

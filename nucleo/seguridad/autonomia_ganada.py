@@ -145,7 +145,13 @@ def evaluar(config, tenant: str, ahora, *, medir, leer_vigente=None) -> list[dic
         if not getattr(h, "aprobacion_humana", False):
             continue
         no_candidata = por_que_no_es_candidata(h)
-        fila = {"accion": h.nombre, "candidata": not no_candidata, "no_candidata": no_candidata}
+        fila = {"accion": h.nombre, "candidata": not no_candidata, "no_candidata": no_candidata,
+                #  Si la pantalla puede ofrecer "Marcarla no critica" (04/11/2026,
+                #  auditoria B4 y M2): solo donde el esquema y el editor lo
+                #  aceptarian -- irreversible, con sus garantias, y no escrita
+                #  por el modelo en un chat (Herramienta.nacio_de_propuesta).
+                "puede_ser_no_critica": bool(not no_candidata and getattr(h, "irreversible", False)
+                                             and not getattr(h, "nacio_de_propuesta", False))}
         if not no_candidata:
             u = umbrales(config, h.nombre)
             desde = ahora - timedelta(days=u["ventana_dias"])
@@ -186,6 +192,32 @@ def agentes_que_la_usan(config, herramienta: str) -> list[str]:
     roles = getattr(config, "roles", None) or {}
     return [n for n, r in roles.items()
             if herramienta in (getattr(r, "puede_consultar", None) or [])]
+
+
+def sin_evidencia_activas(config, tenant: str, herramienta: str, *, leer) -> list[str]:
+    """
+    Las promociones ACTIVAS de la herramienta que se dieron sin evidencia por
+    no critica (evidencia.no_critica), en cualquier alcance: la general y la
+    de cada agente que la usa. Para apagarlas cuando la empresa la vuelve a
+    declarar critica (auditoria M1, 04/11/2026).
+
+    Sin esto, el apagado dependia de que quien consulta trajera la config
+    nueva: el reloj con su copia en cache, o el ultimo metro de
+    frontera.critica (que solo recibe el nombre), la seguian viendo vigente.
+    Una promocion ganada CON evidencia no entra: vale igual siendo critica.
+    LANZA si la base no contesta: quien llama decide.
+    """
+    ids: list[str] = []
+    for rol in [None, *agentes_que_la_usan(config, herramienta)]:
+        fila = leer(tenant, herramienta, rol) if rol else leer(tenant, herramienta)
+        if not fila or fila.get("estado") != "activa":
+            continue
+        evidencia = fila.get("evidencia") or {}
+        if isinstance(evidencia, dict) and evidencia.get("no_critica"):
+            id_ = str(fila.get("id"))
+            if id_ not in ids:
+                ids.append(id_)
+    return ids
 
 
 #: Lo que frena aun a lo no critico: hechos en contra dentro de la ventana.

@@ -1217,6 +1217,22 @@ class Herramienta(Base):
     # id como parametro de consulta no tenia ninguna proteccion. Esto lo vuelve
     # explicito, y deja de depender de donde caiga el dato en la URL.
     inyectados_obligatorios: list[str] = Field(default_factory=list)
+    # Lo que devuelve no es de ningun cliente (un catalogo de planes, una
+    # cobertura): un agente de clientes que NO verifica identidad la puede
+    # tener. Sin esta marca, el editor no deja darsela a uno de esos agentes
+    # (nucleo/config/editor.py::_comprobar_sin_verificar): sin verificacion el
+    # motor baja el nivel exigido a 0, y una consulta de datos queda abierta a
+    # cualquier numero. Agregado 04/11/2026, cuando el formulario empezo a
+    # poder apagar la verificacion. Lo decide quien conoce la herramienta, en
+    # el archivo -- no la pantalla.
+    apta_sin_verificar: bool = False
+    # La escribio el modelo en un chat (herramientas propuestas) y entro al
+    # catalogo cuando un ADMIN aprobo el pedido. Sus comprobaciones y previas
+    # tambien las escribio el modelo, y nadie las reviso: con esta marca la
+    # pantalla no la puede declarar no critica (editor._mutar_criticidad).
+    # La saca, en el archivo, quien revisa la herramienta. Auditoria M2,
+    # 04/11/2026.
+    nacio_de_propuesta: bool = False
     # Marca esta herramienta como un METODO DE VERIFICACION DE IDENTIDAD, no
     # una consulta de datos. Cambia el comportamiento del motor:
     #   - se ofrece SIEMPRE, aunque la sesion no este verificada todavia (es

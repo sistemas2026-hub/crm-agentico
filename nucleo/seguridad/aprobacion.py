@@ -84,13 +84,19 @@ AUTONOMIA_NO_VIGENTE = "AUTONOMIA_NO_VIGENTE"
 PREFIJO_AUTONOMIA = "autonomia_ganada:"
 
 
-def _autonomia_vigente(tenant: str, herramienta: str, rol: str | None = None) -> dict:
+def _autonomia_vigente(tenant: str, herramienta: str, rol: str | None = None,
+                       config_herramienta=None) -> dict:
     """La promocion vigente para el agente que pidio la accion, sin cache. Se
-    sustituye en las pruebas."""
+    sustituye en las pruebas. Con 'config_herramienta' (el ultimo metro del
+    motor la tiene) una promocion sin evidencia de una accion que hoy es
+    critica falla cerrado (YA_ES_CRITICA). Sin ella -- frontera.critica solo
+    recibe el nombre --, lo que la apaga es la degradacion que escribe la
+    ruta que la vuelve critica (auditoria M1, 04/11/2026)."""
     from nucleo.persistencia import autonomia_ganada as registro
     from nucleo.seguridad import autonomia_ganada
 
-    return autonomia_ganada.vigente(tenant, herramienta, leer=registro.vigente, rol=rol)
+    return autonomia_ganada.vigente(tenant, herramienta, leer=registro.vigente, rol=rol,
+                                    config_herramienta=config_herramienta)
 
 #  M06-F (22/09/2026): el estado en que una aprobacion VALE es el del ciclo B5
 #  de origin, no uno propio. En B5 aprobar es RESERVAR: una persona pasa la fila
