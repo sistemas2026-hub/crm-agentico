@@ -97,7 +97,7 @@ def rol_de_entrada(config) -> str | None:
 #  Lectura de la conversacion -- una sola ida a la base
 # --------------------------------------------------------------------------
 
-def _leer(cur, org, conversation_id: str, hasta_mensaje_id: str | None) -> dict:
+def _leer_conversacion(cur, org, conversation_id: str, hasta_mensaje_id: str | None) -> dict:
     """La conversacion acotada: mensajes del cliente y traza hasta el turno de
     'hasta_mensaje_id' (incluido), o entera si es None.
 
@@ -170,7 +170,7 @@ def armar_caso(config, datos: dict, *, origen: str, caso_manual: str | None,
                descripcion: str) -> tuple[dict, list[str]]:
     """El caso dorado y los avisos para quien lo revisa.
 
-    'datos' es lo que devuelve _leer. 'origen' identifica de donde salio
+    'datos' es lo que devuelve _leer_conversacion. 'origen' identifica de donde salio
     ('ejemplo:<id>' o 'revision:<id>') y es la clave con la que el importador
     no duplica.
     """
@@ -284,7 +284,7 @@ def caso_de_ejemplo(config, tenant: str, ejemplo_id: str) -> tuple[dict, list[st
         ej = cur.fetchone()
         if not ej:
             raise SinCaso("Ese ejemplo no existe.")
-        datos = _leer(cur, org, ej["conversation_id"], ej["mensaje_id"])
+        datos = _leer_conversacion(cur, org, ej["conversation_id"], ej["mensaje_id"])
     return armar_caso(
         config, datos, origen=f"ejemplo:{ej['id']}", caso_manual=ej["caso"],
         descripcion=f"desde conversacion real: {ej['caso']} (ejemplo {ej['id'][:8]})")
@@ -308,7 +308,7 @@ def caso_de_revision(config, tenant: str, revision_id: str) -> tuple[dict, list[
         if not rev["es_buen_ejemplo"]:
             raise SinCaso("La revision dice que la conversacion tuvo problemas: "
                           "su traza no es lo que deberia pasar.")
-        datos = _leer(cur, org, rev["conversation_id"], None)
+        datos = _leer_conversacion(cur, org, rev["conversation_id"], None)
     nombre_caso = rev["caso"] or "conversacion"
     return armar_caso(
         config, datos, origen=f"revision:{rev['id']}", caso_manual=rev["caso"],
@@ -344,6 +344,6 @@ def mensajes_para_reproducir(tenant: str, conversation_id: str) -> list[str]:
     tocar la original ni al cliente. Mismo recorte que un caso dorado.
     """
     with sesion(tenant) as (cur, org):
-        datos = _leer(cur, org, conversation_id, None)
+        datos = _leer_conversacion(cur, org, conversation_id, None)
     return [redaccion.redactar(m["contenido"])
             for m in datos["mensajes"][:MAXIMO_MENSAJES * 2]]

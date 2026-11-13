@@ -240,15 +240,18 @@ def detectar(tenant: str, dias: int = DIAS_POR_DEFECTO,
                     order by creado_en limit %s""",
                 (org, p.conversaciones[:MUESTRAS_POR_PATRON],
                  MUESTRAS_POR_PATRON))
-            # REDACTADAS ANTES DE SALIR (12/11/2026). Las muestras van al
-            # modelo y lo que el modelo devuelve queda persistido como los
-            # pasos de una habilidad -- que despues se inyecta en el prompt
-            # de cada turno. Un telefono o una cedula que el cliente escribio
-            # podia terminar escrito en un procedimiento vigente. Se redacta
-            # ANTES de recortar: cortar primero puede partir un numero en un
-            # pedazo que el patron ya no reconoce.
-            p.muestras = [redaccion.redactar(f["contenido"])[:400]
-                          for f in _filas(cur)]
+            p.muestras = [f["contenido"] for f in _filas(cur)]
+    # REDACTADAS ANTES DE SALIR (12/11/2026). Las muestras van al modelo y lo
+    # que el modelo devuelve queda persistido como los pasos de una habilidad
+    # -- que despues se inyecta en el prompt de cada turno. Un telefono o una
+    # cedula que el cliente escribio podia terminar escrito en un
+    # procedimiento vigente. Se redacta ANTES de recortar: cortar primero
+    # puede partir un numero en un pedazo que el patron ya no reconoce. Y
+    # FUERA de la conexion (13/11/2026): no la necesita, y adentro la guarda
+    # de conexiones la confunde con 'redactar' de este archivo, que si llama
+    # al modelo (tests/test_conexiones_sin_espera.py).
+    for p in patrones:
+        p.muestras = [redaccion.redactar(m)[:400] for m in p.muestras]
     return patrones
 
 
