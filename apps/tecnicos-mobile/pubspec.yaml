@@ -26,7 +26,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 #  fotos y movimientos de material encolados. Por eso el numero se sube en el
 #  commit que hace falta publicar, y la version que dice el repo es la que
 #  corre en la calle.
-version: 1.0.15+15
+version: 1.0.16+16
 
 environment:
   sdk: ^3.13.2
