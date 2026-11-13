@@ -65,6 +65,25 @@ flutter run -d emulator-5554 -t lib/vista_previa/marca_de_agua_main.dart
 | Emulador `mythic_pixel`: foto con la cámara virtual → vista previa | banda con logo, empresa, técnico, 15:59 en hora de Bogotá y coordenadas |
 | La **misma foto** pasada por `campo/services/marca_de_agua.py` | misma altura de banda, mismo logo, mismas cuatro líneas, en abajo-izquierda y arriba-derecha. Lo que difiere es la letra: DejaVu en el servidor y la de la app en el teléfono |
 
+## El APK 1.0.16 (13/11/2026)
+
+`Desktop\dexter-apk\dexter-campo-1.0.16-marca-de-agua.apk`: **universal**, versionCode
+16, `BACKEND_URL=https://agent-api.rapilinksas.co`, instalado por cable con
+`adb install -r` en el teléfono de pruebas (vivo V2436). Actualizó encima de la 1.0.15
+(la fecha de primera instalación no cambió) y sincronizó: «Todo sincronizado · hoy 17:11».
+
+**Dos trampas que casi cuestan datos de un técnico:**
+
+- **La firma.** Los teléfonos traen la 1.0.15 firmada con la llave de depuración del
+  OTRO PC (SHA-256 `441eee5d…`), no con la de este (`c6186f3e…`). Un APK con otra llave
+  no actualiza, y la única salida es desinstalar, que borra lo que no se sincronizó. Se
+  firmó con `apksigner` usando una copia de ese `debug.keystore`. Antes de instalar en
+  un teléfono, comparar la huella de lo instalado (`adb shell pm path` + `apksigner
+  verify --print-certs`) con la del APK.
+- **El número.** `--split-per-abi` le suma 2000 al versionCode (arm64 = 2016). Si eso se
+  instala, el próximo APK universal (17) queda «más viejo» y Android lo rechaza. Se
+  compila universal, como el otro PC.
+
 ## Lo que falta
 
 1. **Desplegar el servidor** (push) y **construir e instalar el APK** en los
