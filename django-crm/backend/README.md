@@ -379,6 +379,34 @@ uv run pytest
 
 CI runs `ruff check .` and `ruff format --check .` as hard steps, so both must pass.
 
+### Correr las pruebas contra PostgreSQL — dos trampas que dan rojos falsos
+
+Varias suites piden Postgres real (`pytest.ini` usa `crm.test_settings`, que
+lee `TEST_DATABASE_URL`; sin esa variable cae a SQLite y los rojos son de
+otra cosa). Y **cómo se conecta decide si dos guardas miden algo o no**:
+
+| Trampa | Síntoma | Por qué |
+|---|---|---|
+| El **host** de la base no es uno "local" | `test_anonimizador` ×5 en rojo: *"La base configurada está en 'pg', que no es local"* | `anonimizar_campo` solo corre contra `localhost`, `127.0.0.1`, `::1`, `db` o `postgres` (`HOSTS_LOCALES`). Reescribe datos de clientes: la guarda está bien, el alias estaba mal |
+| Conectarse como **`postgres`** | `test_despacho_pantalla::test_j` en rojo: `DID NOT RAISE ProgrammingError` | `postgres` tiene **BYPASSRLS** (CLAUDE.md §5), así que el RLS nunca bloquea y el test que mide el aislamiento no puede fallar... ni pasar |
+
+Las dos se evitan con el alias correcto y un usuario sin privilegios:
+
+```bash
+docker exec <pg> psql -U postgres -c   "CREATE ROLE app_test LOGIN PASSWORD 'app_test' CREATEDB NOSUPERUSER NOBYPASSRLS;"
+
+docker run --rm --link <pg>:db   -e TEST_DATABASE_URL=postgres://app_test:app_test@db:5432/testdb   -v <ruta>/django-crm/backend:/app -w /app <imagen>   /opt/venv/bin/pytest campo/ --create-db --no-cov -p no:randomly -q
+```
+
+El alias **`db`** (no `pg`) y el usuario **`app_test`** (no `postgres`) son lo
+que cambia. Medido el 12/11/2026: con `pg` y `postgres` quedaban **6 rojos**
+que se venían anotando como preexistentes del repositorio; con esto,
+`campo/` pasa entero. No eran del código: eran la forma de correrlas, y
+desactivaban justo las dos protecciones que esos tests existen para medir.
+
+Después de la primera corrida, `--reuse-db` en vez de `--create-db`: crear la
+base tarda ~4 minutos y reusarla, segundos.
+
 ### Managing Dependencies
 
 ```bash
