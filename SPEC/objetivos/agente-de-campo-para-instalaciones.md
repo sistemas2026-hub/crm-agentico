@@ -179,6 +179,44 @@ El alta los cruza todos, y es donde ya costó tiempo.
    se registra con fecha antes de la primera línea**, no se descubre al final
    — igual que se hizo el 31/10 con «el punto de IA nunca vale `False`».
 
+## DECISIÓN DEL USUARIO, 13/11/2026: el técnico crea el contrato desde la app
+
+> *«ahora el técnico crearía el contrato desde la app de dexter»*
+
+Hoy el técnico, en la casa del cliente, entra a WispHub y llena **a mano**:
+nombre, apellido, cédula, plan, dirección, coordenadas, el técnico que lo crea y
+la fecha. Todo eso **ya está en la plataforma antes de llegar**:
+
+| Lo que llena hoy en WispHub | De dónde sale |
+|---|---|
+| Nombre, apellido, cédula, plan, dirección | la solicitud que llenó el cliente (`solicitudes.SolicitudServicio`) |
+| Coordenadas | el GPS de «Llegué» en la app (el punto real de la casa); el de la solicitud como respaldo |
+| El técnico | la sesión de la app, emparejada con su usuario de `/api/staff/` de WispHub |
+| La fecha | el momento de tocar «Crear el contrato» |
+
+**Prototipo navegable:** `apps/tecnicos-mobile/lib/vista_previa/contrato_main.dart`
+(commit `c9e25839`), instalado como «Contrato (prototipo)» en el teléfono de pruebas.
+**Contrato de ejemplo** generado con WeasyPrint (el motor de `solicitudes/pdf.py`):
+datos de la solicitud + red + instalación + autorizaciones + dos firmas + huella de
+los datos firmados. Las cláusulas NO se inventaron: se cargan como texto de la empresa.
+
+### El plan
+
+| Fase | Qué | Depende de |
+|---|---|---|
+| 1 | La orden de instalación queda unida a su solicitud y la app muestra los datos del cliente; pantalla «Crear el contrato» con firma; el PDF del contrato al expediente | nada externo |
+| 2 | El alta en WispHub (`agregar-cliente/{zona}`), por el motor, con idempotencia y aprobación atada; espera el `task_id` y guarda el servicio en la orden; cierra el ticket | **la respuesta de abajo** |
+| 3 | Autorizar la ONU en SmartOLT | verificar su API (P2) |
+
+**Sin señal no se crea, y nunca se manda solo después:** crear un cliente dos veces
+es peor que esperar.
+
+### Lo que falta del usuario
+
+1. **Zona/router, IP y usuario PPPoE.** La API los exige y el técnico no los nombró:
+   ¿los asigna WispHub solo, los llena la oficina, o los elige el técnico?
+2. **El contrato que firman hoy**, para copiar sus cláusulas y su forma.
+
 ## Bitácora
 
 | Fecha | Qué | Evidencia | Hash |
