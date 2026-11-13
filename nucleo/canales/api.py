@@ -4274,8 +4274,10 @@ def agentes_pausa(nombre):
     except Exception as e:
         return _error_al_guardar(e)
     olvidar_config(tenant)
-    registrar("agentes", "agente pausado" if cuerpo["pausado"] else "agente reanudado",
-              tenant=tenant, agente=nombre)
+    if cuerpo["pausado"]:
+        registrar("agentes", "agente pausado", tenant=tenant, agente=nombre)
+    else:
+        registrar("agentes", "agente reanudado", tenant=tenant, agente=nombre)
     return jsonify({"agente": _agente_json(nombre, config.roles[nombre], config)})
 
 
