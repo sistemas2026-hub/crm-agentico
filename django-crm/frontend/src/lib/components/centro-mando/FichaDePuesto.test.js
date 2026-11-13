@@ -432,7 +432,7 @@ describe('la ficha lleva a donde se cambia y a lo que atiende', () => {
       veredicto: alDia,
       rol: 'USER'
     });
-    expect(href(html)).toEqual(['/agentes#agente-soporte_tecnico_cliente', '/conversaciones']);
+    expect(href(html)).toEqual(['/agentes/soporte_tecnico_cliente', '/conversaciones']);
   });
 
   it('el Supervisor: su tablero a gestión, y no a un USER', () => {

@@ -37,9 +37,9 @@ export function enlacesDelPuesto(puesto, rol) {
     return enlaces;
   }
   return [
-    // El ancla apunta a la tarjeta del agente; si la pantalla todavía no la
-    // tiene, se llega igual a /agentes, arriba.
-    { href: `/agentes#agente-${encodeURIComponent(agente)}`, texto: 'Configurar este agente' },
+    // Cada agente tiene su pagina desde el 13/11/2026 (/agentes/[nombre]):
+    // ahi estan sus herramientas, su autonomia, su bitacora y Editar.
+    { href: `/agentes/${encodeURIComponent(agente)}`, texto: 'Configurar este agente' },
     { href: '/conversaciones', texto: 'Ver las conversaciones' }
   ];
 }

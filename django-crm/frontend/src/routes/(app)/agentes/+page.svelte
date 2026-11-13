@@ -1,762 +1,305 @@
 <script>
   /**
-   * Los agentes configurados y, para cada uno, que puede hacer y que puede
-   * ver. Un ADMIN puede crear/editar/borrar desde aca (via AgenteFormDialog,
-   * que habla con /api/agentes, en cuatro pasos desde el 02/11/2026). Una
-   * herramienta nueva que llama a una API se crea en /configuracion-guiada,
-   * sin codigo; las de logica propia (agregados, internas) si son codigo.
+   * AGENTES: QUIEN ATIENDE, A QUIEN LE HABLA Y QUE PUEDE CAMBIAR  --  13/11/2026
    *
-   * La tarjeta esta armada para responder una pregunta concreta: "¿que le
-   * estoy dejando hacer a este agente?". Por eso las herramientas van
-   * agrupadas por lo que HACEN (ver porLoQueHace) con los campos que ve de
-   * cada una, y no como el diagrama radial que hubo antes -- ese ocupaba mas
-   * y decia menos: truncaba los nombres hasta volverlos ambiguos y no
-   * distinguia una consulta de algo que cambia el mundo real.
+   * Era una grilla de tarjetas de hasta 1.100px de alto (soporte tiene 28
+   * herramientas) que se leia por una ventana de 460px: las cifras y los
+   * agentes operativos quedaban fijos arriba y solo la grilla tenia scroll.
+   * Ahora es UNA tabla, un renglon por agente, agrupada por a quien le habla,
+   * y TODO comparte un solo scroll. El detalle de cada agente (herramientas,
+   * lo que recibe, autonomia, bitacora, cambios) vive en /agentes/[nombre].
+   *
+   * Dos cosas que la pantalla anterior decia mal y esta no:
+   *   · "pide confirmacion antes" en cada accion, leyendo un campo que el
+   *     motor declara y no aplica. Ahora: la hace sola / espera aprobacion,
+   *     del freno real (ver $lib/agentes/presentacion.js::modoDeAccion).
+   *   · la clave del rol capitalizada ("Soporte_tecnico_cliente") como nombre.
+   *
+   * La logica vive en $lib/agentes/presentacion.js, que tiene sus pruebas.
+   *
+   * Sobre los comentarios: van aca y no como <!-- --> al principio de una rama
+   * {#if}: eso choco con los marcadores de hidratacion de Svelte 5 (ver la
+   * historia de este archivo).
    */
   import PageHeader from '$lib/v2/components/PageHeader.svelte';
-  import { huecosDe as huecosDeAgente, textoDelHueco } from '$lib/components/manual/entrenar.js';
-  import StatCard from '$lib/v2/components/StatCard.svelte';
   import AgenteFormDialog from '$lib/components/agentes/AgenteFormDialog.svelte';
   import { Button } from '$lib/components/ui/button/index.js';
-  import { toast } from 'svelte-sonner';
-  import { invalidateAll } from '$app/navigation';
-  import { AlertTriangle, Bot, BotMessageSquare, ScanEye, Radar, ArrowRight } from '@lucide/svelte';
+  import { Bot, BotMessageSquare, ScanEye, Radar, ChevronRight, PauseCircle, AlertTriangle } from '@lucide/svelte';
   import { AGENTES_OPERATIVOS } from '$lib/v2/agentes-operativos.js';
-  import AutonomiaDeAccion from '$lib/components/agentes/AutonomiaDeAccion.svelte';
+  import {
+    agrupar, conteoDeAcciones, familia, indiceDeAutonomia, nombreDe, resumenDe,
+    resumenGlobal, subtituloDe, textoEscalo, FAMILIAS
+  } from '$lib/agentes/presentacion.js';
 
   /** @type {{ data: any }} */
-  let { data, form } = $props();
-
-  /*
-   * Lo que cada agente hace solo (02/11/2026). Una entrada por accion que
-   * pide aprobacion, con su estado en cada agente ('por_agente'). Las que no
-   * piden aprobacion no aparecen: ya salen solas, con la frontera de por medio.
-   */
-  /** @type {Record<string, any>} */
-  let autonomiaDe = $derived(
-    Object.fromEntries((data.autonomia?.acciones ?? []).map((/** @type {any} */ a) => [a.accion, a]))
-  );
+  let { data } = $props();
 
   const esAdmin = $derived(data.role === 'ADMIN');
-
   let dialogoAbierto = $state(false);
-  // Anotado, no inferido: sin esto $state lo ensancha a 'string' y no encaja
-  // en el prop del dialogo, que solo acepta estos dos.
-  let modoDialogo = $state(/** @type {'crear' | 'editar'} */ ('crear'));
-  let agenteEnEdicion = $state(/** @type {any} */ (null));
 
-  function abrirCrear() {
-    modoDialogo = 'crear';
-    agenteEnEdicion = null;
-    dialogoAbierto = true;
+  const autonomiaDe = $derived(indiceDeAutonomia(data.autonomia));
+  const resumen = $derived(resumenGlobal(data.agentes ?? [], autonomiaDe));
+
+  //  Los operativos (Supervisor NOC IA) no vienen del motor: viven en el CRM.
+  //  Se suman a la familia 'auto' como filas que llevan a su tablero, fuera
+  //  de lo que depende del motor -- si el motor no responde, siguen ahi.
+  const operativos = AGENTES_OPERATIVOS.map((o) => ({
+    operativo: true, nombre: o.clave, nombre_visible: o.nombre, cargo: o.rotulo,
+    resumen: o.descripcion, href: o.href, enlace: o.enlace
+  }));
+  const grupos = $derived(agrupar([...(data.agentes ?? []), ...operativos]));
+
+  const desempenoDe = (/** @type {string} */ n) => data.desempeno?.agentes?.[n];
+  const huecosDe = (/** @type {string} */ n) => data.huecosPorRol?.[n]?.length ?? 0;
+  const pct = (/** @type {number} */ a, /** @type {number} */ b) => (b ? Math.round((a / b) * 100) : 0);
+
+  /** Lo que dice "que puede hacer" de un agente conversacional. @param {any} a */
+  function puede(a) {
+    const c = conteoDeAcciones(a, autonomiaDe);
+    const mira = [
+      c.consultas && `${c.consultas} consulta${c.consultas === 1 ? '' : 's'}`,
+      c.cuentas && `${c.cuentas} conteo${c.cuentas === 1 ? '' : 's'}`
+    ].filter(Boolean).join(' · ') || 'Sin consultas';
+    return { ...c, mira };
   }
 
-  function abrirEditar(/** @type {any} */ agente) {
-    modoDialogo = 'editar';
-    agenteEnEdicion = agente;
-    dialogoAbierto = true;
-  }
-
-  /** @type {Record<string, boolean>} */
-  let borradoArmado = $state({});
-
-  // El shell de la app recorta con overflow:hidden (ver (app)/+layout.svelte),
-  // asi que la grilla de tarjetas pide su propio scroll con .v2-scroll/.v2-pad
-  // -- mismo patron que /settings y sus subpaginas. Documentado aca y no como
-  // comentario HTML dentro del {:else}: un comentario ahi, como primer nodo de
-  // la rama, choco con los marcadores de hidratacion de Svelte 5 y producia
-  // 'hydration_mismatch' en cada carga -- Svelte tiraba el DOM del servidor y
-  // volvia a armar todo desde cero en el cliente, lo que se sentia como que el
-  // scroll "se resetea solo" a mitad de uso.
-
-  async function borrar(/** @type {string} */ nombre) {
-    if (!borradoArmado[nombre]) {
-      borradoArmado = { ...borradoArmado, [nombre]: true };
-      return;
-    }
-    borradoArmado = { ...borradoArmado, [nombre]: false };
-    const res = await fetch(`/api/agentes/${encodeURIComponent(nombre)}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}));
-      toast.error(e?.error || 'No se pudo borrar el agente');
-      return;
-    }
-    toast.success('Agente borrado.');
-    await invalidateAll();
-  }
-
-  /** Primer PARRAFO de la descripcion. Antes cortaba en el primer salto de
-   * linea, y como el YAML usa bloques literales eso partia la frase al medio
-   * ("...revisa" y nada mas). El parrafo entero se lee completo; si es largo
-   * lo recorta el CSS, que al menos corta donde termina un renglon. */
-  function resumen(texto) {
-    return (texto || '').trim().split(/\n\s*\n/)[0].replace(/\s*\n\s*/g, ' ');
-  }
-
-  /** Los huecos de ESTE agente y su senal en palabras: la logica vive en
-      $lib para poder probarla -- el harness de vitest no compila .svelte. */
-  const huecosDe = (nombre) => huecosDeAgente(data.huecosPorRol, nombre);
-
-  /**
-   * Las herramientas por lo que HACEN, no por su tipo tecnico.
-   *
-   * 'http'/'agregado'/'batch' es detalle de implementacion: a quien revisa
-   * que puede hacer un agente no le dice nada. Lo que le importa es si el
-   * agente mira, cuenta, o CAMBIA algo del mundo real.
-   *
-   * El orden no es alfabetico ni el del YAML: 'Actua' va ultimo y aparte
-   * porque es el unico grupo con consecuencias. En soporte es una sola
-   * herramienta de ocho -- agendar_visita_tecnica crea una visita con costo
-   * y logistica-- y hasta ahora se veia igual que una consulta.
-   */
-  function porLoQueHace(herramientas) {
-    const grupos = [
-      { clave: 'consulta', titulo: 'Consulta', items: [] },
-      { clave: 'cuenta', titulo: 'Cuenta', items: [] },
-      { clave: 'actua', titulo: 'Actúa', items: [] }
-    ];
-    for (const h of herramientas ?? []) {
-      // Escribir manda sobre el tipo: una herramienta que cambia algo va a
-      // 'Actua' aunque ademas sea un agregado.
-      if (h.solo_lectura === false) grupos[2].items.push(h);
-      else if (h.tipo === 'agregado') grupos[1].items.push(h);
-      else grupos[0].items.push(h);
-    }
-    return grupos.filter((g) => g.items.length > 0);
-  }
-
-  /**
-   * El motivo con mas conversaciones escaladas, o un guion si no escalo
-   * ninguna en el periodo -- nunca "undefined" en pantalla.
-   * @param {Record<string, number> | undefined} porMotivo
-   */
-  function motivoPrincipal(porMotivo) {
-    const entradas = Object.entries(porMotivo ?? {});
-    if (entradas.length === 0) return '—';
-    return entradas.sort((a, b) => b[1] - a[1])[0][0];
-  }
+  const hechosDelSupervisor = $derived(
+    data.tareasSupervisor
+      ? data.tareasSupervisor.delegadas.length
+        ? `Hace solo ${data.tareasSupervisor.delegadas.length} de ${data.tareasSupervisor.total} tareas`
+        : `Sus ${data.tareasSupervisor.total} tareas esperan a una persona`
+      : null
+  );
 </script>
 
 <PageHeader title="Agentes">
   {#snippet sub()}
-    Quién es cada agente y qué herramientas puede usar.
+    Quién atiende, a quién le habla y qué puede cambiar.
   {/snippet}
   {#snippet actions()}
+    <a class="v2-btn v2-btn-sm" href="/agentes/permisos">Quién puede qué</a>
     <a class="v2-btn v2-btn-sm" href="/agentes/flujo">Flujo de derivación</a>
     {#if esAdmin}
       <a class="v2-btn v2-btn-sm" href="/team">Quién usa cada agente</a>
-      <Button type="button" onclick={abrirCrear}>Nuevo agente</Button>
+      <Button type="button" onclick={() => (dialogoAbierto = true)}>Nuevo agente</Button>
     {/if}
   {/snippet}
 </PageHeader>
 
 {#if esAdmin}
-  <AgenteFormDialog
-    bind:open={dialogoAbierto}
-    modo={modoDialogo}
-    agente={agenteEnEdicion}
-    catalogo={data.catalogo || []}
-    motivos={data.motivosEscalada || []}
-    autonomia={data.autonomia}
-  />
+  <AgenteFormDialog bind:open={dialogoAbierto} modo="crear" agente={null}
+    catalogo={data.catalogo || []} motivos={data.motivosEscalada || []} autonomia={data.autonomia} />
 {/if}
 
-{#if data.escalamiento}
-  <!--
-    No es un dato del catalogo de agentes, es la metrica de cuanto resuelve
-    el asistente solo vs. cuanto pasa a un humano -- ver
-    persistencia.tasa_escalamiento() y cli/reporte_escalamiento.py (la misma
-    cuenta, corrida desde la terminal). Solo aparece si el backend respondio
-    (data.escalamiento no es null): un fallo del calculo no debe tumbar la
-    pantalla de agentes.
-  -->
-  <div class="v2-pad" style="padding-top:16px;flex:none">
-    <div class="v2-stats">
-      <StatCard
-        label="Conversaciones (14 días)"
-        value={String(data.escalamiento.total)}
-        tone="slate"
-      />
-      <StatCard
-        label="Escaladas a un humano"
-        value={String(data.escalamiento.escaladas)}
-        tone="clay"
-        detail={`${Math.round(data.escalamiento.tasa * 100)}% del total`}
-      />
-      <StatCard
-        label="Motivo principal"
-        value={motivoPrincipal(data.escalamiento.por_motivo)}
-        tone="ink"
-      />
-    </div>
-  </div>
-{/if}
-
-<!--
-  AGENTES OPERATIVOS  --  fuera del bloque que depende del motor, a proposito.
-
-  Lo que hay debajo sale de `GET /agentes` del motor y desaparece entero si el
-  motor no responde. El Supervisor NOC IA no vive ahi: vive en el CRM, en la
-  app `operaciones`. Si estuviera dentro de ese `{#if}`, un fallo del motor lo
-  borraria de la pantalla aunque el este perfectamente vivo.
-
-  Y NO se declara como rol del tenant: si lo fuera, el motor lo meteria en el
-  enrutador de derivacion y alguien podria acabar derivandole un cliente. Esta
-  tarjeta lo representa; no lo registra.
--->
-<div class="v2-pad seccion-operativos">
-  <h2 class="titulo-familia">Agentes operativos</h2>
-  <p class="nota-familia">
-    Trabajan sobre la operación, no sobre una conversación. No tienen prompt ni modelo:
-    lo que saben hacer es código.
-  </p>
-  <div class="grilla">
-    {#each AGENTES_OPERATIVOS as operativo (operativo.clave)}
-      <a class="tarjeta tarjeta-operativa" href={operativo.href}>
-        <div class="encabezado-tarjeta">
-          <span class="marca-agente" aria-hidden="true"><Radar size={19} /></span>
-          <div class="identidad">
-            <h3>{operativo.nombre}</h3>
-            <p class="organizacion">{operativo.rotulo}</p>
+<div class="v2-scroll">
+  <div class="v2-pad pagina">
+    {#if data.error}
+      <p class="aviso-error" role="alert"><AlertTriangle size={15} /> {data.error}</p>
+    {:else}
+      <section class="resumen" aria-label="Resumen">
+        <div class="cifra">
+          <span class="cifra-icono neutro" aria-hidden="true"><Bot size={19} /></span>
+          <span><strong>{(data.agentes?.length ?? 0) + operativos.length}</strong><span class="cifra-txt">agentes en total</span></span>
+        </div>
+        <div class="cifra fam-cliente">
+          <span class="cifra-icono" aria-hidden="true"><BotMessageSquare size={19} /></span>
+          <span><strong>{resumen.cliente}</strong><span class="cifra-txt">le hablan al cliente</span></span>
+        </div>
+        <div class="cifra ancha">
+          <div class="ancha-cabeza">
+            <span><strong class="acciones-n">{resumen.acciones}</strong> acciones que cambian algo real, en {resumen.conAcciones} agentes</span>
+            <span class="v2-sub">
+              {#if data.escalamiento?.total}
+                {data.escalamiento.total} conversaciones en 14 días · {pct(data.escalamiento.escaladas, data.escalamiento.total)} % pasaron a una persona
+              {:else if data.escalamiento}
+                Sin conversaciones en 14 días
+              {/if}
+            </span>
           </div>
-          <span class="pill-orientacion pill-operativo">Operativo</span>
+          {#if resumen.acciones}
+            <div class="barra" role="img"
+              aria-label="{resumen.solas} las hacen solos, {resumen.espera} esperan aprobación">
+              <span class="barra-sola" style="width:{pct(resumen.solas, resumen.acciones)}%"></span>
+              <span class="barra-espera" style="width:{pct(resumen.espera, resumen.acciones)}%"></span>
+            </div>
+            <div class="leyenda">
+              <span class="ley-sola"><i></i><strong>{resumen.solas}</strong> las hacen solos</span>
+              <span class="ley-espera"><i></i><strong>{resumen.espera}</strong> esperan que una persona apruebe</span>
+              {#if resumen.sinDato}<span class="v2-sub">{resumen.sinDato} sin dato</span>{/if}
+            </div>
+          {/if}
+        </div>
+      </section>
+
+      {#if data.errorAutonomia}
+        <p class="v2-sub nota-dato">{data.errorAutonomia} Las acciones que piden aprobación se muestran esperando.</p>
+      {/if}
+
+      <section class="tabla" aria-label="Agentes">
+        <div class="fila cabeza" aria-hidden="true">
+          <span>Agente</span><span>Le habla a</span><span>Qué puede hacer</span>
+          <span title="Conversaciones que pasaron a una persona. — = sin conversaciones en el periodo">Escaló · 30 d</span><span></span>
         </div>
 
-        <p class="descripcion">{operativo.descripcion}</p>
+        {#each grupos as g (g.clave)}
+          <div class="grupo fam-{g.clave}">
+            <span class="grupo-punto" aria-hidden="true"></span>
+            <h2>{g.titulo}</h2>
+            <span class="v2-sub">{g.items.length} · {g.nota}</span>
+          </div>
 
-        <!-- Lo que hace solo HOY, leido en vivo de sus Ajustes (02/11/2026): es
-             estado, no una metrica que envejece. Se cambia en Supervisor NOC ->
-             Ajustes, que tiene sus propios permisos. -->
-        {#if operativo.clave === 'supervisor-noc' && data.tareasSupervisor}
-          <p class="hace-solo">
-            {#if data.tareasSupervisor.delegadas.length}
-              Hace solo {data.tareasSupervisor.delegadas.length} de {data.tareasSupervisor.total} tareas:
-              {data.tareasSupervisor.delegadas.join(', ')}. Se cambian en sus Ajustes.
-            {:else}
-              No hace sola ninguna de sus {data.tareasSupervisor.total} tareas: todas esperan a una
-              persona. Se encienden en sus Ajustes.
-            {/if}
-          </p>
-        {/if}
+          {#each g.items as a (a.nombre)}
+            {@const fam = familia(a)}
+            {@const p = a.operativo || a.automatico ? null : puede(a)}
+            <a class="fila agente fam-{fam}" id="agente-{a.nombre}" href={a.operativo ? a.href : `/agentes/${encodeURIComponent(a.nombre)}`}>
+              <span class="quien">
+                <span class="icono" aria-hidden="true">
+                  {#if a.operativo}<Radar size={19} />
+                  {:else if a.automatico}<ScanEye size={19} />
+                  {:else if fam === 'cliente'}<BotMessageSquare size={19} />
+                  {:else}<Bot size={19} />{/if}
+                </span>
+                <span class="quien-txt">
+                  <span class="nombre">
+                    {nombreDe(a)}
+                    {#if a.pausado}<span class="pausa"><PauseCircle size={12} /> En pausa</span>{/if}
+                  </span>
+                  <span class="sub">
+                    {subtituloDe(a) || resumenDe(a)}
+                    {#if !a.operativo}<span class="clave">· {a.nombre}</span>{/if}
+                  </span>
+                </span>
+              </span>
 
-        <!-- Sin metricas: las que importan cambian cada minuto y su tablero
-             las muestra con su fuente. Un numero escrito aqui envejeceria. -->
-        <span class="enlace-tablero">
-          {operativo.enlace}<ArrowRight size={15} />
-        </span>
-      </a>
-    {/each}
+              <span class="habla"><span class="pill-fam">{FAMILIAS[fam].habla}</span></span>
+
+              <span class="puede">
+                {#if a.operativo}
+                  <span>{a.nombre === 'supervisor-noc' && hechosDelSupervisor ? hechosDelSupervisor : 'Propone acciones; no ejecuta'}</span>
+                {:else if a.automatico}
+                  <span>Propone aportes al manual</span>
+                {:else if p}
+                  <span class="mira">{p.mira}</span>
+                  {#if p.solas}<span class="chip-sola">{p.solas} {p.solas === 1 ? 'sola' : 'solas'}</span>{/if}
+                  {#if p.espera}<span class="chip-espera">{p.espera} con aprobación</span>{/if}
+                  {#if p.sinDato}<span class="chip-neutro">{p.sinDato} sin dato</span>{/if}
+                  {#if huecosDe(a.nombre)}<span class="chip-hueco" title="Le falta saber hacer algo: ver su página">{huecosDe(a.nombre)} por enseñar</span>{/if}
+                {/if}
+              </span>
+
+              <span class="escalo">{a.operativo ? '' : textoEscalo(desempenoDe(a.nombre))}</span>
+              <span class="chev" aria-hidden="true"><ChevronRight size={16} /></span>
+            </a>
+          {/each}
+        {/each}
+      </section>
+
+      <p class="v2-sub pie">— en «Escaló» = no hubo conversaciones en el periodo, no cero escaladas. Cada fila abre la página del agente.</p>
+    {/if}
   </div>
 </div>
 
-{#if data.error}
-  <p class="aviso-error">⚠️ {data.error}</p>
-{:else if !data.agentes || data.agentes.length === 0}
-  <p class="chat-vacio">No hay agentes configurados.</p>
-{:else}
-  <div class="v2-scroll">
-  <div class="v2-pad grilla-envoltorio">
-  <div class="grilla">
-    {#each data.agentes as agente}
-      {#if agente.automatico}
-        <!--
-          El supervisor no es un Rol real (no tiene herramientas ni
-          puede_consultar): sin diagrama de herramientas y sin acciones de
-          editar/borrar, que no aplican -- no hay '/api/agentes/supervisor'
-          contra el que llamarlas. Ver nucleo/canales/api.py:_agente_supervisor_json.
-        -->
-        <div class="tarjeta tarjeta-automatica">
-          <div class="encabezado-tarjeta">
-            <span class="marca-agente" aria-hidden="true"><ScanEye size={19} /></span>
-            <div class="identidad">
-              <h3>{agente.nombre}</h3>
-              <p class="organizacion">Revisa conversaciones ya cerradas</p>
-            </div>
-            <span class="pill-orientacion pill-automatico">Automático</span>
-          </div>
-
-          <p class="descripcion">{agente.descripcion}</p>
-
-          <p class="modelo-automatico">
-            Modelo: <strong>{agente.modelo || 'hereda el del rol que cierra cada conversación'}</strong>
-          </p>
-        </div>
-      {:else}
-        {@const grupos = porLoQueHace(agente.herramientas)}
-        <!-- El id es el ancla de «Configurar este agente» desde la ficha del
-             Centro de mando (lib/centro-mando/enlaces.js), 12/11/2026. -->
-        <div class="tarjeta" id="agente-{agente.nombre}">
-          <div class="encabezado-tarjeta">
-            <!--
-              Un icono de robot, no las iniciales del nombre: lo primero que
-              tiene que decir la tarjeta es QUE ES, y lo que hay detras no es
-              una persona. La variante distingue a quien le habla -- con globo
-              de dialogo si atiende al cliente final, sin el si es interno --
-              asi la diferencia se ve antes de leer la etiqueta.
-
-              En tono piedra, nunca en ambar: el ambar esta reservado para
-              accion y para lo que exige atencion (el grupo 'Actua' de abajo).
-              Gastarlo aca de adorno se la quita justo donde importa.
-            -->
-            <span class="marca-agente" aria-hidden="true">
-              {#if agente.orientado_a === 'cliente_final'}
-                <BotMessageSquare size={19} />
-              {:else}
-                <Bot size={19} />
-              {/if}
-            </span>
-            <div class="identidad">
-              <h3>{agente.nombre}</h3>
-              {#if agente.area || agente.cargo}
-                <!-- El separador se arma en JS: puesto como texto dentro de un
-                     {#if}, Svelte le come el espacio de adelante y quedaba
-                     "Agente de Soporte· Atencion al Cliente". -->
-                <p class="organizacion">
-                  {[agente.cargo, agente.area].filter(Boolean).join(' · ')}
-                </p>
-              {/if}
-            </div>
-            <span class="pill-orientacion" class:cliente={agente.orientado_a === 'cliente_final'}>
-              {agente.orientado_a === 'cliente_final' ? 'Cliente final' : 'Uso interno'}
-            </span>
-          </div>
-
-          <p class="descripcion">{resumen(agente.descripcion)}</p>
-
-          <!--
-            QUE LE FALTA A ESTE AGENTE, por rol y de los ultimos 14 dias
-            (02/11/2026). Hasta hoy la unica medicion de esta pantalla era la
-            tasa de escalada de TODA la empresa, arriba: al lado de la tarjeta
-            de un agente decia algo que no era de ese agente. Esto es el mismo
-            SQL determinista que alimenta /habilidades --no un segundo calculo
-            de lo mismo-- y es lo que deja ver si una correccion sirvio: el
-            numero antes y el numero despues.
-
-            Sin huecos NO se muestra nada. "0 huecos" en un agente que nadie
-            uso diria que anda bien, y lo que pasa es que no hay datos.
-          -->
-          {#if huecosDe(agente.nombre).length > 0}
-            <div class="huecos" role="note">
-              <p class="huecos-titulo">Le falta saber hacer ({huecosDe(agente.nombre).length})</p>
-              <ul>
-                {#each huecosDe(agente.nombre).slice(0, 3) as h (h.senal + h.motivo)}
-                  <li>
-                    <span class="huecos-n">{h.n_casos}</span>
-                    {textoDelHueco(h)}
-                  </li>
-                {/each}
-              </ul>
-              <a class="huecos-link" href="/habilidades">Enseñarle en Habilidades →</a>
-            </div>
-          {/if}
-
-          <!--
-            Reemplaza al diagrama radial que estaba aca. Ese gastaba ~250px de
-            alto para decir "tiene 8 herramientas" peor que una lista: la
-            posicion de cada nodo no significaba nada (todas cuelgan del
-            agente, es un hecho), los nombres se truncaban a 16 caracteres --
-            'consultar_cliente' y 'consultar_cliente_por_cedula' quedaban
-            IDENTICOS en pantalla-- y las dos cosas que de verdad importan
-            para revisar un agente, que escribe y que campos ve, no aparecian.
-          -->
-          <div class="herramientas">
-            {#each grupos as grupo (grupo.clave)}
-              <div class="grupo" class:grupo-actua={grupo.clave === 'actua'}>
-                <div class="grupo-titulo">
-                  {#if grupo.clave === 'actua'}<AlertTriangle size={12} />{/if}
-                  {grupo.titulo}
-                  <span class="grupo-cuenta">{grupo.items.length}</span>
-                </div>
-                {#each grupo.items as h (h.nombre)}
-                  <div class="herramienta" title={h.descripcion || h.nombre}>
-                    <span class="herr-nombre">{h.nombre}</span>
-                    <span class="herr-campos">
-                      {h.campos_permitidos.length
-                        ? `${h.campos_permitidos.length} campo${h.campos_permitidos.length === 1 ? '' : 's'}`
-                        : '—'}
-                    </span>
-                  </div>
-                  {#if grupo.clave === 'actua'}
-                    <!-- Sin "pide confirmacion antes" (04/11/2026): sale de
-                         'requiere_confirmacion', que el schema exige en TODA
-                         escritura y nada aplica en ejecucion (ver su comentario
-                         en nucleo/config/schema.py). Salia en todas las acciones,
-                         tambien junto a "Lo hace solo", y no decia nada. Si pide
-                         aprobacion o no, lo dice el bloque de abajo. -->
-                    <p class="herr-aviso">Cambia algo real</p>
-                    {#if autonomiaDe[h.nombre]}
-                      <AutonomiaDeAccion
-                        accion={autonomiaDe[h.nombre]}
-                        agente={agente.nombre}
-                        esAdmin={data.esAdmin}
-                        resultado={form?.autonomia ?? null}
-                      />
-                    {/if}
-                  {/if}
-                {/each}
-              </div>
-            {:else}
-              <p class="v2-sub" style="font-size:12px">Sin herramientas asignadas.</p>
-            {/each}
-          </div>
-
-          {#if agente.prompt_piezas?.length}
-            <details class="recibe">
-              <summary>Qué recibe este agente</summary>
-
-              <p class="recibe-nota v2-sub">
-                Las instrucciones que le llegan en cada turno, en orden. No se editan acá: cada
-                bloque dice de dónde sale.
-              </p>
-
-              {#each agente.prompt_piezas as pieza (pieza.titulo)}
-                <div class="pieza">
-                  <div class="pieza-cabeza">
-                    <span class="pieza-titulo">{pieza.titulo}</span>
-                    <span class="pieza-origen" class:fijo={!pieza.editable}>{pieza.origen}</span>
-                  </div>
-                  <pre class="pieza-texto">{pieza.texto}</pre>
-                </div>
-              {/each}
-
-              <!--
-                El prompt no es todo lo que recibe: tambien van las descripciones de
-                las herramientas de arriba (que cargan bastante comportamiento) y el
-                contexto del corpus, que cambia con cada pregunta. Sin este aviso,
-                alguien podria depurar mirando solo esta lista y concluir que el
-                agente "no tiene" una instruccion que en realidad le llega por otro
-                lado.
-              -->
-              <p class="recibe-nota v2-sub">
-                Además de esto recibe la descripción de cada herramienta de arriba, y —cuando la
-                pregunta coincide con el corpus— los fragmentos del manual, que cambian en cada
-                turno.
-              </p>
-            </details>
-          {/if}
-
-          {#if esAdmin}
-            <div class="acciones-tarjeta">
-              <button class="v2-btn v2-btn-sm" type="button" onclick={() => abrirEditar(agente)}>
-                Editar
-              </button>
-              {#if borradoArmado[agente.nombre]}
-                <span class="confirmar-borrado">
-                  <span class="v2-sub" style="font-size:11.5px">Esto no se puede deshacer.</span>
-                  <button class="v2-btn v2-btn-sm" type="button" onclick={() => borrar(agente.nombre)}>
-                    Confirmar
-                  </button>
-                  <button
-                    class="v2-btn v2-btn-sm"
-                    type="button"
-                    onclick={() => (borradoArmado = { ...borradoArmado, [agente.nombre]: false })}
-                  >
-                    Cancelar
-                  </button>
-                </span>
-              {:else}
-                <button class="v2-btn v2-btn-sm" type="button" onclick={() => borrar(agente.nombre)}>
-                  Eliminar
-                </button>
-              {/if}
-            </div>
-          {/if}
-        </div>
-      {/if}
-    {/each}
-  </div>
-  </div>
-  </div>
-{/if}
-
 <style>
-  .grilla-envoltorio {
-    padding-top: 12px;
-    padding-bottom: 32px;
-  }
-  .aviso-error {
-    color: var(--v2-rust);
-    font-size: 14px;
-  }
-  .chat-vacio {
-    color: var(--v2-slate);
-    font-size: 14px;
-  }
-  .grilla {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 16px;
-  }
-  .tarjeta {
-    border: 1px solid var(--v2-line);
-    border-radius: var(--v2-radius);
-    background: var(--v2-card);
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  /* Icono, identidad y etiqueta en una fila: el bloque que se lee primero. */
-  .encabezado-tarjeta {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .marca-agente {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
-    background: var(--v2-line-soft);
-    border: 1px solid var(--v2-line);
-    color: var(--v2-ink);
-  }
-  .identidad {
-    min-width: 0;
-    flex: 1;
-  }
-  /* 17px contra los 12px de la descripcion: sin ese salto la tarjeta se lee
-     como una lista uniforme y el nombre no ancla nada. */
-  .encabezado-tarjeta h3 {
-    margin: 0;
-    font-size: 17px;
-    font-weight: 600;
-    line-height: 1.2;
-    text-transform: capitalize;
-    color: var(--v2-ink);
-  }
-  .organizacion {
-    margin: 2px 0 0;
-    font-size: 11.5px;
-    color: var(--v2-slate);
-  }
-  .pill-orientacion {
-    flex: none;
-    align-self: center;
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--v2-line-soft);
-    border: 1px solid var(--v2-line);
-    color: var(--v2-slate);
-    white-space: nowrap;
-  }
-  /* El unico agente que le habla a alguien de afuera: se marca, pero con
-     'moss' (positivo, uso moderado), no con ambar. */
-  .pill-orientacion.cliente {
-    color: var(--v2-moss);
-    border-color: color-mix(in oklab, var(--v2-moss) 30%, transparent);
-    background: color-mix(in oklab, var(--v2-moss) 8%, transparent);
-  }
-  .tarjeta-automatica {
-    border-style: dashed;
-    background: var(--v2-line-soft);
-  }
+  .pagina { display: flex; flex-direction: column; gap: 16px; padding-top: 14px; padding-bottom: 40px; max-width: 1180px; }
+  .aviso-error { display: inline-flex; gap: 6px; align-items: center; color: var(--v2-rust); font-size: 14px; margin: 0; }
+  .nota-dato { margin: -6px 0 0; font-size: 12.5px; }
+  .pie { font-size: 12px; margin: 0; }
 
-  /* --- Agentes operativos ------------------------------------------------
-     Misma tarjeta que el resto: la familia se distingue por el rotulo y la
-     pildora, no por un diseno aparte. Lo unico distinto es que ESTA tarjeta
-     es un enlace entero -- lleva a su tablero, que es el punto. */
-  .seccion-operativos {
-    padding-bottom: 0;
-  }
-  .titulo-familia {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--v2-ink);
-    margin: 0 0 2px;
-  }
-  .nota-familia {
-    font-size: 11px;
-    color: var(--v2-slate);
-    margin: 0 0 12px;
-    max-width: 62ch;
-  }
-  .tarjeta-operativa {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    text-decoration: none;
-    color: inherit;
-  }
-  .tarjeta-operativa:hover {
-    border-color: color-mix(in oklab, var(--v2-ink) 25%, transparent);
-  }
-  .pill-orientacion.pill-operativo {
-    color: var(--v2-ink);
-    border-color: color-mix(in oklab, var(--v2-ink) 22%, transparent);
-  }
-  .hace-solo { font-size: 12px; color: var(--v2-slate); margin: 0 0 8px; }
-  .enlace-tablero {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--v2-ink);
-    margin-top: auto;
-  }
-  .modelo-automatico {
-    font-size: 11px;
-    color: var(--v2-slate);
-    margin: 0;
-  }
-  .descripcion {
-    font-size: 12px;
-    line-height: 1.55;
-    color: var(--v2-ink);
-    opacity: 0.78;
-    margin: 0;
-  }
-  .huecos {
-    margin: 10px 0 0;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border: 1px solid var(--v2-line);
-    background: color-mix(in srgb, var(--v2-amber, #8a5300) 6%, transparent);
-    font-size: 12px;
-  }
-  .huecos-titulo {
-    margin: 0 0 4px;
-    font-weight: 600;
-  }
-  .huecos ul {
-    margin: 0;
-    padding-left: 0;
-    list-style: none;
-    display: grid;
-    gap: 2px;
-  }
-  .huecos-n {
-    display: inline-block;
-    min-width: 1.4em;
-    font-variant-numeric: tabular-nums;
-    font-weight: 600;
-  }
-  .huecos-link {
-    display: inline-block;
-    margin-top: 6px;
-    font-size: 11px;
-  }
-  .herramientas {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .grupo-titulo {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--v2-slate);
-    margin-bottom: 5px;
-  }
-  .grupo-cuenta {
-    font-weight: 400;
-    opacity: 0.8;
-  }
-  /* 'Actua' es el unico grupo con consecuencias: se separa del resto en vez
-     de distinguirse solo por color, que a un daltonico no le dice nada. */
-  .grupo-actua {
-    border-top: 1px solid var(--v2-line);
-    padding-top: 10px;
-  }
-  .grupo-actua .grupo-titulo {
-    color: var(--v2-ember);
-  }
-  .herramienta {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    font-size: 12px;
-    padding: 2.5px 0;
-  }
-  .herr-nombre {
-    color: var(--v2-ink);
-    word-break: break-word;
-  }
-  .herr-campos {
-    flex-shrink: 0;
-    font-size: 11px;
-    color: var(--v2-slate);
-    font-variant-numeric: tabular-nums;
-  }
-  .herr-aviso {
-    margin: 0 0 2px;
-    font-size: 10.5px;
-    color: var(--v2-ember);
-  }
-  .acciones-tarjeta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding-top: 4px;
-    border-top: 1px solid var(--v2-line);
-    margin-top: 4px;
-  }
-  .confirmar-borrado {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
+  /* Familias: un color por a quien le habla (tokens en v2.css). */
+  .fam-cliente { --fam: var(--v2-fam-cliente); --fam-soft: var(--v2-fam-cliente-soft); --fam-line: var(--v2-fam-cliente-line); }
+  .fam-equipo { --fam: var(--v2-fam-equipo); --fam-soft: var(--v2-fam-equipo-soft); --fam-line: var(--v2-fam-equipo-line); }
+  .fam-auto { --fam: var(--v2-fam-auto); --fam-soft: var(--v2-fam-auto-soft); --fam-line: var(--v2-fam-auto-line); }
 
-  .recibe {
-    border-top: 1px solid var(--v2-line);
-    padding-top: 8px;
+  /* --- Resumen ---------------------------------------------------------- */
+  .resumen { display: flex; flex-wrap: wrap; gap: 12px; }
+  .cifra {
+    flex: 1 1 190px; display: flex; gap: 12px; align-items: center; padding: 14px 16px;
+    border: 1px solid var(--v2-line); border-radius: var(--v2-radius); background: var(--v2-card);
   }
-  .recibe summary {
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    user-select: none;
+  .cifra.fam-cliente { background: var(--fam-soft); border-color: var(--fam-line); }
+  .cifra strong { display: block; font-size: 22px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .cifra.fam-cliente strong, .cifra.fam-cliente .cifra-txt { color: var(--fam); }
+  .cifra-txt { font-size: 13px; color: var(--v2-slate); }
+  .cifra-icono {
+    width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 10px;
+    color: var(--fam); background: color-mix(in srgb, var(--fam) 14%, transparent);
   }
-  .recibe-nota {
-    font-size: 11.5px;
-    margin: 8px 0;
+  .cifra-icono.neutro { color: var(--v2-ink); background: var(--v2-line-soft); }
+  .cifra.ancha { flex: 2.4 1 420px; flex-direction: column; align-items: stretch; gap: 8px; }
+  .ancha-cabeza { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 12px; font-size: 13.5px; }
+  .ancha-cabeza .v2-sub { font-size: 12.5px; }
+  .acciones-n { display: inline !important; font-size: 22px; color: var(--v2-ember-text); margin-right: 2px; }
+  .barra { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--v2-line-soft); }
+  .barra-sola { background: var(--v2-sola-fuerte); }
+  .barra-espera { background: var(--v2-espera-fuerte); }
+  .leyenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; }
+  .leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+  .leyenda i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+  .ley-sola { color: var(--v2-sola); } .ley-sola i { background: var(--v2-sola-fuerte); }
+  .ley-espera { color: var(--v2-espera); } .ley-espera i { background: var(--v2-espera-fuerte); }
+
+  /* --- Tabla ------------------------------------------------------------ */
+  .tabla { border: 1px solid var(--v2-line); border-radius: var(--v2-radius); background: var(--v2-card); box-shadow: var(--v2-shadow); overflow: hidden; }
+  .fila {
+    display: grid; grid-template-columns: minmax(260px, 2.3fr) 110px minmax(240px, 2fr) 92px 20px;
+    gap: 16px; align-items: center; padding: 10px 18px;
   }
-  .pieza {
-    margin-bottom: 10px;
+  .cabeza {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--v2-slate); background: var(--v2-line-soft); border-bottom: 1px solid var(--v2-line); padding-block: 9px;
   }
-  .pieza-cabeza {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
+  .grupo { display: flex; align-items: center; gap: 10px; padding: 14px 18px 6px; border-top: 1px solid var(--v2-line-soft); flex-wrap: wrap; }
+  .grupo h2 { margin: 0; font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em; color: var(--fam); }
+  .grupo .v2-sub { font-size: 12px; }
+  .grupo-punto { width: 10px; height: 10px; border-radius: 3px; background: var(--fam); }
+
+  .agente { text-decoration: none; color: inherit; border-top: 1px solid var(--v2-line-soft); transition: background 0.12s; }
+  .agente:hover { background: var(--v2-hover); }
+  .agente:hover .chev { color: var(--v2-ink); transform: translateX(2px); }
+  .agente:focus-visible { outline: 2px solid var(--v2-ember); outline-offset: -2px; }
+  .quien { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .icono {
+    width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 10px;
+    color: var(--fam); background: var(--fam-soft); border: 1px solid var(--fam-line);
   }
-  .pieza-titulo {
-    font-size: 11.5px;
-    font-weight: 600;
+  .quien-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .nombre { font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sub { font-size: 12px; color: var(--v2-slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clave { font-family: var(--v2-mono); font-size: 11px; opacity: 0.75; }
+  .pausa {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px;
+    border-radius: 999px; color: var(--v2-rust); background: var(--v2-critica-soft); border: 1px solid var(--v2-critica-line);
   }
-  .pieza-origen {
-    font-size: 10.5px;
-    color: var(--v2-slate);
+  .pill-fam {
+    display: inline-block; font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+    color: var(--fam); background: var(--fam-soft); border: 1px solid var(--fam-line);
   }
-  /* Lo generado o fijo se distingue de lo editable: si no, alguien busca
-     donde cambiar un bloque que nadie escribio. */
-  .pieza-origen.fijo {
-    font-style: italic;
+  .fam-auto .pill-fam { border-style: dashed; }
+  .puede { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
+  .mira { color: var(--v2-ink); opacity: 0.85; font-variant-numeric: tabular-nums; }
+  .chip-sola, .chip-espera, .chip-neutro, .chip-hueco {
+    font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums;
   }
-  .pieza-texto {
-    margin: 3px 0 0;
-    font-size: 11.5px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: inherit;
-    color: var(--v2-ink);
-    opacity: 0.82;
-    background: var(--v2-line-soft);
-    border-radius: 6px;
-    padding: 7px 9px;
-    max-height: 190px;
-    overflow-y: auto;
+  .chip-sola { color: var(--v2-sola); background: var(--v2-sola-soft); border: 1px solid var(--v2-sola-line); }
+  .chip-espera { color: var(--v2-espera); background: var(--v2-espera-soft); border: 1px solid var(--v2-espera-line); }
+  .chip-neutro { color: var(--v2-slate); background: var(--v2-line-soft); border: 1px solid var(--v2-line); }
+  .chip-hueco { color: var(--v2-clay); background: transparent; border: 1px dashed var(--v2-clay); font-weight: 500; }
+  .escalo { font-size: 13px; color: var(--v2-slate); font-variant-numeric: tabular-nums; }
+  .chev { color: var(--v2-slate); transition: transform 0.15s; display: grid; }
+
+  /* En el celular cada agente es un renglon de dos lineas: nombre arriba y lo
+     que puede hacer abajo. La cabecera de columnas no aplica. */
+  @media (max-width: 760px) {
+    .cabeza { display: none; }
+    .fila.agente {
+      grid-template-columns: 1fr 18px;
+      grid-template-areas: 'quien chev' 'puede chev';
+      gap: 6px 10px; padding: 12px 14px; min-height: 56px;
+    }
+    .quien { grid-area: quien; }
+    .puede { grid-area: puede; padding-left: 50px; font-size: 12.5px; }
+    .chev { grid-area: chev; }
+    .habla, .escalo { display: none; }
+    .grupo { padding-inline: 14px; }
   }
 </style>

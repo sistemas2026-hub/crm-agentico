@@ -104,4 +104,12 @@ describe('la autonomia de una accion, en cada agente', () => {
     expect(dibujar({ accion: REINICIO, agente: 'soporte_tecnico_cliente', esAdmin: true, resultado }))
       .not.toContain('Listo');
   });
+
+  it('en la pagina del agente, sin la etiqueta de estado (ya la dice la pagina) pero con la palanca', () => {
+    const html = dibujar({ accion: REINICIO, agente: 'soporte', esAdmin: true, mostrarEstado: false });
+    expect(html).not.toContain('Pide aprobación');
+    expect(html).toContain('action="?/promover"');
+    const otro = dibujar({ accion: REINICIO, agente: 'otro', esAdmin: true, mostrarEstado: false });
+    expect(otro).toContain('volvió sola a pedir aprobación');
+  });
 });

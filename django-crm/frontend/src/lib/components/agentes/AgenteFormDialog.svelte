@@ -58,6 +58,10 @@
   let descripcion = $state('');
   let orientadoA = $state('colaborador');
   let atiende = $state('');
+  //  Para personas (13/11/2026): como se llama en pantalla y que hace en una
+  //  frase. No entran al prompt -- ver Rol.nombre_visible en schema.py.
+  let nombreVisible = $state('');
+  let resumenCorto = $state('');
   let conectar = $state(false);
   let exigeVerificacion = $state(true);
   let nuncaRevelar = $state('');
@@ -85,6 +89,8 @@
     descripcion = esEditar ? agente.descripcion || '' : '';
     orientadoA = esEditar ? agente.orientado_a : 'colaborador';
     atiende = esEditar ? agente.atiende || '' : '';
+    nombreVisible = esEditar ? agente.nombre_visible || '' : '';
+    resumenCorto = esEditar ? agente.resumen || '' : '';
     conectar = esEditar ? !!agente.en_el_router : true;
     exigeVerificacion = esEditar ? agente.exige_verificacion !== false : true;
     nuncaRevelar = esEditar ? (agente.nunca_revelar || []).join('\n') : '';
@@ -185,6 +191,8 @@
         orientado_a: orientadoA,
         herramientas,
         nunca_revelar: nuncaRevelar.split('\n').map((t) => t.trim()).filter(Boolean),
+        nombre_visible: nombreVisible.trim(),
+        resumen: resumenCorto.trim(),
         //  En el orden de la empresa. Vacio = puede pasar por cualquiera.
         motivos_escalada: motivos.map((m) => m.clave).filter((c) => motivosElegidos.has(c)),
         //  Solo tienen sentido en un agente de clientes; para uno interno no
@@ -264,6 +272,19 @@
               {/each}
             </div>
           </fieldset>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="space-y-1 text-sm">
+              <span class="font-medium">Nombre para mostrar</span>
+              <input type="text" bind:value={nombreVisible} maxlength="60" placeholder="ej. Soporte técnico (autoservicio)" class={campo} />
+            </label>
+            <label class="space-y-1 text-sm">
+              <span class="font-medium">Qué hace, en una frase</span>
+              <input type="text" bind:value={resumenCorto} maxlength="280" placeholder="ej. Diagnostica fallas de internet y TV del cliente" class={campo} />
+            </label>
+          </div>
+          <p class="-mt-2 text-xs text-[var(--text-secondary)]">
+            Solo para la pantalla: el modelo no los lee. Vacíos, se muestra el identificador.
+          </p>
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="space-y-1 text-sm">
               <span class="font-medium">Cargo</span>

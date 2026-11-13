@@ -64,6 +64,30 @@
      lo hacia parecer deshabilitado. */
   --v2-line-strong: #d5dce6;
   --v2-hover: rgba(20, 18, 46, 0.03);
+  /* Agentes (13/11/2026). El color dice A QUIEN LE HABLA un agente y si una
+     accion la hace SOLO o ESPERA a una persona; no decora. Las familias usan
+     cielo, violeta y verde azulado para no confundirse con el indigo de la
+     accion (--v2-ember), y el semaforo reusa el sentido de siempre: verde =
+     esta bien / va solo, ambar = espera, rojo = critico. */
+  --v2-fam-cliente: #0369a1;
+  --v2-fam-cliente-soft: #e0f2fe;
+  --v2-fam-cliente-line: #bae6fd;
+  --v2-fam-equipo: #6d28d9;
+  --v2-fam-equipo-soft: #f5f3ff;
+  --v2-fam-equipo-line: #ddd6fe;
+  --v2-fam-auto: #0f766e;
+  --v2-fam-auto-soft: #f0fdfa;
+  --v2-fam-auto-line: #99f6e4;
+  --v2-sola: #166534;
+  --v2-sola-soft: #f0fdf4;
+  --v2-sola-line: #bbf7d0;
+  --v2-sola-fuerte: #16a34a;
+  --v2-espera: #92400e;
+  --v2-espera-soft: #fffbeb;
+  --v2-espera-line: #fde68a;
+  --v2-espera-fuerte: #f59e0b;
+  --v2-critica-soft: #fef2f2;
+  --v2-critica-line: #fecaca;
 
   /* Fondo del icono que dice DE DONDE viene algo (Bandeja, NOC, Bodega).
      Siempre neutro: el color de una tarjeta lo pone su plazo, no su origen. */
@@ -130,6 +154,25 @@
   --v2-nav-line: rgba(255, 255, 255, 0.07);
   --v2-shadow: none;
   --v2-shadow-lift: 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+  --v2-fam-cliente: #7dd3fc;
+  --v2-fam-cliente-soft: rgba(56, 189, 248, 0.12);
+  --v2-fam-cliente-line: rgba(56, 189, 248, 0.32);
+  --v2-fam-equipo: #c4b5fd;
+  --v2-fam-equipo-soft: rgba(167, 139, 250, 0.12);
+  --v2-fam-equipo-line: rgba(167, 139, 250, 0.32);
+  --v2-fam-auto: #5eead4;
+  --v2-fam-auto-soft: rgba(45, 212, 191, 0.12);
+  --v2-fam-auto-line: rgba(45, 212, 191, 0.3);
+  --v2-sola: #86efac;
+  --v2-sola-soft: rgba(74, 222, 128, 0.12);
+  --v2-sola-line: rgba(74, 222, 128, 0.3);
+  --v2-sola-fuerte: #22c55e;
+  --v2-espera: #fcd34d;
+  --v2-espera-soft: rgba(251, 191, 36, 0.12);
+  --v2-espera-line: rgba(251, 191, 36, 0.32);
+  --v2-espera-fuerte: #f59e0b;
+  --v2-critica-soft: rgba(255, 123, 107, 0.12);
+  --v2-critica-line: rgba(255, 123, 107, 0.3);
 }
 
 .v2-root *,
@@ -1939,6 +1982,10 @@ a.v2-setting:hover {
     width: 100%;
     margin-left: 0;
     padding-top: 10px;
+    /* Sin esto, con tres o cuatro botones el ultimo quedaba cortado fuera de
+       la pantalla (medido en /agentes a 390px, 13/11/2026): el contenedor
+       ocupa el ancho pero no salta de renglon. */
+    flex-wrap: wrap;
   }
   .v2-page-title,
   .v2-record-title {

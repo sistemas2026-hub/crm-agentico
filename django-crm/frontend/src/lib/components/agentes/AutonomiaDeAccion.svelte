@@ -23,10 +23,15 @@
    *   accion: any,
    *   agente: string,
    *   esAdmin?: boolean,
-   *   resultado?: any
+   *   resultado?: any,
+   *   mostrarEstado?: boolean
    * }}
    */
-  let { accion, agente, esAdmin = false, resultado = null } = $props();
+  //  'mostrarEstado' (13/11/2026): la pagina de cada agente ya dice el estado
+  //  con su propia etiqueta de color, al lado del nombre de la accion; ahi este
+  //  componente muestra solo lo que agrega -- de donde viene, si la perdio, y
+  //  la palanca.
+  let { accion, agente, esAdmin = false, resultado = null, mostrarEstado = true } = $props();
 
   let enEste = $derived(accion?.por_agente?.[agente] ?? null);
   let propio = $derived(
@@ -36,6 +41,7 @@
 </script>
 
 <div class="autonomia">
+  {#if mostrarEstado}
   <div class="fila">
     {#if enEste?.autonoma}
       <span class="chip sola">Lo hace solo</span>
@@ -46,6 +52,7 @@
     {/if}
     {#if accion?.no_critica}<span class="nota">No crítica: no espera evidencia</span>{/if}
   </div>
+  {/if}
 
   {#if enEste?.autonoma && !enEste?.rol}
     <!-- Viene de la promocion GENERAL (sin agente): vale para todo agente que
