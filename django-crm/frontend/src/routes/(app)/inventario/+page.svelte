@@ -116,18 +116,15 @@
 
 <svelte:head>
   <title>Inventario</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
   <!--
     Las tres familias del diseño. Material Symbols es la fuente de iconos: sin
     ella, cada `<span class="material-symbols-outlined">warehouse</span>` se
     dibuja como la palabra "warehouse". Mismo enlace que usa supervisor-noc, que
     es la otra pantalla portada de Stitch.
   -->
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
-    rel="stylesheet"
-  />
+  <!-- Las fuentes se sirven desde la plataforma (static/fuentes/fuentes.css,
+       cargado en app.html) desde el 12/11/2026: Google no se entera de
+       cada pantalla que se abre. -->
 </svelte:head>
 
 <div class="inv">

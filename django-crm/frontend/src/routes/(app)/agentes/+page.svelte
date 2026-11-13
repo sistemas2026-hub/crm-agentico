@@ -282,7 +282,9 @@
         </div>
       {:else}
         {@const grupos = porLoQueHace(agente.herramientas)}
-        <div class="tarjeta">
+        <!-- El id es el ancla de «Configurar este agente» desde la ficha del
+             Centro de mando (lib/centro-mando/enlaces.js), 12/11/2026. -->
+        <div class="tarjeta" id="agente-{agente.nombre}">
           <div class="encabezado-tarjeta">
             <!--
               Un icono de robot, no las iniciales del nombre: lo primero que

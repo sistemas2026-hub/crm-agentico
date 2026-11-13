@@ -505,12 +505,9 @@
      Mono se carga en 600 porque los datos la piden en ese peso: app.html la
      trae solo en 400 y 500, y el navegador inventaba la negrita. -->
 <svelte:head>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@500;600&display=swap"
-    rel="stylesheet"
-  />
+  <!-- Las fuentes se sirven desde la plataforma (static/fuentes/fuentes.css,
+       cargado en app.html) desde el 12/11/2026: Google no se entera de
+       cada pantalla que se abre. -->
 </svelte:head>
 
 <!-- LA BARRA DE CONSOLA.
