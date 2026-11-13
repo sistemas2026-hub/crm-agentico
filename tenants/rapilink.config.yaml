@@ -2897,6 +2897,7 @@ planes_venta:
 herramientas:
 
   - nombre: consultar_cliente
+    resumen: "Busca los datos de un cliente por su número de servicio."
     tipo: http
     descripcion: Datos de un cliente por su ID de servicio.
     solo_lectura: true
@@ -2923,6 +2924,7 @@ herramientas:
         verificado_el: 2026-08-12
 
   - nombre: consultar_cliente_por_cedula
+    resumen: "Busca los datos de un cliente por su cédula."
     tipo: http
     descripcion: Datos de un cliente por su cedula.
     solo_lectura: true
@@ -2941,6 +2943,7 @@ herramientas:
         verificado_el: 2026-08-12
 
   - nombre: consultar_mi_servicio
+    resumen: "Muestra el estado del servicio del cliente que está escribiendo."
     tipo: http
     descripcion: >
       Estado del servicio del cliente autenticado. El id_cliente NO viaja como
@@ -2966,6 +2969,7 @@ herramientas:
       id_servicio: id_cliente
     inyectados_obligatorios: [id_servicio]
   - nombre: consultar_mi_cuenta
+    resumen: "Dice cuánto debe el cliente que está escribiendo: facturas pendientes, total y vencidas."
     tipo: interno
     descripcion: >
       Cuanto debe el cliente autenticado: cuantas facturas pendientes tiene,
@@ -3008,6 +3012,7 @@ herramientas:
   # con una deuda. No llama a ningun proveedor; lee lo que la empresa cargo en
   # Configuracion -> Pagos. Sigue exigiendo la sesion verificada.
   - nombre: consultar_medios_de_pago
+    resumen: "Muestra con qué puede pagar el cliente: link de pago, puntos físicos y cuentas."
     tipo: interno
     descripcion: >
       Con que puede pagar el cliente autenticado: el link de pago y los otros
@@ -3044,6 +3049,7 @@ herramientas:
     metodo: GET
 
   - nombre: consultar_horario_de_atencion
+    resumen: "Dice el horario de atención y si la empresa está abierta ahora."
     tipo: interno
     descripcion: >
       El horario en que la empresa atiende, ya calculado: los siete dias, si esta abierta
@@ -3064,6 +3070,7 @@ herramientas:
   # orientados a colaborador, al id como argumento verificado y requerido, y a
   # NO ser invocable por un servicio.
   - nombre: consultar_cuenta_de_cliente
+    resumen: "Dice cuánto debe un cliente, por su número de servicio."
     tipo: interno
     descripcion: >
       Cuanto debe UN cliente, pedido por su id_servicio: cuantas facturas
@@ -3093,6 +3100,7 @@ herramientas:
         verificado_el: 2026-10-07
     requeridos: [id_servicio]
   - nombre: consultar_plan_tv
+    resumen: "Confirma si el plan de internet de un cliente incluye TV."
     tipo: http
     # EL DETALLE del sync de precios. Ya existia para otra cosa --saber si un
     # plan incluye TV-- y se reusa en vez de declarar una herramienta nueva
@@ -3147,6 +3155,7 @@ herramientas:
   # lee para decidir, y una descripcion de una linea ("busca documentos") lo
   # deja adivinando.
   - nombre: consultar_documentacion
+    resumen: "Busca en los manuales y procedimientos aprobados de la empresa."
     tipo: interno
     descripcion: >
       Busca en los manuales y procedimientos aprobados de la empresa.
@@ -3179,6 +3188,7 @@ herramientas:
   # llave lo decide el catalogo de habilidades. Un rol sin ningun
   # procedimiento asignado no ve ningun indice y nunca la va a llamar.
   - nombre: cargar_habilidad
+    resumen: "Trae los pasos completos de un procedimiento de la empresa."
     tipo: interno
     descripcion: >
       Trae los pasos completos de un procedimiento de la empresa, por su
@@ -3199,6 +3209,7 @@ herramientas:
 
   # --- ventas (19/08/2026) ----------------------------------------------
   - nombre: consultar_solicitud_por_cedula
+    resumen: "Busca una solicitud de instalación ya enviada, por cédula."
     tipo: http
     descripcion: >
       Busca la solicitud de instalacion YA ENVIADA de alguien, por su
@@ -3222,6 +3233,7 @@ herramientas:
         tipo: texto
 
   - nombre: cancelar_solicitud_servicio
+    resumen: "Cancela una solicitud de instalación ya enviada."
     tipo: http
     descripcion: >
       Cancela una solicitud de instalacion ya enviada. Llamala SOLO
@@ -3272,6 +3284,7 @@ herramientas:
         verificado_el: 2026-09-10
 
   - nombre: consultar_servicios_ofrecidos
+    resumen: "Lista los servicios que vende la empresa."
     tipo: interno
     descripcion: >
       Que servicios vende la empresa. LLAMALA ANTES de decir que algo se
@@ -3303,6 +3316,7 @@ herramientas:
   # Ahora sale del catalogo que se administra en /settings/guias-tv. El prompt
   # dice CUANDO consultarla; el contenido viene de aca.
   - nombre: consultar_guia_sintonizacion
+    resumen: "Trae los pasos para sintonizar el televisor del cliente."
     tipo: interno
     descripcion: >
       Como sintonizar el televisor del cliente. ES LA UNICA FUENTE de esas
@@ -3338,6 +3352,7 @@ herramientas:
         tipo: texto
 
   - nombre: consultar_parrilla_canales
+    resumen: "Dice si un canal está en la parrilla de TV."
     tipo: interno
     descripcion: >
       Si un canal esta en la parrilla de TV. Pasale 'canal' con el nombre
@@ -3357,6 +3372,7 @@ herramientas:
         tipo: texto
 
   - nombre: consultar_planes_venta
+    resumen: "Revisa la cobertura en una localidad y muestra los planes que se venden ahí."
     tipo: interno
     descripcion: >
       Cobertura Y lista CURADA de planes en un solo paso, a partir de la
@@ -3382,6 +3398,7 @@ herramientas:
         tipo: texto
 
   - nombre: consultar_planes
+    resumen: "Lista el catálogo técnico de planes de WispHub."
     tipo: http
     # EL LISTADO del sync de precios: da los ids, no el precio.
     #
@@ -3409,6 +3426,7 @@ herramientas:
     auth_esquema: Api-Key
 
   - nombre: consultar_plan_detalle
+    resumen: "Trae el precio y la velocidad reales de un plan."
     tipo: http
     descripcion: >
       Precio y velocidad reales de UN plan, por su ID (resolvelo primero
@@ -3436,6 +3454,7 @@ herramientas:
         verificado_el: 2026-08-19
 
   - nombre: verificar_identidad_por_cedula
+    resumen: "Primer paso para verificar quién es el cliente: busca su cédula."
     tipo: http
     descripcion: >
       Primer paso de la verificacion (no el unico -- ver confirmar_identidad)
@@ -3458,6 +3477,7 @@ herramientas:
     auth_esquema: Api-Key
 
   - nombre: confirmar_identidad
+    resumen: "Segundo paso de la verificación: el cliente confirma su nombre."
     tipo: interno
     descripcion: >
       Segundo y ultimo paso de la verificacion. Llama a esta herramienta DESPUES de que el
@@ -3469,6 +3489,7 @@ herramientas:
     confirma_identidad: true
 
   - nombre: derivar_a_area
+    resumen: "Pasa la conversación al agente del área que corresponde."
     tipo: interno
     descripcion: >
       Pasa esta conversacion al agente especializado del area, que la
@@ -3512,6 +3533,7 @@ herramientas:
     servicios_reportables: [internet, television]
 
   - nombre: ping_cliente
+    resumen: "Hace ping al equipo del cliente para ver si tiene comunicación con la red."
     tipo: http
     asincrona: true
     descripcion: >
@@ -3632,6 +3654,7 @@ herramientas:
   #  salen dos cosas -- lo que el asistente le dice al cliente que corrija, y
   #  el asunto con el que entra el ticket (ver escalamiento.ticket_al_escalar).
   - nombre: registrar_pedido_wifi
+    resumen: "Registra el pedido de cambiar el nombre o la clave del WiFi; lo aplica una persona."
     tipo: interno
     valida_pedido_wifi: true
     # El primer renglon del caso es el pedido, no una frase sobre por que
@@ -3697,6 +3720,7 @@ herramientas:
         valores: {"ocultar": "ocultar", "hacer_visible": "visible"}
 
   - nombre: agendar_visita_tecnica
+    resumen: "Agenda una visita técnica en WispHub (crea un ticket)."
     tipo: http
     # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
     # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
@@ -3801,6 +3825,7 @@ herramientas:
   # fuera del catalogo es de las cosas que WispHub acepta sin quejarse y
   # despues no se puede filtrar.
   - nombre: agendar_visita_internet
+    resumen: "Agenda una visita técnica por falla de internet; la dispara el procedimiento, no el agente."
     tipo: http
     # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
     # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
@@ -4055,6 +4080,7 @@ herramientas:
       ticket-prioridad: "2"                       # Normal
 
   - nombre: crear_ticket_caso
+    resumen: "Deja el caso anotado en WispHub cuando la conversación pasa a una persona."
     tipo: http
     # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
     # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
@@ -4100,6 +4126,7 @@ herramientas:
         verificado_el: 2026-08-12
 
   - nombre: consultar_ticket
+    resumen: "Trae un ticket de WispHub por su número."
     tipo: http
     solo_lectura: true
     #  05/10/2026. La pide el chat del Supervisor NOC por
@@ -4135,6 +4162,7 @@ herramientas:
     campos_texto_libre: [descripcion, asunto]
 
   - nombre: consultar_tickets_de_cliente
+    resumen: "Lista los tickets abiertos de un cliente."
     tipo: http
     # 'asunto' es texto libre pese a parecer un enum: 356 distintos sobre
     # 3.418 tickets reales, y 126 traen nombre y barrio del prospecto.
@@ -4531,6 +4559,7 @@ herramientas:
         verificado_el: 2026-09-09
 
   - nombre: consultar_tecnicos
+    resumen: "Lista el personal técnico de WispHub."
     tipo: http
     descripcion: >
       Lista el personal (staff) de WispHub. Usala para resolver el ID de
@@ -4609,6 +4638,7 @@ herramientas:
   # ejecuten de verdad va a ser desde /acciones/propuestas, con un ticket
   # de prueba, no en el primer intento a ciegas.
   - nombre: crear_ticket
+    resumen: "Crea un ticket de soporte técnico en WispHub."
     tipo: http
     descripcion: >
       Crea un ticket de soporte tecnico real en WispHub. Necesitas el
@@ -4701,6 +4731,7 @@ herramientas:
           "Caja Nap Dañada": "Caja Nap Dañada"
 
   - nombre: responder_ticket
+    resumen: "Agrega una respuesta o nota a un ticket existente."
     tipo: http
     descripcion: >
       Agrega una respuesta/nota a un ticket YA EXISTENTE en WispHub, con
@@ -4747,6 +4778,7 @@ herramientas:
         valores: {baja: 1, normal: 2, alta: 3, muy_alta: 4}
 
   - nombre: actualizar_estado_ticket
+    resumen: "Cambia el estado de un ticket existente (por ejemplo, a Resuelto)."
     tipo: http
     descripcion: >
       Cambia el estado de un ticket YA EXISTENTE (ej. marcarlo Resuelto o
@@ -4776,6 +4808,7 @@ herramientas:
         valores: {nuevo: 1, en_progreso: 2, resuelto: 3, cerrado: 4}
 
   - nombre: consultar_facturas
+    resumen: "Lista facturas de WispHub."
     tipo: http
     solo_lectura: true
     roles_permitidos: [facturacion]
@@ -4805,6 +4838,7 @@ herramientas:
         verificado_el: 2026-07-29
 
   - nombre: consultar_factura_detalle
+    resumen: "Trae el detalle de una factura, línea por línea."
     tipo: http
     descripcion: >
       Detalle completo de UNA factura por su ID, con sus articulos
@@ -4827,6 +4861,7 @@ herramientas:
         verificado_el: 2026-08-19
 
   - nombre: consultar_formas_pago
+    resumen: "Lista las formas de pago: efectivo, transferencia y las demás."
     tipo: http
     descripcion: >
       Catalogo de formas de pago (Efectivo, Transferencia Bancaria,
@@ -4844,6 +4879,7 @@ herramientas:
     auth_esquema: Api-Key
 
   - nombre: registrar_pago
+    resumen: "Registra un pago sobre una factura existente."
     tipo: http
     descripcion: >
       ACCION SENSIBLE. Registra un pago sobre una factura EXISTENTE
@@ -4913,6 +4949,7 @@ herramientas:
         tipo: id
 
   - nombre: agregar_promesa_pago
+    resumen: "Registra que un cliente prometió pagar una factura para cierta fecha."
     tipo: http
     descripcion: >
       Registra que un cliente prometio pagar una factura para cierta
@@ -5082,6 +5119,7 @@ herramientas:
   # las ejecuta un colaborador humano (ver sus 'roles_permitidos': nunca
   # incluyen a este rol de cliente).
   - nombre: reportar_comprobante_pago
+    resumen: "Deja registrado que el cliente dice que ya pagó, con su comprobante, para que lo revise el equipo."
     tipo: interno
     reporta_comprobante_pago: true
     # Primer campo a proposito -- ver el mismo criterio en 'pedido' de
@@ -5145,6 +5183,7 @@ herramientas:
   # intentaria crear -- no es inseguro (el CRM rechaza el nombre repetido con
   # 400 y esa carrera se maneja) pero es un viaje de mas y un 400 evitable.
   - nombre: consultar_casos_bottlecrm
+    resumen: "Busca casos registrados en el CRM."
     busca_caso: true
     tipo: http
     descripcion: >
@@ -5186,6 +5225,7 @@ herramientas:
   # --- agregados -------------------------------------------------------------
 
   - nombre: contar_clientes
+    resumen: "Cuenta clientes por estado, plan, zona o técnico."
     tipo: agregado
     entidad: clientes
     etiqueta: clientes
@@ -5257,6 +5297,7 @@ herramientas:
         contar altas de un mes.
     agrupar_por: [estado, router, tecnico]
   - nombre: contar_facturas
+    resumen: "Cuenta facturas por estado o zona."
     tipo: agregado
     entidad: facturas
     etiqueta: facturas
@@ -5322,6 +5363,7 @@ herramientas:
         emision, no el historico completo.
 
   - nombre: contar_tickets
+    resumen: "Cuenta tickets por estado."
     tipo: agregado
     entidad: tickets
     etiqueta: tickets
@@ -5375,6 +5417,7 @@ herramientas:
         para comparar.
 
   - nombre: informe_materiales
+    resumen: "Resume el consumo de materiales de un periodo."
     tipo: batch
     descripcion: >
       Consumo de materiales de un periodo. El dato NO esta en un modulo de
@@ -5787,6 +5830,7 @@ herramientas:
   # el registro igual, no valida nada; por eso los campos que importan van
   # como 'requeridos' aca, que es la unica barrera que hay.
   - nombre: registrar_solicitud_servicio
+    resumen: "Registra la solicitud de servicio de un prospecto y le envía el formulario de contratación."
     tipo: http
     descripcion: >
       Deja anotada la solicitud de servicio de un prospecto y te devuelve en
@@ -5895,6 +5939,7 @@ herramientas:
   # guarda de 'endpoint sin resolver' en nucleo/herramientas/http.py) y el
   # modelo cae al camino alternativo (ping + preguntas de luces).
   - nombre: consultar_estado_ont
+    resumen: "Dice si el equipo del cliente está en línea en la OLT y desde cuándo."
     tipo: http
     descripcion: >
       Estado de la ONU del cliente en la OLT (Online/Offline) y hace cuanto
@@ -5972,6 +6017,7 @@ herramientas:
       sn_onu: gpon_hex
 
   - nombre: consultar_senal_ont
+    resumen: "Mide la señal óptica del equipo del cliente."
     tipo: http
     descripcion: >
       Nivel de senal optica de la ONU del cliente. SEGUNDO paso del
@@ -6051,6 +6097,7 @@ herramientas:
   # real, es culpa nuestra, y no la detecta ni el speedtest (que solo dice
   # "va lento", no por que) ni la señal optica (que estaria perfecta).
   - nombre: consultar_velocidad_aprovisionada
+    resumen: "Dice a qué velocidad está configurado de verdad el equipo del cliente."
     tipo: http
     descripcion: >
       A que velocidad esta REALMENTE configurado el equipo del cliente en la
@@ -6148,6 +6195,7 @@ herramientas:
   #  Esta recibe 'id_servicio' --argumento legitimo, declarado y verificado-- y
   #  resuelve el equipo ADENTRO. El serial no viaja en la respuesta.
   - nombre: diagnosticar_servicio
+    resumen: "Diagnostica el equipo de un servicio: si está en línea, su señal y por qué se cayó."
     tipo: interno
     diagnostica_servicio: true
     # Con QUE se resuelve el equipo. Se nombra una herramienta del MISMO
@@ -6207,6 +6255,7 @@ herramientas:
         tipo: id
         verificado_el: 2026-10-07
   - nombre: consultar_incidente_red
+    resumen: "Revisa si la falla del cliente es parte de una caída que afecta a más gente."
     tipo: interno
     detecta_incidente: true
     descripcion: >
@@ -6251,6 +6300,7 @@ herramientas:
   # nucleo/herramientas/estabilidad.py para el detalle de por que el conteo
   # va en codigo y no se le pasa la lista al modelo.
   - nombre: consultar_estabilidad_enlace
+    resumen: "Cuenta cuántas veces se cayó el enlace del cliente en las últimas 24 horas y por qué."
     tipo: interno
     resume_estabilidad: true
     descripcion: >
@@ -6392,6 +6442,7 @@ herramientas:
       coordenadas: {param: coordenadas, tipo: texto, verificado_el: 2026-11-10}
 
   - nombre: reiniciar_ont
+    resumen: "Reinicia en remoto el equipo del cliente."
     tipo: http
     descripcion: >
       LLAMA A ESTA HERRAMIENTA (no sugieras el reinicio manual del router, no escales) apenas
@@ -6602,6 +6653,7 @@ herramientas:
       quiere que la reinicies.
 
   - nombre: diagnosticar_falla_ont
+    resumen: "Averigua por qué está caído el equipo del cliente: corte de energía, fibra u otra causa."
     tipo: http
     descripcion: >
       Diagnostico PROFUNDO de por que la ONU esta offline. Distingue el
@@ -6669,6 +6721,7 @@ herramientas:
         "ONU is currently online": "el equipo esta en linea, no hay una caida que explicar"
 
   - nombre: cambiar_tipo_onu
+    resumen: "Corrige cómo está registrado el equipo en SmartOLT para que funcione la TV."
     tipo: http
     multipart: true
     descripcion: >
@@ -6742,6 +6795,7 @@ herramientas:
            valores: [Enabled, Disabled]}
 
   - nombre: activar_catv
+    resumen: "Enciende la televisión en el equipo del cliente cuando su plan la incluye."
     tipo: http
     descripcion: >
       Enciende el servicio de television en el equipo del cliente. Se usa en
@@ -6821,6 +6875,7 @@ herramientas:
            valores: [Enabled]}
 
   - nombre: consultar_dispositivos_conectados
+    resumen: "Lista los dispositivos conectados ahora al router del cliente."
     tipo: http
     descripcion: >
       Los equipos que estan conectados AHORA al router del cliente, via
@@ -6867,6 +6922,7 @@ herramientas:
     extraer_de: response.hostlist
 
   - nombre: consultar_estado_catv
+    resumen: "Dice si la TV está habilitada en el equipo del cliente."
     tipo: http
     descripcion: >
       Si el servicio de TV esta habilitado en el equipo del cliente, segun
@@ -6969,6 +7025,7 @@ herramientas:
   # despacha directo Herramienta.sondea_api / .propone_herramienta. Ver
   # nucleo/herramientas/sondeo.py para el bloqueo de SSRF.
   - nombre: sondear_api
+    resumen: "Hace una consulta de prueba, de solo lectura, a una API externa."
     tipo: interno
     sondea_api: true
     solo_lectura: true
@@ -6991,6 +7048,7 @@ herramientas:
       en el chat -- vos no la necesitas, el motor la resuelve solo).
 
   - nombre: proponer_herramienta
+    resumen: "Guarda el borrador de una herramienta nueva para que un administrador la apruebe."
     tipo: interno
     propone_herramienta: true
     solo_lectura: false

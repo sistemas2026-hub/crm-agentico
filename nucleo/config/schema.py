@@ -1007,6 +1007,11 @@ class Herramienta(Base):
     # el validador mas abajo.
     tipo: Literal["http", "agregado", "sql", "webhook", "batch", "interno"]
     descripcion: str = ""
+    # QUE HACE, PARA UNA PERSONA  --  13/11/2026. 'descripcion' le habla al
+    # MODELO ("LLAMA A ESTA HERRAMIENTA apenas consultar_senal_ont...") y la
+    # pantalla de Agentes no tenia otra cosa que mostrar. Solo de
+    # presentacion: no viaja al modelo. Vacio = la pantalla no inventa una.
+    resumen: str = Field(default="", max_length=200)
     solo_lectura: bool = True
     roles_permitidos: list[str] = Field(min_length=1)
     requiere_confirmacion: bool = False

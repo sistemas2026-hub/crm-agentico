@@ -42,7 +42,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from nucleo.canales import canal as canales
@@ -681,6 +681,33 @@ def _exigir_token_de_servicio():
     return None
 
 
+@app.before_request
+def _autor_de_la_edicion():
+    """
+    QUIEN edita, para el historial de la config (13/11/2026). El proxy del
+    CRM manda 'autor' armado desde la SESION (lib/server/v2/autor.js) en el
+    cuerpo, o en la query para un DELETE, que no lleva cuerpo. Solo se
+    ANOTA: no autoriza nada ni cambia que se puede editar -- eso lo sigue
+    decidiendo el proxy (solo ADMIN) y el token de servicio de arriba. Lo
+    lee editor.anotar_version; se limpia al terminar el pedido.
+    """
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return None
+    cuerpo = request.get_json(silent=True)
+    autor = cuerpo.get("autor") if isinstance(cuerpo, dict) else None
+    autor = autor if isinstance(autor, str) else request.args.get("autor")
+    if autor and autor.strip():
+        g.token_autor_edicion = editor.AUTOR_DE_LA_EDICION.set(autor.strip()[:120])
+    return None
+
+
+@app.teardown_request
+def _soltar_autor_de_la_edicion(_error=None):
+    token = g.pop("token_autor_edicion", None)
+    if token is not None:
+        editor.AUTOR_DE_LA_EDICION.reset(token)
+
+
 @app.errorhandler(Exception)
 def _error_no_manejado(e):
     """
@@ -780,6 +807,9 @@ def _agente_json(nombre: str, rol, config) -> dict:
         "herramientas": [
             {
                 "nombre": h.nombre, "descripcion": h.descripcion.strip(), "tipo": h.tipo,
+                #  Para personas (13/11/2026): ver Herramienta.resumen. La
+                #  'descripcion' de arriba le habla al modelo.
+                "resumen": h.resumen,
                 "campos_permitidos": rol.campos_permitidos.get(h.nombre, []),
                 # Lo que separa mirar de HACER. 'agendar_visita_tecnica' crea
                 # una visita real, con costo y logistica; en la tarjeta se veia

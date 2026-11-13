@@ -187,15 +187,22 @@ def versiones_del_rol(tenant: str, rol: str, limite: int = 200) -> list[dict]:
     primero. Solo la seccion del rol viaja (config->'roles'->rol), no la
     config entera: una config de Rapilink pesa cientos de KB y aca hacen falta
     dos campos. Una version en que el rol no existia trae 'rol': None.
+
+    'autor' (13/11/2026): quien la hizo, si la base ya tiene la columna
+    (supabase/202611131400_autor_del_historial.sql) y la version lo trae. Sin
+    columna, None en todas: el historial se lee igual.
     """
+    from nucleo.config.editor import _hay_columna_autor
+
     with sesion(tenant) as (cur, org):
+        autor = "autor" if _hay_columna_autor(cur) else "null::text"
         cur.execute(
-            """select config_version as version, creado_en,
-                      config->'roles'->(%s::text) as rol
-                 from asistente.tenant_config_historial
-                where organization_id = %s
-                order by config_version desc
-                limit %s""",
+            f"""select config_version as version, creado_en, {autor} as autor,
+                       config->'roles'->(%s::text) as rol
+                  from asistente.tenant_config_historial
+                 where organization_id = %s
+                 order by config_version desc
+                 limit %s""",
             (rol, org, limite))
         return [dict(f) for f in cur.fetchall()]
 

@@ -42,6 +42,37 @@ _NOMBRES = {
 MAX_LINEAS_DIFF = 300
 
 
+#  Lo que vale un campo cuando NO esta escrito (los defaults de Rol en
+#  schema.py). Sin esto, que una version escriba 'exige_verificacion: true'
+#  donde antes no habia nada contaba como cambio -- y no cambio nada: se
+#  mostraba "Cambio la configuracion." en una version identica en efecto
+#  (visto en produccion el 13/11/2026, v147 de soporte_tecnico_cliente).
+_POR_DEFECTO = {
+    "orientado_a": "colaborador",
+    "exige_verificacion": True,
+    "deriva_verificacion": False,
+    "pausado": False,
+}
+
+
+def _normal(clave: str, v):
+    """El valor efectivo: ausente = su default; vacio ("" / [] / {}) = None."""
+    if v is None:
+        return _POR_DEFECTO.get(clave)
+    if isinstance(v, (str, list, dict)) and not v:
+        return _POR_DEFECTO.get(clave)
+    if isinstance(v, dict):
+        #  campos_permitidos: una herramienta con lista vacia es lo mismo que
+        #  no tener entrada (la lista blanca no le entrega nada en los dos).
+        limpio = {k: x for k, x in v.items() if x not in (None, "", [], {})}
+        return limpio or None
+    return v
+
+
+def _igual(clave: str, a, b) -> bool:
+    return _normal(clave, a) == _normal(clave, b)
+
+
 def _texto(v) -> str:
     return v if isinstance(v, str) else ""
 
@@ -61,7 +92,8 @@ def describir(antes: dict | None, despues: dict | None) -> dict | None:
     Devuelve {'resumen': [frases], 'diff_instrucciones': str | None,
     'tipo': 'creado' | 'borrado' | 'editado'}.
     """
-    if antes == despues:
+    if antes == despues or (antes and despues and all(
+            _igual(k, antes.get(k), despues.get(k)) for k in set(antes) | set(despues))):
         return None
     if not antes:
         return {"tipo": "creado", "resumen": ["Se creó el agente."], "diff_instrucciones": None}
@@ -96,8 +128,9 @@ def describir(antes: dict | None, despues: dict | None) -> dict | None:
 
     for clave, nombre in _NOMBRES.items():
         a, d = antes.get(clave), despues.get(clave)
-        if a == d or (not a and not d):
+        if _igual(clave, a, d):
             continue
+        a, d = _normal(clave, a), _normal(clave, d)
         if clave == "descripcion":
             ta, td = _texto(a), _texto(d)
             frases.append(f"{nombre}: de {len(ta):,} a {len(td):,} caracteres.".replace(",", "."))
@@ -114,11 +147,14 @@ def describir(antes: dict | None, despues: dict | None) -> dict | None:
     otros = sorted((set(antes) | set(despues)) - set(_NOMBRES)
                    - {"puede_consultar", "campos_permitidos"})
     for clave in otros:
-        if antes.get(clave) != despues.get(clave):
+        if not _igual(clave, antes.get(clave), despues.get(clave)):
             frases.append(f"Cambió «{clave}».")
 
-    return {"tipo": "editado", "resumen": frases or ["Cambió la configuración."],
-            "diff_instrucciones": diff}
+    #  Sin ninguna frase no hubo cambio que contar: la version no se muestra.
+    #  Antes salia "Cambio la configuracion.", que no le decia nada a nadie.
+    if not frases:
+        return None
+    return {"tipo": "editado", "resumen": frases, "diff_instrucciones": diff}
 
 
 def historial(versiones: list[dict]) -> list[dict]:
@@ -142,6 +178,9 @@ def historial(versiones: list[dict]) -> list[dict]:
             #  Restaurable si en esa version el rol existia: restaurar la que
             #  lo borro no tiene sentido (ver editor.restaurar_rol).
             "restaurable": bool(nueva.get("rol")),
+            #  Quien la hizo, si se registro (columna desde el 13/11/2026). None
+            #  = no se sabe; la pantalla dice "sin registro", no inventa.
+            "autor": nueva.get("autor") or None,
             **cambio,
         })
     return salida

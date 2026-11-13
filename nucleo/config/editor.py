@@ -67,6 +67,7 @@ comparar ambas versiones siga siendo posible.
 
 from __future__ import annotations
 
+import contextvars
 import copy
 import json
 import os
@@ -460,6 +461,29 @@ def _validar(tenant: str, crudo: dict) -> TenantConfig:
             + "\n  - ".join(lineas)) from None
 
 
+#: QUIEN hace la edicion en curso (13/11/2026). Lo fija la ruta HTTP con lo que
+#: manda el proxy del CRM desde la SESION (nunca el navegador) y lo lee
+#: anotar_version. Una ContextVar y no un parametro mas: _editar tiene decenas
+#: de llamadores (guardar_*), y el autor es de la edicion, no de cada mutacion.
+AUTOR_DE_LA_EDICION: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "autor_de_la_edicion", default=None)
+
+
+def _hay_columna_autor(cur) -> bool:
+    """
+    Si la base ya tiene asistente.tenant_config_historial.autor
+    (supabase/202611131400_autor_del_historial.sql). Las migraciones se
+    aplican aparte del deploy: el codigo nuevo puede llegar antes que la
+    columna, y un INSERT que la nombre fallaria y tumbaria la edicion ENTERA
+    (va en la misma transaccion que la config). Se pregunta en vez de suponer.
+    """
+    cur.execute("""select 1 from information_schema.columns
+                    where table_schema = 'asistente'
+                      and table_name = 'tenant_config_historial'
+                      and column_name = 'autor'""")
+    return cur.fetchone() is not None
+
+
 def anotar_version(cur, org, version: int, datos: dict) -> None:
     """
     Guarda una copia de la config que acaba de quedar vigente.
@@ -477,7 +501,19 @@ def anotar_version(cur, org, version: int, datos: dict) -> None:
     'do nothing' ante conflicto: la version es la clave, y una version ya
     anotada no se reescribe -- un historial que se puede pisar no es un
     historial. Tampoco se le dio permiso de update a app_backend.
+
+    Con autor (13/11/2026): si la edicion lo trae y la columna existe, queda
+    QUIEN la hizo. Sin columna, se anota como siempre: el historial no se
+    pierde por esperar una migracion.
     """
+    autor = (AUTOR_DE_LA_EDICION.get() or "").strip()[:120] or None
+    if autor and _hay_columna_autor(cur):
+        cur.execute("""insert into asistente.tenant_config_historial
+                         (organization_id, config_version, config, autor)
+                       values (%s, %s, %s, %s)
+                       on conflict (organization_id, config_version) do nothing""",
+                    (org, version, json.dumps(datos), autor))
+        return
     cur.execute("""insert into asistente.tenant_config_historial
                      (organization_id, config_version, config)
                    values (%s, %s, %s)
@@ -605,11 +641,21 @@ def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
     return config
 
 
+#: Nombres que un agente no puede tener (13/11/2026): son paginas fijas bajo
+#: /agentes en el CRM, y una ruta fija le gana a /agentes/[nombre] -- un agente
+#: llamado asi existiria pero su pagina no abriria nunca.
+NOMBRES_DE_ROL_RESERVADOS = frozenset({"permisos", "flujo", "asignaciones"})
+
+
 def _validar_nombre_rol(nombre: str) -> None:
     if not _RE_NOMBRE_ROL.match(nombre):
         raise ErrorEdicion(
             f"'{nombre}': el nombre debe ser minuscula, empezar con letra y "
             f"usar solo letras/numeros/guion bajo (2-30 caracteres)")
+    if nombre in NOMBRES_DE_ROL_RESERVADOS:
+        raise ErrorEdicion(
+            f"'{nombre}' es el nombre de una pantalla de Agentes: elegi otro "
+            f"identificador para el agente.")
 
 
 # =============================================================================

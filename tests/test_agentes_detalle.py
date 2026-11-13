@@ -285,6 +285,126 @@ api._sesiones.clear()
 r3, a3 = turno(CONFIG)
 comprobar(a3["modelo"], "sin pausa, el mismo turno SI llama al modelo (la prueba ve la diferencia)")
 
+# =============================================================================
+print("\n== 5. lo que se pulio el 13/11 a la tarde ==")
+
+# -- el historial no muestra versiones sin cambio real ------------------------
+a = {"descripcion": "x", "puede_consultar": ["h"], "campos_permitidos": {"h": ["c"]}}
+b = copy.deepcopy(a)
+b["exige_verificacion"] = True          # el default: no cambia nada
+b["nunca_revelar"] = []                 # vacio = ausente
+b["campos_permitidos"]["otra"] = []     # lista vacia = sin entrada
+comprobar(cambios_de_rol.describir(a, b) is None,
+          "escribir un default o una lista vacia no es un cambio (antes: 'Cambio la configuracion.')")
+c = copy.deepcopy(a)
+c["exige_verificacion"] = False
+comprobar(cambios_de_rol.describir(a, c)["resumen"] == ["Verificar identidad: no."],
+          "pero apagar la verificacion SI es un cambio, y se dice")
+d = copy.deepcopy(a)
+d["orientado_a"] = "colaborador"        # default
+comprobar(cambios_de_rol.describir(a, d) is None, "'colaborador' escrito = el default: sin cambio")
+h = cambios_de_rol.historial([
+    {"version": 9, "creado_en": t(9), "rol": c, "autor": "Ana Pérez"},
+    {"version": 8, "creado_en": t(8), "rol": b, "autor": None},
+    {"version": 7, "creado_en": t(7), "rol": a}])
+comprobar([x["version"] for x in h] == [9], "la version sin cambio real (8) no aparece")
+comprobar(h[0]["autor"] == "Ana Pérez", "el autor de la version viaja a la pantalla")
+
+# -- nombres reservados -------------------------------------------------------
+for reservado in ("permisos", "flujo", "asignaciones"):
+    try:
+        editor._validar_nombre_rol(reservado)
+        comprobar(False, f"'{reservado}' se rechaza como nombre de agente")
+    except editor.ErrorEdicion:
+        comprobar(True, f"'{reservado}' se rechaza como nombre de agente")
+
+
+# -- anotar_version: autor solo si la columna existe --------------------------
+class _Cur:
+    def __init__(self, hay_columna):
+        self.hay, self.sql, self.params, self._ultima = hay_columna, [], [], None
+
+    def execute(self, sql, params=None):
+        self.sql.append(" ".join(sql.split()))
+        self.params.append(params)
+        self._ultima = sql
+
+    def fetchone(self):
+        return (1,) if self.hay else None
+
+
+cur = _Cur(True)
+tok = editor.AUTOR_DE_LA_EDICION.set("Ana Pérez")
+editor.anotar_version(cur, "org", 12, {"x": 1})
+editor.AUTOR_DE_LA_EDICION.reset(tok)
+comprobar("autor) values" in cur.sql[-1] and cur.params[-1][-1] == "Ana Pérez",
+          "con autor y con columna, la version guarda quien la hizo")
+cur = _Cur(False)
+tok = editor.AUTOR_DE_LA_EDICION.set("Ana Pérez")
+editor.anotar_version(cur, "org", 12, {"x": 1})
+editor.AUTOR_DE_LA_EDICION.reset(tok)
+comprobar("autor" not in cur.sql[-1].split("values")[0],
+          "SIN la columna (migracion pendiente) se anota como antes: la edicion no se cae")
+cur = _Cur(True)
+editor.anotar_version(cur, "org", 12, {"x": 1})
+comprobar(len(cur.sql) == 1 and "autor" not in cur.sql[0],
+          "sin autor (un CLI) ni se pregunta por la columna")
+
+# -- el autor del pedido llega al editor y se suelta al terminar --------------
+vistos = []
+editor_pausar = editor.pausar_rol
+editor.pausar_rol = lambda tenant, nombre, pausado: (vistos.append(editor.AUTOR_DE_LA_EDICION.get()), CONFIG)[1]
+http.put("/agentes/soporte/pausa", json={"tenant": "rapilink", "pausado": True, "autor": "Ana Pérez"})
+comprobar(vistos == ["Ana Pérez"], f"el autor del cuerpo llega al editor (vio {vistos})")
+comprobar(editor.AUTOR_DE_LA_EDICION.get() is None, "y se suelta al terminar el pedido")
+vistos.clear()
+http.put("/agentes/soporte/pausa", json={"tenant": "rapilink", "pausado": False})
+comprobar(vistos == [None], "un pedido sin autor no hereda el del anterior")
+editor.pausar_rol = editor_pausar
+borrados = []
+editor_borrar = editor.borrar_rol
+editor.borrar_rol = lambda tenant, nombre: borrados.append(editor.AUTOR_DE_LA_EDICION.get())
+http.delete("/agentes/soporte?tenant=rapilink&autor=Luis%20G")
+comprobar(borrados == ["Luis G"], "en un DELETE el autor llega por la query")
+editor.borrar_rol = editor_borrar
+
+# -- versiones_del_rol: lee el autor solo si existe la columna ----------------
+class _Sesion:
+    def __init__(self, cur):
+        self.cur = cur
+
+    def __enter__(self):
+        return self.cur, "org"
+
+    def __exit__(self, *a):
+        return False
+
+
+class _CurLectura(_Cur):
+    def fetchall(self):
+        return []
+
+
+orig_sesion = datos_agentes.sesion
+for hay, espera in ((True, "creado_en, autor as autor"), (False, "null::text as autor")):
+    lect = _CurLectura(hay)
+    datos_agentes.sesion = lambda tenant, c=lect: _Sesion(c)
+    datos_agentes.versiones_del_rol("rapilink", "soporte")
+    comprobar(espera in lect.sql[-1], f"columna {'presente' if hay else 'ausente'}: lee '{espera}'")
+datos_agentes.sesion = orig_sesion
+
+# -- el resumen de cada herramienta llega, y NO al modelo ---------------------
+r = http.get("/agentes?tenant=rapilink").get_json()
+stc = next(x for x in r["agentes"] if x["nombre"] == "soporte_tecnico_cliente")
+reinicio = next(x for x in stc["herramientas"] if x["nombre"] == "reiniciar_ont")
+comprobar(reinicio["resumen"] == "Reinicia en remoto el equipo del cliente.",
+          "/agentes manda el resumen de cada herramienta")
+import inspect                                                       # noqa: E402
+from nucleo.modelo import motor as _motor                            # noqa: E402
+import re as _re                                                     # noqa: E402
+comprobar(not _re.search(r"herramienta[.]resumen(?!_)", inspect.getsource(_motor)),
+          "el motor no le pasa el resumen al modelo (solo 'descripcion')")
+
 print()
 if fallos:
     print(f"FALLARON {len(fallos)}:")
