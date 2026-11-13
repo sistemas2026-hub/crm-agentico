@@ -70,6 +70,11 @@ EVENTO_INTENTO = "cierre_del_supervisor_en_curso"
 #: El Supervisor devolvio la orden solo, porque la revision encontro
 #: algo que NO cumple. Distinto de `EVENTO_BLOQUEADO`, que es "no se pudo".
 EVENTO_DEVUELTA = "devuelta_por_el_supervisor"
+
+#: La devolucion que hace una PERSONA desde la pantalla. Es el mismo hecho
+#: que `EVENTO_DEVUELTA` --la orden volvio a campo y Dexter lo registro-- y
+#: desde el 12/11/2026 cuenta igual. Ver el comentario del filtro.
+EVENTO_DEVUELTA_POR_PERSONA = "correccion_requerida"
 #: Se tomo ESTA vuelta de ESTA orden para devolverla. Se escribe ANTES de
 #: tocar el ticket y la vuelta. La clave es la VUELTA, no una ventana de
 #: tiempo: ver `_reclamar_la_devolucion`.
@@ -299,8 +304,31 @@ def revisadas(org, ahora, *, solo=None, mirar=False) -> list | None:
     #  Lo encontro la guarda `test_v_una_orden_ya_devuelta_no_la_cierra_solo`,
     #  que se puso en rojo con la primera version de este cambio -- su orden
     #  en vuelta 2 no tiene devolucion del Supervisor, y aun asi entraba.
+    #
+    #  Y LA DE UNA PERSONA CUENTA IGUAL  --  12/11/2026, decision del usuario
+    #  ----------------------------------------------------------------------
+    #  Lo de arriba aceptaba solo la devolucion del SUPERVISOR, con este
+    #  argumento: si la devolvio una persona, esa persona pudo cerrar el
+    #  ticket a mano en WispHub y Dexter no lo ve.
+    #
+    #  El usuario lo encontro en la OT #214: la devolvio EL desde la
+    #  pantalla, el tecnico corrigio, los puntos quedaron en orden y la
+    #  orden no cerraba -- `devuelta_por_el_supervisor=False` siendo que la
+    #  bitacora tenia `correccion_requerida` y `reapertura_correccion`.
+    #
+    #  El argumento tenia un hueco, y es por que se cambio: vale IGUAL en la
+    #  vuelta 1, donde una persona tambien pudo cerrar el ticket a mano, y
+    #  ahi si cierra. El propio comentario de arriba lo admite: «el filtro
+    #  por vuelta nunca protegio de ese caso». Una regla que protege en la
+    #  vuelta 2 de un riesgo que acepta en la vuelta 1 no protege: confunde.
+    #
+    #  LO QUE NO CAMBIA, y es lo que de verdad acota: el ticket nunca se
+    #  cerro desde Dexter (`~Q(id__in=ya_cerraron)`). Esa es la condicion que
+    #  importa, y se lee de la bitacora en vez de suponerla.
     devueltas_por_el_supervisor = EventoTrabajo.objects.filter(
-        org=org, tipo=EVENTO_DEVUELTA).values_list("orden_id", flat=True)
+        org=org,
+        tipo__in=(EVENTO_DEVUELTA, EVENTO_DEVUELTA_POR_PERSONA),
+    ).values_list("orden_id", flat=True)
     ya_cerraron = EventoTrabajo.objects.filter(
         org=org, tipo=EVENTO_CERRADO).values_list("orden_id", flat=True)
     candidatas = OrdenTrabajo.objects.filter(

@@ -1191,6 +1191,25 @@ El segundo es invisible: una orden que cerró sola y no debía se ve igual que u
 
 Ficha y plan: [SPEC/objetivos/supervisor-noc-diagnostica-la-red.md](SPEC/objetivos/supervisor-noc-diagnostica-la-red.md).
 
+### 8.24 DECISIÓN — La devolución que hace una persona cuenta igual que la del Supervisor (12/11/2026)
+
+**El síntoma.** El usuario devolvió la OT #214 desde la pantalla, el técnico corrigió, los puntos quedaron en orden y **la orden no cerraba** — sin que nada dijera por qué. Hizo falta `por_que_no_cerro` para verlo:
+
+```
+4. filtro de la vuelta: LA DEJA AFUERA
+   (vuelta=2, devuelta_por_el_supervisor=False, ticket_isp_ya_cerrado=False)
+```
+
+**No era un bug: era el diseño del 09/11 funcionando.** Una orden en vuelta > 1 entraba al cierre automático solo si la había devuelto **el Supervisor**, con este argumento escrito: *"si la devolvió una PERSONA, esa persona pudo cerrar el ticket a mano en WispHub, y ahí H4 sigue entero: no hay fila que leer"*.
+
+**El hueco del argumento, y por qué se cambió.** Ese mismo riesgo existe en la **vuelta 1**, donde la orden **sí** cierra sola. El propio comentario lo admitía: *"el filtro por vuelta nunca protegió de ese caso"*. Una regla que protege en la vuelta 2 de un riesgo que acepta en la vuelta 1 no protege: confunde, y deja órdenes trabadas sin explicación.
+
+**Lo que se decidió.** Si Dexter **registró** la devolución —da igual si la hizo el Supervisor o una persona en su pantalla— conoce la trayectoria entera y la orden entra al cierre.
+
+**Lo que no cambió, y es lo que de verdad acota:** si Dexter ya cerró ese ticket alguna vez (`EVENTO_CERRADO` de `cierre_en_isp`), la orden sigue afuera. Ese cierre pudo reabrirse en el ISP y desde acá no se sabe. Esa condición se lee de la bitácora, nunca se supone.
+
+Tres guardas lo fijan: la vuelta 2 **sin** registro de devolución sigue afuera, la devuelta por una persona entra, y la de ticket ya cerrado no. Revertir el cambio mata solo la del medio.
+
 ## 9. Despliegue
 
 Un VPS gestionado con **Dokploy**: el motor, el CRM (backend, Celery, frontend) y un Supabase autoalojado del que se usa solo Postgres. **Pushear la rama de despliegue publica a producción** (autodeploy). El procedimiento, las variables, el webhook de WhatsApp y el diagnóstico de fallos viven en [DESPLIEGUE.md](DESPLIEGUE.md); las reglas de quién despliega y cómo se verifica, en CLAUDE.md §6–§8.

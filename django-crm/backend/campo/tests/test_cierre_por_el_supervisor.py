@@ -242,11 +242,66 @@ def test_s6_sin_ticket_del_isp_la_cierra_adentro(abierto, orden):
 
 
 def test_v_una_orden_ya_devuelta_no_la_cierra_solo(abierto, orden):
+    """Vuelta 2 SIN registro de devolución: Dexter no conoce su trayectoria
+    y su ticket pudo cerrarse y reabrirse en el ISP sin que nadie lo vea.
+    Sigue afuera, igual que desde H4."""
     OrdenTrabajo.objects.filter(pk=orden.pk).update(vuelta=2)
     EvidenciaTrabajo.objects.filter(orden_trabajo=orden).update(vuelta=2)
     with mock.patch("requests.post") as post:
         assert _fase(abierto)["cerraria"] == 0
     post.assert_not_called()
+
+
+def test_v2_la_que_devolvio_UNA_PERSONA_desde_la_pantalla_SI_entra(abierto,
+                                                                   orden):
+    """DECISIÓN DEL USUARIO, 12/11/2026, sobre la OT #214.
+
+    Hasta hoy solo entraba la que devolvía el SUPERVISOR. El argumento era
+    que si la devolvía una persona, esa persona pudo cerrar el ticket a mano
+    en WispHub. El hueco: eso vale igual en la vuelta 1, donde sí cierra.
+
+    El síntoma era mudo —la orden quedaba trabada y la pantalla no decía por
+    qué— y hizo falta el comando de diagnóstico para verlo."""
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(vuelta=2)
+    EvidenciaTrabajo.objects.filter(orden_trabajo=orden).update(vuelta=2)
+    #  Lo que `requerir_correccion` deja cuando una persona devuelve.
+    EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo="correccion_requerida",
+        datos={"vuelta_nueva": 2, "vuelta_anterior": 1})
+
+    #  NO se afirma `post.assert_not_called()` como en la guarda de arriba:
+    #  justamente porque ahora ENTRA, el camino sale a la red --a cerrar el
+    #  ticket y a mirar las fotos--. Lo que se mide es `cerraria`, que es el
+    #  efecto; copiar el assert del caso contrario fue lo primero que hice y
+    #  se puso rojo por la razón correcta.
+    with mock.patch("requests.post"):
+        assert _fase(abierto)["cerraria"] == 1, (
+            "una orden que una persona devolvió desde la pantalla, con su "
+            "registro en la bitácora y el ticket nunca cerrado, tiene que "
+            "entrar al cierre")
+
+
+def test_v3_pero_no_si_su_ticket_YA_SE_CERRO_alguna_vez(abierto, orden):
+    """Lo que la decisión del 12/11 NO cambió, y es lo que de verdad acota:
+    si Dexter ya cerró ese ticket alguna vez, pudo reabrirse en el ISP y
+    desde acá no se sabe. Sin esta guarda, el cambio de arriba se lleva
+    puesta la protección entera."""
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(vuelta=2)
+    EvidenciaTrabajo.objects.filter(orden_trabajo=orden).update(vuelta=2)
+    EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo="correccion_requerida",
+        datos={"vuelta_nueva": 2, "vuelta_anterior": 1})
+    #  OJO CON LA CONSTANTE: `CS.EVENTO_CERRADA` es «la ORDEN la cerró el
+    #  Supervisor»; la que el filtro mira es la del TICKET del ISP, que vive
+    #  en otro módulo. Usar la primera deja esta guarda en verde sin medir
+    #  nada -- pasó al escribirla.
+    from campo.services.cierre_en_isp import EVENTO_CERRADO
+
+    EventoTrabajo.objects.create(
+        org=orden.org, orden=orden, tipo=EVENTO_CERRADO, datos={})
+
+    with mock.patch("requests.post"):
+        assert _fase(abierto)["cerraria"] == 0
 
 
 def test_m_sin_la_medicion_que_espera_no_la_cierra(abierto, orden, monkeypatch):
