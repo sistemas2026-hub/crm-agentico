@@ -16,6 +16,11 @@ import {
   guardarConfiguracionDeSeguimiento,
   leerConfiguracionDeSeguimiento
 } from '$lib/server/v2/configuracion-de-seguimiento.js';
+import {
+  cuerpoDeMarcaDeAgua,
+  guardarMarcaDeAgua,
+  leerMarcaDeAgua
+} from '$lib/server/v2/marca-de-agua.js';
 import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 
 /**
@@ -96,6 +101,8 @@ export async function load({ url, cookies, locals }) {
     configuracion: conf.configuracion,
     //  Lo que el Supervisor hace solo (30/10/2026): recordar y cerrar.
     seguimiento: seg.configuracion,
+    //  Qué dice la marca de agua de las fotos de campo (12/11/2026).
+    marcaDeAgua: (await leerMarcaDeAgua({ cookies })).configuracion,
     vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
   };
 }
@@ -110,6 +117,29 @@ export const actions = {
       return { hecho: 'Quedó guardado de dónde y qué carga cada cuadrilla.' };
     } catch (e) {
       return fail(400, { error: mensajeDeError(e) });
+    }
+  },
+
+  //  LA MARCA DE AGUA DE LAS FOTOS (12/11/2026). El logo y el nombre salen
+  //  del perfil de la empresa; acá solo se decide qué se estampa y cómo.
+  marcaDeAgua: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'marcaDeAgua', error: 'Esto es para quien gestiona.' });
+    try {
+      const r = await guardarMarcaDeAgua({ cookies }, cuerpoDeMarcaDeAgua(await request.formData()));
+      //  EL MENSAJE DICE EL ESTADO QUE QUEDÓ, no «guardado» a secas: la
+      //  diferencia entre prendida y apagada es la que importa, y la persona
+      //  acaba de tocar varias casillas.
+      if (!r?.activa) return { de: 'marcaDeAgua', hecho: 'Guardado. Las fotos salen sin marca.' };
+      //  Y AVISA EL CASO QUE DEJA UNA MARCA SIN LOGO: prender «el logo» sin
+      //  haberlo cargado produce una marca a la que le falta justo lo que la
+      //  persona creía estar poniendo, y nada se lo diría.
+      const falta = r?.mostrar_logo && !r?.logo_cargado
+        ? ' Falta cargar el logo en el perfil de la empresa: por ahora sale sin logo.'
+        : '';
+      return { de: 'marcaDeAgua', hecho: `Guardado. Las fotos nuevas salen con marca.${falta}` };
+    } catch (e) {
+      return fail(400, { de: 'marcaDeAgua', error: mensajeDeError(e) });
     }
   },
 

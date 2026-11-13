@@ -1522,6 +1522,9 @@ from campo.avisos import (  # noqa: E402,F401
     ConfiguracionDeAvisos,
     DispositivoDeTecnico,
 )
+from campo.marca_de_agua import (  # noqa: E402,F401
+    ConfiguracionDeMarcaDeAgua,
+)
 from campo.pedidos import PedidoDeMaterial  # noqa: E402,F401
 from campo.inventario_operacion import (  # noqa: E402,F401
     Compra,

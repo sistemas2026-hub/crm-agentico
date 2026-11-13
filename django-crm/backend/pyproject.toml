@@ -55,6 +55,14 @@ dependencies = [
     # crm/settings.py depends on it. No application code imports the driver
     # directly, so the swap is confined to this line.
     "psycopg[binary,pool]>=3.2.10",
+    # DECLARADA A PROPOSITO, aunque ya estuviera instalada (12/11/2026).
+    # Pillow entraba como dependencia TRANSITIVA de WeasyPrint: el dia que
+    # alguien saque WeasyPrint, desaparece sin que nada lo diga, y lo que se
+    # rompe es la marca de agua de las fotos de campo --en silencio, porque
+    # el renderizador falla ABIERTO y guardaria todas las fotos sin marca--.
+    # Un uso directo se declara; depender de la dependencia de otro es
+    # depender de una decision ajena.
+    "pillow>=11.0.0",
     "whitenoise>=6.12.0",
     "sentry-sdk>=2.66.1",
     "django-storages>=1.14.6",

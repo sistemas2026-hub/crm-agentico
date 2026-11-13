@@ -265,6 +265,85 @@
 
         {#if publicado?.cuadrillas?.length}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
+            {#if data.marcaDeAgua}
+              <!-- LA MARCA DE AGUA DE LAS FOTOS (12/11/2026). Se dibuja en el
+                   servidor, al recibir cada foto: la aplicación se actualiza a
+                   mano teléfono por teléfono, y esto se va a querer ajustar
+                   varias veces. El costo de esa decisión, dicho acá abajo: la
+                   copia que queda EN el teléfono sale sin marca. -->
+              <details>
+                <summary class="snoc-body-sm">La marca de agua de las fotos</summary>
+                <form method="POST" action="?/marcaDeAgua" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="activa" checked={data.marcaDeAgua.activa} />
+                    Las fotos de campo salen con marca de agua
+                  </label>
+
+                  <span class="snoc-body-sm snoc-secundario">Qué dice:</span>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="mostrar_logo" checked={data.marcaDeAgua.mostrar_logo} />
+                    El logo de la empresa
+                    {#if data.marcaDeAgua.mostrar_logo && !data.marcaDeAgua.logo_cargado}
+                      <!-- Prender el logo sin haberlo cargado deja una marca a la
+                           que le falta justo lo que la persona creía poner. -->
+                      <span class="snoc-error-txt">— falta cargarlo en <a href="/settings/organization">el perfil de la empresa</a></span>
+                    {/if}
+                  </label>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="mostrar_empresa" checked={data.marcaDeAgua.mostrar_empresa} />
+                    El nombre de la empresa{#if data.marcaDeAgua.empresa} ({data.marcaDeAgua.empresa}){/if}
+                  </label>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="mostrar_tecnico" checked={data.marcaDeAgua.mostrar_tecnico} />
+                    Quién tomó la foto
+                  </label>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="mostrar_fecha" checked={data.marcaDeAgua.mostrar_fecha} />
+                    Cuándo se tomó — el instante del obturador, en hora de Colombia
+                  </label>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="mostrar_coordenadas" checked={data.marcaDeAgua.mostrar_coordenadas} />
+                    Dónde se tomó
+                  </label>
+                  <span class="snoc-body-sm snoc-secundario">
+                    Las coordenadas quedan grabadas <strong>dentro</strong> de la imagen, que después viaja al ticket del ISP y se puede reenviar. Si la foto se eligió de la galería en vez de tomarse, no se estampan: la marca lo dice en vez de afirmar un lugar que no se midió.
+                  </span>
+
+                  <span class="snoc-body-sm snoc-secundario">Cómo se ve:</span>
+                  <label class="snoc-body-sm snoc-fila" style="gap:var(--snoc-xs); align-items:center; flex-wrap:wrap;">
+                    En la esquina
+                    <select class="snoc-campo" name="posicion" style="width:auto;" value={data.marcaDeAgua.posicion}>
+                      <option value="abajo_izquierda">abajo a la izquierda</option>
+                      <option value="abajo_derecha">abajo a la derecha</option>
+                      <option value="arriba_izquierda">arriba a la izquierda</option>
+                      <option value="arriba_derecha">arriba a la derecha</option>
+                    </select>
+                    con opacidad
+                    <input class="snoc-campo" type="number" name="opacidad" min="10" max="100" step="5" style="width:4.5rem;" value={data.marcaDeAgua.opacidad} />
+                    de 100
+                  </label>
+                  <label class="snoc-body-sm snoc-pila-xs">
+                    Una línea más, si hace falta
+                    <input class="snoc-campo" type="text" name="texto_extra" maxlength="80" value={data.marcaDeAgua.texto_extra} />
+                  </label>
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="estampar_capturas" checked={data.marcaDeAgua.estampar_capturas} />
+                    Marcar también las capturas de pantalla
+                  </label>
+                  <span class="snoc-body-sm snoc-secundario">
+                    Apagado, porque la marca encima de un test de velocidad puede tapar justo los números que la captura prueba. La firma del cliente nunca se marca.
+                  </span>
+                  <span class="snoc-body-sm snoc-secundario">
+                    La marca se dibuja al recibir la foto, así que vale para las nuevas: las que ya están guardadas no cambian. Y la copia que queda en el teléfono del técnico sale sin marca.
+                  </span>
+                  <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+                    <button class="snoc-btn" type="submit">Guardar</button>
+                    {#if form?.de === 'marcaDeAgua'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
+                  </div>
+                </form>
+              </details>
+            {/if}
+
             {#if data.seguimiento}
               <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Que cierre solo
                    NO se enciende acá: se le delega desde su chat, con el nivel

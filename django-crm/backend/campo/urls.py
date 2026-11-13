@@ -8,6 +8,7 @@ from campo import probar_instruccion_de_foto
 from campo import (
     avisos_views,
     configuracion_de_seguimiento_views,
+    marca_de_agua_views,
     cuadrillas_views,
     despacho_pantalla_views,
     despacho_views,
@@ -115,6 +116,10 @@ urlpatterns = [
     path("seguimiento/configuracion/",
          configuracion_de_seguimiento_views.ConfiguracionDeSeguimientoView.as_view(),
          name="seguimiento_configuracion"),
+    #  Que dice la marca de agua de las fotos de campo (12/11/2026).
+    path("marca-de-agua/configuracion/",
+         marca_de_agua_views.ConfiguracionDeMarcaDeAguaView.as_view(),
+         name="marca_de_agua_configuracion"),
     path("cuadrillas/jornada/", cuadrillas_views.JornadaDeCuadrillaView.as_view(), name="cuadrilla_jornada"),
     path("cuadrillas/<uid:pk>/", cuadrillas_views.CuadrillaView.as_view(), name="cuadrilla"),
     path("inventario/series/", inventario_views.SeriesDisponiblesView.as_view(), name="inv_series"),

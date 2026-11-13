@@ -1215,6 +1215,64 @@ class SubirEvidenciaDirectoView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        #  LA MARCA DE AGUA, ACA Y NO EN OTRO LADO  --  12/11/2026
+        #
+        #  Este es el UNICO punto por donde pasa todo byte de evidencia, y de
+        #  aca salen cuatro caminos distintos que leen el mismo archivo del
+        #  disco: la pantalla de revision del cierre, el ticket de WispHub, el
+        #  caso del CRM y el modelo de vision. Estampar aca los cubre a los
+        #  cuatro sin tocar ninguno.
+        #
+        #  NO DENTRO DE `CampoStorage.guardar`: ese metodo lo comparte el
+        #  catalogo de materiales (`services/catalogo.py`), y estampariamos la
+        #  foto de un rollo de fibra.
+        #
+        #  SINCRONO Y NO EN UNA TAREA: `CompletarTrabajoView` manda las fotos
+        #  al ticket del ISP leyendolas del disco, y nada garantiza que una
+        #  tarea haya corrido antes. La foto llegaria sin marca de forma
+        #  intermitente, que es el peor modo de falla porque funciona casi
+        #  siempre.
+        #
+        #  `estampar_evidencia` nunca levanta: si no puede, devuelve lo que
+        #  entro. Una marca de agua no puede costar la prueba de un trabajo
+        #  que ya se hizo y no se puede repetir -- el tecnico se fue.
+        #
+        #  EL `sha256` DE LA FILA NO SE RECALCULA, a proposito. Sigue siendo
+        #  el de la captura del telefono, que es lo que el reintento del
+        #  telefono vuelve a mandar y lo que las dos restricciones de unicidad
+        #  usan para deduplicar: recalcularlo convertiria cada reintento en
+        #  una fila nueva. Y no rompe ninguna guarda -- no existe ninguna
+        #  verificacion que compare ese hash contra el disco, medido sobre
+        #  todo el backend, y el comentario de `:974` ya lo decia: «el sha256
+        #  identifica la fila, no garantiza que lo que se suba despues
+        #  coincida».
+        from campo.marca_de_agua import estampar_evidencia
+
+        marcado = estampar_evidencia(evidencia, contenido)
+        if marcado is not contenido:
+            #  LA FILA TIENE QUE DECIR LO QUE EL ARCHIVO ES  --  12/11/2026,
+            #  hallazgo H4 de la revision de PII, medido: entraba un PNG y
+            #  salia un JPEG, y `mime_type` seguia diciendo `image/png`.
+            #
+            #  TRES CONSUMIDORES USAN EL DECLARADO, no la firma del archivo:
+            #  `nota_al_isp` manda `"tipo": "image/png"` con base64 de un
+            #  JPEG al ticket de WispHub; `fotos_al_ticket` adjunta el caso
+            #  del CRM con extension `.png`; y `ArchivoDeEvidenciaView` sirve
+            #  `Content-Type: image/png` CON `X-Content-Type-Options:
+            #  nosniff`, que es justo la cabecera que le prohibe al navegador
+            #  corregir la mentira.
+            #
+            #  `estampar` siempre devuelve JPEG (reencodea para dibujar), asi
+            #  que esto no adivina: describe lo que acaba de pasar.
+            contenido = marcado
+            evidencia.mime_type = "image/jpeg"
+            nombre = str(evidencia.nombre_original or "")
+            if nombre:
+                evidencia.nombre_original = (
+                    nombre.rsplit(".", 1)[0] + ".jpg") if "." in nombre else nombre
+            evidencia.save(update_fields=["mime_type", "nombre_original",
+                                          "updated_at"])
+
         if not evidencia.storage_key or not CampoStorage.guardar(
                 evidencia.storage_key, contenido):
             return Response(
