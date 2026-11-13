@@ -477,3 +477,54 @@ def test_j5_la_bandera_no_cambia_nada_mas_del_campo():
     ]})["campos"][0]
     assert con.pop("escaneable") is True
     assert con == sin
+
+
+# =============================================================================
+#  LA VUELTA COMPLETA: lo que se publica tiene que poder volver a editarse
+# =============================================================================
+#  `leer_definicion` reconstruye la definicion EDITABLE desde el esquema
+#  publicado, campo por campo. Lo que no vuelva por ahi SE PIERDE en el
+#  proximo «Publicar» desde la pantalla -- sin error, sin aviso: publica bien y
+#  la bandera desaparece.
+#
+#  Ya habia pasado con el rango bueno, y el codigo lo dice en su comentario:
+#  «EL RANGO BUENO VUELVE A SALIR POR DONDE ENTRO». `escaneable` se agrego el
+#  12/11/2026 sin esa vuelta, y se encontro antes de que mordiera: revisando
+#  que pasos darle al usuario en la pantalla de plantillas. Habria sido
+#  invisible hasta que alguien editara la plantilla por cualquier otro motivo.
+def test_k1_la_camara_sobrevive_a_la_vuelta_COMPLETA():
+    publicado = P.componer({"campos": [
+        {"titulo": "Serial de la ONU", "escaneable": True},
+    ]})
+    definicion, motivos = P.leer_definicion(publicado)
+
+    assert definicion is not None, motivos
+    assert definicion["campos"][0].get("escaneable") is True, (
+        "si no vuelve, el primer «Publicar» desde la pantalla la borra")
+
+    #  Y LA VUELTA ENTERA: publicar lo que volvio tiene que dar lo mismo.
+    assert P.componer(definicion)["campos"][0].get("escaneable") is True
+
+
+def test_k2_un_texto_SIN_camara_no_la_gana_en_la_vuelta():
+    #  El control. Una vuelta que agregara la bandera sola pondria cámaras en
+    #  todos los campos de texto de todas las empresas al primer guardado.
+    publicado = P.componer({"campos": [{"titulo": "Comentarios"}]})
+    definicion, _ = P.leer_definicion(publicado)
+
+    assert "escaneable" not in definicion["campos"][0]
+    assert "escaneable" not in P.componer(definicion)["campos"][0]
+
+
+def test_k3_la_vuelta_no_marca_la_plantilla_como_no_editable():
+    #  Si `escaneable` cayera en «cosas que el editor no maneja», la pantalla
+    #  mostraria «Ver» en vez de «Editar» y la empresa perderia el editor
+    #  entero por una bandera.
+    publicado = P.componer({"campos": [
+        {"titulo": "Serial de la ONU", "escaneable": True},
+        {"titulo": "Potencia", "tipo": "numero", "unidad": "dBm"},
+    ]})
+    definicion, motivos = P.leer_definicion(publicado)
+
+    assert definicion is not None
+    assert motivos == [], f"la plantilla dejo de ser editable por: {motivos}"

@@ -696,6 +696,22 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
                 motivos.append(f"«{titulo}» tiene minimo o maximo en un texto, "
                                "y la app y el servidor lo entienden distinto")
             fila["tipo"] = TEXTO
+            #  LA CAMARA VUELVE A SALIR POR DONDE ENTRO  --  12/11/2026.
+            #
+            #  Mismo motivo que el rango bueno, abajo: esta funcion reconstruye
+            #  la definicion EDITABLE desde el esquema publicado, y lo que no
+            #  vuelva acá se pierde en el proximo «Publicar» desde la pantalla.
+            #  Sin esta linea, abrir la plantilla y guardarla --sin tocar
+            #  nada-- borraba la marca de la camara, y nadie se enteraba:
+            #  publica bien, no da error, y el boton deja de aparecer en el
+            #  telefono.
+            #
+            #  Se descubrio ANTES de que pasara, revisando que pasos darle al
+            #  usuario en la pantalla de plantillas. Habria sido invisible
+            #  hasta que alguien editara esa plantilla por cualquier otro
+            #  motivo, semanas despues.
+            if c.get("escaneable"):
+                fila["escaneable"] = True
         elif tipo == "decimal":
             #  EL RANGO BUENO VUELVE A SALIR POR DONDE ENTRO. Sin estas dos
             #  lineas, cualquier republicacion --y "Guardar en la plantilla"
