@@ -39,6 +39,7 @@ from campo.cuadrillas import (ConfiguracionDeReparto, Cuadrilla,
 from campo.zonas import AliasDeZona, ZonaOperativa, normalizar_localidad
 from campo.inventario import UbicacionInventario
 from campo.permissions import IsCampoAuthenticated, ROLES_GESTION
+from operaciones import areas_del_tenant as _areas
 from common.models import Profile
 
 
@@ -48,6 +49,11 @@ from common.models import Profile
 #: nadie entienda por que. Tres meses cubren "el trimestre pasado", que es el
 #: horizonte con el que se mira de verdad una cuadrilla.
 MAX_DIAS_DE_HISTORIAL = 92
+
+#:  Cuantas areas puede mirar el Supervisor de una empresa. No es una regla de
+#:  negocio: es el tope que impide guardar una lista de mil entradas por un
+#:  cliente roto. Hoy la mas grande usa cinco.
+MAX_AREAS_DEL_SUPERVISOR = 32
 
 
 def _fecha_de(texto: str):
@@ -114,6 +120,26 @@ def _nombres_cambiados(org) -> dict:
     usa el de fabrica. Es lo que la pantalla de Cuadrillas espera."""
     return {c: n for c, n in nombres_de_labor(org).items()
             if c in NOMBRE_DE_FABRICA and n != NOMBRE_DE_FABRICA[c]}
+
+
+def _areas_conocidas(org) -> list:
+    """Las areas que EXISTEN en esta empresa, para que la pantalla las ofrezca.
+
+    Sale del mapa persona -> area que ya sirve el motor (con su cache), mas
+    las de fabrica: una empresa puede querer mirar un area que todavia no
+    tiene a nadie asignado, y no poder elegirla seria un callejon.
+
+    Si el mapa no se puede leer, quedan las de fabrica. Vacio nunca: una
+    lista vacia en la pantalla se lee como «esta empresa no tiene areas».
+    """
+    from operaciones import areas_del_tenant as _a
+
+    try:
+        mapa = _a.area_por_persona_de_org(getattr(org, "pk", org)) or {}
+    except Exception:                                            # noqa: BLE001
+        mapa = {}
+    nombres = {str(v).strip() for v in mapa.values() if str(v or "").strip()}
+    return sorted(nombres | set(_a.AREAS_DE_FABRICA))
 
 
 def _codigos(org) -> str:
@@ -1017,6 +1043,16 @@ class ConfiguracionDeRepartoView(APIView):
             #  CAMBIO; la que no aparece usa el de fabrica. Las pantallas que
             #  listan labores las reciben ya con el nombre (`labores_de`).
             "nombres_de_labor": _nombres_cambiados(org),
+            #  QUE AREAS MIRA EL SUPERVISOR (13/11/2026). La lista EFECTIVA:
+            #  si la empresa no eligio ninguna vienen las de fabrica, para que
+            #  la pantalla muestre lo que de verdad pasa y no una casilla
+            #  vacia, que se leeria como «ninguna».
+            "areas_del_supervisor": list(_areas.areas_que_mira(org)),
+            "areas_de_fabrica": list(_areas.AREAS_DE_FABRICA),
+            #  Las que EXISTEN en esta empresa, para ofrecerlas en vez de
+            #  pedir el nombre exacto: un nombre mal tipeado deja al
+            #  Supervisor sin ver esa cola y no avisa.
+            "areas_conocidas": _areas_conocidas(org),
         })
 
     def put(self, request):
@@ -1062,6 +1098,27 @@ class ConfiguracionDeRepartoView(APIView):
                                "mismo puerto."},
                     status=status.HTTP_400_BAD_REQUEST)
             defaults["onus_para_corte_de_red"] = corte
+
+        #  QUE AREAS MIRA EL SUPERVISOR, SOLO SI VIENE (13/11/2026). Una
+        #  lista vacia es legitima y significa «las de fabrica»: asi se vuelve
+        #  atras sin tener que acordarse de cuales eran.
+        if "areas_del_supervisor" in datos:
+            pedido = datos.get("areas_del_supervisor")
+            if (not isinstance(pedido, list)
+                    or any(not isinstance(x, str) for x in pedido)):
+                return Response(
+                    {"detail": "Las áreas van como una lista de nombres."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            limpias = []
+            for nombre in pedido:
+                nombre = nombre.strip()
+                if nombre and nombre not in limpias:
+                    limpias.append(nombre)
+            if len(limpias) > MAX_AREAS_DEL_SUPERVISOR:
+                return Response(
+                    {"detail": f"Hasta {MAX_AREAS_DEL_SUPERVISOR} áreas."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            defaults["areas_del_supervisor"] = limpias
 
         #  LA TABLA DE LABORES SOLO SI VIENE: sin la clave no se toca, asi una
         #  pantalla vieja que no la manda no la borra. Solo los grupos que
@@ -1123,6 +1180,16 @@ class ConfiguracionDeRepartoView(APIView):
             "configurado": True,
             "labor_por_grupo": labor_de_cada_grupo(org),
             "nombres_de_labor": _nombres_cambiados(org),
+            #  QUE AREAS MIRA EL SUPERVISOR (13/11/2026). La lista EFECTIVA:
+            #  si la empresa no eligio ninguna vienen las de fabrica, para que
+            #  la pantalla muestre lo que de verdad pasa y no una casilla
+            #  vacia, que se leeria como «ninguna».
+            "areas_del_supervisor": list(_areas.areas_que_mira(org)),
+            "areas_de_fabrica": list(_areas.AREAS_DE_FABRICA),
+            #  Las que EXISTEN en esta empresa, para ofrecerlas en vez de
+            #  pedir el nombre exacto: un nombre mal tipeado deja al
+            #  Supervisor sin ver esa cola y no avisa.
+            "areas_conocidas": _areas_conocidas(org),
         })
 
 

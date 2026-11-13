@@ -337,6 +337,25 @@ class ConfiguracionDeReparto(BaseModel):
     #: A que hora LOCAL de la empresa corre. 0-23.
     hora_local = models.PositiveSmallIntegerField(default=HORA_DE_FABRICA)
 
+    #: QUE AREAS MIRA EL SUPERVISOR  --  13/11/2026.
+    #:
+    #: Vacio = las de fabrica (`areas_del_tenant.AREAS_DE_FABRICA`), que son
+    #: las dos que estaban fijas en codigo hasta hoy: 'soporte_tecnico' y
+    #: 'operativo'. Asi, desplegar esto no le cambia la conducta a nadie.
+    #:
+    #: POR QUE DEJO DE SER UNA TUPLA EN EL CODIGO. Medido en produccion el
+    #: 13/11/2026: 41 casos abiertos del area 'ventas' --entre ellos TODAS las
+    #: instalaciones nuevas, que por `importacion_tickets.destinos` van a esa
+    #: area-- quedaban fuera de la mirada del Supervisor. No llegaban a
+    #: Despacho, la demanda salia con cero instalaciones y el dia se armaba sin
+    #: ellas, con todo en verde y sin un solo error.
+    #:
+    #: Ya habia pasado una vez: la constante nacio con UNA area y hubo que
+    #: editar codigo para ponerle la segunda (14/10/2026). La tercera vez seria
+    #: la misma deuda, y el proximo ISP tiene otras areas. Es CLAUDE.md §3.3:
+    #: lo que varia por empresa se edita desde la interfaz.
+    areas_del_supervisor = models.JSONField(default=list, blank=True)
+
     #: Cuantas ordenes se le proponen a una cuadrilla en un dia.
     #:
     #: NO es una capacidad calculada --eso depende de la duracion de cada tipo

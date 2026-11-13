@@ -222,6 +222,41 @@ describe('la configuración del reparto manda la labor de cada caso solo si vien
     expect(cuerpo).not.toHaveProperty('labor_por_grupo');
     expect(cuerpo.tope_por_cuadrilla).toBe('8');
   });
+
+  //  QUE AREAS MIRA EL SUPERVISOR  --  13/11/2026
+  //  Medido ese dia en produccion: 41 casos abiertos de 'ventas' --todas las
+  //  instalaciones nuevas-- quedaban fuera porque las areas estaban fijas en
+  //  codigo. Sin un error.
+  it('las áreas tildadas viajan, y las que no, no', async () => {
+    await actions.reparto_config(envio({
+      ...LO_DE_SIEMPRE,
+      areas_ofrecidas: 'soporte_tecnico,operativo,ventas,cartera',
+      area_soporte_tecnico: '1',
+      area_operativo: '1',
+      area_ventas: '1'
+    }));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo.areas_del_supervisor).toEqual([
+      'soporte_tecnico', 'operativo', 'ventas'
+    ]);
+  });
+
+  it('destildar TODAS manda una lista vacía: es volver a las de fábrica', async () => {
+    //  Y NO «no mandar nada», que el backend lee como «no tocar». Son dos
+    //  intenciones distintas y la pantalla tiene que poder decir las dos.
+    await actions.reparto_config(envio({
+      ...LO_DE_SIEMPRE,
+      areas_ofrecidas: 'soporte_tecnico,operativo,ventas'
+    }));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo.areas_del_supervisor).toEqual([]);
+  });
+
+  it('una pantalla vieja, sin el campo oculto, no manda las áreas', async () => {
+    await actions.reparto_config(envio(LO_DE_SIEMPRE));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo).not.toHaveProperty('areas_del_supervisor');
+  });
 });
 
 describe('el horario de las cuadrillas (21/10/2026)', () => {

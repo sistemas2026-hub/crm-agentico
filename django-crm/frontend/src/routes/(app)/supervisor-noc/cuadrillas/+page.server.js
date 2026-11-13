@@ -452,6 +452,20 @@ export const actions = {
             .map((g) => [g, String(f.get(`labor_de_${g}`) ?? '')])
         );
       }
+      //  QUÉ ÁREAS MIRA EL SUPERVISOR (13/11/2026), solo si el formulario
+      //  las trae. La lista OFRECIDA viaja en un campo aparte porque sin ella
+      //  no se puede distinguir «ninguna tildada» —que es una decisión: volver
+      //  a las de fábrica— de «esta pantalla no tiene el campo». Las casillas
+      //  no marcadas no llegan, igual que en el resto del formulario.
+      const ofrecidas = String(f.get('areas_ofrecidas') ?? '')
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean);
+      if (ofrecidas.length) {
+        cuerpo.areas_del_supervisor = ofrecidas.filter(
+          (a) => f.get(`area_${a}`) === '1'
+        );
+      }
       //  LOS NOMBRES DE LAS LABORES (20/10/2026), solo si el formulario los
       //  trae. Vacío viaja vacío: es «el de siempre».
       const labores = ['instalacion', 'correctivo', 'trabajos'];

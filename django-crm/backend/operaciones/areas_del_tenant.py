@@ -57,11 +57,56 @@ logger = logging.getLogger(__name__)
 #:  area propia con cuatro personas. Con un solo nombre, los tickets de esas
 #:  cuatro quedaban afuera -- y el cliente pidio expresamente "soporte tecnico
 #:  y operativo".
-AREAS_DEL_SUPERVISOR = ("soporte_tecnico", "operativo")
+AREAS_DE_FABRICA = ("soporte_tecnico", "operativo")
+
+#:  El nombre viejo, que era una TUPLA FIJA, apunta a las de fabrica. Hoy la
+#:  lista efectiva la decide la empresa: ver `areas_que_mira` mas abajo. Se
+#:  conserva porque es el valor por omision y porque habia codigo leyendolo.
+AREAS_DEL_SUPERVISOR = AREAS_DE_FABRICA
 
 #:  Se conserva el nombre viejo apuntando a la primera, por si algo quedo
 #:  leyendolo. No se usa en este modulo.
-AREA_DEL_SUPERVISOR = AREAS_DEL_SUPERVISOR[0]
+AREA_DEL_SUPERVISOR = AREAS_DE_FABRICA[0]
+
+
+def areas_que_mira(org=None) -> tuple[str, ...]:
+    """Las areas cuyos tickets lee el Supervisor en ESTA empresa.
+
+    Vacio o ilegible = las de fabrica. Nunca devuelve una lista vacia: eso
+    seria un Supervisor que no mira nada, y el sintoma --«no propone»-- no
+    señalaria aca. Fail-SAFE hacia la conducta de siempre, no hacia el
+    silencio.
+
+    POR QUE NO ES UNA CONSTANTE  --  13/11/2026
+    -------------------------------------------
+    Medido en produccion ese dia, sobre los casos ABIERTOS de Rapilink:
+
+        cartera 350 · soporte_tecnico 65 · operativo 62 · ventas 41 · administracion 18
+
+    Los 41 de 'ventas' incluyen TODAS las instalaciones nuevas --por
+    `importacion_tickets.destinos`, el departamento Ventas de WispHub va al
+    area 'ventas'-- y quedaban fuera: no llegaban a Despacho, la demanda del
+    dia salia con cero instalaciones, y la cuadrilla de instalacion salia con
+    la labor de la mayoria de su zona. Sin un error, sin un log, sin nada en
+    rojo.
+    """
+    if org is None:
+        return AREAS_DE_FABRICA
+    try:
+        from campo.cuadrillas import configuracion_de_reparto
+
+        guardadas = getattr(configuracion_de_reparto(org),
+                            "areas_del_supervisor", None)
+    except Exception as e:                                       # noqa: BLE001
+        #  Sin poder leer la configuracion se sigue como siempre. Devolver
+        #  vacio apagaria al Supervisor por un problema de base.
+        logger.warning("No se pudo leer las areas del Supervisor (%s)",
+                       type(e).__name__)
+        return AREAS_DE_FABRICA
+    limpias = tuple(
+        a.strip() for a in (guardadas if isinstance(guardadas, list) else [])
+        if isinstance(a, str) and a.strip())
+    return limpias or AREAS_DE_FABRICA
 
 #:  Cuanto vale la lectura antes de volver a preguntar. Las areas cambian
 #:  cuando entra o sale alguien del equipo -- no en minutos.
@@ -328,14 +373,16 @@ def criterio_de_area(mapa: dict | None = None, *, org=None) -> CriterioDeArea:
     escrita en el caso.
     """
     m = _solo_texto(_mapa_de(org) if mapa is None else mapa)
-    objetivo = {_normal(a) for a in AREAS_DEL_SUPERVISOR}
+    #  LAS DE ESTA EMPRESA, no una tupla del codigo (13/11/2026).
+    propias = areas_que_mira(org)
+    objetivo = {_normal(a) for a in propias}
     #  LO ESCRITO SE COMPARA SIN MAYUSCULAS NI ESPACIOS ALREDEDOR. 'Case.area'
     #  lo escribe la importacion tal cual viene de 'destinos', y el nucleo
     #  valida ese nombre normalizado; una grafia distinta no es otra area, y
     #  tratarla como ajena cancelaba cada hora lo propio (auditoria
     #  independiente, 16/10/2026). Acentos y guiones no se tocan: eso es
     #  normalizar al escribir, y le toca a la importacion.
-    patron = (r"^\s*(" + "|".join(re.escape(a) for a in AREAS_DEL_SUPERVISOR)
+    patron = (r"^\s*(" + "|".join(re.escape(a) for a in propias)
               + r")\s*$")
     vacia = Q(area__regex=r"^\s*$")
     escrita_propia = Q(area__iregex=patron)

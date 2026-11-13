@@ -1123,6 +1123,31 @@
             </div>
           </div>
 
+          <!-- QUÉ ÁREAS MIRA EL SUPERVISOR (13/11/2026). Estaban fijas en
+               código: 'soporte_tecnico' y 'operativo'. Medido ese día en
+               producción, 41 casos abiertos de 'ventas' —todas las
+               instalaciones nuevas— quedaban fuera, sin un solo error. -->
+          <div class="snoc-pila-xs">
+            <span class="snoc-label">Qué áreas mira el Supervisor</span>
+            <p class="snoc-body-sm snoc-secundario">
+              Solo lee y propone sobre los tickets de estas áreas. Un área sin tildar
+              no aparece en Despacho ni cuenta para armar el día, y eso no da ningún
+              error: la cola simplemente no se ve. Sin ninguna tildada quedan las de
+              siempre ({(data.reparto_config.areas_de_fabrica ?? []).join(', ')}).
+            </p>
+            <input type="hidden" name="areas_ofrecidas"
+                   value={(data.reparto_config.areas_conocidas ?? []).join(',')} />
+            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+              {#each data.reparto_config.areas_conocidas ?? [] as area (area)}
+                <label class="snoc-fila" style="gap:var(--snoc-xs); align-items:center;">
+                  <input type="checkbox" name={`area_${area}`} value="1"
+                         checked={(data.reparto_config.areas_del_supervisor ?? []).includes(area)} />
+                  <span class="snoc-body-sm">{area}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+
           <p class="snoc-body-sm snoc-secundario">
             El tope no es capacidad calculada: es un freno para que no le caigan treinta
             órdenes a la primera cuadrilla. Una cuadrilla puede tener el suyo propio, y
