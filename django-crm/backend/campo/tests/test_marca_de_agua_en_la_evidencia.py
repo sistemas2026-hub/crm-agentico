@@ -297,3 +297,109 @@ def _png() -> bytes:
     salida = io.BytesIO()
     Image.new("RGB", (300, 200), (10, 120, 60)).save(salida, format="PNG")
     return salida.getvalue()
+
+
+# =========================================================================== #
+#  D. EL NOMBRE DEL TECNICO, Y LO QUE LEE EL TELEFONO  --  13/11/2026
+# =========================================================================== #
+class _Usuario:
+    def __init__(self, name, email="tecnico@empresa.co"):
+        self.name = name
+        self.email = email
+
+    def __str__(self):
+        #  Igual que `common.models.User.__str__`: el correo.
+        return self.email
+
+
+class _Perfil:
+    def __init__(self, usuario):
+        self.user = usuario
+
+
+def test_d1_EL_CORREO_DEL_TECNICO_nunca_sale_en_la_foto():
+    """Medido el 13/11/2026: la marca pedía `perfil.nombre_completo`, que no
+    existe, y caía a `str(perfil.user)` -- el correo."""
+    from campo.marca_de_agua import nombre_para_la_marca
+
+    assert nombre_para_la_marca(_Perfil(_Usuario("Carlos Pérez"))) == "Carlos Pérez"
+    assert nombre_para_la_marca(_Perfil(_Usuario(""))) == "", (
+        "sin nombre cargado no se imprime nada: nunca el correo")
+    assert nombre_para_la_marca(_Perfil(_Usuario("  "))) == ""
+    assert nombre_para_la_marca(None) == ""
+
+
+def test_d2_el_estampado_usa_ESE_nombre(org_a, monkeypatch):
+    from campo import marca_de_agua as puente
+    from campo.services import marca_de_agua as dibujo
+
+    vistos = {}
+
+    def _espia(contenido, config, datos):
+        vistos.update(datos)
+        return contenido
+
+    monkeypatch.setattr(dibujo, "estampar", _espia)
+    _prender(org_a, mostrar_tecnico=True)
+
+    ev = _EvidenciaFalsa(org_a)
+    ev.orden_trabajo.tecnico_principal = _Perfil(_Usuario("", "x@y.co"))
+    puente.estampar_evidencia(ev, _jpeg())
+    assert vistos["tecnico"] == "", "un técnico sin nombre no se vuelve su correo"
+
+    ev.orden_trabajo.tecnico_principal = _Perfil(_Usuario("Ana Ruiz", "x@y.co"))
+    puente.estampar_evidencia(ev, _jpeg())
+    assert vistos["tecnico"] == "Ana Ruiz"
+
+
+URL_APP = "/api/campo/marca-de-agua/"
+URL_LOGO = "/api/campo/marca-de-agua/logo/"
+
+
+def test_d3_EL_TELEFONO_lee_la_misma_configuracion_que_estampa(user_client, org_a):
+    #  No es gestión: cualquier persona de campo la lee, porque no trae nada
+    #  que la foto misma no vaya a mostrar.
+    _prender(org_a, posicion="arriba_derecha", texto_extra="Garantía 30 días")
+
+    r = user_client.get(URL_APP)
+    assert r.status_code == 200, r.content
+    datos = r.json()
+
+    from campo.marca_de_agua import configuracion_de
+    assert datos["configuracion"] == configuracion_de(org_a), (
+        "una sola fuente: el teléfono pinta lo que el servidor va a estampar")
+    assert datos["empresa"] == org_a.name
+    assert datos["logo_version"] is None
+    assert "@" not in (datos["tecnico"] or ""), "nunca el correo"
+
+
+def test_d4_apagada_el_telefono_lo_sabe(user_client):
+    #  Sin fila: la apagada, igual que el estampado. El teléfono no pinta
+    #  una banda que la foto no va a llevar.
+    datos = user_client.get(URL_APP).json()
+    assert datos["configuracion"]["activa"] is False
+
+
+def test_d5_EL_LOGO_es_el_de_SU_empresa_y_solo_ese(user_client, org_a, org_b):
+    from django.core.files.base import ContentFile
+
+    assert user_client.get(URL_LOGO).status_code == 404, "sin logo, 404"
+
+    #  Un logo cargado en OTRA empresa no aparece.
+    org_b.logo.save("logo_b.png", ContentFile(_png()), save=True)
+    assert user_client.get(URL_LOGO).status_code == 404
+
+    contenido = _png()
+    org_a.logo.save("logo_a.png", ContentFile(contenido), save=True)
+    r = user_client.get(URL_LOGO)
+    assert r.status_code == 200
+    assert r.content == contenido
+    assert r["Content-Type"] == "image/png"
+
+    version = user_client.get(URL_APP).json()["logo_version"]
+    assert version and len(version) == 12, "el teléfono sabe cuándo rebajarlo"
+
+
+def test_d6_sin_sesion_no_se_lee(unauthenticated_client):
+    assert unauthenticated_client.get(URL_APP).status_code in (401, 403)
+    assert unauthenticated_client.get(URL_LOGO).status_code in (401, 403)

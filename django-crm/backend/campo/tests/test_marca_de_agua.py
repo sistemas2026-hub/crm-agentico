@@ -334,3 +334,59 @@ def test_d5_una_ubicacion_simulada_NO_acusa_a_la_persona():
 
     assert "no verificada" in texto
     assert "SIMULADA" not in texto
+
+
+# =========================================================================== #
+#  E. A LA DERECHA  --  13/11/2026
+# =========================================================================== #
+def _blancos_por_mitad(salida: bytes, arriba: bool) -> tuple[int, int]:
+    """Cuantos pixeles casi blancos hay en cada mitad de la banda.
+
+    La foto es de un solo color oscuro, asi que lo unico blanco es el texto.
+    """
+    with _abre(salida) as img:
+        rgb = img.convert("RGB")
+        ancho, alto = rgb.size
+        banda = int(min(ancho, alto) * 0.055) * 2
+        y0, y1 = (0, banda) if arriba else (alto - banda, alto)
+        izq = der = 0
+        for y in range(y0, y1, 2):
+            for x in range(0, ancho, 2):
+                r, g, b = rgb.getpixel((x, y))
+                if r > 200 and g > 200 and b > 200:
+                    if x < ancho // 2:
+                        izq += 1
+                    else:
+                        der += 1
+        return izq, der
+
+
+@pytest.mark.parametrize("posicion,arriba,lado", [
+    ("abajo_izquierda", False, "izq"),
+    ("abajo_derecha", False, "der"),
+    ("arriba_izquierda", True, "izq"),
+    ("arriba_derecha", True, "der"),
+])
+def test_e1_LA_ESQUINA_ELEGIDA_es_la_que_sale(posicion, arriba, lado):
+    #  Antes «abajo a la derecha» salía idéntica a «abajo a la izquierda»: la
+    #  pantalla ofrecía cuatro esquinas y el dibujo solo miraba arriba/abajo.
+    config = dict(TODO, posicion=posicion, mostrar_coordenadas=False,
+                  mostrar_fecha=False)
+    salida = M.estampar(_imagen(1600, 1200, color=(20, 20, 20)), config,
+                        _datos(empresa="Empresa", tecnico="Ana"))
+
+    izq, der = _blancos_por_mitad(salida, arriba)
+    assert izq + der > 0, "el texto tiene que estar en la banda elegida"
+    if lado == "izq":
+        assert izq > der, (posicion, izq, der)
+    else:
+        assert der > izq, (posicion, izq, der)
+
+
+def test_e2_a_la_derecha_es_una_sola_regla():
+    #  La app la repite en Dart (`marca_de_agua.dart`); que acá sea una
+    #  función con nombre es lo que deja escribir la misma prueba allá.
+    assert M.a_la_derecha("abajo_derecha") is True
+    assert M.a_la_derecha("arriba_derecha") is True
+    assert M.a_la_derecha("abajo_izquierda") is False
+    assert M.a_la_derecha("") is False

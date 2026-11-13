@@ -143,6 +143,11 @@ class ApiEndpoints {
   static String evidenciaUrl(String id) =>
       '$baseUrl/api/campo/evidencias/$id/url/';
 
+  // La marca de agua de la empresa, para pintarla encima de la foto en el
+  // teléfono (13/11/2026). El archivo lo estampa solo el servidor.
+  static String get marcaDeAgua => '$baseUrl/api/campo/marca-de-agua/';
+  static String get marcaDeAguaLogo => '$baseUrl/api/campo/marca-de-agua/logo/';
+
   // Aliases convenientes
   static String accionTrabajo(String id, String accion) {
     if (accion == 'completar') return trabajoCompletar(id);

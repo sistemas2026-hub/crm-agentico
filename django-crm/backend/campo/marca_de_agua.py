@@ -229,6 +229,27 @@ def _es_firma(evidencia) -> bool:
     return rid in _REQUISITOS_DE_FIRMA or rid.startswith("firma_")
 
 
+def nombre_para_la_marca(perfil) -> str:
+    """El nombre de quien tomo la foto, o "" -- NUNCA su correo.
+
+    EL CORREO SALIA EN LA FOTO  --  13/11/2026, medido. La version anterior
+    pedia `perfil.nombre_completo`, un atributo que `Profile` no tiene, y caia
+    a `str(perfil.user)`, que en `common/models.py` es `self.email`. Con la
+    marca prendida, cada foto habria salido con el correo del tecnico
+    horneado en el pixel, rumbo al ticket del ISP. Las pruebas no lo veian
+    porque sus ordenes no tienen tecnico.
+
+    Sin nombre cargado no se imprime nada: un correo es un dato de contacto,
+    no una firma, y una vez en la imagen ya no se puede sacar. La app pinta lo
+    mismo con este mismo valor (`MarcaDeAguaParaLaAppView`), asi que el
+    telefono no puede prometer un nombre que la foto no va a llevar.
+    """
+    if perfil is None:
+        return ""
+    usuario = getattr(perfil, "user", None)
+    return str(getattr(usuario, "name", "") or "").strip()
+
+
 def estampar_evidencia(evidencia, contenido: bytes) -> bytes:
     """La foto con la marca de su empresa, o el original.
 
@@ -253,9 +274,8 @@ def estampar_evidencia(evidencia, contenido: bytes) -> bytes:
 
         tecnico = ""
         try:
-            quien = evidencia.orden_trabajo.tecnico_principal
-            tecnico = (getattr(quien, "nombre_completo", "")
-                       or str(getattr(quien, "user", "") or "")) if quien else ""
+            tecnico = nombre_para_la_marca(
+                evidencia.orden_trabajo.tecnico_principal)
         except Exception:                                        # noqa: BLE001
             tecnico = ""
 

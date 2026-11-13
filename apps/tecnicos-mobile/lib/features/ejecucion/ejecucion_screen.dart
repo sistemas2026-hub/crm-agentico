@@ -10,6 +10,7 @@ import '../../demo/field_mock_data.dart';
 import '../../core/storage/evidencia_storage_service.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/ubicacion_de_captura.dart';
+import '../../core/marca/marca_de_agua_local.dart';
 import '../detalle_orden/acciones_orden.dart';
 import '../detalle_orden/comprobar_conexion.dart';
 import '../detalle_orden/pasos_orden.dart';
@@ -23,6 +24,7 @@ import 'pasos_del_trabajo.dart';
 import 'resumen_para_finalizar.dart';
 import 'widgets/consumo_de_material.dart';
 import 'widgets/firma_del_cliente.dart';
+import 'widgets/foto_con_marca_de_evidencia.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/widgets/contenido_centrado.dart';
@@ -143,6 +145,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   Map<String, dynamic> _valoresFormulario = {};
   List<Map<String, dynamic>> _evidenciasCapturadas = [];
 
+  /// La marca de agua de la empresa, para mostrar sobre cada foto lo que el
+  /// servidor le va a estampar (13/11/2026). Arranca apagada y se lee del
+  /// teléfono; si hay red, se refresca. Ver `MarcaDeAguaLocal`.
+  MarcaDeLaEmpresa _marca = MarcaDeLaEmpresa.apagada;
+
   final Map<String, TextEditingController> _controllers = {};
 
   @override
@@ -223,6 +230,17 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         _isLoading = false;
       });
     }
+    unawaited(_cargarMarca(datos.orgId));
+  }
+
+  /// Primero lo guardado --para que la vista previa esté aunque no haya
+  /// señal-- y después lo que diga el servidor. Nunca lanza.
+  Future<void> _cargarMarca(String orgId) async {
+    final MarcaDeAguaLocal local = MarcaDeAguaLocal();
+    final MarcaDeLaEmpresa guardada = await local.leer(orgId);
+    if (mounted) setState(() => _marca = guardada);
+    final MarcaDeLaEmpresa fresca = await local.refrescar(orgId);
+    if (mounted) setState(() => _marca = fresca);
   }
 
   Future<void> _onFieldChanged(String clave, dynamic valor) async {
@@ -2364,16 +2382,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           ],
           const SizedBox(height: AppSpacing.sm),
           if (hasFoto && filePath != null) ...[
-            ClipRRect(
-              borderRadius: AppRadius.brTarjeta,
-              child: Image.file(
-                File(filePath),
-                height: 140,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    const Text('No se puede cargar la vista previa'),
-              ),
+            //  LA FOTO ENTERA, CON LA MARCA QUE VA A LLEVAR (13/11/2026). Era
+            //  `BoxFit.cover` en 140 px, y el recorte escondía justo el borde
+            //  donde va la banda. Tocarla la abre en grande.
+            MiniaturaConMarca(
+              archivo: File(filePath),
+              marca: _marca,
+              datos: datosDeLaFila(_marca, evidencia, esCaptura: esCaptura),
             ),
             const SizedBox(height: AppSpacing.sm),
           ],

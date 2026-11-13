@@ -44,6 +44,88 @@ def _como_esta(org) -> dict:
     return datos
 
 
+def _version_del_logo(org) -> str | None:
+    """Una huella corta del logo, o None si la empresa no cargó ninguno.
+
+    La app guarda el logo para trabajar sin señal y lo vuelve a bajar solo
+    cuando esto cambia. Sale del nombre y el tamaño, no de leer los bytes: se
+    pide cada vez que el técnico abre una orden, y leer hasta 2 MB por pedido
+    para contestar «es el mismo» no tiene sentido. Subir otro logo cambia el
+    nombre (el storage de Django no pisa archivos), así que la huella cambia.
+    """
+    import hashlib
+
+    logo = getattr(org, "logo", None)
+    if not logo:
+        return None
+    try:
+        tamano = logo.size
+    except Exception:                                            # noqa: BLE001
+        tamano = 0
+    return hashlib.sha256(f"{logo.name}:{tamano}".encode()).hexdigest()[:12]
+
+
+class MarcaDeAguaParaLaAppView(APIView):
+    """``GET /api/campo/marca-de-agua/`` — lo que el teléfono necesita para
+    pintar la marca encima de la foto que el técnico acaba de tomar.
+
+    POR QUÉ EXISTE  --  13/11/2026. Pedido del usuario: que la marca se vea en
+    el teléfono al tomar la foto, no recién en la plataforma. El servidor
+    sigue siendo el ÚNICO que estampa el archivo: si la app también lo hiciera,
+    la foto saldría con dos bandas, y aceptar «ya viene marcada» le daría al
+    teléfono la forma de apagar la marca que lo certifica (el mismo agujero que
+    H3 cerró con el mime). La app solo DIBUJA ENCIMA, con esta misma
+    configuración, para que el técnico vea lo que va a quedar.
+
+    Cualquier persona de campo de la empresa la puede leer --no es gestión--:
+    no trae nada que la propia foto no vaya a mostrar. `tecnico` es el nombre
+    de quien pregunta, por la misma regla que usa el estampado
+    (`nombre_para_la_marca`): nunca el correo.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        from campo.marca_de_agua import configuracion_de, nombre_para_la_marca
+
+        org = request.profile.org
+        return Response({
+            "configuracion": configuracion_de(org),
+            "empresa": getattr(org, "name", "") or "",
+            "tecnico": nombre_para_la_marca(request.profile),
+            "logo_version": _version_del_logo(org),
+        })
+
+
+class LogoParaLaMarcaView(APIView):
+    """``GET /api/campo/marca-de-agua/logo/`` — los bytes del logo de la
+    empresa de quien pregunta. 404 si no hay.
+
+    Lee el `FileField` de la empresa del perfil, nunca una ruta que mande el
+    cliente: no hay forma de pedir el logo de otra empresa, porque no hay nada
+    que apuntar (la misma razón que `_logo_de`).
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request):
+        import mimetypes
+
+        from django.http import Http404, HttpResponse
+
+        from campo.marca_de_agua import _logo_de
+
+        org = request.profile.org
+        contenido = _logo_de(org)
+        if not contenido:
+            raise Http404
+        tipo = mimetypes.guess_type(org.logo.name)[0] or "application/octet-stream"
+        respuesta = HttpResponse(contenido, content_type=tipo)
+        respuesta["X-Content-Type-Options"] = "nosniff"
+        respuesta["Cache-Control"] = "private, max-age=0"
+        return respuesta
+
+
 class ConfiguracionDeMarcaDeAguaView(APIView):
     permission_classes = [IsCampoAuthenticated]
 

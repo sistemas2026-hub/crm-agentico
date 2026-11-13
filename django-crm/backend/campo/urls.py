@@ -117,6 +117,14 @@ urlpatterns = [
          configuracion_de_seguimiento_views.ConfiguracionDeSeguimientoView.as_view(),
          name="seguimiento_configuracion"),
     #  Que dice la marca de agua de las fotos de campo (12/11/2026).
+    #  Lo que el telefono lee para pintar la marca encima de la foto
+    #  (13/11/2026). El archivo lo sigue estampando solo el servidor.
+    path("marca-de-agua/",
+         marca_de_agua_views.MarcaDeAguaParaLaAppView.as_view(),
+         name="marca_de_agua_para_la_app"),
+    path("marca-de-agua/logo/",
+         marca_de_agua_views.LogoParaLaMarcaView.as_view(),
+         name="marca_de_agua_logo"),
     path("marca-de-agua/configuracion/",
          marca_de_agua_views.ConfiguracionDeMarcaDeAguaView.as_view(),
          name="marca_de_agua_configuracion"),

@@ -292,6 +292,11 @@ def estampar(contenido: bytes, config: dict, datos: dict) -> bytes:
         return contenido
 
 
+def a_la_derecha(posicion: str) -> bool:
+    """Si el logo y el texto van contra el borde derecho de la banda."""
+    return str(posicion or "").endswith("derecha")
+
+
 def _dibujar(contenido: bytes, config: dict, lineas: list[str],
              logo: bytes | None) -> bytes:
     from PIL import Image, ImageDraw, ImageFont
@@ -325,7 +330,16 @@ def _dibujar(contenido: bytes, config: dict, lineas: list[str],
     lapiz = ImageDraw.Draw(capa)
 
     margen = max(8, int(lado_corto * 0.012))
+    posicion = str(config.get("posicion") or "abajo_izquierda")
+    #  «A LA DERECHA» NO HACIA NADA  --  13/11/2026. La pantalla ofrece cuatro
+    #  esquinas y esto solo miraba si era arriba o abajo: elegir «abajo a la
+    #  derecha» dejaba la marca exactamente igual que «abajo a la izquierda».
+    #  La banda sigue ocupando todo el ancho --una banda angosta tapa lo mismo
+    #  y se lee peor--; lo que cambia de lado es el contenido. La app dibuja
+    #  la misma regla (`marca_de_agua.dart`), y por eso vive en una funcion.
+    derecha = a_la_derecha(posicion)
     x_texto = margen
+    ancho_logo = 0
     if logo:
         alto_logo = alto_banda - margen
         try:
@@ -334,7 +348,9 @@ def _dibujar(contenido: bytes, config: dict, lineas: list[str],
             proporcion = alto_logo / max(marca.height, 1)
             marca = marca.resize(
                 (max(1, int(marca.width * proporcion)), max(1, alto_logo)))
-            capa.paste(marca, (margen, margen // 2), marca)
+            x_logo = ancho - margen - marca.width if derecha else margen
+            capa.paste(marca, (x_logo, margen // 2), marca)
+            ancho_logo = marca.width
             x_texto = margen * 2 + marca.width
         except Exception:                                        # noqa: BLE001
             #  El logo no puede costar la marca entera: si no abre, va el
@@ -343,11 +359,15 @@ def _dibujar(contenido: bytes, config: dict, lineas: list[str],
 
     y = (alto_banda - tipografia_px * len(lineas)) // 2
     for linea in lineas:
-        lapiz.text((x_texto, y), linea, font=fuente,
-                   fill=(255, 255, 255, 255))
+        if derecha:
+            borde = ancho - margen - (ancho_logo + margen if ancho_logo else 0)
+            x = max(margen, int(borde - lapiz.textlength(linea, font=fuente)))
+        else:
+            x = x_texto
+        lapiz.text((x, y), linea, font=fuente, fill=(255, 255, 255, 255))
         y += tipografia_px
 
-    arriba = str(config.get("posicion") or "abajo_izquierda").startswith("arriba")
+    arriba = posicion.startswith("arriba")
     base_rgba = base.convert("RGBA")
     base_rgba.alpha_composite(capa, (0, 0 if arriba else alto - alto_banda))
 
