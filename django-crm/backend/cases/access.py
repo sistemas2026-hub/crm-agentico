@@ -1,0 +1,197 @@
+"""Who may do what to a case, one place, three rules.
+
+Before this module the question was answered in five places and had drifted
+into three different answers:
+
+* `CaseListView` and `watcher_views._visible_cases_qs` said **admin, creator,
+  assignee or watcher**.
+* `CaseDetailView.get` / `.put` / `.patch` / `.post` and
+  `CaseActivityListView` said **admin, creator or assignee**, no watcher.
+* `CaseDetailView.delete` said **admin or creator**, no assignee either.
+
+The visible consequence was a queue that lied. A watcher's ticket list showed
+the one case they follow; opening it answered 403. That is the same shape of
+contradiction accounts and contacts had, and the same conclusion applies:
+when the verbs disagree by accident it is a mistake, not a policy.
+
+Where they disagree *on purpose*, they now say so. Reading, writing and
+deleting are three rules on three lines, deliberately not one:
+
+    read    admin · reparte · creator · assignee · watcher
+    write   admin · reparte · creator · assignee
+    delete  admin · creator
+
+Watching is subscribing to a ticket, not being handed the keys to it, so the
+watcher clause that was missing from reads is not quietly added to writes.
+
+QUIEN REPARTE (23/10/2026)
+--------------------------
+"reparte" son los roles de gestion: ADMIN, SUPERVISOR y OPERACIONES, los
+mismos que ya despachan cuadrillas y validan ordenes en campo y en el
+Supervisor NOC (campo/permissions.py, operaciones/permissions.py). Hasta ese
+dia solo ADMIN veia la cola entera: un supervisor que reparte trabajo en la
+calle no podia ver un ticket sin asignar, y con 212 de 735 sin responsable el
+reparto esperaba a una sola persona. Ver y escribir, si; BORRAR, no: eso sigue
+siendo de admin o de quien lo creo.
+
+LO SIN ASIGNAR DE SU AREA (24/10/2026)
+--------------------------------------
+Un colaborador ve ademas los tickets SIN RESPONSABLE cuya area escrita
+('Case.area') es la suya, y puede TOMARLOS -- asignarselos a si mismo y nada
+mas, por 'tomar_caso'. No puede editarlos antes de tomarlos: tomar es la
+unica escritura nueva, y despues escribe como cualquier responsable.
+
+El area de la persona es la que la empresa configura ('area_colaborador',
+servida por el motor), leida por la organizacion de quien pregunta. Si no se
+sabe -- el motor no contesta, la persona no tiene area, el caso no tiene area
+escrita -- no se agrega nada: vuelve a ver solo lo suyo. Un caso sin area
+escrita no es de nadie todavia, y repartirlo le toca a quien reparte.
+"""
+
+import re
+
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
+from django.http import Http404
+from rest_framework.exceptions import PermissionDenied
+
+from cases.models import Case
+
+# Re-exported, not redefined. Four modules already import `is_org_admin` from
+# here, and this used to be its own copy of the rule, one of ten across the
+# backend. The single definition now lives in `common.permissions`, which
+# nothing about cases needs to be imported; this name stays so those four
+# imports keep working and so the cases access rules still read in one place.
+from common.permissions import is_org_admin  # noqa: F401
+
+_DENIED = "You do not have Permission to perform this action"
+
+ROLES_QUE_REPARTEN = frozenset({"ADMIN", "SUPERVISOR", "OPERACIONES"})
+
+
+def reparte_tickets(profile):
+    """Si ``profile`` reparte el trabajo: ve la cola entera y asigna.
+
+    ``None`` no reparte (una vista sin contexto de organizacion da 403 y no
+    500), igual que ``is_org_admin``.
+    """
+    return profile is not None and getattr(profile, "role", None) in ROLES_QUE_REPARTEN
+
+
+def _normal(area):
+    return str(area or "").strip().lower()
+
+
+def area_de(profile):
+    """El area de ``profile`` segun la empresa, normalizada, o '' si no se sabe.
+
+    Pregunta al motor (con cache): quien la llame no puede tener una
+    transaccion abierta esperando.
+    """
+    if profile is None or not getattr(profile, "org_id", None):
+        return ""
+    from operaciones import areas_del_tenant as areas
+
+    mapa = areas.area_por_persona_de_org(profile.org_id) or {}
+    return _normal(mapa.get(str(profile.id)))
+
+
+def _sin_asignar_del_area(area):
+    """Casos sin responsable con ``area`` escrita (sin mayusculas ni espacios
+    alrededor, igual que 'criterio_de_area'). Por subconsulta: un join al M2M
+    dentro de un OR duplica filas."""
+    patron = r"^\s*" + re.escape(area) + r"\s*$"
+    return Q(area__iregex=patron) & Q(
+        pk__in=Case.objects.filter(assigned_to__isnull=True).values("pk")
+    )
+
+
+def visible_cases_qs(profile):
+    """Cases ``profile`` is allowed to open. The queryset form of `read`.
+
+    The watcher clause is what lets somebody keep following a ticket after
+    they are unassigned, and it is the clause the detail view was missing.
+    """
+    qs = Case.objects.filter(org=profile.org)
+    if is_org_admin(profile) or reparte_tickets(profile):
+        return qs
+    suyo = Q(created_by=profile.user) | Q(assigned_to=profile) | Q(watchers=profile)
+    area = area_de(profile)
+    if area:
+        suyo |= _sin_asignar_del_area(area)
+    return qs.filter(suyo).distinct()
+
+
+def puede_tomar(profile, case, area=None):
+    """Si ``profile`` puede asignarse ``case``: sin responsable, y quien
+    reparte, quien lo creo (ya podia asignarlo por PATCH) o alguien de su
+    area. ``area`` permite pasarla ya leida."""
+    if case.assigned_to.exists():
+        return False
+    if is_org_admin(profile) or reparte_tickets(profile):
+        return True
+    if profile.user_id == case.created_by_id:
+        return True
+    area = area_de(profile) if area is None else _normal(area)
+    return bool(area) and _normal(case.area) == area
+
+
+def get_case_or_404(profile, pk):
+    """Fetch a case in the requester's org, or raise ``Http404``.
+
+    ``Case.id`` is a UUID column, so ``filter(id="nobody")`` raises Django's
+    ``ValidationError`` rather than returning nothing, which surfaced as a
+    500 on every verb for any id that was not a well-formed UUID. A bad id is
+    a request for a case that does not exist; that is a 404.
+    """
+    try:
+        case = Case.objects.filter(pk=pk, org=profile.org).first()
+    except (DjangoValidationError, ValueError):
+        raise Http404("No such case.")
+    if case is None:
+        raise Http404("No such case.")
+    return case
+
+
+def has_case_read_access(profile, case):
+    """Non-raising form of `read`, for computing response flags."""
+    if has_case_write_access(profile, case):
+        return True
+    if case.watchers.filter(id=profile.id).exists():
+        return True
+    return puede_tomar(profile, case)
+
+
+def has_case_write_access(profile, case):
+    """Non-raising form of `write`."""
+    if is_org_admin(profile) or reparte_tickets(profile):
+        return True
+    if profile.user_id == case.created_by_id:
+        return True
+    return profile.id in {p.id for p in case.assigned_to.all()}
+
+
+def assert_case_read_access(profile, case):
+    """Raise 403 unless ``profile`` may open ``case``."""
+    if not has_case_read_access(profile, case):
+        raise PermissionDenied(_DENIED)
+
+
+def assert_case_write_access(profile, case):
+    """Raise 403 unless ``profile`` may change ``case`` or reply on it."""
+    if not has_case_write_access(profile, case):
+        raise PermissionDenied(_DENIED)
+
+
+def assert_case_delete_access(profile, case):
+    """Raise 403 unless ``profile`` may destroy ``case``.
+
+    Narrower than writing on purpose: an assignee is somebody the work was
+    handed to, which is a reason to let them work the ticket and not a reason
+    to let them erase it.
+    """
+    if is_org_admin(profile):
+        return
+    if profile.user_id == case.created_by_id:
+        return
+    raise PermissionDenied(_DENIED)

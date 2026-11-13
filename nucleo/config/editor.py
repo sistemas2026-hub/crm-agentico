@@ -1,0 +1,2459 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ EDITOR DE ROLES  -  crear/editar/borrar agentes desde la interfaz
+================================================================================
+
+`schema.py` valida; este modulo ESCRIBE. Separado a proposito: `cargar_config`
+no necesita saber nada de edicion, y este archivo no necesita saber nada de
+como se sirve por HTTP (eso vive en canales/api.py).
+
+Alcance original (ver plan aprobado): solo se crean/editan/borran ROLES.
+Crear una herramienta nueva -- conectar una API nueva, decidir sus filtros
+verificados, su whitelist de campos -- era trabajo de codigo, a proposito:
+esa superficie es sensible en seguridad y no encajaba en "editar desde una
+pantalla SIN verificacion".
+
+Extension (agosto 2026, ver aprobar_herramienta_propuesta mas abajo): el
+asistente de configuracion guiada SI puede agregar una herramienta nueva
+desde una pantalla -- pero no relaja la razon original, la resuelve de otra
+forma. La preocupacion nunca fue "una pantalla", fue "sin verificar contra
+la API real y sin que un humano lo revise". Esa doble garantia sigue
+intacta: nada llega aca sin haber pasado por nucleo/herramientas/sondeo.py
+(metodo del valor imposible, no promesas) Y sin que un ADMIN humano apruebe
+el borrador exacto -- nunca el modelo escribe directo al catalogo real.
+
+Escribe en la base, no en el YAML
+---------------------------------
+Antes este modulo reescribia `tenants/<slug>.config.yaml` con ruamel.yaml para
+preservar sus comentarios. En el servidor eso no sirve para nada: esa carpeta
+viaja DENTRO de la imagen del contenedor, y el motor ya no la lee -- lee
+`asistente.tenant_config` (ver nucleo/config/fuente.py). Un editor que escribia
+ahi guardaba sin error en un archivo desechable que nadie iba a consultar: el
+cambio se veia en pantalla, no tenia efecto, y desaparecia en el siguiente
+despliegue.
+
+Asi que se escribe donde se lee. La fuente de verdad es una sola.
+
+  asistente.tenant_config.config (JSONB)   lo que este modulo escribe
+  tenants/<slug>.config.yaml               semilla de alta, ya no se toca
+
+⚠️  El YAML del repositorio NO se entera de lo que se edita aqui. Es
+deliberado -- no hay disco donde escribirlo que sobreviva al despliegue -- pero
+tiene una consecuencia: volver a correr `cli/cargar_config.py` sobre ese YAML
+PISA lo que el cliente haya cambiado desde la interfaz. Ese comando es para
+dar de alta un tenant o para aplicar un cambio de esquema, no rutina.
+
+Leer, mutar y escribir en UNA transaccion
+-----------------------------------------
+`_editar()` toma la fila con `for update` y no la suelta hasta guardar. Sin
+eso, dos administradores guardando a la vez se pisan: los dos leen la misma
+configuracion, cada uno le agrega SU rol, y el segundo en escribir borra el
+rol del primero -- sin error y sin rastro, porque cada uno escribe un
+documento completo y valido.
+
+Validar antes de escribir
+--------------------------
+El documento se muta en memoria y ESE resultado pasa por el mismo camino que
+`cargar_config` (barrido de secretos + `TenantConfig(**...)`). Solo si valida
+se escribe. Si no valida se lanza `ErrorEdicion` con TODOS los problemas
+juntos, y como la excepcion sale de la transaccion, la base queda intacta.
+
+Lo que se guarda es el volcado del modelo ya validado, no el diccionario
+crudo: la misma forma canonica que escribe `cli/cargar_config.py`, para que
+comparar ambas versiones siga siendo posible.
+================================================================================
+"""
+
+from __future__ import annotations
+
+import contextvars
+import copy
+import json
+import os
+import re
+import unicodedata
+from pathlib import Path
+from typing import Callable
+
+from pydantic import ValidationError
+
+from nucleo.observabilidad.registro import registrar
+
+from .schema import COLORES_DE_ETIQUETA, RE_NOMBRE_REF, TenantConfig, _barrer_secretos
+
+_RE_NOMBRE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
+
+# Las claves de primer nivel que ALGUNA funcion de este modulo escribe, o sea
+# lo que una persona puede cambiar desde la interfaz sin tocar el YAML.
+#
+# Vive aca y no en cli/cargar_config.py a proposito: esa lista existe para
+# que cargar el archivo encima de la base no borre en silencio lo que alguien
+# edito desde una pantalla, y estaba escrita a mano en el CLI con un
+# comentario que pedia acordarse de actualizarla. No se actualizo: cuando se
+# agregaron 'planes_venta', 'localidades', 'variables_tenant' y
+# 'manual.casos' quedaron fuera, y la guarda daba por bueno un cambio que
+# habria borrado 6 planes curados y 128 localidades sincronizadas sin decir
+# una palabra (medido el 23/08/2026, antes de que alguien lo pisara).
+#
+# Poniendola junto a los mutadores, quien agregue uno la ve. Es el mismo
+# criterio que TenantConfig.SINCRONIZADOS: la declaracion vive donde esta el
+# codigo que la vuelve necesaria.
+SECCIONES_EDITABLES = (
+    # 26/09/2026: sin esta linea, la carga del YAML --que CLAUDE.md 8 manda
+    # correr despues de cada pull que toque el archivo-- dejaba
+    # 'sin_gestion_horas' en None sin avisar. Eso apaga la banda Y devuelve al
+    # barrido las conversaciones que protegia, que se cierran afirmando que el
+    # cliente no volvio. Es la misma forma de fallar que la parrilla de
+    # canales, y la puerta mas rutinaria de todas. Hallada por el auditor
+    # sobre b3ce928, que es justo el commit que decia cerrar este silencio.
+    # 'sla_toma_minutos' y 'umbral_rx_dbm' siguen expuestos por esta puerta:
+    # es previo y solo cuesta un veredicto en pantalla, no un cierre -- queda
+    # declarado en SPEC/objetivos/guarda-anti-limbo.md (L9), no arreglado aca.
+    "sin_gestion_horas",  # _mutar_ajustes_bandeja
+    "rol_de_entrada",     # _mutar_rol_de_entrada
+    "roles",              # _mutar_crear / _mutar_editar / _mutar_borrar
+    "canales",            # _mutar_canal_whatsapp
+    "identidad",          # _mutar_identidad_descripcion
+    "persona",            # _mutar_persona
+    "herramientas",       # _mutar_plazo_visita_tecnica, _mutar_agregar_herramienta
+    "planes_venta",       # _mutar_planes_venta
+    "localidades",        # _mutar_localidades
+    "variables_tenant",   # _mutar_variable_tenant / _mutar_borrar_variable_tenant
+    "manual",             # _mutar_casos_manual
+    # _mutar_servicios_ofrecidos y _mutar_parrilla_canales. La parrilla es el
+    # caso mas caro de perder de toda esta lista: son cientos de canales que
+    # alguien subio en un Excel, y el YAML los trae VACIOS a proposito (se
+    # cargan desde la pantalla, no a mano). Sin estas dos lineas, la primera
+    # recarga del archivo los borra en silencio -- exactamente lo que paso el
+    # 23/08/2026 con los planes y el 05/09/2026 con la tarifa.
+    "servicios_ofrecidos",
+    "parrilla_canales",
+    # 'guias_tv' por _mutar_guias_tv. Va aca y NO en TenantConfig.SINCRONIZADOS
+    # a proposito: el criterio de esa otra lista es "lo produjo un proceso y se
+    # reemplaza entero" (las 128 localidades, los 100 canales de un Excel), y
+    # una guia de sintonizacion es lo contrario -- la redacta una persona, se
+    # lee bien en un diff, y un tenant nuevo tiene que poder nacer con guias
+    # semilla desde el YAML. Mismo trato que 'planes_venta' y
+    # 'servicios_ofrecidos', que tampoco son sincronizados.
+    "guias_tv",
+    # 'llm' por _mutar_tarifa y _mutar_saldo_proveedor; 'limites' por
+    # _mutar_tope_gasto. Faltaban, y paso exactamente lo que este comentario
+    # anunciaba: el 05/09/2026 una carga del YAML borro la tarifa de DeepSeek
+    # y el endpoint de saldo -- configuracion que solo existe en la base, que
+    # costo medir contra la facturacion real, y que nadie escribio en el
+    # archivo porque no se edita ahi.
+    #
+    # Sin la seccion en esta lista, el cargador ni siquiera avisa: no sabe que
+    # ahi hay algo que solo la interfaz escribe.
+    "llm",                # _mutar_tarifa / _mutar_saldo_proveedor
+    "limites",            # _mutar_tope_gasto
+    # 'importacion_tickets' NO la escribe ningun mutador de este archivo: la
+    # escribe 'cli/activar_importacion.py' directo contra la base. Igual va
+    # aca, por el mismo motivo que 'llm' y 'limites' -- el criterio de esta
+    # lista no es "quien la edita" sino "existe solo en la base, y el YAML no
+    # tiene con que reponerla".
+    #
+    # Medido el 22/09/2026 contra produccion, ANTES de que pasara: la base
+    # tenia 6 filtros de asunto, 6 destinos de enrutamiento, el departamento,
+    # los estados de descubrimiento y reconciliacion, las ventanas y la
+    # cuenta de API; el YAML no declara la seccion, asi que una carga la
+    # habria reemplazado por el default del esquema -- 'cada_horas: 0', que
+    # es APAGADO. La importacion de tickets se habria detenido sin un solo
+    # mensaje, que es la misma forma de fallar que el seguimiento de entregas
+    # de WhatsApp (D17): nada se rompe, simplemente deja de pasar.
+    #
+    # Era la UNICA seccion de la config de produccion que no cubria ninguna
+    # de las dos listas. Comprobado enumerando las claves de la base contra
+    # SECCIONES_EDITABLES + TenantConfig.SINCRONIZADOS.
+    "importacion_tickets",
+    # 29/10/2026. Los DEPARTAMENTOS del ISP -- se crean desde /settings/areas
+    # con su etiqueta, color e icono, y son la estructura con la que la empresa
+    # se organiza.
+    #
+    # Sin esta linea, 'cargar_config._lo_que_pisaria' no las miraba: esa guarda
+    # recorre SECCIONES_QUE_EDITA_LA_INTERFAZ, que es justo esta lista. El
+    # 19/10/2026 una carga las borro SIN UN AVISO, y hubo que recuperarlas a
+    # mano desde un volcado contra la base v176. Lo caro no fue perderlas: fue
+    # que la guarda que existe para gritar "se BORRARIA" no cubria la seccion,
+    # asi que para 'areas' era como si no existiera.
+    #
+    # NO entra en SINCRONIZADOS a proposito: una persona decide un
+    # departamento, no lo produce un proceso, y tiene que poder leerse en un
+    # diff. La base manda en operacion y el archivo sirve de plantilla; lo que
+    # protege el trabajo del cliente es esta guarda, no esconder la seccion.
+    "areas",
+    # 12/11/2026. Los textos que lee el cliente cuando se lo pasa a una
+    # persona, y el cierre por inactividad, se editan desde Ajustes ->
+    # WhatsApp -> Textos del traspaso. Hasta ese dia solo cambiaban por YAML
+    # (auditoria del menu, §2 Administrar): sin estas dos lineas, la primera
+    # carga del archivo despues de una edicion la pisaria sin avisar.
+    # 'limites' ya estaba arriba ('horas_inactividad_cierra' vive ahi).
+    "escalamiento",         # _mutar_textos_escalamiento
+    "cierre_inactivas_ia",  # _mutar_cierre_inactividad
+)
+
+
+class ErrorEdicion(ValueError):
+    pass
+
+
+# =============================================================================
+#  VALIDACION Y ESCRITURA
+# =============================================================================
+
+# La rama que DESPLIEGA. Pushear a cualquier otra no pone una sola linea en
+# produccion, asi que comparar contra el upstream de la rama actual no mide lo
+# que estas guardas creen medir -- ver el comentario de _ref_de_despliegue().
+#
+# SIN VALOR POR DEFECTO, y no por comodidad: el nombre de la rama de
+# despliegue es de la INSTALACION, no del motor -- otra empresa despliega
+# desde 'main' o desde 'produccion'. Escribirlo aca ponia el nombre de un
+# proveedor concreto dentro de nucleo/, que es justo lo que la guarda de
+# arquitectura prohibe (y lo cazo el 22/09/2026, al primer intento).
+#
+# Sin la variable la comprobacion cae a '@{u}', que es la version debil: por
+# eso 'problemas_de_alineacion_git()' AVISA cuando no esta configurada, en vez
+# de degradarse en silencio. Una guarda que se debilita sin decirlo es peor
+# que no tenerla, porque se confia en ella igual.
+VAR_RAMA_DESPLIEGUE = "RAMA_DESPLIEGUE"
+
+
+def _ref_de_despliegue(raiz) -> str | None:
+    """
+    La referencia remota contra la que hay que comparar, o None si no existe.
+
+    POR QUE NO '@{u}'
+    -----------------
+    Estas guardas existen para contestar "¿el codigo que entiende esta config
+    ya esta donde va a leerla?". '@{u}' contesta otra cosa: si llego al remoto
+    de LA RAMA ACTUAL. En una rama de trabajo eso se satisface con un push que
+    no despliega nada.
+
+    Medido el 22/09/2026: con cinco commits en 'feature/bandeja-relevo', la
+    guarda bloqueo correctamente; se pusheo esa rama a SU remoto y la guarda
+    paso, con el codigo todavia fuera de produccion. Esa vez no hizo dano --
+    los commits eran de frontend-- pero el mismo movimiento con un campo nuevo
+    de esquema habria dejado a produccion con una config que su propio codigo
+    rechaza, que es exactamente el incidente del 03/09/2026 que estas guardas
+    documentan.
+
+    Si la rama de despliegue no existe en este repositorio (un clon parcial,
+    otra instalacion), se cae a '@{u}' -- que es peor que nada pero mejor que
+    no comprobar.
+    """
+    import os
+    import subprocess
+    rama = os.environ.get(VAR_RAMA_DESPLIEGUE, "").strip()
+    if not rama:
+        return "@{u}"
+    ref = f"origin/{rama}"
+    try:
+        r = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref],
+                           cwd=raiz, capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return "@{u}"
+    return ref if r.returncode == 0 else "@{u}"
+
+
+def commits_sin_empujar() -> int:
+    """Cuantos commits locales todavia no estan en el remoto.
+
+    Es la comprobacion mas barata que detecta el orden invertido entre codigo
+    y configuracion (ver el bloque que la usa). No mira QUE campos trae la
+    config: mira si este codigo ya llego a donde va a leerla.
+
+    Devuelve 0 ante cualquier duda -- sin git, sin remoto configurado, o con
+    el comando fallando. Una guarda de conveniencia no puede ser la razon por
+    la que no se pueda cargar una configuracion; la que si aborta de verdad es
+    la de perdidas, que compara contra la base.
+    """
+    import subprocess
+    try:
+        raiz = Path(__file__).resolve().parents[2]
+        ref = _ref_de_despliegue(raiz)
+        salida = subprocess.run(
+            ["git", "rev-list", "--count", f"{ref}..HEAD"],
+            cwd=raiz, capture_output=True, text=True, timeout=10)
+    except Exception:                                    # noqa: BLE001
+        return 0
+    if salida.returncode != 0:
+        return 0
+    try:
+        return int((salida.stdout or "0").strip())
+    except ValueError:
+        return 0
+
+
+def commits_atrasados() -> int | None:
+    """Cuantos commits del remoto todavia no estan en esta copia local.
+
+    Caso simetrico e inverso a commits_sin_empujar(): ese detecta codigo local
+    que la config podria usar antes de que llegue a produccion; este detecta
+    lo contrario -- una copia VIEJA escribiendo una config que ya no coincide
+    con el schema que el motor desplegado usa hoy.
+
+    Encontrado en la auditoria de Fase #20.1-20.3 (04-05/09/2026): asi
+    volvieron 'llm.tarifas' / 'limites.mensaje_al_alcanzar_tope' / 'llm.saldo'
+    a produccion -- campos que un schema mas viejo ya no reconoce, escritos
+    por una copia atrasada que todavia los validaba como buenos contra SU
+    propio 'schema.py'.
+
+    A diferencia de commits_sin_empujar() -- que degrada a 0 (permite) ante
+    cualquier duda porque la guarda de perdidas de cada puerta la respalda
+    igual -- esta NO tiene ningun respaldo equivalente: nada mas sabe si un
+    campo sigue siendo valido para el schema desplegado. Por eso, si HAY un
+    repositorio y aun asi no se puede determinar el estado (sin upstream, el
+    comando falla), devuelve None -- y None se trata como bloqueo, nunca como
+    'esta alineado'.
+
+    NO HAY REPOSITORIO NO ES 'NO SE PUEDE DETERMINAR'
+    ------------------------------------------------
+    Devuelve 0 cuando no existe repositorio git en absoluto, y eso no es una
+    concesion: es la unica lectura correcta. La pregunta que hace esta funcion
+    es "¿esta copia del codigo esta atrasada respecto del remoto?", y sin
+    repositorio NO HAY COPIA que pueda estar atrasada -- el codigo que corre es
+    el codigo, no un checkout de algo. El desfase que esta guarda persigue no
+    puede existir ahi.
+
+    Se separo el 08/09/2026, despues de romper produccion con esto. La version
+    anterior devolvia None tambien sin repositorio, y el contenedor productivo
+    no tiene uno: el resultado fue que NINGUNA edicion de configuracion desde
+    la interfaz funcionaba -- ni agentes, ni planes de venta, ni variables.
+    Aparecia como "esta copia no esta alineada con el remoto" en una pantalla
+    donde no hay ninguna copia. El comentario de _editar() ya afirmaba que en
+    produccion esto no dispara nunca; era cierto cuando solo se miraba la
+    direccion ADELANTADA, y dejo de serlo al agregar esta sin distinguir los
+    dos casos.
+    """
+    import subprocess
+
+    raiz = Path(__file__).resolve().parents[2]
+
+    def _git(*args) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(["git", *args], cwd=raiz,
+                                  capture_output=True, text=True, timeout=10)
+        except Exception:                                # noqa: BLE001
+            return None
+
+    # Primero: ¿hay repositorio? Se pregunta explicito en vez de deducirlo del
+    # fallo de la consulta real -- 'git rev-list' falla igual por no tener
+    # upstream, y esos dos casos tienen respuestas opuestas.
+    hay_repo = _git("rev-parse", "--git-dir")
+    if hay_repo is None or hay_repo.returncode != 0:
+        return 0
+
+    # Misma referencia que commits_sin_empujar(): la rama que DESPLIEGA, no el
+    # upstream de la rama actual. Un commit del remoto que esta copia no tiene
+    # solo importa si ese commit ya esta corriendo en produccion.
+    ref = _ref_de_despliegue(raiz)
+    salida = _git("rev-list", "--count", f"HEAD..{ref}")
+    if salida is None or salida.returncode != 0:
+        return None
+    try:
+        return int((salida.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def problemas_de_alineacion_git() -> list[str]:
+    """
+    Problemas de alineacion entre esta copia y el remoto, en las DOS
+    direcciones -- lista vacia si esta alineada.
+
+    Centraliza la deteccion (Fase #20.6.4) para que cargar_config.py y
+    _editar() -- las dos puertas que escriben tenant_config -- compartan UNA
+    sola implementacion en vez de dos copias que hay que acordarse de
+    mantener iguales. No decide COMO reportar el problema ni si bloquea: eso
+    lo arma cada puerta con su propia excepcion, porque una corre como CLI
+    (SystemExit tiene sentido ahi) y la otra corre dentro del proceso
+    servido, donde SystemExit lo tumbaria entero.
+    """
+    import os
+    import subprocess
+
+    adelante = commits_sin_empujar()
+    atras = commits_atrasados()
+
+    problemas: list[str] = []
+    # Sin RAMA_DESPLIEGUE la comprobacion mira el upstream de la rama actual,
+    # que se satisface con un push que no despliega nada. Se dice, en vez de
+    # dejar creer que la guarda es mas fuerte de lo que es.
+    #
+    # Solo si HAY repositorio: en el contenedor productivo no hay ninguno, y
+    # ahi este desfase no puede existir (ver commits_atrasados()). Avisar ahi
+    # bloquearia toda edicion desde la interfaz, que es exactamente el
+    # incidente del 08/09/2026.
+    if not os.environ.get(VAR_RAMA_DESPLIEGUE, "").strip():
+        try:
+            hay_repo = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=Path(__file__).resolve().parents[2],
+                capture_output=True, text=True, timeout=10).returncode == 0
+        except Exception:                                # noqa: BLE001
+            hay_repo = False
+        if hay_repo:
+            problemas.append(
+                f"falta {VAR_RAMA_DESPLIEGUE} en el entorno -- sin ella solo se "
+                f"comprueba contra el remoto de la rama actual, y empujar a una "
+                f"rama de trabajo no despliega nada. Poner el nombre de la rama "
+                f"que despliega (ej. {VAR_RAMA_DESPLIEGUE}=main) en el .env.")
+    if adelante:
+        problemas.append(
+            f"esta copia tiene {adelante} commit(s) que todavia no estan en "
+            f"la rama que despliega -- si esta config usa un campo del "
+            f"esquema que solo existe en esos commits, el motor desplegado no "
+            f"va a poder leerla y deja de atender. Empujar a otra rama no "
+            f"alcanza: lo que importa es que el codigo este CORRIENDO.")
+    if atras is None:
+        problemas.append(
+            "no se pudo determinar si esta copia esta al dia con el remoto "
+            "(sin git, sin upstream configurado, o el comando fallo) -- ante "
+            "la duda, no se procede.")
+    elif atras:
+        problemas.append(
+            f"esta copia esta {atras} commit(s) atras de lo que corre en "
+            f"produccion -- si un "
+            f"commit mas reciente cambio el esquema (por ejemplo, quito un "
+            f"campo que esta copia todavia declara valido), escribir esta "
+            f"config puede reintroducir en produccion algo que el codigo "
+            f"desplegado ya no reconoce.")
+    return problemas
+
+
+def _validar(tenant: str, crudo: dict) -> TenantConfig:
+    """Mismo camino que cargar_config(), pero sobre el documento en memoria."""
+    secretos = _barrer_secretos(crudo)
+    if secretos:
+        raise ErrorEdicion(
+            f"{tenant}: hay valores con pinta de credencial:\n  - "
+            + "\n  - ".join(secretos))
+
+    try:
+        return TenantConfig(**crudo)
+    except ValidationError as e:
+        lineas = [f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
+                  for err in e.errors()]
+        # Que quede rastro de que ALGUIEN intento guardar una config invalida.
+        # El rechazo ya protege --no se escribe nada-- pero sin registro no hay
+        # forma de saber si una regla se esta chocando seguido, y una regla que
+        # molesta todos los dias o esta mal puesta o senala un hueco en la
+        # interfaz que la produce.
+        #
+        # Va al log y no a una fila en la base a proposito: esto corre DENTRO
+        # de la transaccion de _editar(), que va a hacer rollback. Una
+        # escritura aca se perderia con el resto.
+        #
+        # Lo que lleva son los CAMPOS: version que se intentaba pisar, las
+        # secciones tocadas y cuantos problemas hubo. Eso es lo que hace falta
+        # para saber, si esto se repite, si una regla molesta seguido. Los
+        # mensajes de validacion NO van al log: pydantic cita el valor que
+        # rechazo, y ese valor es lo que alguien escribio en la configuracion.
+        # Siguen llegando enteros a quien edito, en la excepcion de abajo.
+        # Ver nucleo/observabilidad/registro.py (D20).
+        registrar("config", "RECHAZADA una edicion invalida", tenant=tenant,
+                  desde_version=crudo.get("version"),
+                  secciones=sorted(k for k in crudo if k in SECCIONES_EDITABLES),
+                  problemas=len(lineas))
+        raise ErrorEdicion(
+            f"{tenant}: {len(lineas)} problema(s) de configuracion:\n  - "
+            + "\n  - ".join(lineas)) from None
+
+
+#: QUIEN hace la edicion en curso (13/11/2026). Lo fija la ruta HTTP con lo que
+#: manda el proxy del CRM desde la SESION (nunca el navegador) y lo lee
+#: anotar_version. Una ContextVar y no un parametro mas: _editar tiene decenas
+#: de llamadores (guardar_*), y el autor es de la edicion, no de cada mutacion.
+AUTOR_DE_LA_EDICION: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "autor_de_la_edicion", default=None)
+
+
+def _hay_columna_autor(cur) -> bool:
+    """
+    Si la base ya tiene asistente.tenant_config_historial.autor
+    (supabase/202611131400_autor_del_historial.sql). Las migraciones se
+    aplican aparte del deploy: el codigo nuevo puede llegar antes que la
+    columna, y un INSERT que la nombre fallaria y tumbaria la edicion ENTERA
+    (va en la misma transaccion que la config). Se pregunta en vez de suponer.
+    """
+    cur.execute("""select 1 from information_schema.columns
+                    where table_schema = 'asistente'
+                      and table_name = 'tenant_config_historial'
+                      and column_name = 'autor'""")
+    return cur.fetchone() is not None
+
+
+def anotar_version(cur, org, version: int, datos: dict) -> None:
+    """
+    Guarda una copia de la config que acaba de quedar vigente.
+
+    Va DENTRO de la transaccion que la escribio, a proposito: si el historial
+    fuera un paso aparte, la unica forma de que se desincronice --guardar la
+    config y no la copia-- seria tambien la mas probable (una excepcion en el
+    medio). Asi, o quedan las dos o no queda ninguna.
+
+    Existe porque 'tenant_config' se actualiza EN EL LUGAR: al subir la
+    version, lo que decia la anterior se pierde. El 07/09/2026 se desactivo el
+    razonamiento del modelo, y dos semanas despues, mirando si el cambio
+    sirvio, no habria forma de saber que config sirvio cada turno.
+
+    'do nothing' ante conflicto: la version es la clave, y una version ya
+    anotada no se reescribe -- un historial que se puede pisar no es un
+    historial. Tampoco se le dio permiso de update a app_backend.
+
+    Con autor (13/11/2026): si la edicion lo trae y la columna existe, queda
+    QUIEN la hizo. Sin columna, se anota como siempre: el historial no se
+    pierde por esperar una migracion.
+    """
+    autor = (AUTOR_DE_LA_EDICION.get() or "").strip()[:120] or None
+    if autor and _hay_columna_autor(cur):
+        cur.execute("""insert into asistente.tenant_config_historial
+                         (organization_id, config_version, config, autor)
+                       values (%s, %s, %s, %s)
+                       on conflict (organization_id, config_version) do nothing""",
+                    (org, version, json.dumps(datos), autor))
+        return
+    cur.execute("""insert into asistente.tenant_config_historial
+                     (organization_id, config_version, config)
+                   values (%s, %s, %s)
+                   on conflict (organization_id, config_version) do nothing""",
+                (org, version, json.dumps(datos)))
+
+
+def _sin_los_que_se_borraron(datos: dict, doc: dict) -> dict:
+    """
+    Respeta el BORRADO de una clave de primer nivel, que el volcado deshacia.
+
+    'model_dump()' emite TODOS los campos del modelo, asi que una clave que el
+    mutador quito a proposito --`doc.pop("sin_gestion_horas", None)`, que es como
+    la interfaz apaga la banda-- volvia a aparecer con valor None. Apagarla
+    dejaba la clave puesta.
+
+    POR QUE IMPORTA, y no es cosmetico: 'extra="forbid"' rechaza una clave por
+    ESTAR PRESENTE, no por su valor. Con la clave puesta, una imagen anterior que
+    no la declare NO PUEDE CARGAR la config y el tenant deja de atender. Medido
+    el 27/09/2026 contra el esquema de f90d3ec: 'extra_forbidden', input None.
+    Y el procedimiento de rollback de DESPLIEGUE.md 7 decia que apagar el campo
+    desde la interfaz alcanzaba, asi que quien lo siguiera durante un incidente
+    rompia el tenant creyendo que hacia lo correcto.
+
+    ALCANCE, a proposito minimo: solo saca claves de PRIMER NIVEL que (a) el
+    mutador dejo fuera del documento y (b) el volcado trae en None. No toca nada
+    mas, asi que NO es un arreglo de D7 --el editor sigue reescribiendo los
+    defaults anidados-- sino el caso concreto en que esa reescritura vuelve
+    destructivo un rollback.
+
+    Se puede leer al reves y tambien es cierto: el modelo da None por defecto, y
+    nadie consulta estas claves dentro del JSONB por SQL (medido), asi que sacar
+    la clave y dejarla en None se leen igual desde el codigo. Lo que cambia es
+    que una version anterior puede cargar el documento.
+    """
+    return {k: v for k, v in datos.items()
+            if not (v is None and k not in doc)}
+
+
+def _editar(tenant: str, mutar: Callable[[dict], None]) -> TenantConfig:
+    """
+    Lee la configuracion vigente, le aplica 'mutar', valida el resultado y lo
+    guarda -- todo dentro de la misma transaccion, con la fila bloqueada.
+
+    Cualquier excepcion (la que lance 'mutar' o la de validacion) sale de la
+    transaccion sin escribir: nucleo/persistencia/db.py hace rollback.
+    """
+    from nucleo.persistencia.db import sesion     # perezoso: evita ciclo
+
+    # MISMA TRAMPA QUE cargar_config.py, POR LA OTRA PUERTA.
+    #
+    # Escribir configuracion con campos que el codigo desplegado no conoce deja
+    # a produccion con una config que su propio motor rechaza (los modelos
+    # declaran extra="forbid": un campo desconocido no se ignora, tumba el
+    # archivo entero) y el asistente deja de atender.
+    #
+    # La guarda de cargar_config.py cubria el camino del YAML. Este es el otro:
+    # correr el editor desde una copia local -- una prueba, un script -- contra
+    # la base de PRODUCCION. Paso dos veces el mismo dia, la segunda por aca.
+    #
+    # En produccion esto no dispara nunca: el editor corre dentro del codigo ya
+    # desplegado, y ahi no hay repositorio git, asi que la comprobacion
+    # devuelve 0/None y no molesta. Solo aparece donde existe el desfase.
+    #
+    # Fase #20.6.4: ademas del caso de arriba (copia ADELANTADA), cubre el
+    # simetrico -- copia ATRASADA -- via problemas_de_alineacion_git(), que
+    # tambien usa cargar_config.py. Una sola implementacion para las dos
+    # puertas.
+    if not os.environ.get("PERMITIR_CONFIG_SIN_DESPLEGAR"):
+        problemas = problemas_de_alineacion_git()
+        if problemas:
+            raise ErrorEdicion(
+                "esta copia no esta alineada con el remoto:\n  - "
+                + "\n  - ".join(problemas) +
+                "\n\nPrimero sincronizar el codigo (git pull / git push segun "
+                "corresponda), despues editar. Si sabes que esta edicion no "
+                "se ve afectada: PERMITIR_CONFIG_SIN_DESPLEGAR=1")
+
+    with sesion(tenant) as (cur, org):
+        cur.execute("""select config, config_version
+                       from asistente.tenant_config
+                       where organization_id = %s
+                       for update""", (org,))
+        fila = cur.fetchone()
+        if not fila or not fila["config"]:
+            raise ErrorEdicion(
+                f"'{tenant}' no tiene configuracion cargada en la base, asi que "
+                f"no hay nada que editar. Cargarla primero con: "
+                f"py -3.13 cli/cargar_config.py tenants/{tenant}.config.yaml")
+
+        # Copia independiente a proposito: 'mutar' cambia dicts anidados en el
+        # lugar (ej. _mutar_editar hace rol["descripcion"] = ...). Sin copiar,
+        # 'doc' y 'fila["config"]' son el MISMO objeto, así que mutar 'doc'
+        # tambien corrompe el "antes" que se usa mas abajo para detectar
+        # cambios -- el resultado quedaba comparado contra si mismo y
+        # 'datos == fila["config"]' daba True siempre, así que ninguna edicion
+        # a un rol EXISTENTE llegaba a guardarse (crear_rol no lo sufria por
+        # casualidad: el rol nuevo no traia los campos con default que Pydantic
+        # agrega al validar, y esa diferencia de claves bastaba para que el
+        # 'if' de abajo diera False).
+        doc = copy.deepcopy(fila["config"])
+        mutar(doc)
+        config = _validar(tenant, doc)
+        datos = config.model_dump(mode="json")
+        datos = _sin_los_que_se_borraron(datos, doc)
+
+        # Igual que cli/cargar_config.py: si el contenido no cambio, no se sube
+        # la version. Asi 'config_version' cuenta cambios reales y no clics en
+        # el boton de guardar.
+        if datos == fila["config"]:
+            registrar("config", "sin cambios", tenant=tenant, version=fila["config_version"])
+            return config
+
+        cur.execute("""update asistente.tenant_config
+                       set config = %s,
+                           config_version = config_version + 1,
+                           actualizado_en = now()
+                       where organization_id = %s
+                       returning config_version""",
+                    (json.dumps(datos), org))
+        version = cur.fetchone()["config_version"]
+        anotar_version(cur, org, version, datos)
+
+    registrar("config", "guardada desde el editor", tenant=tenant, version=version)
+    return config
+
+
+#: Nombres que un agente no puede tener (13/11/2026): son paginas fijas bajo
+#: /agentes en el CRM, y una ruta fija le gana a /agentes/[nombre] -- un agente
+#: llamado asi existiria pero su pagina no abriria nunca.
+NOMBRES_DE_ROL_RESERVADOS = frozenset({"permisos", "flujo", "asignaciones"})
+
+
+def _validar_nombre_rol(nombre: str) -> None:
+    if not _RE_NOMBRE_ROL.match(nombre):
+        raise ErrorEdicion(
+            f"'{nombre}': el nombre debe ser minuscula, empezar con letra y "
+            f"usar solo letras/numeros/guion bajo (2-30 caracteres)")
+    if nombre in NOMBRES_DE_ROL_RESERVADOS:
+        raise ErrorEdicion(
+            f"'{nombre}' es el nombre de una pantalla de Agentes: elegi otro "
+            f"identificador para el agente.")
+
+
+# =============================================================================
+#  CATALOGO  -  lo que la UI necesita para armar el formulario
+# =============================================================================
+
+def catalogo_herramientas(config: TenantConfig) -> list[dict]:
+    """
+    Por herramienta: de que tipo es, si es de verificacion (sin whitelist de
+    campos), y que campos ya declaro CUALQUIER rol existente para ella -- no
+    hay catalogo de campos de las APIs externas en ningun lado del sistema,
+    asi que lo unico confiable para ofrecer como checklist es lo que ya paso
+    por un humano que leyo la respuesta real.
+    """
+    conocidos: dict[str, set[str]] = {}
+    for rol in config.roles.values():
+        for herr, campos in rol.campos_permitidos.items():
+            conocidos.setdefault(herr, set()).update(campos)
+
+    return [
+        {
+            "nombre": h.nombre,
+            "descripcion": h.descripcion.strip(),
+            "tipo": h.tipo,
+            "verifica_identidad": h.verifica_identidad,
+            "campos_conocidos": sorted(conocidos.get(h.nombre, set())),
+            #  QUE HACE, para que el formulario las agrupe y avise (02/11/2026).
+            #  Sale de propiedades del catalogo, nunca del texto de la
+            #  descripcion (que es prompt y cada empresa redacta a su manera).
+            "escribe": not h.solo_lectura,
+            "pide_aprobacion": bool(h.aprobacion_humana),
+            "critica": bool(getattr(h, "critica", True)),
+            "deriva": bool(h.deriva_rol),
+            "de_sistema": _es_de_sistema(h),
+            #  Un agente de clientes que no verifica identidad la puede tener
+            #  (04/11/2026): el formulario avisa antes con la MISMA regla que
+            #  aplica _comprobar_sin_verificar al guardar.
+            "segura_sin_verificar": _segura_sin_verificar(h.model_dump()),
+        }
+        for h in config.herramientas
+    ]
+
+
+#: Las banderas de capacidad que marcan una herramienta que dispara el CODIGO
+#: (el reconciliador, la Bandeja, un servicio), no el agente en una
+#: conversacion. Dartela a un agente no tiene sentido y puede hacer que la
+#: llame cuando no corresponde.
+_BANDERAS_DE_SISTEMA = ("invocable_por_servicio", "responde_ticket_operativo",
+                        "cierra_ticket_operativo", "cierra_ticket_estado",
+                        "adjunta_archivo_ticket")
+
+
+def _es_de_sistema(h) -> bool:
+    return any(bool(getattr(h, b, False)) for b in _BANDERAS_DE_SISTEMA)
+
+
+# =============================================================================
+#  MUTACIONES  -  sobre el documento, sin saber de donde salio
+# =============================================================================
+#  Separadas de la transaccion a proposito: son funciones puras sobre un dict
+#  y se pueden probar sin base de datos (tests/test_editor_config.py).
+
+def _comprobar_nadie_se_queda_sin_roles(doc: dict) -> None:
+    """
+    Una herramienta cuyo ultimo rol se va queda sin nadie que pueda usarla, y
+    el esquema la rechaza (roles_permitidos exige al menos uno).
+
+    Se avisa aca y no se deja llegar al validador porque ahi el error sale como
+    'herramientas.8.roles_permitidos: List should have at least 1 item': indica
+    una posicion en una lista que el administrador no ve y no dice que hacer.
+    El caso llega solo -- desmarcar en un rol la unica herramienta que ese rol
+    tenia en exclusiva -- y desde el formulario parece un cambio inocente.
+    """
+    huerfanas = [h.get("nombre") for h in doc.get("herramientas", [])
+                 if not h.get("roles_permitidos")]
+    if huerfanas:
+        raise ErrorEdicion(
+            f"{', '.join(huerfanas)}: se quedaria(n) sin ningun rol que "
+            f"pueda(n) usarla(s), y una herramienta que nadie puede consultar "
+            f"no se puede guardar. Asignala a otro rol antes de quitarsela a "
+            f"este.")
+
+
+def _aplicar_herramientas(doc: dict, nombre_rol: str, herramientas: list[dict],
+                          campos_permitidos_out: dict, anterior: set[str] | None = None) -> None:
+    """
+    Muta 'herramientas' del documento: agrega nombre_rol a roles_permitidos de
+    cada herramienta seleccionada (si no estaba), y lo quita de las que ya no
+    estan seleccionadas. Documental/defensa en profundidad -- el motor autoriza
+    por Rol.puede_consultar, no por esto -- pero dejarlo desactualizado seria
+    mentir en la config.
+
+    'anterior' es el 'puede_consultar' del rol ANTES de esta edicion. Solo se
+    le quita 'nombre_rol' a una herramienta si de verdad estaba ahi -- nunca
+    por una herramienta que el rol nunca ofrecio en su catalogo, aunque
+    'roles_permitidos' la apunte a este rol por otro motivo. Caso real: las
+    herramientas de uso interno de escalamiento (nucleo/seguimiento/
+    escalamiento.py, ej. 'crear_caso_soporte') no las llama ningun modelo, asi
+    que ningun rol las tiene en 'puede_consultar' -- pero el esquema exige
+    'roles_permitidos' con al menos un elemento, asi que quedan apuntando a un
+    rol cualquiera (ej. 'administracion') solo para cumplir esa cota minima.
+    Sin este chequeo, CUALQUIER guardado de ese rol las desvinculaba (no
+    estaban entre las seleccionadas del formulario, que ni las ofrece) y el
+    validador rechazaba el guardado entero por dejarlas huerfanas.
+    """
+    anterior = anterior or set()
+    seleccionadas = {h["nombre"] for h in herramientas}
+    for herr in doc.get("herramientas", []):
+        nombre_herr = herr.get("nombre")
+        permitidos = herr.setdefault("roles_permitidos", [])
+        ya_esta = nombre_rol in permitidos
+        if nombre_herr in seleccionadas and not ya_esta:
+            permitidos.append(nombre_rol)
+        elif nombre_herr not in seleccionadas and ya_esta and nombre_herr in anterior:
+            permitidos.remove(nombre_rol)
+
+    for h in herramientas:
+        campos = h.get("campos_permitidos") or []
+        if campos:
+            campos_permitidos_out[h["nombre"]] = list(campos)
+
+
+def _aplicar_extras(doc: dict, nombre: str, extras: dict | None) -> None:
+    """
+    Lo que el formulario de agentes sumo el 02/11/2026, para que crear un
+    agente completo no exija el archivo ni una segunda pantalla.
+
+    Cada clave AUSENTE (o None) deja lo que habia: un formulario viejo, o una
+    edicion que no las manda, no borra nada.
+
+      atiende             que temas atiende, en palabras del cliente: con eso
+                          el router arma su tabla de derivacion
+      conectar_al_router  True = el router le puede pasar conversaciones
+                          (entra en 'areas_destino' de la herramienta que
+                          deriva); False = sale. Por _mutar_flujo_derivacion,
+                          la MISMA regla que /agentes/flujo: solo un agente
+                          que atiende al cliente puede recibir una derivacion
+      exige_verificacion  si pide verificar la identidad del cliente
+      nunca_revelar       lo que nunca dice, limpio y sin repetir
+      motivos_escalada    por que motivos pasa a una persona (04/11/2026): un
+                          subconjunto de 'escalamiento.activar_si'; vacio =
+                          todos. Uno que la empresa no tiene lo rechaza el
+                          esquema al validar
+    """
+    if not extras:
+        return
+    rol = doc["roles"][nombre]
+    if extras.get("exige_verificacion") is not None:
+        rol["exige_verificacion"] = bool(extras["exige_verificacion"])
+    if extras.get("nunca_revelar") is not None:
+        rol["nunca_revelar"] = list(dict.fromkeys(
+            t.strip() for t in extras["nunca_revelar"] if isinstance(t, str) and t.strip()))
+    if extras.get("motivos_escalada") is not None:
+        rol["motivos_escalada"] = list(dict.fromkeys(
+            t.strip() for t in extras["motivos_escalada"] if isinstance(t, str) and t.strip()))
+    atiende = extras.get("atiende")
+    if atiende is not None:
+        rol["atiende"] = str(atiende).strip()
+    #  Solo de presentacion (13/11/2026): ver Rol.nombre_visible en schema.py.
+    #  Vacio se guarda vacio: es la forma de volver a mostrar la clave.
+    for clave in ("nombre_visible", "resumen"):
+        valor = extras.get(clave)
+        if valor is not None:
+            rol[clave] = " ".join(str(valor).split())
+    conectar = extras.get("conectar_al_router")
+    if conectar is None:
+        return
+    deriva = next((h for h in doc.get("herramientas") or [] if h.get("deriva_rol")), None)
+    if deriva is None:
+        if conectar:
+            raise ErrorEdicion(
+                "esta empresa no tiene una herramienta de derivacion: no hay router al "
+                "que conectar el agente.")
+        return
+    destinos = [d for d in (deriva.get("areas_destino") or []) if d != nombre]
+    if conectar:
+        destinos.append(nombre)
+    _mutar_flujo_derivacion(doc, destinos, {})
+
+
+_SEGURA_SIN_VERIFICAR = ("verifica_identidad", "confirma_identidad", "deriva_rol",
+                         "carga_habilidad", "consulta_documentacion", "apta_sin_verificar",
+                         "consulta_planes_venta", "consulta_servicios_ofrecidos",
+                         "consulta_parrilla", "inyectados_obligatorios")
+
+
+def _segura_sin_verificar(h: dict) -> bool:
+    return any(h.get(b) for b in _SEGURA_SIN_VERIFICAR)
+
+
+def _comprobar_sin_verificar(doc: dict, nombre: str, previas: set[str]) -> None:
+    """
+    Un agente de clientes que NO verifica identidad solo usa lo que es seguro
+    sin verificar (04/11/2026, auditoria del formulario).
+
+    Sin verificacion el motor baja el nivel exigido a 0
+    (motor.py::_cliente_final_verificable) y todas sus herramientas quedan
+    abiertas: con una que devuelve datos de un cliente, cualquier numero pide
+    la cedula de otra persona y recibe su nombre y su telefono. Eso solo se
+    podia hacer en el archivo; el formulario lo puso a un clic.
+
+    Seguras: las que verifican o confirman identidad, derivan, cargan una
+    habilidad, consultan documentacion o un catalogo interno, las que exigen
+    la identidad inyectada (sin sesion verificada fallan cerradas) y las
+    marcadas 'apta_sin_verificar'. 'previas' son las que el agente YA tenia
+    sin verificar: se respetan -- son decisiones de quien diseno ese agente
+    (una pista del nombre, un nombre confirmado, una persona que aprueba), y
+    rechazarlas dejaria sin poder editar un agente que hoy funciona. Lo que no
+    se puede es sumar una nueva.
+    """
+    rol = doc["roles"][nombre]
+    if rol.get("orientado_a") != "cliente_final" or rol.get("exige_verificacion", True):
+        return
+    por_nombre = {h.get("nombre"): h for h in doc.get("herramientas") or []}
+    expuestas = [t for t in rol.get("puede_consultar") or []
+                 if t not in previas and not _segura_sin_verificar(por_nombre.get(t, {}))]
+    if expuestas:
+        raise ErrorEdicion(
+            "este agente atiende clientes sin verificar su identidad, y "
+            + ", ".join(f"'{t}'" for t in expuestas)
+            + " devuelve datos de un cliente: cualquiera que escriba podria verlos. "
+            "Activá la verificación de identidad, o sacá esa herramienta.")
+
+
+def _sin_verificar_previas(doc: dict, nombre: str) -> set[str]:
+    """Las herramientas que el agente ya tenia atendiendo clientes sin verificar."""
+    rol = (doc.get("roles") or {}).get(nombre) or {}
+    if rol.get("orientado_a") != "cliente_final" or rol.get("exige_verificacion", True):
+        return set()
+    return set(rol.get("puede_consultar") or [])
+
+
+def _con_derivacion_si_atiende_clientes(doc: dict, orientado_a: str,
+                                        herramientas: list[dict]) -> list[dict]:
+    """
+    Un agente que atiende clientes SIEMPRE puede derivar (02/11/2026).
+
+    El esquema lo exige -- sin la herramienta de derivar, una conversacion que
+    cae en ese agente queda encerrada: cuando el cliente pide algo que no
+    resuelve, no hay forma de pasarlo a quien si -- y el formulario lo dejaba
+    en manos de quien crea el agente, que se enteraba por un error que nombra
+    'roles_permitidos'. Se agrega sola, sin campos (es interna: no devuelve
+    datos del cliente).
+    """
+    if orientado_a != "cliente_final":
+        return herramientas
+    deriva = next((h for h in doc.get("herramientas") or [] if h.get("deriva_rol")), None)
+    if deriva is None or any(h.get("nombre") == deriva["nombre"] for h in herramientas):
+        return herramientas
+    return [*herramientas, {"nombre": deriva["nombre"], "campos_permitidos": []}]
+
+
+def _mutar_crear(doc: dict, nombre: str, area: str | None, cargo: str | None,
+                 descripcion: str, orientado_a: str, herramientas: list[dict],
+                 extras: dict | None = None) -> None:
+    if nombre in doc.get("roles", {}):
+        raise ErrorEdicion(f"ya existe un rol llamado '{nombre}'")
+
+    herramientas = _con_derivacion_si_atiende_clientes(doc, orientado_a, herramientas)
+    campos_permitidos: dict = {}
+    _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos)
+
+    nuevo_rol = {
+        "descripcion": descripcion,
+        "orientado_a": orientado_a,
+        "puede_consultar": [h["nombre"] for h in herramientas],
+        "campos_permitidos": campos_permitidos,
+    }
+    if area:
+        nuevo_rol["area"] = area
+    if cargo:
+        nuevo_rol["cargo"] = cargo
+    doc.setdefault("roles", {})[nombre] = nuevo_rol
+    _aplicar_extras(doc, nombre, extras)
+    _comprobar_sin_verificar(doc, nombre, set())
+    _comprobar_nadie_se_queda_sin_roles(doc)
+
+
+def _mutar_editar(doc: dict, nombre: str, area: str | None, cargo: str | None,
+                  descripcion: str, orientado_a: str, herramientas: list[dict],
+                  extras: dict | None = None) -> None:
+    if nombre not in doc.get("roles", {}):
+        raise ErrorEdicion(f"el rol '{nombre}' no existe")
+
+    herramientas = _con_derivacion_si_atiende_clientes(doc, orientado_a, herramientas)
+    anterior = set(doc["roles"][nombre].get("puede_consultar") or [])
+    previas_sin_verificar = _sin_verificar_previas(doc, nombre)
+    campos_permitidos: dict = {}
+    _aplicar_herramientas(doc, nombre, herramientas, campos_permitidos, anterior)
+
+    rol = doc["roles"][nombre]
+    rol["descripcion"] = descripcion
+    rol["area"] = area
+    rol["cargo"] = cargo
+    rol["orientado_a"] = orientado_a
+    rol["puede_consultar"] = [h["nombre"] for h in herramientas]
+    rol["campos_permitidos"] = campos_permitidos
+    _aplicar_extras(doc, nombre, extras)
+    _comprobar_sin_verificar(doc, nombre, previas_sin_verificar)
+    _comprobar_nadie_se_queda_sin_roles(doc)
+
+
+def _mutar_persona(doc: dict, nombre_asistente: str, tono: str,
+                   longitud_respuesta: str, instrucciones_adicionales: str) -> None:
+    """
+    Como se presenta y como escribe el asistente.
+
+    No toca permisos: ni que herramientas hay, ni que campos devuelve cada
+    una. Por eso es lo primero que se puede dejar en manos del cliente sin
+    revisar nada -- lo peor que puede hacer aca es que su asistente hable
+    raro, no que muestre un dato que no debia.
+    """
+    doc.setdefault("persona", {}).update({
+        "nombre_asistente": nombre_asistente,
+        "tono": tono,
+        "longitud_respuesta": longitud_respuesta,
+        "instrucciones_adicionales": instrucciones_adicionales,
+    })
+
+
+NOMBRE_HERRAMIENTA_VISITA_TECNICA = "agendar_visita_tecnica"
+
+
+def _mutar_plazo_visita_tecnica(doc: dict, dias: int) -> None:
+    """
+    Cuantos dias de plazo tiene un ticket de visita tecnica antes de su
+    fecha_final (ver 'fechas_automaticas' en schema.py y motor.py, que hace
+    la cuenta real en el momento de la llamada). Editable sin tocar codigo
+    ni pedirmelo: mismo criterio de riesgo bajo que _mutar_persona -- no
+    toca permisos, solo cuanto tiempo se promete para resolver el caso.
+    """
+    for h in doc.get("herramientas", []):
+        if h.get("nombre") == NOMBRE_HERRAMIENTA_VISITA_TECNICA:
+            h.setdefault("fechas_automaticas", {})["fecha_final"] = dias
+            return
+    raise ErrorEdicion(
+        f"la herramienta '{NOMBRE_HERRAMIENTA_VISITA_TECNICA}' no existe en "
+        f"el catalogo -- no hay donde guardar el plazo.")
+
+
+def _mutar_identidad_descripcion(doc: dict, descripcion: str) -> None:
+    """
+    Que servicios y planes ofrece la empresa, en prosa -- se inyecta SIEMPRE
+    en el prompt de cualquier rol (ver nucleo/recuperacion/prompt.py), a
+    diferencia del corpus (RAG, solo si la pregunta matchea). No toca
+    permisos ni roles, mismo criterio de riesgo bajo que _mutar_persona.
+    """
+    doc.setdefault("identidad", {})["descripcion"] = descripcion
+
+
+def _mutar_flujo_derivacion(doc: dict, destinos: list[str], atiende: dict) -> None:
+    """
+    Que agentes son destino del router, y que atiende cada uno.
+
+    Es lo que hace editable el diagrama de /agentes/flujo: 'destinos' va a
+    'areas_destino' de la herramienta que declara 'deriva_rol', y 'atiende'
+    a cada rol. El prompt del router NO se toca -- su tabla de enrutamiento
+    se genera desde esto (nucleo/recuperacion/prompt.py::_tabla_de_derivacion).
+
+    Se valida contra el documento, no contra el modelo ya cargado: un destino
+    que no existe como rol, o que apunta al propio router, dejaria el
+    diagrama mostrando una flecha que el motor nunca podria seguir.
+    """
+    roles = doc.get("roles") or {}
+    herramientas = doc.get("herramientas") or []
+
+    deriva = next((h for h in herramientas if h.get("deriva_rol")), None)
+    if deriva is None:
+        raise ErrorEdicion(
+            "este tenant no tiene ninguna herramienta de derivacion "
+            "(deriva_rol), asi que no hay flujo que editar todavia.")
+
+    # Un destino tiene que existir y atender al CLIENTE: derivar una
+    # conversacion de WhatsApp a un rol interno (soporte, administracion)
+    # pondria a un agente que habla en tercera persona del cliente a
+    # hablarle DE FRENTE a ese cliente.
+    #
+    # No se rechaza que un destino tenga a su vez la herramienta de derivar:
+    # los especialistas la tienen a proposito, para pasarse una conversacion
+    # entre ellos cuando el router se equivoco de area. La auto-derivacion
+    # (derivar a donde ya se esta) la resuelve el motor en ejecucion --
+    # nucleo/modelo/motor.py::_ejecutar_derivacion la detecta y no hace nada.
+    for destino in destinos:
+        if destino not in roles:
+            raise ErrorEdicion(f"'{destino}' no es un agente de este tenant.")
+        if (roles[destino].get("orientado_a") or "colaborador") != "cliente_final":
+            raise ErrorEdicion(
+                f"'{destino}' es un agente interno (habla con un colaborador, "
+                f"no con el cliente): no puede recibir una conversacion "
+                f"derivada desde WhatsApp.")
+
+    deriva["areas_destino"] = list(dict.fromkeys(destinos))
+
+    for nombre_rol, texto in (atiende or {}).items():
+        if nombre_rol not in roles:
+            raise ErrorEdicion(f"'{nombre_rol}' no es un agente de este tenant.")
+        roles[nombre_rol]["atiende"] = (texto or "").strip()
+
+
+def _mutar_casos_manual(doc: dict, casos: list[str]) -> None:
+    """
+    La lista de tipos de caso con que se clasifica cada conversacion
+    ('manual.casos': internet_lento, sin_senal_tv, consulta_saldo, ...). El
+    modelo elige uno por turno, acotado por enum -- ver
+    nucleo/seguimiento/escalamiento.py -- y queda guardado en la
+    conversacion (supabase/202608180923_caso_conversacion.sql).
+
+    Editable desde la interfaz a proposito: que casos atiende una empresa es
+    dato del negocio, cambia con el uso, y pedir una sesion de desarrollo
+    para agregar "instalacion_nueva" a una lista es exactamente lo que este
+    editor existe para evitar.
+
+    Riesgo bajo pero NO nulo, y por eso las dos guardas de abajo: la lista es
+    el enum que ve el modelo, y hay otras partes de la config que apuntan a
+    un caso por nombre. Borrar el caso equivocado no rompe nada de forma
+    visible -- deja de dispararse un automatismo y nadie se entera.
+    """
+    casos_limpios: list[str] = []
+    for caso in casos:
+        caso = (caso or "").strip()
+        if not caso:
+            continue
+        if not _RE_NOMBRE_ROL.match(caso):
+            raise ErrorEdicion(
+                f"'{caso}': el nombre del caso debe ser minuscula, empezar "
+                f"con letra y usar solo letras/numeros/guion bajo (2-30 "
+                f"caracteres). Ej: 'instalacion_nueva'.")
+        if caso in casos_limpios:
+            raise ErrorEdicion(f"'{caso}' esta repetido en la lista.")
+        casos_limpios.append(caso)
+
+    if not casos_limpios:
+        raise ErrorEdicion(
+            "la lista de casos no puede quedar vacia: es el enum con el que "
+            "el asistente clasifica cada conversacion.")
+
+    # 'otro' es la salida segura del enum: sin ella, una conversacion que no
+    # encaja en ningun caso obliga al modelo a elegir uno que no corresponde,
+    # y la clasificacion pasa de "no se sabe" a "dice algo falso".
+    if "otro" not in casos_limpios:
+        raise ErrorEdicion(
+            "la lista tiene que incluir 'otro': es la opcion que usa el "
+            "asistente cuando ninguna de las demas encaja. Sin ella se ve "
+            "obligado a elegir mal.")
+
+    # Un caso que otra parte de la config referencia por nombre no se puede
+    # borrar desde aca. Hoy solo el agendamiento automatico
+    # ('escalamiento.agendamiento_automatico': sin_senal_tv -> agendar la
+    # visita), y su sintoma al borrarlo seria silencioso: el piloto deja de
+    # dispararse, sin error, sin log, y las visitas vuelven a depender de que
+    # alguien las cree a mano.
+    referenciados = set((doc.get("escalamiento") or {})
+                        .get("agendamiento_automatico") or {})
+    huerfanos = sorted(referenciados - set(casos_limpios))
+    if huerfanos:
+        raise ErrorEdicion(
+            f"no se puede quitar {', '.join(huerfanos)}: el agendamiento "
+            f"automatico depende de ese caso. Primero hay que desactivarlo "
+            f"en la configuracion del escalamiento.")
+
+    doc.setdefault("manual", {})["casos"] = casos_limpios
+
+
+def _mutar_variable_tenant(doc: dict, nombre: str, valor: str) -> None:
+    """
+    Guarda un valor NO secreto que varia por empresa (ej. el subdominio de
+    SmartOLT) -- ver TenantConfig.variables_tenant en schema.py. Genero a
+    proposito: este archivo no sabe que integraciones existen, solo que
+    'nombre' tiene que matchear el patron de referencia (RE_NOMBRE_REF,
+    revalidado por Pydantic al final de _editar) para poder ser referenciado
+    desde 'Herramienta.base_url_ref'.
+    """
+    doc.setdefault("variables_tenant", {})[nombre] = valor
+
+
+def _mutar_borrar_variable_tenant(doc: dict, nombre: str) -> None:
+    (doc.get("variables_tenant") or {}).pop(nombre, None)
+
+
+def canales_desde_excel(datos: bytes) -> tuple[list[str], list[str]]:
+    """
+    (canales, descartados) a partir de un .xlsx de UNA columna, un canal por
+    fila. Funcion pura: recibe bytes y no toca ni la base ni el disco, para
+    que se pueda probar sin subir un archivo de verdad.
+
+    Se lee la PRIMERA columna de la PRIMERA hoja y nada mas. Pedirle a quien
+    carga que respete un nombre de hoja o un encabezado es pedirle que
+    adivine; una columna es lo que cualquiera arma sin instrucciones.
+
+    Los duplicados se descartan comparando SIN mayusculas ni tildes -- que es
+    como los compara despues el motor al buscar un canal. Si aca se dedujera
+    distinto, dos filas que el buscador considera el mismo canal entrarian
+    las dos. Se devuelven aparte, no en silencio: quien sube el archivo tiene
+    que poder ver que se descarto, o va a creer que cargo mas de lo que cargo.
+
+    El orden de aparicion se respeta -- es el que la empresa eligio en su
+    archivo, y reordenarlo alfabeticamente le esconde su propio criterio.
+    """
+    import io as _io
+    from openpyxl import load_workbook
+    from nucleo.config.schema import _sin_tildes
+
+    try:
+        libro = load_workbook(_io.BytesIO(datos), read_only=True, data_only=True)
+    except Exception as e:                       # archivo corrupto, .xls viejo, no-Excel
+        raise ErrorEdicion(
+            "No se pudo leer el archivo. Tiene que ser un Excel .xlsx con los "
+            f"canales en la primera columna ({type(e).__name__})."
+        ) from e
+
+    canales: list[str] = []
+    descartados: list[str] = []
+    vistos: set[str] = set()
+    for fila in libro[libro.sheetnames[0]].iter_rows(min_col=1, max_col=1, values_only=True):
+        crudo = fila[0]
+        if crudo is None:
+            continue
+        nombre = str(crudo).strip()
+        if not nombre:
+            continue
+        clave = _sin_tildes(nombre).strip()
+        if clave in vistos:
+            descartados.append(nombre)
+            continue
+        vistos.add(clave)
+        canales.append(nombre)
+    libro.close()
+
+    if not canales:
+        raise ErrorEdicion(
+            "El archivo no tiene ningun canal en la primera columna. No se "
+            "guarda una parrilla vacia por accidente: dejaria al agente sin "
+            "poder responder por canales.")
+    return canales, descartados
+
+
+def _mutar_parrilla_canales(doc: dict, canales: list[str]) -> None:
+    """
+    Reemplaza la parrilla ENTERA. No hay 'agregar un canal': la parrilla es
+    lo que dice el Excel que se subio, y mezclarla con lo anterior deja
+    canales fantasma de una version vieja que nadie recuerda haber cargado.
+
+    Una sola parrilla para todos los planes con TV (decision de negocio,
+    08/09/2026), por eso vive en la raiz y no dentro de cada PlanVenta.
+    """
+    doc["parrilla_canales"] = [{"nombre": c} for c in canales]
+
+
+def _mutar_guias_tv(doc: dict, guias: list[dict]) -> None:
+    """
+    Las guias de sintonizacion. Reemplaza la lista ENTERA -- la pantalla manda
+    siempre el estado completo, apagadas incluidas: una guia que se retira
+    porque quedo vieja vuelve corregida, y borrarla pierde el texto que
+    alguien redacto.
+
+    LAS REGLAS DE NEGOCIO NO SE REPITEN ACA. Estan en GuiaTV y en
+    TenantConfig (schema.py) y las hace cumplir _editar() al validar la
+    config entera antes de guardar:
+
+      - con 'tdt' la marca va vacia;
+      - una guia activa tiene que tener instrucciones;
+      - una sola activa por (marca, conexion).
+
+    Copiarlas aca daria dos lugares donde corregirlas y uno donde olvidarse.
+    Lo unico que hace este mutador es normalizar la FORMA de lo que llega de
+    la pantalla, para que el validador juzgue datos limpios y no espacios.
+
+    Una guia sin marca Y sin instrucciones se descarta en silencio: es la fila
+    vacia que deja un formulario cuando alguien agrega y no completa.
+    """
+    limpias = []
+    for g in guias or []:
+        g = g or {}
+        marca = str(g.get("marca", "")).strip()
+        instrucciones = str(g.get("instrucciones", "")).strip()
+        tipo = str(g.get("tipo_conexion", "directo")).strip().lower()
+        if not marca and not instrucciones and not str(g.get("url_video", "")).strip():
+            continue
+        limpias.append({
+            "marca": marca,
+            "tipo_conexion": tipo,
+            "instrucciones": instrucciones,
+            "url_video": str(g.get("url_video", "")).strip(),
+            "activa": bool(g.get("activa", True)),
+            "observaciones": str(g.get("observaciones", "")).strip(),
+        })
+    doc["guias_tv"] = limpias
+
+
+def _mutar_servicios_ofrecidos(doc: dict, servicios: list[dict]) -> None:
+    """
+    Que vende la empresa. Reemplaza la lista entera -- la pantalla manda
+    siempre el estado completo, incluidos los apagados, que se conservan a
+    proposito: un servicio que se deja de vender vuelve, y borrarlo pierde la
+    descripcion que alguien redacto.
+    """
+    limpios = []
+    for s in servicios:
+        nombre = str((s or {}).get("nombre", "")).strip()
+        if not nombre:
+            continue
+        limpios.append({"nombre": nombre,
+                        "activo": bool(s.get("activo", True)),
+                        "descripcion": str(s.get("descripcion", "")).strip()})
+    doc["servicios_ofrecidos"] = limpios
+
+
+def _mutar_canal_whatsapp(doc: dict, activo: bool, numero_visible: str | None) -> None:
+    """
+    Prender/apagar el canal y el numero que se muestra en la pantalla de
+    ajustes ("estas atendiendo desde el 300...").
+
+    NO toca los '*_ref' (phone_number_id_ref, token_ref, etc): esos son los
+    NOMBRES de los secretos y ya vienen declarados desde el alta del tenant,
+    siguiendo la convencion de la plataforma (WHATSAPP_PHONE_NUMBER_ID...).
+    Lo que carga el cliente desde la interfaz son los VALORES, que van
+    aparte, cifrados, en asistente.tenant_secrets -- nunca en este documento
+    (ver nucleo/seguridad/secretos.py).
+
+    Pydantic exige que los cuatro refs indispensables esten DECLARADOS para
+    poner 'activo: true' (CanalWhatsApp._activo_exige_lo_indispensable), pero
+    eso no confirma que haya un VALOR cargado para cada uno -- ese chequeo es
+    de la pantalla, no de este documento, porque este documento nunca ve
+    valores de secretos.
+    """
+    doc.setdefault("canales", {}).setdefault("whatsapp", {})
+    doc["canales"]["whatsapp"]["activo"] = activo
+    doc["canales"]["whatsapp"]["numero_visible"] = numero_visible or None
+
+
+def _mutar_borrar(doc: dict, nombre: str) -> None:
+    if nombre not in doc.get("roles", {}):
+        raise ErrorEdicion(f"el rol '{nombre}' no existe")
+
+    destino_escalamiento = (doc.get("escalamiento") or {}).get("destino_rol")
+    if destino_escalamiento == nombre:
+        raise ErrorEdicion(
+            f"'{nombre}' es el destino de escalamiento (escalamiento.destino_rol). "
+            f"Cambia ese destino antes de borrar el rol.")
+
+    del doc["roles"][nombre]
+
+    for herr in doc.get("herramientas", []):
+        permitidos = herr.get("roles_permitidos", [])
+        if nombre in permitidos:
+            permitidos.remove(nombre)
+
+    overrides = (doc.get("llm") or {}).get("overrides")
+    if overrides:
+        for clave in [c for c in overrides if c == f"rol:{nombre}"]:
+            del overrides[clave]
+
+    # Y de las areas que lo precargaban. Sin esto, borrar un agente desde la
+    # pantalla dejaba un area apuntando a un rol que ya no existe: el
+    # validador rechazaba la config entera con "precarga el agente inexistente
+    # 'x'", o sea el borrado fallaba por una referencia que el propio borrado
+    # tenia que limpiar. Un area que se queda sin agentes es valida (ver
+    # AreaDeTrabajo): sigue sirviendo para organizar gente aunque no le de
+    # capacidades, asi que se vacia, no se borra.
+    for area in doc.get("areas", []):
+        agentes = area.get("agentes", [])
+        if nombre in agentes:
+            agentes.remove(nombre)
+
+    _comprobar_nadie_se_queda_sin_roles(doc)
+
+
+# =============================================================================
+#  CREAR / EDITAR / BORRAR
+# =============================================================================
+
+def crear_rol(tenant: str, nombre: str, area: str | None, cargo: str | None,
+              descripcion: str, orientado_a: str,
+              herramientas: list[dict], extras: dict | None = None) -> TenantConfig:
+    _validar_nombre_rol(nombre)
+    return _editar(tenant, lambda doc: _mutar_crear(
+        doc, nombre, area, cargo, descripcion, orientado_a, herramientas, extras))
+
+
+def editar_rol(tenant: str, nombre: str, area: str | None, cargo: str | None,
+               descripcion: str, orientado_a: str,
+               herramientas: list[dict], extras: dict | None = None) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_editar(
+        doc, nombre, area, cargo, descripcion, orientado_a, herramientas, extras))
+
+
+def borrar_rol(tenant: str, nombre: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_borrar(doc, nombre))
+
+
+def _mutar_pausa(doc: dict, nombre: str, pausado: bool) -> None:
+    if nombre not in (doc.get("roles") or {}):
+        raise ErrorEdicion(f"no existe el agente '{nombre}'.")
+    rol = doc["roles"][nombre]
+    if pausado:
+        rol["pausado"] = True
+    else:
+        #  Se quita la clave en vez de escribir False: el documento queda igual
+        #  al de un agente que nunca se pauso, y el historial no se llena de
+        #  'pausado: false' que no dicen nada.
+        rol.pop("pausado", None)
+
+
+def pausar_rol(tenant: str, nombre: str, pausado: bool) -> TenantConfig:
+    """
+    Pone o saca a un agente de la pausa (13/11/2026). Solo toca 'pausado':
+    no pasa por el formulario completo, asi pausar no puede cambiar por
+    accidente sus herramientas ni sus permisos. Ver Rol.pausado.
+    """
+    return _editar(tenant, lambda doc: _mutar_pausa(doc, nombre, bool(pausado)))
+
+
+def _mutar_restaurar(doc: dict, nombre: str, anterior: dict) -> None:
+    if nombre not in (doc.get("roles") or {}):
+        raise ErrorEdicion(
+            f"el agente '{nombre}' ya no existe: restaurar una version no lo vuelve a crear.")
+    #  Copia del rol COMPLETO de esa version, salvo la pausa: volver a una
+    #  version vieja no tiene por que reanudar ni pausar a nadie -- eso es una
+    #  decision aparte y se toma con su propio boton.
+    nuevo = dict(anterior)
+    if doc["roles"][nombre].get("pausado"):
+        nuevo["pausado"] = True
+    else:
+        nuevo.pop("pausado", None)
+    doc["roles"][nombre] = nuevo
+
+
+def restaurar_rol(tenant: str, nombre: str, anterior: dict) -> TenantConfig:
+    """
+    Vuelve el rol a como estaba en una version anterior (13/11/2026). NO
+    reescribe el historial: guarda una version NUEVA con el rol de antes, asi
+    la que se deshace sigue ahi y tambien se puede restaurar. Pasa por la
+    misma validacion que cualquier edicion: si la version vieja nombra una
+    herramienta que ya no existe, se rechaza en vez de guardar algo roto.
+    """
+    if not isinstance(anterior, dict):
+        raise ErrorEdicion("esa version no tiene a este agente.")
+    return _editar(tenant, lambda doc: _mutar_restaurar(doc, nombre, anterior))
+
+
+def guardar_persona(tenant: str, nombre_asistente: str, tono: str,
+                    longitud_respuesta: str,
+                    instrucciones_adicionales: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_persona(
+        doc, nombre_asistente, tono, longitud_respuesta,
+        instrucciones_adicionales))
+
+
+def guardar_identidad_descripcion(tenant: str, descripcion: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_identidad_descripcion(doc, descripcion))
+
+
+def guardar_plazo_visita_tecnica(tenant: str, dias: int) -> TenantConfig:
+    if dias < 1 or dias > 30:
+        raise ErrorEdicion("el plazo tiene que ser entre 1 y 30 dias.")
+    return _editar(tenant, lambda doc: _mutar_plazo_visita_tecnica(doc, dias))
+
+
+def guardar_ajustes_bandeja(tenant: str, sla_toma_minutos: int,
+                            umbral_rx_dbm: float | None,
+                            sin_gestion_horas: int | None) -> TenantConfig:
+    """
+    Los numeros que la Bandeja usa para emitir un VEREDICTO, y que cada
+    empresa tiene que poder poner desde la pantalla.
+
+    'sin_gestion_horas' (26/09/2026) enciende la banda de conversaciones que
+    la IA dejo sin una accion de resolucion registrada. None = apagada. Un
+    campo nuevo de config no existe para nadie hasta que este mutador y el
+    formulario lo conocen: por eso entra aca y no solo en el schema.
+
+    POR QUE SE EDITAN Y NO SE FIJAN EN CODIGO
+    -----------------------------------------
+    'sla_toma_minutos'  cuanto puede esperar una escalada sin dueño. Un ISP
+                        con guardia 24 h y uno que atiende de 8 a 18 no
+                        toleran lo mismo.
+    'umbral_rx_dbm'     desde que potencia optica se considera atenuado el
+                        enlace. Depende de la planta de cada empresa --largo
+                        de los tramos, splitters, tipo de ONU-- y no de este
+                        software.
+
+    LOS DOS ADMITEN "SIN DEFINIR", y eso es parte del diseño: 0 y None hacen
+    que la pantalla muestre el dato SIN veredicto. Un valor por defecto
+    inventado seria peor, porque se veria igual que uno decidido.
+    """
+    if sla_toma_minutos < 0 or sla_toma_minutos > 1440:
+        raise ErrorEdicion("el plazo de toma tiene que estar entre 0 y 1440 minutos.")
+    if umbral_rx_dbm is not None and not (-40.0 <= umbral_rx_dbm <= 0.0):
+        # La potencia optica de recepcion es negativa y cuanto mas negativa,
+        # peor. Fuera de ese rango el numero no es un umbral: es un error de
+        # tipeo, y guardarlo haria que la pantalla marcara sano un enlace
+        # caido -- o al reves.
+        raise ErrorEdicion("el umbral óptico tiene que estar entre -40 y 0 dBm.")
+    if sin_gestion_horas is not None and not (1 <= int(sin_gestion_horas) <= 720):
+        # Menos de una hora es una conversacion en curso entre turno y turno;
+        # mas de treinta dias es no querer verla. Ninguno de los dos es un
+        # umbral: es un error de tipeo.
+        raise ErrorEdicion("el umbral de 'sin gestión' tiene que estar entre 1 y 720 horas.")
+    return _editar(tenant, lambda doc: _mutar_ajustes_bandeja(
+        doc, sla_toma_minutos, umbral_rx_dbm, sin_gestion_horas))
+
+
+def _mutar_ajustes_bandeja(doc, sla_toma_minutos: int,
+                           umbral_rx_dbm: float | None,
+                           sin_gestion_horas: int | None) -> None:
+    """
+    SIN DEFAULT EN EL CUARTO PARAMETRO, y no es descuido. Su None significa
+    BORRAR, y borrarlo apaga la banda 'sin gestion' y con ella la excepcion
+    del barrido que cierra conversaciones: un llamador que lo omitiera por
+    escribir la firma vieja reactivaria el cierre sin decir nada. Con el
+    parametro obligatorio eso es un TypeError al importar, no un silencio.
+    Hallado por el arquitecto el 26/09/2026 sobre 4f1ea12.
+
+    LAS DOS VALIDACIONES CRUZADAS VIVEN ACA, no en guardar_*, porque solo
+    desde el documento se ve el estado ya guardado del tenant.
+    """
+    if sin_gestion_horas is not None:
+        # 1. Sin rol de entrada la banda no existe: mira las conversaciones
+        #    que nunca salieron de el. Guardar el umbral igual dejaba un
+        #    numero persistido, visible en el formulario, sin ningun efecto
+        #    --y nadie se enteraba. Rapilink lo declara; el segundo ISP es
+        #    quien lo pagaba, que es el razonamiento que CLAUDE.md 3.3
+        #    prohibe repetir.
+        if not str(doc.get("rol_de_entrada") or "").strip():
+            raise ErrorEdicion(
+                "primero hay que fijar el rol de entrada: la banda 'sin gestión' "
+                "mira las conversaciones que nunca salieron de él, y sin ese dato "
+                "el umbral se guardaría sin hacer absolutamente nada.")
+        # 2. La banda tiene que aparecer ANTES de que el barrido cierre, no
+        #    despues. La excepcion del barrido arranca en
+        #    'limites.horas_inactividad_cierra'; la banda, en este umbral.
+        #    Con 72 contra 24 quedaban 48 horas en que la fila no se cerraba
+        #    y no aparecia en ninguna pestaña -- exactamente el limbo que la
+        #    banda vino a cerrar, y el estado que el comentario del barrido
+        #    dice querer evitar. Medido por el auditor el 26/09/2026: 25 de
+        #    25 filas exceptuadas y sin banda con 72, y 29 dias de ventana
+        #    con el maximo del formulario.
+        cierre = doc.get("cierre_inactivas_ia") or {}
+        tope = (doc.get("limites") or {}).get("horas_inactividad_cierra")
+        if cierre.get("habilitado") and tope and int(sin_gestion_horas) > int(tope):
+            raise ErrorEdicion(
+                f"el umbral de 'sin gestión' no puede pasar de {int(tope)} horas, que es "
+                "cuando el cierre por inactividad entra a actuar: más allá de ahí la "
+                "conversación deja de cerrarse sola y todavía no aparece en la Bandeja, "
+                "que es justo el caso que esta banda existe para que no ocurra.")
+    doc["sla_toma_minutos"] = int(sla_toma_minutos)
+    if umbral_rx_dbm is None:
+        doc.pop("umbral_rx_dbm", None)
+    else:
+        doc["umbral_rx_dbm"] = float(umbral_rx_dbm)
+    if sin_gestion_horas is None:
+        doc.pop("sin_gestion_horas", None)
+    else:
+        doc["sin_gestion_horas"] = int(sin_gestion_horas)
+
+
+def guardar_canal_whatsapp(tenant: str, activo: bool,
+                           numero_visible: str | None) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_canal_whatsapp(doc, activo, numero_visible))
+
+
+def _mutar_criticidad(doc: dict, herramienta: str, critica: bool) -> None:
+    """
+    Si una accion es critica, desde la pantalla (04/11/2026, PRD §2).
+
+    Es un dato de cada empresa (CLAUDE.md §3.3) y solo se cambiaba en el
+    archivo. Lo que NO se afloja: declararla no critica exige las garantias en
+    codigo (aprobacion, irreversible, verificacion, previas) y lo rechaza el
+    esquema al validar (Herramienta._coherencia); y volver a declararla
+    critica deja sin efecto la autonomia que se le dio sin evidencia
+    (nucleo/seguridad/autonomia_ganada.vigente, YA_ES_CRITICA).
+    """
+    h = next((x for x in doc.get("herramientas") or [] if x.get("nombre") == herramienta), None)
+    if h is None:
+        raise ErrorEdicion(f"'{herramienta}' no es una herramienta de esta empresa.")
+    if not critica and h.get("nacio_de_propuesta"):
+        raise ErrorEdicion(
+            f"'{herramienta}' la escribio el asistente en una conversacion: sus "
+            "comprobaciones no las reviso nadie todavia. Para declararla no critica, "
+            "alguien del equipo tecnico la tiene que revisar primero.")
+    h["critica"] = bool(critica)
+
+
+def guardar_criticidad(tenant: str, herramienta: str, critica: bool) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_criticidad(doc, herramienta, critica))
+
+
+def guardar_flujo_derivacion(tenant: str, destinos: list[str],
+                             atiende: dict) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_flujo_derivacion(doc, destinos, atiende))
+
+
+def guardar_casos_manual(tenant: str, casos: list[str],
+                         rotulos: dict | None = None) -> TenantConfig:
+    """
+    'rotulos' (29/10/2026): como se LEE cada caso nuevo. En /manual la persona
+    escribe «Problema de TV» y la pantalla guarda la clave 'problema_de_tv';
+    lo que escribio es justamente el rotulo, y se guarda en la misma
+    operacion para que la clave no nazca sin el. Opcional: sin el, todo
+    queda como antes.
+    """
+    def mutar(doc: dict) -> None:
+        _mutar_casos_manual(doc, casos)
+        _fundir_rotulos_de_casos(doc, rotulos or {})
+    return _editar(tenant, mutar)
+
+
+def _fundir_rotulos_de_casos(doc: dict, rotulos: dict) -> None:
+    """
+    Agrega los rotulos de casos que vienen, sin tocar los demas, y saca los de
+    casos que ya no estan en ninguna lista: un caso borrado no deja su rotulo
+    colgado. Solo acepta claves que son casos: esta puerta edita casos, no
+    motivos ni etiquetas.
+    """
+    if not isinstance(rotulos, dict):
+        raise ErrorEdicion("los rótulos tienen que venir como un mapa clave → texto.")
+    casos = set((doc.get("manual") or {}).get("casos") or [])
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    actuales = dict(conv.get("rotulos") or {})
+    for clave, texto in rotulos.items():
+        clave = str(clave or "").strip()
+        texto = " ".join(str(texto or "").split())
+        if not clave or not texto:
+            continue
+        if clave not in casos:
+            raise ErrorEdicion(f"'{clave}' no es uno de los casos que se están guardando.")
+        if len(texto) > ROTULO_MAXIMO:
+            raise ErrorEdicion(
+                f"el rótulo de '{clave}' tiene {len(texto)} caracteres; el máximo es "
+                f"{ROTULO_MAXIMO}.")
+        actuales[clave] = texto
+    vivas = {c for lista in claves_con_rotulo(doc).values() for c in lista}
+    actuales = {k: v for k, v in actuales.items() if k in vivas}
+    if actuales:
+        conv["rotulos"] = actuales
+    else:
+        conv.pop("rotulos", None)
+
+
+ROTULO_MAXIMO = 60
+
+
+def claves_con_rotulo(doc: dict) -> dict[str, list[str]]:
+    """Las claves que la Bandeja muestra y que admiten rotulo, por familia."""
+    return {
+        "motivos": list((doc.get("escalamiento") or {}).get("activar_si") or []),
+        "etiquetas": list((doc.get("conversaciones") or {}).get("etiquetas") or []),
+        "casos": list((doc.get("manual") or {}).get("casos") or []),
+    }
+
+
+def guardar_organizacion(tenant: str, organizacion: dict) -> TenantConfig:
+    """
+    La estructura de la empresa: sus pisos, sus departamentos y sus espacios.
+
+    REEMPLAZA EL DOCUMENTO ENTERO, y es la unica forma sensata de guardarlo.
+    Un organigrama no se edita campo a campo: mover un departamento de piso,
+    renombrarlo y quitarle un espacio son el mismo gesto para quien lo hace, y
+    guardarlos de a uno dejaria estados intermedios invalidos -- un
+    departamento en un piso que todavia no existe, dos salas con el mismo id.
+
+    NO VALIDA NADA AQUI, y es a proposito. Las once reglas de una organizacion
+    coherente ya viven en 'schema.py::Organizacion': dos salas con el mismo id,
+    un area reclamada por dos departamentos, un agente sentado en dos sitios, un
+    piso que no esta declarado. '_editar' valida el TenantConfig completo contra
+    ese modelo antes de escribir, asi que repetirlas aqui seria tener dos
+    verdades sobre lo mismo y descubrir el dia que se separen cual de las dos
+    manda.
+
+    Un documento VACIO es legitimo: significa que la empresa deja de declarar su
+    organizacion y vuelve a la estructura por defecto del producto. Hay que
+    poder deshacer.
+    """
+    if not isinstance(organizacion, dict):
+        raise ErrorEdicion("la organización tiene que venir como un objeto.")
+    for clave in organizacion:
+        if clave not in ("pisos", "departamentos", "espacios"):
+            raise ErrorEdicion(
+                f"'{clave}' no es parte de una organización: se esperan "
+                f"'pisos', 'departamentos' y 'espacios'.")
+    return _editar(tenant, lambda doc: doc.__setitem__("organizacion", organizacion))
+
+
+def guardar_reincidencia(tenant: str, dias: int) -> TenantConfig:
+    """
+    Cuantos dias mira el aviso de reincidencia (29/10/2026). 0 lo apaga. El
+    rango lo valida el schema (0-365); aca se da el mensaje para la pantalla.
+    """
+    if not isinstance(dias, int) or isinstance(dias, bool) or not (0 <= dias <= 365):
+        raise ErrorEdicion("los días de reincidencia tienen que ser un entero entre 0 y 365.")
+
+    def mutar(doc: dict) -> None:
+        conv = doc.get("conversaciones") or {}
+        conv["reincidencia_dias"] = dias
+        doc["conversaciones"] = conv
+    return _editar(tenant, mutar)
+
+
+def claves_sin_rotulo(config) -> dict[str, list[str]]:
+    """
+    Las claves que la Bandeja muestra con su nombre crudo porque nadie les
+    escribio un rotulo, por familia. La usan dos avisos: el de
+    cli/cargar_config.py (para quien agrega un motivo en el YAML) y el de
+    Ajustes (para quien agrega un caso desde /manual y no lo vio). Ninguno
+    bloquea: una clave sin rotulo se sigue leyendo.
+    """
+    doc = config.model_dump() if hasattr(config, "model_dump") else config
+    rot = (doc.get("conversaciones") or {}).get("rotulos") or {}
+    return {familia: [c for c in claves if not str(rot.get(c) or "").strip()]
+            for familia, claves in claves_con_rotulo(doc).items()}
+
+
+def guardar_rotulos_bandeja(tenant: str, rotulos: dict) -> TenantConfig:
+    """
+    Como se lee en pantalla cada motivo, etiqueta o caso (29/10/2026).
+
+    Reemplaza el mapa entero: lo que el formulario no manda, se borra. Un
+    rotulo vacio es lo mismo que no tenerlo -- la pantalla vuelve a mostrar la
+    clave con espacios --, asi que se descarta en vez de guardarse.
+    """
+    if not isinstance(rotulos, dict):
+        raise ErrorEdicion("los rótulos tienen que venir como un mapa clave → texto.")
+    return _editar(tenant, lambda doc: _mutar_rotulos_bandeja(doc, rotulos))
+
+
+def _mutar_rotulos_bandeja(doc: dict, rotulos: dict) -> None:
+    """
+    La validacion de claves vive aca y no en el schema: solo desde el
+    documento se ve que motivos, etiquetas y casos tiene HOY la empresa. Una
+    clave que no esta en ninguna lista se rechaza con su nombre: es un error
+    de tipeo o un formulario viejo, y guardarla dejaria un rotulo que no se
+    muestra nunca. Los huerfanos que ya estaban (una clave que se borro de su
+    lista despues) se van en este guardado.
+    """
+    conocidas = {c for lista in claves_con_rotulo(doc).values() for c in lista}
+    limpios: dict[str, str] = {}
+    for clave, texto in rotulos.items():
+        clave = str(clave or "").strip()
+        texto = " ".join(str(texto or "").split())
+        if not clave or not texto:
+            continue
+        if clave not in conocidas:
+            raise ErrorEdicion(
+                f"'{clave}' no es un motivo, una etiqueta ni un caso de esta empresa, "
+                "así que su rótulo no se mostraría nunca.")
+        if len(texto) > ROTULO_MAXIMO:
+            raise ErrorEdicion(
+                f"el rótulo de '{clave}' tiene {len(texto)} caracteres; el máximo es "
+                f"{ROTULO_MAXIMO}: se muestra en una fila de la cola, no es una descripción.")
+        limpios[clave] = texto
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    if limpios:
+        conv["rotulos"] = limpios
+    else:
+        conv.pop("rotulos", None)
+
+
+def guardar_respuestas_rapidas(tenant: str, respuestas: list) -> TenantConfig:
+    """
+    Las respuestas rapidas de la Bandeja (11/11/2026): los textos que una
+    persona inserta escribiendo «/atajo» en el compositor.
+
+    Reemplaza la lista entera, como los rotulos: la pantalla edita la lista
+    completa y lo que no manda, se borra. El formato del atajo, el largo del
+    texto y que no se repitan los valida el schema (RespuestaRapida y
+    Conversaciones.respuestas_rapidas), que es la misma regla para el YAML y
+    para esta pantalla; aca se normaliza y se da un mensaje que nombra la fila.
+    """
+    if not isinstance(respuestas, list):
+        raise ErrorEdicion("las respuestas rápidas tienen que venir como una lista.")
+    return _editar(tenant, lambda doc: _mutar_respuestas_rapidas(doc, respuestas))
+
+
+def _mutar_respuestas_rapidas(doc: dict, respuestas: list) -> None:
+    """
+    Una fila con atajo y texto vacios es un renglon que el formulario dejo sin
+    llenar, no un error: se descarta. Una con UNO de los dos vacio si es un
+    error -- quien escribio un texto sin atajo no lo va a poder usar nunca, y
+    descartarlo en silencio seria perderle lo que escribio.
+
+    El atajo se guarda en minusculas y sin la barra: «/Saludo» es lo que
+    alguien escribe pensando en como se usa, y lo que quiso decir es 'saludo'.
+    """
+    limpias: list[dict] = []
+    vistos: set[str] = set()
+    for i, r in enumerate(respuestas, start=1):
+        if not isinstance(r, dict):
+            raise ErrorEdicion(f"la respuesta {i} no tiene la forma {{atajo, texto}}.")
+        atajo = str(r.get("atajo") or "").strip().lstrip("/").strip().lower()
+        texto = str(r.get("texto") or "").strip()
+        if not atajo and not texto:
+            continue
+        if not atajo:
+            raise ErrorEdicion(f"la respuesta {i} tiene texto pero no atajo: sin atajo no se puede usar.")
+        if not texto:
+            raise ErrorEdicion(f"el atajo '/{atajo}' no tiene texto.")
+        if atajo in vistos:
+            raise ErrorEdicion(f"el atajo '/{atajo}' está dos veces: elegir uno dependería del orden.")
+        vistos.add(atajo)
+        limpias.append({"atajo": atajo, "texto": texto})
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    if limpias:
+        conv["respuestas_rapidas"] = limpias
+    else:
+        conv.pop("respuestas_rapidas", None)
+
+
+def guardar_etiquetas_del_equipo(tenant: str, etiquetas: list) -> TenantConfig:
+    """
+    El catalogo de etiquetas que el EQUIPO le pone a los chats (11/11/2026),
+    desde /settings/bandeja. Mismo camino que los rotulos: reemplaza la lista
+    entera -- lo que el formulario no manda, se borra del catalogo.
+
+    Borrar una etiqueta del catalogo NO la saca de los chats que la tenian
+    (asistente.etiquetas_de_chat): la cola simplemente deja de mostrarla. Si
+    alguien la vuelve a crear con la misma clave, reaparece donde estaba.
+    """
+    if not isinstance(etiquetas, list):
+        raise ErrorEdicion("las etiquetas tienen que venir como una lista.")
+    return _editar(tenant, lambda doc: _mutar_etiquetas_del_equipo(doc, etiquetas))
+
+
+def clave_de_etiqueta(nombre: str) -> str:
+    """
+    «Cliente VIP» -> 'cliente_vip'. Sin tildes ni eñes: la clave es un
+    identificador (schema.CLAVE_DE_ETIQUETA), y lo que se lee es el nombre.
+    Un nombre sin ninguna letra ni digito usable da 'etiqueta'.
+    """
+    plano = unicodedata.normalize("NFKD", str(nombre or "")).encode("ascii", "ignore").decode()
+    clave = re.sub(r"[^a-z0-9]+", "_", plano.lower()).strip("_")[:40].rstrip("_")
+    if not clave or not clave[0].isalpha():
+        clave = f"etiqueta_{clave}" if clave else "etiqueta"
+    return clave[:40].rstrip("_")
+
+
+def _mutar_etiquetas_del_equipo(doc: dict, etiquetas: list) -> None:
+    """
+    Cada elemento: {clave?, nombre, color}.
+
+      CLAVE   la que ya tenia se CONSERVA aunque cambie el nombre: es lo que
+              guardan los chats, y renombrar «VIP» a «Cliente VIP» no puede
+              desetiquetar a nadie. Una etiqueta nueva viene sin clave y nace
+              del nombre; si choca con otra, se le agrega _2, _3...
+      COLOR   de la paleta cerrada (schema.COLORES_DE_ETIQUETA). Uno que no
+              esta se rechaza con su nombre, no se cambia por gris en
+              silencio: la persona eligio algo y tiene que saber que no se
+              guardo.
+
+    Los nombres repetidos, las claves invalidas y el tope los rechaza el
+    esquema al validar el documento entero (_editar), con su mensaje.
+    """
+    limpias: list[dict] = []
+    usadas = {str(e.get("clave") or "").strip() for e in etiquetas
+              if isinstance(e, dict) and str(e.get("clave") or "").strip()}
+    for e in etiquetas:
+        if not isinstance(e, dict):
+            raise ErrorEdicion("cada etiqueta tiene que venir con nombre y color.")
+        nombre = " ".join(str(e.get("nombre") or "").split())
+        if not nombre:
+            raise ErrorEdicion("hay una etiqueta sin nombre: escribí uno o borrala.")
+        color = str(e.get("color") or "gris").strip()
+        if color not in COLORES_DE_ETIQUETA:
+            raise ErrorEdicion(
+                f"'{color}' no es uno de los colores de etiqueta "
+                f"({', '.join(COLORES_DE_ETIQUETA)}).")
+        clave = str(e.get("clave") or "").strip()
+        if not clave:
+            base = clave_de_etiqueta(nombre)
+            clave, n = base, 2
+            while clave in usadas:
+                sufijo = f"_{n}"
+                clave = base[:40 - len(sufijo)] + sufijo
+                n += 1
+            usadas.add(clave)
+        limpias.append({"clave": clave, "nombre": nombre, "color": color})
+    conv = doc.get("conversaciones") or {}
+    doc["conversaciones"] = conv
+    if limpias:
+        conv["etiquetas_del_equipo"] = limpias
+    else:
+        conv.pop("etiquetas_del_equipo", None)
+
+
+def guardar_parrilla_canales(tenant: str, canales: list[str]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_parrilla_canales(doc, canales))
+
+
+def guardar_servicios_ofrecidos(tenant: str, servicios: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_servicios_ofrecidos(doc, servicios))
+
+def guardar_guias_tv(tenant: str, guias: list[dict]) -> TenantConfig:
+    """Las guias de sintonizacion, tal como quedaron en la pantalla."""
+    return _editar(tenant, lambda d: _mutar_guias_tv(d, guias))
+
+
+
+def _mutar_mensaje_automatico(doc: dict, evento: str, activo: bool, plantilla: str,
+                              datos: list[str], solo_a: list[str] | None = None) -> None:
+    """
+    Un momento de 'mensajes_automaticos' (28/10/2026): su plantilla, QUE dato
+    va en cada {{n}} y si esta encendido. Que el evento y los datos existan lo
+    valida el esquema (TenantConfig._mensajes_del_catalogo); que la plantilla
+    este aprobada y pida tantos valores, la ruta contra Meta antes de llamar.
+
+    'solo_a' None = se conserva el que tenia (29/10/2026): el interruptor de
+    la pantalla enciende y apaga sin tocar los numeros de prueba, y apagar un
+    aviso en prueba no puede abrirlo a todos al volver a encenderlo.
+    """
+    previo = (doc.get("mensajes_automaticos") or {}).get(evento) or {}
+    doc.setdefault("mensajes_automaticos", {})[evento] = {
+        "activo": bool(activo), "plantilla": (plantilla or "").strip(),
+        "datos": [str(d) for d in (datos or [])],
+        "solo_a": list(previo.get("solo_a") or []) if solo_a is None
+        else [str(n) for n in solo_a]}
+
+
+def guardar_mensaje_automatico(tenant: str, evento: str, activo: bool, plantilla: str,
+                               datos: list[str], solo_a: list[str] | None = None) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_mensaje_automatico(doc, evento, activo,
+                                                                 plantilla, datos, solo_a))
+
+
+def _mutar_espera_encuesta(doc: dict, minutos: int) -> None:
+    """La espera de la encuesta despues del cierre (29/10/2026). El rango
+    (0 a 1440) lo valida EncuestaWhatsApp."""
+    doc.setdefault("encuesta_whatsapp", {})["espera_minutos"] = int(minutos)
+
+
+#: Lo que la empresa declara para el tablero de capacidad (PRD §2). Las
+#: acciones que evitan una visita no van aca: nombran herramientas del
+#: catalogo y se cargan con la config (cli/cargar_claves.py).
+DECLARABLES_CAPACIDAD = ("minutos_por_conversacion", "minutos_por_visita", "personas_del_equipo")
+
+
+def _mutar_capacidad_declarada(doc: dict, valores: dict) -> None:
+    """None borra lo declarado (vuelve a 'sin declarar'); el resto de
+    'capacidad' queda como estaba. El rango lo valida TenantConfig."""
+    cap = dict(doc.get("capacidad") or {})
+    for clave in DECLARABLES_CAPACIDAD:
+        if valores[clave] is None:
+            cap.pop(clave, None)
+        else:
+            cap[clave] = valores[clave]
+    doc["capacidad"] = cap
+
+
+def guardar_capacidad_declarada(tenant: str, valores: dict) -> TenantConfig:
+    faltan = [c for c in DECLARABLES_CAPACIDAD if c not in valores]
+    if faltan:
+        raise ErrorEdicion("faltan " + ", ".join(faltan) + ": para borrar un valor se "
+                           "manda en null, no se omite.")
+    return _editar(tenant, lambda doc: _mutar_capacidad_declarada(doc, valores))
+
+
+def guardar_espera_encuesta(tenant: str, minutos: int) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_espera_encuesta(doc, minutos))
+
+
+def _mutar_uso_de_plantilla(doc: dict, nombre: str, en_uso: bool) -> None:
+    """Pone o saca 'nombre' de 'plantillas_desactivadas' (28/10/2026)."""
+    lista = [n for n in (doc.get("plantillas_desactivadas") or []) if n != nombre]
+    if not en_uso:
+        lista.append(nombre)
+    doc["plantillas_desactivadas"] = sorted(set(lista))
+
+
+def guardar_uso_de_plantilla(tenant: str, nombre: str, en_uso: bool) -> TenantConfig:
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ErrorEdicion("falta el nombre de la plantilla.")
+    return _editar(tenant, lambda doc: _mutar_uso_de_plantilla(doc, nombre, en_uso))
+
+
+def guardar_variable_tenant(tenant: str, nombre: str, valor: str) -> TenantConfig:
+    if not RE_NOMBRE_REF.match(nombre):
+        raise ErrorEdicion(
+            f"'{nombre}': el nombre de la variable debe ser MAYUSCULAS, "
+            f"empezar con letra y usar solo letras/numeros/guion bajo "
+            f"(ej. SMARTOLT_SUBDOMINIO) -- es como se referencia despues "
+            f"desde 'base_url_ref' en el catalogo de herramientas.")
+    if not valor or not valor.strip():
+        raise ErrorEdicion("falta el valor.")
+    return _editar(tenant, lambda doc: _mutar_variable_tenant(doc, nombre, valor.strip()))
+
+
+def borrar_variable_tenant(tenant: str, nombre: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_borrar_variable_tenant(doc, nombre))
+
+
+def _mutar_planes_venta(doc: dict, planes: list[dict]) -> None:
+    """
+    Reemplaza ENTERA la lista curada de planes que 'ventas' ofrece a un
+    prospecto nuevo -- ver PlanVenta/TenantConfig.planes_venta en
+    schema.py. Reemplazo completo y no un merge incremental a proposito:
+    la pantalla manda el estado completo de los checkboxes en cada
+    guardado (que planes quedaron tildados, con que localidades cada
+    uno), asi que "lo que llega" ya ES la lista final -- un merge
+    complicaria sin necesidad la logica de "destildar uno para sacarlo".
+    """
+    doc["planes_venta"] = planes
+
+
+def guardar_planes_venta(tenant: str, planes: list[dict]) -> TenantConfig:
+    for p in planes:
+        if not (p.get("nombre_wisphub") or "").strip():
+            raise ErrorEdicion("Cada plan necesita 'nombre_wisphub'.")
+    return _editar(tenant, lambda doc: _mutar_planes_venta(doc, planes))
+
+
+def _mutar_localidades(doc: dict, localidades: list[dict]) -> None:
+    """
+    Reemplaza ENTERO el catalogo localidad -> zona(s) -- ver
+    TenantConfig.localidades/LocalidadZona en schema.py. Igual criterio
+    que _mutar_planes_venta: lo produce nucleo/herramientas/localidades.py
+    de punta a punta en cada sincronizacion, nunca un merge incremental.
+    """
+    from datetime import datetime, timezone
+    doc["localidades"] = localidades
+    doc["localidades_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+
+
+def guardar_localidades(tenant: str, localidades: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_localidades(doc, localidades))
+
+
+def _mutar_precios(doc: dict, precios: list[dict]) -> None:
+    """
+    Reemplaza ENTERO el catalogo de precios -- ver TenantConfig.precios_de_planes.
+    Mismo criterio que _mutar_localidades: lo produce
+    nucleo/herramientas/planes_precio.py de punta a punta, nunca un merge.
+    """
+    from datetime import datetime, timezone
+    doc["precios_de_planes"] = precios
+    doc["precios_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+
+
+def guardar_precios(tenant: str, precios: list[dict]) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_precios(doc, precios))
+
+
+def _mutar_marcas_precio(doc: dict, listado: str, detalle: str) -> None:
+    """
+    Marca QUE herramienta trae el catalogo de planes y cual trae el detalle
+    con el precio -- `Herramienta.sincroniza_precio_plan` en schema.py.
+
+    Existe porque hasta hoy esa marca solo se podia poner editando
+    `tenants/<slug>.config.yaml` y cargandolo entero, que es exactamente lo
+    que CLAUDE.md 3.3 prohibe: un dato que varia por empresa viviendo en un
+    archivo que solo un desarrollador sabe editar. El costo real, medido el
+    07/10/2026: el boton de "Actualizar precios" devolvia 400 en produccion y
+    la unica salida era un `cargar_config` completo, que de paso habria
+    apagado la vision y borrado dos cosas creadas desde la interfaz
+    (`areas[ventas]`, `importacion_tickets`).
+
+    Se limpia la marca en TODAS las demas herramientas, no solo se escribe en
+    las dos nombradas: si quedaran dos marcadas 'listado', cual gana la
+    decide el orden de la lista, y eso convierte un cambio de configuracion
+    en un resultado que depende de donde quedo una fila.
+    """
+    herramientas = doc.get("herramientas")
+    if not isinstance(herramientas, list):
+        raise ErrorEdicion("Este agente no tiene catalogo de herramientas.")
+
+    por_nombre = {h.get("nombre"): h for h in herramientas if isinstance(h, dict)}
+    for papel, nombre in (("listado", listado), ("detalle", detalle)):
+        if nombre not in por_nombre:
+            raise ErrorEdicion(
+                f"No existe una herramienta llamada '{nombre}' para el "
+                f"paso '{papel}'."
+            )
+    if listado == detalle:
+        # Son dos llamadas distintas al proveedor (una devuelve los ids, la
+        # otra el precio de uno). La misma herramienta para las dos pediria
+        # el listado dos veces y no traeria ningun precio.
+        raise ErrorEdicion(
+            "El listado y el detalle tienen que ser dos herramientas "
+            "distintas."
+        )
+
+    for h in herramientas:
+        if isinstance(h, dict):
+            h.pop("sincroniza_precio_plan", None)
+    por_nombre[listado]["sincroniza_precio_plan"] = "listado"
+    por_nombre[detalle]["sincroniza_precio_plan"] = "detalle"
+
+
+def guardar_marcas_precio(tenant: str, listado: str, detalle: str) -> TenantConfig:
+    return _editar(tenant, lambda doc: _mutar_marcas_precio(doc, listado, detalle))
+
+
+def aprobar_herramienta_propuesta(tenant: str, herramienta_propuesta: dict) -> TenantConfig:
+    """
+    Agrega al catalogo real una herramienta que vino de una propuesta ya
+    aprobada por un ADMIN humano (ver nucleo/canales/api.py::
+    aprobar_propuesta, el unico llamador -- nunca se invoca directo desde
+    una conversacion). Ver el docstring de este archivo para por que esto
+    no relaja la regla original de "crear una herramienta es trabajo de
+    codigo": llega aca ya sondeada de verdad y ya aprobada por una persona.
+
+    Rechaza si ya existe una herramienta con ese nombre -- una coincidencia
+    de nombre en el borrador no debe pisar algo real. La validacion de
+    FORMA (que 'herramienta_propuesta' tenga los campos correctos para su
+    'tipo', que 'roles_permitidos' apunte a roles que existen) la hace
+    _editar() al final, contra el mismo esquema que valida todo lo demas --
+    si el borrador esta mal armado, el error sale aca y la propuesta queda
+    aprobada pero sin poder escribirse (ver el llamador: no marca 'aprobada'
+    hasta que esto no lance).
+    """
+    nombre = herramienta_propuesta.get("nombre")
+    if not nombre:
+        raise ErrorEdicion("El borrador no tiene 'nombre'.")
+    return _editar(tenant, lambda doc: _mutar_agregar_herramienta(doc, herramienta_propuesta))
+
+
+def _mutar_agregar_herramienta(doc: dict, herramienta_propuesta: dict) -> None:
+    nombre = herramienta_propuesta["nombre"]
+    existentes = {h.get("nombre") for h in doc.get("herramientas", [])}
+    if nombre in existentes:
+        raise ErrorEdicion(f"ya existe una herramienta llamada '{nombre}' en el catalogo.")
+    #  Entra CRITICA y marcada de donde vino, diga lo que diga el borrador
+    #  (auditoria M2, 04/11/2026): ver Herramienta.nacio_de_propuesta.
+    doc.setdefault("herramientas", []).append(
+        {**herramienta_propuesta, "critica": True, "nacio_de_propuesta": True})
+
+
+def _mutar_tarifa(doc: dict, modelo: str, entrada: float, salida: float,
+                  entrada_cache: float | None = None,
+                  descuento: float | None = None,
+                  ventanas: list | None = None) -> None:
+    """Guarda cuanto cuesta un modelo, en USD por MILLON de tokens.
+
+    Por millon porque asi lo publican los proveedores: guardar el numero como
+    viene evita el error mas aburrido y mas caro de este dominio, que es un
+    factor de mil metido al cargarlo.
+    """
+    tarifa = {"entrada": float(entrada), "salida": float(salida)}
+    # Se omite si no se declara, en vez de copiar 'entrada': ausente significa
+    # "cobrar todo como entrada nueva", que es el lado conservador. Guardarlo
+    # igual al de entrada seria lo mismo en el calculo pero mentiria en la
+    # pantalla -- diria que hay un precio de cache cargado cuando no lo hay.
+    if entrada_cache is not None:
+        tarifa["entrada_cache"] = float(entrada_cache)
+    # El descuento y las ventanas son propiedad del PROVEEDOR y cambian sin
+    # avisar (DeepSeek movio las suyas el 23/08/2026). Se conservan si no
+    # vienen: cargar una tarifa nueva no deberia borrar el horario que alguien
+    # configuro antes -- son dos cosas que se editan por separado.
+    previa = ((doc.get("llm") or {}).get("tarifas") or {}).get(modelo) or {}
+    if descuento is not None:
+        tarifa["descuento_fuera_pico"] = float(descuento)
+    elif previa.get("descuento_fuera_pico"):
+        tarifa["descuento_fuera_pico"] = previa["descuento_fuera_pico"]
+    if ventanas is not None:
+        tarifa["ventanas_pico"] = ventanas
+    elif previa.get("ventanas_pico"):
+        tarifa["ventanas_pico"] = previa["ventanas_pico"]
+    doc.setdefault("llm", {}).setdefault("tarifas", {})[modelo] = tarifa
+
+
+def _mutar_borrar_tarifa(doc: dict, modelo: str) -> None:
+    ((doc.get("llm") or {}).get("tarifas") or {}).pop(modelo, None)
+
+
+def _mutar_tope_gasto(doc: dict, tope: float | None, mensaje: str | None) -> None:
+    """El tope mensual de gasto, y que se le dice al cliente si se alcanza.
+
+    None borra el tope. No es lo mismo que cero: cero seria 'frena siempre', y
+    alguien que quiere sacar el limite escribiria justamente eso.
+    """
+    limites = doc.setdefault("limites", {})
+    if tope is None:
+        limites.pop("max_costo_usd_mes", None)
+    else:
+        limites["max_costo_usd_mes"] = float(tope)
+    if mensaje is not None:
+        limites["mensaje_al_alcanzar_tope"] = mensaje.strip()
+
+
+def guardar_tarifa(tenant: str, modelo: str, entrada: float, salida: float,
+                   entrada_cache: float | None = None,
+                   descuento_fuera_pico: float | None = None,
+                   ventanas_pico: list | None = None) -> TenantConfig:
+    if not str(modelo or "").strip():
+        raise ErrorEdicion("Falta la referencia del modelo (ej. 'deepseek:deepseek-v4-flash').")
+    if entrada < 0 or salida < 0 or (entrada_cache is not None and entrada_cache < 0):
+        raise ErrorEdicion("Una tarifa no puede ser negativa.")
+    if descuento_fuera_pico is not None and not (0 <= descuento_fuera_pico <= 1):
+        raise ErrorEdicion(
+            "El descuento fuera de pico va de 0 a 1 (0.5 = mitad de precio).")
+    return _editar(tenant, lambda d: _mutar_tarifa(
+        d, modelo.strip(), entrada, salida, entrada_cache,
+        descuento_fuera_pico, ventanas_pico))
+
+
+def borrar_tarifa(tenant: str, modelo: str) -> TenantConfig:
+    return _editar(tenant, lambda d: _mutar_borrar_tarifa(d, modelo))
+
+
+def guardar_tope_gasto(tenant: str, tope: float | None,
+                       mensaje: str | None = None) -> TenantConfig:
+    if tope is not None and tope <= 0:
+        raise ErrorEdicion(
+            "El tope tiene que ser mayor que cero. Para sacar el limite, "
+            "guardalo vacio -- un tope de 0 frenaria el asistente siempre.")
+    return _editar(tenant, lambda d: _mutar_tope_gasto(d, tope, mensaje))
+
+
+def _mutar_rol_de_entrada(doc: dict, rol: str | None) -> None:
+    """
+    Quien atiende a quien escribe por un canal publico (WhatsApp, web).
+
+    Antes no se elegia: se tomaba el primer rol con orientado_a='cliente_final'
+    (nucleo/canales/api.py::_rol_de_cliente). Rapilink tiene cuatro, y el orden
+    de las claves de un diccionario cambia solo -- editar la configuracion
+    desde la interfaz reserializa el JSON entero. El 07/09/2026 el primero era
+    'ventas', que existe para prospectos y no puede derivar a soporte.
+
+    La validacion de que el rol exista y sea de cliente la hace el esquema
+    (TenantConfig), no esta funcion: asi vale por cualquier puerta, no solo
+    por esta.
+    """
+    if not rol and doc.get("sin_gestion_horas"):
+        # La otra puerta del mismo silencio. Vaciar el rol de entrada estando
+        # la banda encendida la apaga --proyeccion.py falla cerrado sin ese
+        # dato-- y, peor, devuelve al barrido las conversaciones que la banda
+        # estaba protegiendo: se cierran con 'sin_respuesta_cliente', que
+        # afirma que el cliente no volvio, sobre filas que nadie atendio.
+        # Se rechaza en vez de arrastrar la banda, porque apagar una guarda
+        # tiene que ser una decision escrita y no el efecto de otra.
+        raise ErrorEdicion(
+            "no se puede dejar sin rol de entrada mientras la banda 'sin gestión' "
+            "esté encendida: se apagaría sola y esas conversaciones volverían a "
+            "cerrarse por inactividad. Primero vaciá el umbral en Ajustes de la "
+            "Bandeja, y después el rol.")
+    if rol:
+        doc["rol_de_entrada"] = rol.strip()
+    else:
+        doc.pop("rol_de_entrada", None)
+
+
+def _mutar_razonamiento(doc: dict, modo: str | None) -> None:
+    """Si el proveedor razona antes de contestar. Ver LLM.razonamiento."""
+    if modo:
+        doc.setdefault("llm", {})["razonamiento"] = modo
+    else:
+        doc.setdefault("llm", {}).pop("razonamiento", None)
+
+
+def guardar_razonamiento(tenant: str, modo: str | None) -> TenantConfig:
+    """
+    'disabled' le pide al proveedor que NO razone antes de contestar; vacio
+    deja su default, que hoy es razonar.
+
+    Medido contra DeepSeek v4-flash el 07/09/2026 con el prompt real: 4.26s
+    con razonamiento contra 1.77s sin el, y 1.071 tokens de salida --los
+    caros-- gastados en pensar antes de decir cosas como "hola".
+    """
+    return _editar(tenant, lambda d: _mutar_razonamiento(d, modo))
+
+
+def guardar_rol_de_entrada(tenant: str, rol: str | None) -> TenantConfig:
+    """Vacio vuelve al comportamiento viejo (el primero), que avisa por
+    consola. Se permite para poder revertir sin tocar codigo."""
+    return _editar(tenant, lambda d: _mutar_rol_de_entrada(d, rol))
+
+
+def _mutar_saldo_proveedor(doc: dict, url: str, auth_ref: str, campo: str,
+                           tolerancia: float | None) -> None:
+    """Donde preguntarle al proveedor cuanto saldo queda. Ver SaldoProveedor."""
+    s = doc.setdefault("llm", {}).setdefault("saldo", {})
+    s["url"] = url.strip()
+    s["auth_ref"] = auth_ref.strip()
+    s["campo"] = campo.strip()
+    if tolerancia is not None:
+        s["tolerancia"] = float(tolerancia)
+
+
+def guardar_saldo_proveedor(tenant: str, url: str, auth_ref: str, campo: str,
+                            tolerancia: float | None = None) -> TenantConfig:
+    if url and not url.lower().startswith("https://"):
+        raise ErrorEdicion(
+            "La URL del saldo tiene que ser https: por ahi viaja la clave del "
+            "proveedor.")
+    return _editar(tenant, lambda d: _mutar_saldo_proveedor(
+        d, url, auth_ref, campo, tolerancia))
+
+
+# =============================================================================
+#  TEXTOS DEL TRASPASO Y CIERRE POR INACTIVIDAD  --  12/11/2026
+# =============================================================================
+#
+# Hasta este dia se cambiaban solo por YAML, que es lo que CLAUDE.md §3.3
+# prohibe: son palabras y plazos de cada empresa, y el segundo ISP no puede
+# necesitar una sesion de codigo para decir "te paso con un asesor" en su
+# dialecto. Peor: el editor ya LEIA 'cierre_inactivas_ia' para rechazar un
+# umbral de la Bandeja (ver _mutar_ajustes_bandeja), asi que un formulario
+# podia negarse a guardar por un tope que ninguna pantalla dejaba tocar
+# (auditoria del menu, §2 Administrar).
+#
+# Mismo camino que el resto del archivo: _editar() valida contra TenantConfig
+# y solo sube la version si el documento cambio. Igual que todos, sufre D7
+# (el volcado reescribe los defaults ausentes); estas funciones no lo agravan.
+
+#: Lo que puede medir un texto del traspaso. WhatsApp admite 4096, pero este
+#: texto REEMPLAZA la respuesta del turno (ver api.py::_mensaje_de_escalada):
+#: es lo unico que el cliente lee, y uno de mil caracteres ya es una carta.
+TEXTO_TRASPASO_MAXIMO = 1000
+#: Una frase de traspaso se busca DENTRO de la respuesta del modelo
+#: (estado_escalada.promete_traspaso). "un" o "te" aparecen en cualquier
+#: respuesta y harian que, en el unico camino en que se revisa, toda respuesta
+#: se reemplace por 'mensaje_si_falla'. Cinco caracteres es lo minimo que ya
+#: es una frase ("asesor", "un compañero").
+FRASE_TRASPASO_MINIMO = 5
+FRASE_TRASPASO_MAXIMO = 120
+FRASES_TRASPASO_MAXIMAS = 30
+#: El cierre por inactividad: de una hora a treinta dias. Menos de una hora
+#: corta una conversacion entre turno y turno; mas de treinta dias es no
+#: querer cerrarla, y para eso esta el interruptor.
+HORAS_CIERRE_MINIMO = 1
+HORAS_CIERRE_MAXIMO = 720
+
+#: Las claves que el PUT de textos exige, aunque sea vacias: "no vino" y
+#: "borralo" no son lo mismo (mismo criterio que guardar_capacidad_declarada).
+CLAVES_TEXTOS_TRASPASO = ("mensaje", "mensajes_por_motivo", "mensaje_ya_escalada",
+                          "mensaje_si_falla", "frases_de_traspaso")
+
+
+def _plano(texto: str) -> str:
+    """Para comparar dos textos sin que un espacio o una mayuscula los separe."""
+    return " ".join(str(texto or "").lower().split())
+
+
+def _texto_traspaso(valor, que: str) -> str:
+    if valor is None:
+        return ""
+    if not isinstance(valor, str):
+        raise ErrorEdicion(f"{que}: tiene que ser un texto.")
+    limpio = valor.strip()
+    if len(limpio) > TEXTO_TRASPASO_MAXIMO:
+        raise ErrorEdicion(f"{que}: pasa de {TEXTO_TRASPASO_MAXIMO} caracteres. "
+                           "Es lo único que el cliente lee en ese turno: acortalo.")
+    return limpio
+
+
+def _mutar_textos_escalamiento(doc: dict, textos: dict) -> None:
+    """
+    Los cinco textos de 'escalamiento' que lee (o que protege) el cliente.
+
+    Las DOS validaciones que necesitan el documento viven aca, no en
+    guardar_*: que cada motivo exista en 'activar_si' (si no, el texto no se
+    mostraria nunca y nadie lo notaria -- el esquema tambien lo rechaza, pero
+    con un mensaje que no dice que hacer) y que el texto de "ya escalada" no
+    sea el mismo anuncio.
+    """
+    esc = doc.setdefault("escalamiento", {})
+    motivos = list(esc.get("activar_si") or [])
+
+    general = _texto_traspaso(textos["mensaje"], "el mensaje general")
+    if not general:
+        # El general es el que cubre cualquier motivo sin texto propio,
+        # incluido uno que todavia no exista (api.py::_mensaje_de_escalada).
+        # Vacio, un traspaso sin texto propio le manda al cliente un mensaje
+        # en blanco justo en el turno en que lo pasan a una persona.
+        raise ErrorEdicion("el mensaje general no puede quedar vacío: es el que recibe el "
+                           "cliente cuando el motivo del traspaso no tiene texto propio.")
+
+    crudo_motivos = textos["mensajes_por_motivo"] or {}
+    if not isinstance(crudo_motivos, dict):
+        raise ErrorEdicion("los mensajes por motivo tienen que venir como motivo -> texto.")
+    por_motivo: dict[str, str] = {}
+    for motivo, texto in crudo_motivos.items():
+        if motivo not in motivos:
+            raise ErrorEdicion(
+                f"el motivo '{motivo}' no es uno de los que hoy disparan un traspaso en esta "
+                "empresa: su texto no se mostraría nunca.")
+        limpio = _texto_traspaso(texto, f"el mensaje de '{motivo}'")
+        # Vacio = ese motivo usa el general. No se guarda la clave: un texto
+        # vacio guardado se leeria igual, pero en el diff pareceria decidido.
+        if limpio:
+            por_motivo[motivo] = limpio
+
+    ya_escalada = _texto_traspaso(textos["mensaje_ya_escalada"],
+                                  "el mensaje para quien vuelve a escribir")
+    # UN SOLO TEXTO, decision congelada (CLAUDE.md §12, 12/09/2026): lo que
+    # varia por motivo es el anuncio, no esto. Y no puede ser el anuncio: el
+    # 08/09/2026 un cliente contesto "ok" y recibio palabra por palabra "Te
+    # paso con un compañero...", como si el pase no hubiera ocurrido.
+    if ya_escalada:
+        anuncios = {_plano(general)} | {_plano(t) for t in por_motivo.values()}
+        if _plano(ya_escalada) in anuncios:
+            raise ErrorEdicion(
+                "el mensaje para quien vuelve a escribir no puede ser igual al anuncio del "
+                "traspaso: repetido, suena a que el pase nunca ocurrió. Tiene que decir que "
+                "el caso YA está con alguien.")
+
+    si_falla = _texto_traspaso(textos["mensaje_si_falla"], "el mensaje si el traspaso falla")
+
+    crudas = textos["frases_de_traspaso"] or []
+    if not isinstance(crudas, list):
+        raise ErrorEdicion("las frases de traspaso tienen que venir como lista.")
+    frases: list[str] = []
+    vistas: set[str] = set()
+    for f in crudas:
+        if not isinstance(f, str):
+            raise ErrorEdicion("cada frase de traspaso tiene que ser un texto.")
+        limpia = " ".join(f.split())
+        if not limpia:
+            continue
+        if len(limpia) < FRASE_TRASPASO_MINIMO:
+            raise ErrorEdicion(
+                f"la frase '{limpia}' es demasiado corta (mínimo {FRASE_TRASPASO_MINIMO} "
+                "caracteres): aparecería en casi cualquier respuesta y la reemplazaría.")
+        if len(limpia) > FRASE_TRASPASO_MAXIMO:
+            raise ErrorEdicion(f"una frase de traspaso pasa de {FRASE_TRASPASO_MAXIMO} caracteres.")
+        if _plano(limpia) in vistas:
+            continue
+        vistas.add(_plano(limpia))
+        frases.append(limpia)
+    if len(frases) > FRASES_TRASPASO_MAXIMAS:
+        raise ErrorEdicion(f"hay más de {FRASES_TRASPASO_MAXIMAS} frases de traspaso.")
+
+    esc["mensaje"] = general
+    esc["mensajes_por_motivo"] = por_motivo
+    esc["mensaje_ya_escalada"] = ya_escalada
+    esc["mensaje_si_falla"] = si_falla
+    esc["frases_de_traspaso"] = frases
+
+
+def guardar_textos_escalamiento(tenant: str, textos: dict) -> TenantConfig:
+    """
+    Los textos del traspaso a una persona. Las cinco claves tienen que venir
+    (ver CLAVES_TEXTOS_TRASPASO): un formulario que mande menos borraria lo
+    que omitio sin pedirlo.
+    """
+    faltan = [c for c in CLAVES_TEXTOS_TRASPASO if c not in (textos or {})]
+    if faltan:
+        raise ErrorEdicion("faltan " + ", ".join(faltan) + ": para vaciar un texto se manda "
+                           "vacío, no se omite.")
+    return _editar(tenant, lambda doc: _mutar_textos_escalamiento(doc, textos))
+
+
+def _mutar_cierre_inactividad(doc: dict, habilitado: bool, horas: int | None,
+                              backfill_habilitado: bool, backfill_lote: int,
+                              ahora_iso: str) -> None:
+    """
+    El cierre de lo que atendio SOLO el asistente, y el plazo con el que una
+    conversacion muda deja de reutilizarse ('limites.horas_inactividad_cierra').
+
+    EL CORTE SE FIJA AL ENCENDER, Y NUNCA SE MUEVE DESDE ACA. 'rollout_cutoff'
+    parte el mundo en flujo normal y backlog (ver CierreInactivasIA). Sin
+    corte no se cierra nada, asi que encender desde la pantalla sin corte no
+    haria nada -- y pedirle a una persona que escriba una fecha ISO es pedirle
+    que se equivoque. Encender por primera vez es la decision de "desde
+    ahora": se fija ahi. Una vez puesto no se toca: moverlo hacia atras
+    convertiria backlog en flujo normal, que es justo lo que las cohortes
+    existen para impedir.
+
+    LA VALIDACION CRUZADA CON LA BANDEJA ES LA ESPEJO DE _mutar_ajustes_bandeja:
+    alla se rechaza un umbral 'sin gestion' mas tarde que el cierre; aca, un
+    cierre mas temprano que ese umbral. Sin la espejo, bajar las horas desde
+    esta pantalla dejaba un umbral guardado que el motor recorta en silencio
+    (TenantConfig.sin_gestion_horas_efectivas) y una pantalla que muestra un
+    numero que no es el que actua.
+    """
+    if habilitado and horas is None:
+        raise ErrorEdicion(
+            "para encender el cierre por inactividad hace falta el plazo en horas: sin él, "
+            "el interruptor quedaría encendido sin cerrar nada.")
+    sin_gestion = doc.get("sin_gestion_horas")
+    if habilitado and horas is not None and sin_gestion and int(sin_gestion) > int(horas):
+        raise ErrorEdicion(
+            f"el cierre no puede actuar antes de {int(sin_gestion)} horas, que es cuando la "
+            "Bandeja muestra una conversación «sin resolución registrada»: se cerraría antes de "
+            "que nadie la viera. Bajá primero ese umbral en Ajustes → Bandeja.")
+
+    limites = doc.setdefault("limites", {})
+    limites["horas_inactividad_cierra"] = int(horas) if horas is not None else None
+
+    cierre = dict(doc.get("cierre_inactivas_ia") or {})
+    cierre["habilitado"] = bool(habilitado)
+    if habilitado and not cierre.get("rollout_cutoff"):
+        cierre["rollout_cutoff"] = ahora_iso
+    cierre["backfill_habilitado"] = bool(backfill_habilitado)
+    cierre["backfill_lote"] = int(backfill_lote)
+    doc["cierre_inactivas_ia"] = cierre
+
+
+def guardar_cierre_inactividad(tenant: str, habilitado: bool, horas: int | None,
+                               backfill_habilitado: bool, backfill_lote: int,
+                               ahora_iso: str | None = None) -> TenantConfig:
+    if horas is not None and not (HORAS_CIERRE_MINIMO <= int(horas) <= HORAS_CIERRE_MAXIMO):
+        raise ErrorEdicion(f"el plazo tiene que estar entre {HORAS_CIERRE_MINIMO} y "
+                           f"{HORAS_CIERRE_MAXIMO} horas.")
+    if not (1 <= int(backfill_lote) <= 500):
+        raise ErrorEdicion("el lote del backlog tiene que estar entre 1 y 500 por pasada.")
+    if ahora_iso is None:
+        from datetime import datetime, timezone
+        ahora_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return _editar(tenant, lambda doc: _mutar_cierre_inactividad(
+        doc, habilitado, horas, backfill_habilitado, backfill_lote, ahora_iso))

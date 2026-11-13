@@ -1,0 +1,204 @@
+/**
+ * EL PATIO, AMUEBLADO: lo que hace que el centro sea un patio y no un hueco.
+ *
+ * Reducir el suelo vacío fue la mitad del arreglo —`anillo.js` lo bajó de 644
+ * a 180— y la otra mitad es esta: **un rectángulo de suelo liso en el medio de
+ * la empresa se lee como un descampado por grande o chico que sea**. Lo que lo
+ * convierte en patio no es el tamaño, es que tenga para qué estar.
+ *
+ * TRES FRANJAS, Y NINGUNA EN EL MEDIO
+ * -----------------------------------
+ * Todo el mobiliario va contra los dos bordes largos y en la franja de la
+ * entrada. El centro queda libre, y no por estética: **por ahí caminan las
+ * figuras de ambiente**. `ambiente.js` las mantiene a 1,2 de los bordes de la
+ * circulación, así que un banco a 0,9 del borde queda por fuera de donde ellas
+ * pisan. Si el mobiliario invadiera el centro, se verían atravesando un banco
+ * —y arreglar eso del otro lado exigiría darle al caminante un mapa de
+ * obstáculos, que es el sistema de navegación que todavía no se construyó—.
+ *
+ * QUÉ LLEVA Y POR QUÉ ESO
+ * -----------------------
+ * - **Mostrador en la entrada**, mirando hacia afuera: es lo primero que se ve
+ *   al entrar, y hoy la recepción de la empresa del piloto queda enterrada
+ *   dentro de una manzana. Esto NO la reemplaza —la recepción es una sala
+ *   declarada y sigue donde la pone el reparto— sino que marca el acceso.
+ * - **Bancos y maceteros** alternados contra los bordes: el punto de descanso.
+ * - **Un dispensador** cerca de la entrada: el punto de café.
+ * - **Una mesa** a media profundidad: el punto de encuentro.
+ * - **Luminarias** por el eje: van en el techo, así que no estorban a nadie.
+ *
+ * Todo sale del TAMAÑO del patio, nunca de cuántos agentes o departamentos
+ * tiene la empresa. Un patio dice algo del edificio; si dijera algo de la
+ * operación estaría afirmando con adornos lo que ninguna herramienta midió.
+ */
+
+/** Cada cuánto se repite una pieza a lo largo de un borde. */
+export const PASO = 5.5;
+
+/** A qué distancia del borde se apoya el mobiliario. */
+export const ORILLA = 0.9;
+
+/**
+ * Lo que las figuras de ambiente dejan libre en cada borde.
+ *
+ * Es el mismo número que `ambiente.puntoEn` usa como margen. Está acá otra vez
+ * a propósito y con esta nota: son dos módulos que no se importan entre sí, y
+ * la prueba de este archivo comprueba que el mobiliario cae **fuera** de la
+ * banda por donde ellas caminan. Si alguien cambia uno, la guarda cae.
+ */
+export const MARGEN_DE_PASO = 1.2;
+
+/** Un patio por debajo de esto no se amuebla: no entra nada sin estorbar. */
+export const MINIMO = { ancho: 8, fondo: 8 };
+
+/**
+ * Lo que se deja libre a cada lado del vano de una puerta.
+ *
+ * UN BANCO DELANTE DE UNA PUERTA ES UNA PUERTA CERRADA, y eso no se ve
+ * mirando: la puerta sigue dibujada. Lo encontró la rejilla de navegación el
+ * 02/11/2026, en cuanto hubo una: **siete puestos de Comercial y Auditoría no
+ * se alcanzaban desde el pasillo** aunque sus dos salas tenían su vano
+ * abierto. La celda de JUSTO AFUERA estaba ocupada por el macetero del borde
+ * del patio.
+ */
+export const DESPEJE_DE_PUERTA = 1.6;
+
+/**
+ * El mobiliario de un patio, en coordenadas locales de su losa.
+ *
+ * @param {{ancho: number, fondo: number}} patio
+ * @param {{lado: 'izquierda'|'derecha', desde: number, hasta: number}[]} [puertas]
+ *        los vanos que dan a este patio, en `gy` local. NO son un dato de la
+ *        empresa: son geometría del plano, y lo único que hacen es QUITAR
+ *        piezas. Nunca agregan ninguna.
+ * @returns {{tipo: string, gx: number, gy: number, largo?: number}[]}
+ */
+export function mobiliarioDePatio(patio, puertas = []) {
+  const ancho = Number(patio?.ancho) || 0;
+  const fondo = Number(patio?.fondo) || 0;
+  if (ancho < MINIMO.ancho || fondo < MINIMO.fondo) return [];
+
+  const izquierda = ORILLA;
+  const derecha = Number((ancho - ORILLA).toFixed(2));
+  const redondo = (v) => Number(v.toFixed(2));
+
+  //  LOS DOS PUNTOS CON NOMBRE VAN PRIMERO, y los bordes se acomodan a ellos.
+  //
+  //  Al revés —bordes primero y estos encima— la mesa caía sobre un banco: lo
+  //  cazó la guarda de este archivo en un patio de 20 × 28, a 1,13 de
+  //  distancia. Quien manda es la pieza que tiene una razón de estar en ese
+  //  sitio exacto; los bancos se pueden correr.
+  const fijas = [
+    //  EL PUNTO DE ENCUENTRO, a media profundidad. Contra el borde y no en el
+    //  centro del patio, que sería lo natural y es justo lo que no se puede:
+    //  por el centro cruzan las figuras.
+    { tipo: 'mesa', gx: izquierda, gy: redondo(fondo / 2) },
+    //  EL PUNTO DE CAFÉ, del lado de la entrada, que es por donde se llega.
+    { tipo: 'dispensador', gx: derecha, gy: redondo(Math.max(1, fondo - 1.6)) }
+  ];
+
+  //  Los dos bordes largos, alternando banco y macetero. Se arranca a medio
+  //  paso del fondo para no apoyar nada contra la esquina, donde se cruzan los
+  //  dos bordes y dos piezas quedarían encimadas.
+  const bordes = [];
+  let turno = 0;
+  for (let gy = PASO / 2; gy <= fondo - PASO / 2; gy += PASO) {
+    const tipo = turno % 2 === 0 ? 'banco' : 'planta';
+    bordes.push({ tipo, gx: izquierda, gy: redondo(gy) });
+    bordes.push({ tipo: turno % 2 === 0 ? 'planta' : 'banco', gx: derecha, gy: redondo(gy) });
+    turno += 1;
+  }
+
+  //  Y NADA DELANTE DE UNA PUERTA. Una pieza del borde izquierdo estorba a un
+  //  vano del lado izquierdo, y lo mismo del otro. Se mira el lado además del
+  //  `gy`: un banco del borde derecho no tapa una puerta de la izquierda, y
+  //  descartarlo igual dejaria el patio pelado sin motivo.
+  const tapaUnaPuerta = (pieza) => (puertas ?? []).some((v) => {
+    const suLado = pieza.gx < ancho / 2 ? 'izquierda' : 'derecha';
+    if (v.lado !== suLado) return false;
+    return pieza.gy > v.desde - DESPEJE_DE_PUERTA
+      && pieza.gy < v.hasta + DESPEJE_DE_PUERTA;
+  });
+
+  const piezas = [
+    ...fijas,
+    ...bordes.filter((b) => !fijas.some(
+      (f) => Math.hypot(f.gx - b.gx, f.gy - b.gy) < PASO / 2))
+  ].filter((pieza) => pieza.tipo === 'luminaria' || !tapaUnaPuerta(pieza));
+
+  //  Las luminarias van en el TECHO: son las únicas que pueden ir por el eje
+  //  sin que nadie las atraviese caminando.
+  for (let gy = PASO; gy < fondo; gy += PASO * 1.6) {
+    piezas.push({ tipo: 'luminaria', gx: Number((ancho / 2).toFixed(2)), gy: Number(gy.toFixed(2)) });
+  }
+
+  return piezas;
+}
+
+/**
+ * El mobiliario de la franja de entrada: el mostrador que marca el acceso.
+ *
+ * Va contra el borde de ADENTRO —el que da al patio— y no contra el frente: en
+ * esta isometría el frente queda entre la cámara y la oficina, así que una
+ * pieza apoyada ahí tapa lo que viene detrás. Es la misma razón por la que la
+ * sede no lleva muro frontal.
+ *
+ * @param {{ancho: number, fondo: number}} entrada
+ */
+export function mobiliarioDeEntrada(entrada, puertas = []) {
+  const ancho = Number(entrada?.ancho) || 0;
+  const fondo = Number(entrada?.fondo) || 0;
+  if (ancho < MINIMO.ancho || fondo < 3) return [];
+
+  const largo = Math.max(2, Math.min(4, Math.round(ancho * 0.3)));
+
+  //  DÓNDE CAE CADA PUERTA, EN DOS DIMENSIONES.
+  //
+  //  La primera versión comparaba la posición del mostrador a lo largo de un
+  //  borde contra el `gy` de puertas que están en OTRO borde: ejes mezclados,
+  //  y la guarda de navegación lo cazó —«hay algo delante de su puerta»—. Una
+  //  puerta del lado izquierdo está en `gx = 0`, una del derecho en
+  //  `gx = ancho`, y las dos a la altura de su vano.
+  const puntosDePuerta = (puertas ?? []).map((v) => ({
+    gx: v.lado === 'izquierda' ? 0 : ancho,
+    gy: (v.desde + v.hasta) / 2
+  }));
+
+  //  EL MOSTRADOR NO SE BORRA NUNCA: SE CORRE.
+  //
+  //  La primera versión del despeje lo quitaba como a cualquier otra pieza
+  //  cuando una puerta le caía cerca, y la guarda de `sede.test.js` lo cazó —
+  //  «la entrada lleva su mostrador», en rojo—. Tenía razón: sin mostrador, la
+  //  franja de entrada deja de leerse como una recepción y pasa a ser un tramo
+  //  más de suelo. Lo que se mueve es el mueble, igual que con las puertas y
+  //  los rótulos: se busca el hueco que ya existe.
+  let gxMostrador = ancho / 2;
+  if (puntosDePuerta.length > 0) {
+    let mejorHolgura = -Infinity;
+    for (let i = 0; i <= 12; i++) {
+      //  Candidatos a lo largo del borde de adentro, con margen en los cantos.
+      const gx = 1.2 + (i / 12) * Math.max(0, ancho - 2.4);
+      const h = Math.min(...puntosDePuerta.map(
+        (q) => Math.hypot(q.gx - gx, q.gy - ORILLA)));
+      if (h > mejorHolgura) { mejorHolgura = h; gxMostrador = gx; }
+    }
+  }
+
+  const piezas = [
+    { tipo: 'mostrador', gx: Number(gxMostrador.toFixed(2)), gy: ORILLA, largo },
+    { tipo: 'planta', gx: ORILLA, gy: Number((fondo - ORILLA).toFixed(2)) },
+    { tipo: 'planta', gx: Number((ancho - ORILLA).toFixed(2)), gy: Number((fondo - ORILLA).toFixed(2)) }
+  ];
+
+  //  Y LA ENTRADA TAMBIÉN DESPEJA LAS PUERTAS. Se le pasó cuando se arregló el
+  //  patio, y costó una puerta: en la empresa del piloto, el macetero de la
+  //  esquina derecha de esta franja caía delante del vano de Recepción. La
+  //  matriz de las once salas lo encontró —«vano dibujado por el que NO se
+  //  pasa»— y la guarda de entonces no, porque probaba una empresa sintética
+  //  en la que esa esquina queda en otro sitio.
+  //  Las macetas SI se quitan si estorban: son adorno, y un adorno delante de
+  //  una puerta es una puerta cerrada. Tambien en dos dimensiones.
+  return piezas.filter((pieza) => pieza.tipo === 'mostrador'
+    || puntosDePuerta.every(
+      (q) => Math.hypot(q.gx - pieza.gx, q.gy - pieza.gy) > DESPEJE_DE_PUERTA));
+}

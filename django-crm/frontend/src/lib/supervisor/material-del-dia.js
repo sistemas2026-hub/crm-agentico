@@ -1,0 +1,372 @@
+/**
+ * Cómo se dice en Programación el material del día (28/10/2026). Fuera del
+ * componente para poder probarlo. SPEC/objetivos/material-del-dia.md.
+ */
+
+/**
+ * «Conector UPC: carga 6 unidades (ya tiene 4)», «ONU WIFI: carga 1 unidad», o
+ * «Cable drop: tiene el kit completo» cuando no hay que cargar nada.
+ *
+ * Lo que falta va en la MISMA línea: «CABLE COAXIAL: carga 100 m (faltan 100
+ * m)», «CHAZO: no hay en bodega (faltan 10 unidades)». Una línea aparte por
+ * faltante llenaba la tarjeta (captura del usuario, 28/10/2026).
+ *
+ * @param {{ material: string, unidad: string, en_mano: string, necesita: string, asignado: string, falta?: string }} l
+ */
+export function lineaDeMaterial(l) {
+  const tiene = Number(l.en_mano) > 0 ? `ya tiene ${l.en_mano}` : '';
+  const falta = Number(l.falta) > 0 ? `faltan ${cantidad(l.falta ?? '0', l.unidad)}` : '';
+  const entre = [tiene, falta].filter(Boolean).join(' · ');
+  const extra = entre ? ` (${entre})` : '';
+  if (Number(l.necesita) <= 0) return `${l.material}: tiene el kit completo${extra}`;
+  if (Number(l.asignado) <= 0) return `${l.material}: no hay en bodega${extra}`;
+  return `${l.material}: carga ${cantidad(l.asignado, l.unidad)}${extra}`;
+}
+
+/**
+ * El rótulo de la lista plegada: «Ver los 14 materiales del kit · 9
+ * incompletos».
+ *
+ * @param {{ falta?: string }[]} lineas
+ */
+export function resumenDeLineas(lineas) {
+  const n = lineas.length;
+  const incompletos = lineas.filter((l) => Number(l.falta) > 0).length;
+  const base = n === 1 ? 'Ver el material del kit' : `Ver los ${n} materiales del kit`;
+  return incompletos ? `${base} · ${incompletos} incompleto${incompletos === 1 ? '' : 's'}` : base;
+}
+
+/** Lo que devuelve el backend cuando lo eligió una persona en el panel. */
+export const POR_UNA_PERSONA = 'lo eligió una persona';
+
+/**
+ * Por qué ese kit o esa bodega: «elegido por una persona», o «lo eligió el
+ * Supervisor: su zona la nombra» (28/10/2026: «la idea era que lo hiciera el
+ * Supervisor»).
+ *
+ * @param {string} motivo
+ */
+export function porQue(motivo) {
+  if (!motivo) return '';
+  return motivo === POR_UNA_PERSONA ? 'elegido por una persona' : `lo eligió el Supervisor: ${motivo}`;
+}
+
+/**
+ * La primera opción del panel: dejar que elija el Supervisor, diciendo qué
+ * elegiría hoy.
+ *
+ * @param {string} eligeElSupervisor el nombre, o vacío si no puede elegir
+ */
+export function opcionDelSupervisor(eligeElSupervisor) {
+  return eligeElSupervisor
+    ? `Que elija el Supervisor (hoy: ${eligeElSupervisor})`
+    : 'Que elija el Supervisor (hoy no puede: ver el motivo)';
+}
+
+/**
+ * Si el Supervisor ya le cargó el material hoy: «Cargado a las 06:07». Vacío
+ * si no. Sin el acta desde el 29/10/2026 (el usuario: «está de más»): el acta
+ * sigue en Inventario → Reportes → Entregas, que es donde se busca.
+ *
+ * @param {{ cargado_en?: string | null, acta?: string }} m
+ */
+export function estadoDeCarga(m) {
+  if (!m?.cargado_en) return '';
+  return `Cargado a las ${m.cargado_en.slice(11, 16)}`;
+}
+
+/**
+ * Una línea que resume los avisos del material de una cuadrilla (29/10/2026,
+ * el usuario: «que se contraiga como el material»): «Falta material · sale sin
+ * ONU CATV y ONU WIFI». Lo que no reconoce lo cuenta: «1 aviso más».
+ *
+ * @param {string[]} avisos
+ */
+export function resumenDeAvisos(avisos) {
+  const lista = avisos ?? [];
+  const sinEquipo = lista.map(equipoDelAviso).filter(Boolean);
+  const falta = lista.some((a) => a.startsWith('Le falta material'));
+  const otros = lista.length - sinEquipo.length - (falta ? 1 : 0);
+  const partes = [];
+  if (falta) partes.push('Falta material');
+  if (sinEquipo.length) partes.push(`${partes.length ? 'sale' : 'Sale'} sin ${unidos(sinEquipo)}`);
+  if (otros > 0) partes.push(`${otros} ${otros === 1 ? 'aviso' : 'avisos'} más`);
+  return partes.join(' · ');
+}
+
+/** El equipo que nombra un aviso «Sale sin X: …», o `null`. @param {string} a */
+function equipoDelAviso(a) {
+  return /^Sale sin (.+?):/.exec(a)?.[1] ?? null;
+}
+
+/**
+ * LA PASTILLA DE LA TARJETA (07/11/2026). El usuario, con la captura: «qué
+ * otro arreglo se puede hacer para que no se vea tan maluco».
+ *
+ * `resumenDeAvisos` escribía «Falta material · sale sin ONU CATV y ONU WIFI»
+ * en rojo y en negrita, igual en las cuatro tarjetas. «Falta material» ya lo
+ * dicen las pastillas de arriba —«5 con faltantes», «BOG-SOLEDAD le faltan 14
+ * materiales»—, así que repetirlo en cada tarjeta gasta la única línea que
+ * tenía algo propio que decir: QUÉ no puede hacer ESTA cuadrilla.
+ *
+ * Cuando el aviso nombra equipo, la pastilla dice solo eso. El texto completo
+ * no se pierde: sigue adentro del desplegable.
+ *
+ * LO QUE LE PASA A TODAS NO DISTINGUE A NINGUNA (07/11/2026, segunda vuelta).
+ * El usuario, con la pantalla ya desplegada: «esto sigue igual». Y tenía
+ * razón: acortar la frase no quitó la repetición. En su captura, las CUATRO
+ * cuadrillas decían «Sin ONU CATV y ONU WIFI», palabra por palabra, debajo de
+ * un «Sin ONU CATV: 4 cuadrillas» que ya lo decía una vez. Cuatro pastillas
+ * rojas iguales son un fondo rojo, no cuatro avisos.
+ *
+ * `comunes` son los equipos que le faltan a TODAS: se restan, porque de ellos
+ * la tarjeta no aporta nada. Si después de restarlos no le queda nada propio,
+ * la pastilla deja de ser roja y pasa a ser el rótulo gris del desplegable
+ * («2 avisos»): el texto entero sigue adentro, intacto.
+ *
+ * `propio` es lo que la pantalla usa para el rojo. El color no se decide acá.
+ *
+ * @param {string[]} avisos
+ * @param {string[]} [comunes] equipos que le faltan a TODAS las cuadrillas
+ * @returns {{ texto: string, propio: boolean }}
+ */
+export function pastillaDeAvisos(avisos, comunes) {
+  const lista = avisos ?? [];
+  const deTodas = new Set(comunes ?? []);
+  const sinEquipo = /** @type {string[]} */ (lista.map(equipoDelAviso).filter(Boolean));
+  const suyos = sinEquipo.filter((e) => !deTodas.has(e));
+  if (suyos.length) return { texto: `Sin ${unidos(suyos)}`, propio: true };
+  //  Nada propio que decir. Ni se calla —el detalle sigue a un clic— ni grita.
+  if (sinEquipo.length) {
+    const n = lista.length;
+    return { texto: n === 1 ? '1 aviso' : `${n} avisos`, propio: false };
+  }
+  return { texto: resumenDeAvisos(lista), propio: true };
+}
+
+/**
+ * LOS EQUIPOS QUE LE FALTAN A TODAS (07/11/2026). Lo que repetían las cuatro
+ * tarjetas de la captura del usuario.
+ *
+ * «Todas» son las cuadrillas que traen material; una sin material no vota, o
+ * una sola cuadrilla sin kit dejaría el conjunto vacío y volvería el muro.
+ * Con UNA sola cuadrilla con material no hay repetición posible: lo suyo es
+ * propio y se devuelve vacío.
+ *
+ * @param {{ avisos?: string[] }[]} [cuadrillas] el material de cada cuadrilla
+ * @returns {string[]} los equipos que aparecen en TODAS, ordenados
+ */
+export function equiposDeTodas(cuadrillas) {
+  const conMaterial = (cuadrillas ?? []).filter((m) => (m?.avisos ?? []).length);
+  if (conMaterial.length < 2) return [];
+  /** @type {Set<string> | null} */
+  let comunes = null;
+  for (const m of conMaterial) {
+    const suyos = new Set(
+      /** @type {string[]} */ ((m?.avisos ?? []).map(equipoDelAviso).filter(Boolean))
+    );
+    comunes = comunes === null ? suyos : new Set([...comunes].filter((e) => suyos.has(e)));
+    if (!comunes.size) return [];
+  }
+  return [...(comunes ?? [])].sort();
+}
+
+/**
+ * EL EQUIPO QUE FALTA HOY, contado por cuadrillas y UNA sola vez arriba. Es lo
+ * que las tarjetas repetían y las pastillas de cuentas no decían: cuántas
+ * materiales faltan ya se sabía, pero no QUÉ equipo ni a cuántas les pega.
+ *
+ * Se cuenta por cuadrilla, no por aviso: lo que el Supervisor decide con esto
+ * es a qué bodega llamar y cuánto equipo mover.
+ *
+ * `todas` dice que no le falta a algunas sino a TODAS las que tienen material:
+ * es la que la tarjeta ya no repite, así que arriba tiene que quedar claro que
+ * no es parcial (07/11/2026, segunda vuelta).
+ *
+ * @param {{ avisos?: string[] }[]} [cuadrillas] el material de cada cuadrilla
+ * @returns {{ equipo: string, cuadrillas: number, todas: boolean }[]} de la más a la menos
+ */
+export function equipoQueFalta(cuadrillas) {
+  /** @type {Map<string, number>} */
+  const cuenta = new Map();
+  const conMaterial = (cuadrillas ?? []).filter((m) => (m?.avisos ?? []).length).length;
+  for (const m of cuadrillas ?? []) {
+    //  Dos avisos del mismo equipo en una cuadrilla siguen siendo UNA
+    //  cuadrilla: si no, «4 cuadrillas» podría salir con tres.
+    const vistos = new Set();
+    for (const a of m?.avisos ?? []) {
+      const equipo = equipoDelAviso(a);
+      if (!equipo || vistos.has(equipo)) continue;
+      vistos.add(equipo);
+      cuenta.set(equipo, (cuenta.get(equipo) ?? 0) + 1);
+    }
+  }
+  return [...cuenta]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([equipo, cuantas]) => ({
+      equipo,
+      cuadrillas: cuantas,
+      todas: conMaterial > 1 && cuantas === conMaterial
+    }));
+}
+
+/**
+ * LO QUE FALTA, COMO FRASE (07/11/2026, tercera vuelta). El usuario eligió,
+ * sobre la maqueta, que lo accionable viva en un bloque aparte: «hacelo así
+ * pero más pequeño». Dentro de ese bloque es una lista que se lee de corrido,
+ * así que estos renglones son frases y no pastillas sueltas.
+ *
+ * «A las 5 cuadrillas les falta ONU CATV» cuando no se salva ninguna —«las 5»
+ * es lo que dice que son todas, y es la única vez que se dice, porque la
+ * tarjeta de cada cuadrilla ya no lo repite—, «A 3 cuadrillas les falta ONU
+ * WIFI» si no, y en singular «A 1 cuadrilla le falta X».
+ *
+ * @param {{ equipo: string, cuadrillas: number, todas?: boolean }} e
+ */
+export function lineaDeEquipo(e) {
+  if (e.cuadrillas === 1) return `A 1 cuadrilla le falta ${e.equipo}`;
+  return `A ${e.todas ? 'las ' : ''}${e.cuadrillas} cuadrillas les falta ${e.equipo}`;
+}
+
+/** «A», «A y B», «A, B y C». @param {string[]} cosas */
+function unidos(cosas) {
+  if (cosas.length <= 1) return cosas.join('');
+  return `${cosas.slice(0, -1).join(', ')} y ${cosas[cosas.length - 1]}`;
+}
+
+/**
+ * La línea de arriba del material del día: cuántas ya se cargaron, o que es
+ * todavía una propuesta.
+ *
+ * @param {{ cargado_en?: string | null }[]} cuadrillas
+ */
+export function tituloDelMaterial(cuadrillas) {
+  const cargadas = cuadrillas.filter((c) => c.cargado_en).length;
+  if (!cargadas) return 'Material del día · propuesta: el Supervisor todavía no cargó nada';
+  return `Material del día · el Supervisor ya cargó ${cargadas} de ${cuadrillas.length} cuadrillas`;
+}
+
+/**
+ * Las cuentas del material del día como pastillas (29/10/2026, el usuario,
+ * con la captura: «¿qué podemos hacer con esto para que se vea más
+ * estético?»). Lo que está en cero no se dice, salvo las completas: «0 de 5
+ * con el kit completo» también es un dato.
+ *
+ * @param {{ cuadrillas: number, completas: number, con_faltantes?: number, sin_carga?: number }} c
+ * @returns {{ texto: string, tono: 'ok' | 'falta' | 'sin' }[]}
+ */
+export function pastillasDeCuentas(c) {
+  /** @type {{ texto: string, tono: 'ok' | 'falta' | 'sin' }[]} */
+  const salida = [{ texto: `${c.completas} de ${c.cuadrillas} con el kit completo`, tono: 'ok' }];
+  if (c.con_faltantes) salida.push({ texto: `${c.con_faltantes} con faltantes`, tono: 'falta' });
+  if (c.sin_carga) salida.push({ texto: `${c.sin_carga} sin carga`, tono: 'sin' });
+  return salida;
+}
+
+/**
+ * Lo que les falta a las bodegas, una entrada por bodega en el orden en que
+ * llegan. Eran trece líneas rojas iguales, una por material
+ * («BOG-SOLEDAD: faltan 2000 m de CABLE DROP (hay 0 libres…)»). `sinNada`
+ * dice que no hay libre NADA de lo que se pide: casi siempre es stock que no
+ * se cargó en Dexter, y se puede decir.
+ *
+ * @param {{ bodega: string, material: string, unidad: string, falta: string, disponible: string, pedido: string }[]} faltantes
+ */
+export function faltantesPorBodega(faltantes) {
+  /** @type {Map<string, typeof faltantes>} */
+  const por = new Map();
+  for (const f of faltantes ?? []) {
+    if (!por.has(f.bodega)) por.set(f.bodega, []);
+    por.get(f.bodega)?.push(f);
+  }
+  return [...por].map(([bodega, materiales]) => ({
+    bodega,
+    materiales,
+    sinNada: materiales.every((m) => Number(m.disponible) <= 0)
+  }));
+}
+
+/**
+ * «faltan 13 materiales», «falta 1 material». Sin el «le» desde el
+ * 07/11/2026: ahora va detrás del nombre de la bodega y dos puntos
+ * («BOG-SOLEDAD: faltan 13 materiales»), donde el «le» sobra.
+ *
+ * @param {number} n
+ */
+export function cuantosFaltan(n) {
+  return n === 1 ? 'falta 1 material' : `faltan ${n} materiales`;
+}
+
+/**
+ * CADA BODEGA EN UNA PASTILLA (07/11/2026). El usuario, con la captura: «qué
+ * otro arreglo se puede hacer para que no se vea tan maluco».
+ *
+ * Eran dos barras de ancho completo, una debajo de la otra, con el borde rojo
+ * a la izquierda: dos bodegas ocupaban el mismo alto que las cinco pastillas
+ * de cuentas de arriba, sin decir más. Como pastilla entran las dos en una
+ * fila, al lado de las cuentas que ya están en esa forma; al abrirla, la tabla
+ * se lleva el ancho entero.
+ *
+ * @param {{ bodega: string, materiales: unknown[] }} g un grupo de `faltantesPorBodega`
+ */
+export function pastillaDeBodega(g) {
+  return `${g.bodega}: ${cuantosFaltan(g.materiales?.length ?? 0)}`;
+}
+
+/**
+ * EL BLOQUE «PARA QUE EL DÍA SALGA COMPLETO» (07/11/2026, tercera vuelta).
+ *
+ * Después de dos vueltas, lo repetido ya no estaba en las tarjetas sino
+ * ARRIBA: seis pastillas rojas y un párrafo rojo, de tres familias distintas
+ * —cuentas, equipo que falta, apps sin abrir— mezcladas en la misma franja.
+ * El usuario eligió sobre la maqueta juntar lo accionable en un bloque y
+ * devolverle a las cuentas su gris: una cuenta no es una alarma.
+ *
+ * Orden: primero lo que deja a una cuadrilla sin poder trabajar, después lo
+ * que impide que le llegue el trabajo. Las bodegas no entran acá porque
+ * llevan su tabla desplegable; van debajo, en sus pastillas.
+ *
+ * @param {{ equipo: string, cuadrillas: number, todas?: boolean }[]} equipos
+ * @param {string} apps lo de `resumenDeLoSinBajar`, o vacío
+ * @returns {string[]} una frase por renglón, vacío si no hay nada que hacer
+ */
+export function loQueHayQueResolver(equipos, apps) {
+  const salida = (equipos ?? []).map(lineaDeEquipo);
+  if (apps) salida.push(apps);
+  return salida;
+}
+
+/**
+ * «1 unidad», «6 unidades», «300 metros».
+ * @param {string} n
+ * @param {string} unidad
+ */
+export function cantidad(n, unidad) {
+  if (Number(n) === 1 && unidad === 'unidades') return '1 unidad';
+  return `${n} ${unidad}`;
+}
+
+/**
+ * Del formulario de configuración al cuerpo del PUT. Los campos se llaman
+ * `kit:<código de labor>`, `bodega:<id de cuadrilla>` y `apoyo:<código de
+ * labor>` (30/10/2026: «si» o «no», si se toma de apoyo); vacío = sin kit /
+ * sin bodega. Solo viaja lo que el formulario trae.
+ *
+ * @param {FormData} f
+ * @returns {{ kits: Record<string, string|null>, bodegas: Record<string, string|null>, apoyos: Record<string, boolean> }}
+ */
+export function cuerpoDeConfiguracion(f) {
+  /** @type {Record<string, string|null>} */
+  const kits = {};
+  /** @type {Record<string, string|null>} */
+  const bodegas = {};
+  /** @type {Record<string, boolean>} */
+  const apoyos = {};
+  for (const [clave, valor] of f.entries()) {
+    const v = String(valor ?? '').trim() || null;
+    if (clave.startsWith('kit:')) kits[clave.slice(4)] = v;
+    else if (clave.startsWith('bodega:')) bodegas[clave.slice(7)] = v;
+    else if (clave.startsWith('apoyo:') && (v === 'si' || v === 'no')) apoyos[clave.slice(6)] = v === 'si';
+  }
+  return { kits, bodegas, apoyos };
+}

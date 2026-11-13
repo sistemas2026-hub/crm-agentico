@@ -1,0 +1,209 @@
+{
+ "generado_en": "2026-09-25T15:45:25-0500",
+ "esperada": "facturacion_cliente",
+ "filas": [
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "00_neutro         (control)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "10_identidad",
+   "aciertos": 2,
+   "total": 6,
+   "areas": {
+    "null": 4,
+    "facturacion_cliente": 2
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "14_id_mas_herr",
+   "aciertos": 1,
+   "total": 6,
+   "areas": {
+    "null": 5,
+    "facturacion_cliente": 1
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "15_id_mas_esc",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "13_las_tres",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "00_neutro         (control)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "10_identidad",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "14_id_mas_herr",
+   "aciertos": 1,
+   "total": 6,
+   "areas": {
+    "null": 5,
+    "facturacion_cliente": 1
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "15_id_mas_esc",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "13_las_tres",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "00_neutro         (control)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "10_identidad",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "14_id_mas_herr",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "15_id_mas_esc",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "13_las_tres",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "00_neutro         (control)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "10_identidad",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "14_id_mas_herr",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "15_id_mas_esc",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "13_las_tres",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  }
+ ]
+}

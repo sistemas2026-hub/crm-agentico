@@ -30,6 +30,22 @@ funcione como dice.** El propio archivo trae un error verificado — su bloque
 `servers:` apunta a `api.wisphub.net`, y la produccion real es `api.wisphub.io`.
 Ni el dominio del spec se da por bueno sin comprobar.
 
+**`api-main.yaml` NO trae los campos.** Medido el 05/11/2026: ese archivo son
+411 lineas de PUNTEROS --cada ruta y cada esquema es un `$ref` a otro archivo
+del mismo directorio estatico-- y un `grep coordenadas` sobre el da 0
+coincidencias. Para ver los campos de una entidad hay que bajar su componente
+aparte:
+
+```
+https://wisphub.net/static/yaml/api/Clientes/components/Clientes.yaml          (la LISTA)
+https://wisphub.net/static/yaml/api/Clientes/components/ServicesRetrieve.yaml  (/clientes/{id}/)
+https://wisphub.net/static/yaml/api/Clientes/components/ClientesRetrieve.yaml  (/clientes/{id}/perfil/)
+https://wisphub.net/static/yaml/api/Clientes/paths/<operacion>.yaml            (parametros y respuestas)
+```
+
+Quien lea solo `api-main.yaml` concluye que el spec no documenta los campos, y
+no es asi: estan, en otro archivo.
+
 ## La regla, antes que nada
 
 > **La documentacion de la API es una HIPOTESIS, no una fuente de verdad.
@@ -78,6 +94,7 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | clientes | `estado` | **NUMERICO**: 1 activo, 2 suspendido, 3 cancelado, 4 gratis |
 | clientes | `plan_internet`, `ciudad`, `localidad` | |
 | clientes | `router`, `tecnico` | Hallados en agosto. `router` es la via para agrupar por zona geografica: en una red WISP el router ES la zona fisica |
+| clientes | `telefono__contains` | Verificado agosto 2026 (metodo del valor imposible: `telefono__contains=9999999999` -> 0). `telefono=<valor>` (sin `__contains`) NO sirve para buscar un numero individual: el campo guarda varios numeros separados por coma (`"3242124123,3002687147"`) y el match es EXACTO contra la cadena completa, asi que un solo numero da 0. `__contains` si matchea un numero suelto dentro de la cadena. Es la via para identificar a un cliente de WhatsApp por su numero (ver `Autenticacion.patron_extraccion` en `nucleo/config/schema.py`) — probar primero con `__contains`, nunca asumir que el filtro exacto alcanza. |
 | facturas | `estado` | 1 pendiente, 2 pagada, 3 cancelada, 4 en revision, 5 transferida |
 | facturas | `zona` | Las 5 zonas suman exacto el total |
 | tickets | `estado` | 1 nuevo, 2 en progreso, 4 cerrado |
@@ -91,6 +108,7 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | clientes | `saldo` | — |
 | clientes | fechas (cualquier forma) | No se pueden contar altas de un mes |
 | facturas | `facturadas` | — |
+| facturas | `id_servicio` (el cliente) | Verificado 15/09/2026: devuelve las MISMAS 5.249 facturas para cualquier id_servicio -- se probo con dos clientes distintos y la lista salio identica, misma primera factura y mismo `count`. Para el estado de cobranza de UN cliente hay que leer su registro en `/api/clientes/?id_servicio=`, que trae `estado_facturas`, `saldo` y `fecha_corte` |
 | tickets | `departamento`, `tecnico`, `prioridad` | — |
 | tickets | cliente (8 nombres probados) | Filtrar por estado y cruzar en codigo, solo sobre los abiertos |
 
@@ -113,7 +131,8 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 | `/api/clientes/{id}/` | GET, PUT, PATCH, DELETE (segun `OPTIONS`) | **`DELETE` aqui NO funciona** — da HTTP 500. Ver aviso abajo |
 | `/api/clientes/{id}/perfil/` | DELETE | **El borrado real.** Verificado end-to-end contra produccion — ver aviso abajo |
 | `/api/tickets/` | GET, POST | Se pueden crear tickets |
-| `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar |
+| `/api/tickets/{id}/` | GET, PUT, PATCH | Se pueden actualizar, **pero `estado` por PATCH NO se aplica** — ver aviso abajo |
+| `/api/tickets/{id}/respuesta/` | POST | **Responder un ticket Y cambiarle el estado, en la misma llamada.** Verificado en produccion 28/08/2026 |
 | `/api/facturas/` | GET, POST | |
 | `/api/gastos/` | GET, POST | Vacio, pero **acepta escritura** |
 | `/api/zonas/`, `/api/plan-internet/`, `/api/staff/` | GET | Catalogos de solo lectura |
@@ -129,6 +148,49 @@ OPTIONS /api/tickets/   ->  Allow: GET, POST, HEAD, OPTIONS
 > materiales tuvo que salir del texto de los tickets. Pero es escribible: si en
 > algun momento se decide poblarlo, el informe dejaria de depender de parsear
 > formularios en HTML.
+
+### Crear/editar tickets — campos requeridos que la documentacion NO marcaba (verificado en vivo, 19/08/2026)
+
+Mismo patron de siempre: la documentacion oficial de estos tres endpoints no
+marcaba todos los campos obligatorios, y solo se descubrio al provocar el
+error real contra un ticket de prueba (`servicio` 6555 "PRUEBA TEMPORAL",
+ticket `#90354`, cerrado al terminar).
+
+| Endpoint | Campos que la API exige de verdad | Como se confirmo |
+|---|---|---|
+| `POST /api/tickets/` (crear) | `estado` Y `tecnico`, ademas de lo obvio (`servicio`, `asunto`) | Un POST sin esos dos dio `400 {"estado":["Este campo es requerido."],"tecnico":["Este campo es requerido."]}`. La doc oficial no los listaba como obligatorios |
+| `POST /api/tickets/{id}/respuesta/` (responder) | `ticket-estado` Y `ticket-prioridad`, ademas de `respuesta` | Mismo metodo: `400` con los dos campos marcados "requerido". Aca la doc SI acertaba -- confirma que no hay que asumir en ningun sentido, ni que miente ni que dice la verdad, se prueba siempre |
+| `PUT /api/tickets/{id}/` (cambiar estado) | Solo `estado` -- **no** exige el resto del recurso pese a ser `PUT` | `PUT` con `{"estado": 3}` solo dio `200` y aplico el cambio. No es REST estricto, mismo hallazgo que otros endpoints de esta API |
+
+**Como se resolvio en el catalogo**: `estado` de `crear_ticket` se fijo en
+codigo (`argumentos_fijos: {estado: 1}` -- todo ticket nuevo nace "Nuevo",
+no es una decision real del modelo). `tecnico` SI lo elige el modelo
+(resuelto por nombre via `consultar_tecnicos`), asi que necesitaba forzarse
+como obligatorio en el schema que ve el modelo -- que hasta este hallazgo
+**no existia**: `Herramienta.requeridos` (`nucleo/config/schema.py`) es
+nuevo, agregado especificamente porque `motor.py` mandaba `"required": []`
+fijo para TODA herramienta, sin excepcion, hasta este caso. Sirve para
+cualquier herramienta futura con un campo que la API exige y el modelo
+tiene que decidir.
+
+### Facturas — filtros y escritura (verificado en vivo, 19/08/2026)
+
+| Filtro/campo | Notas |
+|---|---|
+| `GET /api/facturas/?cliente=` | Quiere el **usuario** del cliente (formato `nombre-slug@empresa`, campo `usuario` en la respuesta de LISTA de `/api/clientes/` -- NO en la respuesta de detalle `/api/clientes/{id}/`, que trae `usuario_rb` en su lugar y ni siquiera el mismo valor). `servicio`/`id_servicio` como filtro es IGNORADO en silencio (devuelve el universo sin filtrar) -- mismo patron de siempre, probarlo con el metodo del valor imposible antes de asumir |
+| `GET /api/facturas/?estado=` | Ya verificado antes (1 pendiente, 2 pagada, 3 cancelada, 4 en revision, 5 transferida) |
+| Rango de fechas (`fecha_emision__range_0/_1`, etc.) | Tope real confirmado: **3 meses exactos** (`400 {"error":"El rango de fecha seleccionado no puede exceder 3 meses."}`), no una aproximacion |
+| `POST /api/facturas/{id}/registrar-pago/` | **`fecha_pago` es requerida de verdad** pese a que la doc la marca opcional ("solo tiene efecto con un permiso especial") -- sin ella, `400 {"fecha_pago":["Este campo es requerido."]}`. Se resuelve en codigo con la fecha actual, formato `YYYY-MM-DD HH:mm` (**distinto** al de tickets, `DD/MM/AAAA`) |
+| `POST /api/promesa-pago/` | **`id_factura` NO se valida** pese a que la doc lo marca requerido -- un valor imposible (`999999999`) no genero error junto a los demas campos vacios. El formato de `fecha_limite` del ejemplo oficial (`2022/08/26`, con barras) tambien esta mal: la API real exige guiones (`YYYY-MM-DD`), confirmado con un `400` de formato antes de acertar |
+
+**Bug encontrado, no de la API sino del catalogo propio**: `registrar_pago` llevaba
+tiempo en produccion sin declarar `filtros_verificados` -- el modelo no tenia
+forma de decir a que factura se referia, y el endpoint (`/api/facturas/{id}/
+registrar-pago/`) nunca podia resolver el marcador `{id}` de la URL. Toda
+llamada fallaba en silencio con `ErrorHerramientaHttp`, sin que ningun caso
+dorado lo hubiera notado (no habia ninguno que ejercitara esta herramienta).
+Corregido y verificado con un pago real sobre una factura de prueba (quedo
+`Pagada`, con `forma_pago`, `referencia` y `total_cobrado` reflejados).
 
 ### Crear cliente / instalacion — esquema confirmado (documentacion oficial, agosto 2026)
 
@@ -226,7 +288,197 @@ por API. Una herramienta de creacion NO necesita enviarlo.
 > No descartado del todo: podria requerir otro formato de valor o un endpoint
 > de accion propio, igual que borrar. Sin verificar todavia.
 
+### Reasignar un ticket: PUT sirve, PATCH lo ignora en silencio
+
+Verificado en vivo sobre un ticket real (28/08/2026), en los dos sentidos:
+
+```
+PATCH {"tecnico": "3684490"}          -> 200, el tecnico NO cambia
+PATCH {"tecnico": "999999999"}        -> 200, tampoco falla   <- lo DESCARTA
+PATCH con los 10 campos completos     -> 200, sigue sin cambiar
+PUT   con los 10 campos completos     -> 200, el tecnico SI cambia
+PUT   {"tecnico": "999999999", ...}   -> 400 "Seleccione una opcion valida"
+```
+
+Las dos ultimas lineas son el hallazgo: en **PUT** el campo se valida y se
+aplica; en **PATCH** se descarta sin decir nada, ni siquiera con un valor
+imposible. Un PATCH que responde 200 no significa que haya cambiado algo.
+
+Casi se documenta como "WispHub no permite reasignar por API": el `tecnico`
+ignorado en PATCH incluso con valor imposible, y ninguna sub-ruta de accion en
+el spec, parecian concluyentes. Faltaba probar el otro verbo. **Antes de dar
+una operacion por imposible, probar GET/PUT/PATCH/POST por separado** -- que
+uno la ignore no dice nada de los demas.
+
+`email_tecnico` si cambia con PATCH, y eso confunde mas: parece que el PATCH
+funciono. Cambiar solo ese campo NO mueve el ticket de cola.
+
+PUT exige el conjunto completo, el mismo que exige crear (ver arriba):
+`asunto` + `asuntos_default`, `departamento` + `departamentos_default`,
+`estado`, `prioridad`, `origen_reporte`, `tecnico`, `descripcion`. Mandar
+menos no da error: responde 200 y no cambia lo que falta.
+
 ## Trampas que ya costaron tiempo
+
+**`GET /api/tickets/{id}/` en paralelo devuelve 429.** Medido en produccion el
+20/10/2026: 808 tickets releidos con 6 lecturas a la vez dieron **80 con
+`429 Too Many Requests`** (~10 %). La misma relectura de a una, la del reloj,
+no los da. La API no manda cabecera de cupo que se haya visto. Para releer
+mucho, de a una o pocas; y para enterarse de cierres, no releer ticket por
+ticket: buscar un filtro del listado (por estado y fecha de cierre) y
+verificarlo con el metodo del valor imposible antes de usarlo.
+
+**`/api/tickets/?estado=N` SIN fechas devuelve solo el ultimo mes.** Medido
+en produccion el 20/10/2026: `estado=1` (Nuevo) dio 211 y `estado=2` (En
+Progreso) 15, el mas viejo el 94433, cuando habia 788 abiertos. Con
+`estado` + `fecha_creacion_0/1` en tramos de 59 dias, recorriendo hacia atras,
+salen los 788; el mas viejo, el 33501 del 29/04/2025, y ninguno antes de
+marzo de 2025. `estado=99` da 0: el filtro se aplica. Es lo que usa la
+conciliacion del motor (`importacion_io.listar_abiertos`).
+
+**Un ticket borrado en WispHub responde 404 por su numero**, y su caso en
+Dexter queda abierto para siempre: nada lo cierra solo. El mismo 20/10/2026,
+2 de 808 abiertos (95549 y 95778). Ese dia se cerraron a mano; desde la
+conciliacion del motor (`conciliar_meses`), dos 404 separados por una hora lo
+dejan "Eliminado" y el Supervisor lo cierra solo.
+
+**`estado_instalacion` y `costo_instalacion` NO sirven para detectar una
+instalacion desde `/api/clientes/`.** Esta misma skill documentaba que
+`?instalacion` "habilita" esos campos, y eso vale para ESCRIBIR, no para LEER.
+Medido el 08/10/2026:
+
+- `estado_instalacion` **no viene en ninguna respuesta de `/api/clientes/`**:
+  ni en la lista (54 campos) ni en el detalle (34 campos).
+- `costo_instalacion` **si viene en la lista** (ausente en el detalle, otra vez
+  la dualidad lista/detalle de esta API) pero esta **poblado en clientes
+  activos normales** (`'25000'`, `'50000'`): no distingue nada.
+- Como filtro de `/api/clientes/`, `estado_instalacion` se **IGNORA**: 7451
+  para `=999999999`, `=NO_EXISTE` y `=1..8`, identico a
+  `?campo_que_no_existe=1`.
+
+La via real es `/api/instalaciones/` (ver la tabla de catalogos).
+
+**Los TICKETS de instalacion no apuntan al registro de `/api/instalaciones/`:
+cuelgan del cliente ficticio `id_servicio=3545` "INSTALACIONES NUEVAS"**, que
+es un cliente NORMAL y activo en `/api/clientes/`. Medido sobre 3.418 tickets
+(01/09-08/10/2026): **220 cuelgan de 3545**, y los **23** con asunto
+"instalacion nueva" estan **todos** ahi (0 fuera). Pero solo **18 de los 220**
+tienen el asunto canonico: los otros 202 usan **200 asuntos distintos** que son
+el NOMBRE y el BARRIO del prospecto. Clasificar por asunto captura el **10%**;
+por `id_servicio`, el 100%. El id vive en la config del tenant
+(`WISPHUB_ID_SERVICIO_INSTALACIONES`), nunca fijo en codigo.
+
+> ⚠️ **Y por eso `asunto` es un campo con PII.** 126 asuntos distintos (127
+> tickets) traen `nombre | barrio` -- por ejemplo
+> `'Graciano Rojas Morantes / via el Tamarindo ... SABANAGRANDE'`. Si entra a
+> una lista blanca, va **tambien** a `campos_texto_libre` (CLAUDE.md §5, capa
+> 2). Es exactamente el caso de los 136 de 300 tickets con documento embebido,
+> en otro campo.
+
+**El campo `asunto` de los tickets es TEXTO LIBRE, no el enum del catalogo.**
+`/api/tickets/asuntos-tickets/` declara 142 asuntos; sobre 3.418 tickets reales
+hay **356 distintos**, y **277 (13% de los tickets) no estan en el catalogo**.
+Cobertura acumulada: top-15 = 70,9%, top-30 = 83,9%, top-50 = 89,0%,
+top-200 = 95,4%. Un mapa asunto->tipo se mantiene con el top-30 y un default
+explicito; **nunca con match exacto** (`Instalacion Nueva` exacto captura 18 de
+23; normalizado sin tildes y por prefijo, 23 de 23).
+
+**`?asunto=` es un filtro IGNORADO** (3418 con `NO_EXISTE_XYZ`, igual que sin
+filtro), lo mismo que `servicio`, `id_servicio`, `cliente` y
+`servicio__id_servicio` con `=3545` y con `=999999999`. Se trae la ventana y se
+cruza en codigo.
+
+**El rango de fechas de TICKETS no se llama `__range_0/_1` -- se llama
+`fecha_creacion_0`/`fecha_creacion_1`.** Verificado el 08/10/2026. El nombre
+con `__range` se IGNORA en silencio (mismo count que un parametro inventado).
+El real se delata con un 400 que nombra el problema:
+
+    ?fecha_creacion__range_0=...&__range_1=...  -> 566  (= base, IGNORADO)
+    ?fecha_creacion_0=2030-01-01                -> 400 "ingrese ambos valores del rango"
+    ?fecha_creacion_0=2030-01-01&_1=2030-02-01  -> 0    (imposible: SE APLICA)
+    ?fecha_creacion_0=2026-09-01&_1=2026-10-08  -> 3418
+    ?fecha_creacion_0=2026-01-01&_1=2026-10-08  -> 400 "no mayor a 2 meses"
+    ?fecha_creacion_0=26/09/2026&...            -> 400 "Use YYYY-MM-DD o YYYY-MM-DD HH:MM:SS"
+
+Importa el factor: SIN el filtro, `/api/tickets/` devuelve **566**; solo
+septiembre son **3.418**. El recorte propio descarta ~85%, y con el nombre
+equivocado nadie se enteraba porque la respuesta no da error. Ojo que el tope
+aca es de **2 meses**, no los 3 que vale para facturas.
+
+**El campo `usuario` SOLO viene en el listado, nunca en el detalle** (verificado
+25/08/2026). Es el identificador interno del cliente
+(`mario-sabanagrande@rapilink-sas`) y es el que arman las URLs del panel web:
+
+```
+GET /api/clientes/5832/             ->  usuario: None
+GET /api/clientes/?id_servicio=5832 ->  usuario: 'mario-sabanagrande@rapilink-sas'
+```
+
+Mismo registro, mismo proveedor, dos endpoints, respuestas distintas — el
+mismo patron que esta skill ya documenta para `usuario_rb`/`servicio`. Buscarlo
+en el detalle lleva a concluir que el campo no existe, y de ahi a **derivarlo
+del nombre** (pasar "MARIO SABANAGRANDE" a `mario-sabanagrande`). No hacerlo:
+dos clientes con nombre parecido dan un slug parecido, y el enlace abre la
+ficha de otra persona. El identificador es lo unico que no se parece a otro.
+
+Las URLs del panel (`wisphub.io`, distinto de `api.wisphub.io`):
+
+```
+perfil    /clientes/ver/{usuario}/
+trafico   /trafico/semana/servicio/{usuario}/{id_servicio}/
+ping      /clientes/ping/{usuario}/{id_servicio}/
+```
+
+
+**Un campo opcional puede aceptar AUSENTE y rechazar `null`.** Verificado en
+`/api/clientes/{id}/ping/` (agosto 2026): `interfaz` omitido responde 202, e
+`interfaz: ""` tambien, pero `{"interfaz": null}` devuelve
+`400 {"interfaz":["Este campo no puede ser nulo."]}`. La diferencia importa
+porque un valor vacio en la sesion se convierte en `None` con facilidad
+(`x.get(...) or None`) y termina viajando como `null` en el JSON. Al inyectar
+valores de sesion, **omitir la clave** en vez de mandarla nula.
+
+**Una tarea asincrona puede decir SUCCESS y traer un error de texto como
+resultado.** El caso peor de esta API hasta ahora, porque no hay como
+detectarlo mirando codigos de estado. En `/api/clientes/{id}/ping/` con
+`arp_ping=true` y sin `interfaz`:
+
+```
+POST  -> HTTP 202  {"task_id": "..."}
+GET /api/tasks/{id}/  ->  status: SUCCESS
+    result: [{'ping-1': '('Error "failure: interface needs to be specified
+              for arp ping" executing command /ping =arp-ping=yes ...'}]
+```
+
+HTTP correcto, tarea exitosa, y adentro un error en prosa donde deberia haber
+metricas (`received`, `packet-loss`, `avg-rtt`). Con `arp_ping=false` la misma
+llamada devuelve el ping de verdad. **`arp_ping` exige `interfaz`**, y como
+`interfaz_lan` vacio es normal (ver mas arriba), dejarlo en true rompe el
+diagnostico de muchos clientes sin que nada lo denuncie.
+
+**`interfaz_lan` PRESENTE pero incorrecta rompe el ping igual que `arp_ping`
+mal puesto -- mismo sintoma, causa distinta.** El caso de arriba es con el
+campo vacio (normal). Si el campo tiene un valor que no corresponde a esta
+ONU en particular (visto en vivo, agosto 2026, en una ficha de prueba), el
+mismo error de texto aparece igual (`"input does not match any value of
+interface"`), no importa `arp_ping`. La leccion completa: no confiar en
+`interfaz_lan` en absoluto para pinguear -- ver mas abajo por que
+`ping_cliente` dejo de inyectarlo del todo.
+
+**`ping-exitoso` es TEXTO ("3 de 3", "0 de 3"), nunca un booleano.**
+Verificado en vivo (agosto 2026). Costo un bug real: una precondicion de
+`Herramienta.exige_previas` (`nucleo/config/schema.py`) se declaro con
+`valor: true`, comparacion EXACTA contra un campo que en realidad nunca es
+`true`/`false` sino la cadena `"N de M"` -- la precondicion quedo imposible
+de cumplir desde el dia que se escribio, sin que ningun error lo avisara (el
+modelo simplemente nunca podia pasar el gate, y eso se veia identico a "el
+modelo no quiere ofrecer esto"). Se detecto recien despues de varias pruebas
+en vivo fallidas, sospechando primero del modelo y no del dato. Leccion: al
+declarar una `Precondicion` contra un campo de una API externa, verificar el
+VALOR Y EL TIPO reales (con una llamada real o revisando esta skill), nunca
+asumir que "exitoso" se traduce a un booleano solo porque el nombre del
+campo lo sugiere.
+
 
 **Los filtros de estado son NUMERICOS.** `?estado=Nuevo` devuelve 0 resultados
 sin error alguno. Parece "no hay tickets nuevos"; en realidad la consulta no
@@ -245,6 +497,88 @@ para comparar nada. En facturas el recorte son ~2 ultimos meses de emision.
 Mas alla devuelve HTTP 400. Se valida ANTES de llamar, o el asesor ve un
 "fallo al llamar a WispHub" sin saber por que.
 
+### Escribir `sn_onu` en un cliente — verificado por OPTIONS el 28/09/2026
+
+```
+OPTIONS /api/clientes/<id>/          -> 200
+  actions declara UN metodo:          PUT     (NO PATCH)
+  actions.PUT.sn_onu                  {type: string, read_only: false,
+                                       required: false}
+```
+
+O sea: el campo es escribible y el metodo del detalle es **PUT**. Se midio con
+OPTIONS y un GET para tomar un id, sin escribir nada.
+
+⚠️ **LO QUE ESTO NO PRUEBA, y es el riesgo grave.** Un `PUT` normalmente espera el
+recurso COMPLETO. Si WispHub lo aplica asi, mandar solo `sn_onu` podria **vaciar
+los demas campos del cliente** -- direccion, telefono, plan --. En `/api/tickets/`
+ya se midio que el PUT acepta un cuerpo parcial (*"no exige el resto del recurso
+pese a ser PUT"*), pero **eso es otro endpoint** y esta API no es consistente:
+`sn_onu` mismo tiene la dualidad leer/escribir que esta skill documenta para
+`usuario_rb`.
+
+Y hay un antecedente exacto de que OPTIONS puede mentir en esta API: las fechas
+estimadas de un ticket **aparecen en `actions.POST` y hasta marcadas REQUERIDO**, y
+el POST las descarta en silencio (09/09/2026, ver
+`tenants/rapilink.config.yaml::crear_ticket_instalacion`).
+
+**MEDIDO EL 28/09/2026 con un PUT real contra el cliente de prueba 6555, y el
+riesgo NO se materializo:**
+
+```
+PUT {"sn_onu": "CANARIO-SN-1"}   -> 200, y al leer QUEDO ESCRITO
+PUT {"comentarios": "canario-2"} -> 200, y sn_onu SOBREVIVIO intacto
+```
+
+O sea: **el PUT de este endpoint es PARCIAL.** Escribe lo que se manda y no toca
+el resto. Mandar solo `sn_onu` es seguro, y la herramienta que lo hace se puede
+encender.
+
+### Tres trampas que aparecieron al medirlo, y ninguna estaba documentada
+
+**1 · Un PUT con campos que la API no acepta devuelve 200 y NO escribe nada.** El
+primer intento mando `nombre`, `direccion` y `telefono` a la vez: respondio `200`
+y al leer los tres seguian vacios. Es la misma trampa que esta skill describe para
+los filtros --*"la API ignora en silencio y devuelve como si nada"*-- ahora en una
+escritura. **Un 200 de esta API no prueba que se escribio: hay que leer despues.**
+
+Probablemente sea la dualidad leer/escribir que esta skill ya documenta para
+`usuario_rb` y para los tickets: los nombres que se LEEN de un cliente no son
+todos los que se ESCRIBEN. No se investigo cuales son los de escritura de esos
+tres, porque no hacian falta.
+
+**2 · `sn_onu` NO SE PUEDE VACIAR.**
+
+```
+PUT {"sn_onu": ""}     -> 200  y el valor anterior SIGUE AHI
+PUT {"sn_onu": " "}    -> 200  idem
+PUT {"sn_onu": null}   -> 400
+```
+
+Importa para el producto: si un equipo se retira de una casa, el campo no se puede
+limpiar. Lo unico que se puede es sobrescribirlo con otro valor. Una funcion de
+"desinstalar" que espere vaciarlo va a fallar en silencio.
+
+**3 · Por eso el cliente 6555 quedo con `sn_onu = "PRUEBA-BORRAR"`.** No se pudo
+dejar vacio como estaba. Es un cliente de prueba y el valor lo dice, pero queda
+anotado para que nadie lo tome por un serial real.
+
+*(El procedimiento fue el mismo con el que se verificaron los tickets: cliente de
+PRUEBA, canarios obviamente falsos, y la ficha completa guardada antes para poder
+restaurarla.)*
+
+**`sn_onu` solo lo tiene el 68% de los clientes activos.** Medido el 14/08/2026
+sobre los 4.163 activos (paginacion verificada: 4.163 filas, 4.163 ids
+distintos): 2.864 traen serial, **1.299 lo tienen vacio**. Una primera muestra
+de las 12 primeras paginas daba 75% — el sesgo de las primeras paginas es real,
+hay que recorrer todo.
+
+Importa porque `sn_onu` es la llave contra SmartOLT (y contra cualquier sistema
+que indexe por ONU): **1 de cada 3 clientes no se puede diagnosticar por ahi**,
+y una herramienta que lo asuma le falla a un tercio de la base. El formato es
+uniforme: 12 caracteres con prefijo de fabricante (`HWTC*` Huawei, `CDTC*`,
+`DF*`, `DC*`).
+
 **El campo `telefono` guarda varios numeros en uno.** El 55% de los clientes.
 Leerlo como valor unico da 43% de cobertura; extrayendo todos los moviles
 (`(?<!\d)3\d{9}(?!\d)`), 98.7%.
@@ -254,6 +588,157 @@ Leerlo como valor unico da 43% de cobertura; extrayendo todos los moviles
 `password_ssid_router_wifi`) y las **coordenadas GPS** del domicilio. Por eso la
 lista de campos es BLANCA por rol y no negra: con lista negra, un campo nuevo
 del proveedor queda expuesto por defecto.
+
+### `coordenadas` del cliente: SIN MEDIR todavia (05/11/2026)
+
+**No se pudo medir, y por eso no entra a ningun parseo hasta que se mida.** Ese
+dia se intento confirmar el formato real de `coordenadas` en `/api/clientes/`
+--el campo que `consultar_cliente` ya trae-- para copiarlo a dos columnas
+`FloatField` (`gps_lat`, `gps_lng`) de la orden de trabajo. La medicion no
+pudo correr: en la maquina de desarrollo **no existe `WISPHUB_API_KEY`**
+(`py -3.13 cli/sondear_api.py` -> `Falta WISPHUB_API_KEY en el .env`). Lo que
+si se comprobo es que el bloqueo es la credencial y no la red:
+`curl https://api.wisphub.io/api/clientes/?limit=1` sin clave -> **403**.
+
+Lo unico confirmado ese dia es DOCUMENTACION, no medicion:
+
+| Esquema oficial | Que dice de `coordenadas` |
+|---|---|
+| `Clientes/components/Clientes.yaml` (la LISTA, que es la que usa `consultar_cliente` via `?id_servicio=`) | `coordenadas: {title: Coordenadas, type: string}` -- **un solo campo de texto**, sin `format`, sin `example`, sin `maxLength`, sin `nullable` |
+| `Clientes/components/ServicesRetrieve.yaml` (`/api/clientes/{id}/`) | el mismo campo, identica definicion |
+| `Clientes/components/ClientesRetrieve.yaml` (`/api/clientes/{id}/perfil/`) | **no lo tiene**: ese serializer es de facturacion |
+
+En ninguno de los tres hay `latitud`/`longitud`/`gps` por separado: si son dos
+numeros, viajan **dentro de esa unica cadena**.
+
+Lo que SIGUE SIN MEDIR, y hace falta antes de parsear: el separador (coma,
+punto y coma, espacio), si lleva espacios, **el orden (`lat,lng` o `lng,lat`)**,
+cuantos decimales, si trae basura alrededor (parentesis, comillas, un enlace de
+Google Maps), que devuelve cuando el cliente no lo tiene cargado (`""`, `null`,
+el string `"None"`, `"0,0"`, o la clave ausente) y **cuantos clientes lo tienen
+cargado sobre el total**, partido por `estado`.
+
+Dos cosas que ya se pueden decidir sin la medicion, porque no dependen de ella:
+
+- **`"0,0"` se rechaza aparte del vacio.** Es una coordenada valida --en el
+  Golfo de Guinea-- asi que una guarda que solo pregunte "esta vacio?" la deja
+  pasar y manda al tecnico al Atlantico. Mismo criterio que el de
+  `ping-exitoso`: el valor y el tipo reales, no el que sugiere el nombre.
+- **Un punto que no se pudo parsear se guarda como `null`, nunca aproximado.**
+  Ya es la decision escrita en `campo/dia_publicado.py` (05/11/2026): sin
+  coordenadas la pantalla dice «sin ubicacion» y no se geocodifica la
+  direccion. Un punto inventado se lee como un hecho.
+
+Como medirlo cuando haya clave (SOLO LECTURA): paginar `GET /api/clientes/`
+con `limit`/`offset` propios sobre HTTPS --nunca el `next`, que viene en
+`http://`-- y clasificar por fila la FORMA del campo (digitos a `D`) mas los
+conteos por `estado`. Se imprime la forma y el conteo, **nunca el valor**:
+una coordenada es el domicilio de una persona. Mismo criterio y mismo motivo
+que `cli/medir_serial_onu.py`, que ya hace esto para `sn_onu`.
+
+Y el orden **no se asume**: Barranquilla es ~10.9 N / -74.8 W, asi que el signo
+lo delata (el componente negativo es la longitud). Se comprueba sobre clientes
+de una ciudad conocida, no sobre uno cualquiera.
+
+### Escribir `coordenadas`: se puede, y la trampa es que NO HAY `PATCH`
+
+Leido del spec el 05/11/2026 (DOCUMENTADO, no medido). El campo es escribible
+por dos operaciones, y por ninguna otra:
+
+| Operacion | Ruta | `coordenadas` | Respuesta que declara el spec |
+|---|---|---|---|
+| Crear | `POST /api/clientes/agregar-cliente/{id_zona}/` | opcional, `type: string`. El `required` del body es solo `usuario_rb`, `ip`, `plan_internet` | **`202` + `task_id`** (uuid) + `messages`. No declara 200 ni 201 |
+| Editar | `PUT /api/clientes/{id_servicio}/` | opcional a nivel de campo; el `requestBody` entero es `required: true` | **`200`** con el cliente, **o `202`** con `task_id`. El spec NO dice cuando devuelve cada una |
+
+### VERIFICADO el 10/11/2026: el `PUT` de cliente es SINCRONO, y devuelve la ficha
+
+El spec dejaba la duda («200 **o** 202, no dice cuando»), y la duda no era
+academica: un `202` pasa `raise_for_status()` sin ruido, asi que el sistema
+habria marcado la operacion como exitosa y dicho «guardada» sin que nadie
+comprobara que se aplico -- y con la fila de idempotencia en `exitosa`, sin
+forma de volver a intentarlo.
+
+Medido contra el servicio de prueba con `cli/medir_respuesta_coordenada.py`:
+
+    PUT /api/clientes/5832/  {"coordenadas": "<valor con un decimal movido>"}
+      -> 200   (nunca 202; sin `task_id` en la respuesta)
+    GET de control            -> el valor CAMBIO
+    PUT de restauracion       -> 200, quedo como estaba
+
+**Es sincrono.** Quien escriba por aca puede confiar en el codigo de estado.
+(Ojo: esto es el `PUT` de EDITAR. El `POST` de crear si es asincrono y
+devuelve `202` + `task_id` -- son dos endpoints distintos.)
+
+### Y LA RESPUESTA DEVUELVE LA FICHA ENTERA: 34 CAMPOS, CON TRES CONTRASENAS
+
+Medido en la misma corrida. Las claves que vuelven, sin sus valores:
+
+    asesor, auto_activar_servicio, comentarios, COORDENADAS, estado,
+    facturas_pagadas, fecha_cancelacion, fecha_instalacion, fecha_registro,
+    firewall, forma_contratacion, id_servicio, interfaz_lan, ip,
+    ip_router_wifi, local_address_pppoe, mac_cpe, mac_router_wifi,
+    modelo_antena, modelo_router_wifi, PASSWORD_CPE, PASSWORD_ROUTER_WIFI,
+    PASSWORD_SSID_ROUTER_WIFI, plan_internet, protocolo_conexion_cpe,
+    router, sectorial, sn_onu, ssid_router_wifi, tecnico, usuario_cpe,
+    usuario_rb, usuario_router_wifi, zona
+
+**Un PUT a este endpoint no es «una confirmacion corta»: es una ficha de
+cliente.** Importa porque lo que devuelve el ejecutor se guarda en
+`asistente.operaciones_externas.respuesta`, en claro y sin pasar por ninguna
+lista blanca -- esa vive en el bucle del modelo, y las rutas dedicadas no
+pasan por ahi. La migracion de esa tabla asume lo contrario: «para las tres
+acciones de red es una confirmacion corta, no una ficha de cliente».
+
+Quien escriba por este endpoint tiene que DESCARTAR el cuerpo antes de que
+llegue a la idempotencia, o esas tres contrasenas y el domicilio quedan
+guardados de nuestro lado. Hecho en
+`nucleo/seguimiento/coordenada_del_cliente.py`, que devuelve un acuse.
+
+Lo encontro una auditoria de PII como hipotesis («plausible, no medido»), y
+esta corrida lo confirmo.
+
+
+**No existe `PATCH` de cliente, y no hay endpoint de ubicacion sola.** Buscado
+en `api-main.yaml`: ningun path contiene `ubicacion`, `coordenadas`, `latitud`,
+`longitud`, `gps` ni `mapa`. Las unicas escrituras de cliente son las dos de
+arriba mas `DELETE`, `activar`, `desactivar` y `eliminar-clientes`.
+
+**LA TRAMPA, Y ES LA RAZON DE ESTA SECCION.** Sin `PATCH`, actualizar una sola
+coordenada obliga a un `PUT`, y un `PUT` significa "reemplaza el recurso". El
+spec **no dice** si WispHub lo trata como reemplazo total --borrando los campos
+que no se mandan-- o como parcial. Mandar `{"coordenadas": "..."}` a secas y
+que la ficha pierda plan, IP y telefono es un modo de falla que no avisa: la
+respuesta seria `200`. **Antes de escribir una sola coordenada hay que medir
+esto contra el cliente de prueba** (servicio 5832, Mario Sabanagrande): leer la
+ficha entera, hacer el `PUT` minimo, volver a leer y comparar campo por campo.
+Hasta que eso este medido, escribir coordenadas no entra al catalogo.
+
+El spec tampoco declara el formato en escritura: la unica `description` es
+`"Coordenadas."` y el ejemplo cURL es `"coordenadas": "String"` --un marcador
+de posicion, no un dato--. O sea que **la doc confirma que no documenta el
+formato**, ni para leer ni para escribir: la unica fuente sigue siendo medir.
+
+**El descuido de `mac_cpe`, ahora confirmado tambien en escritura.** En
+`create_clientes.yaml` el campo `mac_cpe` tiene `description: Coordenadas.`,
+el mismo texto que el campo `coordenadas`. Es el error ya anotado arriba, y
+ahora se sabe que esta en el esquema que alguien usaria para ESCRIBIR: quien
+se guie por la descripcion puede mandar la coordenada al campo de la MAC.
+
+Donde viven estos archivos:
+
+```
+https://wisphub.net/static/yaml/api/Clientes/paths/create_clientes.yaml    (POST)
+https://wisphub.net/static/yaml/api/Clientes/paths/retrieve_servicio.yaml  (GET/PUT/DELETE)
+https://wisphub.net/static/yaml/api/Clientes/parameters/list_parameters.yaml
+```
+
+**No hay filtro por coordenadas.** `list_parameters.yaml` declara filtros por
+servicio, usuario, nombre, apellido, telefono, rfc, cedula, ip, email,
+direccion, localidad, ciudad, usuario_cpe, mac_cpe, usuario_router_wifi,
+ssid_router_wifi, sn_onu, comentarios, estado, forma_contratacion, tecnico,
+asesor, sectorial, plan_internet, router, `limit` y `offset`. **Ninguno** por
+coordenadas, ni de existencia ("los que tienen cargado"), ni geografico. Para
+medir cobertura hay que paginar todo y contar del lado de aca.
 
 **Un endpoint puede existir y estar vacio.** `/api/gastos/` responde 200 con 0
 registros. "Existe" no significa "tiene datos".
@@ -290,7 +775,81 @@ fallan con ella. Conviene reintentar con la variante contraria ante un 404.
 **`do_not_notify_client: true`** en `/api/tickets/comentarios/` permite dejar
 notas internas sin enviar correo al cliente. Es un flag no documentado
 oficialmente. Ese endpoint da 404 en esta instancia — puede ser diferencia de
-version o de plan.
+version o de plan. **La via que SI existe aca es otra** (`/respuesta/`, abajo).
+
+### Responder y cerrar un ticket: `POST /api/tickets/{id}/respuesta/`
+
+Verificado end-to-end contra produccion el 28/08/2026 (HTTP 201, y confirmado
+con un `GET` posterior, no solo por el eco de la respuesta).
+
+`multipart/form-data`, no JSON:
+
+| Campo | Req. | Valores |
+|---|---|---|
+| `respuesta` | si | El texto. Se guarda como HTML (`<p>...</p>`) |
+| `ticket-estado` | si | **1** Nuevo, **2** En Progreso, **3** Resuelto, **4** Cerrado |
+| `ticket-prioridad` | si | **1** Baja, **2** Normal, **3** Alta, **4** Muy Alta |
+| `ticket-falla` | no | Lista cerrada de ~30 fallas (incluye `Cambio de Contraseña en Router Wifi`) |
+| `archivo` | no | PDF/Word/imagen. **Acepta VARIOS en una sola llamada** -- ver abajo |
+| `reabrir-ticket` | no | Responde y reabre |
+
+> **`archivo` es singular en la doc y acepta VARIOS igual** (medido el
+> 07/11/2026, ticket 97918 del servicio de prueba 5832). Se mandan como
+> varias partes multipart con el MISMO nombre de campo --`archivo` repetido--
+> y la respuesta devuelve `archivos` en plural con una URL por cada uno:
+>
+> ```
+> HTTP 201
+> {"respuesta":"...","archivos":[
+>    "https://avisos.wisphub.io/media/tickets/respuesta/.../prueba-2.png",
+>    "https://avisos.wisphub.io/media/tickets/respuesta/.../prueba-1.png"]}
+> ```
+>
+> **Importa mucho mas de lo que parece**: como `ticket-estado` es obligatorio,
+> CADA llamada mueve el ticket. Si `archivo` aceptara uno solo, adjuntar las
+> seis fotos de un tecnico serian seis respuestas y seis escrituras de estado
+> sobre el ticket de un cliente. Con varias partes es UNA.
+>
+> Del lado nuestro hay una trampa que costo un instrumento: en Python,
+> `requests` arma las partes desde un **dict** si se le pasa un dict, y un
+> dict no repite claves -- el segundo archivo pisa al primero y sale uno
+> solo, sin error. Hay que pasarle una **lista de tuplas**
+> `[("archivo", (...)), ("archivo", (...))]`. La primera version de la sonda
+> usaba un dict y habria concluido "acepta uno" midiendo su propio defecto.
+>
+> El ORDEN no se conserva: se mandaron prueba-1 y prueba-2, y volvieron al
+> reves. No asumir que el primero de la lista es el primero del ticket.
+>
+> Y otra, de lectura: la lista `respuestas` que devuelve `GET /api/tickets/
+> {id}/` **no viene con la mas nueva al final**. Leer `respuestas[-1]` para
+> verificar lo que se acaba de escribir devuelve otra. Se verifica por el
+> cuerpo del 201 o contando.
+
+> **No es "dejar un comentario": es responder Y MOVER EL TICKET.** `ticket-estado`
+> es obligatorio, asi que toda respuesta fija un estado. Comprobado sin querer:
+> un ticket **Cerrado** al que se le mando una respuesta con `ticket-estado=2`
+> quedo **En Progreso**. Quien use esto para "solo agregar una nota" tiene que
+> mandar el estado que el ticket YA tiene, o lo reabre.
+
+> **`PATCH /api/tickets/{id}/` con `{"estado": 4}` NO cierra el ticket.**
+> Responde `200` con el ticket entero de vuelta —parece que funciono— y la
+> lectura posterior sigue diciendo `En Progreso`. Es el mismo eco enganoso que
+> ya se documento para `PATCH` sobre clientes. **La unica forma verificada de
+> cambiar el estado de un ticket es `POST /respuesta/`.**
+
+> **`OPTIONS` sobre `/respuesta/` devuelve 500, no 404.** Un 500 ahi NO
+> significa que el endpoint no exista: la ruta existe y `POST` funciona
+> perfecto. Si se sondea con `OPTIONS` (que es lo que esta misma skill
+> recomienda para descubrir escritura), este endpoint se descartaria por
+> error. Ante un 500 en `OPTIONS`, probar el `POST` real antes de concluir.
+
+**El autor de la respuesta es la cuenta de la API key**, no quien la origino:
+las respuestas quedan firmadas como `Rapilink SAS - admin@rapilink-sas`. Si
+alguna vez importa distinguir quien contesto, hay que decirlo DENTRO del texto
+de la respuesta -- el campo `autor` no se puede elegir.
+
+El ticket leido con `GET` trae `respuestas` (lista de `{respuesta, created,
+autor}`) y `finalizado_por` con el nombre de quien lo cerro.
 
 **El asunto se guarda como `"Asunto - Cliente"`**, y el catalogo de origen trae
 errores de tipeo (`INSTATALACION NUEVA`). Al categorizar hay que cortar en
@@ -354,7 +913,7 @@ confirmados contra produccion `.io` con un `GET` real:
 | `/api/categorias-gastos/` | 40 | Relevante si algun dia se puebla `/api/gastos/` |
 | `/api/planes-adicionales/` | 1 | |
 | `/api/servicios-adicionales/` | 3704 | |
-| `/api/instalaciones/` | 1 | Trae un registro con forma de cliente completo (nombre, cedula, direccion, email). Parece ser instalaciones PENDIENTES actuales, no historico — sin confirmar del todo |
+| `/api/instalaciones/` | 2 | **Las instalaciones son un universo DISJUNTO de `/api/clientes/`.** Verificado 08/10/2026: sus registros traen `estado: "Instalacion"` --un quinto valor de TEXTO que ningun codigo numerico 0-12 alcanza en `/api/clientes/`-- y **no existen** en clientes: `?id_servicio=7764` da `count: 0` y `GET /api/clientes/7764/` da **404**. Los 4 estados de cliente (3952+1157+2253+89) suman **exacto** 7451, sin solapamiento. Filtros: `estado_instalacion` **SE APLICA aqui** (imposible -> 0; `=1` -> 1, `=8` -> 1, suma exacta), `id_servicio` se aplica, `zona` se IGNORA. `GET /api/instalaciones/{id}/` da 404: solo coleccion |
 | `/api/fichas/` | 0 | Sistema de fichas/hotspot; Rapilink no lo usa |
 | `/api/tarjeta-cobranza/` | 0 | Sin uso en esta instancia |
 | `/api/tickets/asuntos-tickets/` | — | Catalogo completo de ~140 asuntos. Confirma el hallazgo de otro proyecto: `"Instalacion Nueva"` y `"Instatalacion Nueva"` (typo) conviven como valores DISTINTOS del catalogo de origen |
@@ -396,6 +955,233 @@ de un solo registro. Con el antecedente de esta sesion —un `DELETE` en el
 recurso obvio que fallaba con 500 mientras la via real era un sub-recurso
 distinto— cualquiera de estos puede comportarse distinto a lo que el nombre
 sugiere. Ninguno se prueba sin plan concreto y autorizacion explicita.
+
+## El campo `coordenadas`: lo medido (10/11/2026)
+
+Medido contra produccion (`api.wisphub.io`) para decidir si un tecnico puede
+guardar el GPS del cliente desde la app de campo. Cliente de prueba: 5832.
+
+**Un solo campo, texto libre, `"lat,lon"`.** No hay `lat`/`lon` separados, ni
+numeros: es una cadena. Viene en la respuesta de LISTA (54 campos) y en la de
+DETALLE (34 campos) -- a diferencia de `usuario`, aqui los dos endpoints
+coinciden. `/api/clientes/{id}/perfil/` (33 campos: nombre, cedula, direccion,
+telefono...) **NO trae coordenadas**: el GPS vive en el recurso del SERVICIO,
+no en el del cliente.
+
+**El vacio es `""`, nunca `null` ni `"0,0"`.** Medido sobre 4.644 filas de
+lista: 2.982 con cadena vacia, 0 con la clave ausente, 0 con `null`, 0 con
+`"0,0"`. La condicion "este cliente no tiene coordenadas" es cadena vacia o
+cadena que no parsea.
+
+**El campo NO esta validado: guarda cualquier texto.** En 2.700 filas
+muestreadas convivian cuatro formas distintas y una basura:
+
+| Forma | Cuantas (de 2.700) |
+|---|---|
+| `lat,lon` decimal, 5 a 15 decimales por componente | ~1.350 |
+| grados-minutos-segundos (`10°52'...N 74°55'...W`) | 257 |
+| `lat -lon` separados por ESPACIO, sin coma | ~105 |
+| direcciones de calle (`Cl. 45c # 3D-21`) | 6 |
+| un `--74.xxx` con doble signo menos | 1 |
+
+Por eso un lector no puede asumir `split(",")`: hay que parsear defensivamente
+y tratar lo no parseable como "sin coordenadas". Y confirmado por el lado de
+escritura: un `POST /api/clientes/agregar-cliente/32278/` con
+`{"coordenadas": "ESTO_NO_ES_UNA_COORDENADA"}` y sin los tres requeridos
+devolvio `400 {"ip":[...],"usuario_rb":[...],"plan_internet":[...]}` --
+**ni una palabra sobre `coordenadas`**: el serializer la acepta como texto.
+
+**Escritura: `PUT /api/clientes/{id}/` es la via documentada y alcanzable.**
+`OPTIONS /api/clientes/{id}/` -> `Allow: GET, PUT, PATCH, DELETE, HEAD, OPTIONS`.
+La coleccion sigue siendo `GET, HEAD, OPTIONS`. No existe sub-ruta de accion:
+`/api/clientes/{id}/coordenadas/` y `/api/clientes/editar-cliente/{id}/` dan 404.
+El `PUT` del spec (`Clientes/paths/retrieve_servicio.yaml`, bajar aparte: el
+`openapi.yaml` principal solo trae `$ref`) lista `coordenadas` como string
+junto a los otros 30 campos del servicio. La clave de API **no esta bloqueada
+por permiso**: el `PUT` llega a la validacion de negocio (400 de dominio), no
+a un 403.
+
+**`PATCH` con un dict anidado revienta con 500.** `PATCH {"plan_internet":
+{"id": 999999999}}` -> **500** (pagina HTML), sin cambiar nada. El mismo cuerpo
+por `PUT` -> `400 {"detail":"No se encontro el plan de internet"}`. Y `PATCH {}`
+-> `200` devolviendo el objeto entero, con los 34 campos intactos: PATCH no
+esta roto, lo rompe el dict anidado. `PATCH` tambien ignora claves que no
+existen (200, sin cambios).
+
+**El eco de PATCH/PUT no prueba nada** (ya documentado para tickets y estado de
+cliente): las dos respuestas devuelven el objeto completo. Toda comprobacion se
+hizo con un `GET` posterior y un diff campo por campo contra un respaldo previo.
+
+**Trampas al armar un `PUT` completo** -- el detalle que se LEE no se puede
+reenviar tal cual:
+
+- `estado` se lee como texto (`"Gratis"`, `"Activo"`) y el `PUT` lo quiere
+  entero (0 instalacion, 1 activo, 2 suspendido, 3 cancelado, 4 gratis).
+- `plan_internet`, `router`, `tecnico`, `zona`, `modelo_antena`, `sectorial`
+  se leen como objetos (`{"id":..., "nombre":...}`, y `router` trae ademas
+  `falla_general`) y el `PUT` los quiere como `{"id": N}`.
+- el detalle devuelve los cuatro campos de contrasena: un `PUT` de objeto
+  completo los reenviaria. Razon de peso para escribir SOLO `coordenadas`.
+
+### VERIFICADO el 10/11/2026: el PUT parcial APLICA y NO PISA
+
+Lo que arriba quedaba pendiente ya se midio, con escritura real autorizada por
+el usuario sobre el servicio de prueba **5832**:
+
+    PUT /api/clientes/5832/   {"coordenadas": "<valor con el ultimo decimal movido>"}
+      -> 200
+    GET /api/clientes/5832/   -> `coordenadas` quedo en el valor nuevo
+                                 unico campo que cambio de los 34
+                                 19 campos con valor antes, 19 despues
+    PUT /api/clientes/5832/   {"coordenadas": "<valor original>"}  -> restaurado
+
+**Mandar solo `coordenadas` es seguro**: no vacia ninguno de los otros 33
+campos. No hace falta leer y reenviar el objeto completo --que ademas obligaria
+a convertir `estado` a entero y los anidados a `{"id": N}`, y reenviaria las
+cuatro contrasenas--.
+
+⚠️ **POR QUE EL VALOR TIENE QUE SER DISTINTO, y no el mismo.** La primera
+pasada de esta misma prueba (en SmartOLT, misma sesion) escribio el valor que el
+registro YA tenia y midio «0 campos cambiaron». Parece la respuesta y no lo es:
+con un valor identico, «nada cambio» es exactamente lo que se veria si la API
+hubiera IGNORADO la llamada --y el 200 no desempata, porque ya esta medido que
+estas APIs devuelven 200 de eco ante un cuerpo que no leyeron--. Una prueba que
+no distingue «funciono» de «no hizo nada» no prueba nada. Mover el ultimo
+decimal (misma ubicacion, ~10 cm) deja las dos preguntas separadas: que APLICO
+se ve en el campo, y que NO PISO se ve en el diff.
+
+### La IDENTIDAD del cliente no esta donde uno la busca (12/11/2026)
+
+**El detalle del servicio NO trae el nombre, la direccion, la cedula ni el
+telefono.** Medido sobre el 5832: `GET /api/clientes/5832/` devuelve 34 campos
+y esos cuatro NO ESTAN -- ni vacios, AUSENTES. Son dos recursos distintos con
+la misma raiz:
+
+| Recurso | Campos | Que es |
+|---|---|---|
+| `/api/clientes/{id}/` | 34 | EL SERVICIO: ip, plan, zona, router, sn_onu, coordenadas, las cuatro contrasenas |
+| `/api/clientes/{id}/perfil/` | 33 | LA PERSONA: nombre, apellidos, cedula, direccion, telefono, email |
+
+La trampa no es que falte documentacion: es que el nombre del endpoint dice
+"clientes" y lo que devuelve es el servicio. Buscar `nombre` ahi y encontrar
+que no esta lleva a concluir que la API no lo expone. Y el error simetrico ya
+estaba medido en el otro sentido: `/perfil/` NO trae `coordenadas`.
+
+### VERIFICADO el 12/11/2026: el PUT parcial del PERFIL aplica, y es la via
+### para que un tecnico corrija la identidad desde la puerta
+
+Hasta hoy de `/perfil/` solo se habia verificado el **DELETE** (el borrado
+real). Tambien acepta escritura, y con la misma propiedad que ya se habia
+medido en el servicio: **un PUT con SOLO los campos que cambian aplica y NO
+pisa el resto.** Escritura real autorizada por el usuario sobre el servicio de
+prueba **5832**:
+
+    OPTIONS /api/clientes/5832/perfil/
+      -> 200  Allow: GET, PUT, PATCH, DELETE, HEAD, OPTIONS
+
+    PUT /api/clientes/5832/perfil/
+        {"nombre": ..., "direccion": ..., "cedula": ..., "telefono": ...}
+      -> 200
+    GET /api/clientes/5832/perfil/   (aparte, no el eco)
+      -> los CUATRO aplicaron
+         los otros 29 campos intactos
+         24 campos con valor antes, 24 despues
+    PUT con los valores originales   -> 200, los cuatro restaurados
+
+Cada campo se escribio con un valor DISTINTO del que tenia, por la razon que
+esta seccion ya explica mas arriba: con un valor identico, «nada cambio» es
+indistinguible de «la API ignoro la llamada».
+
+**POR QUE IMPORTA.** Una instalacion nueva entra como ticket del cliente
+ficticio del ISP (un prospecto sin identidad resuelta), y hoy el nombre, la
+cedula y la direccion los teclea alguien que no tiene el documento delante. Con
+esto, quien SI lo tiene --el tecnico, parado en la puerta-- puede corregirlos,
+y el alta de red (ip, usuario_rb, plan, zona) sigue siendo de la oficina, que
+es la unica que conoce la topologia.
+
+### MEDIDO el 12/11/2026: Rapilink NO usa el modulo de instalaciones
+
+Solo lectura, sin una sola escritura. Y el resultado cambia el diseño, asi que
+conviene leerlo antes de construir cualquier cosa sobre `/api/instalaciones/`:
+
+    GET /api/instalaciones/                          count = 1
+        ?estado_instalacion=1  Nueva                 0
+        ?estado_instalacion=2  Progreso              0
+        ?estado_instalacion=3  Activada              0
+        ?estado_instalacion=4  Terminada             0
+        ?estado_instalacion=7  Pendiente             0
+        ?estado_instalacion=8  Planificacion         1   <- la unica
+                               suma de los seis      1   = el total
+
+**UN registro, y esta en pre-instalacion.** El trabajo de instalacion de esta
+empresa NO vive aca: vive en los TICKETS, con asunto «Instalacion Nueva» y
+departamento «Ventas». Construir la app contra este endpoint seria construir
+contra una tabla vacia.
+
+(Limite de la medicion, que hay que decir: esta API aplica recortes propios sin
+filtro de fecha --medido en tickets y facturas--, asi que «1» puede ser «1 en la
+ventana reciente» y no «1 en la historia». Para lo que se decidio hoy no cambia
+nada: de las seis listas que un tecnico mirarian, cinco estan en cero.)
+
+**El filtro `estado_instalacion` SI se respeta**: un valor imposible
+(`999999999`) devuelve 0, y la suma de los seis estados cuadra con el total.
+
+**La fila NO trae `estado_instalacion`.** Son 54 campos y ese NO esta --
+AUSENTE, no vacio--. Lo que trae es `estado`, y como TEXTO: `'Instalación'`,
+no un numero. O sea: se puede FILTRAR por `estado_instalacion` y no se puede
+LEER de vuelta. Quien quiera saber en que estado quedo algo tiene que deducirlo
+de la lista en la que aparece.
+
+**`tecnico` vino `null`** en esa fila, consistente con el hallazgo de que en
+instalaciones asignadas la asignacion real viaja en `email_tecnico`. Su filtro
+devuelve 0 ante un imposible (buena senal) pero NO se pudo validar con un valor
+real: con una sola fila y su tecnico en null, ningun id devuelve un
+subconjunto. **No es «no funciona», es «no se puede medir con estos datos»** --
+y la diferencia importa: declararlo verificado seria inventar.
+
+### Lo que NO hace falta verificar, y por que
+
+Se iba a medir si `estado_instalacion` se puede MOVER por API (1 -> 2 -> 4),
+con una escritura sobre el servicio de prueba. **Se descarto antes de hacerla**,
+por dos razones:
+
+1. No hay nada que mover: cinco de los seis estados estan en cero.
+2. El sujeto estaba mal elegido. El 5832 esta **Activo**, y
+   `estado_instalacion` no es una etiqueta como `nombre`: es una posicion en una
+   fila de trabajo. Escribirselo podria meter un cliente real en la «Lista de
+   instalaciones» del panel --inventandole trabajo al equipo-- o moverle el
+   `estado` del servicio, que reserva el `0` para «instalacion». El riesgo no es
+   perder un dato: es cortarle el servicio a alguien o ensuciarle la cola a
+   quien despacha.
+
+Para cerrar una instalacion se usa lo que YA esta verificado:
+`POST /api/tickets/{id}/respuesta/` con `ticket-estado`, que es la unica forma
+confirmada de mover el estado de un ticket.
+
+### `/api/instalaciones/` es la pantalla del panel, y sin filtro no la devuelve
+
+La entrada anterior de esta skill decia «1 registro, parece ser instalaciones
+pendientes, sin confirmar». El spec lo aclara: es el
+«Lista de instalaciones» Y «Lista de pre-instalaciones» de WispHub, y **se
+filtra por `estado_instalacion`**:
+
+    1 Nueva · 2 Progreso · 3 Activada · 4 Terminada · 7 Pendiente
+    8 Planificacion   <- las PRE-instalaciones
+
+Pide el permiso «Lista de Clientes». Cada fila trae **54 campos**, con las
+cuatro contrasenas, la cedula y las coordenadas: lista blanca obligatoria.
+
+**No hay catalogo de `localidad` ni de `ciudad`** en ninguna de las 54 rutas
+(si hay `/zonas/`, `/router/`, `/sectorial/`, `/plan-internet/`, `/staff/`,
+`/modelo-antena/`, `/proveedores/`, `/formas-de-pago/`). Son texto libre, y esa
+es la causa estructural de las direcciones mal escritas. Los valores que YA
+existen se pueden cosechar de la base de clientes: `localidad` y `ciudad` son
+filtros verificados.
+
+**`/api/solicitar-instalacion/` no es para el tecnico.** Es un alta de
+PRE-instalacion y exige `front_dni_proof`, `back_dni_proof` y
+`proof_of_address` (archivos binarios), ademas de nombre, apellido, direccion y
+telefono. Es un flujo de ventas, no de campo.
 
 ## Antes de dar por buena una integracion
 

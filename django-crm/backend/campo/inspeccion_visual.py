@@ -1,0 +1,513 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ QUE SE VE EN LA FOTO QUE SUBIO EL TECNICO  --  31/10/2026
+================================================================================
+
+Pedido del usuario: que las fotos de evidencia se analicen con IA para ver si
+la instalacion quedo bien, y que el supervisor pueda revisarlo.
+
+ESTA ES LA ETAPA 1, Y SU ALCANCE ES DELIBERADO
+-----------------------------------------------
+Se analiza UNA foto cuando el tecnico la confirma, contra lo que su plantilla
+ya declara que esa foto tiene que mostrar, y el resultado aparece como un
+punto mas en la revision del cierre que ya existe.
+
+Lo que NO hace, y no es que falte: no extrae estructura del texto (el
+proveedor no puede devolver JSON -- medido el 02/10/2026, ver
+`nucleo/canales/vision.py:22-33`), no arma dataset de entrenamiento, y no
+tiene pantalla propia. Esas etapas se deciden con el numero que esta produce:
+cuantas veces el analisis coincide con lo que el supervisor habria dicho.
+
+LA DECISION QUE MANDA SOBRE TODO LO DEMAS
+------------------------------------------
+**El punto de IA NUNCA puede valer False.** Solo `True` o `None`.
+
+`revision_del_cierre.py` convierte cualquier punto en `False` en el veredicto
+NO_CERRAR, y ese veredicto ademas alimenta el cierre autonomo del Supervisor.
+Si la IA pudiera decir que no, una opinion no verificada de un modelo
+bloquearia el trabajo de un tecnico y frenaria un cierre que nadie reviso.
+
+`None` ya significa REVISAR --"miralo vos"--, que es exactamente el alcance
+que corresponde: la IA puede pedir atencion, nunca negar un cierre. Es
+"crecer en alcance, no en autonomia" (CLAUDE.md §4) aplicado al caso.
+
+Decidido el 31/10/2026 con esa recomendacion escrita, antes de la primera
+linea de codigo, porque despues habria sido una correccion y no una decision.
+
+DE DONDE SALE QUE TIENE QUE MOSTRAR CADA FOTO
+----------------------------------------------
+De `evidencias[].instrucciones` del esquema de la plantilla
+(`campo/plantillas.py:507`): un texto libre, por requisito, por empresa, que
+una persona escribe en español desde `/supervisor-noc/plantillas`. Ya existia.
+No se invento ningun catalogo de prompts ni ninguna superficie de config
+nueva: lo que varia por empresa ya estaba modelado como configuracion.
+
+QUE PASA CON LOS FORMATOS QUE EL ANALIZADOR NO MIRA
+----------------------------------------------------
+El storage de campo acepta JPEG, PNG, WebP, HEIC y PDF
+(`campo/services/storage.py:25-27`); `vision.es_imagen()` solo JPEG y PNG. Una
+foto de iPhone (HEIC) se sube bien y el analizador la rechaza. **No se
+convierte a ciegas** --mismo criterio que `vision.py:232-238`-- y tampoco se
+trata como un fallo: se anota el motivo y el punto queda en `None`. Que
+aparezca cuantas veces pasa es parte de lo que la etapa 1 viene a medir.
+
+NO ESCRIBE NADA. Igual que `revision_del_cierre.py`: lee, decide y devuelve.
+Quien persiste es `campo/tasks.py`.
+================================================================================
+"""
+from __future__ import annotations
+
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+#: Lo que el CRM le manda al motor y lo que entiende de vuelta.
+ESTADO_OK = "procesado"
+ESTADO_APAGADO = "apagado"
+
+#: EL MOTIVO QUE NO SE GUARDA. Cuando la empresa no tiene esto habilitado no
+#: pasa nada y no queda nada: ni fila, ni punto en la revision, ni foto que
+#: haya salido del CRM. Es una cadena y no un booleano porque quien decide no
+#: escribir es la tarea, y tiene que poder distinguir ESTE motivo de un fallo
+#: de verdad -- un fallo si se guarda, para que se vea.
+#:
+#: Lo encontro el revisor de PII (31/10/2026): la primera version escribia
+#: fila igual, y con eso `punto_de_la_revision` veia "ninguna se pudo mirar",
+#: devolvia el punto en "no se sabe" y el veredicto pasaba a REVISAR. Con la
+#: funcion APAGADA --que es el default y lo que va a produccion-- eso habria
+#: frenado el cierre autonomo del Supervisor en toda orden con evidencia.
+MOTIVO_APAGADO = "esta empresa no tiene habilitado que se miren las fotos"
+
+#: Los formatos que el analizador del motor mira hoy. Se comprueba de ESTE
+#: lado para no pagar un viaje HTTP por una foto que va a rechazar igual, y
+#: para que el motivo que se guarda diga "HEIC" y no "no es JPEG ni PNG".
+FIRMA_JPEG = bytes([0xFF, 0xD8, 0xFF])
+FIRMA_PNG = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+
+#: Tope del analizador (`nucleo/canales/vision.py::MAX_BYTES`). El storage de
+#: campo admite 25 MB, asi que una evidencia valida puede pasarse. Se mide
+#: aca, con su motivo, en vez de descubrirlo como un error del proveedor.
+MAX_BYTES = 8 * 1024 * 1024
+
+#: Cuanto se espera al motor. Mas que el timeout de vision (30 s) para que el
+#: que corte sea el de alla y su motivo sea el de alla.
+TIMEOUT_SEGUNDOS = 45
+
+
+def formato_legible(contenido: bytes) -> str:
+    """Como nombrar el formato en el motivo. No adivina: mira la firma."""
+    if not contenido:
+        return "vacio"
+    if contenido[:3] == FIRMA_JPEG:
+        return "JPEG"
+    if contenido[:8] == FIRMA_PNG:
+        return "PNG"
+    if contenido[4:12] == b"ftypheic" or contenido[4:12] == b"ftypheix":
+        return "HEIC"
+    if contenido[:4] == b"RIFF" and contenido[8:12] == b"WEBP":
+        return "WebP"
+    if contenido[:4] == b"%PDF":
+        return "PDF"
+    return "desconocido"
+
+
+def se_puede_mirar(contenido: bytes) -> str:
+    """"" si se puede analizar, o el motivo por el que no. Falla cerrado."""
+    if not contenido:
+        return "el archivo llego vacio"
+    if len(contenido) > MAX_BYTES:
+        return (f"pesa {len(contenido) // 1024} KB y el analizador acepta "
+                f"hasta {MAX_BYTES // 1024} KB")
+    formato = formato_legible(contenido)
+    if formato not in ("JPEG", "PNG"):
+        return f"el analizador solo mira JPEG y PNG, y esto es {formato}"
+    return ""
+
+
+def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
+    """El texto que la plantilla declara para ESTE requisito, o "".
+
+    Sale de `evidencias[].instrucciones` del esquema de la version del tipo de
+    trabajo. Si la plantilla no lo declara se manda el titulo, que al menos
+    dice de que es la foto; si no hay ni eso, se manda vacio y el analizador
+    describe lo que ve sin saber que se le pedia.
+    """
+    version = getattr(evidencia.orden_trabajo, "tipo_trabajo_version", None)
+    esquema = (getattr(version, "esquema", None) or {}) if version else {}
+    for e in esquema.get("evidencias") or []:
+        if not isinstance(e, dict) or e.get("id") != evidencia.requisito_id:
+            continue
+        #  `instrucciones_propias` SOLO reemplaza el texto de la plantilla,
+        #  nunca el envoltorio  --  06/11/2026
+        #
+        #  Existe para poder PROBAR una redaccion antes de guardarla. Y entra
+        #  aca, y no en quien llama, porque el prefijo "Esta foto tenia que
+        #  mostrar: <titulo>." es portante: las reglas 7 y 12 de
+        #  `INSTRUCCION_EVIDENCIA` disparan solo "si te dijeron que tenia que
+        #  mostrar", y la linea MUESTRA: es una de ellas.
+        #
+        #  La primera version del comando de prueba reemplazaba el pie
+        #  COMPLETO. Probaba un prompt sin prefijo y guardaba uno con prefijo:
+        #  podia decir que un texto funciona y que al guardarlo cambiara el
+        #  veredicto. Un instrumento que mide otro camino que el que corre.
+        instrucciones = (instrucciones_propias.strip()
+                         or str(e.get("instrucciones") or "").strip())
+        titulo = str(e.get("titulo") or "").strip()
+        #  SI ES UNA CAPTURA, SE LO DECIMOS  --  07/11/2026
+        #
+        #  El usuario: «que siga distinguiendo entre una foto a otra pantalla
+        #  y captura». Son dos cosas distintas y el modelo no tenia como
+        #  separarlas: veia pixeles de pantalla y marcaba ATENCION en las dos.
+        #
+        #  Una CAPTURA es legitima --el test de velocidad ES una captura, por
+        #  eso existe `es_captura` en la plantilla-- y una foto tomada DE otra
+        #  pantalla es sospechosa: puede ser el trabajo de otro, o una
+        #  impresion. La diferencia no la puede inventar el modelo; la sabe la
+        #  plantilla, que ya declara cual es cual.
+        #
+        #  SOLO SE AFLOJA DONDE LA EMPRESA LO DECLARO. En las demas fotos la
+        #  sospecha queda intacta, que es justo lo que el usuario pidio
+        #  conservar.
+        if bool(e.get("es_captura")):
+            #  LAS DOS FORMAS VALEN  --  08/11/2026
+            #
+            #  El usuario: «el test de velocidad debe permitir foto a otra
+            #  pantalla o captura, porque a veces se toma la foto para el
+            #  test». Y es el uso real: el tecnico corre el speedtest en el
+            #  telefono del cliente y lo fotografia con el suyo.
+            #
+            #  No contradice lo que pidio el dia anterior --«que siga
+            #  distinguiendo entre una foto a otra pantalla y captura»--: se
+            #  sigue distinguiendo y se dice cual es, lo que cambia es que no
+            #  levanta ATENCION. Describir no es marcar.
+            #
+            #  Lo que SI tiene que marcar es lo unico que importa aca: que los
+            #  numeros no se puedan leer. Una captura perfecta de la que no se
+            #  lee la velocidad no sirve, y una foto torcida de la que se lee
+            #  todo, si.
+            marca = (" Esta evidencia puede ser una captura de pantalla del "
+                     "telefono O una foto tomada de otra pantalla: la empresa "
+                     "acepta las dos, asi que NADA de eso es motivo de "
+                     "atencion --ni reflejos, ni trama, ni bordes, ni que la "
+                     "pantalla este inclinada--. Deci cual de las dos parece, "
+                     "en pocas palabras, y marca atencion SOLO si los numeros "
+                     "que se pedian no se pueden leer.")
+        else:
+            marca = ""
+        #  EL RANGO QUE LA EMPRESA DECLARO, ANTES DE LEER  --  11/11/2026
+        #
+        #  EL CASO, MEDIDO EN LA OT #201. La foto de `medicion_al_salir` se
+        #  miro CUATRO veces y las cuatro leyeron «-2.10 dBm» donde la
+        #  pantalla dice «-21.0». Una hasta lo subraya: «punto decimal
+        #  visible». El modelo no duda: esta seguro de su error.
+        #
+        #  POR QUE ESTO Y NO MAS RELECTURAS. El 11/11 por la manana se
+        #  construyo la doble lectura, que ataca VARIANZA --el modelo que se
+        #  equivoca distinto cada vez-- y la #201 mostro que lo de esta
+        #  pantalla es SESGO: lee igual de mal todas las veces. Releer no
+        #  puede arreglar un sesgo; darle la magnitud que espera, si. (En la
+        #  vuelta 1 de esa misma orden SI hubo varianza --2 lecturas de -21.0
+        #  y 2 de -2.10 de la misma foto-- asi que la doble lectura sigue
+        #  sirviendo; las dos cosas no se reemplazan.)
+        #
+        #  ES GUIA, NO GARANTIA (PRD 7.4). El codigo sigue descartando lo que
+        #  no puede salir de ese medidor; esto solo le da al modelo la
+        #  oportunidad de no equivocarse. Y se le pide VERIFICAR, nunca
+        #  ajustar: un prompt que diga «tiene que estar entre X e Y» invita a
+        #  inventar un numero que encaje, que es peor que leer mal.
+        #
+        #  SALE DE LA PLANTILLA DE LA EMPRESA (CLAUDE.md §3.3): Rapilink
+        #  declara -60 a -8 en ese campo. Otra empresa con otro instrumento
+        #  declara otra cosa y el pie cambia solo.
+        rango = ""
+        try:
+            from campo.revision_del_cierre import limites_de_la_foto
+
+            limites = limites_de_la_foto(evidencia.orden_trabajo,
+                                         evidencia.requisito_id)
+        except Exception:                                        # noqa: BLE001
+            limites = None
+        if limites:
+            piso, techo = limites
+            rango = (f" Esta empresa declara que una lectura valida de este "
+                     f"medidor va de {piso:.1f} a {techo:.1f} dBm. Si el "
+                     f"numero que lees cae fuera de ese rango, volve a mirar "
+                     f"la posicion del punto decimal antes de contestar: es "
+                     f"el error mas comun al leer estas pantallas. NO cambies "
+                     f"el numero para que encaje --si despues de mirarlo otra "
+                     f"vez seguis leyendo lo mismo, escribi lo que ves--.")
+
+        if instrucciones:
+            return (f"Esta foto tenia que mostrar: {titulo or evidencia.requisito_id}. "
+                    f"{instrucciones}{marca}{rango}")
+        if titulo:
+            return f"Esta foto tenia que mostrar: {titulo}.{marca}{rango}"
+        break
+    return ""
+
+
+def _motor() -> tuple[str, dict]:
+    """La base del motor y las cabeceras. Un solo sitio que lo arma."""
+    base = (os.environ.get("MOTOR_URL", "") or "http://motor:5000").rstrip("/")
+    cabeceras = {}
+    token = os.environ.get("MOTOR_SERVICE_TOKEN")
+    if token:
+        cabeceras["X-Servicio-Token"] = token
+    return base, cabeceras
+
+
+def _esta_habilitado(tenant: str) -> bool:
+    """Si ESTA empresa tiene habilitado que se miren sus fotos de evidencia.
+
+    FALLA CERRADO en todos los frentes: si el motor no contesta, contesta
+    cualquier otra cosa, o la respuesta no se entiende, la foto no sale. Eso
+    es lo contrario de como falla la mayoria de las consultas de este
+    proyecto, y es a proposito: esto no es un dato de servicio, es el
+    consentimiento de una empresa para mandarle fotos de la casa de sus
+    clientes a un tercero. No poder comprobarlo no es permiso.
+    """
+    import requests
+
+    base, cabeceras = _motor()
+    try:
+        r = requests.get(f"{base}/interno/vision/evidencias-habilitada",
+                         params={"tenant": tenant}, headers=cabeceras,
+                         timeout=10)
+        if r.status_code != 200:
+            return False
+        return bool((r.json() or {}).get("habilitada") is True)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("inspeccion visual: no se pudo comprobar el "
+                       "interruptor (%s)", type(e).__name__)
+        return False
+
+
+def _bytes_de(evidencia) -> bytes | None:
+    """El binario de la evidencia, o None si no se pudo leer.
+
+    Pasa por `CampoStorage.ruta_absoluta`, que es quien tapa el path
+    traversal: la key sale de la base, pero leerla por otro camino seria
+    saltearse la unica defensa que hay si alguna fila quedara con '../..'.
+    """
+    from campo.services.storage import CampoStorage
+
+    try:
+        ruta = CampoStorage.ruta_absoluta(evidencia.storage_key)
+        if not ruta or not os.path.exists(ruta):
+            return None
+        with open(ruta, "rb") as f:
+            return f.read()
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("inspeccion visual: no se pudo leer el archivo (%s)",
+                       type(e).__name__)
+        return None
+
+
+def analizar(evidencia, instrucciones_propias: str = "") -> dict:
+    """Mira UNA evidencia. Devuelve que paso; no escribe.
+
+    `instrucciones_propias` es para PROBAR una redaccion antes de guardarla
+    en la plantilla (06/11/2026). Va por el mismo camino, el mismo proposito
+    y el mismo envoltorio que produccion -- si fuera por otro, lo que se mida
+    aca no diria nada de lo que va a pasar despues. Que esta funcion NO
+    ESCRIBA es lo que hace seguro probar: un ensayo no deja un analisis
+    falso en la bitacora de la orden.
+
+    `{"estado", "texto", "motivo", "modelo", "segundos", "tokens"}`.
+
+    NUNCA LEVANTA: el archivo del tecnico ya esta guardado (un hecho) y el
+    analisis es otro. Que el segundo falle no puede convertir la subida en un
+    500 -- mismo criterio que `cierre_en_isp.cerrar_ticket_al_validar`.
+    """
+    #  LA EMPRESA SALE DE LA ORDEN, NUNCA DEL ENTORNO (revisor de PII,
+    #  31/10/2026). La primera version leia `MOTOR_TENANT`, que es UNA por
+    #  instalacion: con dos empresas en la misma, la foto tomada dentro de la
+    #  casa de un cliente de la B se habria mandado al proveedor porque la A
+    #  tiene el interruptor encendido, y la factura habria caido en la A. El
+    #  interruptor que este modulo justifica con "no es el mismo
+    #  consentimiento" se habria evaluado contra el consentimiento de otra
+    #  empresa. Hay una guarda que lo caza:
+    #  `common/tests/test_motor_tenant_falla_cerrado.py`.
+    from operaciones.areas_del_tenant import tenant_de
+
+    tenant = tenant_de(evidencia.org)
+    if not tenant:
+        return _no("no se sabe a que empresa del motor pertenece esta orden: "
+                   "no se le manda la foto a nadie")
+
+    #  EL CONSENTIMIENTO SE PREGUNTA ANTES DE MOVER LOS BYTES (H1). La ruta
+    #  de analisis tambien lo comprueba --ahi vive el control-- pero para
+    #  entonces la foto ya salio del servicio que es su dueño. Preguntar
+    #  primero cuesta un GET sin cuerpo.
+    if not _esta_habilitado(tenant):
+        return _no(MOTIVO_APAGADO)
+
+    contenido = _bytes_de(evidencia)
+    if contenido is None:
+        return _no("no se pudo leer el archivo de la evidencia")
+
+    motivo = se_puede_mirar(contenido)
+    if motivo:
+        return _no(motivo)
+
+    import requests
+
+    base, cabeceras = _motor()
+    try:
+        r = requests.post(
+            f"{base}/interno/vision/analizar-evidencia",
+            params={"tenant": tenant},
+            files={"imagen": ("evidencia.jpg", contenido, "image/jpeg")},
+            data={"pie": que_tenia_que_mostrar(evidencia,
+                                               instrucciones_propias)},
+            headers=cabeceras, timeout=TIMEOUT_SEGUNDOS)
+        cuerpo = r.json() if r.content else {}
+        if not isinstance(cuerpo, dict):
+            cuerpo = {}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("inspeccion visual: no se pudo hablar con el motor (%s)",
+                       type(e).__name__)
+        return _no(f"no se pudo hablar con el motor ({type(e).__name__})")
+
+    if r.status_code != 200:
+        return _no(f"el motor contesto HTTP {r.status_code}")
+    estado = str(cuerpo.get("estado") or "")
+    if estado == ESTADO_APAGADO:
+        return _no(str(cuerpo.get("motivo") or "el analisis esta apagado"))
+    if estado != ESTADO_OK or not str(cuerpo.get("texto") or "").strip():
+        return _no(str(cuerpo.get("error") or "el analizador no devolvio texto"))
+
+    return {"estado": ESTADO_OK, "texto": str(cuerpo["texto"]).strip(),
+            "motivo": "", "modelo": str(cuerpo.get("modelo") or ""),
+            "segundos": cuerpo.get("segundos") or 0,
+            "tokens": cuerpo.get("tokens") or 0}
+
+
+def _no(motivo: str) -> dict:
+    return {"estado": "", "texto": "", "motivo": motivo, "modelo": "",
+            "segundos": 0, "tokens": 0}
+
+
+# =============================================================================
+#  EL PUNTO QUE VE EL SUPERVISOR
+# =============================================================================
+
+#: La clave del punto en `revision_del_cierre.revisar()`.
+CLAVE = "fotos"
+
+
+def punto_de_la_revision(orden):
+    """El sexto punto, o None si no aplica.
+
+    NUNCA DEVUELVE `ok=False`, y esa es la garantia entera de este modulo --
+    ver el encabezado. Las tres salidas:
+
+        None   esta empresa no lo tiene encendido, o no hay ninguna foto
+               analizada: el punto no aparece y la revision queda como antes.
+        True   se miraron todas las fotos y ninguna pidio atencion.
+        None (punto)  hay algo que una persona tiene que mirar. El texto dice
+               que, y el veredicto de la revision pasa a REVISAR.
+
+    Que "no se pudo mirar" y "mirala" den los dos `None` es a proposito: las
+    dos cosas significan lo mismo para quien decide --que el codigo no puede
+    afirmar que esta bien-- y distinguirlas en el veredicto invitaria a que
+    una de las dos empiece a contar como aprobacion.
+    """
+    from campo.models import AnalisisDeEvidencia
+
+    todas = list(AnalisisDeEvidencia.objects.filter(
+        org=orden.org, evidencia__orden_trabajo=orden,
+        vuelta=orden.vuelta).order_by("created_at"))
+    if not todas:
+        return None
+
+    #  LA ULTIMA DE CADA FOTO, NO TODAS LAS FILAS  --  11/11/2026, OT #200
+    #
+    #  La tabla es append-only: cada intento suma una fila. Contarlas todas
+    #  hacia que un intento FALLIDO pesara para siempre, aunque el siguiente
+    #  hubiera leido la foto bien.
+    #
+    #  MEDIDO EN LA OT #200, y es el caso que deja ver por que importa:
+    #      ia 10/11 15:17:31  motivo=no se pudo hablar con el motor (ReadTimeout)
+    #      ia 10/11 18:14:45  «Medidor Rouhan; pantalla legible: 1550 nm...»
+    #  El reintento del 10/11 hizo su trabajo y el punto seguia diciendo
+    #  «1 no se pudieron mirar». Sin esto, reintentar no sirve de nada aca:
+    #  ninguna mirada posterior puede limpiar el intento que fallo.
+    #
+    #  MISMO CRITERIO QUE EL RESTO DEL CIERRE: `_fotos_que_muestran_otra_cosa`
+    #  y `mirar_las_que_faltan` ya se quedan con la ultima por evidencia. Este
+    #  punto era el unico que las sumaba.
+    ultimo = {}
+    for a in todas:
+        ultimo[a.evidencia_id] = a
+    analisis = list(ultimo.values())
+
+    mirados = [a for a in analisis if a.texto]
+    sin_mirar = [a for a in analisis if not a.texto]
+    if not mirados:
+        #  Ninguna se pudo mirar. Se dice, y queda en "no se sabe": callarlo
+        #  dejaria al supervisor creyendo que la IA las aprobo.
+        return {"clave": CLAVE, "ok": None,
+                "texto": (f"No se pudo mirar ninguna de las {len(sin_mirar)} "
+                          f"fotos: {sin_mirar[0].motivo}")}
+
+    con_atencion = [a for a in mirados if a.pide_atencion]
+
+    #  Y LAS QUE MUESTRAN OTRA COSA  --  08/11/2026
+    #
+    #  Este punto miraba SOLO `ATENCION`, y `MUESTRA` es otra marca: el
+    #  modelo puede decir que la foto muestra algo distinto de lo que se
+    #  pidio --«MUESTRA: no»-- sin levantar atencion. En la practica las dos
+    #  suelen ir juntas, porque la regla 11 del prompt pide atencion cuando
+    #  «la foto no sirve como evidencia de lo que se pedia». Pero «suelen»
+    #  no es una garantia, y lo que estaba en juego es grande: una foto que
+    #  muestra otra cosa, sin atencion, dejaba el veredicto en «se puede
+    #  cerrar» y la orden se cerraba sola.
+    #
+    #  Lo encontro una guarda del efecto el 08/11/2026, al escribir la
+    #  devolucion automatica: el caso de prueba tenia «MUESTRA: no» sin
+    #  «ATENCION: si» y este punto contesto «nada llamo la atencion».
+    #
+    #  SIGUE SIN PODER DECIR QUE NO: `ok` es None, nunca False. La regla del
+    #  31/10 --una opinion no verificada no frena el trabajo de un tecnico--
+    #  no cambia; lo que cambia es que esa opinion deje de pasar inadvertida.
+    from campo.tasks import muestra_lo_pedido
+    otra_cosa = [a for a in mirados
+                 if a not in con_atencion
+                 and muestra_lo_pedido(a.texto or "") is False]
+
+    #  LAS DE CATALOGO SE CUENTAN APARTE  --  09/11/2026
+    #
+    #  Caian dentro de «piden una mirada» --el modelo marca ATENCION cuando ve
+    #  material de producto-- y ese texto no distingue una foto oscura de una
+    #  imagen bajada de una tienda. El supervisor leia «2 de 4 fotos piden una
+    #  mirada» y no tenia como saber que la diferencia era esa.
+    from campo.tasks import es_de_catalogo
+
+    de_catalogo = [a for a in mirados if es_de_catalogo(a.texto or "") is True]
+    con_atencion = [a for a in con_atencion if a not in de_catalogo]
+
+    if con_atencion or otra_cosa or de_catalogo or sin_mirar:
+        partes = []
+        if de_catalogo:
+            partes.append(
+                f"{len(de_catalogo)} es una imagen de producto, no una foto "
+                f"del trabajo" if len(de_catalogo) == 1 else
+                f"{len(de_catalogo)} son imágenes de producto, no fotos del "
+                f"trabajo")
+        if con_atencion:
+            partes.append(f"{len(con_atencion)} de {len(mirados)} fotos piden "
+                          f"una mirada")
+        if otra_cosa:
+            partes.append(f"{len(otra_cosa)} no es lo que se pidio"
+                          if len(otra_cosa) == 1 else
+                          f"{len(otra_cosa)} no son lo que se pidio")
+        if sin_mirar:
+            partes.append(f"{len(sin_mirar)} no se pudieron mirar")
+        return {"clave": CLAVE, "ok": None,
+                "texto": "Revisá las fotos: " + " y ".join(partes) + "."}
+
+    return {"clave": CLAVE, "ok": True,
+            "texto": f"Se miraron las {len(mirados)} fotos y nada llamó la atención."}
