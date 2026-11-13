@@ -194,6 +194,12 @@ comprobar("cliente_final" not in r["agentes"],
           "un agente sin conversaciones no aparece: no se afirma 'sin uso' sin datos")
 datos_agentes.desempeno = orig_desempeno
 
+extras = api._extras_de_agente({"nombre_visible": "x" * 99, "resumen": "Hace algo", "otra": 1})
+comprobar(extras.get("nombre_visible") == "x" * 60 and extras.get("resumen") == "Hace algo",
+          "el formulario hace llegar nombre y resumen al editor, recortados al tope del esquema")
+comprobar("nombre_visible" not in api._extras_de_agente({"atiende": "x"}),
+          "un formulario que no los manda no los borra")
+
 comprobar(datos_agentes.ultimos_digitos("whatsapp:+57 300 123 4821") == "•••• 4821",
           "la bitacora muestra solo los ultimos cuatro digitos")
 comprobar(datos_agentes.ultimos_digitos(None) == "—", "sin contacto, un guion")

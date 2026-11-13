@@ -4077,6 +4077,12 @@ def _extras_de_agente(cuerpo: dict) -> dict:
     extras = {}
     if "atiende" in cuerpo:
         extras["atiende"] = str(cuerpo.get("atiende") or "")[:400]
+    #  Para personas (13/11/2026): ver Rol.nombre_visible. Mismo tope que el
+    #  esquema, para que un texto largo se recorte y no tumbe el guardado.
+    if "nombre_visible" in cuerpo:
+        extras["nombre_visible"] = str(cuerpo.get("nombre_visible") or "")[:60]
+    if "resumen" in cuerpo:
+        extras["resumen"] = str(cuerpo.get("resumen") or "")[:280]
     for clave in ("conectar_al_router", "exige_verificacion"):
         if isinstance(cuerpo.get(clave), bool):
             extras[clave] = cuerpo[clave]
