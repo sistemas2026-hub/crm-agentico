@@ -7,27 +7,133 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **11/11/2026 — producción en `d73356f2`**, medida con
-`git fetch` sobre `origin/fix/integracion-wisphub`.
+Última actualización: **13/11/2026 — producción en `9972c6fc`**, medida con
+`git fetch` sobre `origin/fix/integracion-wisphub`. Lo que cerró esta sesión
+entró hasta **`8a696bf4`**, verificado como ancestro de esa punta.
 
-**La cabecera anterior tenía 23 días y afirmaba que producción era
-`ba5a1a5f`.** Lo era el 19/10; desde entonces entraron **532 commits**, de
-varias sesiones. **Esta actualización NO cataloga esos 532** — arregla el
-número que envejeció y agrega lo que cerró esta sesión. Quien necesite el
-detalle lo tiene en `git log ba5a1a5f..d73356f2`.
+**Hay al menos dos sesiones escribiendo la rama al mismo tiempo**: los dos
+commits que están por encima de `8a696bf4` no son de esta sesión. Esta
+actualización **no los cataloga** — cuenta lo que cerró, corrige el número que
+envejeció y poda las cuatro filas que ya no están abiertas.
 
-Que esto haya vuelto a pasar, con 532 en vez de 90, dice algo sobre el
-mecanismo y no sobre quien lo olvidó: un archivo que una sola sesión puede
-escribir envejece a la velocidad de las OTRAS. No es una propuesta de cambiar
-la regla del escritor único --nació de tres sesiones que lo dejaron en dos
-versiones divergentes-- sino un dato para quien la revise.
+El 11/11 esta cabecera tenía 23 días y afirmaba que producción era `ba5a1a5f`:
+lo era el 19/10, y en el medio entraron **532 commits** de varias sesiones. Que
+haya pasado con 532 en vez de 90 dice algo del mecanismo y no de quien lo
+olvidó: un archivo que una sola sesión puede escribir envejece a la velocidad
+de las OTRAS. No es una propuesta de cambiar la regla del escritor único
+--nació de tres sesiones que lo dejaron en dos versiones divergentes-- sino un
+dato para quien la revise.
 
-> **Esta sección la escribió una sesión que NO es la dueña del archivo**
-> (`integrar-centro-mando`), por pedido explícito del usuario el 11/11/2026.
-> Se limitó a la cabecera y a agregar la sección de abajo: no se tocó ninguna
-> otra, ni se podó nada.
+> **Las dos secciones de abajo las escribió una sesión que NO es la dueña del
+> archivo** (`integrar-centro-mando`), por pedido explícito del usuario el
+> 11/11 y el 13/11/2026. Se limitó a la cabecera, a agregar sus secciones y a
+> podar filas que ella misma cerró: no reescribió ninguna otra.
 
 ---
+
+## Las fotos de campo llevan la marca de la empresa — 12 y 13/11/2026
+
+**En producción hasta `8a696bf4`.** Una foto tomada desde la app sale con una
+banda que dice de quién es el trabajo: el nombre de la empresa, el del técnico,
+la fecha, la coordenada y el logo. **Qué dice cada línea lo decide la empresa
+desde `/supervisor-noc/programacion`, sin desplegar nada** — es configuración
+por tenant (CLAUDE.md §3.3), no un valor en código.
+
+### Arranca APAGADA, y la coordenada aparte
+
+Las dos cosas son decisiones, no defaults olvidados:
+
+- **`activa=False`.** Ninguna empresa empieza a recibir fotos marcadas por una
+  migración. Lo afirma `test_b1`, que es la guarda de la decisión.
+- **`mostrar_coordenadas=False`, aunque el usuario pidió las coordenadas.**
+  Estampar el GPS hornea el **domicilio del cliente dentro del píxel**, donde
+  la redacción ya no llega y de donde no se puede borrar: la imagen viaja al
+  ticket de WispHub y al caso del CRM. Se prende a propósito, una vez, sabiendo
+  eso.
+
+### El camino
+
+```
+la app sube la evidencia
+  → campo/views.py:1249              sincrónico, ANTES de guardar los bytes
+  → campo/marca_de_agua.py           la config de la empresa, el logo, qué NO se estampa
+  → campo/services/marca_de_agua.py  el dibujo: función pura, sin base ni red
+```
+
+**Falla ABIERTO, al revés que el interruptor y a propósito.** Cualquier error
+—una fuente que no está, un JPEG raro, un logo corrupto— devuelve los bytes
+originales. El técnico ya se fue de la casa: perder la marca es un problema,
+perder la evidencia no se puede repetir. Lo afirma `test_a6` con una evidencia
+a la que le falta todo lo que el puente lee.
+
+**Lo que no se estampa**: la firma del cliente (el logo encima la tapa), las
+capturas de pantalla que la plantilla declara como tales (la banda encima de un
+test de velocidad tapa los números que el test prueba, y hay una casilla para
+que la empresa lo decida al revés), los PDF, y lo ya guardado.
+
+### Lo que la revisión de PII encontró, y quien lo construyó no vio
+
+Tres hallazgos, los tres sobre la misma superficie: **lo que queda horneado en
+un archivo que sale de la empresa**.
+
+| | Qué | Por qué importa |
+|---|---|---|
+| H2 | `ubicacion_motivo` se imprimía **crudo** | lo escribe quien sube, sin validación. Se midió una cédula y un teléfono de 190 caracteres saliendo en el píxel. Hoy sale de un catálogo cerrado (`MOTIVOS_DE_UBICACION`) |
+| H3 | el **MIME declarado** decidía si se estampaba | registrar como HEIC y subir un JPEG apagaba la marca: la garantía la podía apagar el mismo al que certifica. Hoy deciden los bytes (`_es_imagen_dibujable`) |
+| H4 | entraba PNG, salía JPEG y **la fila seguía diciendo PNG** | tres consumidores leen el mime declarado, y la pantalla de revisión sirve `nosniff`, la cabecera que le prohíbe al navegador corregir la mentira |
+
+Y un cuarto, que no es un bug sino una decisión: la banda decía **«UBICACIÓN
+SIMULADA»**. Eso es una acusación sobre un empleado, irreversible, en un
+archivo que sale de la empresa, y ese flag tiene falsos positivos conocidos.
+Hoy dice **«ubicación no verificada»**.
+
+### Cómo se verificó, y qué no se corrió
+
+| Qué | Resultado |
+|---|---|
+| las 49 pruebas de la marca de agua | verdes |
+| **8 mutaciones deliberadas** sobre las guardas | **8 muertas**: las tres mentiras, la firma, el fallo abierto, y los tres hallazgos de arriba |
+| 96 pruebas del camino de la evidencia y de plantillas | verdes |
+| 61 pruebas aplicando las migraciones **desde cero** contra un Postgres limpio | verdes |
+| `makemigrations --check` | «No changes detected» |
+| **`svelte-check`** | **NO se corrió, y queda dicho**: la imagen del frontend es de producción (`build`, `node_modules`, `package.json`: sin `src` ni herramientas) y un `node_modules` armado en Windows no se monta en Linux. Se compilaron el `.svelte` y los dos `.js` con el compilador del propio proyecto |
+
+### Los dos errores de esta sesión, que valen más que lo construido
+
+**Dos migraciones `0050` en `campo`.** Otra sesión creó la suya mientras esta
+escribía la de la marca de agua. Dos hojas en el grafo y Django se niega a
+migrar: habría frenado el deploy de las dos, no solo el de quien llegó segundo.
+Renumerada a `0051` y encadenada a la ajena. **Es la segunda vez en el mismo
+día** (`28be6fd0`, dos `0049` en `campo`, unas horas antes): el síntoma es de la
+topología --varias sesiones escribiendo la misma app de Django-- y no del
+descuido de ninguna.
+
+**Y el commit del renombre salió vacío por dentro.** `git status` lo dijo con
+un `RM` y se leyó la R ignorando la M: el archivo quedó renombrado con la
+dependencia vieja. Lo cazó ir a verificar **lo commiteado** en vez de confiar en
+las pruebas, que habían corrido sobre el árbol de trabajo y no sobre el commit.
+`PARSEA ≠ IMPORTA ≠ FUNCIONA` tiene un hermano: **verde en el árbol ≠ verde en
+lo que se empuja.**
+
+### Lo demás que cerró esta sesión
+
+| Commit | Qué |
+|---|---|
+| `29ae3337` | **la cédula del cliente ya no queda escrita en la auditoría cuando el ISP falla**: `error_para_guardar()` reemplazó a `f"{type(e).__name__}: {e}"` en los 4 sitios que escriben a la base. Guarda el tipo, el `http_status`/`sqlstate` y `archivo:línea` — nunca el texto del tercero |
+| `552b4736` | **ahora se le puede preguntar al motor qué código está corriendo**: `/salud` devuelve una huella de 12 caracteres del contenido de `nucleo/**/*.py`, con CRLF normalizado a LF (sin eso, local y desplegado nunca coinciden). Es contenido, no hash de commit — la misma razón de §11 |
+| `c3330325` | **el interruptor se comprueba antes de cada escritura**, no una vez para las dos: había una ventana de hasta 15 s entre la primera y la segunda |
+| `a4f477a7` | **`test_errores_http` vuelve a verde**, y los 6 defectos que su rojo escondía |
+| `46154476` + `469c7af8` | **el serial y la cédula se leen con la cámara** en cualquier campo de texto que la plantilla declare `escaneable`. El segundo commit es el que importa: **editar la plantilla desde la pantalla borraba esa marca en silencio**, porque `leer_definicion()` no devolvía la bandera que `componer()` sí escribía. Se encontró antes de que mordiera |
+
+### Qué queda abierto de esto
+
+| | |
+|---|---|
+| **La prueba de punta a punta la hace el usuario** | prender la marca en Programación, cerrar una instalación con foto desde la app, y ver la banda en la revisión del cierre y en el ticket de WispHub |
+| El logo sale de `Org` y **no se carga en esta pantalla** | se carga en `/settings/organization`; la pantalla de la marca avisa si falta. Dos lugares para subir el mismo logo es un logo que diverge |
+| Tres defectos de ruteo, que son **configuración y decisión del usuario** | los tickets de TV reciben el formulario de fibra (`servicio_tv` no es alcanzable); «Cambio De Domicilio» cae en correctivo; «Troncal Partida» recibe un formulario que pregunta qué equipo se recogió (`trabajo_general` no es alcanzable) |
+| `potencia_en_la_roseta` no tiene rango bueno | hay un comando `fijar_rango_bueno` para ponérselo |
+| Las 88 pruebas base del CI siguen sin Postgres | el único camino que no toca producción es arreglar las ~28 que no pasan `created_at` (~2 h). Queda escrito en la cabecera del workflow |
 
 ## La ubicación del cliente, escrita desde la calle — 10 y 11/11/2026
 
@@ -113,10 +219,7 @@ Vale anotarlo junto, porque es la lección y no el detalle:
 | | |
 |---|---|
 | `invocable_por_servicio` sobra en las dos herramientas | abre el camino autónomo; quitarlo exige agregar las dos marcas a `editor._BANDERAS_DE_SISTEMA` en el mismo cambio |
-| **El actor no se persiste** | se valida en tres capas y no queda en ninguna fila: hoy no hay con qué contestar quién escribió una coordenada |
 | Las guardas de calidad del GPS viven solo en Dart | simulada, precisión y sin señal. El servidor escribe lo que le manden |
-| El interruptor se lee una vez para las dos escrituras | ventana de hasta 15 s entre la primera y la segunda |
-| `str(e)` en `operaciones_externas.error` | preexistente; no filtra la coordenada pero sí el id de servicio y el serial |
 | Los servicios **5345** y **5394** | coordenada en un formato que el parser no reconoce: puede ser basura o un quinto formato |
 
 ## App de campo: LAS DIEZ MEJORAS — 11/11/2026
@@ -305,7 +408,6 @@ fuerte que antes: ya no depende de que el técnico no toque el chip.
 
 | | |
 |---|---|
-| La APK con el sello **no está instalada todavía** | `dexter-campo-sello.apk`, 11/11 18:53. Las cifras del inicio no cambian hasta que se instale |
 | Los rojos intermitentes de `e2e_*` | la corrida completa (1376 pruebas) deja 2 en rojo, y **sin los cambios también falla, en pruebas distintas**. Corriendo solas pasan. Suites que comparten archivos de base |
 | Un «Otro» en el **bloqueo** no se puede medir todavía | cero bloqueos reportados. Dentro de dos meses la columna `categoria` dice cuáles motivos se usaron de verdad, y eso sí es una medición para decidir |
 
