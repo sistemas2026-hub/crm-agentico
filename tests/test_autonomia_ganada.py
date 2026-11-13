@@ -59,9 +59,16 @@ comprobar(ag.por_que_no_es_candidata(por_nombre["reiniciar_ont"]) == [],
           "reiniciar_ont es candidata: mide su efecto y exige previas")
 comprobar("efecto_no_verificable" in ag.por_que_no_es_candidata(por_nombre["registrar_pago"]),
           "registrar_pago NO: su efecto no se mide en codigo")
-comprobar(all(ag.por_que_no_es_candidata(h) for h in RAPILINK.herramientas
-              if h.aprobacion_humana and h.nombre != "reiniciar_ont"),
-          "y ninguna otra de las que hoy piden aprobacion")
+#  Desde el 10/11/2026 (7355682f) activar la TV y corregir el tipo de equipo
+#  tambien se comprueban en la ONU y exigen previas: son CANDIDATAS (se mide
+#  su evidencia), y siguen siendo CRITICAS -- tocan un servicio que se cobra
+#  (PRD §2) --, asi que solo una persona las puede promover con evidencia.
+CANDIDATAS = {"reiniciar_ont", "cambiar_tipo_onu", "activar_catv"}
+comprobar({h.nombre for h in RAPILINK.herramientas
+           if h.aprobacion_humana and not ag.por_que_no_es_candidata(h)} == CANDIDATAS,
+          "las candidatas son las que miden su efecto y exigen previas, y ninguna otra")
+comprobar(all(getattr(por_nombre[n], "critica", True) for n in CANDIDATAS - {"reiniciar_ont"}),
+          "y ser candidata no la vuelve no critica")
 sin_comprobaciones = SimpleNamespace(verificacion=SimpleNamespace(comprobaciones=[]),
                                      exige_previas=[object()])
 comprobar(ag.por_que_no_es_candidata(sin_comprobaciones) == ["efecto_no_verificable"],
@@ -159,8 +166,9 @@ comprobar("reiniciar_ont" in nombres and "consultar_cliente" not in nombres,
 reinicio = next(f for f in filas if f["accion"] == "reiniciar_ont")
 comprobar(reinicio["candidata"] and reinicio["elegible"] and reinicio["evidencia"]["revisadas"] == 40,
           "reiniciar_ont con su evidencia y su veredicto", str(reinicio))
-comprobar(pedidos == [("rapilink", "reiniciar_ont", AHORA - timedelta(days=30), AHORA)],
-          "se mide SOLO la candidata, en la ventana de la empresa", str(pedidos))
+comprobar(sorted(pedidos) == sorted(("rapilink", n, AHORA - timedelta(days=30), AHORA)
+                                    for n in CANDIDATAS),
+          "se miden SOLO las candidatas, en la ventana de la empresa", str(pedidos))
 pago = next(f for f in filas if f["accion"] == "registrar_pago")
 comprobar(not pago["candidata"] and not pago["elegible"] and "evidencia" not in pago,
           "una no candidata no se mide ni puede ser elegible", str(pago))
