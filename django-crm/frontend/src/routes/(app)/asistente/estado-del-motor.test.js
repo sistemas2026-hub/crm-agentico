@@ -12,7 +12,7 @@ vi.mock('$lib/server/v2/tenant.js', () => ({ tenantDeLaSesion: async () => m.ten
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
 const modulo = await import('./+page.server.js');
-const { PLAZO_ASISTENTE_MS } = modulo;
+const { _PLAZO_ASISTENTE_MS } = modulo;
 /** @type {(e: any) => Promise<any>} */
 const load = /** @type {any} */ (modulo.load);
 
@@ -60,7 +60,7 @@ describe('estado del asistente', () => {
     vi.useFakeTimers();
     try {
       const p = load(ev(() => 'colgado'));
-      await vi.advanceTimersByTimeAsync(PLAZO_ASISTENTE_MS + 10);
+      await vi.advanceTimersByTimeAsync(_PLAZO_ASISTENTE_MS + 10);
       expect((await p).estado).toBe('sin_respuesta');
     } finally {
       vi.useRealTimers();

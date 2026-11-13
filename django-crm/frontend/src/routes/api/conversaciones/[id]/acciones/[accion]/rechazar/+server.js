@@ -6,7 +6,7 @@ import { autorDeSesion } from '$lib/server/v2/autor.js';
 
 /** Lo más largo que se acepta como motivo. Es un registro de auditoría, no
  *  un documento: un texto mayor es casi seguro un pegado por error. */
-export const MOTIVO_MAXIMO = 500;
+export const _MOTIVO_MAXIMO = 500;
 
 /**
  * Rechazar una acción que la IA propuso, CON MOTIVO  --  12/11/2026
@@ -47,8 +47,8 @@ export async function POST({ locals, fetch, params, request }) {
   if (!motivo) {
     return json({ error: 'Escribí por qué la rechazás.' }, { status: 400 });
   }
-  if (motivo.length > MOTIVO_MAXIMO) {
-    return json({ error: `El motivo no puede pasar de ${MOTIVO_MAXIMO} caracteres.` },
+  if (motivo.length > _MOTIVO_MAXIMO) {
+    return json({ error: `El motivo no puede pasar de ${_MOTIVO_MAXIMO} caracteres.` },
       { status: 400 });
   }
 

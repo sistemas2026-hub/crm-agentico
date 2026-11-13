@@ -5,7 +5,7 @@ import { leerConPlazo } from '$lib/server/v2/plazo.js';
 
 /** Cuánto se espera al motor para preparar la pantalla. Lo que no llega se
  *  queda sin su opción; la pantalla no se retiene por eso. */
-export const PLAZO_ASISTENTE_MS = 4000;
+export const _PLAZO_ASISTENTE_MS = 4000;
 
 /**
  * Lo que la pantalla necesita saber ANTES de que alguien escriba:
@@ -44,13 +44,13 @@ export async function load({ locals, fetch }) {
 
   const [agentes, vision] = await Promise.all([
     puedeElegir
-      ? leerConPlazo(fetch, `${baseUrl}/agentes?tenant=${t}`, { headers: headersMotor() }, PLAZO_ASISTENTE_MS)
+      ? leerConPlazo(fetch, `${baseUrl}/agentes?tenant=${t}`, { headers: headersMotor() }, _PLAZO_ASISTENTE_MS)
       : Promise.resolve(null),
     leerConPlazo(
       fetch,
       `${baseUrl}/interno/vision/evidencias-habilitada?tenant=${t}&proposito=asistente_interno`,
       { headers: headersMotor() },
-      PLAZO_ASISTENTE_MS
+      _PLAZO_ASISTENTE_MS
     )
   ]);
 

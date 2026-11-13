@@ -9,7 +9,7 @@ vi.mock('$env/dynamic/private', () => ({ env: { PRIVATE_ASISTENTE_URL: 'http://m
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: (h = {}) => h }));
 vi.mock('$lib/server/v2/tenant.js', () => ({ tenantDeLaSesion: async () => 'empresa' }));
 
-const { POST, MOTIVO_MAXIMO } = await import('./+server.js');
+const { POST, _MOTIVO_MAXIMO } = await import('./+server.js');
 
 /**
  * @param {any} cuerpo
@@ -47,7 +47,7 @@ describe('POST /api/conversaciones/[id]/acciones/[accion]/rechazar', () => {
   });
 
   it('un motivo demasiado largo no llega al motor', async () => {
-    const { r, fetch } = await rechazar({ motivo: 'x'.repeat(MOTIVO_MAXIMO + 1) });
+    const { r, fetch } = await rechazar({ motivo: 'x'.repeat(_MOTIVO_MAXIMO + 1) });
     expect(r.status).toBe(400);
     expect(fetch).not.toHaveBeenCalled();
   });
