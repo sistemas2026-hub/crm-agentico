@@ -148,6 +148,10 @@ class ApiEndpoints {
   static String get marcaDeAgua => '$baseUrl/api/campo/marca-de-agua/';
   static String get marcaDeAguaLogo => '$baseUrl/api/campo/marca-de-agua/logo/';
 
+  // El contrato del cliente, firmado desde la app (13/11/2026).
+  static String contratoDeLaOrden(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/contrato/';
+
   // Aliases convenientes
   static String accionTrabajo(String id, String accion) {
     if (accion == 'completar') return trabajoCompletar(id);

@@ -25,6 +25,7 @@ import 'resumen_para_finalizar.dart';
 import 'widgets/consumo_de_material.dart';
 import 'widgets/firma_del_cliente.dart';
 import 'widgets/foto_con_marca_de_evidencia.dart';
+import '../contrato/contrato_screen.dart';
 import '../../core/sync/sync_presentacion.dart';
 import '../../core/sync/sync_queue_service.dart';
 import '../../core/widgets/contenido_centrado.dart';
@@ -1457,6 +1458,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             // serial, IP y la señal de la ficha. Ver `FranjaDelServicio`.
             if (_orden != null)
               FranjaDelServicio(trabajo: TrabajoVista.desdeOrden(_orden!)),
+            // EL CONTRATO DEL CLIENTE (13/11/2026): en las instalaciones, el
+            // técnico lo crea aquí en vez de llenarlo a mano en WispHub.
+            if (llevaContrato(_orden)) _accesoAlContrato(),
             _franjaDelFormulario(),
             // LO QUE FALTA, ARRIBA Y FIJO
             // ---------------------------
@@ -2290,6 +2294,35 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _accesoAlContrato() {
+    final String titulo = 'OT #${_orden?['numero'] ?? ''}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+      child: Material(
+        color: AppColors.infoFondo,
+        borderRadius: AppRadius.brTarjeta,
+        child: InkWell(
+          borderRadius: AppRadius.brTarjeta,
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => ContratoScreen(ordenId: widget.ordenId, titulo: titulo),
+          )),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(children: <Widget>[
+              const Icon(Icons.assignment_outlined, color: AppColors.azulAccion),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Contrato del cliente: créalo aquí con la firma',
+                    style: AppTypography.etiqueta.copyWith(color: AppColors.azulAccion)),
+              ),
+              const Icon(Icons.chevron_right, color: AppColors.azulAccion),
+            ]),
           ),
         ),
       ),

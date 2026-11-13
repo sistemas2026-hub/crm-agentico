@@ -263,6 +263,47 @@
              cerró. Antes no salía en ningún lado (la OT #4 en producción). -->
         <PorRevisar ordenes={publicado?.por_revisar ?? []} dia={data.dia} />
 
+        <!-- EL CONTRATO DE INSTALACIÓN (13/11/2026). Fuera del bloque que pide
+             cuadrillas publicadas a propósito: es de la empresa, no del día, y
+             una opción que desaparece los días sin reparto no se encuentra. -->
+        {#if data.contrato}
+          <section class="snoc-panel" style="gap:var(--snoc-sm);">
+            <details>
+              <summary class="snoc-body-sm">El contrato de instalación</summary>
+              <form method="POST" action="?/contrato" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                <p class="snoc-body-sm" style="margin:0;">
+                  El técnico crea el contrato del cliente desde la app: los datos salen de la solicitud,
+                  él elige el servidor y el cliente firma. Aquí se decide entre qué servidores elige y qué dice el contrato.
+                </p>
+                <span class="snoc-label">Servidores</span>
+                <span class="snoc-body-sm">El número es el de la <b>zona</b> en WispHub (no el del router: tienen números distintos aunque se llamen igual).</span>
+                {#each Array(6) as _, i}
+                  <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                    <input class="snoc-campo" style="width:7rem;" inputmode="numeric" name={`servidor_id_${i}`}
+                           placeholder="N.º de zona" aria-label={`Número de zona del servidor ${i + 1}`}
+                           value={data.contrato.servidores?.[i]?.id_zona ?? ''} />
+                    <input class="snoc-campo" style="flex:1; min-width:12rem;" name={`servidor_nombre_${i}`}
+                           placeholder="Nombre que ve el técnico" aria-label={`Nombre del servidor ${i + 1}`}
+                           maxlength="80" value={data.contrato.servidores?.[i]?.nombre ?? ''} />
+                  </div>
+                {/each}
+                <label class="snoc-body-sm snoc-pila-xs">
+                  NIT de la empresa
+                  <input class="snoc-campo" name="nit" maxlength="80" value={data.contrato.nit ?? ''} />
+                </label>
+                <label class="snoc-body-sm snoc-pila-xs">
+                  Condiciones del servicio (el texto de su contrato, tal cual va en el PDF)
+                  <textarea class="snoc-campo" name="texto_condiciones" rows="8" maxlength="20000">{data.contrato.texto_condiciones ?? ''}</textarea>
+                </label>
+                <div class="snoc-fila" style="gap:var(--snoc-sm); align-items:center; flex-wrap:wrap;">
+                  <button class="snoc-btn" type="submit">Guardar</button>
+                  {#if form?.de === 'contrato'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
+                </div>
+              </form>
+            </details>
+          </section>
+        {/if}
+
         {#if publicado?.cuadrillas?.length}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
             {#if data.marcaDeAgua}

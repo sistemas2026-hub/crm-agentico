@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 28,
+      version: 29,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -159,6 +159,17 @@ class LocalDatabase {
     // aparte.
     if (oldVersion < 28) {
       await _crearSelloDelArranque(db);
+    }
+
+    // v29 (13/11/2026): la LABOR de la orden (instalacion, correctivo...). La
+    // app la usa para ofrecer el contrato del cliente solo en las
+    // instalaciones. Aditiva y con la misma guarda de `table_info` que v13.
+    if (oldVersion < 29) {
+      final infoOr = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOr = infoOr.map((c) => c['name'] as String).toSet();
+      if (infoOr.isNotEmpty && !colsOr.contains('labor')) {
+        await db.execute('ALTER TABLE local_ordenes ADD COLUMN labor TEXT;');
+      }
     }
 
     // v15: el seguimiento de la intervencion, para poder leerlo sin señal.
@@ -1216,6 +1227,7 @@ class LocalDatabase {
         telefono TEXT,
         tipo_nombre TEXT NOT NULL,
         tipo_codigo TEXT NOT NULL,
+        labor TEXT,
         work_type_version_id TEXT,
         schema_version INTEGER NOT NULL DEFAULT 1,
         formulario_campos_json TEXT,
@@ -1440,6 +1452,8 @@ class LocalDatabase {
                   'pasos_json',
                   'cuadrilla_json',
                   'requisitos_seguridad_json',
+                  // La labor viene en el `tipo` del detalle (13/11/2026).
+                  'labor',
                 ],
                 where: 'id = ? AND org_id = ? AND profile_id = ?',
                 whereArgs: <Object?>[id, orgId, profileId],
@@ -1517,6 +1531,7 @@ class LocalDatabase {
       'telefono': clienteObj['telefono'] ?? ordenData['telefono'] ?? '',
       'tipo_nombre': tipoNombre,
       'tipo_codigo': tipoCodigo,
+      'labor': soloDetalle('labor', tipoObj['labor']?.toString()),
       'work_type_version_id': ordenData['work_type_version_id']?.toString(),
       // La version del esquema decide si la orden se puede trabajar con esta
       // version de la aplicacion. El listado no la trae, y caer al 1 por

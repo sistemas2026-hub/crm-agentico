@@ -21,6 +21,7 @@ import {
   guardarMarcaDeAgua,
   leerMarcaDeAgua
 } from '$lib/server/v2/marca-de-agua.js';
+import { cuerpoDeContrato, guardarContrato, leerContrato } from '$lib/server/v2/contrato.js';
 import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 
 /**
@@ -103,6 +104,8 @@ export async function load({ url, cookies, locals }) {
     seguimiento: seg.configuracion,
     //  Qué dice la marca de agua de las fotos de campo (12/11/2026).
     marcaDeAgua: (await leerMarcaDeAgua({ cookies })).configuracion,
+    //  Los servidores, el NIT y las condiciones del contrato (13/11/2026).
+    contrato: (await leerContrato({ cookies })).configuracion,
     vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
   };
 }
@@ -117,6 +120,25 @@ export const actions = {
       return { hecho: 'Quedó guardado de dónde y qué carga cada cuadrilla.' };
     } catch (e) {
       return fail(400, { error: mensajeDeError(e) });
+    }
+  },
+
+  //  EL CONTRATO DE INSTALACIÓN (13/11/2026): entre qué servidores elige el
+  //  técnico, el NIT y el texto de las condiciones que va en el PDF.
+  contrato: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'contrato', error: 'Esto es para quien gestiona.' });
+    try {
+      const r = await guardarContrato({ cookies }, cuerpoDeContrato(await request.formData()));
+      const n = r?.servidores?.length ?? 0;
+      //  Dice lo que quedó: sin servidores, el técnico no puede firmar.
+      const hecho = n === 0
+        ? 'Guardado, pero sin servidores: el técnico no podrá crear contratos hasta cargar al menos uno.'
+        : `Guardado. El técnico elige entre ${n} servidor${n === 1 ? '' : 'es'}.`
+          + (r?.texto_condiciones ? '' : ' Falta el texto de las condiciones: el PDF lo dirá.');
+      return { de: 'contrato', hecho };
+    } catch (e) {
+      return fail(400, { de: 'contrato', error: mensajeDeError(e) });
     }
   },
 

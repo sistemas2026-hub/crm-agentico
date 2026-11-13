@@ -1,0 +1,127 @@
+{% comment %}
+El contrato que el cliente firma en su casa, desde la app de campo (13/11/2026).
+Lo arma campo/contrato.py::armar_pdf. Mismo motor y misma familia visual que el
+expediente de la solicitud (solicitudes/templates/solicitudes/expediente.html).
+
+Cada recuadro dice de DONDE salio su dato: es lo que le permite a quien lo
+revise despues saber que tecleo una persona y que vino del sistema.
+
+Las condiciones NO estan escritas aca: son el texto de cada empresa, cargado
+desde la plataforma. Sin ese texto el recuadro lo dice, en vez de imprimir un
+contrato con clausulas inventadas.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: letter; margin: 12mm 12mm 14mm;
+          @bottom-center { content: "Contrato {{ numero }} · página " counter(page) " de " counter(pages);
+                           font-size: 7pt; color: #7b8794; } }
+  body { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif;
+         font-size: 9pt; color: #1f2933; line-height: 1.45; margin: 0; }
+  .marca { display: flex; justify-content: space-between; align-items: flex-start;
+           border-bottom: 2px solid #1668c1; padding-bottom: 9px; margin-bottom: 12px; }
+  .marca .empresa { font-size: 15pt; font-weight: 700; color: #1668c1; }
+  .marca .nit { font-size: 7.5pt; color: #52606d; }
+  .marca .logo { height: 40px; width: auto; max-width: 160px; }
+  .marca h1 { font-size: 12.5pt; margin: 0; text-align: right; color: #17335c;
+              text-transform: uppercase; }
+  .marca .num { text-align: right; font-size: 8pt; color: #52606d; margin-top: 3px; }
+  .caja { border: 1px solid #d3dae1; border-radius: 6px; padding: 9px 12px; margin-bottom: 9px; }
+  .titulo { font-size: 9pt; font-weight: 700; color: #1668c1; text-transform: uppercase;
+            letter-spacing: .6px; margin-bottom: 6px; }
+  .origen { float: right; font-size: 6.8pt; font-weight: 700; text-transform: none;
+            letter-spacing: 0; border-radius: 8px; padding: 1px 7px; }
+  .o-cliente { background: #eaf7ef; color: #17603a; }
+  .o-plataforma { background: #e6f0fb; color: #17335c; }
+  .o-tecnico { background: #eef0f2; color: #3e4c59; }
+  .rotulo { font-size: 6.8pt; color: #7b8794; text-transform: uppercase; letter-spacing: .6px; }
+  .valor { font-size: 9.3pt; font-weight: 600; }
+  table.rejilla { width: 100%; border-collapse: collapse; }
+  table.rejilla td { padding: 3px 10px 3px 0; vertical-align: top; }
+  .condiciones { white-space: pre-line; font-size: 8pt; }
+  .falta { background: #fdecea; border: 1px dashed #b5342a; color: #8a2a20; }
+  .firmas { display: flex; gap: 14px; }
+  .firma { flex: 1; border: 1px solid #d3dae1; border-radius: 6px; padding: 8px 10px; }
+  .firma img { height: 70px; display: block; margin: 4px 0; }
+  .linea { border-top: 1px solid #1f2933; margin-top: 4px; padding-top: 3px; font-size: 8pt; }
+  .huella { font-family: "DejaVu Sans Mono", monospace; font-size: 7pt; color: #52606d;
+            border-top: 1px solid #d3dae1; padding-top: 6px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="marca">
+  <div style="display:flex; gap:10px; align-items:center;">
+    {% if logo %}<img class="logo" src="{{ logo }}" alt="">{% endif %}
+    <div><div class="empresa">{{ empresa }}</div>{% if nit %}<div class="nit">NIT {{ nit }}</div>{% endif %}</div>
+  </div>
+  <div>
+    <h1>Contrato de prestación<br>del servicio de internet</h1>
+    <div class="num">N.º {{ numero }} · Orden OT-{{ orden }} · {{ fecha }}</div>
+  </div>
+</div>
+
+<div class="caja">
+  <div class="titulo">1 · El suscriptor <span class="origen o-cliente">de la solicitud del cliente, revisado por el técnico</span></div>
+  <table class="rejilla"><tr>
+    <td style="width:50%"><div class="rotulo">Nombre</div><div class="valor">{{ c.nombre }} {{ c.apellido }}</div></td>
+    <td><div class="rotulo">Documento</div><div class="valor">{{ c.tipo_documento }} {{ c.numero_documento }}</div></td>
+  </tr><tr>
+    <td><div class="rotulo">Teléfono</div><div class="valor">{{ c.telefono|default:"—" }}</div></td>
+    <td><div class="rotulo">Correo</div><div class="valor">{{ c.correo|default:"—" }}</div></td>
+  </tr><tr>
+    <td colspan="2"><div class="rotulo">Dirección de instalación</div>
+      <div class="valor">{{ c.direccion }}{% if c.barrio %}, {{ c.barrio }}{% endif %}</div></td>
+  </tr></table>
+</div>
+
+<div class="caja">
+  <div class="titulo">2 · El servicio contratado <span class="origen o-plataforma">plan de la solicitud · servidor elegido en sitio</span></div>
+  <table class="rejilla"><tr>
+    <td style="width:50%"><div class="rotulo">Plan</div><div class="valor">{{ plan }}</div></td>
+    <td><div class="rotulo">Servidor</div><div class="valor">{{ servidor.nombre }}</div></td>
+  </tr></table>
+</div>
+
+<div class="caja{% if not condiciones %} falta{% endif %}">
+  <div class="titulo">3 · Condiciones del servicio</div>
+  {% if condiciones %}
+    <div class="condiciones">{{ condiciones }}</div>
+  {% else %}
+    <div>La empresa todavía no cargó el texto de sus condiciones en la plataforma
+    (Programación → El contrato de instalación).</div>
+  {% endif %}
+</div>
+
+<div class="caja">
+  <div class="titulo">4 · Autorizaciones <span class="origen o-cliente">aceptadas en la solicitud</span></div>
+  {% if autorizaciones %}
+    <div>{% if autorizaciones.habeas_data %}☑{% else %}☐{% endif %} Tratamiento de datos personales (habeas data){% if aceptadas_en %} — aceptada el {{ aceptadas_en }}{% endif %}</div>
+    <div>{% if autorizaciones.centrales_de_riesgo %}☑{% else %}☐{% endif %} Consulta y reporte en centrales de riesgo{% if aceptadas_en %} — aceptada el {{ aceptadas_en }}{% endif %}</div>
+  {% else %}
+    <div>Esta instalación no vino de una solicitud: las autorizaciones no se aceptaron por escrito antes de la visita.</div>
+  {% endif %}
+</div>
+
+<div class="firmas">
+  <div class="firma">
+    <div class="rotulo">Firma del suscriptor</div>
+    <img src="{{ firma }}" alt="">
+    <div class="linea">{{ c.nombre }} {{ c.apellido }} · {{ c.tipo_documento }} {{ c.numero_documento }}</div>
+  </div>
+  <div class="firma">
+    <div class="rotulo">Por la empresa</div>
+    <div style="height:70px"></div>
+    <div class="linea">{{ tecnico|default:"Técnico instalador" }} · técnico instalador</div>
+  </div>
+</div>
+
+<div class="huella">
+  Firmado en el teléfono del técnico el {{ fecha }} a las {{ hora }} (hora de Colombia){% if gps %}, en {{ gps }}{% endif %}.
+  Huella de los datos firmados: {{ huella }}. La plataforma la guarda al firmar: si después
+  alguien cambia un dato, deja de coincidir.
+</div>
+</body>
+</html>

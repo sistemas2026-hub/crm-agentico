@@ -9,6 +9,7 @@ from campo import (
     avisos_views,
     configuracion_de_seguimiento_views,
     marca_de_agua_views,
+    contrato_views,
     cuadrillas_views,
     despacho_pantalla_views,
     despacho_views,
@@ -119,6 +120,13 @@ urlpatterns = [
     #  Que dice la marca de agua de las fotos de campo (12/11/2026).
     #  Lo que el telefono lee para pintar la marca encima de la foto
     #  (13/11/2026). El archivo lo sigue estampando solo el servidor.
+    #  El contrato del cliente, firmado desde la app (13/11/2026).
+    path("trabajos/<uuid:pk>/contrato/",
+         contrato_views.ContratoDeLaOrdenView.as_view(), name="contrato_de_la_orden"),
+    path("contratos/<uuid:pk>/pdf/",
+         contrato_views.PdfDelContratoView.as_view(), name="pdf_del_contrato"),
+    path("contrato/configuracion/",
+         contrato_views.ConfiguracionDeContratoView.as_view(), name="contrato_configuracion"),
     path("marca-de-agua/",
          marca_de_agua_views.MarcaDeAguaParaLaAppView.as_view(),
          name="marca_de_agua_para_la_app"),

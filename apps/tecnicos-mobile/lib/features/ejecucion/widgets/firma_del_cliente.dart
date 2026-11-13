@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -72,7 +73,9 @@ class FirmaDelCliente extends StatefulWidget {
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.hoja)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.hoja),
+        ),
       ),
       builder: (_) => FirmaDelCliente(
         orgId: orgId,
@@ -219,8 +222,10 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
                     Text(widget.resumenDelTrabajo, style: AppTypography.cuerpo),
                     if (widget.materialesInstalados.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 8),
-                      Text('Equipos y materiales instalados',
-                          style: AppTypography.etiquetaChica),
+                      Text(
+                        'Equipos y materiales instalados',
+                        style: AppTypography.etiquetaChica,
+                      ),
                       for (final linea in widget.materialesInstalados)
                         Text('· $linea', style: AppTypography.cuerpoChico),
                     ],
@@ -263,9 +268,12 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
                 ),
               ),
               if (_error != null)
-                Text(_error!,
-                    style: AppTypography.cuerpoChico
-                        .copyWith(color: AppColors.error)),
+                Text(
+                  _error!,
+                  style: AppTypography.cuerpoChico.copyWith(
+                    color: AppColors.error,
+                  ),
+                ),
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
@@ -274,7 +282,8 @@ class _FirmaDelClienteState extends State<FirmaDelCliente> {
                   onPressed: _guardando ? null : _guardar,
                   child: _guardando
                       ? const SizedBox(
-                          width: 18, height: 18,
+                          width: 18,
+                          height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Guardar conformidad'),
@@ -355,9 +364,9 @@ class TrazoDeFirma extends ChangeNotifier {
     }
 
     final imagen = await grabador.endRecording().toImage(
-          destino.width.round(),
-          destino.height.round(),
-        );
+      destino.width.round(),
+      destino.height.round(),
+    );
     final datos = await imagen.toByteData(format: ui.ImageByteFormat.png);
     return datos!.buffer.asUint8List();
   }
@@ -373,15 +382,33 @@ class LienzoDeFirma extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, restricciones) {
-        trazo.anotarTamano(Size(restricciones.maxWidth, restricciones.maxHeight));
-        return GestureDetector(
-          onPanStart: (d) => trazo.empezar(d.localPosition),
-          onPanUpdate: (d) => trazo.continuar(d.localPosition),
-          child: AnimatedBuilder(
-            animation: trazo,
-            builder: (context, _) => CustomPaint(
-              painter: _PintorDeFirma(trazo),
-              size: Size.infinite,
+        trazo.anotarTamano(
+          Size(restricciones.maxWidth, restricciones.maxHeight),
+        );
+        //  EL SCROLL LE GANABA EL TRAZO A LA FIRMA  --  13/11/2026, medido en
+        //  un teléfono. Este recuadro vive dentro de una hoja que se desplaza,
+        //  y con `onPan` el desplazamiento vertical gana la disputa de gestos:
+        //  un trazo hacia arriba o abajo movía la hoja en vez de dibujar, y la
+        //  firma salía cortada o vacía. Ahora el recuadro RECLAMA el dedo apenas
+        //  lo toca (`EagerGestureRecognizer`) y los puntos llegan crudos por
+        //  `Listener`, así que lo que se dibuja dentro no lo pelea nadie.
+        return RawGestureDetector(
+          gestures: <Type, GestureRecognizerFactory>{
+            EagerGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+                  EagerGestureRecognizer.new,
+                  (_) {},
+                ),
+          },
+          child: Listener(
+            onPointerDown: (e) => trazo.empezar(e.localPosition),
+            onPointerMove: (e) => trazo.continuar(e.localPosition),
+            child: AnimatedBuilder(
+              animation: trazo,
+              builder: (context, _) => CustomPaint(
+                painter: _PintorDeFirma(trazo),
+                size: Size.infinite,
+              ),
             ),
           ),
         );

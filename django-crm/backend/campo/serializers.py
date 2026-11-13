@@ -303,6 +303,9 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             "version": v.version,
             "schema_version": v.schema_version,
             "schema_hash": v.schema_hash,
+            #  La labor (instalacion, correctivo...). La app la usa para
+            #  ofrecer el contrato del cliente solo donde hay uno que firmar.
+            "labor": getattr(v.work_type, "labor", "") or "",
             # Los pasos del procedimiento ya venian con la plantilla y nadie
             # los entregaba: la aplicacion los dibujaba de ejemplo.
             "pasos": v.esquema.get("pasos", []),
