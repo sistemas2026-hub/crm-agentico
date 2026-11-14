@@ -21,6 +21,7 @@
   import AlertasDelDia from '$lib/supervisor/AlertasDelDia.svelte';
   import ResumenDelDia from '$lib/supervisor/ResumenDelDia.svelte';
   import {
+    aQuienSeLePuedeMover,
     cupoDeLaCuadrilla,
     pastillasDePersona,
     quienLaAsigno,
@@ -120,6 +121,21 @@
   //  dice una vez arriba. Ver `pastillaDeAvisos`.
   const comunes = $derived(equiposDeTodas(material?.cuadrillas ?? []));
   const conf = $derived(data.configuracion);
+  //  A QUIÉN SE LE PUEDE PASAR UNA ORDEN  --  14/11/2026
+  //
+  //  Todas las personas que salen ESE día, de cualquier cuadrilla: mover
+  //  dentro de la misma rara vez resuelve algo, y mover a alguien que no
+  //  sale deja la orden en «con alguien que este día no sale», que es el
+  //  problema que esto viene a evitar, no a crear.
+  //
+  //  SE DEDUPLICA POR `profile`: una persona en dos cuadrillas saldría dos
+  //  veces en el selector y las dos opciones harían lo mismo.
+  //
+  //  NO SE SACA A QUIEN YA LA TIENE, a propósito: la fila trae nombres, no
+  //  ids, y filtrar por nombre es comparar dos cadenas que nadie garantiza
+  //  iguales. Si se elige a esa persona, `asignar()` lo ve y devuelve sin
+  //  tocar nada (campo/services/despacho.py) — ni evento ni aviso.
+  const aQuienMover = $derived(aQuienSeLePuedeMover(publicado?.cuadrillas));
   //  LOS KITS INCOMPLETOS (31/10/2026): si el material no se pudo leer es
   //  `null`, y la franja NO muestra la ficha. Un 0 ahi diria «estan todos
   //  completos», que es justo lo que no se sabe.
@@ -582,7 +598,7 @@
                   {#if c.ordenes.length}
                     <div class="snoc-pila-xs" style="gap:var(--snoc-sm); padding-top:var(--snoc-xs);">
                       {#each c.ordenes as o (o.id)}
-                        <OrdenDelDia orden={o} dia={data.dia} marca={textoDeLaSiguiente(c.ordenes)} />
+                        <OrdenDelDia orden={o} dia={data.dia} marca={textoDeLaSiguiente(c.ordenes)} {aQuienMover} />
                       {/each}
                     </div>
                   {/if}

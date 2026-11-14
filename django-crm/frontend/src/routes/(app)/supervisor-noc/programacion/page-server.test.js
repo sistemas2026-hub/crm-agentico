@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -346,5 +348,124 @@ describe('Programación: la carga', () => {
 
     expect(d.publicado).toBe(null);
     expect(d.error).toBe(true);
+  });
+});
+
+/**
+ * MOVER LA ORDEN A OTRO TÉCNICO (14/11/2026).
+ *
+ * Lo que se mide acá es lo que SALE hacia el backend —a qué URL, con qué
+ * cuerpo— y lo que NO sale cuando falta algo. El efecto del otro lado
+ * (`campo/services/despacho.py::asignar`) ya tiene sus pruebas en Python:
+ * repetirlas acá sería medir dos veces lo mismo y ninguna vez esta capa.
+ */
+describe('Programación: mover una orden a otro técnico', () => {
+  /** @param {{rol?: string, profile?: string, motivo?: string}} d */
+  const pedido = ({ rol = 'SUPERVISOR', profile = 'p-bb', motivo = 'Se enfermó' } = {}) => {
+    const f = new FormData();
+    f.set('orden', 'o-1');
+    f.set('profile', profile);
+    f.set('motivo', motivo);
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } }
+    });
+  };
+
+  it('viaja el id de la persona y el motivo, al endpoint de la orden', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({});
+
+    const r = /** @type {any} */ (await actions.mover(pedido()));
+
+    //  `/mover/`, NO `/asignar/`: el segundo deja al anterior con acceso de
+    //  escritura sobre la orden (medido el 14/11/2026). Que esta linea diga
+    //  cual de los dos es lo unico que impide volver al endpoint equivocado.
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/trabajos/o-1/mover/');
+    expect(apiRequest.mock.calls[0][1]).toEqual({
+      method: 'POST',
+      body: { profile_id: 'p-bb', motivo: 'Se enfermó' }
+    });
+    expect(r.hecho).toBeTruthy();
+  });
+
+  //  EL MENSAJE NO AFIRMA EL AVISO: lo lee de la respuesta. `avisar_asignacion`
+  //  sale solo si la persona es nueva en la orden, y devolverle la orden a
+  //  quien la tenia antes no manda nada. Decirle al Supervisor que si,
+  //  cuando no, lo deja esperando una llamada que nadie va a recibir.
+  it('el mensaje dice si el aviso salió o no', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ resultado: 'movida', aviso: true });
+    const con = /** @type {any} */ (await actions.mover(pedido()));
+
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ resultado: 'movida', aviso: false });
+    const sin = /** @type {any} */ (await actions.mover(pedido()));
+
+    expect(con.hecho).toContain('Le llegó el aviso');
+    expect(sin.hecho).toContain('No le llega aviso');
+  });
+
+  it('mover a quien ya la tenía lo dice, en vez de decir que la movió', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ resultado: 'sin_cambios', aviso: false });
+
+    const r = /** @type {any} */ (await actions.mover(pedido()));
+
+    expect(r.hecho).toContain('ya la tenía');
+  });
+
+  //  SIN MOTIVO NO SALE, aunque el backend lo acepte vacío: el evento
+  //  `reasignacion` lo guarda y es lo único que después explica por qué un
+  //  trabajo cambió de manos.
+  it('sin motivo no se mueve nada', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.mover(pedido({ motivo: '   ' })));
+
+    expect(r.status).toBe(400);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('sin a quién pasársela tampoco', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.mover(pedido({ profile: '' })));
+
+    expect(r.status).toBe(400);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('quien no gestiona no mueve nada', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.mover(pedido({ rol: 'USER' })));
+
+    expect(r.status).toBe(403);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * QUE LA PANTALLA LO ALIMENTE (14/11/2026).
+ *
+ * `OrdenDelDia` dibuja el control solo si recibe `aQuienMover`, y la lista la
+ * arma esta página. Si esa línea se cae, el componente sigue en verde con sus
+ * nueve pruebas y el control no aparece nunca: es exactamente el «código
+ * construido no es código que corre» de CLAUDE.md §6.
+ *
+ * SE LEE EL FUENTE porque no hay jsdom en este proyecto —toda prueba de
+ * componente renderiza en el servidor— y una página entera con su `load` no
+ * se monta así. Es una prueba de cableado, no de comportamiento, y eso es
+ * justo lo que falta cubrir.
+ */
+describe('Programación: el control de mover llega dibujado', () => {
+  it('la página le pasa la lista de destinos a cada tarjeta', () => {
+    const fuente = readFileSync(
+      new URL('./+page.svelte', import.meta.url), 'utf-8');
+
+    expect(fuente).toMatch(/<OrdenDelDia[^>]*\{aQuienMover\}/);
+    expect(fuente).toContain('aQuienSeLePuedeMover(publicado?.cuadrillas)');
   });
 });

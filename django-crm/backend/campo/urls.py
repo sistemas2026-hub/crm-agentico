@@ -247,6 +247,8 @@ urlpatterns = [
     path("trabajos/<uid:pk>/cuadrilla/principal/", despacho_views.CambiarPrincipalView.as_view(), name="cuadrilla_principal"),
     path("trabajos/<uid:pk>/cuadrilla/retirar/", despacho_views.RetirarIntegranteView.as_view(), name="cuadrilla_retirar"),
     path("trabajos/<uid:pk>/cuadrilla/desasignar/", despacho_views.DesasignarTrabajoView.as_view(), name="cuadrilla_desasignar"),
+    #  MOVER la orden: no es asignar. Ver `MoverLaOrdenView`.
+    path("trabajos/<uid:pk>/mover/", despacho_views.MoverLaOrdenView.as_view(), name="trabajo_mover"),
     path("trabajos/<uid:pk>/programar/", despacho_views.ProgramarTrabajoView.as_view(), name="trabajo_programar"),
     path("trabajos/<uid:pk>/reprogramar/", despacho_views.ReprogramarTrabajoView.as_view(), name="trabajo_reprogramar"),
     path("trabajos/<uid:pk>/contingencia/", despacho_views.ContingenciaTrabajoView.as_view(), name="trabajo_contingencia"),

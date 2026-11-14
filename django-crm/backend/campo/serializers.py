@@ -576,3 +576,19 @@ class DesasignarSerializer(serializers.Serializer):
     """Dejar la orden sin nadie. 0 integrantes es un estado valido (F-2)."""
 
     motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class MoverLaOrdenSerializer(serializers.Serializer):
+    """A quien pasa la orden, y por que.
+
+    EL MOTIVO ES OBLIGATORIO, al reves que en `AsignarSerializer`. Un
+    movimiento de trabajo entre personas es lo unico de esta familia que
+    despues nadie puede reconstruir: el evento guarda quien la tenia y quien
+    la recibe, pero no por que, y ese «por que» es lo que una persona lee
+    cuando revisa la bitacora un mes despues. Medido en la devolucion al
+    tecnico, que ya lo exige por la misma razon.
+    """
+
+    profile_id = serializers.UUIDField()
+    motivo = serializers.CharField(allow_blank=False, trim_whitespace=True,
+                                   max_length=200)

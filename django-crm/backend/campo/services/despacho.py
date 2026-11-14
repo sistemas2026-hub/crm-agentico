@@ -1182,3 +1182,116 @@ def desasignar(orden: OrdenTrabajo, actor, motivo: str = "") -> int:
     _evento(fresca, "cuadrilla_desasignada", actor, antes,
             integrantes_retirados=cuantos, motivo=motivo)
     return cuantos
+
+
+def _exigir_persona_de_campo_activa(orden: OrdenTrabajo, profile) -> None:
+    """Que el destino sea alguien que va a ver la orden en su telefono.
+
+    POR QUE ACA Y NO EN LA PANTALLA  --  14/11/2026
+    -----------------------------------------------
+    El control de Programacion solo ofrece a quienes salen ese dia, pero esa
+    lista vive en el navegador y `profile_id` es un campo de formulario.
+    Medido el 14/11/2026 contra el endpoint de asignar: un perfil de BODEGA e
+    INACTIVO entraba con 200, y la orden quedaba con un responsable que no la
+    va a ver nunca -- sin error, sin aviso, sin nada que lo senale.
+
+    Lo que se exige es tener `PersonaDeCampo` activa, que es exactamente lo
+    que `dia_publicado` usa para decir quien sale a trabajar. No se exige un
+    rol: el catalogo de roles no distingue a un tecnico, y agregar esa regla
+    aca la pondria en un lugar distinto del que ya decide quien sale.
+    """
+    from campo.cuadrillas import PersonaDeCampo
+
+    if not PersonaDeCampo.objects.filter(
+            org=orden.org, profile=profile, activa=True).exists():
+        raise ErrorDespacho(
+            "Esa persona no esta activa como personal de campo: no veria la "
+            "orden en su telefono.")
+
+
+@transaction.atomic
+def mover_la_orden(orden: OrdenTrabajo, nuevo, actor, motivo: str = "") -> dict:
+    """La orden PASA de un tecnico a otro: al anterior se le quita.
+
+    POR QUE NO ALCANZA CON `asignar()`  --  14/11/2026
+    --------------------------------------------------
+    `asignar()` baja al anterior de `es_principal` y le DEJA la fila en
+    `asignaciones` (linea 217). Eso esta bien para una cuadrilla --el que deja
+    de ser lider sigue en el equipo-- y esta mal para esto: toda la
+    autorizacion intra-tenant de campo mide pertenencia a `asignaciones`,
+    nunca `es_principal`:
+
+        campo/views.py:88                   `_obtener_orden_o_404`
+        campo/services/transiciones.py:140  `exigir_asignado`, bajo lock
+
+    Medido por el auditor de frontera contra Postgres real: despues de
+    «mover» la orden a B, el tecnico A la marco en camino, en sitio y la
+    COMPLETO, y la bitacora quedo con `trabajo_completado_campo` a nombre de
+    A sobre una orden cuyo principal es B. Dos personas con escritura
+    completa sobre el mismo trabajo, y el cierre atribuido a la equivocada.
+
+    SE COMPONEN LAS DOS FUNCIONES QUE YA EXISTEN, no se escribe una tercera
+    forma de mover filas: `asignar` sube al nuevo (y avisa, y avisa al
+    cliente, y deja el evento) y `retirar_integrante` borra la fila del
+    anterior --que para entonces ya no es principal, asi que sale por la rama
+    del auxiliar sin pedir sucesor--. Un camino nuevo que repitiera esos
+    pasos a mano es como se pierde una de las guardas.
+
+    EL LOCK ES DE ESTA FUNCION, y es la diferencia con `asignar`, que es la
+    unica de este modulo que decide sobre la copia en memoria. Aca las dos
+    escrituras van bajo la misma fila bloqueada: dos personas moviendo la
+    misma orden al mismo tiempo se serializan en vez de dejar dos eventos y
+    una peticion rebotando contra el indice unico parcial.
+
+    NO SE MUEVE LO YA COMPLETADO EN CAMPO: el trabajo lo hizo alguien, y la
+    revision del cierre, la devolucion al ticket y la marca de agua de las
+    fotos nombran al principal (`campo/marca_de_agua.py`,
+    `campo/devolver_al_ticket.py`). Moverla se lo atribuye a quien no lo hizo.
+    En camino y en sitio SI se mueven: ese es el caso que pidio el control
+    --el tecnico se enfermo yendo--.
+
+    @return {"movida": bool, "anterior": Profile|None, "aviso": bool}
+            `aviso` dice si al nuevo le llego el aviso al telefono, que NO es
+            siempre: `avisar_asignacion` sale solo si la persona es nueva en
+            la orden. La pantalla no puede afirmarlo sin preguntar.
+    """
+    fresca = _bloquear(orden)
+    #  `_exigir_operable` y `_misma_empresa` (abajo) son FAIL-FAST REDUNDANTE,
+    #  y esta escrito porque se midio: el 14/11/2026 las dos sobrevivieron a
+    #  su mutacion con la suite en verde. No es que falte una guarda -- es que
+    #  `asignar()` ya rechaza las dos cosas (lineas 206 y 208), asi que
+    #  borrarlas de aca no cambia el efecto. Se dejan por dos razones: el
+    #  error sale ANTES de empezar a mover filas, y las otras cuatro funciones
+    #  de cuadrilla de este modulo abren igual. Lo que miden las pruebas es el
+    #  efecto (B3, E3), no estas dos lineas.
+    _exigir_operable(fresca)
+    if fresca.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO:
+        raise ErrorDespacho(
+            f"La orden #{fresca.numero} ya esta completada en campo y espera "
+            f"revision. Moverla le atribuiria a otra persona un trabajo que "
+            f"no hizo.")
+    _misma_empresa(fresca, nuevo)
+
+    anterior = fresca.tecnico_principal
+    if anterior is not None and anterior.id == nuevo.id:
+        #  NO ES UN ERROR y no deja rastro: el doble clic, y dos personas
+        #  moviendola al mismo destino desde dos pantallas. No paso nada.
+        #
+        #  Y SALE ANTES DE VALIDAR EL DESTINO, a proposito: esa validacion
+        #  existe para no dejar la orden con un responsable que no la va a
+        #  ver, y aca no se cambia de responsable. Validando primero, pedirle
+        #  mover a quien YA la tiene --alguien que entretanto se dio de baja,
+        #  por ejemplo-- devolveria un error por algo que no iba a pasar.
+        return {"movida": False, "anterior": anterior, "aviso": False}
+
+    _exigir_persona_de_campo_activa(fresca, nuevo)
+
+    #  Antes de tocar nada: si ya estaba en la orden (como ayudante), subirlo
+    #  a principal no es una visita nueva y `asignar` no le avisa.
+    era_integrante = fresca.asignaciones.filter(profile=nuevo).exists()
+
+    asignar(fresca, nuevo, actor, motivo=motivo)
+    if anterior is not None:
+        retirar_integrante(fresca, anterior, actor, motivo=motivo)
+
+    return {"movida": True, "anterior": anterior, "aviso": not era_integrante}

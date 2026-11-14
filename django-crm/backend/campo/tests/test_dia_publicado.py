@@ -837,3 +837,27 @@ def test_b_publicar_con_el_boton_no_congela_la_orden(
     assert EventoTrabajo.objects.filter(orden=o, tipo="publicada_por_una_persona",
                                         profile=admin_profile).count() == 1
     assert R._asignadas_a_mano(org_a, [o.id]) == set()
+
+
+# ---------------------------------------------------------------------------
+# M · a quien se puede MOVER una orden (14/11/2026)
+#
+# Programacion muestra el nombre de cada tecnico del dia y nada mas. Para
+# mover una orden de uno a otro desde la pantalla hace falta el ID, y sin el
+# no hay selector posible.
+#
+# LA GUARDA AFIRMA A QUIEN SENALA, no que la clave exista. Un `profile` que
+# trajera el id de `PersonaDeCampo` --que es otro objeto, con su propia
+# tabla-- pasaria cualquier prueba de presencia y mandaria la orden a nadie.
+# ---------------------------------------------------------------------------
+
+def test_m_cada_persona_del_dia_dice_QUIEN_es_para_poder_moverle_la_orden(
+        org_a, version, norte, admin_profile, user_profile):
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile, user_profile)
+    _orden(org_a, version)
+
+    c = D.del_dia(org_a, LUNES)["cuadrillas"][0]
+    por_nombre = {p["nombre"]: p for p in c["personas"]}
+
+    assert por_nombre["Cuadrilla #1 0"]["profile"] == str(admin_profile.id)
+    assert por_nombre["Cuadrilla #1 1"]["profile"] == str(user_profile.id)

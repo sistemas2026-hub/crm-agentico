@@ -538,3 +538,41 @@ export function alertasDelDia(publicado, material) {
 export function seDibujaElMapa(dia, hoy) {
   return Boolean(hoy) && dia === hoy;
 }
+
+/**
+ * A QUIÉN SE LE PUEDE PASAR UNA ORDEN  --  14/11/2026
+ *
+ * Todas las personas que salen ESE día, de cualquier cuadrilla. Mover dentro
+ * de la misma cuadrilla rara vez resuelve algo, y mover a alguien que no sale
+ * deja la orden en «con alguien que este día no sale»: el problema que el
+ * control viene a evitar, no a crear.
+ *
+ * EL NOMBRE LLEVA LA CUADRILLA porque dos personas se llaman igual más
+ * seguido de lo que parece, y el selector es lo único que quien mueve mira
+ * antes de decidir.
+ *
+ * SE DEDUPLICA POR `profile`: la misma persona en dos cuadrillas saldría dos
+ * veces y las dos opciones harían exactamente lo mismo.
+ *
+ * NO SE SACA A QUIEN YA TIENE LA ORDEN, a propósito: la fila de la orden trae
+ * nombres, no ids, y filtrar comparando cadenas es una coincidencia que nadie
+ * garantiza. Si igual se la eligen, `asignar()` compara contra el responsable
+ * actual y devuelve sin tocar nada — ni evento, ni aviso
+ * (`campo/services/despacho.py`).
+ *
+ * Es una función y no una expresión dentro de la plantilla por la misma razón
+ * que `seDibujaElMapa`: lo que vive en un `{#each}` no lo mira ninguna prueba.
+ *
+ * @param {any[] | null | undefined} cuadrillas las del día publicado
+ * @returns {{profile: string, nombre: string}[]}
+ */
+export function aQuienSeLePuedeMover(cuadrillas) {
+  const porId = new Map();
+  for (const c of cuadrillas ?? []) {
+    for (const p of c?.personas ?? []) {
+      if (!p?.profile || porId.has(p.profile)) continue;
+      porId.set(p.profile, { profile: p.profile, nombre: `${p.nombre} · ${c.cuadrilla}` });
+    }
+  }
+  return Array.from(porId.values());
+}

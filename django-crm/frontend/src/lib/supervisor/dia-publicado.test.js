@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  aQuienSeLePuedeMover,
   cupoDeLaCuadrilla,
   pastillasDePersona,
   resumenDeLoSinBajar,
@@ -291,5 +292,61 @@ describe('cuándo vence, contra el día que se mira (29/10/2026)', () => {
       'Sin vencimiento',
       'Sin vencimiento'
     ]);
+  });
+});
+
+describe('a quién se le puede pasar una orden (14/11/2026)', () => {
+  const DIA = [
+    { cuadrilla: 'Cuadrilla #1', personas: [
+      { profile: 'p-aa', nombre: 'Jeider Amell' },
+      { profile: 'p-bb', nombre: 'Nicolás Mora' }
+    ] },
+    { cuadrilla: 'Cuadrilla #2', personas: [
+      { profile: 'p-cc', nombre: 'Jeider Amell' }
+    ] }
+  ];
+
+  //  EL NOMBRE SOLO NO ALCANZA: dos Jeider Amell en el mismo día, y el
+  //  selector es lo único que quien mueve mira antes de decidir.
+  it('cada opción dice de qué cuadrilla es, para distinguir dos nombres iguales', () => {
+    expect(aQuienSeLePuedeMover(DIA)).toEqual([
+      { profile: 'p-aa', nombre: 'Jeider Amell · Cuadrilla #1' },
+      { profile: 'p-bb', nombre: 'Nicolás Mora · Cuadrilla #1' },
+      { profile: 'p-cc', nombre: 'Jeider Amell · Cuadrilla #2' }
+    ]);
+  });
+
+  //  LA MISMA PERSONA EN DOS CUADRILLAS no se ofrece dos veces: las dos
+  //  opciones harían lo mismo y la segunda solo confunde.
+  //  Y SALE CON LA PRIMERA CUADRILLA, no con la ultima. El `Map` ya la
+  //  deduplica solo --medido por mutacion el 14/11/2026: quitar el `has`
+  //  dejaba la suite en verde-- pero sin el gana la ULTIMA, y entonces la
+  //  misma persona se nombra distinto segun el orden en que vengan las
+  //  cuadrillas. Eso es lo que esta linea fija.
+  it('la misma persona en dos cuadrillas sale una vez, con la primera', () => {
+    const repetida = [
+      { cuadrilla: 'Cuadrilla #1', personas: [{ profile: 'p-aa', nombre: 'Jeider' }] },
+      { cuadrilla: 'Cuadrilla #2', personas: [{ profile: 'p-aa', nombre: 'Jeider' }] }
+    ];
+
+    expect(aQuienSeLePuedeMover(repetida)).toEqual([
+      { profile: 'p-aa', nombre: 'Jeider · Cuadrilla #1' }
+    ]);
+  });
+
+  //  UNA FILA SIN `profile` NO SE OFRECE. El día publicado solo empezó a
+  //  traerlo el 14/11/2026: contra un servidor viejo, o una fila a la que le
+  //  falte, una opción vacía mandaría el POST sin destino.
+  it('sin el id de la persona, esa opción no existe', () => {
+    const sinId = [{ cuadrilla: 'Cuadrilla #1', personas: [
+      { nombre: 'Alguien sin id' }, { profile: 'p-aa', nombre: 'Jeider' }
+    ] }];
+
+    expect(aQuienSeLePuedeMover(sinId).map((p) => p.profile)).toEqual(['p-aa']);
+  });
+
+  it('un día sin cuadrillas no ofrece a nadie', () => {
+    expect(aQuienSeLePuedeMover([])).toEqual([]);
+    expect(aQuienSeLePuedeMover(null)).toEqual([]);
   });
 });

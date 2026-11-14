@@ -77,3 +77,71 @@ describe('la tarjeta de una orden del día', () => {
     expect(html({ orden })).not.toContain('od-aviso-mal');
   });
 });
+
+describe('mover la orden a otro técnico (14/11/2026)', () => {
+  const OTROS = [
+    { profile: 'p-aa', nombre: 'Jeider Amell · Cuadrilla #1' },
+    { profile: 'p-bb', nombre: 'Nicolás Mora · Cuadrilla #2' }
+  ];
+
+  //  LA GUARDA AFIRMA EL `value`, NO QUE LA OPCIÓN EXISTA. El selector dibuja
+  //  el nombre y manda el id, y son dos cosas distintas: un `value` con el
+  //  nombre adentro renderiza igual de bien y el POST vuelve 404 «No existe
+  //  esa persona». Esa es la mutación que esto tiene que matar.
+  it('cada opción manda el id de la persona, no su nombre', () => {
+    const h = html({ orden, aQuienMover: OTROS });
+
+    expect(h).toMatch(/<option value="p-aa"[^>]*>Jeider Amell · Cuadrilla #1<\/option>/);
+    expect(h).toMatch(/<option value="p-bb"[^>]*>Nicolás Mora · Cuadrilla #2<\/option>/);
+  });
+
+  it('el formulario dice qué orden mueve, y pide el motivo', () => {
+    const h = html({ orden, aQuienMover: OTROS });
+
+    expect(h).toContain('action="?/mover"');
+    expect(h).toMatch(/name="orden"[^>]*value="o-1"/);
+    //  El backend acepta el motivo vacío; la pantalla no. Sin él, el evento
+    //  `reasignacion` queda sin la única línea que después explica por qué
+    //  un trabajo cambió de manos.
+    expect(h).toMatch(/name="motivo"[^>]*required/);
+  });
+
+  //  SIN A QUIÉN MOVERLA NO HAY CONTROL. Un selector vacío es un botón que no
+  //  hace nada, y en esta pantalla eso pasa seguido: un día con una sola
+  //  cuadrilla de una persona.
+  it('sin nadie más en el día, el control no se dibuja', () => {
+    const h = html({ orden, aQuienMover: [] });
+
+    expect(h).not.toContain('action="?/mover"');
+  });
+
+  //  NO SE MUEVE LO TERMINADO: el servidor lo rechaza, y ofrecer un botón que
+  //  va a ser negado es peor que no ofrecerlo.
+  it('una orden cerrada no se puede mover', () => {
+    const h = html({ orden: { ...orden, estado: 'cerrada', estado_texto: 'Cerrada' },
+                     aQuienMover: OTROS });
+
+    expect(h).not.toContain('action="?/mover"');
+  });
+
+  //  NI LO YA HECHO: el trabajo lo completó alguien y espera revisión.
+  //  Moverla se lo atribuye a quien no lo hizo — la revisión del cierre, la
+  //  devolución al ticket y la marca de agua de las fotos nombran al
+  //  responsable.
+  it('una orden ya completada en campo tampoco', () => {
+    const h = html({ orden: { ...orden, estado: 'completada_campo',
+                              estado_texto: 'Completada en campo' },
+                     aQuienMover: OTROS });
+
+    expect(h).not.toContain('action="?/mover"');
+  });
+
+  //  PERO UNA EN CAMINO SÍ: es el caso que pidió el control.
+  it('una en camino sí se puede mover', () => {
+    const h = html({ orden: { ...orden, estado: 'en_camino',
+                              estado_texto: 'En camino' },
+                     aQuienMover: OTROS });
+
+    expect(h).toContain('action="?/mover"');
+  });
+});

@@ -24,8 +24,33 @@
   import ProgresoDeLaOrden from './ProgresoDeLaOrden.svelte';
   import RevisionDelCierre from './RevisionDelCierre.svelte';
 
-  /** @type {{ orden: any, dia: string, marca?: string }} */
-  let { orden, dia, marca = '' } = $props();
+  /** @type {{ orden: any, dia: string, marca?: string,
+   *           aQuienMover?: {profile: string, nombre: string}[] }} */
+  let { orden, dia, marca = '', aQuienMover = [] } = $props();
+
+  //  MOVERLA A OTRO TÉCNICO  --  14/11/2026
+  //
+  //  Hasta hoy no se podía desde ninguna pantalla, y el síntoma era caro: el
+  //  técnico que se enfermaba a media jornada se llevaba sus órdenes con él.
+  //  El backend ya lo resolvía entero (`campo/services/despacho.py::asignar`)
+  //  y nadie lo llamaba.
+  //
+  //  NO SE OFRECE SOBRE LO TERMINADO ni sobre lo YA COMPLETADO EN CAMPO. Lo
+  //  primero el servidor lo rechaza, y un botón que va a ser negado es peor
+  //  que no tenerlo. Lo segundo es más de fondo: el trabajo ya lo hizo
+  //  alguien, y la revisión del cierre, la devolución al ticket y la marca de
+  //  agua de las fotos nombran al responsable — moverla se lo atribuye a
+  //  quien no lo hizo. `mover_la_orden` lo rechaza también, porque una lista
+  //  en el navegador no es una garantía.
+  //
+  //  EN CAMINO Y EN SITIO SÍ: ese es el caso que pidió el control —el técnico
+  //  se enfermó yendo— y es justo el que más urge.
+  //
+  //  NI SIN NADIE A QUIEN MOVERLA: un día de una sola cuadrilla de una
+  //  persona dibujaría un selector vacío, que es un botón que no hace nada.
+  const NO_SE_MUEVEN = ['cerrada', 'cancelada', 'completada_campo'];
+  let seMueve = $derived(aQuienMover.length > 0
+    && !NO_SE_MUEVEN.includes(orden.estado));
 
   //  Lo terminado se atenúa, salvo que espere que alguien lo revise
   //  (30/10/2026): eso es justo lo que hay que mirar.
@@ -100,6 +125,59 @@
     </div>
   {/if}
 
+  {#if seMueve}
+    <div class="od-mover">
+      <!-- UN `<details>` NATIVO, Y ESTA VEZ SÍ  --  14/11/2026
+
+           El 12/11 el campo de los minutos quedó plegado en uno y el usuario
+           no lo encontró: ahí estaba mal, porque era un AJUSTE, algo que se
+           busca sin saber dónde está. Acá el resumen dice literalmente lo
+           que alguien busca cuando lo necesita.
+
+           Y hay una razon de fondo: toda esta pantalla usa formularios
+           nativos, sin `enhance` ni estado de cliente, y sus pruebas
+           renderizan en el SERVIDOR. Un botón con `$state` no se dibuja
+           ahí, así que el control no tendría forma de medirse. -->
+      <details>
+        <summary class="od-mover-abre">Mover a otro técnico</summary>
+        <!-- FORMULARIO NATIVO, SIN `enhance`, igual que RevisionDelCierre: al
+             confirmar, la página recarga y la orden aparece ya bajo la
+             cuadrilla nueva. Con `enhance` se quedaría dibujada donde estaba,
+             que es justo lo contrario de lo que se acaba de hacer. -->
+        <form method="POST" action="?/mover" class="od-mover-form">
+          <input type="hidden" name="orden" value={orden.id} />
+          <label class="od-mover-campo">
+            <span class="snoc-label">Se la paso a</span>
+            <select name="profile" required class="snoc-input">
+              {#each aQuienMover as p (p.profile)}
+                <option value={p.profile}>{p.nombre}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="od-mover-campo">
+            <span class="snoc-label">Por qué</span>
+            <input type="text" name="motivo" required maxlength="200"
+                   class="snoc-input" placeholder="Se enfermó, la zona le queda lejos…" />
+          </label>
+          <button type="submit" class="snoc-btn snoc-btn-primario">Mover</button>
+          <!-- LO QUE DE VERDAD PASA (14/11/2026). Acá decía «al anterior se le
+               borra de la app, con lo que tenga sin subir», y las dos mitades
+               eran falsas en direcciones opuestas: con `asignar()` no se le
+               borraba nada —seguía viendo y pudiendo cerrar la orden— y, si
+               se le borrara, `ordenTieneAlgoSinSubir`
+               (`local_database.dart:3999`) impide soltar una orden con la
+               cola pendiente. El texto alarmaba por una pérdida imposible y
+               ocultaba el acceso que sí quedaba. -->
+          <p class="snoc-body-sm snoc-secundario">
+            Al anterior se le quita: deja de verla en su app y no puede seguir
+            trabajándola. Si tiene fotos sin subir, el teléfono la conserva hasta
+            que terminen de subir.
+          </p>
+        </form>
+      </details>
+    </div>
+  {/if}
+
   <footer class="od-pie">
     <span>
       <span class="od-estado">{orden.estado_texto}</span>
@@ -112,6 +190,16 @@
 </article>
 
 <style>
+  .od-mover {
+    display: grid;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--snoc-outline-variant);
+  }
+  .od-mover-form { display: grid; gap: 6px; }
+  .od-mover-campo { display: grid; gap: 2px; }
+  .od-mover-abre { cursor: pointer; font-size: 12px; line-height: 18px; font-weight: 600; }
+
   .od {
     /* El ámbar de «vence hoy» y de la prioridad media: el Supervisor NOC no
        tiene uno propio, y no se toca el sistema compartido por una tarjeta. */

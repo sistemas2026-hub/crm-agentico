@@ -38,6 +38,7 @@ from campo.serializers import (
     OrdenTrabajoDetailSerializer,
     ProgramarSerializer,
     ReprogramarSerializer,
+    MoverLaOrdenSerializer,
     RetirarIntegranteSerializer,
     ValidarSerializer,
 )
@@ -46,6 +47,7 @@ from campo.services.despacho import (
     anotar_labor_sugerida, asignar, asignar_a_jornada, bloquear_el_caso,
     cambiar_principal, cliente_para_la_orden, contexto_del_caso, crear_orden,
     desasignar, ordenes_vivas_del_caso,
+    mover_la_orden,
     retirar_integrante,
 )
 from campo.services.idempotencia import manejar_idempotencia
@@ -801,3 +803,40 @@ class DesasignarTrabajoView(APIView):
                 aviso="La orden ya estaba sin asignar.")
         return _respuesta_cuadrilla(orden, resultado="desasignada",
                                     integrantes_retirados=cuantos)
+
+
+class MoverLaOrdenView(APIView):
+    """La orden PASA de un tecnico a otro: al anterior se le quita.
+
+    No es `AsignarTrabajoView` con otro nombre. Esa pone al nuevo y le deja
+    la fila al anterior, que entonces sigue pudiendo abrir, recorrer y cerrar
+    la orden -- medido el 14/11/2026. Ver `despacho.py::mover_la_orden`.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    @manejar_idempotencia
+    def post(self, request, pk):
+        negado = _exigir_gestion(request)
+        if negado:
+            return negado
+
+        orden = _orden_o_404(request, pk)
+        s = MoverLaOrdenSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        nuevo = _profile_o_404(request, s.validated_data["profile_id"])
+
+        try:
+            r = mover_la_orden(orden, nuevo, request.profile,
+                               motivo=s.validated_data["motivo"])
+        except ErrorDespacho as e:
+            return _error_de_cuadrilla(e)
+
+        #  `aviso` NO es siempre True: `avisar_asignacion` sale solo si la
+        #  persona es nueva en la orden. La pantalla lo dice segun esto, en
+        #  vez de prometerlo.
+        return _respuesta_cuadrilla(
+            orden,
+            resultado="movida" if r["movida"] else "sin_cambios",
+            aviso=r["aviso"],
+            anterior=str(r["anterior"].id) if r["anterior"] else None)

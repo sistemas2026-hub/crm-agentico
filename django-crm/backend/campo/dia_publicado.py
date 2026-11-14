@@ -205,6 +205,21 @@ def _personas_de(org, jornadas, reciben, por_jornada, zona) -> dict:
                 and (visto is None or a.created_at > visto + freno))
             filas.append({
                 "nombre": r.get("nombre") or _nombre(r["profile"]),
+                #  QUIEN ES, NO SOLO COMO SE LLAMA  --  14/11/2026
+                #
+                #  Programacion traia el nombre y nada mas, y con un nombre no
+                #  se puede mover una orden a nadie: el selector de
+                #  «mover a otro tecnico» necesita a quien apuntar.
+                #
+                #  ES EL ID DEL PROFILE, no el de `PersonaDeCampo`. Son dos
+                #  objetos distintos con dos tablas distintas, y `asignar()`
+                #  (campo/services/despacho.py) busca un Profile: mandarle el
+                #  otro id devuelve 404 y el sintoma --«no existe esa
+                #  persona»-- no senala aca.
+                #
+                #  NO ES UN DATO DE CLIENTE: es un companero, igual que su
+                #  nombre, que esta pantalla ya muestra.
+                "profile": str(pid),
                 "ordenes": len(suyas),
                 "telefono": pid in con_telefono,
                 "ultimo_contacto": visto.astimezone(zona).isoformat() if visto else None,

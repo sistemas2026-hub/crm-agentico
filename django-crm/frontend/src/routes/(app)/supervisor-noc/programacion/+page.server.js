@@ -9,6 +9,7 @@ import {
 } from '$lib/server/v2/material-del-dia.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 import { aprobarYCerrar, cerrarAprobada, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
+import { moverOrden } from '$lib/server/v2/mover-orden.js';
 import { leerCerradas } from '$lib/server/v2/cerradas.js';
 import { rangoDeCerradas } from '$lib/supervisor/dia-publicado.js';
 import {
@@ -246,6 +247,49 @@ export const actions = {
       return { de: 'revision', hecho: 'Devuelta al técnico. Le llega el aviso con lo que tiene que rehacer.' };
     } catch (e) {
       return fail(400, { de: 'revision', error: mensajeDeError(e, 'No se pudo devolver.') });
+    }
+  },
+
+  //  MOVER LA ORDEN A OTRO TÉCNICO  --  14/11/2026
+  //
+  //  Hasta hoy no había forma de hacerlo desde ninguna pantalla: el técnico
+  //  que se enfermaba a media jornada se llevaba sus órdenes con él. El
+  //  backend lo resolvía entero y nadie lo llamaba (ver `mover-orden.js`).
+  //
+  //  EL MOTIVO ES OBLIGATORIO ACÁ y opcional en el backend, a propósito. El
+  //  evento `reasignacion` lo guarda, y es lo único que después explica por
+  //  qué un trabajo cambió de manos; un campo opcional se deja vacío siempre.
+  //  Mismo criterio que la devolución, que ya exige el suyo.
+  //
+  //  NO SE VALIDA QUE EL DESTINO SALGA HOY: eso lo decide la pantalla, que
+  //  solo ofrece a quienes salen. Repetir la regla acá la pondría en dos
+  //  lugares que pueden divergir, y el backend ya rechaza lo que de verdad
+  //  no se puede —otra empresa, una orden cerrada o cancelada—.
+  mover: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'mover', error: 'Esto es para quien gestiona.' });
+    const f = await request.formData();
+    const orden = String(f.get('orden') ?? '');
+    const profile = String(f.get('profile') ?? '').trim();
+    const motivo = String(f.get('motivo') ?? '').trim();
+    if (!orden) return fail(400, { de: 'mover', error: 'Falta la orden.' });
+    if (!profile) return fail(400, { de: 'mover', error: 'Elegí a quién se la pasás.' });
+    if (!motivo) return fail(400, { de: 'mover', error: 'Decí por qué se mueve.' });
+    try {
+      const r = await moverOrden({ cookies }, { orden, profile, motivo });
+      //  NO SE AFIRMA EL AVISO, SE PREGUNTA (14/11/2026). `avisar_asignacion`
+      //  sale solo si la persona es nueva en la orden
+      //  (`campo/services/despacho.py:229`, decisión propia con su prueba).
+      //  Devolverle la orden a quien la tenía antes, o dársela a quien ya
+      //  figuraba de ayudante, no manda nada — y la pantalla lo decía igual.
+      if (r?.resultado === 'sin_cambios') {
+        return { de: 'mover', hecho: 'Esa persona ya la tenía. No se cambió nada.' };
+      }
+      return { de: 'mover', hecho: r?.aviso
+        ? 'Movida. Le llegó el aviso al teléfono.'
+        : 'Movida. No le llega aviso: ya figuraba en esta orden.' };
+    } catch (e) {
+      return fail(400, { de: 'mover', error: mensajeDeError(e, 'No se pudo mover.') });
     }
   }
 };
