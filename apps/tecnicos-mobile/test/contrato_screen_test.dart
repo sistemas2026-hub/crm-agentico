@@ -13,12 +13,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _ApiFalsa extends ApiDelContrato {
-  _ApiFalsa({this.lectura, this.errorDeLectura});
+  _ApiFalsa({this.lectura, this.errorDeLectura, this.ips});
 
   final Map<String, dynamic>? lectura;
   final String? errorDeLectura;
+  /// Lo que contesta `/ips-libres/`, por zona. Sin esto, lista vacia.
+  final Map<int, Map<String, dynamic>>? ips;
   Map<String, dynamic>? enviado;
   int lecturas = 0;
+  final List<int> zonasPedidas = <int>[];
+
+  @override
+  Future<Map<String, dynamic>> ipsLibres(String ordenId, int idZona) async {
+    zonasPedidas.add(idZona);
+    return ips?[idZona] ??
+        <String, dynamic>{'libres': const <dynamic>[], 'motivo': 'sin pool'};
+  }
 
   @override
   Future<RespuestaDelServidor> leer(String ordenId) async {
@@ -82,6 +92,175 @@ void main() {
         () async => <String, dynamic>{'lat': 10.9108, 'lng': -74.8186, 'precision_m': 6};
   });
   tearDown(() => UbicacionDeCaptura.overrideParaPruebas = null);
+
+  // ========================================================================
+  //  LA DIRECCION IP  --  14/11/2026
+  //
+  //  Se OFRECE y no se teclea: el usuario reporto que al digitar los datos
+  //  «hay muchos errores». Una IP mal tecleada no es un dedazo, es un cliente
+  //  sin servicio o dos clientes con la misma.
+  // ========================================================================
+  testWidgets('elegir el servidor pide las IP de ESA zona', (WidgetTester t) async {
+    _telefonoAlto(t);
+    final _ApiFalsa api = _ApiFalsa(lectura: _borrador(), ips: <int, Map<String, dynamic>>{
+      20061: <String, dynamic>{
+        'libres': <String>['172.16.9.2', '172.16.9.3'],
+        'advertencia': 'Ninguna de estas la tiene un CLIENTE. Los equipos de red...',
+      },
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+
+    //  Con DOS servidores no se pide nada hasta que elija.
+    expect(api.zonasPedidas, isEmpty);
+    expect(find.text('172.16.9.2'), findsNothing);
+
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.pumpAndSettle();
+
+    expect(api.zonasPedidas, <int>[20061]);
+    expect(find.text('172.16.9.2'), findsOneWidget);
+    expect(find.text('172.16.9.3'), findsOneWidget);
+  });
+
+  testWidgets('LA ADVERTENCIA SE MUESTRA: libre no es usable', (WidgetTester t) async {
+    _telefonoAlto(t);
+    await t.pumpWidget(_montar(_ApiFalsa(
+        lectura: _borrador(),
+        ips: <int, Map<String, dynamic>>{
+          20061: <String, dynamic>{
+            'libres': <String>['172.16.9.2'],
+            'advertencia': 'Los equipos de red no estan en el listado del proveedor.',
+          },
+        })));
+    await t.pumpAndSettle();
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.pumpAndSettle();
+
+    expect(find.textContaining('equipos de red'), findsOneWidget);
+  });
+
+  testWidgets('sin direcciones para ofrecer, se dice el motivo', (WidgetTester t) async {
+    _telefonoAlto(t);
+    await t.pumpWidget(_montar(_ApiFalsa(
+        lectura: _borrador(),
+        ips: <int, Map<String, dynamic>>{
+          20061: <String, dynamic>{
+            'libres': const <dynamic>[],
+            'motivo': 'la ocupacion de IP no se ha sincronizado nunca',
+          },
+        })));
+    await t.pumpAndSettle();
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.pumpAndSettle();
+
+    expect(find.textContaining('no se ha sincronizado'), findsOneWidget);
+  });
+
+  testWidgets('cambiar de servidor SUELTA la IP elegida', (WidgetTester t) async {
+    //  Dejarla puesta seria mandar una direccion de otro rango sin que nadie
+    //  lo note.
+    _telefonoAlto(t);
+    final _ApiFalsa api = _ApiFalsa(lectura: _borrador(), ips: <int, Map<String, dynamic>>{
+      20061: <String, dynamic>{'libres': <String>['172.16.9.2']},
+      20053: <String, dynamic>{'libres': <String>['10.0.0.5']},
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('172.16.9.2'));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('SERVIDOR 1'));
+    await t.pumpAndSettle();
+
+    expect(find.text('172.16.9.2'), findsNothing, reason: 'la de la zona vieja se va');
+    expect(find.text('10.0.0.5'), findsOneWidget);
+    expect(api.zonasPedidas, <int>[20061, 20053]);
+  });
+
+  testWidgets('la IP elegida VIAJA en el contrato', (WidgetTester t) async {
+    //  LAS DOS PRUEBAS DE ARRIBA NO ALCANZABAN, y lo dijeron las mutaciones:
+    //  quitar `if (_ip != null) 'ip': _ip` del cuerpo no rompia ninguna,
+    //  porque ninguna FIRMABA con una direccion elegida. Mirar la pantalla no
+    //  prueba que el dato salga.
+    _telefonoAlto(t);
+    final _ApiFalsa api = _ApiFalsa(lectura: _borrador(), ips: <int, Map<String, dynamic>>{
+      20061: <String, dynamic>{'libres': <String>['172.16.9.2', '172.16.9.3']},
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('172.16.9.3'));
+    await t.pump();
+    await t.drag(find.byType(LienzoDeFirma), const Offset(140, -40));
+    await t.pump();
+
+    await t.runAsync(() async {
+      await t.tap(find.text('Crear el contrato'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await t.pumpAndSettle();
+
+    expect(api.enviado!['ip'], '172.16.9.3');
+  });
+
+  testWidgets('cambiar de servidor NO deja viajar la IP de la zona vieja',
+      (WidgetTester t) async {
+    //  El control de la de arriba: sin soltar `_ip` al cambiar de zona, el
+    //  contrato saldria con una direccion de OTRO rango, y eso no se ve en la
+    //  pantalla porque el chip de la zona vieja ya no esta.
+    _telefonoAlto(t);
+    final _ApiFalsa api = _ApiFalsa(lectura: _borrador(), ips: <int, Map<String, dynamic>>{
+      20061: <String, dynamic>{'libres': <String>['172.16.9.2']},
+      20053: <String, dynamic>{'libres': <String>['10.0.0.5']},
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('172.16.9.2'));
+    await t.pump();
+
+    //  Se arrepiente y cambia de servidor, SIN elegir una nueva.
+    await t.tap(find.text('SERVIDOR 1'));
+    await t.pumpAndSettle();
+
+    await t.drag(find.byType(LienzoDeFirma), const Offset(140, -40));
+    await t.pump();
+    await t.runAsync(() async {
+      await t.tap(find.text('Crear el contrato'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await t.pumpAndSettle();
+
+    expect(api.enviado!.containsKey('ip'), isFalse,
+        reason: 'la de la zona vieja no puede viajar');
+    expect(api.enviado!['id_zona'], 20053);
+  });
+
+  testWidgets('con UN SOLO servidor las pide sola', (WidgetTester t) async {
+    //  La zona se elige sola en la carga, asi que el onChanged del radio no
+    //  corre: sin este camino la pantalla quedaba sin nada que ofrecer.
+    _telefonoAlto(t);
+    final Map<String, dynamic> uno = _borrador();
+    uno['servidores'] = <Map<String, dynamic>>[
+      <String, dynamic>{'id_zona': 20053, 'nombre': 'SERVIDOR 1'},
+    ];
+    final _ApiFalsa api = _ApiFalsa(lectura: uno, ips: <int, Map<String, dynamic>>{
+      20053: <String, dynamic>{'libres': <String>['10.0.0.5']},
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+
+    expect(api.zonasPedidas, <int>[20053]);
+    expect(find.text('10.0.0.5'), findsOneWidget);
+  });
 
   test('lleva contrato: por la labor, y por el código de la plantilla como respaldo', () {
     expect(llevaContrato(<String, dynamic>{'labor': 'instalacion'}), isTrue);

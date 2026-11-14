@@ -290,3 +290,62 @@ def test_e2_un_servidor_malo_se_rechaza(admin_client, servidores):
 def test_e3_quien_no_gestiona_no_la_toca(user_client):
     assert user_client.put(URL_CONFIG, {"nit": "x"},
                            format="json").status_code in (403, 404)
+
+
+# =========================================================================== #
+#  LA IP QUE ELIGIO EL TECNICO  --  14/11/2026
+#
+#  Queda en los datos FIRMADOS porque es parte de lo que se decidio en la casa,
+#  y de ahi la lee el alta cuando se construya. Se valida la FORMA, no que este
+#  libre: comprobarlo exige preguntarle al motor, y si el motor no contesta el
+#  tecnico no podria firmar por un problema de red que no es suyo. Firmar no
+#  crea el cliente en el ISP.
+# =========================================================================== #
+#: Lo que `firmar` exige y el borrador de esta orden no trae: esta orden no
+#: tiene solicitud, asi que el documento lo manda el telefono.
+_CLIENTE_IP = {"nombre": "Laura", "apellido": "Gomez",
+               "numero_documento": "1043000000", "tipo_documento": "CC",
+               "direccion": "Cra 21 # 45-12", "telefono": "3000000000",
+               "correo": "", "barrio": "Villa Estadio"}
+
+
+def test_ip_la_que_eligio_queda_en_los_datos_firmados(user_client, orden, config):
+    r = user_client.post(_url(orden), _cuerpo(cliente=_CLIENTE_IP, ip="172.16.9.37"), format="json")
+
+    assert r.status_code in (200, 201), r.content
+    assert ContratoDeServicio.objects.get(orden=orden).datos["ip_elegida"] == "172.16.9.37"
+
+
+def test_ip_sin_elegir_ninguna_se_firma_igual(user_client, orden, config):
+    """Una empresa sin pools declarados tiene que poder firmar."""
+    r = user_client.post(_url(orden), _cuerpo(cliente=_CLIENTE_IP), format="json")
+
+    assert r.status_code in (200, 201), r.content
+    assert ContratoDeServicio.objects.get(orden=orden).datos["ip_elegida"] == ""
+
+
+@pytest.mark.parametrize("mala,trozo", [
+    ("no-es-una-ip", "válida"),
+    ("172.16.9", "válida"),
+    ("999.1.1.1", "válida"),
+    ("::1", "IPv4"),
+    ("172.16.9.0", "red o el broadcast"),
+    ("172.16.9.255", "red o el broadcast"),
+    ("172.16.9.1", "puerta de enlace"),
+])
+def test_ip_una_direccion_que_no_puede_ser_se_rechaza(user_client, orden, config,
+                                                      mala, trozo):
+    r = user_client.post(_url(orden), _cuerpo(cliente=_CLIENTE_IP, ip=mala), format="json")
+
+    assert r.status_code == 400, r.content
+    assert trozo in r.json().get("detail", "")
+    assert not ContratoDeServicio.objects.filter(orden=orden).exists(),         "y NO queda un contrato a medias"
+
+
+def test_ip_el_punto_uno_se_rechaza_aunque_el_rango_este_vacio(user_client, orden, config):
+    """EL CONTROL de la medicion del 14/11: el .1 estaba libre en 83 de 86
+    pools, uno de ellos con 240 de 254 ocupadas. Es la puerta de enlace, y eso
+    no depende de que el rango tenga clientes."""
+    r = user_client.post(_url(orden), _cuerpo(cliente=_CLIENTE_IP, ip="10.9.9.1"), format="json")
+
+    assert r.status_code == 400, r.content

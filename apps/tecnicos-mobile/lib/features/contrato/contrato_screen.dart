@@ -76,6 +76,27 @@ class ApiDelContrato {
     }
   }
 
+  /// Las IP que se le pueden ofrecer en esa zona.
+  ///
+  /// NO devuelve error: una lista vacia con su motivo es una respuesta
+  /// legitima --el servidor contesta 200 y explica por que no hay-- y el
+  /// tecnico tiene que poder seguir firmando sin esto. El contrato no depende
+  /// de la IP.
+  Future<Map<String, dynamic>> ipsLibres(String ordenId, int idZona) async {
+    try {
+      final Response<dynamic> r = await ApiClient()
+          .get<dynamic>(ApiEndpoints.ipsLibresDeLaOrden(ordenId, idZona))
+          .timeout(const Duration(seconds: 15));
+      final dynamic d = r.data is String ? jsonDecode(r.data as String) : r.data;
+      return Map<String, dynamic>.from(d as Map);
+    } catch (e) {
+      return <String, dynamic>{
+        'libres': const <dynamic>[],
+        'motivo': 'No se pudieron consultar las direcciones disponibles.',
+      };
+    }
+  }
+
   Future<RespuestaDelServidor> firmar(String ordenId, Map<String, dynamic> cuerpo) async {
     try {
       final Response<dynamic> r = await ApiClient()
@@ -123,6 +144,15 @@ class _EstadoContrato extends State<ContratoScreen> {
   Map<String, dynamic>? _borrador;
   List<Map<String, dynamic>> _servidores = <Map<String, dynamic>>[];
   int? _idZona;
+  //  LAS IP DE LA ZONA ELEGIDA. Se piden recien cuando el tecnico elige el
+  //  servidor, porque el servidor es lo que decide de que rango salen: es el
+  //  mismo orden que el panel del ISP y el que la API del alta exige.
+  List<String> _ips = <String>[];
+  String? _ip;
+  bool _cargandoIps = false;
+  String _motivoSinIps = '';
+  String _advertenciaIps = '';
+  int _zonaDeLasIps = -1;
   bool _enviando = false;
   String? _errorDeEnvio;
   final TrazoDeFirma _trazo = TrazoDeFirma();
@@ -184,6 +214,35 @@ class _EstadoContrato extends State<ContratoScreen> {
       _tipoDocumento = (cliente['tipo_documento'] ?? 'CC').toString();
       _plan.text = (_borrador?['plan'] ?? '').toString();
     });
+    //  CON UN SOLO SERVIDOR LA ZONA SE ELIGE SOLA, y entonces nadie dispara
+    //  `_pedirIps`: el `onChanged` del radio no corre. Es el caso mas comun
+    //  --una empresa con un servidor-- y sin esto la pantalla quedaba con el
+    //  servidor puesto y sin ninguna direccion que ofrecer.
+    final int? zona = _idZona;
+    if (zona != null && _contrato == null) await _pedirIps(zona);
+  }
+
+  /// Pide las libres de esa zona. No bloquea nada: si no hay, se dice.
+  Future<void> _pedirIps(int idZona) async {
+    setState(() {
+      _cargandoIps = true;
+      _zonaDeLasIps = idZona;
+    });
+    final Map<String, dynamic> d = await widget.api.ipsLibres(widget.ordenId, idZona);
+    if (!mounted) return;
+    //  LLEGO TARDE Y LA ZONA YA CAMBIO: se descarta. Sin esto, la respuesta
+    //  de la zona vieja pisaria la lista de la nueva, y el tecnico elegiria
+    //  una direccion de otro rango creyendo que es de la que marco.
+    if (_zonaDeLasIps != idZona) return;
+    setState(() {
+      _cargandoIps = false;
+      _ips = <String>[
+        for (final dynamic x in (d['libres'] as List? ?? const <dynamic>[]))
+          if (x.toString().trim().isNotEmpty) x.toString(),
+      ];
+      _motivoSinIps = _ips.isEmpty ? (d['motivo'] ?? '').toString() : '';
+      _advertenciaIps = (d['advertencia'] ?? '').toString();
+    });
   }
 
   bool get _listo =>
@@ -210,6 +269,9 @@ class _EstadoContrato extends State<ContratoScreen> {
       },
       'plan': _plan.text.trim(),
       'id_zona': _idZona,
+      //  Si no eligio ninguna, no viaja: el servidor acepta vacio porque
+      //  una empresa sin pools declarados tiene que poder firmar igual.
+      if (_ip != null) 'ip': _ip,
       'firma_png_base64': base64Encode(firma),
       if (ubicacion.containsKey('lat') && ubicacion.containsKey('lng'))
         'gps': <String, dynamic>{
@@ -347,7 +409,18 @@ class _EstadoContrato extends State<ContratoScreen> {
             ),
           RadioGroup<int>(
             groupValue: _idZona,
-            onChanged: (int? v) => setState(() => _idZona = v),
+            onChanged: (int? v) {
+              setState(() {
+                _idZona = v;
+                //  La IP de la zona anterior no sirve para la nueva: se
+                //  suelta. Dejarla puesta seria ofrecer una direccion de
+                //  otro rango sin que nadie lo note.
+                _ip = null;
+                _ips = <String>[];
+                _motivoSinIps = '';
+              });
+              if (v != null) _pedirIps(v);
+            },
             //  Material transparente: sin él, la tarjeta de color tapa el
             //  efecto del toque y el técnico no ve que eligió.
             child: Material(
@@ -362,6 +435,60 @@ class _EstadoContrato extends State<ContratoScreen> {
               ]),
             ),
           ),
+          //  LA IP, DESPUES DEL SERVIDOR  --  14/11/2026
+          //
+          //  Se OFRECE y no se teclea, que es el motivo de todo esto: el
+          //  usuario reporto que al digitar los datos «hay muchos errores».
+          //  Una IP mal tecleada no es un error de ortografia: es un cliente
+          //  sin servicio, o dos clientes con la misma IP.
+          if (_idZona != null) ...<Widget>[
+            const SizedBox(height: 12),
+            Text('Dirección IP', style: AppTypography.etiqueta),
+            if (_cargandoIps)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Row(children: <Widget>[
+                  SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Buscando las disponibles...'),
+                ]),
+              )
+            else if (_ips.isEmpty)
+              _Aviso(
+                icono: Icons.info_outline,
+                texto: _motivoSinIps.isEmpty
+                    ? 'No hay direcciones para ofrecer en este servidor.'
+                    : _motivoSinIps,
+              )
+            else ...<Widget>[
+              //  Un Wrap y no un RadioGroup: son veinte opciones cortas y en
+              //  columna no caben en una pantalla de telefono.
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final String ip in _ips)
+                    ChoiceChip(
+                      label: Text(ip),
+                      selected: _ip == ip,
+                      onSelected: (bool sel) => setState(() => _ip = sel ? ip : null),
+                    ),
+                ],
+              ),
+              if (_advertenciaIps.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  //  LA ADVERTENCIA SE MUESTRA, no se guarda en el codigo: una
+                  //  direccion libre aqui es una que ningun CLIENTE tiene. Las
+                  //  antenas y los switches no son clientes.
+                  child: _Aviso(icono: Icons.warning_amber_outlined,
+                      texto: _advertenciaIps),
+                ),
+            ],
+          ],
         ]),
         _Tarjeta(children: <Widget>[
           Row(children: <Widget>[

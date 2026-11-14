@@ -152,6 +152,11 @@ class ApiEndpoints {
   static String contratoDeLaOrden(String ordenId) =>
       '$baseUrl/api/campo/trabajos/$ordenId/contrato/';
 
+  // Las IP libres de una zona, para ofrecerselas al tecnico en vez de
+  // pedirle que las teclee (14/11/2026).
+  static String ipsLibresDeLaOrden(String ordenId, int idZona) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/ips-libres/?zona=$idZona';
+
   // Aliases convenientes
   static String accionTrabajo(String id, String accion) {
     if (accion == 'completar') return trabajoCompletar(id);

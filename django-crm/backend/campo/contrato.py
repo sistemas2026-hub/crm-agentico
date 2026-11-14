@@ -268,6 +268,50 @@ def _gps_de(cuerpo: dict) -> dict | None:
     return out
 
 
+def _ip_de(cuerpo: dict) -> str:
+    """La IP que el tecnico eligio, validada en FORMA. "" si no mando ninguna.
+
+    QUE SE COMPRUEBA ACA Y QUE NO  --  14/11/2026
+    ---------------------------------------------
+    Aca: que sea una IPv4 de verdad y que su ultimo octeto no sea `.0` (la
+    red), `.255` (el broadcast) ni `.1` (la puerta de enlace, medida el 14/11:
+    libre en 83 de 86 pools, uno con 240 de 254 ocupadas).
+
+    **Aca NO se comprueba que este libre**, y es a proposito. Comprobarlo exige
+    preguntarle al motor, que puede no contestar -- y entonces el tecnico, con
+    el cliente delante y la firma hecha, no podria firmar por un problema de
+    red que no es suyo. Firmar no crea el cliente en el ISP: no hay ningun
+    efecto externo que proteger todavia.
+
+    La comprobacion de verdad va donde esta el efecto irreversible: el alta.
+    Ahi, contra la ocupacion viva y en el ultimo metro, que es donde la
+    frontera la pone (CLAUDE.md 5). Esta IP es «la que eligio el tecnico», no
+    «la que el sistema garantiza libre», y el nombre del campo lo dice.
+
+    VACIO ES VALIDO. Una empresa sin pools declarados no tiene nada que
+    ofrecer, y eso no puede impedir que se firme un contrato.
+    """
+    import ipaddress
+
+    crudo = str(cuerpo.get("ip") or "").strip()
+    if not crudo:
+        return ""
+    try:
+        direccion = ipaddress.ip_address(crudo)
+    except ValueError:
+        raise ContratoInvalido("Esa no es una dirección IP válida.")
+    if direccion.version != 4:
+        raise ContratoInvalido("La dirección tiene que ser IPv4.")
+    ultimo = int(str(direccion).rsplit(".", 1)[1])
+    if ultimo in (0, 255):
+        raise ContratoInvalido(
+            "Esa dirección es la red o el broadcast del rango: no es de un cliente.")
+    if ultimo == 1:
+        raise ContratoInvalido(
+            "El .1 es la puerta de enlace del rango: elegí otra.")
+    return str(direccion)
+
+
 def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
     """Crea el contrato firmado de la orden. Devuelve (contrato, creado).
 
@@ -305,11 +349,18 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
         raise ContratoInvalido("Elige el servidor." if config["servidores"]
                                else "Tu empresa todavía no cargó sus servidores.")
 
+    #  LA IP QUE ELIGIO EL TECNICO. Va en los datos firmados porque es parte
+    #  de lo que se decidio en la casa, y de aqui la lee el alta cuando se
+    #  construya. Se llama asi --«la que eligio»-- y no «asignada»: hasta que
+    #  el alta la aplique, nadie la tiene.
+    ip_elegida = _ip_de(cuerpo)
+
     firma = _firma_de(cuerpo)
     ahora = timezone.now()
     datos = {
         "cliente": cliente,
         "plan": plan,
+        "ip_elegida": ip_elegida,
         "servidor": {"id_zona": servidor["id_zona"], "nombre": servidor.get("nombre", "")},
         "gps": _gps_de(cuerpo) or base.get("gps"),
         "autorizaciones": base.get("autorizaciones"),
