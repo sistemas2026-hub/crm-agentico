@@ -388,6 +388,9 @@ describe('Programación: mover una orden a otro técnico', () => {
       body: { profile_id: 'p-bb', motivo: 'Se enfermó' }
     });
     expect(r.hecho).toBeTruthy();
+    //  DE QUE ORDEN es el resultado: la tarjeta lo compara contra el suyo
+    //  para no sacar el mismo mensaje en las treinta.
+    expect(r.orden).toBe('o-1');
   });
 
   //  EL MENSAJE NO AFIRMA EL AVISO: lo lee de la respuesta. `avisar_asignacion`
@@ -467,5 +470,8 @@ describe('Programación: el control de mover llega dibujado', () => {
 
     expect(fuente).toMatch(/<OrdenDelDia[^>]*\{aQuienMover\}/);
     expect(fuente).toContain('aQuienSeLePuedeMover(publicado?.cuadrillas)');
+    //  Y `form`, o la tarjeta no tiene con que mostrar si la orden se movio
+    //  o por que no (14/11/2026).
+    expect(fuente).toMatch(/<OrdenDelDia[^>]*\{form\}/);
   });
 });

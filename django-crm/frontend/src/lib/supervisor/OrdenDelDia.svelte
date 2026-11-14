@@ -25,8 +25,9 @@
   import RevisionDelCierre from './RevisionDelCierre.svelte';
 
   /** @type {{ orden: any, dia: string, marca?: string,
-   *           aQuienMover?: {profile: string, nombre: string}[] }} */
-  let { orden, dia, marca = '', aQuienMover = [] } = $props();
+   *           aQuienMover?: {profile: string, nombre: string}[],
+   *           form?: any }} */
+  let { orden, dia, marca = '', aQuienMover = [], form = null } = $props();
 
   //  MOVERLA A OTRO TÉCNICO  --  14/11/2026
   //
@@ -175,6 +176,21 @@
           </p>
         </form>
       </details>
+      <!-- LO QUE PASO, EN LA TARJETA DE ESTA ORDEN  --  14/11/2026
+           El control salio sin ningun lugar donde mostrar su resultado: el
+           usuario elegia un tecnico, tocaba «Mover», la pagina recargaba y no
+           decia nada -- ni el exito ni el error. Y el error estaba: el
+           servidor rechazaba al lider del dia. Una accion que no puede
+           reportar es una accion que falla en silencio.
+
+           SE COMPARA LA ORDEN porque `form` es de la pagina entera y hay una
+           tarjeta por orden: sin esta condicion el mismo mensaje saldria en
+           las treinta. -->
+      {#if form?.de === 'mover' && form?.orden === orden.id}
+        <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">
+          {form?.hecho ?? form?.error}
+        </p>
+      {/if}
     </div>
   {/if}
 

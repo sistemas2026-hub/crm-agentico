@@ -273,8 +273,8 @@ export const actions = {
     const profile = String(f.get('profile') ?? '').trim();
     const motivo = String(f.get('motivo') ?? '').trim();
     if (!orden) return fail(400, { de: 'mover', error: 'Falta la orden.' });
-    if (!profile) return fail(400, { de: 'mover', error: 'Elegí a quién se la pasás.' });
-    if (!motivo) return fail(400, { de: 'mover', error: 'Decí por qué se mueve.' });
+    if (!profile) return fail(400, { de: 'mover', orden, error: 'Elegí a quién se la pasás.' });
+    if (!motivo) return fail(400, { de: 'mover', orden, error: 'Decí por qué se mueve.' });
     try {
       const r = await moverOrden({ cookies }, { orden, profile, motivo });
       //  NO SE AFIRMA EL AVISO, SE PREGUNTA (14/11/2026). `avisar_asignacion`
@@ -283,13 +283,13 @@ export const actions = {
       //  Devolverle la orden a quien la tenía antes, o dársela a quien ya
       //  figuraba de ayudante, no manda nada — y la pantalla lo decía igual.
       if (r?.resultado === 'sin_cambios') {
-        return { de: 'mover', hecho: 'Esa persona ya la tenía. No se cambió nada.' };
+        return { de: 'mover', orden, hecho: 'Esa persona ya la tenía. No se cambió nada.' };
       }
-      return { de: 'mover', hecho: r?.aviso
+      return { de: 'mover', orden, hecho: r?.aviso
         ? 'Movida. Le llegó el aviso al teléfono.'
         : 'Movida. No le llega aviso: ya figuraba en esta orden.' };
     } catch (e) {
-      return fail(400, { de: 'mover', error: mensajeDeError(e, 'No se pudo mover.') });
+      return fail(400, { de: 'mover', orden, error: mensajeDeError(e, 'No se pudo mover.') });
     }
   }
 };

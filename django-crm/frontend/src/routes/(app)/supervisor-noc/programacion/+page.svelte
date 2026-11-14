@@ -598,7 +598,7 @@
                   {#if c.ordenes.length}
                     <div class="snoc-pila-xs" style="gap:var(--snoc-sm); padding-top:var(--snoc-xs);">
                       {#each c.ordenes as o (o.id)}
-                        <OrdenDelDia orden={o} dia={data.dia} marca={textoDeLaSiguiente(c.ordenes)} {aQuienMover} />
+                        <OrdenDelDia orden={o} dia={data.dia} marca={textoDeLaSiguiente(c.ordenes)} {aQuienMover} {form} />
                       {/each}
                     </div>
                   {/if}

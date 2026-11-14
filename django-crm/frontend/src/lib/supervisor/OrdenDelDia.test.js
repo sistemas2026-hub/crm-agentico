@@ -136,6 +136,27 @@ describe('mover la orden a otro técnico (14/11/2026)', () => {
     expect(h).not.toContain('action="?/mover"');
   });
 
+  //  EL CONTROL SALIÓ SIN DÓNDE REPORTAR (14/11/2026). La página recargaba y
+  //  no decía nada: ni el éxito ni el error. Y el error estaba — el servidor
+  //  rechazaba al líder del día. Ninguna de las guardas anteriores lo vio,
+  //  porque todas miraban que el formulario se dibujara, no que contestara.
+  it('el resultado de mover se ve en la tarjeta de esa orden', () => {
+    const h = html({ orden, aQuienMover: OTROS,
+                     form: { de: 'mover', orden: 'o-1', error: 'No se pudo mover.' } });
+
+    expect(h).toContain('No se pudo mover.');
+    expect(h).toContain('snoc-error-txt');
+  });
+
+  //  Y NO EN LAS OTRAS: `form` es de la página entera y hay una tarjeta por
+  //  orden. Sin comparar el id, el mismo mensaje sale en las treinta.
+  it('el resultado de otra orden no aparece en esta', () => {
+    const h = html({ orden, aQuienMover: OTROS,
+                     form: { de: 'mover', orden: 'OTRA', hecho: 'Movida.' } });
+
+    expect(h).not.toContain('Movida.');
+  });
+
   //  PERO UNA EN CAMINO SÍ: es el caso que pidió el control.
   it('una en camino sí se puede mover', () => {
     const h = html({ orden: { ...orden, estado: 'en_camino',

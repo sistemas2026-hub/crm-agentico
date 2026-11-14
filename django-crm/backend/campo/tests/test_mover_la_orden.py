@@ -188,33 +188,27 @@ def test_b3_una_cerrada_tampoco(
         mover_la_orden(o, destino, admin_profile, motivo="x")
 
 
-def test_b4_a_alguien_que_no_es_persona_de_campo_no_se_mueve(
+def test_b4_una_cuenta_activa_SIN_PersonaDeCampo_si_la_recibe(
         org_a, version, user_profile, admin_profile, django_user_model):
-    """Medido el 14/11/2026: el endpoint de asignar aceptaba un perfil de
-    bodega e inactivo con 200, y la orden quedaba con un responsable que no la
-    va a ver nunca. La pantalla solo ofrece a quienes salen ese dia, pero una
-    lista en el navegador no es una garantia (CLAUDE.md §4)."""
+    """Era al reves hasta el 14/11/2026, y por eso el control no movio nada en
+    produccion. `destinatarios` entrega ordenes a cuentas activas, mire o no
+    `PersonaDeCampo` -- ver F. Exigir esa fila aca rechazaba justo a los
+    lideres del dia, que son la mayoria de los destinos del selector.
+
+    La guarda que falta aca --una cuenta DADA DE BAJA no la recibe-- es F2:
+    esa si es la regla que `destinatarios` usa."""
     from common.models import Profile
 
     u = django_user_model.objects.create_user(
-        email="bodega@ejemplo.test", password="x")
-    nadie = Profile.objects.create(user=u, org=org_a, role="USER", is_active=True)
+        email="sinficha@ejemplo.test", password="x")
+    sin_ficha = Profile.objects.create(user=u, org=org_a, role="USER",
+                                       is_active=True)
     o = _de(_orden(org_a, version), user_profile)
 
-    with pytest.raises(ErrorDespacho):
-        mover_la_orden(o, nadie, admin_profile, motivo="x")
+    mover_la_orden(o, sin_ficha, admin_profile, motivo="x")
 
     o.refresh_from_db()
-    assert o.tecnico_principal.id == user_profile.id
-
-
-def test_b5_a_alguien_dado_de_baja_tampoco(
-        org_a, version, user_profile, destino, admin_profile):
-    PersonaDeCampo.objects.filter(org=org_a, profile=destino).update(activa=False)
-    o = _de(_orden(org_a, version), user_profile)
-
-    with pytest.raises(ErrorDespacho):
-        mover_la_orden(o, destino, admin_profile, motivo="x")
+    assert o.tecnico_principal.id == sin_ficha.id
 
 
 # ---------------------------------------------------------------------------
@@ -376,5 +370,67 @@ def test_e6_a_una_persona_de_OTRA_empresa_no_se_mueve(
                                     "motivo": "x"}, format="json")
 
     assert r.status_code == 404, r.content
+    o.refresh_from_db()
+    assert o.tecnico_principal.id == user_profile.id
+
+
+# ---------------------------------------------------------------------------
+# F · EL CASO DE PRODUCCION (14/11/2026): el LIDER del dia
+# ---------------------------------------------------------------------------
+
+def test_f_al_LIDER_DEL_DIA_se_le_puede_mover_aunque_no_sea_PersonaDeCampo(
+        org_a, version, norte, user_profile, destino, admin_profile):
+    """Encontrado en produccion el mismo dia que salio el control: se elegia
+    un tecnico del selector, se tocaba «Mover» y no pasaba nada.
+
+    LA CAUSA FUE UNA REGLA INVENTADA. La primera version exigia
+    `PersonaDeCampo` activa, y esa NO es la regla con la que el sistema
+    decide quien recibe una orden. `cuadrillas.destinatarios` dice: «el LIDER
+    DEL DIA la recibe siempre, ESTE O NO anotado entre los integrantes», y
+    entra por `jornada.lider`, que es un `Profile` -- sin pasar por
+    `PersonaDeCampo` en ninguna linea. Un lider que no esta anotado como
+    integrante no tiene esa fila, y el selector de la pantalla SI lo ofrece,
+    porque sale de `destinatarios`.
+
+    Dos reglas distintas para la misma pregunta, en dos archivos: la de
+    `destinatarios` decidia a quien ofrecer y la mia decidia a quien aceptar.
+    """
+    from campo.cuadrillas import PersonaDeCampo
+
+    #  Un lider del dia tal como lo arma la pantalla: `jornada.lider`, sin
+    #  fila propia en PersonaDeCampo.
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla #5")
+    j = JornadaDeCuadrilla.objects.create(
+        org=org_a, cuadrilla=c, fecha=LUNES,
+        labor=JornadaDeCuadrilla.INSTALACION, lider=destino)
+    j.zonas.set([norte])
+    PersonaDeCampo.objects.filter(org=org_a, profile=destino).delete()
+    assert not PersonaDeCampo.objects.filter(org=org_a, profile=destino).exists()
+
+    #  Y la pantalla lo ofrece: si esto no fuera cierto, la prueba estaria
+    #  midiendo un caso que no existe.
+    from campo.cuadrillas import destinatarios
+    assert destino.id in {r["profile"].id for r in destinatarios(j)["reciben"]}
+
+    o = _de(_orden(org_a, version), user_profile)
+
+    mover_la_orden(o, destino, admin_profile, motivo="Se enfermo")
+
+    o.refresh_from_db()
+    assert o.tecnico_principal.id == destino.id
+
+
+def test_f2_pero_a_una_cuenta_DADA_DE_BAJA_no(
+        org_a, version, user_profile, destino, admin_profile):
+    """La regla que SI usa el sistema: `destinatarios` descarta al lider
+    inactivo con el motivo `lider_inactivo`, y a un integrante con
+    `not p.is_active`. Su telefono ya no entra."""
+    destino.is_active = False
+    destino.save(update_fields=["is_active"])
+    o = _de(_orden(org_a, version), user_profile)
+
+    with pytest.raises(ErrorDespacho):
+        mover_la_orden(o, destino, admin_profile, motivo="x")
+
     o.refresh_from_db()
     assert o.tecnico_principal.id == user_profile.id

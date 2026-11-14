@@ -1184,29 +1184,33 @@ def desasignar(orden: OrdenTrabajo, actor, motivo: str = "") -> int:
     return cuantos
 
 
-def _exigir_persona_de_campo_activa(orden: OrdenTrabajo, profile) -> None:
-    """Que el destino sea alguien que va a ver la orden en su telefono.
+def _exigir_cuenta_activa(profile) -> None:
+    """Que el destino sea alguien a quien el sistema le entrega ordenes.
 
-    POR QUE ACA Y NO EN LA PANTALLA  --  14/11/2026
-    -----------------------------------------------
-    El control de Programacion solo ofrece a quienes salen ese dia, pero esa
-    lista vive en el navegador y `profile_id` es un campo de formulario.
-    Medido el 14/11/2026 contra el endpoint de asignar: un perfil de BODEGA e
-    INACTIVO entraba con 200, y la orden quedaba con un responsable que no la
-    va a ver nunca -- sin error, sin aviso, sin nada que lo senale.
+    LA REGLA NO SE INVENTA ACA: ES LA DE `destinatarios`  --  14/11/2026
+    --------------------------------------------------------------------
+    La primera version exigia `PersonaDeCampo` activa, y fallo en produccion
+    el mismo dia: se elegia un tecnico del selector, se tocaba «Mover» y no
+    pasaba nada. `cuadrillas.destinatarios` --la UNICA regla de a quien le
+    llega una orden-- dice «el LIDER DEL DIA la recibe siempre, ESTE O NO
+    anotado entre los integrantes», y entra por `jornada.lider`, que es un
+    `Profile`: no pasa por `PersonaDeCampo` en ninguna linea. Un lider que no
+    esta anotado como integrante no tiene esa fila, y el selector de la
+    pantalla SI lo ofrece, porque sale de `destinatarios`.
 
-    Lo que se exige es tener `PersonaDeCampo` activa, que es exactamente lo
-    que `dia_publicado` usa para decir quien sale a trabajar. No se exige un
-    rol: el catalogo de roles no distingue a un tecnico, y agregar esa regla
-    aca la pondria en un lugar distinto del que ya decide quien sale.
+    Quedaban dos reglas distintas para la misma pregunta, en dos archivos:
+    una decidia a quien OFRECER y la otra a quien ACEPTAR. Esta ahora es la
+    de alla: `is_active`, lo mismo que mira `destinatarios` para el lider
+    (`motivo = "lider_inactivo"`) y para cada integrante (`not p.is_active`).
+
+    POR QUE SE VALIDA IGUAL, en vez de confiar en la pantalla: esa lista vive
+    en el navegador y `profile_id` es un campo de formulario. Medido el
+    14/11/2026 contra el endpoint de asignar, un perfil INACTIVO entraba con
+    200 y la orden quedaba con un responsable que no la iba a ver nunca.
     """
-    from campo.cuadrillas import PersonaDeCampo
-
-    if not PersonaDeCampo.objects.filter(
-            org=orden.org, profile=profile, activa=True).exists():
+    if not profile.is_active:
         raise ErrorDespacho(
-            "Esa persona no esta activa como personal de campo: no veria la "
-            "orden en su telefono.")
+            "Esa cuenta esta dada de baja: no veria la orden en su telefono.")
 
 
 @transaction.atomic
@@ -1284,7 +1288,7 @@ def mover_la_orden(orden: OrdenTrabajo, nuevo, actor, motivo: str = "") -> dict:
         #  por ejemplo-- devolveria un error por algo que no iba a pasar.
         return {"movida": False, "anterior": anterior, "aviso": False}
 
-    _exigir_persona_de_campo_activa(fresca, nuevo)
+    _exigir_cuenta_activa(nuevo)
 
     #  Antes de tocar nada: si ya estaba en la orden (como ayudante), subirlo
     #  a principal no es una visita nueva y `asignar` no le avisa.
