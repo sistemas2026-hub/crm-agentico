@@ -196,3 +196,68 @@ def test_sin_org_recorre_LAS_DOS(org_a, org_b):
     salida = _correr_sin_org()
 
     assert org_a.name in salida and org_b.name in salida, salida
+
+
+# =========================================================================== #
+#  LA SEPTIMA PUERTA  --  13/11/2026
+#
+#  Se agrego la configuracion de areas el mismo dia y este informe no la
+#  mostraba: decia «la demanda no tiene instalaciones» sin decir que los casos
+#  de esa area no se miran. El informe mandaba a buscar al lugar equivocado,
+#  que es justo lo que vino a evitar.
+# =========================================================================== #
+def test_un_area_CON_CASOS_que_no_se_mira_se_nombra(org_a):
+    from cases.models import Case
+
+    ConfiguracionDeReparto.objects.create(org=org_a, activo=True)
+    zona = ZonaOperativa.objects.create(org=org_a, nombre="Centro", activa=True)
+    _cuadrilla(org_a, "Instalacion 1", "instalacion", zona=zona)
+    for i in range(3):
+        Case.objects.create(org=org_a, name=f"T{i}", area="ventas",
+                            status="New")
+
+    salida = _correr(org_a)
+
+    assert "NO LA MIRA" in salida, salida
+    assert "ventas (3)" in salida
+    assert "Cuadrillas -> configuracion" in salida
+
+
+def test_un_area_CERRADA_no_acusa_a_nadie(org_a):
+    #  Casos cerrados no son trabajo pendiente: contarlos acusaria un area que
+    #  no tiene nada esperando.
+    from cases.models import Case
+
+    ConfiguracionDeReparto.objects.create(org=org_a, activo=True)
+    Case.objects.create(org=org_a, name="T", area="ventas", status="Closed")
+
+    salida = _correr(org_a)
+
+    assert "NO LA MIRA" not in salida, salida
+
+
+def test_cuando_el_area_SE_TILDA_deja_de_acusar(org_a):
+    from cases.models import Case
+
+    fila = ConfiguracionDeReparto.objects.create(org=org_a, activo=True)
+    Case.objects.create(org=org_a, name="T", area="ventas", status="New")
+    assert "NO LA MIRA" in _correr(org_a), "el control: antes acusaba"
+
+    fila.areas_del_supervisor = ["soporte_tecnico", "operativo", "ventas"]
+    fila.save()
+
+    salida = _correr(org_a)
+    assert "NO LA MIRA" not in salida, salida
+    assert "ventas" in salida, "igual la nombra entre las que mira"
+
+
+def test_el_informe_dice_si_las_eligio_la_empresa(org_a):
+    ConfiguracionDeReparto.objects.create(org=org_a, activo=True)
+    assert "(las de fabrica)" in _correr(org_a)
+
+    fila = ConfiguracionDeReparto.objects.get(org=org_a)
+    fila.areas_del_supervisor = ["ventas"]
+    fila.save()
+    salida = _correr(org_a)
+    assert "(las de fabrica)" not in salida, salida
+    assert "las eligio la empresa ............ SI" in salida

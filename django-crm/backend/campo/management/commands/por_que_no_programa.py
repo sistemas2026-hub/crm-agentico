@@ -2,7 +2,7 @@
 ================================================================================
  POR QUE EL SUPERVISOR NO PROGRAMA UNA LABOR  --  13/11/2026
 ================================================================================
-Recorre, en orden, TODAS las puertas que hay entre «el ISP tiene tickets de
+Recorre, en orden, LAS SIETE puertas que hay entre «el ISP tiene tickets de
 instalacion» y «una cuadrilla sale a instalar», y dice en cual se corta.
 
     python manage.py por_que_no_programa --org <uuid> [--labor instalacion]
@@ -11,7 +11,7 @@ POR QUE EXISTE
 --------------
 El usuario reporto que el Supervisor no programa instalaciones. Hay SEIS
 puertas en ese camino y ninguna avisa cuando se cierra: el ciclo apagado, un
-dia que no se trabaja, la labor sin fila en la tabla de la empresa, ninguna
+dia que no se trabaja, un area cuyos tickets el Supervisor no mira, la labor sin fila en la tabla de la empresa, ninguna
 cuadrilla con esa labor habitual, los casos sin barrio o sin zona, y el tope
 diario. Mirar la pantalla no distingue una de otra, y cada una se arregla de
 una manera distinta.
@@ -39,12 +39,17 @@ igual que «no hay trabajo».
 """
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Count
 
 from common.models import Org
 from common.tasks import set_rls_context
 
 #: Lo que se diagnostica por defecto, que es lo que el usuario reporto.
 LABOR_POR_DEFECTO = "instalacion"
+
+#: Un caso ABIERTO: los tres estados que no son un final. Los mismos que usa
+#: `importacion_tickets.reconciliar_estados`.
+ESTADOS_ABIERTOS = ("New", "Assigned", "Pending")
 
 
 def _si_no(v) -> str:
@@ -167,11 +172,52 @@ class Command(BaseCommand):
             cortes.append(f"ese dia las cuadrillas no trabajan ({no_trabajan}): "
                           f"el Supervisor no arma, a proposito")
 
-        # -- PUERTA 3: la labor existe y esta en la tabla -------------------
+        # -- PUERTA 3: que areas mira el Supervisor --------------------------
+        #
+        #  LA PUERTA QUE FALTABA EN ESTE INFORME  --  13/11/2026. Se agrego la
+        #  configuracion de areas el mismo dia y este diagnostico no la
+        #  mostraba: decia «la demanda no tiene instalaciones» sin decir que
+        #  los casos de esa area no se miran. Un diagnostico que no nombra la
+        #  puerta que el sistema acaba de ganar manda a buscar al lugar
+        #  equivocado, que es exactamente lo que vino a evitar.
+        from operaciones import areas_del_tenant as AT
+
+        from cases.models import Case
+
+        mira = AT.areas_que_mira(org)
+        elegidas = bool(getattr(config, "areas_del_supervisor", None))
+        w("")
+        w("3 · QUE AREAS MIRA EL SUPERVISOR")
+        w(f"    mira ............................. {', '.join(mira)}")
+        w(f"    las eligio la empresa ............ "
+          f"{_si_no(elegidas)}"
+          + ("" if elegidas else "   (las de fabrica)"))
+        por_area = (Case.objects
+                    .filter(org=org, status__in=ESTADOS_ABIERTOS)
+                    .values("area").annotate(n=Count("id")).order_by("-n"))
+        normal = {AT._normal(a) for a in mira}
+        afuera = []
+        w("    casos ABIERTOS por area:")
+        for fila in por_area:
+            nombre = (fila["area"] or "").strip() or "— sin area"
+            adentro = AT._normal(nombre) in normal
+            w(f"      {nombre:<24} {fila['n']:>5}"
+              + ("" if adentro else "   <-- NO LA MIRA"))
+            if not adentro and fila["n"]:
+                afuera.append((nombre, fila["n"]))
+        if afuera:
+            detalle = ", ".join(f"{a} ({n})" for a, n in afuera)
+            cortes.append(
+                f"hay casos abiertos en areas que el Supervisor NO mira: "
+                f"{detalle}. Si ahi viven las instalaciones, no llegan a "
+                f"Despacho y la demanda sale sin ellas. Se tilda en "
+                f"Cuadrillas -> configuracion")
+
+        # -- PUERTA 4: la labor existe y esta en la tabla -------------------
         labores = labor_de_cada_grupo(org)
         labor_nueva = labores.get(INSTALACION_NUEVA)
         w("")
-        w("3 · LA LABOR EN LA TABLA DE LA EMPRESA")
+        w("4 · LA LABOR EN LA TABLA DE LA EMPRESA")
         w(f"    '{labor_pedida}' es una labor valida ... "
           f"{_si_no(labor_valida(org, labor_pedida))}")
         w(f"    grupo '{INSTALACION_NUEVA}' -> ........ {labor_nueva or '— SIN FILA'}")
@@ -189,13 +235,13 @@ class Command(BaseCommand):
                           f"tabla: los casos de un cliente nuevo quedan en "
                           f"'sin_labor' y no piden cuadrilla")
 
-        # -- PUERTA 4: cuadrillas con esa labor habitual --------------------
+        # -- PUERTA 5: cuadrillas con esa labor habitual --------------------
         con_la_labor = list(Cuadrilla.objects
                             .filter(org=org, activa=True,
                                     labor_habitual=labor_pedida)
                             .prefetch_related("zonas_habituales"))
         w("")
-        w("4 · LAS CUADRILLAS")
+        w("5 · LAS CUADRILLAS")
         w(f"    activas en total ................. "
           f"{Cuadrilla.objects.filter(org=org, activa=True).count()}")
         w(f"    con labor habitual '{labor_pedida}' .. {len(con_la_labor)}")
@@ -214,11 +260,11 @@ class Command(BaseCommand):
             cortes.append(f"las cuadrillas de '{labor_pedida}' no tienen zona "
                           f"habitual activa: sin zona no reciben trabajo")
 
-        # -- PUERTA 5: la demanda ------------------------------------------
+        # -- PUERTA 6: la demanda ------------------------------------------
         propuestas = adj.propuestas_en_despacho(org)
         demanda = adj.demanda_de_despacho(org, propuestas)
         w("")
-        w("5 · LA DEMANDA DE DESPACHO")
+        w("6 · LA DEMANDA DE DESPACHO")
         for clave in ("casos", "contados", "ya_despachados", "sin_barrio",
                       "instalaciones_sin_barrio", "sin_zona", "sin_labor",
                       "mismo_corte_de_red", "obras_sin_barrio",
@@ -240,9 +286,9 @@ class Command(BaseCommand):
                           f"los contadores de arriba para saber donde se "
                           f"quedaron los casos")
 
-        # -- PUERTA 6: lo que el plan asignaria -----------------------------
+        # -- PUERTA 7: lo que el plan asignaria -----------------------------
         w("")
-        w("6 · LO QUE EL SUPERVISOR ASIGNARIA HOY  (en memoria, no escribe)")
+        w("7 · LO QUE EL SUPERVISOR ASIGNARIA HOY  (en memoria, no escribe)")
         planes = ja.planear_el_dia(org, fecha, demanda=demanda["por_zona"])
         con_la_labor_hoy = 0
         for p in planes:
