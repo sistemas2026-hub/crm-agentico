@@ -7,9 +7,9 @@ Si contradice a una conversación, gana este archivo.
 se actualiza: una sección que quedó vieja no es inocua — la siguiente sesión la
 lee como verdad. La historia detallada vive en `auditorias/`, no acá.
 
-Última actualización: **13/11/2026 — producción en `9972c6fc`**, medida con
+Última actualización: **14/11/2026 — producción en `38db3bed`**, medida con
 `git fetch` sobre `origin/fix/integracion-wisphub`. Lo que cerró esta sesión
-entró hasta **`8a696bf4`**, verificado como ancestro de esa punta.
+entró hasta ahí, verificado como ancestro de esa punta.
 
 **Hay al menos dos sesiones escribiendo la rama al mismo tiempo**: los dos
 commits que están por encima de `8a696bf4` no son de esta sesión. Esta
@@ -30,6 +30,116 @@ dato para quien la revise.
 > podar filas que ella misma cerró: no reescribió ninguna otra.
 
 ---
+
+## El Supervisor mira las áreas que la empresa elija — 13 y 14/11/2026
+
+**En producción en `38db3bed`, y PROBADO por el usuario el 14/11.** Qué áreas
+de tickets lee el Supervisor se tilda en `/supervisor-noc/cuadrillas`. Era una
+tupla en el código.
+
+### El defecto, y por qué nadie lo veía
+
+El usuario reportó que **el Supervisor no programaba instalaciones**. La causa
+estaba a dos capas de distancia de donde se buscó primero:
+
+```python
+#  operaciones/areas_del_tenant.py, hasta el 13/11/2026
+AREAS_DEL_SUPERVISOR = ("soporte_tecnico", "operativo")
+```
+
+Todo lo demás, `criterio_de_area` lo marcaba **ajeno**. Y los tickets de
+instalación van al área `ventas`, por la propia config del tenant
+(`importacion_tickets.destinos['ventas|*'].area`).
+
+Medido en producción el 13/11, casos **abiertos** de Rapilink:
+
+```
+cartera 350 · soporte_tecnico 65 · operativo 62 · ventas 41 · administracion 18
+```
+
+Los 41 de ventas **nunca llegaban a Despacho**. La demanda del día salía con
+cero instalaciones, y la cuadrilla de instalación salía con la labor de la
+mayoría de su zona. **Sin un error, sin un log, sin nada en rojo.**
+
+### Las tres hipótesis que se descartaron, y con qué
+
+Vale más que el arreglo, porque las tres eran creíbles y las tres estaban bien:
+
+| Hipótesis | Qué la descartó |
+|---|---|
+| «No se importan los tickets de otras áreas» | `importar_tickets --detalle`: de **484 abiertos, 484 `YA_EXISTE`**, cero rechazos. Y la lista blanca corre ANTES del chequeo de existencia ([importacion.py:650](nucleo/seguimiento/importacion.py#L650) vs 684), así que un departamento fuera de la lista habría salido como `descartado_por_departamento` |
+| «Falta el id del cliente ficticio en la config» | `diferencias_config.py`: `WISPHUB_ID_SERVICIO_INSTALACIONES` no aparece como diferencia — la base lo tiene |
+| «No hay cuadrilla de instalación» | el diagnóstico: Cuadrilla #2 la tiene, con zona SOLEDAD, y el Supervisor **ya le asignaba** `labor=instalacion` |
+
+### Lo que se construyó, y por qué no fue agregar una palabra
+
+Agregar `'ventas'` a la tupla habría arreglado hoy y repetido la deuda: esa
+constante **nació con un área** y hubo que editar código para ponerle la
+segunda (14/10/2026). La tercera vez era la misma historia, y el próximo ISP
+tiene otras áreas. Es CLAUDE.md §3.3.
+
+`ConfiguracionDeReparto.areas_del_supervisor` (JSONB, migración `0052`), leída
+por `areas_del_tenant.areas_que_mira(org)`, tildada en Cuadrillas.
+
+**Vacío = las de fábrica**, que son las dos de siempre: desplegarlo no le
+cambió la conducta a ninguna empresa hasta que alguien tildó.
+
+**Y falla SAFE, no closed, a propósito.** Una lista vacía o ilegible vuelve a
+las de fábrica. Devolver `()` dejaría al Supervisor sin mirar nada — el mismo
+síntoma que se acababa de depurar, y otra vez sin señalar la causa. Es la
+excepción consciente a «todo fail-closed» de PRD §7.4: acá lo cerrado es el
+silencio.
+
+### El instrumento, que es lo reusable
+
+`campo/por_que_no_programa.py` (`python manage.py por_que_no_programa`, sin
+argumentos). Recorre **las siete puertas** entre «el ISP tiene tickets de
+instalación» y «una cuadrilla sale a instalar», y dice en cuál se corta:
+
+```
+1 el ciclo de la madrugada · 2 el día · 3 las áreas que mira ·
+4 la labor en la tabla · 5 las cuadrillas · 6 la demanda · 7 el plan
+```
+
+Nació porque ninguna de las siete avisa cuando se cierra, y mirar la pantalla
+no distingue una de otra — cada una se arregla en otro lugar. Es de solo
+lectura, sin datos de cliente, y una prueba afirma que **no escribe ni una
+fila**.
+
+**Y su propia lección**: la primera versión tenía SEIS puertas y no mostraba
+la de las áreas, que se había agregado el mismo día. Decía «la demanda no
+tiene instalaciones» sin decir que esos casos no se miran — mandaba a buscar
+al lugar equivocado, que es justo lo que vino a evitar. Un diagnóstico que no
+nombra la puerta que el sistema acaba de ganar es peor que ninguno.
+
+### Cómo se verificó
+
+| Qué | Resultado |
+|---|---|
+| 22 pruebas de las áreas contra Postgres real | verdes |
+| 17 pruebas del diagnóstico, una de ellas «no escribe nada» | verdes |
+| 18 de vitest en la pantalla de Cuadrillas (3 nuevas) | verdes |
+| 43 pruebas existentes del criterio de área | verdes |
+| **8 mutaciones deliberadas** | **8 muertas** |
+| `makemigrations --check` | «No changes detected»; `0052` es hoja única en `campo` |
+| la pantalla, con el compilador del propio proyecto | compila |
+| **en producción, por el usuario** | tildó `ventas` y el Supervisor las ve |
+
+Las ocho mutaciones: volver a la tupla fija, la lista vacía apagando al
+Supervisor, el PUT sin validar, el GET devolviendo el campo crudo, la basura
+usada tal cual, la puerta nueva sin acusar, contando los casos cerrados, y el
+informe leyendo la tupla en vez de la config.
+
+**`svelte-check` no corrió, y queda dicho**: la imagen del frontend es de
+producción y no trae las herramientas de tipos.
+
+### Qué queda abierto de esto
+
+| | |
+|---|---|
+| **`cartera` con 350 casos abiertos sigue afuera**, y probablemente está bien | cobranza no es trabajo de campo. Pero ahora el informe lo dice, que antes no pasaba: es una decisión visible en vez de un efecto de una constante |
+| Habilitar `ventas` entra la cola ENTERA, no solo las instalaciones | lo tolerable es que el Supervisor **propone y no despacha**, y un caso mal pasado se saca. Si hay que afinarlo, se decide con los casos reales a la vista |
+| La base de producción tiene **8 empresas** | Rapilink, «Rapilink Telecomunicaciones» y seis restos de prueba (`Empresa A/B`, dos `prueba-b4-*`, dos `prueba-entrega-*`). No afectan nada medido; están ahí |
 
 ## Las fotos de campo llevan la marca de la empresa — 12 y 13/11/2026
 
