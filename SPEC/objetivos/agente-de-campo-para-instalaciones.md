@@ -273,6 +273,68 @@ medido como IGNORADO**, así que no se puede pedir «las de esta zona» directo;
 la respuesta de LISTA sí trae `ip` y `zona` por fila, y `router` sí filtra. Qué
 camino sirve se decide con el método del valor imposible, no por analogía.
 
+## LA FASE 2, CERRADA EN DISEÑO — 14/11/2026
+
+Cuatro respuestas del usuario ese día, y una medición que corrigió a la
+tercera. El flujo queda **igual al que el técnico ya usa en WispHub**, que es
+también la forma que la API pide:
+
+```
+1. el técnico elige la ZONA            ← `agregar-cliente/{id_zona}` la pide primero
+2. salen las IP disponibles de esa zona
+3. toca una — «puede ser cualquiera»
+4. se crea el cliente
+```
+
+### Lo que decidió el usuario, y lo que midió el repositorio
+
+| | Lo que dijo | Lo que los datos agregaron |
+|---|---|---|
+| Quién elige la IP | **el técnico, en la casa** | contradecía a la skill, que la daba por de la oficina. Corregido |
+| Cómo lo hace hoy | aprieta una lupa y sale la lista | ese listado **no está en la API**: 54 rutas, ninguna de IP libres |
+| Cuánto del pool se usa | «las 254; solo fuera la primera y la última» | cierto para `.0` y `.255`. **El `.1` NO**: libre en 83 de 86 pools, incluido uno con 240/254 ocupadas. Es la puerta de enlace y no se ofrece |
+| El orden | **primero la zona, después las IP** | encaja con `{id_zona}` en la URL del POST |
+
+### El defecto que casi se construyó encima
+
+El primer informe agrupaba por ZONA. Pero `172.16.9.0/24` tiene 42 clientes en
+«CORTE 15 - SERVIDOR 1» y 211 en «CORTE 30 - SERVIDOR 1»: decía **«212 libres»
+donde hay una**.
+
+La evidencia de que es una sola red: en 16 prefijos la suma de las dos zonas
+**nunca pasa de 254**, y nueve están al 98-99%. Si fueran redes distintas los
+conteos serían independientes y alguno se pasaría. **«CORTE 15/30» es el día de
+corte de la factura** —las dos zonas dicen *SERVIDOR 1*—, no la red.
+
+Entonces: la zona dice **de qué prefijos** se puede sacar; lo ocupado se cuenta
+**sobre todos los clientes**, sin importar su zona. Las dos cosas a la vez.
+
+### Lo que se va a construir
+
+| | |
+|---|---|
+| **Los prefijos de cada zona son configuración** | se siembran con los medidos y la empresa los corrige. Un prefijo con un cliente no es un pool: `169.254.x` es link-local y `192.168.x` es LAN privada, y los dos aparecían con «252 libres» |
+| **Lo ocupado se lee de WispHub, no se guarda** | una copia envejece, y entre que se lee y se crea pasan minutos. Se pregunta al momento |
+| **El `.1` queda fuera** | y los 3 pools donde un cliente lo tiene van a revisión aparte |
+| **Se ofrece, no se teclea** | el motivo de todo esto: el usuario reportó que al digitar «hay muchos errores». Una IP mal tecleada no es un dedazo: es un cliente sin servicio, o dos con la misma |
+
+### Lo que NO va a poder prometer, dicho antes de construirlo
+
+**Que una IP libre sea usable.** Los equipos de red —antenas, switches, CTO— no
+son clientes, así que no están en `/api/clientes/` y la resta no los ve. Si una
+dirección la tiene una antena, la lista la va a ofrecer igual.
+
+Y el fallo no es limpio: `agregar-cliente` devuelve **202 + `task_id`**, no un
+`400`, y ya está medido que *«una tarea asíncrona puede decir SUCCESS y traer
+un error de texto como resultado»*. Hay que leer el resultado de la tarea.
+
+### Un hallazgo que no es de la app, y vale aparte
+
+**Los pools de SERVIDOR 1 están casi llenos**: nueve `/24` al 98-99%, y
+Sabanagrande con `172.16.40.0/24` en **240 de 254**. Eso no lo arregla una
+pantalla; son direcciones que se agotan. Queda anotado porque se vio midiendo,
+no porque alguien lo pidiera.
+
 ## Bitácora
 
 | Fecha | Qué | Evidencia | Hash |
