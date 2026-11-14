@@ -10,6 +10,7 @@ from campo import (
     configuracion_de_seguimiento_views,
     marca_de_agua_views,
     contrato_views,
+    ips_libres_views,
     cuadrillas_views,
     despacho_pantalla_views,
     despacho_views,
@@ -125,6 +126,10 @@ urlpatterns = [
          contrato_views.ContratoDeLaOrdenView.as_view(), name="contrato_de_la_orden"),
     path("contratos/<uuid:pk>/pdf/",
          contrato_views.PdfDelContratoView.as_view(), name="pdf_del_contrato"),
+    #  Las IP que se le ofrecen al tecnico, en la misma pantalla y despues
+    #  de que elija la zona (14/11/2026). Ver `ips_libres_views`.
+    path("trabajos/<uuid:pk>/ips-libres/",
+         ips_libres_views.IpsLibresDeLaOrdenView.as_view(), name="ips_libres_de_la_orden"),
     path("contrato/configuracion/",
          contrato_views.ConfiguracionDeContratoView.as_view(), name="contrato_configuracion"),
     path("marca-de-agua/",

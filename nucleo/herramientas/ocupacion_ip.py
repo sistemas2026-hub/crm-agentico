@@ -51,6 +51,7 @@ import ipaddress
 
 import requests
 
+from nucleo.seguridad.redaccion import redactar
 from nucleo.herramientas.http import ErrorHerramientaHttp, headers_de, url_de
 
 TIMEOUT_SEGUNDOS = 30
@@ -167,7 +168,26 @@ def sincronizar(herramienta, tenant: str | None = None,
                 #  Se guardan unas pocas para poder mirarlas, no todas: es
                 #  texto que escribio una persona y puede ser cualquier cosa.
                 if len(ilegibles) < 20:
-                    ilegibles.append(crudo[:40])
+                    #  REDACTADO, no crudo  --  revisor de PII, 14/11/2026.
+                    #
+                    #  Este campo lo teclea una persona, y todo lo que no sea
+                    #  una IPv4 valida cae aca: medido en el interprete, una
+                    #  cedula de 10 digitos, un telefono y «casa de juan
+                    #  perez» los tres dan ValueError en `ipaddress` y terminan
+                    #  en esta lista. Y esta lista sale por HTTP.
+                    #
+                    #  Se redacta en vez de borrarse porque sin ver QUE FORMA
+                    #  tiene el valor malo nadie puede ir a corregir la fila,
+                    #  que es para lo que se guardo. `redactar` saca cedula,
+                    #  telefono, email, URL y coordenadas.
+                    #
+                    #  LO QUE NO CUBRE, y queda dicho: nombres propios y
+                    #  direcciones en prosa. Si hace falta cero PII, lo que
+                    #  sigue es devolver una clasificacion («3 con letras, 1
+                    #  solo digitos») en vez del texto, y eso pierde la
+                    #  capacidad de encontrar la fila. Es una decision del
+                    #  usuario, no de este modulo.
+                    ilegibles.append(redactar(crudo[:40]))
                 continue
             ocupacion.setdefault(pref, set()).add(ultimo)
 

@@ -240,8 +240,31 @@ revisar(r["ocupacion"].get("10.0.0.") == [4], "y separa los prefijos")
 revisar(r["sin_ip"] == 1, "cuenta la fila sin ip", str(r["sin_ip"]))
 revisar(r["ilegibles"] == ["no-es-una-ip"], "y nombra la ilegible",
         str(r["ilegibles"]))
+
 revisar(r["leidos"] == len(filas), "cuenta las filas leidas")
 revisar(r["completo"] is True, "una sola pagina corta y se da por completa")
+
+#  H1 DEL REVISOR DE PII  --  14/11/2026
+#
+#  El campo lo teclea una persona y TODO lo que no sea una IPv4 valida cae en
+#  'ilegibles', que sale por HTTP. Medido en el interprete: una cedula de 10
+#  digitos, un telefono y 'casa de juan perez' dan ValueError en `ipaddress`.
+#  Se redacta antes de devolverlo.
+sucias = [{"ip": "1043000000"}, {"ip": "3005380776"},
+          {"ip": "laura@ejemplo.co"}, {"ip": "10.9108,-74.8186"}]
+r = _medir([{"count": len(sucias), "results": sucias}])
+salida = " | ".join(r["ilegibles"])
+revisar("1043000000" not in salida,
+        "una CEDULA en el campo ip no sale cruda", salida)
+revisar("3005380776" not in salida,
+        "ni un TELEFONO", salida)
+revisar("laura@ejemplo.co" not in salida, "ni un EMAIL", salida)
+revisar("74.8186" not in salida, "ni unas COORDENADAS", salida)
+revisar(len(r["ilegibles"]) == 4,
+        "pero las cuatro siguen contandose: sin ver que forma tiene el valor "
+        "malo, nadie puede ir a corregir la fila", salida)
+revisar("oculto" in salida or "ocultas" in salida,
+        "y se ve QUE se oculto, no un espacio en blanco", salida)
 
 #  DOS ZONAS, UN MISMO /24: el defecto del 14/11. La ocupacion es GLOBAL.
 mezcla = ([{"ip": f"172.16.9.{n}"} for n in range(2, 44)]
