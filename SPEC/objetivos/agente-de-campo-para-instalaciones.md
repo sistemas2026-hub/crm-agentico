@@ -247,6 +247,26 @@ suposición, no una medición, y la decisión del usuario gana (CLAUDE.md §1).
   el NOMBRE (`CORTE 15 - SERVIDOR 1`) y hay que cruzarlo contra los segmentos
   IP, no deducirlo.
 
+**CÓMO LO HACE HOY** (el usuario, 14/11/2026): en el panel de WispHub el
+técnico **aprieta una lupa en el campo de IP y le salen las disponibles**, y
+elige cualquiera — *«puede ser cualquiera»*. Eso dice tres cosas del diseño:
+
+1. **WispHub ya sabe cuáles están libres**, pero ese listado NO está en su API
+   pública: el índice del spec tiene 54 rutas y ninguna es de IP disponibles
+   (`/clientes/{accion}/` es solo activar/desactivar). La lupa vive en el panel
+   (`wisphub.io`), no en `api.wisphub.io`.
+2. **No hace falta lógica para elegir.** Cualquiera libre sirve, así que la
+   pantalla solo tiene que ofrecer y el técnico toca una.
+3. **Depender del endpoint interno del panel sería peor que calcularlo**: no
+   tiene contrato, puede cambiar sin aviso y probablemente pide la sesión del
+   navegador y no la clave de API. Para un camino que CREA clientes, eso no.
+
+**OJO con el fallo, que no es limpio.** Si se ofrece una IP que ya está tomada,
+`agregar-cliente` no devuelve un `400`: devuelve **202 + `task_id`**, y la
+skill ya tiene medido que *«una tarea asíncrona puede decir SUCCESS y traer un
+error de texto como resultado»*. O sea que el diseño no puede apoyarse en «si
+está ocupada, la API avisa»: hay que leer el resultado de la tarea.
+
 **Lo que falta medir antes de construir** (y es una medición, no una decisión):
 cuáles IPs están ocupadas hoy. El filtro `zona` de `/api/clientes/` **está
 medido como IGNORADO**, así que no se puede pedir «las de esta zona» directo;
