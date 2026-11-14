@@ -1095,9 +1095,16 @@ indistinguible de «la API ignoro la llamada».
 **POR QUE IMPORTA.** Una instalacion nueva entra como ticket del cliente
 ficticio del ISP (un prospecto sin identidad resuelta), y hoy el nombre, la
 cedula y la direccion los teclea alguien que no tiene el documento delante. Con
-esto, quien SI lo tiene --el tecnico, parado en la puerta-- puede corregirlos,
-y el alta de red (ip, usuario_rb, plan, zona) sigue siendo de la oficina, que
-es la unica que conoce la topologia.
+esto, quien SI lo tiene --el tecnico, parado en la puerta-- puede corregirlos.
+
+> **CORREGIDO EL 14/11/2026.** Esta seccion decia: «y el alta de red (ip,
+> usuario_rb, plan, zona) sigue siendo de la oficina, que es la unica que
+> conoce la topologia». **Era una suposicion, no una medicion.** Preguntado
+> entre cuatro opciones, el usuario respondio que **la IP la elige el TECNICO,
+> en la casa**. Consecuencia para quien construya el alta: la IP no puede
+> viajar en la orden --no existe cuando la orden se crea-- y la plataforma
+> tiene que ofrecerle al tecnico las libres de su rango en vez de pedirle que
+> la teclee. Ver `SPEC/objetivos/agente-de-campo-para-instalaciones.md`.
 
 ### MEDIDO el 12/11/2026: Rapilink NO usa el modulo de instalaciones
 

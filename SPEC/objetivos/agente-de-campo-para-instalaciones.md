@@ -213,9 +213,45 @@ es peor que esperar.
 
 ### Lo que falta del usuario
 
-1. **Zona/router, IP y usuario PPPoE.** La API los exige y el técnico no los nombró:
-   ¿los asigna WispHub solo, los llena la oficina, o los elige el técnico?
-2. **El contrato que firman hoy**, para copiar sus cláusulas y su forma.
+1. ~~**Zona/router, IP y usuario PPPoE.**~~ **RESPONDIDO el 14/11/2026: los
+   elige el TÉCNICO, en la casa.** Ver abajo.
+2. ~~**El contrato que firman hoy.**~~ Resuelto: las cláusulas y el NIT son
+   configuración por empresa (`ConfiguracionDeContrato.texto_condiciones`), se
+   cargan en Programación. Fase 1, `645cc8ef`.
+
+### LA IP LA ELIGE EL TÉCNICO — decisión del usuario, 14/11/2026
+
+Preguntado explícitamente entre cuatro opciones (la oficina antes de la visita,
+el técnico en la casa, WispHub solo, sin definir), el usuario eligió **el
+técnico, en la casa**.
+
+**Esto CONTRADICE lo que la skill de WispHub daba por sentado**, y la skill se
+corrigió el mismo día. Decía: «el alta de red (ip, usuario_rb, plan, zona)
+sigue siendo de la oficina, que es la única que conoce la topología». Era una
+suposición, no una medición, y la decisión del usuario gana (CLAUDE.md §1).
+
+**Qué cambia del diseño de la Fase 2:**
+
+- La IP **no puede viajar en la orden**, porque todavía no existe cuando la
+  orden se crea. Se elige en la pantalla del contrato, con señal.
+- La plataforma tiene que **guardar los rangos por zona** —configuración
+  editable por empresa, CLAUDE.md §3.3, nunca un rango fijo en código— y
+  ofrecerle al técnico las libres.
+- **Ofrecer, no pedir que teclee.** Es el mismo motivo que trajo todo este
+  trabajo: el usuario reportó que al digitar los datos «hay muchos errores,
+  mala escritura del nombre, direcciones mal digitalizadas». Una IP mal
+  tecleada no es un error de ortografía: es un cliente sin servicio, o dos
+  clientes con la misma IP.
+- La zona tiene que **corresponder a la red real de esa IP**. Ya está medido
+  que no se puede adivinar: el catálogo de zonas trae el número de servidor en
+  el NOMBRE (`CORTE 15 - SERVIDOR 1`) y hay que cruzarlo contra los segmentos
+  IP, no deducirlo.
+
+**Lo que falta medir antes de construir** (y es una medición, no una decisión):
+cuáles IPs están ocupadas hoy. El filtro `zona` de `/api/clientes/` **está
+medido como IGNORADO**, así que no se puede pedir «las de esta zona» directo;
+la respuesta de LISTA sí trae `ip` y `zona` por fila, y `router` sí filtra. Qué
+camino sirve se decide con el método del valor imposible, no por analogía.
 
 ## Bitácora
 
