@@ -1621,6 +1621,49 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     return !faltaDato && !faltaFoto;
   }
 
+  /// El resumen de un paso: lo que ya tiene adentro, en una línea.
+  ///
+  /// Pedido del usuario el 14/11/2026, con la pantalla de una instalación
+  /// delante: «es muy confuso para el técnico; tiene que [ser] un tipo
+  /// formulario para que sea más fácil y que muestre lo que está llenado».
+  ///
+  /// La regla de qué se escribe vive en `pasos_del_trabajo.dart`, que se
+  /// prueba sin emulador. Acá solo se junta lo que el paso tiene.
+  String _resumenDe(PasoDeEjecucion paso) {
+    final List<CampoDelFormulario> campos = CampoDelFormulario.normalizar(
+      paso.campos,
+      _valoresFormulario,
+    );
+    final List<String> etiquetas = <String>[];
+    final List<String> valores = <String>[];
+    int vacios = 0;
+    for (final CampoDelFormulario c in campos) {
+      final String v = (_valoresFormulario[c.id] ?? '').toString().trim();
+      if (v.isEmpty) {
+        //  Solo cuenta como «falta» lo que de verdad traba el cierre: un campo
+        //  opcional sin llenar no es una deuda.
+        if (c.bloqueaCierre) vacios++;
+        continue;
+      }
+      etiquetas.add(c.titulo);
+      valores.add(v);
+    }
+    final List<Map<String, dynamic>> faltan = requisitosPendientes(
+      requisitos: paso.evidencias,
+      capturadas: _evidenciasCapturadas,
+    );
+    final int obligatoriasQueFaltan =
+        faltan.where((Map<String, dynamic> r) => r['obligatorio'] == true).length;
+    final int puestas = paso.evidencias.length - faltan.length;
+    return resumenDelPaso(
+      etiquetas: etiquetas,
+      valores: valores,
+      camposVacios: vacios,
+      fotosPuestas: puestas < 0 ? 0 : puestas,
+      fotosQueFaltan: obligatoriasQueFaltan,
+    );
+  }
+
   /// La línea de pasos (09/11/2026, el usuario: «hacer que la interfaz sea
   /// más creativa»).
   ///
@@ -1690,6 +1733,23 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 color: AppColors.onSurfaceVariant,
               ),
             ),
+          //  LOS OTROS PASOS, CON LO QUE YA TIENEN ADENTRO (14/11/2026).
+          //
+          //  Hasta hoy un paso cerrado era un círculo con un número: el
+          //  técnico sabía que había pasado por ahí y no qué había dejado.
+          //  Para comprobar «¿ya puse el serial?» tenía que volver a entrar,
+          //  y con cinco pasos eso son cinco viajes.
+          //
+          //  El actual NO se repite acá: ya está abierto justo debajo.
+          for (int i = 0; i < pasos.length; i++)
+            if (i != actual)
+              _FilaDeOtroPaso(
+                numero: i + 1,
+                titulo: pasos[i].titulo,
+                resumen: _resumenDe(pasos[i]),
+                completo: _pasoCompleto(pasos[i]),
+                alTocar: () => setState(() => _pasoActual = i),
+              ),
         ],
       ),
     );
@@ -2520,6 +2580,75 @@ class _CirculoDePaso extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Un paso que NO es el que se está llenando: su número, su nombre y lo que
+/// ya tiene adentro. Tocarlo lleva ahí.
+///
+/// POR QUÉ UNA FILA Y NO SOLO EL CÍRculo  --  14/11/2026
+/// -----------------------------------------------------
+/// La línea de círculos dice en cuál está parado el técnico. No dice qué
+/// quedó en los otros, y eso es justo lo que hay que comprobar antes de
+/// cerrar: «¿ya puse el serial?», «¿faltaba una foto en el paso 2?».
+class _FilaDeOtroPaso extends StatelessWidget {
+  const _FilaDeOtroPaso({
+    required this.numero,
+    required this.titulo,
+    required this.resumen,
+    required this.completo,
+    required this.alTocar,
+  });
+
+  final int numero;
+  final String titulo;
+  final String resumen;
+  final bool completo;
+  final VoidCallback alTocar;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color =
+        completo ? AppColors.exitoTexto : AppColors.onSurfaceVariant;
+    return InkWell(
+      onTap: alTocar,
+      borderRadius: AppRadius.brChico,
+      child: Padding(
+        //  44 de alto mínimo: es un blanco para un dedo, no una etiqueta.
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              completo ? Icons.check_circle : Icons.radio_button_unchecked,
+              size: 18,
+              color: color,
+            ),
+            const SizedBox(width: 8),
+            //  Expanded y no Spacer: con letra grande el resumen desborda la
+            //  fila. Ya pasó con el título de la firma (11/11/2026).
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '$numero. $titulo',
+                    style: AppTypography.cuerpoChico.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (resumen.isNotEmpty)
+                    Text(
+                      resumen,
+                      style: AppTypography.etiquetaChica.copyWith(color: color),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

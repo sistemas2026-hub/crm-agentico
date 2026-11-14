@@ -143,6 +143,68 @@ void main() {
           pasos: _pasos,
         );
 
+    testWidgets('UN CAMPO OPCIONAL VACIO NO ES UNA DEUDA',
+        (WidgetTester t) async {
+      //  Si contara, un paso con un comentario opcional en blanco diria
+      //  «faltan 1 dato» para siempre y el tecnico lo buscaria sin encontrar
+      //  nada que llenar -- el campo no traba el cierre.
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(FuenteDeEjecucionFalsa(
+        campos: <Map<String, dynamic>>[
+          _campo('med', 'Medición al llegar', paso: 'paso_1'),
+          _campo('sol', 'Qué se cambió', paso: 'paso_2'),
+          _campo('obs', 'Observaciones', paso: 'paso_2', req: false),
+        ],
+        requisitos: const <Map<String, dynamic>>[],
+        pasos: _pasos,
+      )));
+      await t.pumpAndSettle();
+
+      //  Se llena SOLO el obligatorio del paso 2 y se vuelve al 1.
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField).first, 'Cambié la roseta');
+      await t.pumpAndSettle();
+      await t.tap(find.text('1. Diagnóstico'));
+      await t.pumpAndSettle();
+
+      expect(find.textContaining('Cambié la roseta'), findsWidgets);
+      expect(find.textContaining('falta'), findsNothing,
+          reason: 'el opcional en blanco no es una deuda');
+    });
+
+    testWidgets('UN PASO CERRADO MUESTRA LO QUE YA TIENE ADENTRO',
+        (WidgetTester t) async {
+      //  El pedido del 14/11/2026: «que muestre lo que esta llenado». Antes un
+      //  paso cerrado era un circulo con un numero, asi que para comprobar
+      //  «¿ya puse el serial?» habia que volver a entrar -- con cinco pasos,
+      //  cinco viajes.
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(porPasos()));
+      await t.pumpAndSettle();
+
+      //  Se llena el paso 2 y se vuelve al 1: el 2 queda cerrado CON su dato.
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      //  El campo por su tipo y no por su etiqueta: en esta pantalla el
+      //  titulo va FUERA del TextField, asi que `widgetWithText` no lo
+      //  encuentra. Es el mismo patron de `ejecucion_formulario_test`.
+      await t.enterText(find.byType(TextField).last, 'Cambié la roseta');
+      await t.pumpAndSettle();
+      //  Se vuelve TOCANDO LA FILA del paso 1, que es lo que esta lista
+      //  agrega: antes, para volver, habia que usar el boton de abajo.
+      await t.tap(find.text('1. Diagnóstico'));
+      await t.pumpAndSettle();
+
+      expect(find.text('2. Solución'), findsOneWidget);
+      expect(find.textContaining('Cambié la roseta'), findsWidgets,
+          reason: 'el valor se lee sin tener que entrar al paso');
+
+      //  Y EL CONTROL: el paso donde SÍ está parado no se repite en la lista,
+      //  porque su formulario ya está abierto justo debajo.
+      expect(find.text('1. Diagnóstico'), findsOneWidget);
+    });
+
     testWidgets('un paso a la vez, con siguiente y anterior; Finalizar en el último',
         (WidgetTester t) async {
       _pantallaAlta(t);
@@ -150,12 +212,23 @@ void main() {
       await t.pumpAndSettle();
 
       //  La linea de pasos (09/11/2026): un circulo por paso, y el nombre
-      //  SOLO del que esta abierto. Los otros titulos no se escriben: con
-      //  cuatro pasos no entran en un renglon, y cortarlos no dice nada.
+      //  del que esta abierto.
+      //
+      //  LOS OTROS TITULOS AHORA SI SE ESCRIBEN  --  14/11/2026, y es una
+      //  vuelta atras con motivo. La regla del 09/11 era «no entran en un
+      //  renglon, y cortarlos no dice nada», y eso valia porque iban EN FILA
+      //  al lado de los circulos. Desde hoy van en una LISTA VERTICAL, uno
+      //  por renglon y con lo que cada paso ya tiene adentro: la razon que
+      //  cerraba la decision --el ancho-- dejo de existir.
+      //
+      //  El pedido del usuario, con la pantalla de una instalacion delante:
+      //  «es muy confuso para el tecnico; tiene que [ser] un tipo formulario
+      //  para que sea mas facil y que muestre lo que esta llenado».
       expect(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp(r'^Paso 2(, completo)?$')), findsOneWidget);
       expect(find.text('1. Diagnóstico'), findsOneWidget);
-      expect(find.text('2. Solución'), findsNothing);
+      expect(find.text('2. Solución'), findsOneWidget,
+          reason: 'el paso cerrado se nombra, para poder comprobar que tiene');
       expect(find.textContaining('Medición al llegar'), findsWidgets);
       expect(find.textContaining('Qué se cambió'), findsNothing);
       expect(find.text('Finalizar'), findsNothing);

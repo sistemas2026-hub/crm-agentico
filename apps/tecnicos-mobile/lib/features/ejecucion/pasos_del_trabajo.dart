@@ -64,3 +64,75 @@ enum EstadoDelPaso {
   /// Todavía le falta algo, esté antes o después del actual.
   pendiente,
 }
+
+/// Lo que un paso dice de sí mismo cuando NO es el que se está llenando.
+///
+/// EL PEDIDO (14/11/2026)
+/// ----------------------
+/// El usuario, con la pantalla de una instalación delante: «es muy confuso
+/// para el técnico; tiene que [ser] un tipo formulario para que sea más fácil
+/// y que muestre lo que está llenado».
+///
+/// Hasta hoy un paso cerrado era un círculo con un número. El técnico sabía
+/// que había pasado por ahí y no qué había dejado adentro, así que para
+/// comprobarlo tenía que volver a entrar -- y con cinco pasos eso es cinco
+/// viajes para contestar «¿ya puse el serial?».
+///
+/// QUÉ DEVUELVE
+/// ------------
+/// Una línea corta. Lo que está lleno, y si falta algo, cuánto:
+///
+///     'Puerto 7 · CTO-SOL-114 · 2 fotos'
+///     'Serial HWTC8A3F21B4 · faltan 2 fotos'
+///     'faltan 3 datos'
+///     ''                                   (el paso no pide nada)
+///
+/// LOS VALORES SE MUESTRAN, NO SE INTERPRETAN. No se traduce «true» a «sí» ni
+/// se redondea un número: lo que el técnico escribió es lo que tiene que
+/// leer, o el resumen deja de servir para comprobar.
+///
+/// CUÁNTOS VALORES: tres. Con todos, la línea pasa de un renglón en un
+/// teléfono y se corta en cualquier lado; con uno, no alcanza para reconocer
+/// el paso. Los que no entran se cuentan al final.
+String resumenDelPaso({
+  required List<String> etiquetas,
+  required List<String> valores,
+  required int camposVacios,
+  required int fotosPuestas,
+  required int fotosQueFaltan,
+  int cuantosValores = 3,
+}) {
+  final List<String> partes = <String>[];
+
+  final int tope = cuantosValores < 0 ? 0 : cuantosValores;
+  int mostrados = 0;
+  for (int i = 0; i < valores.length && mostrados < tope; i++) {
+    final String v = valores[i].trim();
+    if (v.isEmpty) continue;
+    final String e = i < etiquetas.length ? etiquetas[i].trim() : '';
+    //  La etiqueta ADELANTE y corta: «Puerto 7» se lee; «7» solo, no. Pero si
+    //  la etiqueta es larga ocupa el renglón entero, así que ahí gana el valor.
+    partes.add(e.isNotEmpty && e.length <= 14 ? '$e $v' : v);
+    mostrados++;
+  }
+
+  final int sinMostrar = valores.where((String v) => v.trim().isNotEmpty).length - mostrados;
+  if (sinMostrar > 0) partes.add('+$sinMostrar');
+
+  if (fotosPuestas > 0) {
+    partes.add(fotosPuestas == 1 ? '1 foto' : '$fotosPuestas fotos');
+  }
+
+  //  LO QUE FALTA VA AL FINAL Y SE NOMBRA. Un paso a medias que solo muestre
+  //  lo que tiene se lee como terminado.
+  final List<String> faltan = <String>[];
+  if (camposVacios > 0) {
+    faltan.add(camposVacios == 1 ? '1 dato' : '$camposVacios datos');
+  }
+  if (fotosQueFaltan > 0) {
+    faltan.add(fotosQueFaltan == 1 ? '1 foto' : '$fotosQueFaltan fotos');
+  }
+  if (faltan.isNotEmpty) partes.add('faltan ${faltan.join(' y ')}');
+
+  return partes.join(' · ');
+}
