@@ -1,6 +1,5 @@
 <script>
   import { onDestroy } from 'svelte';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
 
   import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
   //  La burbuja del chat del Supervisor ya no se monta aca: vive en
@@ -1306,9 +1305,6 @@
                 {corriendo ? 'Analizando…' : 'Analizar ahora'}
               </button>
             </div>
-          </div>
-          <div class="snv-pestanas">
-            <PestanasNoc activa="pendientes" />
           </div>
         </header>
 

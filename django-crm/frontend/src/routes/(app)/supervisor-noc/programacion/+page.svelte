@@ -20,7 +20,6 @@
   import FranjaDeIndicadores from '$lib/supervisor/FranjaDeIndicadores.svelte';
   import AlertasDelDia from '$lib/supervisor/AlertasDelDia.svelte';
   import ResumenDelDia from '$lib/supervisor/ResumenDelDia.svelte';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import {
     cupoDeLaCuadrilla,
     pastillasDePersona,
@@ -151,9 +150,6 @@
               Lo que quedó publicado para el día: a quién le tocó cada orden, quién se la
               asignó —el Supervisor o una persona— y si al técnico le llegó el aviso.
             </p>
-          </div>
-          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-            <PestanasNoc activa="programacion" />
           </div>
         </div>
       </section>

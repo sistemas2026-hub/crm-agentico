@@ -13,7 +13,6 @@
    * los dos lados hacen igual.
    */
   import { enhance } from '$app/forms';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { goto } from '$app/navigation';
   import '../supervisor-noc.css';
   import NivelesDeRespuesta from './NivelesDeRespuesta.svelte';
@@ -146,9 +145,6 @@
             Qué anota y qué fotos saca el técnico en cada visita, y con qué labor sale la
             orden. Un cambio se publica como versión nueva: las órdenes ya creadas no cambian.
           </p>
-        </div>
-        <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-          <PestanasNoc activa="plantillas" />
         </div>
       </div>
       {#if form?.error}

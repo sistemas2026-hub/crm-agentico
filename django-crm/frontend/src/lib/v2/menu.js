@@ -16,18 +16,24 @@
  *   termKey  la entrada que un paquete vertical puede renombrar.
  *   count    la clave de su insignia en `counts` (lo arma el layout).
  *   modulo   la clave con que la empresa la puede ocultar (common/modulos.py).
+ *   hijos    subpantallas: la entrada se vuelve un grupo que se despliega y se
+ *            contrae, y tocarla NO navega (13/11/2026, ver Supervisor NOC).
+ *   incluye  otras rutas que cuentan como esta entrada para marcarla activa.
  */
 import { t } from '$lib/terminology.js';
 import { sinModulosOcultos } from './modulos.js';
+import { PESTANAS_NOC } from '$lib/supervisor/pestanas.js';
 
 /** El mismo conjunto que campo/permissions.py::ROLES_GESTION y que el
  *  servidor de /supervisor-noc. */
 export const ROLES_GESTION = ['ADMIN', 'SUPERVISOR', 'OPERACIONES'];
 
 /**
+ * @typedef {{ href: string, label: string, exact?: boolean, incluye?: string[],
+ *             count?: string }} Hijo
  * @typedef {{ href: string, label: string, icono: string, exact?: boolean,
  *             admin?: boolean, roles?: string[], termKey?: string,
- *             count?: string, modulo?: string }} Entrada
+ *             count?: string, modulo?: string, hijos?: Hijo[] }} Entrada
  * @typedef {{ label: string, items: Entrada[] }} Grupo
  */
 
@@ -42,12 +48,28 @@ export const GRUPOS = [
       // Hasta el 12/11/2026 lo veía todo rol y un USER rebotaba en un candado
       // (auditoría del menú, Supervisor NOC). Insignia: órdenes detenidas que
       // esperan al NOC.
+      //
+      // DESDE EL 13/11/2026 SE DESPLIEGA. Pedido del usuario: tocar
+      // «Supervisor» abría Pendientes —la pantalla más pesada, con sus
+      // consultas al motor— aunque uno fuera a Despacho, y las subpantallas
+      // eran píldoras dentro de cada una. Ahora tocarlo muestra Pendientes,
+      // Fallas, Cuadrillas, Despacho, Programación, Plantillas y Ajustes, y se
+      // carga solo la que se elige. La lista es la de PESTANAS_NOC: una sola.
       {
         href: '/supervisor-noc',
-        label: 'Supervisor NOC IA',
+        // «IA» sale del menú: con la insignia y la flecha de desplegar no cabía
+        // en la barra y se cortaba en «Supervisor N…». La pantalla lo conserva.
+        label: 'Supervisor NOC',
         icono: 'Activity',
         roles: ROLES_GESTION,
-        count: 'supervisor'
+        count: 'supervisor',
+        hijos: PESTANAS_NOC.map((p) => ({
+          href: p.href,
+          label: p.menu ?? p.texto,
+          exact: p.exacta ?? false,
+          incluye: p.incluye ?? [],
+          count: p.count
+        }))
       },
       // Que hace cada agente AHORA. /agentes dice como esta configurado
       // cada uno; esto, en que anda en este momento.
@@ -148,4 +170,22 @@ export function gruposDelMenu({ role = 'USER', terminology = undefined, ocultos 
       .map((i) => (i.termKey ? { ...i, label: t(terminology, i.termKey, i.label) } : i))
   })).filter((g) => g.items.length > 0);
   return sinModulosOcultos(porRol, ocultos);
+}
+
+/**
+ * Si `ruta` es la pantalla de esta entrada (o de una de sus subpantallas).
+ *
+ * Prefijo por SEGMENTO: '/tasks' no debe marcar '/tasksX', y con hijos el
+ * padre está activo si lo está cualquiera de ellos.
+ *
+ * @param {{ href: string, exact?: boolean, incluye?: string[], hijos?: Hijo[] }} entrada
+ * @param {string} ruta
+ * @returns {boolean}
+ */
+export function estaActiva(entrada, ruta) {
+  const bajo = (/** @type {string} */ href) =>
+    ruta === href || (href !== '/' && ruta.startsWith(href.endsWith('/') ? href : `${href}/`));
+  if (entrada.hijos?.length) return entrada.hijos.some((h) => estaActiva(h, ruta));
+  if (entrada.exact) return ruta === entrada.href;
+  return bajo(entrada.href) || (entrada.incluye ?? []).some(bajo);
 }

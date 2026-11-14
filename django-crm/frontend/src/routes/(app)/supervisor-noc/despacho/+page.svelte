@@ -10,7 +10,6 @@
    * la evidencia y por qué, y quien despacha acepta o cambia.
    */
   import { enhance } from '$app/forms';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { untrack } from 'svelte';
@@ -399,9 +398,6 @@
             Qué casos van a una visita, y con qué plantilla. Lo que se despacha acá es lo
             que el ciclo de la madrugada reparte entre las cuadrillas.
           </p>
-        </div>
-        <div class="snoc-fila" style="gap:var(--snoc-sm);">
-          <PestanasNoc activa="despacho" />
         </div>
       </div>
     </section>

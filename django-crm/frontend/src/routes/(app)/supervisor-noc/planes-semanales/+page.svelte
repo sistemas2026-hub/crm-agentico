@@ -1,6 +1,5 @@
 <script>
   import { enhance } from '$app/forms';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { invalidateAll, goto } from '$app/navigation';
   import '../supervisor-noc.css';
   import FormularioDelTrabajo from './FormularioDelTrabajo.svelte';
@@ -654,11 +653,11 @@
           </div>
         </div>
 
-        <!-- Pestañas. Desde el 28/10/2026 esta es la pantalla de los PLANES
-             SEMANALES (la de antes de Programación): se llega desde
-             Programación, que ahora muestra el día publicado. -->
+        <!-- Desde el 28/10/2026 esta es la pantalla de los PLANES SEMANALES
+             (la de antes de Programación): se llega desde Programación. Las
+             subpantallas están en el menú lateral desde el 13/11/2026; queda
+             solo el regreso. -->
         <div class="snoc-envuelve snoc-pestanas">
-          <PestanasNoc activa="programacion" />
           <a class="snoc-pildora" href="/supervisor-noc/programacion">← Volver a Programación</a>
         </div>
       </section>

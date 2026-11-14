@@ -16,7 +16,6 @@
    * que es justo lo que la idempotencia evita.
    */
   import { enhance } from '$app/forms';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import { opcionesDeLider } from '$lib/supervisor/lider-de-cuadrilla.js';
   import '../supervisor-noc.css';
 
@@ -395,9 +394,6 @@
             Quiénes son, y qué hace cada una el día que elijas. La cuadrilla sigue siendo la
             misma mañana; lo que cambia es su labor y su gente.
           </p>
-        </div>
-        <div class="snoc-fila" style="gap:var(--snoc-sm);">
-          <PestanasNoc activa="cuadrillas" />
         </div>
       </div>
 

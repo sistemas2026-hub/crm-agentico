@@ -35,9 +35,12 @@
     Cable,
     BookMarked,
     Moon,
-    Funnel
+    Funnel,
+    ChevronDown
   } from '@lucide/svelte';
-  import { gruposDelMenu } from '$lib/v2/menu.js';
+  import { slide } from 'svelte/transition';
+  import { untrack } from 'svelte';
+  import { gruposDelMenu, estaActiva } from '$lib/v2/menu.js';
   import { alternarTema, leerTema } from '$lib/v2/tema.js';
 
   // El tema se lee del navegador, asi que recien cuando hay navegador: en el
@@ -94,8 +97,71 @@
     }))
   );
 
-  const isActive = (href, exact) =>
-    exact ? page.url.pathname === href : page.url.pathname.startsWith(href);
+  const isActive = (href, exact) => estaActiva({ href, exact }, page.url.pathname);
+
+  /*
+   * LAS ENTRADAS CON SUBPANTALLAS SE DESPLIEGAN  --  13/11/2026
+   * ----------------------------------------------------------
+   * Hoy es Supervisor NOC. Tocarla abre o cierra la lista; no navega, para no
+   * cargar Pendientes cuando uno va a Despacho. Qué queda abierto se recuerda
+   * en el navegador (es comodidad de quien mira, no un dato), y si esa lectura
+   * falla el menú igual funciona: abierto si se está dentro de la sección.
+   *
+   * Al ENTRAR a la sección desde afuera —un enlace, el buscador— se abre sola,
+   * para que se vea dónde se está. Moverse dentro de ella no la reabre si la
+   * persona la cerró a propósito.
+   */
+  const CLAVE_ABIERTOS = 'dexter.menu.abiertos';
+  /** @type {Record<string, boolean>} */
+  let abiertos = $state({});
+  $effect(() => {
+    try {
+      const guardado = JSON.parse(localStorage.getItem(CLAVE_ABIERTOS) ?? '{}');
+      if (guardado && typeof guardado === 'object') {
+        untrack(() => (abiertos = { ...guardado, ...abiertos }));
+      }
+    } catch {
+      /* sin almacenamiento: se queda con lo que hay */
+    }
+  });
+
+  /** @param {string} href @param {boolean} valor */
+  function fijarAbierto(href, valor) {
+    abiertos = { ...abiertos, [href]: valor };
+    try {
+      localStorage.setItem(CLAVE_ABIERTOS, JSON.stringify(abiertos));
+    } catch {
+      /* sin almacenamiento: dura lo que dure la página */
+    }
+  }
+
+  /** Secciones con hijos en las que se estaba en la navegación anterior. */
+  /** @type {Set<string>} */
+  let dentroAntes = new Set();
+  $effect(() => {
+    const ruta = page.url.pathname;
+    const dentro = new Set();
+    for (const g of groups) {
+      for (const i of g.items) {
+        if (i.hijos && estaActiva(i, ruta)) dentro.add(i.href);
+      }
+    }
+    untrack(() => {
+      for (const href of dentro) {
+        if (!dentroAntes.has(href)) fijarAbierto(href, true);
+      }
+    });
+    dentroAntes = dentro;
+  });
+
+  /** @param {{ href: string, hijos?: any[] }} item */
+  const estaAbierto = (item) => abiertos[item.href] ?? estaActiva(item, page.url.pathname);
+
+  //  El despliegue respeta a quien pidió menos movimiento: la transición de
+  //  Svelte corre en JavaScript y no ve la consulta de CSS.
+  const sinMovimiento =
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const DESPLIEGUE = { duration: sinMovimiento ? 0 : 160 };
 </script>
 
 <nav class="v2-nav" aria-label="Principal">
@@ -121,17 +187,56 @@
   {#each groups as group (group.label)}
     <div class="v2-nav-group v2-label">{group.label}</div>
     {#each group.items as item (item.href)}
-      <a
-        class="v2-link"
-        href={item.href}
-        aria-current={isActive(item.href, item.exact) ? 'page' : undefined}
-      >
-        <item.icon />
-        {item.label}
-        {#if item.count && counts[item.count]}
-          <span class="v2-count">{counts[item.count]}</span>
+      {#if item.hijos?.length}
+        {@const abierto = estaAbierto(item)}
+        {@const idLista = `v2-sub-${item.href.replace(/[^a-z0-9]+/gi, '-')}`}
+        <button
+          class="v2-link v2-nav-padre"
+          class:v2-nav-padre-dentro={estaActiva(item, page.url.pathname)}
+          type="button"
+          aria-expanded={abierto}
+          aria-controls={idLista}
+          onclick={() => fijarAbierto(item.href, !abierto)}
+        >
+          <item.icon />
+          <span class="v2-nav-padre-texto">{item.label}</span>
+          <!-- Cerrada, la insignia va en el padre; abierta, en su subpantalla. -->
+          {#if !abierto && item.count && counts[item.count]}
+            <span class="v2-count">{counts[item.count]}</span>
+          {/if}
+          <span class="v2-nav-flecha" class:v2-nav-flecha-abierta={abierto} aria-hidden="true">
+            <ChevronDown />
+          </span>
+        </button>
+        {#if abierto}
+          <div class="v2-nav-sub" id={idLista} transition:slide={DESPLIEGUE}>
+            {#each item.hijos as hijo (hijo.href)}
+              <a
+                class="v2-link v2-nav-hijo"
+                href={hijo.href}
+                aria-current={estaActiva(hijo, page.url.pathname) ? 'page' : undefined}
+              >
+                {hijo.label}
+                {#if hijo.count && counts[hijo.count]}
+                  <span class="v2-count">{counts[hijo.count]}</span>
+                {/if}
+              </a>
+            {/each}
+          </div>
         {/if}
-      </a>
+      {:else}
+        <a
+          class="v2-link"
+          href={item.href}
+          aria-current={isActive(item.href, item.exact) ? 'page' : undefined}
+        >
+          <item.icon />
+          {item.label}
+          {#if item.count && counts[item.count]}
+            <span class="v2-count">{counts[item.count]}</span>
+          {/if}
+        </a>
+      {/if}
     {/each}
   {/each}
 
@@ -189,6 +294,79 @@
 </nav>
 
 <style>
+  /* El padre que despliega: un botón con la cara de un enlace del menú. */
+  .v2-nav-padre {
+    width: 100%;
+    background: none;
+    border: 0;
+    font-family: inherit;
+    font-size: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  /* Con la insignia y la flecha, «Supervisor NOC IA» se partía en dos líneas
+     en los 236 px de la barra: la fila se aprieta y el nombre va en una. */
+  .v2-nav-padre {
+    gap: 8px;
+    padding-right: 4px;
+  }
+  .v2-nav-padre-texto {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Dentro de la sección pero con la lista cerrada: que se note dónde se está
+     sin pintarlo como la pantalla activa (esa es la subpantalla). */
+  .v2-nav-padre-dentro {
+    color: #fff;
+    font-weight: 650;
+  }
+  .v2-nav-padre .v2-count {
+    margin-left: 0;
+    min-width: 18px;
+    padding: 0 5px;
+  }
+  .v2-nav-flecha {
+    display: inline-flex;
+    flex: none;
+    margin-left: -4px;
+    opacity: 0.7;
+    transition: transform 160ms ease-out;
+  }
+  .v2-nav-flecha :global(svg) {
+    width: 14px;
+    height: 14px;
+  }
+  .v2-nav-flecha-abierta {
+    transform: rotate(180deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .v2-nav-flecha {
+      transition: none;
+    }
+  }
+  /* Las subpantallas: alineadas con el texto del padre (10 de margen + 17 del
+     ícono + 10 de separación), con una guía a la izquierda que las agrupa. */
+  .v2-nav-sub {
+    position: relative;
+    margin: 1px 0 4px;
+  }
+  .v2-nav-sub::before {
+    content: '';
+    position: absolute;
+    left: 18px;
+    top: 4px;
+    bottom: 4px;
+    width: 1px;
+    background: var(--v2-nav-line);
+  }
+  .v2-nav-hijo {
+    padding-left: 37px;
+    min-height: 32px;
+    font-size: 13px;
+  }
   /* Search opens an overlay rather than navigating, so it is a button. It
      borrows .v2-link for everything else. A control that sits in a list of
      links should not look like the odd one out. */

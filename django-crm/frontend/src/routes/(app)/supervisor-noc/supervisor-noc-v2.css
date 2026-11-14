@@ -166,15 +166,6 @@
 .snv-bajada { margin: 2px 0 0; color: var(--snv-tinta-2); font-size: 14px; }
 .snv-cabecera-der { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 6px; }
 .snv-ultimo { font-size: 13px; color: var(--snv-tinta-2); }
-/* Las pestañas de siempre (PestanasNoc), con el subrayado del diseño. */
-.snv-pestanas { border-bottom: 1px solid var(--snv-linea); }
-.snv .snv-pestanas .snoc-pildora {
-  background: none; border-radius: 0; padding: 8px 14px 10px; margin-bottom: -1px;
-  font-family: var(--snv-f-texto); font-size: 14px; font-weight: 500; color: var(--snv-tinta-2);
-  border-bottom: 2px solid transparent; text-decoration: none;
-}
-.snv .snv-pestanas .snoc-pildora:hover { color: var(--snv-tinta); }
-.snv .snv-pestanas .snoc-pildora-activa { color: var(--snv-tinta); font-weight: 700; border-bottom-color: var(--snv-accion); }
 
 /* ---------------------------------------------------------------------------
    AHORA MISMO

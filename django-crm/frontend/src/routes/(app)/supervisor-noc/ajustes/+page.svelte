@@ -12,7 +12,6 @@
    * Supervisor hizo (o dejó de hacer) algo.
    */
   import { enhance } from '$app/forms';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import '../supervisor-noc.css';
   import {
     comoLlego,
@@ -80,9 +79,6 @@
             por qué. Lo crítico —lo que mueve dinero, corta un servicio o le llega a muchos
             clientes a la vez— espera siempre a una persona.
           </p>
-        </div>
-        <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-          <PestanasNoc activa="ajustes" />
         </div>
       </div>
       <!-- El error de UNA tarea se muestra en su fila; acá solo el que no

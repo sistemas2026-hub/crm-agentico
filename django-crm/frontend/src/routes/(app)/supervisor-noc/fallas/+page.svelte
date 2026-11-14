@@ -12,7 +12,6 @@
    */
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
-  import PestanasNoc from '$lib/supervisor/PestanasNoc.svelte';
   import '../supervisor-noc.css';
   import { avance, motivosLegibles, NO_LISTO, POR_QUE_NO, textoDeDetencion } from '$lib/supervisor/fallas.js';
 
@@ -70,9 +69,6 @@
               escriban evita que todos pregunten a la vez; lo aprueba una persona y sale por WhatsApp,
               por tandas.
             </p>
-          </div>
-          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-            <PestanasNoc activa="fallas" />
           </div>
         </div>
         {#if form?.error && !form?.situacion}
