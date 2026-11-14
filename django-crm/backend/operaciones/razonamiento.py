@@ -86,13 +86,26 @@ TOPE_TEXTO = 2000
 TOPE_LISTA = 20
 
 
-def _sin_identificadores(texto: str) -> str:
-    """Borra correos, moviles y documentos de un texto libre."""
+def sin_identificadores(texto: str) -> str:
+    """Borra correos, moviles y documentos de un texto libre.
+
+    PUBLICA DESDE EL 14/11/2026, y el guion bajo se fue a proposito: `campo`
+    la usa para el motivo de una reasignacion, que es el mismo problema
+    --texto que una persona escribe y queda guardado para leerlo despues--.
+    La alternativa era copiar `_PATRONES` en el otro modulo, y dos listas de
+    patrones de PII en dos archivos divergen: la que se corrige es una sola y
+    la otra queda protegiendo de menos sin que nadie lo note.
+    """
     if not texto:
         return ""
     for patron, reemplazo in _PATRONES:
         texto = patron.sub(reemplazo, texto)
     return texto
+
+
+#  Los llamadores de este modulo la nombran asi desde antes; se conserva para
+#  no tocar siete lineas que no cambian de significado.
+_sin_identificadores = sin_identificadores
 
 
 def _texto(valor) -> str:

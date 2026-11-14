@@ -256,10 +256,16 @@ export const actions = {
   //  que se enfermaba a media jornada se llevaba sus órdenes con él. El
   //  backend lo resolvía entero y nadie lo llamaba (ver `mover-orden.js`).
   //
-  //  EL MOTIVO ES OBLIGATORIO ACÁ y opcional en el backend, a propósito. El
-  //  evento `reasignacion` lo guarda, y es lo único que después explica por
-  //  qué un trabajo cambió de manos; un campo opcional se deja vacío siempre.
-  //  Mismo criterio que la devolución, que ya exige el suyo.
+  //  EL MOTIVO ES OBLIGATORIO EN LAS DOS CAPAS: acá y en el serializer
+  //  (`allow_blank=False`). El evento `reasignacion` lo guarda, y es lo único
+  //  que después explica por qué un trabajo cambió de manos; un campo
+  //  opcional se deja vacío siempre. Mismo criterio que la devolución.
+  //
+  //  Y VIAJA SIN LIMPIAR DESDE ACÁ, a propósito: el identificador que alguien
+  //  escriba ahí lo borra `mover_la_orden` antes de guardar nada
+  //  (`campo/services/despacho.py`). Hacerlo también en esta capa daría dos
+  //  lugares donde la regla puede divergir, y el único que de verdad protege
+  //  es el que está pegado a la escritura.
   //
   //  NO SE VALIDA QUE EL DESTINO SALGA HOY: eso lo decide la pantalla, que
   //  solo ofrece a quienes salen. Repetir la regla acá la pondría en dos

@@ -1294,6 +1294,27 @@ def mover_la_orden(orden: OrdenTrabajo, nuevo, actor, motivo: str = "") -> dict:
     #  a principal no es una visita nueva y `asignar` no le avisa.
     era_integrante = fresca.asignaciones.filter(profile=nuevo).exists()
 
+    #  EL MOTIVO ES TEXTO LIBRE  --  14/11/2026, revision de PII
+    #
+    #  Lo escribe una persona de gestion y queda en DOS filas de
+    #  `campo_eventotrabajo` (esta reasignacion y el retiro del anterior),
+    #  append-only y a la vista en el admin de Django. De 300 descripciones
+    #  de ticket reales, 136 traian un documento embebido (CLAUDE.md §5): un
+    #  campo libre obligatorio, al lado del nombre de un cliente en la misma
+    #  tarjeta, es exactamente esa forma de dato.
+    #
+    #  SE LIMPIA, NO SE PROHIBE: quien mueve una orden esta describiendo una
+    #  situacion de trabajo --«se enfermo», «la zona le queda lejos»--, no
+    #  identificando a nadie. Lo que se pierde es un numero de serie ocasional
+    #  que caiga en `\d{6,11}`, y esa decision ya se tomo con su motivo donde
+    #  viven los patrones.
+    #
+    #  VA ACA Y NO EN LA VISTA: la garantia tiene que valer para cualquier
+    #  llamador, no solo para el que entra por HTTP.
+    from operaciones.razonamiento import sin_identificadores
+
+    motivo = sin_identificadores(motivo)
+
     asignar(fresca, nuevo, actor, motivo=motivo)
     if anterior is not None:
         retirar_integrante(fresca, anterior, actor, motivo=motivo)

@@ -434,3 +434,53 @@ def test_f2_pero_a_una_cuenta_DADA_DE_BAJA_no(
 
     o.refresh_from_db()
     assert o.tecnico_principal.id == user_profile.id
+
+
+# ---------------------------------------------------------------------------
+# G · EL MOTIVO ES TEXTO LIBRE (14/11/2026, revision de PII)
+# ---------------------------------------------------------------------------
+
+def test_g_un_documento_escrito_en_el_motivo_no_queda_en_la_base(
+        org_a, version, user_profile, destino, admin_profile):
+    """El «Por que» lo escribe una persona y se guarda tal cual en DOS filas
+    de `campo_eventotrabajo` (la reasignacion y el retiro del anterior),
+    append-only y visibles en el admin de Django.
+
+    LA MEDICION QUE OBLIGA A ESTO: de 300 descripciones de ticket reales, 136
+    traian un documento embebido (CLAUDE.md §5). Un campo libre obligatorio,
+    al lado del nombre de un cliente en la misma tarjeta, es exactamente esa
+    forma de dato.
+
+    No se prohibe escribirlo --quien mueve una orden esta describiendo una
+    situacion de trabajo, no identificando a nadie-- se guarda sin el
+    identificador, con los mismos patrones que `operaciones/razonamiento.py`
+    ya aplica a otra tabla que se guarda para leerla despues.
+    """
+    o = _de(_orden(org_a, version), user_profile)
+
+    mover_la_orden(o, destino, admin_profile,
+                   motivo="se lo paso a Juan, el cliente 1234567890 lo pidio")
+
+    guardados = [e.datos.get("motivo", "")
+                 for e in EventoTrabajo.objects.filter(orden=o)
+                 if "motivo" in (e.datos or {})]
+    assert guardados, "ningun evento guardo el motivo: la prueba no mide nada"
+    for texto in guardados:
+        assert "1234567890" not in texto
+        assert "[documento]" in texto
+        #  Y lo que SI explica por que se movio sigue estando: borrar el
+        #  identificador no puede borrar el motivo.
+        assert "se lo paso a Juan" in texto
+
+
+def test_g2_el_correo_y_el_movil_tampoco(
+        org_a, version, user_profile, destino, admin_profile):
+    o = _de(_orden(org_a, version), user_profile)
+
+    mover_la_orden(o, destino, admin_profile,
+                   motivo="escribir a ana@ejemplo.com o al 3001234567")
+
+    e = EventoTrabajo.objects.get(orden=o, tipo="reasignacion")
+    assert "ana@ejemplo.com" not in e.datos["motivo"]
+    assert "3001234567" not in e.datos["motivo"]
+    assert "[correo]" in e.datos["motivo"] and "[telefono]" in e.datos["motivo"]
