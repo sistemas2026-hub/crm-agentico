@@ -1226,7 +1226,13 @@ Medido contra Postgres real el 14/11/2026, en la auditoría de frontera previa a
 
 **Y lo que decía que pasaba y no pasaba.** El texto avisaba que al anterior se le borraba la orden de la app *"con lo que tenga sin subir"*. Las dos mitades eran falsas en direcciones opuestas: con `asignar()` no se le borraba nada, y aunque se le borrara, `ordenTieneAlgoSinSubir` (`local_database.dart:3999`) **impide soltar una orden con la cola pendiente**. El texto alarmaba por una pérdida imposible y ocultaba el acceso que sí quedaba.
 
-**El destino se valida en el servidor.** La pantalla solo ofrece a quienes salen ese día, pero esa lista vive en el navegador y `profile_id` es un campo de formulario: medido, el endpoint anterior aceptaba un perfil de bodega e inactivo con 200, y la orden quedaba con un responsable que no la iba a ver nunca. Ahora se exige `PersonaDeCampo` activa — lo mismo que decide quién sale a trabajar.
+**El destino se valida en el servidor, con la regla que ya existía.** La pantalla solo ofrece a quienes salen ese día, pero esa lista vive en el navegador y `profile_id` es un campo de formulario: medido, el endpoint anterior aceptaba un perfil inactivo con 200, y la orden quedaba con un responsable que no la iba a ver nunca.
+
+La primera versión exigió `PersonaDeCampo` activa **y falló en producción el mismo día**: se elegía un técnico del selector, se tocaba Mover y no pasaba nada. La regla con la que este sistema decide quién recibe una orden es `cuadrillas.destinatarios`, y dice *«el líder del día la recibe siempre, esté o no anotado entre los integrantes»*: entra por `jornada.lider`, que es un `Profile`, sin pasar por `PersonaDeCampo` en ninguna línea. Un líder no anotado como integrante no tiene esa fila — y el selector sí lo ofrece, porque sale de `destinatarios`.
+
+**La lección, que vale más que el arreglo:** había dos reglas para la misma pregunta, en dos archivos — una decidía a quién **ofrecer** y la otra a quién **aceptar**. Validar en el servidor es correcto; inventar ahí una regla nueva en vez de usar la que ya decide, no. Ahora es `is_active`, la misma que `destinatarios` aplica al líder (`motivo = "lider_inactivo"`) y a cada integrante.
+
+**Y la acción no tenía dónde reportar:** ningún bloque de la pantalla mostraba su resultado, así que el rechazo del servidor se veía como una recarga muda. Ninguna guarda vio las dos cosas: todas medían que el formulario se **dibujara**, no que **contestara**.
 
 ## 9. Despliegue
 
