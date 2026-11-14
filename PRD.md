@@ -1210,6 +1210,24 @@ Ficha y plan: [SPEC/objetivos/supervisor-noc-diagnostica-la-red.md](SPEC/objetiv
 
 Tres guardas lo fijan: la vuelta 2 **sin** registro de devolución sigue afuera, la devuelta por una persona entra, y la de ticket ya cerrado no. Revertir el cambio mata solo la del medio.
 
+### 8.25 DECISIÓN — Mover una orden le QUITA el trabajo al técnico anterior, no solo se lo da al nuevo (14/11/2026)
+
+**Lo que faltaba.** No había forma de mover una orden de un técnico a otro desde ninguna pantalla. El técnico que se enfermaba a media jornada se llevaba sus órdenes con él, y lo único que quedaba era esperar al reparto del día siguiente. El backend lo resolvía desde hacía meses (`AsignarTrabajoView`) y **ninguna pantalla lo llamaba** — un caso más de código construido que no corre (CLAUDE.md §6).
+
+**Por qué el endpoint obvio era el equivocado.** `asignar()` pone al nuevo como responsable y le **deja la fila** en `asignaciones` al anterior. Para una cuadrilla eso está bien: quien deja de ser líder sigue en el equipo. Para mover un trabajo está mal, porque toda la autorización intra-tenant de campo mide pertenencia a `asignaciones`, **nunca** `es_principal` (`campo/views.py:88`, `campo/services/transiciones.py:140`).
+
+Medido contra Postgres real el 14/11/2026, en la auditoría de frontera previa a integrar: después de «mover» la orden al técnico B, el técnico **A la marcó en camino, en sitio y la completó**. La bitácora quedó con `trabajo_completado_campo` a nombre de A sobre una orden cuyo responsable es B. Dos personas con escritura completa sobre el mismo trabajo, y el cierre atribuido a la equivocada.
+
+**Lo que se decidió.** Mover es una operación propia (`/campo/trabajos/<id>/mover/`), no un alias de asignar: sube al nuevo y **borra la fila del anterior**, las dos cosas bajo la misma fila bloqueada. La guarda que lo fija no mira la tabla —eso sobreviviría a que mañana la autorización pase a mirar otra cosa— sino el efecto: el anterior podía marcar la orden antes del movimiento y **recibe 404 después**.
+
+**Lo que no se mueve, y por qué.** Una orden ya **completada en campo** no se mueve. El trabajo lo hizo alguien, y la revisión del cierre, la devolución al ticket y la marca de agua de las fotos nombran al responsable: moverla se lo atribuye a quien no lo hizo. **En camino** y **en sitio** sí se mueven — ese es exactamente el caso que pidió el control.
+
+**Lo que la pantalla no puede prometer.** `avisar_asignacion` sale solo si la persona es nueva en la orden (decisión propia, con su prueba desde antes). Devolverle la orden a quien la tenía, o dársela a quien ya figuraba de ayudante, **no manda ningún aviso**. La pantalla lo afirmaba igual; ahora lo pregunta: la respuesta trae `aviso`, y el mensaje dice lo que pasó.
+
+**Y lo que decía que pasaba y no pasaba.** El texto avisaba que al anterior se le borraba la orden de la app *"con lo que tenga sin subir"*. Las dos mitades eran falsas en direcciones opuestas: con `asignar()` no se le borraba nada, y aunque se le borrara, `ordenTieneAlgoSinSubir` (`local_database.dart:3999`) **impide soltar una orden con la cola pendiente**. El texto alarmaba por una pérdida imposible y ocultaba el acceso que sí quedaba.
+
+**El destino se valida en el servidor.** La pantalla solo ofrece a quienes salen ese día, pero esa lista vive en el navegador y `profile_id` es un campo de formulario: medido, el endpoint anterior aceptaba un perfil de bodega e inactivo con 200, y la orden quedaba con un responsable que no la iba a ver nunca. Ahora se exige `PersonaDeCampo` activa — lo mismo que decide quién sale a trabajar.
+
 ## 9. Despliegue
 
 Un VPS gestionado con **Dokploy**: el motor, el CRM (backend, Celery, frontend) y un Supabase autoalojado del que se usa solo Postgres. **Pushear la rama de despliegue publica a producción** (autodeploy). El procedimiento, las variables, el webhook de WhatsApp y el diagnóstico de fallos viven en [DESPLIEGUE.md](DESPLIEGUE.md); las reglas de quién despliega y cómo se verifica, en CLAUDE.md §6–§8.
