@@ -215,11 +215,51 @@ tambien devuelve `task_id`. Hay que consultar el resultado de la tarea aparte
 para confirmar que se creo de verdad.
 
 **Campos opcionales de escritura que NUNCA debe proponer el modelo**, aunque el
-esquema los acepte: `password_servicio`, `password_cpe`, `password_router_wifi`,
-`password_ssid_router_wifi`, `coordenadas`. Mismo criterio que en lectura —lista
-blanca por rol— pero aplicado a lo que se ESCRIBE. Una herramienta de "crear
-cliente" debe fijar estos campos en codigo (vacios o ausentes), nunca dejar que
-el modelo los complete.
+esquema los acepte. Son **CINCO** contrasenas y no cuatro --la lista de esta
+skill tenia cuatro hasta el 14/11/2026, cuando el usuario pego el cuerpo
+completo del POST y aparecio `password_portal_cliente`--:
+
+    password_servicio · password_cpe · password_router_wifi
+    password_ssid_router_wifi · password_portal_cliente
+    coordenadas
+
+Mismo criterio que en lectura —lista blanca por rol— pero aplicado a lo que se
+ESCRIBE. Una herramienta de "crear cliente" debe fijar estos campos en codigo
+(vacios o ausentes), nunca dejar que el modelo los complete.
+
+Que la lista estuviera incompleta es el argumento de la lista BLANCA: con lista
+negra, el campo que el proveedor agrega manana queda expuesto por defecto, y se
+descubre cuando ya salio.
+
+### EL CUERPO COMPLETO DEL POST  --  pegado por el usuario, 14/11/2026
+
+**Es la DOCUMENTACION, no una medicion.** Los unicos tres campos cuya
+obligatoriedad esta verificada en vivo siguen siendo `usuario_rb`, `ip` y
+`plan_internet` (ver arriba); de los demas, esto dice que EXISTEN, no como se
+comportan.
+
+```
+usuario_rb · ip · local_address_pppoe · mac_cpe · coordenadas
+plan_internet · sectorial · nombre · apellidos · email · direccion
+localidad · ciudad · telefono · cp · forma_contratacion
+password_portal_cliente · password_servicio · firewall · modelo_antena
+usuario_cpe · password_cpe · protocolo_conexion_cpe · sn_onu
+ip_router_wifi · modelo_router_wifi · usuario_router_wifi
+password_router_wifi · ssid_router_wifi · password_ssid_router_wifi
+mac_router_wifi · comentarios · nombre_facturacion · tipo_persona · rfc
+direccion_facturacion · email_facturacion · representante_legal
+cedula_facturacion · cedula · informacion_adicional · retenciones
+numeracion_alterna · costo_instalacion · estado_instalacion
+```
+
+**Lo que este cuerpo NO resuelve:** no hay ningun campo ni endpoint que diga
+cuales IP estan LIBRES. Es el cuerpo de la escritura, no un catalogo. La lupa
+que el tecnico usa en el panel sigue siendo del panel (`wisphub.io`).
+
+**`local_address_pppoe` no estaba en esta skill, y para una instalacion
+importa.** `ip` ya estaba documentado como «Remote Address para PPPoE»; este es
+el otro lado de la pareja. Quien construya el alta tiene que saber si en
+Rapilink hace falta, y eso **no esta preguntado todavia**.
 
 **Descuido de la documentacion de WispHub, no nuestro**: `mac_cpe` aparece
 descrito como "Coordenadas" —copiado del campo `coordenadas`, al que si le
@@ -585,7 +625,9 @@ Leerlo como valor unico da 43% de cobertura; extrayendo todos los moviles
 
 **El registro de cliente trae 54 campos**, incluidas **cuatro contrasenas**
 (`password_cpe`, `password_servicio`, `password_router_wifi`,
-`password_ssid_router_wifi`) y las **coordenadas GPS** del domicilio. Por eso la
+`password_ssid_router_wifi`) y las **coordenadas GPS** del domicilio. (En
+ESCRITURA son cinco: el cuerpo del POST acepta ademas
+`password_portal_cliente` -- ver la seccion de creacion.) Por eso la
 lista de campos es BLANCA por rol y no negra: con lista negra, un campo nuevo
 del proveedor queda expuesto por defecto.
 
