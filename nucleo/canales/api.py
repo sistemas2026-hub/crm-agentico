@@ -6244,6 +6244,99 @@ def interno_anotar_en_el_ticket(orden_id: str):
     return jsonify(resultado.como_dict()), codigo_http
 
 
+@app.get("/interno/red/ips-libres")
+def interno_red_ips_libres():
+    """Que direcciones IP puede ofrecerle la pantalla al tecnico, en una zona.
+
+        GET /interno/red/ips-libres?tenant=<slug>&zona=<id>[&cuantas=20]
+
+    LA ZONA DICE DE QUE PREFIJOS, LA OCUPACION SE CUENTA SOBRE TODOS
+    ---------------------------------------------------------------
+    Las dos cosas a la vez, y la segunda se aprendio midiendo (14/11/2026): en
+    produccion un mismo /24 tenia 42 clientes en una zona y 211 en otra --el
+    mismo servidor con distinto dia de corte de factura-- asi que contar solo
+    los de la zona elegida daba 212 libres donde habia una.
+
+    FALLA CERRADO, Y ESTO ES LO QUE MAS IMPORTA DE ESTA RUTA. Sin ocupacion
+    sincronizada, con una lectura incompleta, o sin pool declarado para esa
+    zona, devuelve CERO direcciones y dice por que. No saber que esta tomado NO
+    es que todo este libre: ofrecer una direccion a partir de un dato que falta
+    es como dos clientes terminan con la misma IP.
+
+    LO QUE NO PUEDE PROMETER, y quien lo muestre tiene que repetirlo con estas
+    palabras: una direccion libre aca es una que NINGUN CLIENTE tiene. Los
+    equipos de red --antenas, switches, cajas-- no son clientes, no estan en el
+    listado del proveedor y esta resta no los ve.
+    """
+    from nucleo.herramientas import ocupacion_ip as oip
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    zona_cruda = (request.args.get("zona") or "").strip()
+    if not zona_cruda:
+        return jsonify({"error": "Falta el parametro 'zona'."}), 400
+    try:
+        zona = int(zona_cruda)
+    except ValueError:
+        return jsonify({"error": "'zona' es el id numerico del catalogo."}), 400
+    try:
+        cuantas = max(1, min(int(request.args.get("cuantas") or 20), 200))
+    except ValueError:
+        cuantas = 20
+
+    def _nada(motivo: str, detalle: str = ""):
+        #  200 y no 4xx: no es un error de quien pregunta. Es una respuesta
+        #  legitima --"no hay nada que ofrecer, y por esto"-- y la pantalla
+        #  tiene que poder mostrar el motivo en vez de un fallo.
+        cuerpo = {"libres": [], "motivo": motivo, "zona": zona}
+        if detalle:
+            cuerpo["detalle"] = detalle
+        return jsonify(cuerpo), 200
+
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        registrar("red", "no se pudo leer la config para las ips libres",
+                  tenant=tenant, error=e)
+        return _nada("no se pudo leer la configuracion")
+
+    if not getattr(config, "ocupacion_ip", None):
+        return _nada("la ocupacion de IP no se ha sincronizado nunca")
+    if not getattr(config, "ocupacion_ip_completa", False):
+        return _nada("la ultima lectura de ocupacion quedo incompleta")
+
+    pool = next((p for p in (config.pools_de_ip or [])
+                 if int(getattr(p, "zona_id", -1)) == zona), None)
+    if pool is None:
+        return _nada("esta zona no tiene pool declarado")
+    if not (pool.prefijos or []):
+        return _nada("el pool de esta zona no tiene ningun prefijo")
+
+    libres: list[str] = []
+    #  SE RECORREN LOS PREFIJOS EN EL ORDEN DECLARADO y se corta al llegar a
+    #  `cuantas`: el primero de la lista es el que la empresa quiere llenar
+    #  primero, y repartir entre varios dejaria todos a medias.
+    for pref in pool.prefijos:
+        if len(libres) >= cuantas:
+            break
+        ocupados = config.ocupacion_ip.get(pref) or []
+        libres.extend(oip.libres_de(pref, ocupados, cuantas - len(libres)))
+
+    return jsonify({
+        "libres": libres,
+        "zona": zona,
+        "zona_nombre": pool.zona_nombre or "",
+        "prefijos": list(pool.prefijos or []),
+        "actualizado_en": getattr(config, "ocupacion_ip_actualizado_en", None),
+        #  Va en la respuesta y no solo en la documentacion: el aviso tiene que
+        #  llegar a la pantalla que muestra la lista, no quedarse aca.
+        "advertencia": ("Ninguna de estas la tiene un CLIENTE. Los equipos de "
+                        "red no estan en el listado del proveedor, asi que una "
+                        "direccion que tenga una antena aparece libre."),
+    }), 200
+
+
 @app.get("/interno/vision/evidencias-habilitada")
 def interno_vision_evidencias_habilitada():
     """Si esta empresa tiene habilitado que se miren sus fotos de evidencia.
@@ -6865,6 +6958,73 @@ def configuracion_localidades_sincronizar():
     return jsonify({
         "localidades": [l.model_dump(mode="json") for l in nuevo.localidades],
         "localidades_actualizado_en": nuevo.localidades_actualizado_en,
+    })
+
+
+@app.post("/configuracion/ocupacion-ip/sincronizar")
+def configuracion_ocupacion_ip_sincronizar():
+    """
+    Recorre el catalogo de clientes del proveedor y guarda QUE DIRECCIONES IP
+    estan tomadas, por prefijo /24.
+
+    ES EL LLAMADOR de `nucleo/herramientas/ocupacion_ip.py::sincronizar`, y
+    existe por CLAUDE.md 6: un mecanismo sin llamador no corre nunca y no da
+    error, log ni alerta. Lo mismo que paso con el reloj de tareas colgado de
+    un `__main__` que gunicorn no ejecuta.
+
+    Tarda lo mismo que el sync de localidades --decenas de llamadas
+    secuenciales-- y por eso es una accion de administrador bajo demanda, nunca
+    parte de una conversacion. Mismo criterio y mismo incidente (20/08/2026).
+
+    GUARDA LA LECTURA INCOMPLETA TAMBIEN, con su marca. Tirarla dejaria la
+    anterior --mas vieja-- pasando por buena; guardarla sin marca seria peor.
+    La ruta que ofrece direcciones se niega mientras la marca diga que no esta
+    completa.
+    """
+    from nucleo.herramientas import ocupacion_ip as sincronizador_ocupacion
+
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    herramienta = next((h for h in config.herramientas
+                        if getattr(h, "sincroniza_ocupacion_ip", False)), None)
+    if herramienta is None:
+        return jsonify({"error": "Este agente no tiene ninguna herramienta "
+                                 "marcada 'sincroniza_ocupacion_ip'."}), 400
+
+    try:
+        leido = sincronizador_ocupacion.sincronizar(
+            herramienta, tenant, config.variables_tenant)
+    except Exception as e:
+        return fallo(502, "proveedor_no_sincronizo",
+                     "No se pudo leer la ocupacion de IP del proveedor.",
+                     componente="ocupacion_ip", e=e,
+                     estado_proveedor=estado_http_de(e))
+
+    try:
+        nuevo = editor.guardar_ocupacion_ip(
+            tenant, leido["ocupacion"], leido["completo"])
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(
+            e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+
+    olvidar_config(tenant)
+    return jsonify({
+        "prefijos": len(nuevo.ocupacion_ip or {}),
+        "direcciones_tomadas": sum(len(v) for v in (nuevo.ocupacion_ip or {}).values()),
+        "leidos": leido["leidos"],
+        "sin_ip": leido["sin_ip"],
+        "ilegibles": leido["ilegibles"],
+        "completa": nuevo.ocupacion_ip_completa,
+        "actualizado_en": nuevo.ocupacion_ip_actualizado_en,
     })
 
 

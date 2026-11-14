@@ -1983,6 +1983,30 @@ def guardar_localidades(tenant: str, localidades: list[dict]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_localidades(doc, localidades))
 
 
+def _mutar_ocupacion_ip(doc: dict, ocupacion: dict, completa: bool) -> None:
+    """
+    Reemplaza ENTERA la ocupacion de direcciones IP -- ver
+    TenantConfig.ocupacion_ip. Mismo criterio que localidades y precios: lo
+    produce `nucleo/herramientas/ocupacion_ip.py` de punta a punta y un merge
+    no tendria sentido, porque una direccion que se LIBERO solo se nota por su
+    ausencia en la lectura nueva.
+
+    `completa` viaja junto al dato y no aparte: una lectura cortada guardada
+    sin su marca es indistinguible de una entera, y la ruta que ofrece
+    direcciones depende de poder distinguirlas.
+    """
+    from datetime import datetime, timezone
+    doc["ocupacion_ip"] = ocupacion
+    doc["ocupacion_ip_completa"] = bool(completa)
+    doc["ocupacion_ip_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+
+
+def guardar_ocupacion_ip(tenant: str, ocupacion: dict,
+                         completa: bool) -> TenantConfig:
+    return _editar(tenant,
+                   lambda doc: _mutar_ocupacion_ip(doc, ocupacion, completa))
+
+
 def _mutar_precios(doc: dict, precios: list[dict]) -> None:
     """
     Reemplaza ENTERO el catalogo de precios -- ver TenantConfig.precios_de_planes.

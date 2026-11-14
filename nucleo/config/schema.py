@@ -1371,6 +1371,16 @@ class Herramienta(Base):
     # base_url/endpoint/auth_ref que la herramienta ya declara, sin duplicar
     # esa config para un job aparte.
     sincroniza_localidades: bool = False
+    # Marca esta herramienta como la FUENTE de la ocupacion de direcciones IP
+    # (que /24 tiene tomado que ultimo octeto). Mismo listado que el sync de
+    # localidades y misma forma de job: no corre en una conversacion, solo
+    # `nucleo/herramientas/ocupacion_ip.py::sincronizar()`.
+    #
+    # BANDERA PROPIA Y NO REUSAR 'sincroniza_localidades': son dos jobs con
+    # dos destinos distintos, y si uno se apaga el otro tiene que seguir. El
+    # valor de fabrica es False: desplegar este codigo no empieza a recorrer
+    # 7.000 clientes de nadie.
+    sincroniza_ocupacion_ip: bool = False
     #: Marca las DOS herramientas del precio de un plan: el listado que da los
     #: ids y el detalle que da el precio. Son dos porque el proveedor las
     #: separo asi --medido el 07/10/2026: el listado no trae precio-- y una
@@ -1447,6 +1457,10 @@ class Herramienta(Base):
     # de WispHub.
     campo_localidad_sync: str = "localidad"
     campo_zona_sync: str = "zona"
+    # Que columna del listado trae la direccion IP del cliente. Como las dos
+    # de arriba: el nombre vive en la config porque es del proveedor, y
+    # `nucleo/` no conoce ninguno.
+    campo_ip_sync: str = "ip"
     # Excepcion CUARTA a "el modelo nunca propone argumentos libres" (las
     # otras tres: campo_busqueda de verifica_identidad, 'confirma' de
     # confirma_identidad, 'area' acotada de deriva_rol). Esta SI necesita ser
@@ -4102,6 +4116,38 @@ class Capacidad(Base):
     dias_sin_visita: int = Field(default=7, ge=1, le=60)
 
 
+class PoolDeIp(Base):
+    """De que prefijos se puede sacar una IP para una zona del proveedor.
+
+    POR QUE ES UNA DECISION Y NO SE INFIERE  --  14/11/2026
+    ------------------------------------------------------
+    Se intento inferirlo de los clientes que ya existen y NO SE PUEDE. En
+    produccion aparecieron mas de 100 prefijos por zona: unos con 250 de 254
+    ocupadas --los pools de verdad-- y decenas con UNO solo, entre ellos trece
+    `169.254.x`, que es link-local de RFC 3927 (la direccion que un equipo se
+    da a si mismo cuando no hay DHCP) y cuatro `192.168.x`, que es LAN privada
+    metida en el campo de la IP.
+
+    Los tres se ven IGUAL en un listado: «252 libres». Ofrecer eso manda al
+    tecnico a una direccion que no enruta. Asi que la empresa declara cuales
+    son sus pools, y el catalogo medido sirve para SEMBRAR esa lista, no para
+    reemplazarla.
+
+    `zona_id` es el id del catalogo del proveedor, el mismo que la URL del alta
+    pide. La zona dice de que prefijos se puede sacar; lo OCUPADO se cuenta
+    sobre todos los clientes, sin importar su zona (ver
+    `nucleo/herramientas/ocupacion_ip.py`).
+    """
+
+    zona_id: int
+    #: Para que una pantalla pueda nombrarla sin pedir el catalogo otra vez.
+    zona_nombre: str = ""
+    #: Prefijos /24 como texto terminado en punto: '172.16.9.'. Vacio = esta
+    #: zona no puede ofrecer ninguna, y eso NO es un error: es una zona que
+    #: todavia nadie configuro, y la pantalla lo tiene que decir asi.
+    prefijos: list[str] = Field(default_factory=list)
+
+
 class TenantConfig(Base):
     # Campos que NO son configuracion sino la SALIDA de un proceso: los
     # produce el sistema, no los escribe una persona, y se reemplazan enteros
@@ -4132,7 +4178,12 @@ class TenantConfig(Base):
     # proceso y se reemplaza entero".
     SINCRONIZADOS: ClassVar[tuple[str, ...]] = (
         "localidades", "localidades_actualizado_en", "parrilla_canales",
-        "precios_de_planes", "precios_actualizado_en")
+        "precios_de_planes", "precios_actualizado_en",
+        #  La OCUPACION la produce un job y se reemplaza entera. Los
+        #  POOLS no estan aca a proposito: son una decision de la empresa
+        #  y tiene sentido leerlos en un diff.
+        "ocupacion_ip", "ocupacion_ip_actualizado_en",
+        "ocupacion_ip_completa")
 
     version: int = 1
     identidad: Identidad
@@ -4269,6 +4320,21 @@ class TenantConfig(Base):
     # se edita a mano: se reemplaza entero cada vez que corre el sync.
     localidades: list[LocalidadZona] = Field(default_factory=list)
     localidades_actualizado_en: str | None = None  # ISO, ultima sincronizacion
+    # DE QUE PREFIJOS SACA IP CADA ZONA  --  14/11/2026. Una DECISION de la
+    # empresa (ver PoolDeIp), no un dato sincronizado: por eso NO esta en
+    # SINCRONIZADOS y si baja al archivo.
+    pools_de_ip: list[PoolDeIp] = Field(default_factory=list)
+    # QUE DIRECCIONES ESTAN TOMADAS: prefijo ('172.16.9.') -> ultimos octetos.
+    # Lo PRODUCE un job (`ocupacion_ip.sincronizar`), se reemplaza entero y no
+    # baja al archivo. Vacio = no se sincronizo nunca, y entonces no se puede
+    # ofrecer ninguna direccion: no saber que esta tomado NO es que todo este
+    # libre.
+    ocupacion_ip: dict[str, list[int]] = Field(default_factory=dict)
+    ocupacion_ip_actualizado_en: str | None = None  # ISO
+    # Si la ultima lectura se completo. Una parcial no sirve para ofrecer:
+    # lo que falto leer es justo lo que haria que una direccion pareciera
+    # libre.
+    ocupacion_ip_completa: bool = False
     # Que cuesta cada plan. Mismo criterio que 'localidades': lo produce un
     # job entero, nunca una persona, y se reemplaza completo en cada corrida.
     precios_de_planes: list[PrecioDePlan] = Field(default_factory=list)
