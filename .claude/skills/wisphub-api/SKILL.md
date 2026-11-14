@@ -256,6 +256,32 @@ numeracion_alterna · costo_instalacion · estado_instalacion
 cuales IP estan LIBRES. Es el cuerpo de la escritura, no un catalogo. La lupa
 que el tecnico usa en el panel sigue siendo del panel (`wisphub.io`).
 
+### MEDIDO el 14/11/2026: la API NO tiene los rangos de IP
+
+`cli/sondear_api.py --campos` contra produccion, solo lectura:
+
+| Endpoint | Campos | Lo que NO trae |
+|---|---|---|
+| `/api/zonas/` | **2**: `id`, `nombre` | ningun rango, ninguna red, ningun pool |
+| `/api/router/` | **5**: `id`, `nombre`, `ip`, `falla_general`, `falla_general_descripcion` | el `ip` es la del ROUTER, no un pool de clientes |
+
+Asi que **el rango por zona no se puede leer de WispHub**: o lo carga la
+empresa en la plataforma, o se INFIERE de los clientes que ya existen, que es
+el camino barato --el dato esta, repartido en 7.677 filas--. Para eso esta
+`cli/rangos_de_ip.py` (solo lectura).
+
+**`/api/clientes/` tiene `ip`, `ip_local`, `zona` Y `router`** en la respuesta
+de lista, que es justo lo que hace falta para contar lo ocupado.
+
+**HIPOTESIS SIN VERIFICAR**: `ip_local` (lectura) seria el par de
+`local_address_pppoe` (escritura) -- el mismo patron escritura != lectura que
+esta skill ya documenta para `usuario_rb` -> `servicio`. No esta medido: nadie
+comparo los dos campos en el mismo cliente.
+
+**Y el numero cambio**: `/api/clientes/` da **7.677** (eran 7.451) y
+`/api/instalaciones/` da **2** (era 1, el 12/11). El modulo de instalaciones
+sigue practicamente sin usarse.
+
 **`local_address_pppoe` no estaba en esta skill, y para una instalacion
 importa.** `ip` ya estaba documentado como «Remote Address para PPPoE»; este es
 el otro lado de la pareja. Quien construya el alta tiene que saber si en
