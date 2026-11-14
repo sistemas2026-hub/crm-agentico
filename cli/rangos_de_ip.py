@@ -124,8 +124,10 @@ def main(cuantas_libres: int, minimo: int) -> None:
     filas = traer_clientes()
     print(f"\n{len(filas)} clientes leidos\n")
 
-    #  zona -> prefijo -> {ultimo octeto en uso}
-    mapa: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    #  prefijo -> {ultimo octeto en uso}, GLOBAL
+    mapa: dict[str, set] = defaultdict(set)
+    #  prefijo -> {zonas que lo usan}
+    zonas_de: dict[str, set] = defaultdict(set)
     routers: dict[str, set] = defaultdict(set)
     sin_ip = 0
     con_ip_local = 0
@@ -148,76 +150,98 @@ def main(cuantas_libres: int, minimo: int) -> None:
             ultimo = int(f["ip"].rsplit(".", 1)[1])
         except (IndexError, ValueError):
             continue
-        mapa[f["zona"] or "— sin zona"][pref].add(ultimo)
+        #  POR PREFIJO Y NO POR ZONA  --  14/11/2026: las zonas CORTE
+        #  comparten el mismo /24. Ver el comentario del informe.
+        mapa[pref].add(ultimo)
+        zonas_de[pref].add(f["zona"] or "— sin zona")
 
     print("=" * 78)
     #  CUAL ES UN POOL Y CUAL ES UN DEDAZO  --  14/11/2026
     #
-    #  La primera corrida saco mas de 100 prefijos por zona: unos con 40 a 94
-    #  clientes (los pools de verdad) y decenas con UNO solo, entre ellos un
-    #  `169.254.x` --link-local de RFC 3927, la direccion que un equipo se da a
-    #  si mismo cuando no hay DHCP-- y dos `192.168.x`, que es LAN privada.
+    #  Mas de 100 prefijos: unos con 250 de 254 ocupadas (los pools de verdad)
+    #  y decenas con UNO solo, entre ellos trece `169.254.x` --link-local de
+    #  RFC 3927, lo que un equipo se da a si mismo cuando no hay DHCP-- y
+    #  cuatro `192.168.x`, que es LAN privada en el campo `ip`. Los tres se
+    #  veian IGUAL en el listado: «252 libres».
     #
-    #  Importa porque los tres se ven IGUAL en un listado: "252 libres". Si la
-    #  app ofreciera eso, mandaria al tecnico a una direccion que no enruta. El
-    #  corte por cantidad es una HEURISTICA, no una medicion: el que manda es
-    #  el pool que la empresa declare.
+    #  LAS ZONAS «CORTE» COMPARTEN EL /24, y eso rompia la cuenta. Medido:
+    #  `172.16.9.0/24` tiene 42 clientes en CORTE 15 y 211 en CORTE 30, y las
+    #  dos zonas dicen «SERVIDOR 1». En 16 prefijos la suma de las dos nunca
+    #  pasa de 254 y nueve estan al 98-99%: no son dos redes, es UNA, y
+    #  «CORTE 15/30» es el dia de corte de factura, no la red. El informe
+    #  agrupaba por zona y decia «212 libres» donde habia 1.
     pools, sospechosos = {}, {}
-    for z, prefijos in mapa.items():
-        for pref, usados in prefijos.items():
-            destino = pools if len(usados) >= minimo else sospechosos
-            destino.setdefault(z, {})[pref] = usados
+    for pref, usados in mapa.items():
+        (pools if len(usados) >= minimo else sospechosos)[pref] = usados
 
-    print(f"  POOLS PROBABLES  (>= {minimo} clientes en el prefijo)")
+    def _ocupadas(pref) -> str:
+        zs = ", ".join(sorted(zonas_de[pref]))
+        return zs if len(zs) <= 56 else zs[:53] + "..."
+
+    print(f"  POOLS PROBABLES  (>= {minimo} direcciones ocupadas)")
     print("=" * 78)
-    print("  El pool es el /24 entero: usable .1 a .254, fuera .0 (red) y .255")
-    print("  (broadcast). Lo dijo el usuario el 14/11/2026 -- hasta entonces")
-    print("  este informe excluia tambien el .1, dandolo por puerta de enlace.")
+    print("  El pool es el /24: .0 es la red y .255 el broadcast.")
+    print("  EL .1 SE INFORMA APARTE y NO se cuenta como libre -- ver abajo.")
     primera_en_uso = primera_libre = 0
-    for zona in sorted(pools):
-        rs = ", ".join(sorted(routers.get(zona, ()))) or "-"
-        print(f"\n  ZONA: {zona}        router(es): {rs}")
-        for pref in sorted(pools[zona]):
-            usados = pools[zona][pref]
-            libres = [n for n in range(1, 255) if n not in usados]
-            if 1 in usados:
-                primera_en_uso += 1
-            else:
-                primera_libre += 1
+    for pref in sorted(pools, key=lambda p: -len(pools[p])):
+        usados = pools[pref]
+        if 1 in usados:
+            primera_en_uso += 1
+        else:
+            primera_libre += 1
+        #  El .1 queda FUERA de las libres: la medicion de abajo dice por que.
+        libres = [n for n in range(2, 255) if n not in usados]
+        pct = 100 * len(usados) // 253
+        print(f"\n    {pref}0/24     ocupadas {len(usados):>3} de 253"
+              f"   ({pct:>3}%)   LIBRES {len(libres):>3}"
+              f"   .1 {'OCUPADA' if 1 in usados else 'libre'}")
+        print(f"      zonas: {_ocupadas(pref)}")
+        if libres:
             muestra = ", ".join(f"{pref}{n}" for n in libres[:cuantas_libres])
-            print(f"    {pref}0/24     en uso {len(usados):>3}"
-                  f"   libres {len(libres):>3}"
-                  f"   .1 {'OCUPADA' if 1 in usados else 'libre'}")
-            if muestra:
-                print(f"      libres (primeras {min(cuantas_libres, len(libres))}): {muestra}")
+            print(f"      libres: {muestra}")
+        else:
+            print("      SIN NINGUNA LIBRE")
 
-    #  EL .1, MEDIDO EN VEZ DE SUPUESTO. Si en NINGUN pool lo tiene un
-    #  cliente, es la puerta de enlace en todos y ofrecerlo dejaria al cliente
-    #  sin servicio. Si lo tiene en varios, es asignable.
+    #  EL .1, MEDIDO EN VEZ DE SUPUESTO  --  14/11/2026
+    #
+    #  El usuario dijo que las 254 se usan y que solo quedan fuera la primera
+    #  y la ultima del pool (.0 y .255). Los datos dicen otra cosa EN LA
+    #  OPERACION: el .1 esta libre en 83 de 86 pools, incluido uno con 240 de
+    #  254 ocupadas. Si el .1 fuera asignable, en un pool al 94% tendria que
+    #  estar tomado nueve de cada diez veces.
+    #
+    #  Por eso no se ofrece, y se informa: la teoria del /24 es la del usuario,
+    #  pero la puerta de enlace vive ahi.
     print("\n  EL .1 DE CADA POOL:")
     print(f"    pools donde un cliente LO TIENE ....... {primera_en_uso}")
     print(f"    pools donde NADIE lo tiene ............ {primera_libre}")
-    if primera_en_uso == 0 and primera_libre:
-        print("    -> en NINGUNO lo tiene un cliente: parece la puerta de")
-        print("       enlace en todos, y ofrecerlo seria mandar al tecnico a")
-        print("       una direccion que no va a levantar. CONFIRMAR antes.")
+    if primera_libre > primera_en_uso * 3:
+        print("    -> casi siempre libre, incluso en pools casi llenos: es la")
+        print("       puerta de enlace. NO se ofrece. Los pocos donde un")
+        print("       cliente lo tiene valen una mirada: un cliente sentado")
+        print("       en la puerta de enlace es un problema, no una excepcion.")
 
     print("\n" + "=" * 78)
-    print(f"  PREFIJOS SOSPECHOSOS  (< {minimo} clientes: NO son un pool)")
+    print(f"  PREFIJOS SOSPECHOSOS  (< {minimo} ocupadas: NO son un pool)")
     print("=" * 78)
-    total_sosp = 0
-    for zona in sorted(sospechosos):
-        print(f"\n  ZONA: {zona}")
-        for pref in sorted(sospechosos[zona]):
-            n = len(sospechosos[zona][pref])
-            total_sosp += n
-            nota = ""
-            if pref.startswith("169.254."):
-                nota = "   <-- LINK-LOCAL (RFC 3927), no es una asignacion"
-            elif pref.startswith(("192.168.", "10.")):
-                nota = "   <-- LAN privada en el campo `ip`"
-            print(f"    {pref}0/24     {n:>3} cliente(s){nota}")
-    print(f"\n  clientes en prefijos sospechosos: {total_sosp}")
+    print("  OJO CON EL CORTE: es una heuristica por cantidad, no una medicion.")
+    print("  Un pool chico de verdad cae aca. El que manda es el pool que la")
+    print("  empresa declare.")
+    total_sosp = roto = 0
+    for pref in sorted(sospechosos, key=lambda p: -len(sospechosos[p])):
+        n = len(sospechosos[pref])
+        total_sosp += n
+        nota = ""
+        if pref.startswith("169.254."):
+            nota = "   <-- LINK-LOCAL (RFC 3927): NO es una asignacion"
+            roto += n
+        elif pref.startswith(("192.168.", "10.")):
+            nota = "   <-- LAN privada en el campo `ip`"
+            roto += n
+        print(f"    {pref}0/24     {n:>3} ocupada(s){nota}")
+        print(f"      zonas: {_ocupadas(pref)}")
+    print(f"\n  direcciones en prefijos sospechosos: {total_sosp}")
+    print(f"  de esas, en rangos que NO PUEDEN SER una IP de cliente: {roto}")
 
     print("\n" + "=" * 78)
     print("  LO QUE NO CUADRA, QUE ES LO QUE HAY QUE MIRAR")
