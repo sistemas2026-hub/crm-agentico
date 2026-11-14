@@ -52,6 +52,7 @@ if _HOST not in ("localhost", "127.0.0.1", "::1", "host.docker.internal"):
     raise SystemExit(1)
 
 import psycopg                                           # noqa: E402
+from empresa_de_prueba import extras                  # noqa: E402
 
 fallos: list[str] = []
 
@@ -104,11 +105,14 @@ def preparar():
         c.execute(sql)
         c.execute("delete from asistente.tool_calls")
         c.execute("delete from public.organization")
+        c_extra, v_extra = extras(c)
         a = c.execute(
-            "insert into public.organization (name) values ('ISP A') returning id"
+            f"insert into public.organization (name{c_extra}) "
+            f"values ('ISP A'{v_extra}) returning id"
         ).fetchone()[0]
         b = c.execute(
-            "insert into public.organization (name) values ('ISP B') returning id"
+            f"insert into public.organization (name{c_extra}) "
+            f"values ('ISP B'{v_extra}) returning id"
         ).fetchone()[0]
         return a, b
 
@@ -116,8 +120,12 @@ def preparar():
 def meter(org, nombre, con=None, params="{}"):
     cerrar = con is None
     con = con or psycopg.connect(DSN, autocommit=True)
+    #  `exito` es `boolean not null` SIN default en el esquema del repo
+    #  (`202608042055_schema.sql:334`): sin pasarlo, el insert muere contra una
+    #  base migrada de verdad. Esta prueba nunca habia corrido contra una.
     con.execute("insert into asistente.tool_calls "
-                "(organization_id, herramienta, parametros) values (%s,%s,%s::jsonb)",
+                "(organization_id, herramienta, parametros, exito) "
+                "values (%s,%s,%s::jsonb,true)",
                 (org, nombre, params))
     if cerrar:
         con.close()

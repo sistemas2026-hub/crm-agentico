@@ -72,6 +72,7 @@ if _HOST not in ("localhost", "127.0.0.1", "::1", "host.docker.internal"):
     raise SystemExit(1)
 
 import psycopg                                           # noqa: E402
+from empresa_de_prueba import extras                  # noqa: E402
 
 fallos: list[str] = []
 
@@ -157,11 +158,14 @@ def preparar():
             encoding="utf-8")
         c.execute(sql)
         c.execute("delete from public.organization")
+        c_extra, v_extra = extras(c)
         a = c.execute(
-            "insert into public.organization (name) values ('ISP A') returning id"
+            f"insert into public.organization (name{c_extra}) "
+            f"values ('ISP A'{v_extra}) returning id"
         ).fetchone()[0]
         b = c.execute(
-            "insert into public.organization (name) values ('ISP B') returning id"
+            f"insert into public.organization (name{c_extra}) "
+            f"values ('ISP B'{v_extra}) returning id"
         ).fetchone()[0]
         return a, b
 

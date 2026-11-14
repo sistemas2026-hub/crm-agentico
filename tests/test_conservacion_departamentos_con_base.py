@@ -71,6 +71,7 @@ from cli import cargar_config                            # noqa: E402
 from nucleo.config import editor                         # noqa: E402
 from nucleo.config.schema import TenantConfig            # noqa: E402
 from nucleo.persistencia.conexion import dsn             # noqa: E402
+from empresa_de_prueba import extras                  # noqa: E402
 
 # ---------------------------------------------------------------------------
 #  SE AISLA EL SUJETO DE PRUEBA, y vale explicar por que no es hacer trampa.
@@ -137,8 +138,9 @@ def _preparar(cur) -> str:
     cur.execute("delete from asistente.tenant_config_historial")
     cur.execute("delete from asistente.tenant_config")
     cur.execute("delete from public.organization")
-    cur.execute("insert into public.organization (name) values "
-                "('ISP de laboratorio') returning id")
+    c_extra, v_extra = extras(cur)
+    cur.execute(f"insert into public.organization (name{c_extra}) values "
+                f"('ISP de laboratorio'{v_extra}) returning id")
     return cur.fetchone()[0]
 
 

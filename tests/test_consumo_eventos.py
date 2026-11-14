@@ -65,6 +65,7 @@ def comprobar(etiqueta: str, condicion: bool, detalle: str = "") -> None:
 
 
 from base_local import exigir_base_local                           # noqa: E402
+from empresa_de_prueba import extras                  # noqa: E402
 exigir_base_local(__file__)
 def crudo():
     return psycopg.connect(db.dsn(), row_factory=dict_row)
@@ -80,8 +81,9 @@ SLUG_B = f"consumo-b-{uuid.uuid4().hex[:8]}"
 
 def sembrar(slug: str) -> str:
     with crudo() as con, con.cursor() as cur:
-        cur.execute("insert into public.organization (name) values (%s) returning id",
-                    (slug,))
+        c_extra, v_extra = extras(cur)
+        cur.execute(f"insert into public.organization (name{c_extra}) "
+                    f"values (%s{v_extra}) returning id", (slug,))
         org = str(cur.fetchone()["id"])
         cur.execute(
             """insert into asistente.tenant_config (organization_id, slug, config)
