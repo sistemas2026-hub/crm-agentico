@@ -341,6 +341,47 @@ describe('las fotos, para poder compararlas', () => {
     expect(b).not.toContain('⚠');
   });
 
+  it('la foto sin problemas se resume en una línea, y el detalle queda cerrado', () => {
+    //  EL PEDIDO DEL 17/11/2026: «que no muestre ese texto, que mejor muestre
+    //  si pasa, y cuando no pase, por qué». Se afirma el EFECTO: la línea
+    //  está, y el `<details>` NO trae `open`, que es lo que hace que las
+    //  instrucciones y la prosa dejen de ser lo primero que se lee.
+    const b = html([
+      foto({ analisis: 'Se ve el router con sus luces.', muestra_lo_pedido: true })
+    ]);
+
+    expect(b).toContain('✓ Sin observaciones.');
+    expect(b).toMatch(/<details[^>]*class="[^"]*rc-foto-detalle(?![^>]*\sopen)/);
+  });
+
+  it('la foto con un problema lo dice en la línea, y abre el detalle sola', () => {
+    //  Cuando hay algo que mirar, lo que permite decidir es lo que pedía la
+    //  plantilla CONTRA lo que el modelo vio. Ahí el detalle no se esconde:
+    //  esconderlo cambiaría «menos ruido» por «un clic más justo cuando
+    //  importa».
+    const b = html([
+      foto({ analisis: 'Se ve un televisor encendido.',
+             muestra_lo_pedido: false, pide_atencion: true })
+    ]);
+
+    expect(b).toContain('⚠ No es lo que se pidió.');
+    expect(b).toMatch(/<details[^>]*rc-foto-detalle[^>]*\sopen/);
+    //  Y el detalle sigue teniendo las dos mitades de la comparación.
+    expect(b).toContain('El router, con sus luces visibles.');
+    expect(b).toContain('Se ve un televisor encendido.');
+  });
+
+  it('sin análisis no aparece NI ✓ NI ⚠', () => {
+    //  La guarda de arriba («sin análisis no inventa un visto bueno») medía
+    //  que no hubiera ⚠. Resumir en una línea agrega la otra mitad del
+    //  riesgo: un ✓ donde la visión está apagada sería la pantalla
+    //  afirmando una revisión que no pasó.
+    const b = html([foto({ analisis: '', pide_atencion: false })]);
+
+    expect(b).not.toContain('✓');
+    expect(b).not.toContain('Sin observaciones');
+  });
+
   it('con una plantilla vieja --sin estos datos-- no dibuja la sección vacía', () => {
     //  Compatibilidad: las evidencias de antes son `{id, titulo}` a secas.
     //  Mostrar una lista de fotos sin fotos ni instrucciones sería ruido.

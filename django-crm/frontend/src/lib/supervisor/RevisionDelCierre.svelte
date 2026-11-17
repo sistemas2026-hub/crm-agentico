@@ -22,6 +22,7 @@
     veredicto
   } from './afinar_instruccion.js';
   import { motivosDeLaRevision } from './dia-publicado.js';
+  import { comoQuedoLaFoto } from './estado-de-la-foto.js';
 
   /** @type {{ orden: any }} */
   let { orden } = $props();
@@ -259,6 +260,9 @@
         <summary class="snoc-label">Las fotos que se pidieron</summary>
         <ul>
           {#each r.evidencias as e (e.id)}
+            <!-- ARRIBA DE TODO porque `{@const}` solo vale como hijo
+                 inmediato de un bloque, no dentro de un `<div>`. -->
+            {@const q = comoQuedoLaFoto(e)}
             <li class="rc-foto" class:rc-falta={!e.evidencia_id}>
               {#if e.evidencia_id}
                 <a href={`/api/supervisor-noc/evidencias/${e.evidencia_id}/archivo`}
@@ -271,29 +275,45 @@
               {/if}
               <div class="rc-foto-dice">
                 <strong>{e.titulo}</strong>{#if e.obligatoria}<span class="rc-obl"> · obligatoria</span>{/if}
-                <!-- QUÉ TENÍA QUE MOSTRAR: la mitad de la comparación. Sin
-                     esto se compara contra un título de tres palabras. -->
-                {#if e.instrucciones}
-                  <span class="rc-pedia">Tenía que mostrar: {e.instrucciones}</span>
+                <!-- CÓMO QUEDÓ, EN UNA LÍNEA  --  17/11/2026
+                     El usuario: «que no muestre ese texto, que mejor muestre
+                     si pasa, y cuando no pase, por qué». Antes se volcaban
+                     acá las instrucciones completas, la prosa entera del
+                     modelo y sus tres líneas de marca: ocho renglones por
+                     foto para enterarse de que no había nada que hacer.
+
+                     NINGÚN DATO NUEVO: los cuatro que lo deciden ya venían en
+                     la respuesta. Lo que cambia es que se componen.
+
+                     `ok === null` NO IMPRIME NADA, ni ✓ ni ⚠: sin análisis no
+                     hay revisión que afirmar, y la visión puede estar apagada
+                     para esa empresa. Ver `estado-de-la-foto.js`. -->
+                {#if q.ok === true}
+                  <span class="rc-foto-ok">✓ {q.texto}</span>
+                {:else if q.ok === false}
+                  <span class="rc-foto-mal">⚠ {q.texto}</span>
                 {/if}
-                {#if !e.evidencia_id}
-                  <span class="rc-no-llego">No llegó.</span>
-                {/if}
-                <!-- LO QUE LA IA VIO, como dato y nunca como veredicto: puede
-                     pedir atención, nunca negar un cierre. Quien decide sigue
-                     siendo quien mira. -->
-                <!-- NO ES LO QUE SE PIDIO: va primero y aparte del resto
-                     del analisis. «Se ve un cable suelto» dice que el TRABAJO
-                     tiene un problema; «hay un televisor donde pedian el
-                     router» dice que la FOTO esta mal. Una se arregla
-                     volviendo a la casa, la otra sacando otra foto. -->
-                {#if e.muestra_lo_pedido === false}
-                  <span class="rc-no-es">✗ No es lo que se pidió.</span>
-                {/if}
-                {#if e.analisis}
-                  <span class="rc-ia" class:rc-ia-ojo={e.pide_atencion}>
-                    {e.pide_atencion ? '⚠' : '·'} {e.analisis}
-                  </span>
+
+                <!-- EL DETALLE SIGUE ENTERO, A UN CLIC, y ABIERTO cuando hay
+                     algo que mirar. No se borra: lo que permite decidir es
+                     justamente lo que pedía la plantilla CONTRA lo que el
+                     modelo vio. Lo que cambia es que deja de ser lo primero
+                     que se lee cuando no hay nada que hacer.
+
+                     Nativo, sin `enhance`: ver el encabezado de este
+                     archivo. -->
+                {#if e.instrucciones || e.analisis}
+                  <details class="rc-foto-detalle" open={q.ok === false}>
+                    <summary>ver detalle</summary>
+                    {#if e.instrucciones}
+                      <span class="rc-pedia">Tenía que mostrar: {e.instrucciones}</span>
+                    {/if}
+                    {#if e.analisis}
+                      <span class="rc-ia" class:rc-ia-ojo={e.pide_atencion}>
+                        {e.pide_atencion ? '⚠' : '·'} {e.analisis}
+                      </span>
+                    {/if}
+                  </details>
                 {/if}
 
                 <!-- AFINAR LA INSTRUCCIÓN, desde donde se descubre que está
@@ -477,12 +497,21 @@
   .rc-foto-dice { display: grid; gap: 2px; font-size: 12px; min-width: 0; }
   .rc-obl { color: var(--snoc-on-surface-variant, #666); font-weight: 400; }
   .rc-pedia { color: var(--snoc-on-surface-variant, #666); }
-  .rc-no-llego { color: #b91c1c; font-weight: 600; }
   .rc-ia { color: var(--snoc-on-surface-variant, #666); }
   .rc-ia-ojo { color: #8a5300; }
-  /*  Mismo rojo que «No llegó»: las dos dicen que esa foto no sirve como
-      evidencia, por motivos distintos. */
-  .rc-no-es { color: #b91c1c; font-weight: 600; }
+  /*  CÓMO QUEDÓ LA FOTO, en una línea (17/11/2026). El ✓ va en gris y no en
+      verde a propósito: dice «sin observaciones», no «está bien», y un verde
+      lo leería como una aprobación que el modelo no da. El rojo es el mismo
+      que usaban «No llegó» y «No es lo que se pidió», que ahora entran por
+      acá con su motivo. */
+  .rc-foto-ok { color: var(--snoc-on-surface-variant, #666); }
+  .rc-foto-mal { color: #b91c1c; font-weight: 600; }
+  .rc-foto-detalle > summary {
+    cursor: pointer; color: var(--snoc-on-surface-variant, #666);
+    font-size: 11px; list-style: none;
+  }
+  .rc-foto-detalle[open] > summary { margin-bottom: 2px; }
+  .rc-foto-detalle > span { display: block; }
   .rc-punto-false { color: var(--snoc-error); font-weight: 600; }
   .rc-punto-null { color: #8a5300; }
   .rc-acciones { display: flex; flex-wrap: wrap; gap: 8px; }
