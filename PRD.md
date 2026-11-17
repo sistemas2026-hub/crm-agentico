@@ -1350,3 +1350,43 @@ Es la misma fortaleza que el modelo ya demostró (traducir intención a parámet
 **Confirmación empírica de la regla 2 (julio 2026).** Al implementar `consultar_tickets_de_cliente` se le entregaron al modelo 50 tickets (~14.000 caracteres). Resultado: `qwen3:4b` **dejó de seguir el prompt** —respondió en inglés—, se puso a "analizar" la lista y concluyó que *"50 nuevas instalaciones están activas en la zona CORTE 15"*, una afirmación que nadie le pidió y que no se deduce del dato. Con el mismo caso reducido a conteo + desglose por estado + los 5 más recientes (1.283 caracteres), la respuesta volvió a ser correcta, en español y breve. No es una cuestión de eficiencia: **un modelo pequeño saturado de datos deja de obedecer las reglas de comportamiento**, y ahí el riesgo deja de ser la latencia y pasa a ser la exactitud.
 
 **Por qué la regla 4 no es cosmética.** Esta decisión no elimina el error del modelo: lo traslada de la aritmética a la *interpretación*. El modelo ya no suma mal, pero puede componer un filtro equivocado —entender "zona norte" como `NORTE` cuando en WispHub se llama `ZONA 1`— y devolver un número impecablemente calculado sobre la pregunta incorrecta. Ese error es más peligroso que uno evidente, porque nadie lo nota. Declarar la interpretación permite que el asesor, que sí conoce los nombres reales, lo detecte de inmediato. Misma filosofía que el filtro fail-closed: no confiar, hacer visible.
+
+### 8.26 DECISIÓN — La foto del daño frena el cierre, y se decidió NO arreglarlo (17/11/2026)
+
+**El síntoma, y por qué parecía grande.** Una OT salió con siete puntos en verde y dos interrogantes, y uno era la foto obligatoria *«Daño encontrado»*. Esa foto existe para mostrar el elemento roto, y la regla 11 de [nucleo/canales/vision.py](nucleo/canales/vision.py) pide `ATENCION` al ver *«material deteriorado»*: la foto que documenta el problema es la que frena el cierre del arreglo. El arreglo parecía claro —una marca en la plantilla, como la que ya existe para `es_captura`— y costaba unas dos horas más el trabajo de marcarla en la plantilla de cada empresa.
+
+**Se midió antes de construirlo** (CLAUDE.md §10), con `campo/management/commands/que_foto_frena.py`, sobre 60 días de producción:
+
+```
+Daño encontrado      24 de 41 miradas levantaron atención      59%
+Medicion al salir    11 de 41                                  27%
+test de velocidad    11 de 35                                  31%
+Medicion al llegar    6 de 40                                  15%
+```
+
+El 59% confirmaba que es el requisito que más frena, por lejos. **Y la segunda medición dio vuelta la conclusión.**
+
+**LA FOTO BUENA LEVANTA MUCHO MENOS ATENCIÓN QUE LA MALA, y es lo contrario de lo que se había previsto.** La hipótesis escrita antes de medir era que una foto nítida del daño levantaría *más* atención —el modelo ve mejor el deterioro— y que el sistema estaría premiando la foto borrosa. Medido:
+
+```
+                    muestra lo pedido        el resto
+Daño encontrado         7/23   30%          17/18   94%
+Medicion al salir       3/30   10%           8/11   73%
+test de velocidad       6/29   21%            5/6   83%
+Medicion al llegar      1/33    3%            5/7   71%
+```
+
+El patrón es el mismo en los cuatro requisitos. El sistema no premia la foto mala: marca la foto mala, que es lo que tiene que hacer.
+
+**El número real del problema es 7, no 24.** De las 24 atenciones sobre la foto del daño, **17 son de fotos que no muestran lo pedido** —borrosas, o mostrando otra cosa— y ahí la atención es correcta. Solo **7** son el caso descrito: la foto está bien y frena por mostrar el daño. Siete en 60 días, uno cada nueve días.
+
+**Lo que se decidió, y por qué.** **No se construye.** Dos motivos, y el segundo pesa más que el aritmético:
+
+1. Siete casos en 60 días no pagan dos horas más el trabajo recurrente de marcar la plantilla de cada empresa que entre.
+2. **El modelo devuelve un solo `ATENCION: si` y no dice por qué lo levantó.** Una marca que dijera «acá el deterioro no cuenta» apagaría también las 17 donde la foto no servía como evidencia. El arreglo no puede distinguir lo que el dato de entrada no distingue, y quedaría peor que hoy.
+
+**Lo que la medición sí destapó, y queda abierto.** **18 de 41 fotos del daño (44%) no muestran lo pedido.** Ese es el problema grande, cuesta doble —frena la orden y deja al supervisor sin evidencia de qué se arregló— y no es del cierre: es de la app y de cómo se toma la foto. No se abrió en esta sesión.
+
+**Para reabrir hace falta una medición nueva que mueva el 7** (CLAUDE.md §10). El comando que lo mide quedó en el repositorio, es de solo lectura y se corre con `python manage.py que_foto_frena --org <uuid>`.
+
+**Una advertencia sobre ese comando.** Su línea *«en cuántas órdenes fue el único motivo»* mezcla los dos casos: cuenta una orden donde la foto del daño levantó atención *sin importar si la foto mostraba o no lo pedido*. Por eso dijo 21 donde el número relevante es 7. Además los cuatro requisitos suman 45 sobre 34 órdenes: hay solapamiento, y apagar un solo requisito no destraba todas las que lo nombran. Quien lo use para reabrir esta decisión tiene que leer la tabla de `MUESTRA`, no esa línea.
