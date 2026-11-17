@@ -266,3 +266,96 @@ def test_si_ademas_hay_una_foto_sin_mirar_no_se_promete_el_cierre(org_a):
 
     assert "se cerrarían solas" not in salida, salida
     assert "por otra cosa" in salida, salida
+
+
+# ---------------------------------------------------------------------------
+#  6) EN CUANTAS ORDENES FUE EL UNICO MOTIVO
+# ---------------------------------------------------------------------------
+
+def _unico_motivo(salida: str, titulo: str):
+    """El número de órdenes que la salida atribuye a ese requisito, o None."""
+    dentro = False
+    for linea in salida.splitlines():
+        if linea.startswith("EN CUANTAS ORDENES"):
+            dentro = True
+            continue
+        if dentro and linea.startswith("LA FOTO QUE MUESTRA"):
+            return None
+        if dentro and f"«{titulo}»" in linea:
+            return int(linea.split()[0])
+    return None
+
+
+def test_cuenta_la_orden_donde_la_atencion_fue_el_unico_motivo(org_a):
+    """El control positivo: la orden del caso, con la foto del daño en
+    atención y nada más raro, se cuenta."""
+    _orden(org_a, 8810)
+
+    assert _unico_motivo(_correr(org_a), "Daño encontrado") == 1
+
+
+def test_no_la_cuenta_si_ademas_hay_una_foto_sin_mirar(org_a):
+    """Apagar la atención no destraba esa orden: el punto sigue en «?» por
+    la foto que falta. Contarla sería prometer un cierre que no va a pasar,
+    y es el ruido conocido del motor --3 ReadTimeout en 16 análisis--."""
+    _orden(org_a, 8811, terminado="")
+
+    assert _unico_motivo(_correr(org_a), "Daño encontrado") is None
+
+
+def test_dos_fotos_del_mismo_requisito_son_una_sola_orden(org_a):
+    """Se cuenta por ORDEN, no por foto. Si contara fotos, el número que
+    decide las dos horas estaría inflado por órdenes con varias tomas."""
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+    from campo.models import EvidenciaTrabajo
+    from campo.tasks import _pide_atencion
+
+    orden = _orden(org_a, 8812)
+    #  Una SEGUNDA foto del mismo requisito, también con atención.
+    ev = EvidenciaTrabajo.objects.create(
+        org=org_a, orden_trabajo=orden, requisito_id="dano_encontrado",
+        vuelta=1, sha256="segunda8812".ljust(64, "x")[:64],
+        storage_key="k/segunda8812", nombre_original="m2.jpg",
+        mime_type="image/jpeg", bytes=1,
+        estado_archivo=EvidenciaTrabajo.RECIBIDO)
+    AnalisisDeEvidencia.objects.create(
+        org=org_a, evidencia=ev, vuelta=1, origen=AnalisisDeEvidencia.IA,
+        texto=VIO_EL_DANO, pide_atencion=_pide_atencion(VIO_EL_DANO))
+
+    assert _unico_motivo(_correr(org_a), "Daño encontrado") == 1
+
+
+# ---------------------------------------------------------------------------
+#  7) LA FOTO QUE MUESTRA LO PEDIDO, CONTRA EL RESTO
+# ---------------------------------------------------------------------------
+
+def test_separa_la_foto_que_muestra_lo_pedido_de_la_que_no(org_a):
+    """La pregunta que esta sección existe para contestar: ¿la foto nítida
+    levanta MAS atención que la borrosa? Si las dos columnas salieran
+    iguales, la sección no estaría midiendo nada.
+
+    Se arman los dos lados: una orden con la foto del daño nítida y con
+    atención, otra con la misma foto borrosa --MUESTRA: no se sabe-- y sin
+    atención. La izquierda tiene que dar 100% y la derecha 0%.
+    """
+    #  DOS BUENAS Y UNA MALA, no una de cada una: con un caso simétrico,
+    #  invertir las dos columnas da exactamente el mismo resultado y la
+    #  mutación sobrevive. Medido el 17/11/2026.
+    _orden(org_a, 8813)
+    _orden(org_a, 8815)
+    _orden(org_a, 8814,
+           dano="Primer plano desenfocado, no se distingue qué elemento es.\n"
+                "CATALOGO: no\nMUESTRA: no se sabe\nATENCION: no")
+
+    salida = _correr(org_a)
+    fila = [l for l in salida.splitlines()
+            if "Daño encontrado" in l and "%" in l and "/" in l]
+
+    assert len(fila) == 1, salida
+    #  CADA UNA EN SU COLUMNA, no «las dos están en la línea». Invertirlas
+    #  deja la conclusión al revés --dice que el sistema premia la foto
+    #  buena cuando premia la mala-- y esa mutación sobrevivió a la primera
+    #  versión de esta guarda, medido el 17/11/2026.
+    izquierda, derecha = fila[0][34:53].strip(), fila[0][53:72].strip()
+    assert izquierda == "2/2  100%", (izquierda, fila[0])
+    assert derecha == "0/1  0%", (derecha, fila[0])

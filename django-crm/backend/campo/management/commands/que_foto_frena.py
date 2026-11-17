@@ -161,22 +161,48 @@ class Command(BaseCommand):
                 continue
             por_orden.setdefault((orden.id, a.vuelta), []).append(a)
 
+        from campo.tasks import muestra_lo_pedido
+
         titulos_cache = {}
-        conteo = {}      # (titulo, requisito_id) -> [miradas, con_atencion]
+        conteo = {}        # (titulo, requisito_id) -> [miradas, con_atencion]
+        por_muestra = {}   # titulo -> [buenas, buenas_atencion, resto, resto_atencion]
+        unico_motivo = {}  # titulo -> {ordenes}
+        ordenes_miradas = set()
         for (orden_id, _vuelta), analisis in por_orden.items():
             orden = analisis[0].evidencia.orden_trabajo
             if orden.id not in titulos_cache:
                 titulos_cache[orden.id] = _titulos_de(orden)
             titulos = titulos_cache[orden.id]
             c = _clasificar(_ultimo_por_evidencia(analisis))
+            if c["mirados"]:
+                ordenes_miradas.add(orden_id)
             atencion = {a.evidencia_id for a in c["con_atencion"]}
+            #  EL PUNTO DE FOTOS QUEDO EN «?» SOLO POR LA ATENCION. Si ademas
+            #  hay una foto sin mirar, de catalogo o que muestra otra cosa,
+            #  apagar la atencion no lo destraba, y contarla seria prometer
+            #  un cierre que no va a pasar.
+            solo_atencion = bool(c["con_atencion"]) and not (
+                c["sin_mirar"] or c["otra_cosa"] or c["de_catalogo"])
             for a in c["mirados"]:
                 req = str(getattr(a.evidencia, "requisito_id", "") or "(sin id)")
-                clave = (titulos.get(req, req), req)
-                par = conteo.setdefault(clave, [0, 0])
+                titulo = titulos.get(req, req)
+                par = conteo.setdefault((titulo, req), [0, 0])
                 par[0] += 1
-                if a.evidencia_id in atencion:
+                levanto = a.evidencia_id in atencion
+                if levanto:
                     par[1] += 1
+                #  LA FOTO QUE MUESTRA LO PEDIDO, CONTRA EL RESTO. Si la
+                #  nitida levanta MAS atencion que la borrosa, el sistema
+                #  esta premiando la foto mala, y eso cambia la decision.
+                g = por_muestra.setdefault(titulo, [0, 0, 0, 0])
+                buena = muestra_lo_pedido(a.texto or "") is True
+                g[0 if buena else 2] += 1
+                if levanto:
+                    g[1 if buena else 3] += 1
+                #  POR ORDEN, NO POR FOTO. Dos fotos del mismo requisito en
+                #  atencion son UNA orden frenada, no dos.
+                if levanto and solo_atencion:
+                    unico_motivo.setdefault(titulo, set()).add(orden_id)
 
         self.stdout.write("")
         self.stdout.write(f"QUE FOTO LEVANTA ATENCION  --  ultimos {dias} dias")
@@ -196,6 +222,52 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write("  La TASA es lo que decide, no el conteo: una foto que")
         self.stdout.write("  levanta atención casi siempre, la levanta por existir.")
+
+        # ------------------------------------------------------------------
+        #  EN CUANTAS ORDENES FUE EL UNICO MOTIVO
+        # ------------------------------------------------------------------
+        self.stdout.write("")
+        self.stdout.write(f"EN CUANTAS ORDENES FUE EL UNICO MOTIVO  --  "
+                          f"{len(ordenes_miradas)} órdenes con fotos miradas")
+        self.stdout.write("=" * 72)
+        if not unico_motivo:
+            self.stdout.write("  En ninguna. Donde hubo atención, también hubo")
+            self.stdout.write("  otra cosa (no se pudo mirar, catálogo, otra foto).")
+        for titulo, ordenes in sorted(unico_motivo.items(),
+                                      key=lambda kv: -len(kv[1])):
+            parte = (100 * len(ordenes) / len(ordenes_miradas)
+                     if ordenes_miradas else 0)
+            self.stdout.write(f"  {len(ordenes):>4}  «{titulo}»  "
+                              f"({parte:.0f}% de las órdenes miradas)")
+        self.stdout.write("")
+        self.stdout.write("  «Único motivo» es del PUNTO DE FOTOS, no del cierre")
+        self.stdout.write("  entero: de una orden ya cerrada no se puede saber")
+        self.stdout.write("  cómo estaban los otros ocho puntos. Es un techo del")
+        self.stdout.write("  impacto, no el impacto.")
+
+        # ------------------------------------------------------------------
+        #  LA FOTO BUENA, ¿LEVANTA MAS ATENCION QUE LA MALA?
+        # ------------------------------------------------------------------
+        self.stdout.write("")
+        self.stdout.write("LA FOTO QUE MUESTRA LO PEDIDO, CONTRA EL RESTO")
+        self.stdout.write("=" * 72)
+        self.stdout.write(f"{'foto de la plantilla':<34}{'muestra lo pedido':>19}"
+                          f"{'el resto':>19}")
+        self.stdout.write("-" * 72)
+        for (titulo, _req), (_miradas, atencion) in ordenado:
+            if not atencion:
+                continue
+            buenas, buenas_at, resto, resto_at = por_muestra.get(
+                titulo, [0, 0, 0, 0])
+            izq = (f"{buenas_at}/{buenas}  {(100 * buenas_at / buenas):.0f}%"
+                   if buenas else "—")
+            der = (f"{resto_at}/{resto}  {(100 * resto_at / resto):.0f}%"
+                   if resto else "—")
+            self.stdout.write(f"{titulo[:33]:<34}{izq:>19}{der:>19}")
+        self.stdout.write("")
+        self.stdout.write("  Si la de la izquierda es MAYOR, el sistema está")
+        self.stdout.write("  premiando la foto mala: cuanto mejor se ve el daño,")
+        self.stdout.write("  más seguro lo marca el modelo.")
 
         # ------------------------------------------------------------------
         #  PARTE 2  --  EL IMPACTO DE HOY
