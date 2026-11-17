@@ -178,24 +178,34 @@ def _fotos_que_muestran_otra_cosa(orden) -> list[str]:
     costo a la vista.
     """
     try:
+        from campo.analisis_de_evidencia import la_que_vale
         from campo.models import AnalisisDeEvidencia
         from campo.tasks import muestra_lo_pedido
     except Exception:                                            # noqa: BLE001
         return []
-    #  La ultima por requisito, con la vuelta pesando primero: lo mismo que
-    #  en `_evidencias_para_revisar`, y por el mismo caso de la foto
-    #  reintentada.
-    ultimo = {}
+    #  La ultima FOTO por requisito, con la vuelta pesando primero: lo mismo
+    #  que en `_evidencias_para_revisar`, y por el mismo caso de la foto
+    #  reintentada. Y de esa foto, la lectura que vale --no la ultima fila:
+    #  un reintento fallido no puede tapar lo que ya se habia leido bien
+    #  (17/11/2026, ver `analisis_de_evidencia.la_que_vale`).
+    #
+    #  LOS DOS PASOS VAN EN ESTE ORDEN Y NO AL REVES. Elegir primero la foto
+    #  y despues su lectura impide caer a la lectura de la VUELTA ANTERIOR
+    #  cuando la foto rehecha no se pudo leer: serian dos fotos distintas, y
+    #  se devolveria al tecnico por lo que mostraba la que ya reemplazo.
+    por_foto, foto_del_requisito = {}, {}
     try:
         for a in (AnalisisDeEvidencia.objects
                   .filter(org=orden.org, evidencia__orden_trabajo=orden)
                   .select_related("evidencia")
                   .order_by("evidencia__vuelta", "created_at")):
-            ultimo[a.evidencia.requisito_id] = a
+            por_foto.setdefault(a.evidencia_id, []).append(a)
+            foto_del_requisito[a.evidencia.requisito_id] = a.evidencia_id
     except Exception:                                            # noqa: BLE001
         return []
-    return sorted(r for r, a in ultimo.items()
-                  if muestra_lo_pedido(a.texto or "") is False)
+    return sorted(
+        r for r, ev in foto_del_requisito.items()
+        if muestra_lo_pedido(la_que_vale(por_foto[ev]).texto or "") is False)
 
 
 def _fotos_de_catalogo(orden) -> list[str]:
@@ -392,13 +402,18 @@ def _evidencias_para_revisar(orden, esquema) -> list[dict]:
     #  SIN FILTRAR POR VUELTA tampoco: si la foto que se muestra es de la
     #  vuelta anterior, su analisis tambien lo es, y filtrarlo la dejaria sin
     #  lo que la IA vio -- que es justo la mitad util de esta lista.
-    visto = {}
+    #  La ULTIMA CON TEXTO gana: una correccion de una persona es una fila
+    #  nueva y posterior, y es la que vale; pero un reintento que FALLO
+    #  escribe fila sin texto, y esa no puede borrar una lectura buena. La
+    #  regla, con el caso que la origino, en `analisis_de_evidencia`.
+    from campo.analisis_de_evidencia import la_que_vale
+
+    por_foto = {}
     for a in AnalisisDeEvidencia.objects.filter(
             org=orden.org,
             evidencia__orden_trabajo=orden).order_by("created_at"):
-        #  La ULTIMA gana: una correccion de una persona es una fila nueva y
-        #  posterior, y es la que vale.
-        visto[str(a.evidencia_id)] = a
+        por_foto.setdefault(str(a.evidencia_id), []).append(a)
+    visto = {k: la_que_vale(filas) for k, filas in por_foto.items()}
 
     salida = []
     for e in esquema.get("evidencias", []):

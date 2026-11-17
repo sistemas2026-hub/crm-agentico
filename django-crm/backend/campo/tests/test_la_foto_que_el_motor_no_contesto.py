@@ -201,3 +201,133 @@ def test_UN_FALLO_AL_MIRAR_NO_FRENA_LA_REVISION(org_a):
     assert salida is not None
     assert orden.pk in [o.pk for o, _ in salida], \
         "la orden desaparecio de la revision por un fallo al mirar"
+
+
+# ---------------------------------------------------------------------------
+#  2) EL ESPEJO: LECTURA BUENA PRIMERO, FALLA DESPUES  --  17/11/2026, OT #2
+# ---------------------------------------------------------------------------
+#
+#  MEDIDO EN PRODUCCION, la foto de `medicion_al_salir` de la OT #2:
+#
+#      ia 17/11 18:16:28  MUESTRA: si  ATENCION: no      <- la leyo bien
+#      ia 17/11 18:16:36  MUESTRA: si  ATENCION: no      <- y otra vez
+#      ia 17/11 18:16:56  motivo=no se pudo hablar con el motor (ReadTimeout)
+#      ia 17/11 18:17:16  motivo=no se pudo hablar con el motor (ReadTimeout)
+#
+#  El arreglo del 11/11 --quedarse con la ULTIMA fila por foto-- resolvia el
+#  caso de arriba (falla primero) y abria este. En la pantalla del supervisor
+#  la foto salia MUDA: ni visto ni alerta, teniendo dos lecturas limpias.
+#
+#  Y NO SE ARREGLABA SOLO: `mirar_las_que_faltan` ya usa la regla buena, ve
+#  que hay texto, y por eso NO la reintenta. Quedaba asi para siempre.
+
+VIO_LA_MEDICION = ("Medidor con pantalla legible: -21.0 dBm.\n"
+                   "CATALOGO: no\nMUESTRA: si\nATENCION: no")
+VIO_OTRA_COSA = ("Un teclado de laptop, no el conector que se pedia.\n"
+                 "CATALOGO: no\nMUESTRA: no\nATENCION: si")
+
+
+def _fallo(org, ev, vuelta=1, motivo="no se pudo hablar con el motor (ReadTimeout)"):
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+
+    return AnalisisDeEvidencia.objects.create(
+        org=org, evidencia=ev, vuelta=vuelta,
+        origen=AnalisisDeEvidencia.IA, texto="", motivo=motivo)
+
+
+def _leyo(org, ev, texto, vuelta=1):
+    from campo.analisis_de_evidencia import AnalisisDeEvidencia
+
+    return AnalisisDeEvidencia.objects.create(
+        org=org, evidencia=ev, vuelta=vuelta,
+        origen=AnalisisDeEvidencia.IA, texto=texto)
+
+
+def test_UN_TIMEOUT_POSTERIOR_NO_BORRA_LA_LECTURA_BUENA(org_a):
+    """La regla, en el unico lugar donde esta escrita."""
+    from campo.analisis_de_evidencia import la_que_vale
+
+    _, ev = _orden_con_foto(org_a, 9940)
+    buena = _leyo(org_a, ev, VIO_LA_MEDICION)
+    filas = [buena, _fallo(org_a, ev), _fallo(org_a, ev)]
+
+    assert la_que_vale(filas).pk == buena.pk
+
+    #  Y EL CASO DEL 11/11 NO SE ROMPE: al reves --falla primero, lectura
+    #  despues-- tambien tiene que ganar la buena. Una sola regla, los dos.
+    assert la_que_vale(list(reversed(filas))).pk == buena.pk
+
+
+def test_LA_PANTALLA_NO_SE_QUEDA_MUDA_POR_UN_REINTENTO_FALLIDO(org_a):
+    """EL EFECTO QUE VIO EL USUARIO. La fila de esa foto no decia nada --ni
+    visto ni alerta-- porque `analisis` llegaba vacio a la pantalla."""
+    from campo.revision_del_cierre import _evidencias_para_revisar
+
+    orden, ev = _orden_con_foto(org_a, 9941)
+    _leyo(org_a, ev, VIO_LA_MEDICION)
+    _fallo(org_a, ev)
+
+    fila = next(f for f in _evidencias_para_revisar(orden, ESQUEMA)
+                if f["id"] == "medicion_al_llegar")
+
+    assert fila["analisis"], "la pantalla se quedo muda teniendo la lectura"
+    assert fila["muestra_lo_pedido"] is True
+
+
+def test_EL_VEREDICTO_CUENTA_ESA_FOTO_COMO_MIRADA(org_a):
+    """Y no como «1 no se pudieron mirar», que deja la orden esperando a una
+    persona por una foto que SI se leyo. Un freno falso."""
+    from campo.inspeccion_visual import punto_de_la_revision
+
+    orden, ev = _orden_con_foto(org_a, 9942)
+    _leyo(org_a, ev, VIO_LA_MEDICION)
+    _fallo(org_a, ev)
+
+    punto = punto_de_la_revision(orden)
+
+    assert punto["ok"] is True, punto["texto"]
+    assert "no se pudieron mirar" not in punto["texto"]
+
+
+def test_ENTRE_PURAS_FALLAS_SIGUE_GANANDO_LA_ULTIMA(org_a):
+    """Sin ninguna lectura, el `motivo` tiene que sobrevivir: es lo que deja
+    el veredicto en REVISAR. Devolver None aca seria silencio, y silencio
+    se lee como aprobacion."""
+    from campo.inspeccion_visual import punto_de_la_revision
+
+    orden, ev = _orden_con_foto(org_a, 9943)
+    _fallo(org_a, ev, motivo="el primero")
+    _fallo(org_a, ev, motivo="el ultimo")
+
+    punto = punto_de_la_revision(orden)
+
+    assert punto["ok"] is None
+    assert "el ultimo" in punto["texto"], punto["texto"]
+
+
+def test_LA_FOTO_REHECHA_QUE_NO_SE_PUDO_LEER_NO_SE_JUZGA_CON_LA_VIEJA(org_a):
+    """EL ORDEN DE LOS DOS PASOS, afirmado por su efecto.
+
+    Primero se elige la FOTO de cada requisito, y recien despues la lectura
+    que vale de esa foto. Al reves --juntar todas las filas del requisito y
+    quedarse con la ultima con texto-- la lectura de la vuelta 1 sobreviviria
+    a la foto que la reemplazo, y el tecnico seria devuelto por un teclado
+    que ya no esta en ninguna evidencia vigente."""
+    from campo.models import EvidenciaTrabajo
+    from campo.revision_del_cierre import _fotos_que_muestran_otra_cosa
+
+    orden, vieja = _orden_con_foto(org_a, 9944)
+    _leyo(org_a, vieja, VIO_OTRA_COSA)
+
+    orden.vuelta = 2
+    orden.save(update_fields=["vuelta"])
+    nueva = EvidenciaTrabajo.objects.create(
+        org=org_a, orden_trabajo=orden, requisito_id="medicion_al_llegar",
+        vuelta=2, sha256="to9944v2".ljust(64, "y")[:64],
+        storage_key="k/to9944v2", nombre_original="m2.jpg",
+        mime_type="image/jpeg", bytes=1,
+        estado_archivo=EvidenciaTrabajo.RECIBIDO)
+    _fallo(org_a, nueva, vuelta=2)
+
+    assert _fotos_que_muestran_otra_cosa(orden) == [], \
+        "se devolvio al tecnico por la foto que ya reemplazo"

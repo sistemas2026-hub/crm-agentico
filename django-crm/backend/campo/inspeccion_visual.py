@@ -439,10 +439,18 @@ def punto_de_la_revision(orden):
     #  MISMO CRITERIO QUE EL RESTO DEL CIERRE: `_fotos_que_muestran_otra_cosa`
     #  y `mirar_las_que_faltan` ya se quedan con la ultima por evidencia. Este
     #  punto era el unico que las sumaba.
-    ultimo = {}
+    #
+    #  Y «LA ULTIMA» ES «LA ULTIMA CON TEXTO»  --  17/11/2026, OT #2
+    #
+    #  Quedarse con la ultima a secas dejaba que un reintento FALLIDO borrara
+    #  una lectura buena anterior: el espejo exacto del caso de arriba. La
+    #  regla, con su medicion, vive en `analisis_de_evidencia.la_que_vale`.
+    from campo.analisis_de_evidencia import la_que_vale
+
+    por_foto = {}
     for a in todas:
-        ultimo[a.evidencia_id] = a
-    analisis = list(ultimo.values())
+        por_foto.setdefault(a.evidencia_id, []).append(a)
+    analisis = [la_que_vale(filas) for filas in por_foto.values()]
 
     mirados = [a for a in analisis if a.texto]
     sin_mirar = [a for a in analisis if not a.texto]

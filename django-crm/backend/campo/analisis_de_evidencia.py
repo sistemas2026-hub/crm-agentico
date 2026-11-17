@@ -111,3 +111,50 @@ class AnalisisDeEvidencia(BaseModel):
 
     def __str__(self) -> str:
         return f"Análisis {self.origen} de {self.evidencia_id}"
+
+
+def la_que_vale(filas):
+    """De todos los intentos sobre UNA foto, el que cuenta. None si no hay.
+
+    `filas` llega en orden cronologico (la tabla ordena por `created_at`).
+
+    LA REGLA: GANA LA ULTIMA CON TEXTO, NO LA ULTIMA  --  17/11/2026
+    ----------------------------------------------------------------
+    Un intento fallido escribe su fila igual, con `motivo` y sin texto. Si
+    manda la ultima a secas, un timeout BORRA una lectura buena anterior.
+
+    MEDIDO EN LA OT #2, EN PRODUCCION. La foto de `medicion_al_salir`:
+
+        ia 17/11 18:16:28  MUESTRA: si  ATENCION: no      <- la leyo bien
+        ia 17/11 18:16:36  MUESTRA: si  ATENCION: no      <- y otra vez
+        ia 17/11 18:16:56  motivo=no se pudo hablar con el motor (ReadTimeout)
+        ia 17/11 18:17:16  motivo=no se pudo hablar con el motor (ReadTimeout)
+
+    En la pantalla del supervisor esa foto salia MUDA --ni visto ni alerta--
+    teniendo dos lecturas limpias. Y no se arreglaba sola: `mirar_las_que_
+    faltan` ya usa esta regla, ve que hay texto, y por eso NO la reintenta.
+
+    ES EL ESPEJO DEL ARREGLO DEL 11/11/2026 (OT #200, en
+    `inspeccion_visual.punto_de_la_revision`). Aquel caso era «falla primero,
+    lectura buena despues» y se resolvio quedandose con la ULTIMA fila. Ese
+    cambio dejo abierto el caso opuesto --lectura buena primero, falla
+    despues-- que es este. Una sola regla cubre los dos.
+
+    POR QUE DEVUELVE LA ULTIMA SIN TEXTO CUANDO NINGUNA TIENE: para no perder
+    el `motivo`. Quien pregunta necesita poder decir «no se pudo mirar, y por
+    esto», que es lo que deja el veredicto en REVISAR. Silencio no.
+
+    SE APLICA POR FOTO, NUNCA POR REQUISITO. Agrupar por requisito mezclaria
+    vueltas: en una orden devuelta, la vuelta 2 trae una foto DISTINTA, y caer
+    a la lectura de la vuelta 1 seria juzgar la foto nueva con lo que se vio en
+    la vieja. Quien agrupa por requisito elige primero su evidencia y recien
+    despues llama aca.
+    """
+    vale = None
+    for a in filas:
+        #  Reemplaza cuando la nueva trae texto, o cuando la guardada no lo
+        #  trae --asi, entre puras fallas, sigue ganando la ultima y su
+        #  `motivo` es el mas reciente.
+        if (a.texto or "").strip() or not (vale and (vale.texto or "").strip()):
+            vale = a
+    return vale
