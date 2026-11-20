@@ -1452,3 +1452,22 @@ El backend ya lo resolvía entero (`campo/services/bloqueos.py::resolver`) y des
 **VERIFICADO:** 9 pruebas nuevas de backend contra PostgreSQL y 11 de frontend; 10 mutaciones de backend y 8 de frontend, todas muertas (una de frontend sobrevivió a la primera versión de las pruebas y por eso existe la guarda «bloqueada pero sin bloqueo abierto»).
 
 **Queda abierto, visto en la misma orden y no tocado:** el Supervisor le siguió mandando el recordatorio de «reportar» cada 15 minutos a una orden que estaba detenida.
+
+### 8.28 DECISIÓN — Una captura de pantalla no frena la orden por ser captura (20/11/2026)
+
+**El pedido.** El usuario: *«el supervisor no puede detener una orden solo por ser captura»*.
+
+**Qué pasaba.** La instrucción con la que el Supervisor mira una evidencia no decía nada sobre capturas, salvo en la regla del catálogo. Solo la evidencia que la plantilla declara `es_captura` recibía el aviso de que una captura es legítima (07/11 y 08/11/2026). En las demás, el modelo veía una pantalla y podía escribir `ATENCION: si` —veredicto en REVISAR— o `MUESTRA: no` —la orden vuelve al técnico—. Las dos frenan.
+
+**Qué cambia.** En `INSTRUCCION_EVIDENCIA`, reglas 11 y 12: una captura se nombra como tal y se juzga **por lo que muestra**, igual que cualquier foto. Frena solo si lo que muestra no sirve como evidencia de lo pedido.
+
+**Qué NO cambia.**
+
+- La **foto tomada de otra pantalla** sigue como la dejó la decisión del 07/11: el pedido de hoy nombra la captura, no esa.
+- Una captura que muestra **otra cosa** que lo pedido sigue siendo `MUESTRA: no` (el caso del 05/11: una captura del sistema de tickets donde iba el equipo).
+- No se toca código de decisión: es el modelo el que ve la imagen. Guía, no garantía (§7.4).
+
+**Lo que se pierde, dicho antes de que cueste.** Una foto vieja o ajena reenviada como captura ya no se distingue por el formato. Si eso aparece en producción, la respuesta no es volver a frenar todas las capturas: es que la plantilla marque en qué evidencias no se aceptan.
+
+**VERIFICADO:** 4 guardas nuevas (`tests/test_vision_evidencia_campo.py`, sección J) y sus mutaciones muertas; miden que la regla **llega** al modelo.
+**NO VERIFICADO:** que el modelo la obedezca. `cli/evaluar.py` no recorre este camino y fuera de producción no hay capturas reales de técnicos. Se mide después del despliegue con una orden de prueba.

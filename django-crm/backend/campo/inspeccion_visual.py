@@ -170,6 +170,11 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
         #  SOLO SE AFLOJA DONDE LA EMPRESA LO DECLARO. En las demas fotos la
         #  sospecha queda intacta, que es justo lo que el usuario pidio
         #  conservar.
+        #
+        #  20/11/2026: eso ya vale solo para la FOTO DE OTRA PANTALLA. La
+        #  captura dejo de frenar en cualquier evidencia --«el supervisor no
+        #  puede detener una orden solo por ser captura»-- y esa regla vive
+        #  en `INSTRUCCION_EVIDENCIA` (reglas 11 y 12), no aca. PRD 8.28.
         if bool(e.get("es_captura")):
             #  LAS DOS FORMAS VALEN  --  08/11/2026
             #

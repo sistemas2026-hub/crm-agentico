@@ -245,6 +245,30 @@ comprobar("I6. MUESTRA: no queda solo para lo que no es del oficio",
 comprobar("I7. la falla que no se nota por fuera tambien sirve",
           "hay fallas que no se notan por fuera" in _i_bajo[:_i11])
 
+# =============================================================================
+print("\n-- J: una captura no frena la orden por ser captura --")
+# =============================================================================
+#  20/11/2026. El usuario: «el supervisor no puede detener una orden solo por
+#  ser captura». ATENCION: si deja el veredicto en REVISAR y MUESTRA: no le
+#  devuelve la orden al tecnico: las dos frenan, asi que la regla tiene que
+#  estar en las DOS lineas. Igual que la seccion I: mide que la regla llega al
+#  modelo, no que el modelo la cumpla.
+comprobar("J1. ser captura no levanta atencion",
+          "una captura de pantalla no es motivo de atencion por ser captura"
+          in _i_bajo[_i11:_i12],
+          "tiene que vivir DENTRO de la regla 11")
+comprobar("J2. se juzga lo que la captura muestra",
+          "juzgá lo que muestra igual que a cualquier foto"
+          in _i_bajo[_i11:_i12])
+comprobar("J3. y la captura que no sirve la sigue levantando",
+          "si lo que la captura muestra no sirve como evidencia"
+          in _i_bajo[_i11:_i12])
+comprobar("J4. ser captura tampoco la vuelve MUESTRA: no",
+          "tampoco la vuelve 'muestra: no'" in _i_bajo[_i12:_i13]
+          and "si en la captura se ve lo que se pedia, es 'muestra: si'"
+          in _i_bajo[_i12:_i13],
+          "tiene que vivir DENTRO de la regla 12")
+
 print("\n" + "=" * 72)
 if fallos:
     print(f" {len(fallos)} FALLAS:")

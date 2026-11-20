@@ -323,6 +323,17 @@ MARCA_ATENCION = "ATENCION"
 #: pedido de la foto que no sirve, porque es el unico que ve las dos cosas--.
 #: La decision, con lo que se afloja y lo que NO esta medido: PRD 8.26.1.
 #:
+#: UNA CAPTURA NO FRENA LA ORDEN POR SER CAPTURA  --  20/11/2026
+#: El usuario: «el supervisor no puede detener una orden solo por ser
+#: captura». Hasta hoy solo se aflojaba en la evidencia que la plantilla
+#: declara `es_captura` (el pie de `campo/inspeccion_visual.py`); en las demas
+#: el modelo veia pixeles de pantalla y levantaba ATENCION o MUESTRA: no, y
+#: eso deja la orden en REVISAR o se la devuelve al tecnico. Ahora se juzga lo
+#: que la captura MUESTRA, en cualquier evidencia. La foto tomada DE OTRA
+#: pantalla no se toca: esa decision es del 07/11 y nadie la reabrio.
+#: Lo que se pierde, y esta dicho en PRD 8.28: una foto vieja reenviada como
+#: captura ya no se distingue por el formato.
+#:
 #: AL TOCAR LA 7b: las palabras de `campo.tasks.PALABRAS_QUE_PIDEN_MIRAR` no
 #: pueden aparecer antes de la regla 11 --por eso dice «daño» y «roto» y
 #: nunca el participio--. Lo caza `tests/test_vision_propositos.py` F2.
@@ -405,7 +416,12 @@ INSTRUCCION_EVIDENCIA = (
     "encontrada (regla 7b), el daño que se ve NO es motivo de atencion "
     "--es justo lo que la foto tenia que mostrar--. Ahi poné 'si' "
     "unicamente si la foto no sirve como evidencia: no se distingue "
-    "nada, o no muestra nada de telecomunicaciones.\n"
+    "nada, o no muestra nada de telecomunicaciones. "
+    "Y UNA CAPTURA DE PANTALLA NO ES MOTIVO DE ATENCION POR SER CAPTURA: "
+    "si la imagen es una captura del telefono, decilo en pocas palabras y "
+    "juzgá lo que muestra igual que a cualquier foto. Ahi poné 'si' "
+    "unicamente si lo que la captura muestra no sirve como evidencia de "
+    "lo que se pedia.\n"
     "12. Si --y SOLO si-- te dijeron que tenia que mostrar esta foto, agregá "
     "ANTES de esa linea otra sola que diga exactamente 'MUESTRA: si', "
     "'MUESTRA: no' o 'MUESTRA: no se sabe'. 'no' es para cuando la imagen "
@@ -416,7 +432,9 @@ INSTRUCCION_EVIDENCIA = (
     "encontrada, poné 'MUESTRA: si' si se ve cualquier elemento o red de "
     "telecomunicaciones como dice la regla 7b, lo reconozcas del todo o "
     "no; 'MUESTRA: no' queda solo para la imagen que no tiene nada de "
-    "telecomunicaciones. Si no te dijeron que tenia que mostrar, NO "
+    "telecomunicaciones. Que la imagen sea una captura de pantalla "
+    "tampoco la vuelve 'MUESTRA: no': si en la captura se ve lo que se "
+    "pedia, es 'MUESTRA: si'. Si no te dijeron que tenia que mostrar, NO "
     "escribas esta linea.\n"
     "13. Agregá SIEMPRE, antes de las dos lineas anteriores, otra sola que "
     "diga exactamente 'CATALOGO: si' o 'CATALOGO: no'. Poné 'si' cuando la "
