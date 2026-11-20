@@ -201,11 +201,49 @@ print("\n-- H: lo que la instruccion de evidencia NO puede perder --")
 #  reglas 1 y 4 piden describir: una foto donde entra una persona o un recibo
 #  se describia entera, y eso queda guardado para siempre (revisor de PII,
 #  H4). Estas dos afirmaciones existen para que no se pierda otra vez.
-comprobar("H1. acota la foto que no muestra una instalacion",
-          "no muestra equipos ni una instalacion" in vision.INSTRUCCION_EVIDENCIA)
+comprobar("H1. acota la foto que no muestra nada de telecomunicaciones",
+          "no muestra equipos, cables ni red de telecomunicaciones"
+          in vision.INSTRUCCION_EVIDENCIA
+          and "nada mas. No describas el resto" in vision.INSTRUCCION_EVIDENCIA)
 comprobar("H2. y prohibe describir personas, direcciones y papeles",
           "describas a las personas" in vision.INSTRUCCION_EVIDENCIA
           and "placas" in vision.INSTRUCCION_EVIDENCIA)
+
+# =============================================================================
+print("\n-- I: la foto del DAÑO no se rechaza por mostrar un daño --")
+# =============================================================================
+#  20/11/2026. El usuario: cada foto nueva del daño encontrado que el modelo
+#  «no habia visto» se rechazaba. La instruccion solo nombraba equipos de
+#  ADENTRO de la casa, mandaba a «no se ve lo que se pedia» todo lo que no
+#  fuera «equipos ni una instalacion» --un cable partido en un poste no es
+#  ninguna de las dos-- y pedia ATENCION por «material deteriorado», que es
+#  exactamente lo que una foto del daño tiene que mostrar.
+#
+#  ESTAS GUARDAS MIDEN QUE LA REGLA LLEGA AL MODELO, NO QUE EL MODELO LA
+#  CUMPLA. La seccion F ya prueba que el system que sale ES esta constante;
+#  la conducta se mide con fotos reales (`comparar_calidad_vision`).
+_I = vision.INSTRUCCION_EVIDENCIA
+_i_bajo = _I.lower()
+_i11 = _i_bajo.find("11. ")
+_i12 = _i_bajo.find("12. ")
+_i13 = _i_bajo.find("13. ")
+comprobar("I1. la red de AFUERA tambien es del oficio",
+          all(p in _i_bajo[:_i11] for p in
+              ("acometida", "caja nap", "poste", "empalme")))
+comprobar("I2. cuando se pide un daño, lo roto es la foto correcta",
+          "la foto correcta es la de algo roto" in _i_bajo[:_i11])
+comprobar("I3. y vale el daño que no esta en la lista",
+          "aunque sea de un tipo que no este en esta lista" in _i_bajo[:_i11])
+comprobar("I4. el daño pedido NO levanta atencion",
+          "el daño que se ve no es motivo de atencion" in _i_bajo[_i11:_i12],
+          "la excepcion tiene que vivir DENTRO de la regla 11")
+comprobar("I5. pero la foto que no sirve la sigue levantando",
+          "no muestra nada de telecomunicaciones" in _i_bajo[_i11:_i12])
+comprobar("I6. MUESTRA: no queda solo para lo que no es del oficio",
+          "queda solo para la imagen que no tiene nada de "
+          "telecomunicaciones" in _i_bajo[_i12:_i13])
+comprobar("I7. la falla que no se nota por fuera tambien sirve",
+          "hay fallas que no se notan por fuera" in _i_bajo[:_i11])
 
 print("\n" + "=" * 72)
 if fallos:

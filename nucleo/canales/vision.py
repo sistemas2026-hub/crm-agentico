@@ -308,6 +308,24 @@ MARCA_ATENCION = "ATENCION"
 #: mostrar cada foto, y eso ya vive en el esquema de la plantilla
 #: ('evidencias[].instrucciones', campo/plantillas.py:507) -- se pasa como
 #: 'pie'. Esto es como se mira una foto de instalacion, igual para cualquiera.
+#:
+#: LA FOTO DEL DAÑO NO SE RECHAZA POR MOSTRAR UN DAÑO  --  20/11/2026
+#: El usuario: cada foto nueva del «Daño encontrado» que el modelo no habia
+#: visto se rechazaba. Tres causas, las tres en este texto: la regla 1 solo
+#: nombraba equipos de ADENTRO de la casa; la 9 mandaba a «no se ve lo que se
+#: pedia» todo lo que no fuera «equipos ni una instalacion» --y un cable
+#: partido en un poste no es ninguna de las dos--; la 11 pedia ATENCION por
+#: «material deteriorado», que es lo que esa foto tiene que mostrar. De ahi
+#: la red de afuera en la regla 1, la 7b, y las excepciones de la 11 y la 12.
+#:
+#: NO SE MARCA NADA POR EMPRESA: dispara con lo que el pie ya dice que se
+#: pedia. Y no apaga nada en codigo --es el modelo el que distingue el daño
+#: pedido de la foto que no sirve, porque es el unico que ve las dos cosas--.
+#: La decision, con lo que se afloja y lo que NO esta medido: PRD 8.26.1.
+#:
+#: AL TOCAR LA 7b: las palabras de `campo.tasks.PALABRAS_QUE_PIDEN_MIRAR` no
+#: pueden aparecer antes de la regla 11 --por eso dice «daño» y «roto» y
+#: nunca el participio--. Lo caza `tests/test_vision_propositos.py` F2.
 INSTRUCCION_EVIDENCIA = (
     "Sos un inspector de instalaciones de un proveedor de internet. Un "
     "tecnico subio esta foto como evidencia de un trabajo. La lee la oficina, "
@@ -315,7 +333,9 @@ INSTRUCCION_EVIDENCIA = (
     "Reglas:\n"
     "1. Deci que elementos de telecomunicaciones se ven: ONT, router, modem, "
     "access point, fuente, caja de distribucion, roseta, conectores, patch "
-    "cord, cable UTP, fibra. SOLO los que se ven: NO enumeres los que no "
+    "cord, cable UTP, fibra; y de la red de afuera: cable de acometida, "
+    "caja NAP, empalme o mufa, splitter, poste, herrajes, tensores, "
+    "tendido. SOLO los que se ven: NO enumeres los que no "
     "estan. Esta lista esta para que los reconozcas, no para recorrerla.\n"
     "2. Marca y modelo SOLO si se leen en la imagen. Si no, no los nombres.\n"
     "3. Si hay luces indicadoras, deci cuales, de que color y si estan fijas "
@@ -349,11 +369,27 @@ INSTRUCCION_EVIDENCIA = (
     "agregando que el punto decimal era visible.\n"
     "7. Si te dicen que tenia que mostrar esta foto, contesta ademas si eso "
     "se ve o no se ve, en una linea.\n"
+    "7b. CUANDO LO QUE SE PEDIA ES UN DAÑO, UNA FALLA O UNA AVERIA "
+    "ENCONTRADA, la foto correcta ES la de algo roto: eso es lo que se "
+    "pidio, no un defecto del trabajo. Vale cualquier daño sobre un "
+    "elemento o una red de telecomunicaciones, adentro o afuera de la "
+    "casa, AUNQUE SEA DE UN TIPO QUE NO ESTE EN ESTA LISTA: fibra o cable "
+    "partido, cortado, doblado, pelado, quemado, mordido o caido; conector "
+    "roto, sucio, quemado o sulfatado; equipo o fuente quemados, mojados "
+    "o golpeados; caja abierta, rota o inundada; empalme abierto; poste, "
+    "herraje o tensor caidos o vencidos; una rama o un arbol sobre el "
+    "tendido. Deci en pocas palabras que elemento es y que daño se ve. "
+    "Si no reconoces la pieza exacta pero se ve que es cableado o red de "
+    "telecomunicaciones, alcanza: decilo asi. Y hay fallas que no se "
+    "notan por fuera --un equipo apagado, una luz roja, un cable que "
+    "parece entero--: si la foto muestra un elemento de "
+    "telecomunicaciones, tambien sirve.\n"
     "8. NO transcribas numeros de documento, cedulas, telefonos ni datos "
     "personales que aparezcan en la imagen, aunque se lean. Tampoco "
     "describas a las personas que aparezcan, ni leas direcciones, placas ni "
     "papeles que esten en el encuadre.\n"
-    "9. Si la foto no muestra equipos ni una instalacion, deci en una linea "
+    "9. Si la foto no muestra equipos, cables ni red de telecomunicaciones "
+    "--ni adentro ni afuera de la casa--, deci en una linea "
     "que no se ve lo que se pedia y nada mas. No describas el resto.\n"
     "10. CUARENTA PALABRAS COMO MAXIMO, sin saludos. Si no entra, sacá la "
     "descripcion de lo que no se pidio, nunca el veredicto.\n"
@@ -364,15 +400,24 @@ INSTRUCCION_EVIDENCIA = (
     "o si la foto no sirve como evidencia de lo que se pedia. Si lo unico "
     "que hiciste fue describir lo que hay, poné 'ATENCION: no'. Que algo "
     "este borroso o fuera de cuadro NO alcanza por si solo: decilo en el "
-    "parrafo y poné 'si' unicamente si por eso la foto no sirve.\n"
+    "parrafo y poné 'si' unicamente si por eso la foto no sirve. "
+    "EXCEPCION: si lo que se pedia era un daño, una falla o una averia "
+    "encontrada (regla 7b), el daño que se ve NO es motivo de atencion "
+    "--es justo lo que la foto tenia que mostrar--. Ahi poné 'si' "
+    "unicamente si la foto no sirve como evidencia: no se distingue "
+    "nada, o no muestra nada de telecomunicaciones.\n"
     "12. Si --y SOLO si-- te dijeron que tenia que mostrar esta foto, agregá "
     "ANTES de esa linea otra sola que diga exactamente 'MUESTRA: si', "
     "'MUESTRA: no' o 'MUESTRA: no se sabe'. 'no' es para cuando la imagen "
     "muestra algo DISTINTO de lo que se pedia --pidieron el router y hay un "
     "televisor--. 'no se sabe' es para cuando no se puede determinar: esta "
     "borrosa, oscura, tapada, o es un primer plano del que no se deduce que "
-    "equipo es. Si no te dijeron que tenia que mostrar, NO escribas esta "
-    "linea.\n"
+    "equipo es. Cuando se pedia un daño, una falla o una averia "
+    "encontrada, poné 'MUESTRA: si' si se ve cualquier elemento o red de "
+    "telecomunicaciones como dice la regla 7b, lo reconozcas del todo o "
+    "no; 'MUESTRA: no' queda solo para la imagen que no tiene nada de "
+    "telecomunicaciones. Si no te dijeron que tenia que mostrar, NO "
+    "escribas esta linea.\n"
     "13. Agregá SIEMPRE, antes de las dos lineas anteriores, otra sola que "
     "diga exactamente 'CATALOGO: si' o 'CATALOGO: no'. Poné 'si' cuando la "
     "imagen no sea una foto tomada en el trabajo sino material de producto: "

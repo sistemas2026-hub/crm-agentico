@@ -1390,3 +1390,33 @@ El patrón es el mismo en los cuatro requisitos. El sistema no premia la foto ma
 **Para reabrir hace falta una medición nueva que mueva el 7** (CLAUDE.md §10). El comando que lo mide quedó en el repositorio, es de solo lectura y se corre con `python manage.py que_foto_frena --org <uuid>`.
 
 **Una advertencia sobre ese comando.** Su línea *«en cuántas órdenes fue el único motivo»* mezcla los dos casos: cuenta una orden donde la foto del daño levantó atención *sin importar si la foto mostraba o no lo pedido*. Por eso dijo 21 donde el número relevante es 7. Además los cuatro requisitos suman 45 sobre 34 órdenes: hay solapamiento, y apagar un solo requisito no destraba todas las que lo nombran. Quien lo use para reabrir esta decisión tiene que leer la tabla de `MUESTRA`, no esa línea.
+
+#### 8.26.1 REABIERTA el 20/11/2026 por decisión del usuario — el modelo no conocía el daño, y eso sí se arregla
+
+**Qué dijo el usuario.** Que cada foto nueva del *«Daño encontrado»* que el modelo «no había visto» se rechaza, y que la idea es la contraria: que conozca su oficio, que si la foto es de telecomunicaciones la identifique, y que si está bien la pase.
+
+**El error de la decisión anterior, que es mío.** El 17/11 se leyó que 18 de 41 fotos del daño (44%) *«no muestran lo pedido»* y se le atribuyó **al técnico y a la app** — sin mirar ni una de esas fotos. Era una inferencia escrita como hallazgo. Leída la instrucción con esa pregunta, el rechazo tenía **tres causas en el texto mismo**, y ninguna es del técnico:
+
+| Regla | Qué decía | Qué le hacía a una foto del daño |
+|---|---|---|
+| 1 | Nombraba solo equipos de **adentro** de la casa: ONT, router, roseta, patch cord | Un cable partido en un poste, una caja NAP abierta o una acometida caída no estaban en su vocabulario |
+| 9 | *«Si la foto no muestra equipos ni una instalación, decí que no se ve lo que se pedía»* | Un tendido roto no es ni un equipo ni una instalación: salía `MUESTRA: no`, que es lo que **devuelve la orden al técnico** |
+| 11 | `ATENCION: si` ante *«material deteriorado»* | El deterioro es exactamente lo que esa foto tiene que mostrar |
+
+Y el pie que acompaña la foto es solo *«Esta foto tenía que mostrar: Daño encontrado.»* — la plantilla base no trae instrucciones para ese requisito.
+
+**Por qué el segundo motivo del 17/11 ya no aplica.** Se había descartado una marca en la plantilla porque *«el modelo devuelve un solo `ATENCION: si` y no dice por qué»*: apagarla en código apagaba también las fotos que no servían. Lo que se construyó no apaga nada en código: **es el modelo el que distingue**, porque es el único que ve las dos cosas a la vez — qué se pidió y qué hay en la imagen. Y no hay nada que marcar por empresa: la regla dispara con lo que el pie ya dice, se llame el requisito «Daño encontrado», «Falla» o «Avería».
+
+**Qué cambió** en `INSTRUCCION_EVIDENCIA` ([nucleo/canales/vision.py](nucleo/canales/vision.py)):
+
+- **Regla 1** — suma la red de afuera: acometida, caja NAP, empalme, splitter, poste, herrajes, tensores, tendido.
+- **Regla 7b, nueva** — cuando lo pedido es un daño, una falla o una avería, lo roto **es** la foto correcta. Vale cualquier daño sobre telecomunicaciones *aunque sea de un tipo que no esté en la lista*, y vale la falla que no se nota por fuera (un equipo apagado, una luz roja).
+- **Regla 9** — «no se ve lo que se pedía» queda para la foto que no muestra equipos, cables **ni red**, adentro o afuera.
+- **Regla 11** — excepción: el daño pedido no levanta atención. La sigue levantando la foto que no sirve como evidencia.
+- **Regla 12** — en la foto del daño, `MUESTRA: no` queda solo para la imagen que no tiene nada de telecomunicaciones.
+
+**Lo que se afloja, dicho de frente.** Con esto, una foto de *cualquier* elemento de telecomunicaciones pasa como «Daño encontrado», se vea roto o no. Es deliberado —hay fallas que no se ven— y el costo es acotado: es la foto del *antes*, no la que prueba el arreglo; las mediciones y el reporte siguen teniendo sus propios puntos en la revisión.
+
+**VERIFICADO:** el texto llega al modelo (la sección F de `tests/test_vision_evidencia_campo.py` afirma que el `system` que sale es esta constante), siete guardas nuevas (sección I) y **8 mutaciones muertas**. `test_vision_propositos.py` sigue en verde: ninguna palabra del detector de respaldo quedó en la parte descriptiva.
+
+**NO VERIFICADO: que el modelo cumpla.** Es un cambio de prompt, o sea guía y no garantía (§7.4), y no hay fotos de daño fuera de producción con las que medirlo antes de desplegar. Se mide después, con lo que ya existe: `comparar_calidad_vision --evidencia <uuid> --solo-una` sobre una foto que hoy esté rechazada, y `que_foto_frena` otra vez en dos semanas. **Los números a mover: el 44% de «no muestra lo pedido» y el 30% de atención sobre fotos buenas.** Si no bajan, la causa no era esta.
