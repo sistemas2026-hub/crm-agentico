@@ -1,0 +1,172 @@
+{
+ "generado_en": "2026-09-25T16:02:06-0500",
+ "esperada": "facturacion_cliente",
+ "filas": [
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "00_neutro        (control alto)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "01_completo      (control bajo)",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "30_solo_user",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "24d60d9d",
+   "tema": "no_internet",
+   "condicion": "31_user_y_estado",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "00_neutro        (control alto)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "01_completo      (control bajo)",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "30_solo_user",
+   "aciertos": 5,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 5,
+    "soporte_tecnico_cliente": 1
+   }
+  },
+  {
+   "conv": "10929479",
+   "tema": "consulta_saldo",
+   "condicion": "31_user_y_estado",
+   "aciertos": 4,
+   "total": 6,
+   "areas": {
+    "null": 2,
+    "facturacion_cliente": 4
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "00_neutro        (control alto)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "01_completo      (control bajo)",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "30_solo_user",
+   "aciertos": 5,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 5,
+    "null": 1
+   }
+  },
+  {
+   "conv": "07b86efe",
+   "tema": "validacion_de_pago",
+   "condicion": "31_user_y_estado",
+   "aciertos": 4,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 4,
+    "null": 2
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "00_neutro        (control alto)",
+   "aciertos": 6,
+   "total": 6,
+   "areas": {
+    "facturacion_cliente": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "01_completo      (control bajo)",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "null": 6
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "30_solo_user",
+   "aciertos": 0,
+   "total": 6,
+   "areas": {
+    "soporte_tecnico_cliente": 3,
+    "null": 3
+   }
+  },
+  {
+   "conv": "53f79def",
+   "tema": "internet_lento",
+   "condicion": "31_user_y_estado",
+   "aciertos": 3,
+   "total": 6,
+   "areas": {
+    "soporte_tecnico_cliente": 3,
+    "facturacion_cliente": 3
+   }
+  }
+ ]
+}

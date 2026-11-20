@@ -1,0 +1,191 @@
+- generic [ref=f50e4]:
+  - banner [ref=f50e5]:
+    - link "Dexter" [ref=f50e6] [cursor=pointer]:
+      - /url: /
+    - navigation "Módulos" [ref=f50e7]:
+      - link "Conversaciones" [ref=f50e8] [cursor=pointer]:
+        - /url: /conversaciones
+      - link "Tickets" [ref=f50e9] [cursor=pointer]:
+        - /url: /tickets
+      - link "Asistente" [ref=f50e10] [cursor=pointer]:
+        - /url: /asistente
+      - link "Agentes" [ref=f50e11] [cursor=pointer]:
+        - /url: /agentes
+    - textbox "Buscar conversaciones" [ref=f50e16]:
+      - /placeholder: Buscar conversación, cliente o mensaje…
+    - generic [ref=f50e17]:
+      - generic [ref=f50e18]:
+        - text: Por atender
+        - generic [ref=f50e19]: "2"
+      - generic [ref=f50e20]:
+        - text: Espera máx.
+        - generic [ref=f50e21]: 5h
+      - generic [ref=f50e22]:
+        - text: Total
+        - generic [ref=f50e23]: "8"
+      - generic [ref=f50e24]: En vivo
+      - generic "Sesión de ana.qa" [ref=f50e26]: ana.qa
+  - generic [ref=f50e27]:
+    - complementary "Conversaciones" [ref=f50e28]:
+      - navigation "Filtrar por estado" [ref=f50e29]:
+        - button "Por atender 2" [ref=f50e30] [cursor=pointer]:
+          - generic [ref=f50e31]: Por atender
+          - generic [ref=f50e32]: "2"
+        - button "En atención 4" [ref=f50e33] [cursor=pointer]:
+          - generic [ref=f50e34]: En atención
+          - generic [ref=f50e35]: "4"
+        - button "Resueltas 1" [ref=f50e36] [cursor=pointer]:
+          - generic [ref=f50e37]: Resueltas
+          - generic [ref=f50e38]: "1"
+        - button "Todas 8" [ref=f50e39] [cursor=pointer]:
+          - generic [ref=f50e40]: Todas
+          - generic [ref=f50e41]: "8"
+      - generic [ref=f50e42]:
+        - generic [ref=f50e43]:
+          - generic [ref=f50e44]: Canal
+          - combobox "Qué canales se ven" [ref=f50e45] [cursor=pointer]:
+            - option "Operativo" [selected]
+            - option "Pruebas"
+            - option "Todos"
+        - generic [ref=f50e46]:
+          - generic [ref=f50e47]: Orden
+          - combobox "Ordenar la lista" [ref=f50e48] [cursor=pointer]:
+            - option "Actividad"
+            - option "Recomendado" [selected]
+            - option "Mayor espera"
+            - option "Más recientes"
+        - button "Solo escaladas" [ref=f50e49] [cursor=pointer]
+      - generic [ref=f50e50]:
+        - 'link "Cliente respondió Vencido +6h Espera: 6h CLIENTE QA 2 4h Cliente respondió — sin asignar Asistente: Ya te estamos atendiendo, en un momento te responde una persona. WhatsApp" [ref=f50e51] [cursor=pointer]':
+          - /url: /conversaciones/ca76a97c-3593-4ffe-9bc3-ff21f9f7bc4d
+          - generic [ref=f50e52]:
+            - generic [ref=f50e53]:
+              - generic [ref=f50e54]: Cliente respondió
+              - 'generic "Venció hace 6h (objetivo: 15 min para tomarla)" [ref=f50e56]':
+                - text: Vencido
+                - generic [ref=f50e57]: +6h
+              - generic "Esperando desde hace 6h" [ref=f50e58]: "Espera: 6h"
+            - generic [ref=f50e59]:
+              - generic [ref=f50e60]: CLIENTE QA 2
+              - generic [ref=f50e61]: 4h
+            - generic [ref=f50e62]: Cliente respondió — sin asignar
+            - paragraph [ref=f50e63]: "Asistente: Ya te estamos atendiendo, en un momento te responde una persona."
+            - generic [ref=f50e64]: WhatsApp
+        - 'link "Legado · revisar Vencido +4h Espera: 4h CLIENTE QA 7 4h Legado: requiere revisión Sin mensajes todavía Sin dueño en Dexter WhatsApp" [ref=f50e66] [cursor=pointer]':
+          - /url: /conversaciones/abd37ddf-7479-461b-b1f8-9e76ba60e9f4
+          - generic [ref=f50e67]:
+            - generic [ref=f50e68]:
+              - generic [ref=f50e69]: Legado · revisar
+              - 'generic "Venció hace 4h (objetivo: 15 min para tomarla)" [ref=f50e71]':
+                - text: Vencido
+                - generic [ref=f50e72]: +4h
+              - generic "Esperando desde hace 4h" [ref=f50e73]: "Espera: 4h"
+            - generic [ref=f50e74]:
+              - generic [ref=f50e75]: CLIENTE QA 7
+              - generic [ref=f50e76]: 4h
+            - generic [ref=f50e77]: "Legado: requiere revisión"
+            - paragraph [ref=f50e78]: Sin mensajes todavía
+            - generic [ref=f50e79]:
+              - generic [ref=f50e80]: Sin dueño en Dexter
+              - generic [ref=f50e81]: WhatsApp
+    - generic [ref=f50e82]:
+      - generic [ref=f50e83]:
+        - generic [aria-hidden] [ref=f50e84]: CQ
+        - generic [ref=f50e85]:
+          - generic [ref=f50e86]:
+            - heading "CLIENTE QA 5" [level=2] [ref=f50e87]
+            - generic [ref=f50e88]:
+              - generic [ref=f50e89]: "57300000005"
+              - generic [ref=f50e90]: ISP 6555
+              - generic [ref=f50e91]: CC 1.032.456.789
+              - generic [ref=f50e92]: Fibra 300 Mbps
+              - generic [ref=f50e93]: Activo
+          - generic [ref=f50e94]:
+            - generic [ref=f50e95]: Humano · Ana QA
+            - generic [ref=f50e97]: WhatsApp
+            - generic [ref=f50e98]: abierta
+      - paragraph [ref=f50e99]:
+        - strong [ref=f50e105]: Escalada · IA no responde
+        - generic [ref=f50e106]: Atendida
+        - generic [ref=f50e110]:
+          - button "Marcar como resuelta" [ref=f50e111] [cursor=pointer]
+          - tooltip "Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Abajo elegís en qué terminó y se cierra la conversación; el próximo mensaje del cliente abre una nueva."
+      - generic [ref=f50e112]:
+        - generic [ref=f50e113]:
+          - term [ref=f50e114]: Qué quiere
+          - definition [ref=f50e115]: Necesito que venga un tecnico QA — lo que escribió, sin resumir
+        - generic [ref=f50e116]:
+          - term [ref=f50e117]: Le prometimos
+          - definition [ref=f50e118]: No se encontró el mensaje con el que se le avisó.
+        - generic [ref=f50e119]:
+          - term [ref=f50e120]: Qué falta
+          - definition [ref=f50e121]: El asistente no dejó anotado el próximo paso. El caso quedó abierto en el CRM.
+        - generic [ref=f50e122]:
+          - term [ref=f50e123]: Qué hizo la IA
+          - definition [ref=f50e124]: No consultó ningún sistema antes de derivar.
+      - generic [ref=f50e126]:
+        - generic [ref=f50e127]: Hoy
+        - generic [ref=f50e129]:
+          - generic [ref=f50e130]: Necesito que venga un tecnico QA
+          - generic [ref=f50e131]: 13:07
+        - generic [ref=f50e132]:
+          - generic [ref=f50e133]: Ana QA
+          - generic [ref=f50e135]: Listo, agendamos la visita.
+          - generic [ref=f50e136]: 13:17
+          - button "☆ Marcar" [ref=f50e138] [cursor=pointer]
+      - generic [ref=f50e139]:
+        - group "Qué estás escribiendo" [ref=f50e140]:
+          - button "Responder al cliente" [pressed] [ref=f50e141] [cursor=pointer]
+          - button "Nota interna" [ref=f50e142] [cursor=pointer]
+          - button "Responder y devolver a IA" [ref=f50e143] [cursor=pointer]
+        - status [ref=f50e144]:
+          - generic [ref=f50e145]: Ventana abierta · quedan 16 h 4 min
+        - generic [ref=f50e146]:
+          - textbox "Escribí tu respuesta…" [ref=f50e147]
+          - generic [ref=f50e148]:
+            - generic [ref=f50e149]:
+              - button "Emoji" [ref=f50e151] [cursor=pointer]
+              - button "Adjuntar" [ref=f50e156] [cursor=pointer]
+              - button "Grabar una nota de voz" [ref=f50e159] [cursor=pointer]
+            - generic [ref=f50e163]:
+              - strong [ref=f50e164]: Se envía directo al cliente
+              - text: · no pasa por el asistente · Enter envía
+            - button "Enviar" [disabled] [ref=f50e165]
+    - complementary "Contexto de la conversación" [ref=f50e169]:
+      - navigation "Contexto de la conversación" [ref=f50e170]:
+        - button "Cliente" [ref=f50e171] [cursor=pointer]
+        - button "Equipo" [ref=f50e172] [cursor=pointer]
+        - button "Caso" [ref=f50e173] [cursor=pointer]
+        - button "Actividad" [ref=f50e174] [cursor=pointer]
+        - button "Proceso" [ref=f50e175] [cursor=pointer]
+      - generic [ref=f50e177]:
+        - paragraph [ref=f50e178]: Cliente
+        - paragraph [ref=f50e179]:
+          - generic [ref=f50e183]: Identidad verificada en esta conversación
+        - generic [ref=f50e184]:
+          - generic [ref=f50e185]: Nombre
+          - generic [ref=f50e186]: CLIENTE QA 5
+        - generic [ref=f50e187]:
+          - generic [ref=f50e188]: Teléfono
+          - generic [ref=f50e189]: "57300000005"
+        - generic [ref=f50e190]:
+          - generic [ref=f50e191]: Cliente en el ISP
+          - generic [ref=f50e192]: "6555"
+        - paragraph [ref=f50e193]: Equipo
+        - generic [ref=f50e194]:
+          - generic [ref=f50e195]: Serial de la ONU
+          - generic [ref=f50e196]: FHTT1234ABCD
+        - paragraph [ref=f50e197]: "Dexter guarda de cada cliente lo que hizo falta para atenderlo: su identidad y los identificadores de su equipo. El plan, la dirección, el saldo y las facturas viven en el sistema del ISP y no se traen acá."
+  - contentinfo [ref=f50e198]:
+    - generic [ref=f50e199]:
+      - text: Las lleva la IA
+      - generic [ref=f50e201]: "1"
+    - generic [ref=f50e202]:
+      - text: En manos de una persona
+      - generic [ref=f50e204]: "6"
+    - generic [ref=f50e205]:
+      - text: Sin dueño
+      - generic [ref=f50e206]: "2"
+    - generic [ref=f50e208]:
+      - text: Cola leída hace
+      - generic [ref=f50e209]: 2s

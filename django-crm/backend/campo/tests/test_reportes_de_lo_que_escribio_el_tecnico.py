@@ -1,0 +1,208 @@
+# -*- coding: utf-8 -*-
+"""
+Los pedidos a bodega, los faltantes explicados y las actas llegan a la oficina.
+
+18/10/2026: los tres se guardaban y ninguna pantalla de la web los mostraba. El
+pedido llegaba solo si la empresa tenia un canal de avisos, y la explicacion de
+un faltante quedaba escrita sin que nadie pudiera leerla. Ahora son tres
+reportes de `GET /inventario/reportes/`, que la web pasa enteros a la pantalla.
+
+Lo que cuidan estas pruebas, ademas de que el dato llegue: que el texto libre
+viaje tapado, que un tecnico no lea lo que escribio otro, y que otra empresa no
+vea nada.
+"""
+
+from datetime import date
+
+import pytest
+from django.utils import timezone
+
+from campo.models import (
+    ActaDeDevolucion,
+    IncidenciaDeMaterial,
+    MaterialCatalogo,
+    PedidoDeMaterial,
+)
+
+pytestmark = pytest.mark.django_db
+
+REPORTES = "/api/campo/inventario/reportes/"
+
+
+@pytest.fixture
+def conector(org_a):
+    return MaterialCatalogo.objects.create(
+        org=org_a, codigo="CON-SC-APC", nombre="Conector SC/APC", unidad="unidades")
+
+
+@pytest.fixture
+def pedido(org_a, user_profile, conector):
+    return PedidoDeMaterial.objects.create(
+        org=org_a, profile=user_profile, material=conector, cantidad=20,
+        motivo="se acabaron, llamar al 3001234567", idempotency_key="p-1")
+
+
+def _filas(client, de, **params):
+    r = client.get(REPORTES, {"de": de, **params})
+    assert r.status_code == 200, r.content
+    return r.json()["filas"]
+
+
+def test_1_bodega_ve_el_pedido_con_quien_lo_pidio(admin_client, pedido, regular_user):
+    fila = _filas(admin_client, "pedidos")[0]
+    assert (fila["material"], fila["cantidad"], fila["unidad"], fila["estado"]) == (
+        "CON-SC-APC", "20", "unidades", "pendiente")
+    assert fila["persona"] == (regular_user.name or regular_user.email)
+
+
+def test_2_el_texto_libre_viaja_tapado(admin_client, pedido):
+    motivo = _filas(admin_client, "pedidos")[0]["motivo"]
+    assert "se acabaron" in motivo
+    assert "3001234567" not in motivo
+
+
+def test_3_un_tecnico_no_lee_lo_que_escribio_otro(user_client, pedido):
+    for de in ("pedidos", "faltantes", "cierres"):
+        assert user_client.get(REPORTES, {"de": de}).status_code == 403, de
+    # Los de antes siguen abiertos a cualquier sesion de campo.
+    assert user_client.get(REPORTES, {"de": "consumo"}).status_code == 200
+
+
+def test_4_otra_empresa_no_ve_nada(org_b_client, pedido):
+    assert _filas(org_b_client, "pedidos") == []
+
+
+def test_5_hasta_cuenta_el_dia_entero(admin_client, pedido):
+    hoy = timezone.localdate().isoformat()
+    assert len(_filas(admin_client, "pedidos", desde=hoy, hasta=hoy)) == 1
+
+
+def test_6_el_faltante_dice_que_paso_y_por_que(admin_client, org_a, user_profile, conector):
+    IncidenciaDeMaterial.objects.create(
+        org=org_a, profile=user_profile, material=conector,
+        tipo=IncidenciaDeMaterial.DANADO, cantidad=3,
+        motivo="se partieron al pelar la fibra", idempotency_key="i-1")
+
+    fila = _filas(admin_client, "faltantes")[0]
+
+    assert fila["tipo"] == "danado"
+    assert fila["tipo_texto"] == dict(IncidenciaDeMaterial.TIPOS)["danado"]
+    assert (fila["material"], fila["cantidad"]) == ("CON-SC-APC", "3")
+    assert fila["motivo"] == "se partieron al pelar la fibra"
+    assert fila["jornada"] is None
+
+
+def test_7_el_acta_muestra_lo_que_se_congelo_no_un_recalculo(admin_client, org_a, user_profile):
+    ActaDeDevolucion.objects.create(
+        org=org_a, profile=user_profile, jornada=date(2026, 10, 17),
+        estado=ActaDeDevolucion.CONFIRMADA, confirmada_en=timezone.now(),
+        resumen={
+            "ordenes": {"asignadas": 3, "completadas": 3, "pendientes": 0},
+            "material": {"por_unidad": [{"unidad": "m", "recibido": "100"}]},
+            "detalle": [{"codigo": "DROP", "nombre": "Cable drop", "unidad": "m",
+                         "entregado": "100", "consumido": "35",
+                         "esperado_devolver": "65", "devuelto": "65",
+                         "diferencia": "0"}],
+        })
+    # Una pendiente no es un acta: no se firmó.
+    ActaDeDevolucion.objects.create(org=org_a, profile=user_profile,
+                                    jornada=date(2026, 10, 18))
+
+    filas = _filas(admin_client, "cierres")
+
+    assert [f["jornada"] for f in filas] == ["2026-10-17"]
+    assert filas[0]["ordenes"]["completadas"] == 3
+    assert filas[0]["materiales"][0]["consumido"] == "35"
+    assert filas[0]["por_unidad"] == [{"unidad": "m", "recibido": "100"}]
+
+
+def test_8_otra_empresa_no_ve_las_actas_ni_los_faltantes(org_b_client, org_a, user_profile, conector):
+    IncidenciaDeMaterial.objects.create(
+        org=org_a, profile=user_profile, material=conector, cantidad=1,
+        motivo="x", idempotency_key="i-2")
+    ActaDeDevolucion.objects.create(
+        org=org_a, profile=user_profile, jornada=date(2026, 10, 17),
+        estado=ActaDeDevolucion.CONFIRMADA)
+    assert _filas(org_b_client, "faltantes") == []
+    assert _filas(org_b_client, "cierres") == []
+
+
+def test_9_en_los_reportes_de_consumo_hasta_tambien_cuenta_el_dia_entero(
+        admin_client, org_a, user_profile, conector):
+    """Antes «hasta hoy» se leia como las 00:00 de hoy y dejaba afuera lo de hoy."""
+    from campo.models import MovimientoDeMaterial
+
+    MovimientoDeMaterial.objects.create(
+        org=org_a, profile=user_profile, material=conector,
+        tipo=MovimientoDeMaterial.CONSUMO, cantidad=2, idempotency_key="c-hoy",
+        ocurrido_en=timezone.now())
+    hoy = timezone.localdate().isoformat()
+
+    por_material = _filas(admin_client, "consumo", desde=hoy, hasta=hoy)
+    por_tecnico = _filas(admin_client, "tecnicos", desde=hoy, hasta=hoy)
+
+    assert [f["codigo"] for f in por_material] == ["CON-SC-APC"]
+    assert len(por_tecnico) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Bodega resuelve el pedido (18/10/2026)
+# --------------------------------------------------------------------------- #
+
+def _resolver(client, pedido, **cuerpo):
+    return client.post(f"/api/campo/inventario/pedidos/{pedido.id}/resolver/",
+                       cuerpo, format="json")
+
+
+def test_10_bodega_lo_atiende_y_queda_quien_y_cuando(admin_client, pedido, admin_user):
+    r = _resolver(admin_client, pedido, estado="atendido", nota="sale en la camioneta de las 2")
+    assert r.status_code == 200, r.content
+    pedido.refresh_from_db()
+    assert pedido.estado == "atendido"
+    assert pedido.resuelto_en is not None
+    fila = _filas(admin_client, "pedidos")[0]
+    assert fila["estado"] == "atendido"
+    assert fila["resuelto_por"] == (admin_user.name or admin_user.email)
+    assert fila["nota_de_bodega"] == "sale en la camioneta de las 2"
+
+
+def test_11_rechazar_sin_decir_por_que_no_se_puede(admin_client, pedido):
+    assert _resolver(admin_client, pedido, estado="rechazado").status_code == 400
+    pedido.refresh_from_db()
+    assert pedido.estado == "pendiente"
+    assert _resolver(admin_client, pedido, estado="rechazado",
+                     nota="no hay stock hasta el lunes").status_code == 200
+
+
+def test_12_el_mismo_toque_dos_veces_no_reescribe_nada(admin_client, pedido):
+    _resolver(admin_client, pedido, estado="atendido")
+    pedido.refresh_from_db()
+    primero = pedido.resuelto_en
+    assert _resolver(admin_client, pedido, estado="atendido", nota="otra").status_code == 200
+    pedido.refresh_from_db()
+    assert (pedido.resuelto_en, pedido.nota_de_bodega) == (primero, "")
+
+
+def test_13_lo_ya_decidido_no_se_da_vuelta_en_silencio(admin_client, pedido):
+    _resolver(admin_client, pedido, estado="atendido")
+    r = _resolver(admin_client, pedido, estado="rechazado", nota="me equivoque")
+    assert r.status_code == 409
+    pedido.refresh_from_db()
+    assert pedido.estado == "atendido"
+
+
+def test_14_un_tecnico_no_se_autoriza_su_propio_pedido(user_client, pedido):
+    assert _resolver(user_client, pedido, estado="atendido").status_code == 403
+    pedido.refresh_from_db()
+    assert pedido.estado == "pendiente"
+
+
+def test_15_otra_empresa_recibe_404(org_b_client, pedido):
+    assert _resolver(org_b_client, pedido, estado="atendido").status_code == 404
+    pedido.refresh_from_db()
+    assert pedido.estado == "pendiente"
+
+
+def test_16_un_estado_inventado_se_rechaza(admin_client, pedido):
+    assert _resolver(admin_client, pedido, estado="pendiente").status_code == 400
+    assert _resolver(admin_client, pedido, estado="borrado").status_code == 400

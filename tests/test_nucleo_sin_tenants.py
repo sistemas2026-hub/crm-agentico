@@ -40,14 +40,20 @@ TENANTS = RAIZ / "tenants"
 # Se ignora la plantilla: su slug es de ejemplo y no corresponde a nadie.
 SLUGS_EXENTOS = {"mi-isp"}
 
-# Hosts de PROVEEDORES DE MODELO. Son infraestructura de la plataforma, no de
-# un cliente: identicos para todos los tenants, como el endpoint de cualquier
-# libreria. Moverlos a la configuracion obligaria a repetir la misma URL en el
-# YAML de cada empresa — mas fragil, no menos.
+# Hosts de PROVEEDORES DE MODELO Y DE CANAL. Son infraestructura de la
+# plataforma, no de un cliente: identicos para todos los tenants, como el
+# endpoint de cualquier libreria. Moverlos a la configuracion obligaria a
+# repetir la misma URL en el YAML de cada empresa — mas fragil, no menos.
 #
 # La distincion no es de conveniencia: el endpoint de un sistema de GESTION
 # (WispHub y equivalentes) SI es de un cliente, porque otra empresa puede usar
 # otro sistema. Esos siguen prohibidos aqui.
+#
+# graph.facebook.com entra por esa misma prueba: toda empresa que use WhatsApp
+# Business le habla al mismo host. Lo que cambia por empresa es la CUENTA
+# (phone_number_id, token), y eso ya vive en la configuracion y en sus
+# secretos. Para el dia que un tenant entre por un BSP en vez de por Meta
+# directo, 'canales.whatsapp.api_base' lo sobreescribe sin tocar el nucleo.
 HOSTS_DE_PLATAFORMA = {
     "api.deepseek.com",
     "dashscope-intl.aliyuncs.com",
@@ -55,6 +61,7 @@ HOSTS_DE_PLATAFORMA = {
     "api.moonshot.cn",
     "api.openai.com",
     "api.anthropic.com",
+    "graph.facebook.com",
 }
 
 # Formas de meter logica por cliente sin escribir su nombre.

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nada de esta aplicación sale del dispositivo por respaldo.
+
+  Android respalda por defecto los datos de una app: la base SQLite y la
+  carpeta de documentos entre ellos. Acá eso significaría copiar a una cuenta
+  personal de Google la libreta de clientes de la empresa — nombre, dirección,
+  teléfono y las coordenadas de cada domicilio — más las fotografías de las
+  instalaciones.
+
+  Son datos de los que responde el ISP, no el técnico, y no deberían salir del
+  teléfono ni siquiera cifrados hacia la nube de otra persona. La misma regla
+  vale para la transferencia entre equipos al estrenar teléfono.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,391 @@
+"""
+================================================================================
+ POR QUE NO CERRO  --  09/11/2026
+================================================================================
+Dice, para una orden que la pantalla muestra como «Se puede cerrar» y que sin
+embargo sigue abierta, EN QUE PASO se cae. No escribe nada: ni un evento, ni
+una transicion, ni una llamada al ISP.
+
+POR QUE EXISTE
+--------------
+Entre que la pantalla calcula «Se puede cerrar» y que la orden quede cerrada
+hay seis filtros, y ninguno deja rastro en la tarjeta:
+
+  1. `puertas(org)`          -- delegacion y nivel de autonomia
+  2. `RC.aplica(orden)`      -- completada en campo y sin validar
+  3. la medicion pendiente   -- una falla de servicio sin medir espera
+  4. el filtro de la vuelta  -- H4 y su refinamiento del 09/11
+  5. `_reclamar`             -- un intento de hace menos de 60 minutos
+  6. el ticket del ISP       -- lo que contesto el motor
+
+El 08 y el 09/11 el mismo sintoma --«los siete puntos en verde y no cierra»--
+salio dos veces por dos filtros distintos, y las dos veces se diagnostico
+leyendo codigo en vez de la bitacora. Esto lee la bitacora.
+
+SIN DATOS DEL CLIENTE. Numero de orden, estados, vuelta, tipos de evento y
+fechas. De los `datos` de cada evento salen solo claves conocidas y cortas
+(estado, codigo, ticket, vuelta, requisitos, veredicto); el resto se nombra
+por su clave, sin su contenido, porque ahi vive el texto libre.
+
+LA UNICA EXCEPCION, Y POR QUE NO SALE SOLA (12/11/2026)
+-------------------------------------------------------
+Lo que el modelo ESCRIBIO mirando la foto es prosa libre. Ya paso por
+`redactar()` antes de guardarse, que tapa cedula, celular, correo y
+coordenadas --medido-- pero un NOMBRE PROPIO o una DIRECCION en prosa
+sobrevive: «se ve un papel a nombre de X», «se lee Calle 50 # 10-20 en la
+fachada». Este comando se corre dentro del contenedor de PRODUCCION y su
+salida se pega en un chat, que es el mismo modo de falla que dejo 14 secretos
+en transcripciones.
+
+Por eso **por defecto no se imprime**: sale el NUMERO que el modelo leyo y
+las lineas de marca (`MUESTRA:`, `ATENCION:`, `CATALOGO:`), que es lo que el
+diagnostico usa de verdad. La prosa entera se pide con `--con-texto`, a
+sabiendas. El encabezado decia «sin datos del cliente» mientras el codigo la
+imprimia siempre; lo encontro el revisor de PII el 12/11/2026.
+
+Uso, dentro del contenedor del backend (desde /app):
+  python manage.py por_que_no_cerro --org <uuid>
+  python manage.py por_que_no_cerro --org <uuid> --ot 212
+  python manage.py por_que_no_cerro --org <uuid> --ot 212 --con-texto
+================================================================================
+"""
+from zoneinfo import ZoneInfo
+
+from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
+
+from common.models import Org
+from common.tasks import set_rls_context
+
+BOGOTA = ZoneInfo("America/Bogota")
+
+#: Las lineas con las que el modelo le habla al codigo. No son prosa: son un
+#: valor de un conjunto chico, y de ahi sale el veredicto.
+MARCAS = ("MUESTRA:", "ATENCION:", "CATALOGO:")
+
+
+def _lo_que_se_puede_mostrar(texto, con_texto: bool) -> list:
+    """Que se imprime de lo que el modelo escribio mirando una foto.
+
+    POR DEFECTO, NO LA PROSA (12/11/2026). Ver el encabezado: `redactar()` ya
+    tapo cedula, celular, correo y coordenadas antes de guardar, pero un
+    nombre propio o una direccion en prosa sobrevive, y esta salida se pega
+    en un chat.
+
+    Lo que queda alcanza para el diagnostico que este comando existe para
+    hacer: el NUMERO que el modelo leyo --la diferencia entre «-21.0» y
+    «-2.10» es todo el caso de la OT #200 y la #201-- y las lineas de marca,
+    que son un valor de un conjunto chico y no texto libre.
+
+    `--con-texto` devuelve la prosa entera, a sabiendas y con la advertencia
+    pegada arriba, porque hay fallas que solo se ven leyendola.
+    """
+    crudo = (texto or "").strip()
+    if not crudo:
+        return []
+    if con_texto:
+        return ["[prosa del modelo -- puede traer un nombre o una direccion]",
+                crudo.replace(chr(10), " ")[:200]]
+
+    from campo import potencia_de_la_foto as PF
+
+    numero = PF.uno_solo(crudo)
+    salida = [f"numero={numero}" if numero is not None
+              else "sin numero legible"]
+    for linea in crudo.splitlines():
+        limpia = linea.strip()
+        if any(limpia.upper().startswith(m) for m in MARCAS):
+            salida.append(limpia[:80])
+    salida.append(f"({len(crudo)} caracteres de prosa, ocultos: --con-texto)")
+    return salida
+
+#: De los `datos` de un evento solo salen estas claves. Todo lo demas se
+#: nombra sin su valor: ahi van `observacion` y los textos del tecnico.
+CLAVES_SEGURAS = (
+    "estado", "codigo", "ticket", "ticket_isp", "vuelta", "vuelta_nueva",
+    "vuelta_anterior", "requisitos", "requisitos_a_corregir", "veredicto",
+    "puntos", "estado_validacion_anterior", "estado_validacion_nuevo",
+    "referencia", "detalle",
+)
+
+ORDEN_POR_DEFECTO = 3
+
+
+def _hora(dt) -> str:
+    return timezone.localtime(dt, BOGOTA).strftime("%d/%m %H:%M:%S")
+
+
+def _datos(d: dict) -> str:
+    if not isinstance(d, dict) or not d:
+        return ""
+    partes = []
+    for k, v in d.items():
+        if k in CLAVES_SEGURAS:
+            partes.append(f"{k}={str(v)[:120]}")
+        else:
+            partes.append(f"{k}=<...>")
+    return "  " + " ".join(partes)
+
+
+class Command(BaseCommand):
+    help = "Dice en que paso se cae una orden que deberia cerrar sola. No escribe nada."
+
+    def add_arguments(self, parser):
+        parser.add_argument("--org", required=True, help="UUID de la empresa")
+        parser.add_argument("--ot", type=int, action="append", default=[],
+                            help="Numero de orden (repetible). Sin esto, las ultimas sin validar.")
+        parser.add_argument("--ultimas", type=int, default=ORDEN_POR_DEFECTO,
+                            help=f"Cuantas mirar cuando no se dice --ot (por defecto {ORDEN_POR_DEFECTO})")
+        parser.add_argument("--con-texto", action="store_true",
+                            help="Imprime la PROSA que el modelo escribio de cada foto. "
+                                 "Puede traer un nombre o una direccion que leyo de la "
+                                 "imagen: no pegues esa salida en un chat.")
+
+    def handle(self, *args, **opciones):
+        from datetime import timedelta
+
+        from campo import revision_del_cierre as RC
+        from campo import cierre_por_el_supervisor as CS
+        from campo.models import (AnalisisDeEvidencia, EventoTrabajo,
+                                  EvidenciaTrabajo, OrdenTrabajo)
+        from campo.services.cierre_en_isp import EVENTO_CERRADO, EVENTO_NO_CERRADO
+
+        try:
+            org = Org.objects.get(pk=opciones["org"])
+        except (Org.DoesNotExist, ValueError, TypeError) as e:
+            raise CommandError(f"No se encontro esa empresa ({type(e).__name__})")
+        set_rls_context(org.id)
+
+        ahora = timezone.now()
+        base = OrdenTrabajo.objects.filter(org=org)
+        if opciones["ot"]:
+            ordenes = list(base.filter(numero__in=opciones["ot"]).order_by("-numero"))
+            faltan = set(opciones["ot"]) - {o.numero for o in ordenes}
+            if faltan:
+                self.stdout.write(f"No existen en esta empresa: {sorted(faltan)}")
+        else:
+            ordenes = list(base.filter(
+                estado_operativo=OrdenTrabajo.COMPLETADA_CAMPO,
+                estado_validacion__in=(OrdenTrabajo.PENDIENTE,
+                                       OrdenTrabajo.REQUIERE_REVISION),
+            ).order_by("-numero")[:max(1, opciones["ultimas"])])
+            if not ordenes:
+                #  LA QUE NO CIERRA PUEDE NO ESTAR ESPERANDO NADA  --  09/11
+                #
+                #  Primera corrida en produccion: «No hay ordenes terminadas
+                #  en campo esperando validacion», y la orden del usuario
+                #  estaba DEVUELTA. El sintoma no era «no cierra» sino «se
+                #  devuelve otra vez cada vez que el tecnico la manda», y con
+                #  el fallback vacio el comando no mostraba ni la bitacora.
+                self.stdout.write(
+                    "Ninguna esperando validacion. Se miran las ultimas que el "
+                    "Supervisor DEVOLVIO:")
+                vistos, elegidos = set(), []
+                for oid in (EventoTrabajo.objects
+                            .filter(org=org, tipo=CS.EVENTO_DEVUELTA)
+                            .order_by("-created_at")
+                            .values_list("orden_id", flat=True)):
+                    if oid in vistos:
+                        continue
+                    vistos.add(oid)
+                    elegidos.append(oid)
+                    if len(elegidos) >= max(1, opciones["ultimas"]):
+                        break
+                ordenes = list(base.filter(id__in=elegidos).order_by("-numero"))
+        if not ordenes:
+            self.stdout.write("No hay ordenes terminadas en campo esperando "
+                              "validacion, ni devueltas por el Supervisor.")
+            return
+
+        motivo_puertas = CS.puertas(org)
+        self.stdout.write("")
+        self.stdout.write(f"Hora de la empresa: {_hora(ahora)}  (Bogota)")
+        self.stdout.write(
+            "1. puertas(org): " + (f"CIERRA -> {motivo_puertas}" if motivo_puertas
+                                   else "abierta (delegada y con nivel)"))
+
+        pendientes = RC.pendientes_de_medir(org, ahora)
+        if pendientes is None:
+            self.stdout.write("   pendientes_de_medir: NO SE PUDO SABER -> no cierra ninguna")
+
+        for orden in ordenes:
+            self.stdout.write("")
+            self.stdout.write("=" * 72)
+            self.stdout.write(
+                f"OT #{orden.numero}   operativo={orden.estado_operativo}   "
+                f"validacion={orden.estado_validacion}   vuelta={orden.vuelta}")
+            self.stdout.write("=" * 72)
+
+            eventos = list(EventoTrabajo.objects.filter(org=org, orden=orden)
+                           .order_by("created_at"))
+            self.stdout.write(f"BITACORA ({len(eventos)} eventos)")
+            for ev in eventos:
+                self.stdout.write(f"  {_hora(ev.created_at)}  {ev.tipo}{_datos(ev.datos)}")
+
+            #  LAS FOTOS, QUE ES LO QUE DECIDE. Una foto sin fila de analisis
+            #  no aparece en el veredicto ni como «no se pudo mirar»: el punto
+            #  entero se cae, y desde afuera eso se ve igual que todo bien.
+            self.stdout.write("")
+            self.stdout.write("FOTOS Y LO QUE EL MODELO VIO")
+            evidencias = list(EvidenciaTrabajo.objects
+                              .filter(org=org, orden_trabajo=orden)
+                              .order_by("vuelta", "recibida_en_servidor"))
+            por_evidencia = {}
+            for a in (AnalisisDeEvidencia.objects
+                      .filter(org=org, evidencia_id__in=[e.id for e in evidencias])
+                      .order_by("created_at")):
+                por_evidencia.setdefault(a.evidencia_id, []).append(a)
+            if not evidencias:
+                self.stdout.write("  (ninguna)")
+            for e in evidencias:
+                filas = por_evidencia.get(e.id) or []
+                marca = (f"{len(filas)} analisis" if filas
+                         else "SIN ANALISIS -- nadie la miro")
+                self.stdout.write(
+                    f"  v{e.vuelta}  {e.requisito_id}  [{e.estado_archivo}]  {marca}")
+                for a in filas:
+                    detalle = (f" motivo={a.motivo}" if a.motivo else "")
+                    self.stdout.write(
+                        f"        {a.origen} {_hora(a.created_at)} "
+                        f"v{a.vuelta} atencion={a.pide_atencion}{detalle}")
+                    for linea in _lo_que_se_puede_mostrar(
+                            a.texto, opciones.get("con_texto")):
+                        self.stdout.write(f"          {linea}")
+
+            #  LOS DOS NUMEROS DE LA POTENCIA, UNO AL LADO DEL OTRO. Son
+            #  numeros de un instrumento, no texto del tecnico.
+            self.stdout.write("")
+            self.stdout.write("POTENCIA: LA FOTO CONTRA LO ESCRITO")
+            try:
+                from campo import potencia_de_la_foto as PF
+
+                #  LAS MISMAS LLAMADAS QUE `_potencia`, no una copia parecida.
+                #  La primera version leyo `_cierre_de_esta_vuelta` como si
+                #  fuera un dict --es un EventoTrabajo-- e imprimio
+                #  «escrito=None» para toda orden. Un diagnostico que mide por
+                #  su cuenta miente justo cuando mas se lo necesita.
+                cierre = RC._cierre_de_esta_vuelta(orden)
+                if cierre is None:
+                    self.stdout.write("  no hay reporte de cierre de esta vuelta")
+                else:
+                    respuestas = RC._lo_que_escribio_el_tecnico(orden, cierre)
+                    for campo_id, requisito, cuando in (
+                            (RC.CAMPO_AL_LLEGAR, "medicion_al_llegar", "al llegar"),
+                            (RC.CAMPO_AL_SALIR, "medicion_al_salir", "al salir")):
+                        #  TODAS LAS LECTURAS, Y LA QUE EL SISTEMA USA
+                        #  --  11/11/2026, OT #201
+                        #
+                        #  Este bloque mostraba `PF.uno_solo` sobre UNA sola
+                        #  lectura --la ultima-- y desde la doble lectura eso
+                        #  ya no es lo que `_potencia` hace. En la vuelta 1 de
+                        #  la #201 la diferencia era visible: cuatro lecturas,
+                        #  dos de -21.0 y dos de -2.10, y el comando imprimia
+                        #  «foto=-2.1» como si fuera el dato. Un diagnostico
+                        #  que calcula por su cuenta miente justo cuando mas
+                        #  se lo necesita -- ya paso una vez en este mismo
+                        #  bloque, con `_cierre_de_esta_vuelta`.
+                        escrito = RC._a_numero(respuestas.get(campo_id))
+                        lecturas = RC._lecturas_de_la_foto(orden, requisito)
+                        crudos = [PF.uno_solo(t) for t in lecturas]
+                        limites = RC._lo_que_el_tecnico_PODRIA_escribir(orden, campo_id)
+                        bruto, discordaron = RC._numero_de_la_foto(lecturas,
+                                                                   limites)
+                        linea = (f"  {cuando}: foto={bruto}  escrito={escrito}  "
+                                 f"limites={limites}  "
+                                 f"lecturas={crudos or 'ninguna'}")
+                        if discordaron:
+                            linea += ("  -> DOS LECTURAS CREIBLES DISTINTAS, "
+                                      "no se compara")
+                        elif bruto is None and crudos:
+                            linea += "  -> la foto se DESCARTA, no se compara"
+                        elif escrito is None or bruto is None:
+                            linea += "  -> falta un lado, NO SE COMPARA (el punto no aparece)"
+                        else:
+                            ok, por_que = PF.comparar(bruto, escrito)
+                            linea += f"  -> coinciden={ok} ({por_que})"
+                        self.stdout.write(linea)
+                        #  Y SI SE VA A RELEER, decirlo: es la pregunta que
+                        #  sigue cuando una medicion no se pudo verificar.
+                        if requisito in RC.mediciones_para_releer(orden, cierre):
+                            self.stdout.write("      (esta foto se vuelve a "
+                                              "leer en la proxima pasada)")
+            except Exception as e:                               # noqa: BLE001
+                self.stdout.write(f"  no se pudo leer ({type(e).__name__})")
+
+            self.stdout.write("")
+            self.stdout.write("DONDE SE CAE")
+
+            #  2. aplica
+            if not RC.aplica(orden):
+                self.stdout.write("  2. RC.aplica: NO -- no esta completada en campo "
+                                  "sin validar. La pantalla tampoco la mostraria.")
+                continue
+            self.stdout.write("  2. RC.aplica: si")
+
+            #  3. la medicion
+            if pendientes is None:
+                espera = "no se pudo saber"
+            elif str(orden.id) in pendientes:
+                espera = "SI espera la medicion despues del arreglo"
+            else:
+                espera = "no espera medicion"
+            self.stdout.write(f"  3. medicion: {espera}")
+
+            #  4. el filtro de la vuelta
+            devuelta = EventoTrabajo.objects.filter(
+                org=org, orden=orden, tipo=CS.EVENTO_DEVUELTA).exists()
+            ticket_cerrado = EventoTrabajo.objects.filter(
+                org=org, orden=orden, tipo=EVENTO_CERRADO).exists()
+            pasa = orden.vuelta <= 1 or (devuelta and not ticket_cerrado)
+            self.stdout.write(
+                f"  4. filtro de la vuelta: {'pasa' if pasa else 'LA DEJA AFUERA'}"
+                f"   (vuelta={orden.vuelta}, devuelta_por_el_supervisor={devuelta}, "
+                f"ticket_isp_ya_cerrado={ticket_cerrado})")
+
+            en_revisadas = CS.revisadas(org, ahora, solo=orden.pk)
+            if en_revisadas is None:
+                self.stdout.write("     revisadas(): None -- no cierra ninguna")
+                continue
+            if not en_revisadas:
+                self.stdout.write("     revisadas(): VACIO -- esta orden no es candidata")
+                continue
+            _, revision = en_revisadas[0]
+            self.stdout.write(f"     revisadas(): entra, veredicto={revision['veredicto']}")
+            for p in revision["puntos"]:
+                self.stdout.write(f"       [{p.get('ok')}] {p.get('clave')}: "
+                                  f"{str(p.get('texto'))[:110]}")
+            if revision.get("sugeridas"):
+                self.stdout.write(f"     a rehacer: {revision['sugeridas']}")
+
+            if revision["veredicto"] != RC.CERRAR:
+                self.stdout.write("  -> No cierra porque la revision no la da por buena. "
+                                  "Si hay algo a rehacer, se devuelve.")
+                continue
+
+            #  5. el reclamo. SOLO SE CONSULTA: reproducir el `create` de
+            #  `_reclamar` aqui dejaria la orden trabada una hora por haber
+            #  preguntado.
+            desde = ahora - timedelta(minutes=CS.MINUTOS_ENTRE_INTENTOS)
+            frenan = list(EventoTrabajo.objects.filter(
+                org=org, orden=orden,
+                tipo__in=(CS.EVENTO_BLOQUEADO, CS.EVENTO_INTENTO),
+                created_at__gte=desde).order_by("created_at"))
+            if frenan:
+                cuales = ", ".join(f"{e.tipo} a las {_hora(e.created_at)}" for e in frenan)
+                self.stdout.write(
+                    f"  5. _reclamar: LA FRENA durante {CS.MINUTOS_ENTRE_INTENTOS} min -> {cuales}")
+            else:
+                self.stdout.write("  5. _reclamar: libre")
+
+            #  6. el ticket, por lo que quedo escrito. No se le vuelve a
+            #  preguntar al ISP: esto no habla con nadie.
+            ultimos = [e for e in eventos if e.tipo in (
+                EVENTO_CERRADO, EVENTO_NO_CERRADO, CS.EVENTO_BLOQUEADO,
+                CS.EVENTO_DIVERGENCIA, CS.EVENTO_CERRADA)]
+            if ultimos:
+                e = ultimos[-1]
+                self.stdout.write(f"  6. ticket del ISP, ultimo rastro: {e.tipo} "
+                                  f"a las {_hora(e.created_at)}{_datos(e.datos)}")
+            else:
+                self.stdout.write("  6. ticket del ISP: sin rastro -- nunca se intento cerrar")
+        self.stdout.write("")

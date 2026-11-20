@@ -1,0 +1,342 @@
+# Agente de campo para el técnico instalando
+
+**Estado:** encuadrado, **no se construyó nada** · **Anotado:** 02/11/2026
+
+> **Por qué queda anotado y no se arrancó.** El usuario: *«dejalo anotado para
+> después, que están haciendo un cambio que da otro punto de vista»*. Hay
+> trabajo en curso de otra sesión que puede mover los supuestos de abajo.
+> **Antes de retomar esto, releer lo que haya cambiado**, en especial la
+> autonomía por agente y lo que se decida sobre acciones críticas.
+
+## Qué pidió el usuario
+
+> *«se crearía para que ayude al técnico al momento de realizar una
+> instalación, a llenar los formularios y adjuntar los documentos, autorizar
+> el equipo en SmartOLT y demás funciones que uno le indique. Este agente lo
+> supervisa el agente Supervisor IA. El técnico empieza y gestiona la
+> instalación desde la app — aún no está habilitado instalación.»*
+
+Y confirmó después: **la misma app y el mismo técnico** hacen soporte,
+instalación y cualquier otro trabajo. Una instalación es **un tipo de trabajo
+más**, no un flujo aparte.
+
+## El hallazgo que ordena todo
+
+**Lo que falta no es un agente.** Falta (a) autorizar la ONU en SmartOLT, que
+no existe ni como herramienta ni como endpoint verificado, y (b) el alta del
+cliente en WispHub, verificada en la skill pero sin herramienta y sin un solo
+llamador. El agente es la última capa; hoy no tendría nada que ofrecer.
+
+## Lo que ya existe, y no hay que volver a construir
+
+| Pieza | Estado |
+|---|---|
+| Labor `instalacion` + plantillas de partida `instalacion_fibra` y `traslado_servicio` | ✅ de fábrica. `instalacion_fibra`: 120 min, 5 campos (serial ONU, metros de fibra, potencia en roseta −28/−8 dBm, WiFi probada, cliente informado), 4 evidencias, 2 obligatorias |
+| El ciclo completo de la orden, el checklist que bloquea el cierre, la cola offline de evidencias | ✅ y **no distinguen labor** |
+| El clasificador que separa instalación de correctivo | ✅ por el cliente de instalaciones del ISP; 220 de 220 acertados (08/10/2026) |
+| La IA mirando las fotos contra las instrucciones de la plantilla | ✅ desplegado el 31/10–01/11/2026 |
+| El serial del equipo volviendo al ISP solo | ✅ `lazo_isp.py` |
+| La revisión del cierre por el Supervisor | ✅ |
+| El canal de aviso al técnico | ✅ salvo el proveedor de push |
+
+**«No está habilitado instalación» no es código: es configuración.** Cuatro
+cosas, todas desde pantallas: adoptar la plantilla y **publicar** su versión;
+declararle **asuntos** (con dos plantillas de la misma labor y sin asuntos, el
+caso **no se despacha**); una cuadrilla con labor habitual `instalacion`; y
+`hora_de_corte` (sin eso el Supervisor no crea órdenes solo). **Medirlo es una
+lectura, no un desarrollo.**
+
+## Los huecos reales
+
+1. **Autorizar la ONU: no existe y NO ESTÁ VERIFICADO.** La skill de SmartOLT
+   (788 líneas) no tiene la operación; solo el campo de lectura
+   `authorization_date`. Escrituras conocidas: `reboot` (ejecutada en vivo) y
+   las cinco de CATV (documentadas, ninguna ejecutada). Nada sobre ONU sin
+   autorizar ni cómo descubrirlas — el enum de estados medido no incluye un
+   «sin autorizar». **Sondear con `GET` + id imposible MIENTE acá**: seis
+   candidatos de CATV dieron 405 y existían. Lo que funciona es bajar la
+   colección oficial. Es trabajo de `verificador-de-api`.
+2. **Sería la SEXTA herramienta `irreversible`** del sistema. Es la única de
+   su familia que **crea** algo en la OLT —ocupa puerto y compromete recursos—
+   y el deshacer no lo midió nadie. Entra en M06-D como `INDETERMINADA` hasta
+   que haya evidencia. Obliga a actualizar `CLAUDE.md §5`, `M06-D` y
+   `tests/test_m06d_matriz_autonomia.py`. Y choca con
+   `SPEC/objetivos/reemplazo-de-mano-de-obra.md`, donde las críticas *«se
+   quedan como están»*.
+3. **Alta del cliente en WispHub**: endpoint **sí verificado en vivo**
+   (`POST /api/clientes/agregar-cliente/{id_zona}/?instalacion`, respuesta
+   asíncrona con `task_id`), sin herramienta y sin llamador. Y exige un cruce
+   **IP ↔ zona que no está modelado en ninguna parte** — la skill dice que no
+   hay forma de saberlo sin conocer la topología. Ese mapa es **configuración
+   de la empresa**, no una tabla en código.
+4. **Adjuntar documentos HOY NO SE PUEDE.** El backend acepta
+   `foto|documento|firma` y el storage acepta PDF, pero el editor guiado solo
+   emite `foto` y **la app no tiene selector de archivos** (`image_picker` sí,
+   `file_picker` no existe). Solo entra una foto del documento.
+5. **Grieta de contrato en la firma**: la app escribe `campoClave:
+   'firma_receptor'`, un campo que ninguna plantilla declara y que el backend
+   no conoce. Síntoma anotado: orden cerrada en el teléfono y trabada en el
+   servidor.
+
+## Lo que mata al agente conversacional en campo, y hay que decirlo primero
+
+**El técnico trabaja sin señal.** La app es offline-first con cola. Un turno
+de conversación **no se puede encolar**: se ejecutaría cuando el técnico ya se
+fue, midiendo un momento que a nadie le importa — el mismo criterio ya escrito
+para `ProbarConexionView`.
+
+Un agente conversacional en campo es, por construcción, **una capacidad que
+existe solo con red**, y la app tiene que decirlo en la cara en vez de fallar
+en silencio.
+
+## La app no habla con el motor, y no hace falta que empiece
+
+Las ~45 rutas de la app van todas a Django. El motor ya se consume **desde la
+app por el backend**, dos veces y con el contrato de error ya diseñado
+(`probar-conexion` → `ping_cliente`, `medir-senal` → `consultar_senal_ont`).
+Un segundo camino significaría una segunda credencial de servicio en un
+teléfono.
+
+Y la ruta del motor que presta el modelo ya existe y es genérica en los
+hechos: su docstring dice *«No sabe de qué está hablando»*. El bucle de
+razonamiento también existe y acepta `tools` como parámetro.
+
+> **⚠️ Filo que hay que cerrar ANTES de reusar ese bucle.** El ejecutor de
+> herramientas del chat es **un dict global sin dueño** y no filtra por actor.
+> Pasarle `tools` acotado solo cambia lo que el modelo *ve*: si nombra
+> `delegar_tarea`, se ejecuta igual — y eso **enciende tareas autónomas del
+> Supervisor**. Hoy lo contiene el permiso de la ruta (jefe de operaciones),
+> no el catálogo. Un agente del técnico que herede eso sería un técnico en la
+> calle encendiendo autonomía. **Se arregla en el ejecutor, no en el prompt.**
+
+## «Lo supervisa el Supervisor IA»: qué significa con lo que hay
+
+Supervisar **el trabajo** está construido. Supervisar **a un agente** no
+existe. La forma que el proyecto ya eligió para medir una IA es el par
+*(lo que dijo la IA, lo que dijo la persona)* como **filas separadas**, nunca
+un `UPDATE` — ver `AnalisisDeEvidencia`.
+
+Lectura propuesta: no es una capa nueva, es eso generalizado. El agente deja
+su sugerencia como fila, el técnico decide, y la revisión del cierre gana **un
+punto más que puede valer `True` o `None` y nunca `False`** — la decisión
+congelada del 31/10/2026. Lo que **no** es extensión es que el Supervisor
+*autorice* acciones: eso es la frontera del motor, y el Supervisor **no
+ejecuta nada** por diseño.
+
+## El plan, cuando se retome
+
+**Prerrequisitos, antes de la etapa 1:**
+
+- **P1** — medir qué falta de la configuración de instalación en la org real.
+  Es una lectura.
+- **P2** — `verificador-de-api` sobre SmartOLT: existe el endpoint, con qué
+  parámetros, qué devuelve y **cómo se deshace**. Sin esto no puede entrar al
+  catálogo.
+- **P3** — la decisión del usuario, abajo.
+
+**Etapa 1 · «Autorizar la ONU desde la app». Sin modelo.** Hoy el técnico
+instala, escribe el serial y **se sale de la app** a autorizar en el panel de
+SmartOLT. Ese salto es lo que de verdad cuesta, es determinista y **funciona
+con mala señal**. Herramienta en el catálogo (config, patrón de
+`actualizar_sn_onu` y `reiniciar_ont`), servicio en `campo/services/` espejo
+de `lazo_isp.py`, endpoint en campo, botón en el detalle de la orden como
+`probar-conexion`. **Sin señal se rechaza, nunca se encola.** Es alcance, no
+autonomía: sigue habiendo aprobación humana atada antes del efecto.
+
+**Etapa 2 · El alta del cliente en WispHub.** Antes hay que modelar el mapa
+IP↔zona como configuración del tenant.
+
+**Etapa 3 · Ahí sí el agente.** Rol en `tenant_config` editable desde
+`/agentes`, catálogo propio **partido por rol** (ver el filo de arriba), bucle
+en Django, modelo prestado por el motor. Y el conocimiento operativo de
+instalación en `directivas/`: hoy el corpus del RAG es una sola guía de
+atención al cliente, **no hay manual de instalación ingestado**. Un agente de
+campo sin eso no tiene nada que saber que el formulario no diga ya.
+
+## Qué NO hay que crear
+
+Un cliente HTTP al motor en la app · una ruta de chat nueva en el motor · un
+segundo bucle de razonamiento · una tabla de conversación nueva · un canal de
+aviso al técnico · una tubería de visión · un registro de «equipo instalado en
+el cliente X» (eso lo sabe WispHub, frontera ya fijada) · una plantilla de
+instalación nueva · un catálogo de prompts por empresa.
+
+Y un cuidado de catálogos con la misma forma que **no son el mismo**: la
+`zona` de WispHub (la del alta, con el servidor en el nombre), la `zone` de
+SmartOLT (medida como ignorada en un filtro), las `ZonaDeReparto` de campo, y
+`localidad`/`ciudad` del cliente son **cuatro identificadores independientes**.
+El alta los cruza todos, y es donde ya costó tiempo.
+
+## Decisiones pendientes, las dos del usuario
+
+1. **¿Qué es este agente?** (a) un **asistente determinista** en la app:
+   botones que ejecutan lo que hoy obliga a salirse, con validación en código
+   y aprobación humana atada — sin modelo, anda con mala señal; o (b) un
+   **agente conversacional**. No son excluyentes, pero **(b) sin (a) no tiene
+   nada que ofrecer**. **Recomendación: (a) primero.**
+2. **¿El agente de campo podría alguna vez autorizar una ONU solo?** Hoy la
+   respuesta del repositorio es no. Si la intención es que sí, **se decide y
+   se registra con fecha antes de la primera línea**, no se descubre al final
+   — igual que se hizo el 31/10 con «el punto de IA nunca vale `False`».
+
+## DECISIÓN DEL USUARIO, 13/11/2026: el técnico crea el contrato desde la app
+
+> *«ahora el técnico crearía el contrato desde la app de dexter»*
+
+Hoy el técnico, en la casa del cliente, entra a WispHub y llena **a mano**:
+nombre, apellido, cédula, plan, dirección, coordenadas, el técnico que lo crea y
+la fecha. Todo eso **ya está en la plataforma antes de llegar**:
+
+| Lo que llena hoy en WispHub | De dónde sale |
+|---|---|
+| Nombre, apellido, cédula, plan, dirección | la solicitud que llenó el cliente (`solicitudes.SolicitudServicio`) |
+| Coordenadas | el GPS de «Llegué» en la app (el punto real de la casa); el de la solicitud como respaldo |
+| El técnico | la sesión de la app, emparejada con su usuario de `/api/staff/` de WispHub |
+| La fecha | el momento de tocar «Crear el contrato» |
+
+**Prototipo navegable:** `apps/tecnicos-mobile/lib/vista_previa/contrato_main.dart`
+(commit `c9e25839`), instalado como «Contrato (prototipo)» en el teléfono de pruebas.
+**Contrato de ejemplo** generado con WeasyPrint (el motor de `solicitudes/pdf.py`):
+datos de la solicitud + red + instalación + autorizaciones + dos firmas + huella de
+los datos firmados. Las cláusulas NO se inventaron: se cargan como texto de la empresa.
+
+### El plan
+
+| Fase | Qué | Depende de |
+|---|---|---|
+| 1 | La orden de instalación queda unida a su solicitud y la app muestra los datos del cliente; pantalla «Crear el contrato» con firma; el PDF del contrato al expediente | nada externo |
+| 2 | El alta en WispHub (`agregar-cliente/{zona}`), por el motor, con idempotencia y aprobación atada; espera el `task_id` y guarda el servicio en la orden; cierra el ticket | **la respuesta de abajo** |
+| 3 | Autorizar la ONU en SmartOLT | verificar su API (P2) |
+
+**Sin señal no se crea, y nunca se manda solo después:** crear un cliente dos veces
+es peor que esperar.
+
+### Lo que falta del usuario
+
+1. ~~**Zona/router, IP y usuario PPPoE.**~~ **RESPONDIDO el 14/11/2026: los
+   elige el TÉCNICO, en la casa.** Ver abajo.
+2. ~~**El contrato que firman hoy.**~~ Resuelto: las cláusulas y el NIT son
+   configuración por empresa (`ConfiguracionDeContrato.texto_condiciones`), se
+   cargan en Programación. Fase 1, `645cc8ef`.
+
+### LA IP LA ELIGE EL TÉCNICO — decisión del usuario, 14/11/2026
+
+Preguntado explícitamente entre cuatro opciones (la oficina antes de la visita,
+el técnico en la casa, WispHub solo, sin definir), el usuario eligió **el
+técnico, en la casa**.
+
+**Esto CONTRADICE lo que la skill de WispHub daba por sentado**, y la skill se
+corrigió el mismo día. Decía: «el alta de red (ip, usuario_rb, plan, zona)
+sigue siendo de la oficina, que es la única que conoce la topología». Era una
+suposición, no una medición, y la decisión del usuario gana (CLAUDE.md §1).
+
+**Qué cambia del diseño de la Fase 2:**
+
+- La IP **no puede viajar en la orden**, porque todavía no existe cuando la
+  orden se crea. Se elige en la pantalla del contrato, con señal.
+- La plataforma tiene que **guardar los rangos por zona** —configuración
+  editable por empresa, CLAUDE.md §3.3, nunca un rango fijo en código— y
+  ofrecerle al técnico las libres.
+- **Ofrecer, no pedir que teclee.** Es el mismo motivo que trajo todo este
+  trabajo: el usuario reportó que al digitar los datos «hay muchos errores,
+  mala escritura del nombre, direcciones mal digitalizadas». Una IP mal
+  tecleada no es un error de ortografía: es un cliente sin servicio, o dos
+  clientes con la misma IP.
+- La zona tiene que **corresponder a la red real de esa IP**. Ya está medido
+  que no se puede adivinar: el catálogo de zonas trae el número de servidor en
+  el NOMBRE (`CORTE 15 - SERVIDOR 1`) y hay que cruzarlo contra los segmentos
+  IP, no deducirlo.
+
+**CÓMO LO HACE HOY** (el usuario, 14/11/2026): en el panel de WispHub el
+técnico **aprieta una lupa en el campo de IP y le salen las disponibles**, y
+elige cualquiera — *«puede ser cualquiera»*. Eso dice tres cosas del diseño:
+
+1. **WispHub ya sabe cuáles están libres**, pero ese listado NO está en su API
+   pública: el índice del spec tiene 54 rutas y ninguna es de IP disponibles
+   (`/clientes/{accion}/` es solo activar/desactivar). La lupa vive en el panel
+   (`wisphub.io`), no en `api.wisphub.io`.
+2. **No hace falta lógica para elegir.** Cualquiera libre sirve, así que la
+   pantalla solo tiene que ofrecer y el técnico toca una.
+3. **Depender del endpoint interno del panel sería peor que calcularlo**: no
+   tiene contrato, puede cambiar sin aviso y probablemente pide la sesión del
+   navegador y no la clave de API. Para un camino que CREA clientes, eso no.
+
+**OJO con el fallo, que no es limpio.** Si se ofrece una IP que ya está tomada,
+`agregar-cliente` no devuelve un `400`: devuelve **202 + `task_id`**, y la
+skill ya tiene medido que *«una tarea asíncrona puede decir SUCCESS y traer un
+error de texto como resultado»*. O sea que el diseño no puede apoyarse en «si
+está ocupada, la API avisa»: hay que leer el resultado de la tarea.
+
+**Lo que falta medir antes de construir** (y es una medición, no una decisión):
+cuáles IPs están ocupadas hoy. El filtro `zona` de `/api/clientes/` **está
+medido como IGNORADO**, así que no se puede pedir «las de esta zona» directo;
+la respuesta de LISTA sí trae `ip` y `zona` por fila, y `router` sí filtra. Qué
+camino sirve se decide con el método del valor imposible, no por analogía.
+
+## LA FASE 2, CERRADA EN DISEÑO — 14/11/2026
+
+Cuatro respuestas del usuario ese día, y una medición que corrigió a la
+tercera. El flujo queda **igual al que el técnico ya usa en WispHub**, que es
+también la forma que la API pide:
+
+```
+1. el técnico elige la ZONA            ← `agregar-cliente/{id_zona}` la pide primero
+2. salen las IP disponibles de esa zona
+3. toca una — «puede ser cualquiera»
+4. se crea el cliente
+```
+
+### Lo que decidió el usuario, y lo que midió el repositorio
+
+| | Lo que dijo | Lo que los datos agregaron |
+|---|---|---|
+| Quién elige la IP | **el técnico, en la casa** | contradecía a la skill, que la daba por de la oficina. Corregido |
+| Cómo lo hace hoy | aprieta una lupa y sale la lista | ese listado **no está en la API**: 54 rutas, ninguna de IP libres |
+| Cuánto del pool se usa | «las 254; solo fuera la primera y la última» | cierto para `.0` y `.255`. **El `.1` NO**: libre en 83 de 86 pools, incluido uno con 240/254 ocupadas. Es la puerta de enlace y no se ofrece |
+| El orden | **primero la zona, después las IP** | encaja con `{id_zona}` en la URL del POST |
+
+### El defecto que casi se construyó encima
+
+El primer informe agrupaba por ZONA. Pero `172.16.9.0/24` tiene 42 clientes en
+«CORTE 15 - SERVIDOR 1» y 211 en «CORTE 30 - SERVIDOR 1»: decía **«212 libres»
+donde hay una**.
+
+La evidencia de que es una sola red: en 16 prefijos la suma de las dos zonas
+**nunca pasa de 254**, y nueve están al 98-99%. Si fueran redes distintas los
+conteos serían independientes y alguno se pasaría. **«CORTE 15/30» es el día de
+corte de la factura** —las dos zonas dicen *SERVIDOR 1*—, no la red.
+
+Entonces: la zona dice **de qué prefijos** se puede sacar; lo ocupado se cuenta
+**sobre todos los clientes**, sin importar su zona. Las dos cosas a la vez.
+
+### Lo que se va a construir
+
+| | |
+|---|---|
+| **Los prefijos de cada zona son configuración** | se siembran con los medidos y la empresa los corrige. Un prefijo con un cliente no es un pool: `169.254.x` es link-local y `192.168.x` es LAN privada, y los dos aparecían con «252 libres» |
+| **Lo ocupado se lee de WispHub, no se guarda** | una copia envejece, y entre que se lee y se crea pasan minutos. Se pregunta al momento |
+| **El `.1` queda fuera** | y los 3 pools donde un cliente lo tiene van a revisión aparte |
+| **Se ofrece, no se teclea** | el motivo de todo esto: el usuario reportó que al digitar «hay muchos errores». Una IP mal tecleada no es un dedazo: es un cliente sin servicio, o dos con la misma |
+
+### Lo que NO va a poder prometer, dicho antes de construirlo
+
+**Que una IP libre sea usable.** Los equipos de red —antenas, switches, CTO— no
+son clientes, así que no están en `/api/clientes/` y la resta no los ve. Si una
+dirección la tiene una antena, la lista la va a ofrecer igual.
+
+Y el fallo no es limpio: `agregar-cliente` devuelve **202 + `task_id`**, no un
+`400`, y ya está medido que *«una tarea asíncrona puede decir SUCCESS y traer
+un error de texto como resultado»*. Hay que leer el resultado de la tarea.
+
+### Un hallazgo que no es de la app, y vale aparte
+
+**Los pools de SERVIDOR 1 están casi llenos**: nueve `/24` al 98-99%, y
+Sabanagrande con `172.16.40.0/24` en **240 de 254**. Eso no lo arregla una
+pantalla; son direcciones que se agotan. Queda anotado porque se vio midiendo,
+no porque alguien lo pidiera.
+
+## Bitácora
+
+| Fecha | Qué | Evidencia | Hash |
+|---|---|---|---|
+| 02/11/2026 | **Encuadrado y aparcado a pedido del usuario.** Barrido completo: `apps/tecnicos-mobile/lib/` entero (91 `.dart`), `campo/` (57 módulos), la skill de SmartOLT (788 líneas), la de WispHub, `M06-D`, el catálogo (91 herramientas, 9 roles). Nada construido, ninguna API llamada, producción no leída | informe del arquitecto | — |

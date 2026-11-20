@@ -1,0 +1,211 @@
+{
+  "origen": "por_defecto",
+  "pisos": [
+    {
+      "nivel": 3,
+      "rotulo": "Tecnología y dirección"
+    },
+    {
+      "nivel": 2,
+      "rotulo": "Operación y clientes"
+    },
+    {
+      "nivel": 1,
+      "rotulo": "Administración"
+    }
+  ],
+  "departamentos": [
+    {
+      "id": "operativo",
+      "rotulo": "NOC y Redes",
+      "direccion": "Dirección de Operaciones",
+      "piso": 3,
+      "plantilla": "operaciones",
+      "areas": [
+        "operativo",
+        "Operaciones",
+        "NOC y Redes"
+      ],
+      "capacidades": [],
+      "ocupaciones": [
+        {
+          "puesto": "principal",
+          "agente": "supervisor_noc",
+          "nombre": "",
+          "persona": ""
+        }
+      ],
+      "acento": "#4f46e5"
+    },
+    {
+      "id": "campo",
+      "rotulo": "Operaciones de Campo",
+      "direccion": "Dirección de Operaciones",
+      "piso": 2,
+      "plantilla": "tecnica",
+      "areas": [
+        "campo",
+        "Operaciones de Campo",
+        "Campo"
+      ],
+      "capacidades": [],
+      "ocupaciones": [],
+      "acento": "#4d9e2a"
+    },
+    {
+      "id": "atencion_cliente",
+      "rotulo": "Atención al Cliente",
+      "direccion": "Dirección de Servicio",
+      "piso": 2,
+      "plantilla": "atencion",
+      "areas": [
+        "atencion_cliente",
+        "Atención al Cliente",
+        "soporte_tecnico",
+        "Soporte Técnico"
+      ],
+      "capacidades": [
+        "soporte"
+      ],
+      "ocupaciones": [
+        {
+          "puesto": "principal",
+          "agente": "cliente_final",
+          "nombre": "",
+          "persona": ""
+        },
+        {
+          "puesto": "p1",
+          "agente": "soporte_tecnico_cliente",
+          "nombre": "Diagnóstico",
+          "persona": ""
+        }
+      ],
+      "acento": "#0ea5a4"
+    },
+    {
+      "id": "comercial",
+      "rotulo": "Comercial y Marketing",
+      "direccion": "Dirección Comercial",
+      "piso": 2,
+      "plantilla": "comercial",
+      "areas": [
+        "ventas",
+        "Ventas",
+        "comercial",
+        "Comercial y Marketing"
+      ],
+      "capacidades": [],
+      "ocupaciones": [
+        {
+          "puesto": "principal",
+          "agente": "ventas",
+          "nombre": "",
+          "persona": ""
+        }
+      ],
+      "acento": "#b8860b"
+    },
+    {
+      "id": "cartera",
+      "rotulo": "Finanzas y Cartera",
+      "direccion": "Dirección Financiera",
+      "piso": 1,
+      "plantilla": "finanzas",
+      "areas": [
+        "cartera",
+        "Cartera",
+        "Facturación",
+        "Finanzas y Cartera"
+      ],
+      "capacidades": [
+        "facturacion"
+      ],
+      "ocupaciones": [
+        {
+          "puesto": "principal",
+          "agente": "facturacion_cliente",
+          "nombre": "Cobranza",
+          "persona": ""
+        }
+      ],
+      "acento": "#a855f7"
+    },
+    {
+      "id": "administracion",
+      "rotulo": "Administración",
+      "direccion": "Dirección General",
+      "piso": 1,
+      "plantilla": "gestion",
+      "areas": [
+        "administracion",
+        "Administración"
+      ],
+      "capacidades": [
+        "administracion"
+      ],
+      "ocupaciones": [
+        {
+          "puesto": "principal",
+          "agente": "configuracion_guiada",
+          "nombre": "",
+          "persona": ""
+        }
+      ],
+      "acento": "#2563eb"
+    },
+    {
+      "id": "recursos_humanos",
+      "rotulo": "Recursos Humanos",
+      "direccion": "Dirección General",
+      "piso": 1,
+      "plantilla": "personal",
+      "areas": [
+        "recursos_humanos",
+        "Recursos Humanos",
+        "Talento Humano"
+      ],
+      "capacidades": [],
+      "ocupaciones": [],
+      "acento": "#be185d"
+    },
+    {
+      "id": "auditoria",
+      "rotulo": "Auditoría y Cumplimiento",
+      "direccion": "Dirección General",
+      "piso": 1,
+      "plantilla": "expedientes",
+      "areas": [
+        "auditoria",
+        "Auditoría y Cumplimiento",
+        "Cumplimiento"
+      ],
+      "capacidades": [],
+      "ocupaciones": [],
+      "acento": "#6b21a8"
+    }
+  ],
+  "espacios": [
+    {
+      "id": "direccion",
+      "rotulo": "Dirección",
+      "piso": 3,
+      "plantilla": "despacho",
+      "acento": "#64748b"
+    },
+    {
+      "id": "sala_reuniones",
+      "rotulo": "Sala de Reuniones",
+      "piso": 3,
+      "plantilla": "reuniones",
+      "acento": "#0f766e"
+    },
+    {
+      "id": "recepcion",
+      "rotulo": "Recepción",
+      "piso": 1,
+      "plantilla": "vestibulo",
+      "acento": "#92400e"
+    }
+  ]
+}

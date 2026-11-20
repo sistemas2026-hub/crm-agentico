@@ -1,0 +1,26 @@
+# Override para levantar ESTE worktree sin chocar con los contenedores que ya
+# corren (wt_campo, motor-local, supabase).
+#
+#   docker compose -p inventario -f docker-compose.yml -f compose.inventario.yml up -d db redis backend
+#
+# `!override` es obligatorio y no cosmetico: en Compose las listas de `ports` se
+# ACUMULAN entre archivos, asi que sin el tag el override agrega 8002 y CONSERVA
+# el 8000/5432/6379 del archivo base -- y falla con "port is already allocated".
+# Medido el 28/09/2026 intentandolo sin el.
+#
+# db y redis no publican nada: el backend las alcanza por la red interna del
+# proyecto, y lo que no se expone no puede chocar.
+services:
+  db:
+    ports: !override []
+
+  redis:
+    ports: !override []
+
+  backend:
+    ports: !override
+      - "8002:8000"
+
+  frontend:
+    ports: !override
+      - "5174:5173"

@@ -1,0 +1,123 @@
+- generic [ref=f1e3]:
+  - navigation "Principal" [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: Q
+      - generic [ref=f1e7]: QA BANDEJA (datos de prueba)
+    - generic [ref=f1e8]: Vender
+    - link "Hoy" [ref=f1e9] [cursor=pointer]:
+      - /url: /
+    - link "Negociaciones" [ref=f1e16] [cursor=pointer]:
+      - /url: /pipeline
+    - link "Prospectos" [ref=f1e19] [cursor=pointer]:
+      - /url: /leads
+    - link "Cuentas" [ref=f1e24] [cursor=pointer]:
+      - /url: /accounts
+    - link "Contactos" [ref=f1e29] [cursor=pointer]:
+      - /url: /contacts
+    - link "Objetivos" [ref=f1e35] [cursor=pointer]:
+      - /url: /goals
+    - generic [ref=f1e42]: Atender
+    - link "Tareas" [ref=f1e43] [cursor=pointer]:
+      - /url: /tasks
+    - link "Tickets" [ref=f1e47] [cursor=pointer]:
+      - /url: /tickets
+    - link "Asistente" [ref=f1e55] [cursor=pointer]:
+      - /url: /asistente
+    - link "Conversaciones" [ref=f1e59] [cursor=pointer]:
+      - /url: /conversaciones
+    - link "Simulador WhatsApp" [ref=f1e62] [cursor=pointer]:
+      - /url: /simulador-whatsapp
+    - link "Agentes" [ref=f1e65] [cursor=pointer]:
+      - /url: /agentes
+    - link "Manual" [ref=f1e71] [cursor=pointer]:
+      - /url: /manual
+    - link "Instalaciones" [ref=f1e75] [cursor=pointer]:
+      - /url: /instalaciones
+    - link "Base de conocimiento" [ref=f1e80] [cursor=pointer]:
+      - /url: /solutions
+    - link "Documentos" [ref=f1e83] [cursor=pointer]:
+      - /url: /documents
+    - generic [ref=f1e87]: Facturar
+    - link "Facturas" [ref=f1e88] [cursor=pointer]:
+      - /url: /invoices
+    - link "Registro de horas" [ref=f1e92] [cursor=pointer]:
+      - /url: /timesheet
+    - generic [ref=f1e96]: Administrar
+    - link "Equipo y accesos" [ref=f1e97] [cursor=pointer]:
+      - /url: /team
+    - link "Configuración" [ref=f1e110] [cursor=pointer]:
+      - /url: /settings
+    - link "Conectar sistema" [ref=f1e112] [cursor=pointer]:
+      - /url: /conectores
+    - link "Conectar API nueva" [ref=f1e119] [cursor=pointer]:
+      - /url: /configuracion-guiada
+    - link "Habilidades" [ref=f1e125] [cursor=pointer]:
+      - /url: /habilidades
+    - link "Consumo" [ref=f1e129] [cursor=pointer]:
+      - /url: /consumo
+    - generic [ref=f1e133]:
+      - button "Buscar ⌘K" [ref=f1e134] [cursor=pointer]:
+        - text: Buscar
+        - generic [ref=f1e138]: ⌘K
+      - link "Notificaciones" [ref=f1e139] [cursor=pointer]:
+        - /url: /notifications
+      - link "Tu perfil" [ref=f1e143] [cursor=pointer]:
+        - /url: /profile
+      - link "Ayuda" [ref=f1e148] [cursor=pointer]:
+        - /url: /support
+      - link "Descargar app" [ref=f1e152] [cursor=pointer]:
+        - /url: https://play.google.com/store/apps/details?id=io.bottlecrm&hl=en
+      - link "Cerrar sesión" [ref=f1e155] [cursor=pointer]:
+        - /url: /logout
+  - generic [ref=f1e159]:
+    - banner [ref=f1e160]:
+      - generic [ref=f1e161]:
+        - heading "Conversaciones" [level=1] [ref=f1e162]
+        - generic [ref=f1e163]: 1 por atender · 8 en total
+    - generic [ref=f1e164]:
+      - complementary "Conversaciones" [ref=f1e165]:
+        - navigation "Filtrar por estado" [ref=f1e166]:
+          - button "Por atender 1" [ref=f1e167] [cursor=pointer]:
+            - text: Por atender
+            - generic [ref=f1e168]: "1"
+          - button "En atención 4" [ref=f1e169] [cursor=pointer]:
+            - text: En atención
+            - generic [ref=f1e170]: "4"
+          - button "Resueltas 1" [ref=f1e171] [cursor=pointer]:
+            - text: Resueltas
+            - generic [ref=f1e172]: "1"
+          - button "Todas 8" [ref=f1e173] [cursor=pointer]:
+            - text: Todas
+            - generic [ref=f1e174]: "8"
+        - textbox "Buscar conversaciones" [ref=f1e179]:
+          - /placeholder: Buscar cliente o mensaje…
+        - generic [ref=f1e180]:
+          - generic [ref=f1e181]:
+            - generic [ref=f1e182]: Canales
+            - combobox "Qué canales se ven" [ref=f1e183] [cursor=pointer]:
+              - option "Operativo" [selected]
+              - option "Pruebas"
+              - option "Todos"
+          - generic [ref=f1e184]:
+            - generic [ref=f1e185]: Ordenar por
+            - combobox "Ordenar la lista" [ref=f1e186] [cursor=pointer]:
+              - option "Actividad reciente"
+              - option "Recomendado" [selected]
+              - option "Mayor espera"
+              - option "Más reciente creación"
+          - button "Solo escaladas" [ref=f1e187] [cursor=pointer]
+        - 'link "Cliente respondió Espera: 2h CLIENTE QA 2 9m Cliente respondió — sin asignar Asistente: Ya te estamos atendiendo, en un momento te responde una persona. WhatsApp" [ref=f1e189] [cursor=pointer]':
+          - /url: /conversaciones/ca76a97c-3593-4ffe-9bc3-ff21f9f7bc4d
+          - generic [ref=f1e190]:
+            - generic [ref=f1e191]:
+              - generic [ref=f1e192]: Cliente respondió
+              - generic "Esperando desde hace 2h" [ref=f1e194]: "Espera: 2h"
+            - generic [ref=f1e195]:
+              - generic [ref=f1e196]: CLIENTE QA 2
+              - generic [ref=f1e197]: 9m
+            - generic [ref=f1e198]: Cliente respondió — sin asignar
+            - paragraph [ref=f1e199]: "Asistente: Ya te estamos atendiendo, en un momento te responde una persona."
+            - generic [ref=f1e200]: WhatsApp
+      - generic [ref=f1e203]:
+        - heading "Elegí una conversación" [level=3] [ref=f1e208]
+        - paragraph [ref=f1e209]: Hay 1 esperando a una persona. Están marcadas en la lista de la izquierda.

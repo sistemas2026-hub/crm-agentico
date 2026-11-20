@@ -1,0 +1,11 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Generated API schema. drf-spectacular writes YAML, and the file name says
+# .json, so prettier picks the JSON parser and dies on line 1 instead of
+# reporting a formatting diff. That aborts `pnpm run lint` before eslint runs.
+openapi.json

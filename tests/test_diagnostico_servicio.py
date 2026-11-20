@@ -1,0 +1,528 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+ EL DIAGNOSTICO OPTICO SALE POR LOS DOS DESPACHOS, Y NUNCA DEVUELVE EL SERIAL
+================================================================================
+
+QUE SE PRUEBA
+-------------
+Tres cosas, y cada una tiene su cicatriz:
+
+  1. Que 'motor.ejecutar_para_servicio' LLEGUE al ejecutor de diagnostico.
+     Hay DOS despachos en nucleo/modelo/motor.py --'_despacho_de_herramienta',
+     que es el del modelo, y 'ejecutar_para_servicio', que es el de un servicio
+     interno-- y el 07/10/2026 la herramienta estaba cableada solo en el
+     primero. El sintoma no señalaba la causa: la herramienta existia, estaba
+     autorizada por rol, tenia 'invocable_por_servicio: true' en la base, y el
+     chat del Supervisor recibia HTTP 502. Ese 502 era el 'except Exception' de
+     la ruta interna atrapando el ValueError "solo 'http'" del final de
+     'ejecutar_para_servicio'.
+
+  2. Que el SERIAL de la ONU no salga nunca en el resultado. El serial habilita
+     reiniciar el equipo. Que el modelo pueda leerlo es la mitad de un camino
+     de inyeccion -- la otra mitad seria una herramienta de reinicio que acepte
+     el serial como argumento del modelo.
+
+  3. Que la señal se clasifique EN CODIGO, no la interprete el modelo, y que
+     la clasificacion no se mezcle con 'Match state'. Un campo unico llamado
+     'senal_texto' decia 'mismatch' con -20.55 dBm, que es una señal BUENA:
+     'Match state' habla de la config aplicada en la OLT, no del nivel optico.
+
+COMO SE AFIRMA, Y POR QUE ASI
+-----------------------------
+La §1 se mide POR EFECTO: se reemplaza el ejecutor por un centinela y se
+afirma que la salida ES el centinela. Una prueba que dijera "la rama esta
+escrita" --buscando el texto en el fuente-- pasaria en verde con el ejecutor
+desconectado, y encima se dispararia con un docstring que mencione el flag.
+Esa trampa ya costo tiempo cinco veces en este repositorio.
+
+Sin red, sin base y sin modelo:
+
+    py -3.13 tests/test_diagnostico_servicio.py
+================================================================================
+"""
+import io
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+for var, valor in (("DBHOST", "localhost"), ("DBPORT", "5432"),
+                   ("DBNAME", "postgres"), ("DBUSER", "postgres"),
+                   ("DBPASSWORD", "x")):
+    os.environ.setdefault(var, valor)
+
+from nucleo.config.schema import Herramienta                      # noqa: E402
+from nucleo.herramientas import diagnostico_servicio as diag     # noqa: E402
+from nucleo.modelo import motor                                  # noqa: E402
+
+FALLOS = []
+
+
+def afirmar(condicion, que):
+    print(f"  [{'ok' if condicion else 'FALLA'}] {que}")
+    if not condicion:
+        FALLOS.append(que)
+
+
+class _Identidad:
+    slug = "tenant_de_prueba"
+
+
+class _Config:
+    """Lo minimo que 'ejecutar_para_servicio' lee de una config."""
+
+    identidad = _Identidad()
+    variables_tenant = {"SMARTOLT_SUBDOMINIO": "ejemplo"}
+    roles = {}
+
+
+def _herramienta(**cambios):
+    """La herramienta REAL del schema, no un doble artesanal.
+
+    La primera version de esta prueba imitaba a mano los atributos que el
+    despacho mira y fallaba por los que no adivino ('argumentos_fijos'). Una
+    instancia del schema los trae todos con su default -- y si manana el
+    despacho mira un campo nuevo, esta prueba no se cae por eso.
+    """
+    datos = {"nombre": "diagnosticar_servicio",
+             "descripcion": "Diagnostico optico de un servicio.",
+             "tipo": "interno",
+             "diagnostica_servicio": True,
+             "resolver_equipo_con": "consultar_cliente",
+             "invocable_por_servicio": True,
+             "roles_permitidos": ["supervisor_noc"],
+             "solo_lectura": True}
+    datos.update(cambios)
+    return Herramienta(**datos)
+
+
+print("=" * 70)
+print(" EL DIAGNOSTICO OPTICO: LOS DOS DESPACHOS, EL SERIAL Y LA SEÑAL")
+print("=" * 70)
+
+print("\n§1  LA RUTA DE UN SERVICIO LLEGA AL EJECUTOR  --  medido por efecto")
+
+CENTINELA = {"__centinela__": "llego al ejecutor de diagnostico"}
+_visto = {}
+
+
+def _falso_diagnosticar(herramienta, argumentos, tenant=None,
+                        variables_tenant=None, catalogo=None):
+    _visto["tenant"] = tenant
+    _visto["argumentos"] = dict(argumentos or {})
+    return CENTINELA
+
+
+_original = motor.ejecutor_diagnostico.diagnosticar
+motor.ejecutor_diagnostico.diagnosticar = _falso_diagnosticar
+try:
+    salida = motor.ejecutar_para_servicio(
+        _Config(), _herramienta(), {"id_servicio": 5832})
+    error = None
+except Exception as e:                                           # noqa: BLE001
+    salida, error = None, e
+finally:
+    motor.ejecutor_diagnostico.diagnosticar = _original
+
+afirmar(error is None,
+        f"'ejecutar_para_servicio' no lanza"
+        + (f" (lanzo {type(error).__name__}: {error})" if error else ""))
+afirmar(salida is CENTINELA,
+        "y la salida ES la del ejecutor de diagnostico, no otra cosa")
+#  El slug importa: el ejecutor lo usa para resolver la credencial del tenant.
+#  Si llegara vacio, la llamada saldria sin clave y el sintoma seria un 403 de
+#  SmartOLT, que señala al proveedor y no a esto.
+afirmar(_visto.get("tenant") == "tenant_de_prueba",
+        "y el ejecutor recibe el slug del tenant, no una cadena vacia")
+
+print("\n§2  LA MUTACION QUE ESTA PRUEBA TIENE QUE MATAR")
+#  Lo que fallo en produccion fue EXACTAMENTE esto: sin la rama, el final de
+#  'ejecutar_para_servicio' lanza ValueError y la ruta interna lo convierte en
+#  502. Se reproduce apagando el flag, que es la forma de llegar al final de la
+#  funcion sin tocar el fuente.
+try:
+    motor.ejecutar_para_servicio(
+        _Config(), _herramienta(diagnostica_servicio=False),
+        {"id_servicio": 5832})
+    cayo = None
+except Exception as e:                                           # noqa: BLE001
+    cayo = e
+
+afirmar(isinstance(cayo, ValueError) and "solo 'http'" in str(cayo),
+        "sin rama que la atienda, una 'interno' muere con ValueError -- que es "
+        "el 502 que se vio")
+
+print("\n§3  LAS CLAVES QUE EL EJECUTOR PROMETE  --  el serial no esta entre ellas")
+#  '_sin_resolver' es el unico camino de salida que no habla con el proveedor,
+#  asi que sirve para leer la FORMA del resultado sin red.
+forma = diag._sin_resolver("motivo de prueba", 5832)
+afirmar(isinstance(forma, dict), "'_sin_resolver' devuelve un dict")
+prohibidas = {"sn", "SN", "sn_onu", "serial", "equipo", "Description",
+              "nombre", "ip", "IPv4 address", "mac"}
+afirmar(not (set(forma) & prohibidas),
+        f"ninguna clave del resultado es el serial ni PII: {sorted(forma)}")
+afirmar("equipo_registrado" in forma,
+        "y si dice SI HAY equipo registrado, que es el dato util sin el serial")
+
+print("\n§4  LA SEÑAL SE CLASIFICA EN CODIGO, Y NO ES 'Match state'")
+afirmar(diag._clasificar_senal(-20.55) == "buena",
+        "-20.55 dBm es buena (el caso real que un campo unico llamaba "
+        "'mismatch')")
+afirmar(diag._clasificar_senal(-27.0) == "debil",
+        f"-27.0 dBm es debil (fuera del piso {diag.SENAL_MINIMA_DBM})")
+afirmar(diag._clasificar_senal(None) == "sin_dato",
+        "sin lectura NO se inventa una clasificacion")
+afirmar(diag._clasificar_senal(-8.0) == "buena"
+        and diag._clasificar_senal(-25.0) == "buena",
+        "los bordes del rango documentado (-25 a -8) cuentan como buenos")
+#  Y el campo de config va aparte, para que no se lean como lo mismo.
+afirmar("senal" in forma and "estado_config" in forma,
+        "'senal' y 'estado_config' son campos DISTINTOS del resultado")
+
+print("\n§4b UN 400 DE SMARTOLT ES 'NO ESTA REGISTRADO', NO 'LA PETICION ESTA MAL'")
+#  Verificado por la skill con el metodo del valor imposible --un serial
+#  inexistente devuelve 400 "Invalid parameters"-- y medido en produccion el
+#  07/10/2026: de cinco servicios reales, cuatro contestaron su estado y uno dio
+#  400 con un serial de formato perfecto. No era la forma del identificador.
+#
+#  Importa porque este texto lo lee una persona antes de cerrarle el caso a
+#  alguien: "contesto 400" la manda a revisar una integracion que esta bien.
+#
+#  SE MIDE HACIENDO QUE EL PROVEEDOR CONTESTE 400, no leyendo el fuente. La
+#  primera version de esta guarda buscaba la frase con 'inspect.getsource' y
+#  habria pasado en verde con el 'return' borrado, porque el COMENTARIO que
+#  explica el cambio contiene la misma frase. Esa trampa ya costo tiempo seis
+#  veces en este repositorio; van siete si se cuenta este intento.
+
+
+class _Respuesta400:
+    status_code = 400
+
+    @staticmethod
+    def json():
+        return {"status": False, "error": "Invalid parameters"}
+
+
+#  Los tres bordes externos de 'diagnosticar', y se parchean los TRES porque
+#  sin credenciales la funcion falla antes de llegar al 400 -- con otro motivo
+#  igual de valido, que es justamente lo que haria pasar esta guarda por el
+#  camino equivocado.
+_req_original = diag.requests.get
+_serial_original = diag._resolver_serial
+_base_original = diag.ejecutor_http.base_url_de
+_headers_original = diag.ejecutor_http.headers_de
+diag.requests.get = lambda *a, **k: _Respuesta400()
+diag._resolver_serial = lambda *a, **k: ("UNSERIALCUALQUIERA", "")
+diag.ejecutor_http.base_url_de = lambda *a, **k: "https://ejemplo.invalido"
+diag.ejecutor_http.headers_de = lambda *a, **k: {}
+try:
+    _resp = diag.diagnosticar(_herramienta(), {"id_servicio": 5832},
+                              tenant="t", variables_tenant={"X": "y"},
+                              catalogo=[])
+finally:
+    diag.requests.get = _req_original
+    diag._resolver_serial = _serial_original
+    diag.ejecutor_http.base_url_de = _base_original
+    diag.ejecutor_http.headers_de = _headers_original
+
+afirmar("no esta registrado" in (_resp.get("motivo") or ""),
+        f"un 400 se traduce a 'no esta registrado': {_resp.get('motivo')!r}")
+afirmar("400" not in (_resp.get("motivo") or ""),
+        "y NO le muestra el codigo HTTP crudo a quien decide")
+afirmar(_resp["estado"] == "desconocido",
+        "el estado queda en 'desconocido', nunca en linea ni caido")
+afirmar(_resp["senal"] == "sin_dato",
+        "y la señal queda 'sin_dato', que es lo que impide proponer un cierre")
+
+print("\n§4c EL NIVEL QUE RECIBE LA OLT VIAJA, Y SOLO SI ES UN NUMERO")
+#  Tanda 2 de las correcciones del usuario (19/10/2026): el doble diagnostico
+#  del Supervisor compara los dos niveles que el ISP escribe en el ticket. El
+#  de la OLT venia en la misma respuesta y se tiraba. Se mide con una respuesta
+#  200 de la forma verificada de 'full_status_json'.
+
+
+class _Respuesta200:
+    status_code = 200
+
+    def __init__(self, olt):
+        self._olt = olt
+
+    def json(self):
+        optico = {"Rx optical power(dBm)": "-23.57"}
+        if self._olt is not None:
+            optico["OLT Rx ONT optical power(dBm)"] = self._olt
+        return {"full_status_json": {
+            "ONU details": {"Run state": "Online", "Match state": "match",
+                            "Last down cause": "dying-gasp"},
+            "Optical status": optico}}
+
+
+def _diagnosticar_con(olt):
+    diag.requests.get = lambda *a, **k: _Respuesta200(olt)
+    diag._resolver_serial = lambda *a, **k: ("UNSERIALCUALQUIERA", "")
+    diag.ejecutor_http.base_url_de = lambda *a, **k: "https://ejemplo.invalido"
+    diag.ejecutor_http.headers_de = lambda *a, **k: {}
+    try:
+        return diag.diagnosticar(_herramienta(), {"id_servicio": 5832},
+                                 tenant="t", variables_tenant={"X": "y"},
+                                 catalogo=[])
+    finally:
+        diag.requests.get = _req_original
+        diag._resolver_serial = _serial_original
+        diag.ejecutor_http.base_url_de = _base_original
+        diag.ejecutor_http.headers_de = _headers_original
+
+
+_con = _diagnosticar_con("-23.38")
+afirmar(_con.get("senal_dbm") == -23.57 and _con.get("senal_olt_dbm") == -23.38,
+        f"los dos niveles salen como numeros: {_con.get('senal_dbm')} / "
+        f"{_con.get('senal_olt_dbm')}")
+afirmar(_con.get("senal") == "buena",
+        "la clasificacion sigue siendo la de la ONU, no la de la OLT")
+afirmar(_diagnosticar_con(None).get("senal_olt_dbm", "falta") is None,
+        "sin el campo, el nivel de la OLT es None, no falta la clave")
+for raro in ("", "N/A", "nan", "inf"):
+    afirmar(_diagnosticar_con(raro).get("senal_olt_dbm") is None,
+            f"{raro!r} no es un nivel: queda None")
+afirmar("senal_olt_dbm" in diag._sin_resolver("x", 1),
+        "y sin resolver, la forma es la misma")
+
+print("\n§4d EL CORTE DEL PUERTO: LAS DEL MISMO PUERTO EN LOS A LA VEZ, SIN PII")
+#  Caso 4 de las correcciones del usuario (19/10/2026). El proveedor se simula
+#  ruteando por URL, con la forma verificada ese dia.
+
+
+class _Json:
+    status_code = 200
+    ok = True
+
+    def __init__(self, cuerpo):
+        self._cuerpo = cuerpo
+
+    def json(self):
+        return self._cuerpo
+
+    @staticmethod
+    def raise_for_status():
+        return None
+
+
+class _Proveedor:
+    def __init__(self, *, run="Offline", causa="ONT LOSi/LOBi alarm",
+                 detalles=None, filas=None, roto=False):
+        self.run, self.causa, self.roto = run, causa, roto
+        self.detalles = detalles if detalles is not None else {
+            "olt_id": "3", "board": "2", "port": "11"}
+        self.filas = filas or []
+        self.pedidos = []
+
+    def __call__(self, url, **k):
+        self.pedidos.append((url, k.get("params")))
+        if "get_onu_full_status_info" in url:
+            return _Json({"full_status_json": {
+                "ONU details": {"Run state": self.run,
+                                "Last down cause": self.causa},
+                "Optical status": {}}})
+        if self.roto:
+            raise ConnectionError("sin red")
+        if "get_onu_details" in url:
+            return _Json({"onu_details": self.detalles})
+        if "get_all_onus_details" in url:
+            return _Json({"onus": self.filas})
+        raise AssertionError(f"pedido inesperado: {url}")
+
+
+def _con_proveedor(proveedor):
+    diag.requests.get = proveedor
+    diag._resolver_serial = lambda *a, **k: ("CDTC00000001", "")
+    diag.ejecutor_http.base_url_de = lambda *a, **k: "https://ejemplo.invalido"
+    diag.ejecutor_http.headers_de = lambda *a, **k: {}
+    try:
+        return diag.diagnosticar(_herramienta(), {"id_servicio": 5832},
+                                 tenant="t", variables_tenant={"X": "y"},
+                                 catalogo=[])
+    finally:
+        diag.requests.get = _req_original
+        diag._resolver_serial = _serial_original
+        diag.ejecutor_http.base_url_de = _base_original
+        diag.ejecutor_http.headers_de = _headers_original
+
+
+_filas = [
+    {"status": "LOS", "last_status_change": "2026-10-19 10:00:00.123456",
+     "sn": "CDTC00000001"},                                       # este equipo
+    {"status": "LOS", "last_status_change": "2026-10-19 10:05:00.000001",
+     "sn": "CDTC00000002"},                                       # a la vez
+    {"status": "LOS", "last_status_change": "2026-10-19 09:50:00",
+     "sn": "CDTC00000003"},                                       # a la vez
+    {"status": "LOS", "last_status_change": "2026-05-01 08:00:00.000001",
+     "sn": "CDTC00000004"},                                       # hace meses
+]
+_p = _Proveedor(filas=_filas)
+_r = _con_proveedor(_p)
+afirmar(_r.get("puerto") == "3/2/11" and _r.get("onus_en_los_a_la_vez") == 3,
+        f"cuenta las del puerto en LOS a la vez, sin la de hace meses: "
+        f"{_r.get('puerto')} / {_r.get('onus_en_los_a_la_vez')}")
+_listado = next((p for u, p in _p.pedidos if "get_all_onus_details" in u), None)
+afirmar(_listado is not None
+        and (_listado["olt_id"], _listado["board"], _listado["port"],
+             _listado["status"]) == ("3", "2", "11", "los"),
+        f"pide el puerto filtrado y solo LOS: {_listado}")
+afirmar(_listado is not None and set(_listado["fields"].split(","))
+        == {"status", "last_status_change", "sn"},
+        "y pide SOLO estado, hora y serial: ni nombre, ni direccion, ni contacto")
+afirmar(not ({"sn", "name", "address", "contact"} & set(_r)),
+        f"el resultado no trae el serial ni datos del cliente: {sorted(_r)}")
+
+_r = _con_proveedor(_Proveedor(filas=_filas[1:]))
+afirmar(_r.get("onus_en_los_a_la_vez") == 0,
+        "si este equipo no figura en LOS en su puerto, no se afirma un corte")
+_r = _con_proveedor(_Proveedor(roto=True))
+afirmar(_r.get("puerto") == "" and _r.get("onus_en_los_a_la_vez") is None,
+        "sin poder contar, ni puerto ni numero: no hay corte que afirmar")
+_r = _con_proveedor(_Proveedor(filas=_filas, detalles={
+    "olt_id": 3, "board": 0, "port": 11}))
+afirmar(_r.get("puerto") == "3/0/11" and _r.get("onus_en_los_a_la_vez") == 3,
+        f"la placa 0 existe, y como numero tambien vale: {_r.get('puerto')}")
+_r = _con_proveedor(_Proveedor(filas=_filas, detalles={
+    "olt_id": "3", "board": "2 CARLOS PRUEBA", "port": "11"}))
+afirmar(_r.get("puerto") == "" and _r.get("onus_en_los_a_la_vez") is None,
+        "una pieza que no es un numero no arma una llave: ni puerto ni conteo")
+_hexa = diag.ejecutor_http._gpon_hex("CDTC00000001")
+_r = _con_proveedor(_Proveedor(filas=[dict(f, sn=_hexa) if i == 0 else f
+                                      for i, f in enumerate(_filas)]))
+afirmar(bool(_hexa) and _r.get("onus_en_los_a_la_vez") == 3,
+        "la fila propia se encuentra tambien con el serial en hexadecimal")
+_r = _con_proveedor(_Proveedor(filas=[{k: v for k, v in f.items() if k != "sn"}
+                                      for f in _filas]))
+afirmar(_r.get("onus_en_los_a_la_vez") == 0,
+        "si las filas no traen el serial, no se afirma un corte (y queda en "
+        "el log)")
+
+
+class _Paginado(_Proveedor):
+    """El proveedor recorta la pagina: la fila propia llega en la segunda."""
+
+    def __call__(self, url, **k):
+        if "get_all_onus_details" in url:
+            self.pedidos.append((url, k.get("params")))
+            pagina = (k.get("params") or {}).get("page")
+            filas = _filas[1:] if pagina == 1 else _filas[:1]
+            return _Json({"onus": filas, "total_pages": 2})
+        return super().__call__(url, **k)
+
+
+_p = _Paginado()
+_r = _con_proveedor(_p)
+afirmar(_r.get("onus_en_los_a_la_vez") == 3
+        and sum(1 for u, _ in _p.pedidos if "get_all_onus_details" in u) == 2,
+        "si el proveedor recorta la pagina, se pide la siguiente y la fila "
+        "propia aparece igual")
+
+
+class _SoloHexa(_Proveedor):
+    """El equipo solo responde con el serial en hexadecimal: 68 de Rapilink."""
+
+    def __call__(self, url, **k):
+        if url.endswith("/get_onu_details/CDTC00000001"):
+            self.pedidos.append((url, k.get("params")))
+            no = _Json({})
+            no.ok, no.status_code = False, 404
+            return no
+        return super().__call__(url, **k)
+
+
+_r = _con_proveedor(_SoloHexa(filas=_filas))
+afirmar(_r.get("puerto") == "3/2/11" and _r.get("onus_en_los_a_la_vez") == 3,
+        "si el equipo solo responde en hexadecimal, se reintenta con esa forma "
+        "y el corte se cuenta igual")
+_p = _Proveedor(run="Online", causa="")
+_r = _con_proveedor(_p)
+afirmar(len(_p.pedidos) == 1 and _r.get("onus_en_los_a_la_vez") is None,
+        "en linea no se pregunta por los vecinos: las consultas de mas son "
+        "solo para una caida por LOS")
+_p = _Proveedor(causa="dying-gasp")
+_r = _con_proveedor(_p)
+afirmar(len(_p.pedidos) == 1,
+        "una caida por falta de energia tampoco: es la casa, no la fibra")
+
+print("\n§5  LA CAUSA DE CAIDA SE TRADUCE A ALGO QUE DECIDE UNA ACCION")
+#  'dying-gasp' y 'LOSi' llevan a conversaciones distintas: una es un corte de
+#  luz en la casa, la otra es fibra. Si el modelo tuviera que interpretar el
+#  texto crudo del proveedor, eso seria el prompt haciendo de garantia.
+afirmar(diag._clasificar_causa("dying-gasp") == diag.SIN_ENERGIA,
+        "'dying-gasp' es sin energia (corte de luz del cliente)")
+afirmar(diag._clasificar_causa("ONT LOSi/LOBi alarm") == diag.FIBRA,
+        "'LOSi/LOBi' es fibra")
+afirmar(diag._clasificar_causa("ONT LOFi alarm") == diag.FIBRA,
+        "'LOFi' tambien es fibra, no otra categoria")
+#  '' y 'otra' NO son lo mismo, y la diferencia decide una conversacion:
+#  vacio es "el proveedor no reporto ninguna caida" (tipico de un equipo en
+#  linea), 'otra' es "reporto una causa que este codigo no sabe traducir". Si
+#  las dos cayeran en el mismo cajon, un equipo sano se leeria como un equipo
+#  con una falla sin clasificar.
+afirmar(diag._clasificar_causa("") == "",
+        "sin causa reportada el campo queda VACIO, no 'otra'")
+afirmar(diag._clasificar_causa("algo que el proveedor no documento")
+        == diag.OTRA,
+        "una causa nueva del proveedor cae en 'otra', no en la ultima probada")
+
+print("\n§6  NINGUNA 'interno' INVOCABLE POR SERVICIO MUERE CON \"solo 'http'\"")
+#  LA GUARDA QUE PREVIENE LA TERCERA, y la razon de que exista: al arreglar el
+#  diagnostico se midio el catalogo entero por este mismo criterio y aparecio un
+#  SEGUNDO hueco identico ('consultar_caidas_pon_flota'), declarada invocable
+#  por un servicio y sin rama que la atienda. No se habia visto porque hoy nadie
+#  la pide -- estaba cableada para fallar el dia que se active, y el sintoma
+#  habria sido un 502 que no señala a esto.
+#
+#  SE MIDE POR EFECTO, NO POR AST. La primera version de esta medicion leia QUE
+#  atributos de 'herramienta' toca cada despacho, y daba un falso OK para una
+#  herramienta que no enciende ningun flag conocido: el conjunto vacio satisface
+#  cualquier condicion. Llamar y ver si muere no tiene ese agujero.
+#
+#  Se recorren TODOS los tenants del repositorio y no se nombra ninguno: el
+#  nucleo no conoce un cliente, y una prueba del nucleo tampoco deberia.
+import glob                                                      # noqa: E402
+
+import yaml                                                      # noqa: E402
+
+from nucleo.config.schema import TenantConfig                    # noqa: E402
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+semillas = sorted(glob.glob(os.path.join(RAIZ, "tenants", "*.config.yaml")))
+afirmar(bool(semillas), f"hay semillas de tenant para revisar ({len(semillas)})")
+
+huecos = []
+revisadas = 0
+for ruta in semillas:
+    with io.open(ruta, encoding="utf-8") as fh:
+        cfg = TenantConfig(**yaml.safe_load(fh))
+    for h in cfg.herramientas:
+        if h.tipo != "interno" or not h.invocable_por_servicio:
+            continue
+        revisadas += 1
+        try:
+            motor.ejecutar_para_servicio(cfg, h, {})
+        except ValueError as e:
+            if "solo 'http'" in str(e):
+                huecos.append(f"{os.path.basename(ruta)}:{h.nombre}")
+        except Exception:                                        # noqa: BLE001
+            #  Cualquier otra excepcion significa que el despacho SI la atendio
+            #  y fallo mas adentro (sin red, sin credencial). Eso no es lo que
+            #  se mide aqui.
+            pass
+
+afirmar(revisadas > 0,
+        f"se llamo a cada 'interno' invocable por servicio ({revisadas})")
+afirmar(not huecos,
+        f"ninguna muere en el despacho de servicio (huecos: {huecos})")
+
+print("\n" + "=" * 70)
+if FALLOS:
+    print(f"FALLARON {len(FALLOS)}:")
+    for f in FALLOS:
+        print(f"  - {f}")
+    sys.exit(1)
+print("TODO OK: el diagnostico sale por los dos despachos, sin el serial, y la "
+      "señal la clasifica el codigo")

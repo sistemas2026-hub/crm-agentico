@@ -1,0 +1,434 @@
+<!--
+  UNA ORDEN DEL DÍA, en su tarjeta (29/10/2026). Pedido del usuario: «cada
+  ticket que lo dibuje en una tarjeta organizada, que no salga la información
+  revuelta».
+
+  De arriba abajo, lo que se lee primero va primero: su lugar en el orden del
+  día (el que arma el Supervisor y sigue la app), el número, la prioridad y
+  cuándo vence; el asunto como título; a quién y dónde; y abajo, lo de la
+  operación (estado, técnicos, quién la asignó y si le llegó el aviso).
+
+  La SIGUIENTE —la que el técnico hace al terminar— lleva el borde y el número
+  en el color del Supervisor, y lo dice en su cabecera. Lo terminado se atenúa.
+-->
+<script>
+  import {
+    quienLaAsigno,
+    textoDelAviso,
+    textoDelVencimiento,
+    textoDePrioridad,
+    textoDeSeguimiento,
+    textoDeTiempos,
+    tonoDelVencimiento
+  } from './dia-publicado.js';
+  import ProgresoDeLaOrden from './ProgresoDeLaOrden.svelte';
+  import RevisionDelCierre from './RevisionDelCierre.svelte';
+
+  /** @type {{ orden: any, dia: string, marca?: string,
+   *           aQuienMover?: {profile: string, nombre: string}[],
+   *           form?: any }} */
+  let { orden, dia, marca = '', aQuienMover = [], form = null } = $props();
+
+  //  MOVERLA A OTRO TÉCNICO  --  14/11/2026
+  //
+  //  Hasta hoy no se podía desde ninguna pantalla, y el síntoma era caro: el
+  //  técnico que se enfermaba a media jornada se llevaba sus órdenes con él.
+  //  El backend ya lo resolvía entero (`campo/services/despacho.py::asignar`)
+  //  y nadie lo llamaba.
+  //
+  //  NO SE OFRECE SOBRE LO TERMINADO ni sobre lo YA COMPLETADO EN CAMPO. Lo
+  //  primero el servidor lo rechaza, y un botón que va a ser negado es peor
+  //  que no tenerlo. Lo segundo es más de fondo: el trabajo ya lo hizo
+  //  alguien, y la revisión del cierre, la devolución al ticket y la marca de
+  //  agua de las fotos nombran al responsable — moverla se lo atribuye a
+  //  quien no lo hizo. `mover_la_orden` lo rechaza también, porque una lista
+  //  en el navegador no es una garantía.
+  //
+  //  EN CAMINO Y EN SITIO SÍ: ese es el caso que pidió el control —el técnico
+  //  se enfermó yendo— y es justo el que más urge.
+  //
+  //  NI SIN NADIE A QUIEN MOVERLA: un día de una sola cuadrilla de una
+  //  persona dibujaría un selector vacío, que es un botón que no hace nada.
+  const NO_SE_MUEVEN = ['cerrada', 'cancelada', 'completada_campo'];
+  let seMueve = $derived(aQuienMover.length > 0
+    && !NO_SE_MUEVEN.includes(orden.estado));
+
+  //  Lo terminado se atenúa, salvo que espere que alguien lo revise
+  //  (30/10/2026): eso es justo lo que hay que mirar.
+  let terminada = $derived(orden.estado === 'cerrada'
+    || (orden.estado === 'completada_campo' && !orden.revision && orden.validacion !== 'aprobado'));
+  let tono = $derived(tonoDelVencimiento(orden.vence_en, dia));
+  //  Llegan del más viejo al más nuevo (`dia_publicado.py` ordena por fecha):
+  //  el último de la lista es el más reciente.
+  let recordatorios = $derived(orden.recordatorios ?? []);
+  let sinLlegar = $derived(recordatorios.filter((/** @type {any} */ r) => !r.llego).length);
+  let aviso = $derived(textoDelAviso(orden.aviso));
+  //  El seguimiento (30/10/2026): cuánto lleva y si dejó de reportar.
+  let tiempos = $derived(textoDeTiempos(orden.tiempos));
+  let seguimiento = $derived(textoDeSeguimiento(orden.seguimiento));
+</script>
+
+<article
+  class="od"
+  class:od-siguiente={orden.siguiente}
+  class:od-terminada={terminada}
+  aria-label={`Orden ${orden.numero}${orden.orden_del_dia ? `, ${orden.orden_del_dia}ª del día` : ''}`}
+>
+  <header class="od-cabeza">
+    {#if orden.orden_del_dia}
+      <span class="od-lugar" title="Lugar en el orden del día">{orden.orden_del_dia}</span>
+    {/if}
+    <span class="od-numero">OT {orden.numero}</span>
+    {#if orden.prioridad}
+      <span class="od-prioridad od-prioridad-{orden.prioridad}">{textoDePrioridad(orden.prioridad)}</span>
+    {/if}
+    <span class="od-vence od-vence-{tono}">{textoDelVencimiento(orden.vence_en, dia)}</span>
+    {#if orden.siguiente && marca}
+      <span class="od-marca">{marca}</span>
+    {/if}
+  </header>
+
+  <p class="od-asunto">{orden.asunto || orden.tipo}</p>
+
+  <div class="od-quien">
+    <span class="od-cliente">{orden.cliente || 'Sin cliente'}</span>
+    {#if orden.barrio}<span class="od-barrio">{orden.barrio}</span>{/if}
+  </div>
+
+  <!-- EL PROGRESO, como en la app (30/10/2026): «debe salir para cada ticket». -->
+  <ProgresoDeLaOrden estado={orden.estado} />
+
+  {#if tiempos || seguimiento}
+    <p class="od-tiempos">
+      {tiempos}{#if seguimiento}<span class="od-seguimiento" class:od-seguimiento-vencido={orden.seguimiento?.tipo === 'vencido'}>{seguimiento}</span>{/if}
+    </p>
+  {/if}
+
+  <!-- LOS RECORDATORIOS (31/10/2026): se ven aunque la orden ya esté
+       terminada. Si «no llegó al teléfono», el aviso salió pero Google no lo
+       aceptó; si no hay ninguno, no se cumplió la regla de los 30 minutos. -->
+  <!-- PLEGADOS CUANDO SON VARIOS  --  20/11/2026, OT #328
+
+       El Supervisor recuerda cada 15 minutos, y una orden parada varios días
+       llenaba la tarjeta con decenas de renglones iguales que empujaban todo
+       lo demás fuera de la vista. Uno solo se sigue viendo entero; de dos en
+       adelante queda UN renglón con cuántos fueron y cuándo el último, y la
+       lista completa se abre al tocarlo.
+
+       LO QUE EL RESUMEN NO PUEDE ESCONDER: los que no llegaron al teléfono.
+       Era lo único que distinguía un renglón de otro, así que se cuenta en
+       el renglón plegado y lo tiñe de rojo.
+
+       `<details>` NATIVO: sin estado ni JavaScript, como el resto de la
+       tarjeta. -->
+  {#if recordatorios.length === 1}
+    <p class="od-recordatorio" class:od-recordatorio-mal={!recordatorios[0].llego}>
+      El Supervisor le recordó reportar · {recordatorios[0].cuando}{recordatorios[0].llego ? '' : ' (no llegó al teléfono)'}
+    </p>
+  {:else if recordatorios.length > 1}
+    <details class="od-recordatorios">
+      <summary class="od-recordatorio" class:od-recordatorio-mal={sinLlegar > 0}>
+        El Supervisor le recordó reportar {recordatorios.length} veces · último {recordatorios[recordatorios.length - 1].cuando}{sinLlegar > 0 ? ` (${sinLlegar === 1 ? '1 no llegó' : `${sinLlegar} no llegaron`} al teléfono)` : ''}
+      </summary>
+      {#each recordatorios as r, i (i)}
+        <p class="od-recordatorio od-recordatorio-fila" class:od-recordatorio-mal={!r.llego}>
+          {r.cuando}{r.llego ? '' : ' (no llegó al teléfono)'}
+        </p>
+      {/each}
+    </details>
+  {/if}
+
+  <!-- DETENIDA POR EL TÉCNICO  --  20/11/2026, OT #328
+
+       La barra de arriba dibuja `bloqueada` en el casillero de «En sitio», y
+       hasta hoy la tarjeta no decía ni que estaba parada ni por qué. Y no
+       había por dónde sacarla: la app no ofrece nada sobre una orden detenida
+       y el botón que la destrababa vivía en otra pantalla.
+
+       NO VA PLEGADO EN UN `<details>`: no es un ajuste que alguien va a
+       buscar, es lo que hay que resolver para que la orden siga.
+
+       FORMULARIO NATIVO, SIN `enhance`, como el resto de la tarjeta: al
+       confirmar la página recarga y la orden aparece ya en marcha. -->
+  {#if orden.bloqueo}
+    <div class="od-bloqueo">
+      <p class="od-bloqueo-titulo">
+        Detenida{orden.bloqueo.quien ? ` por ${orden.bloqueo.quien}` : ''} · {orden.bloqueo.desde}
+      </p>
+      {#if orden.bloqueo.motivo || orden.bloqueo.categoria}
+        <p class="od-bloqueo-motivo">
+          {#if orden.bloqueo.categoria}<strong>{orden.bloqueo.categoria}</strong>{/if}{#if orden.bloqueo.categoria && orden.bloqueo.motivo}: {/if}{orden.bloqueo.motivo}
+        </p>
+      {/if}
+      {#if orden.bloqueo.necesita}
+        <p class="od-bloqueo-motivo">Necesita: {orden.bloqueo.necesita}</p>
+      {/if}
+      <form method="POST" action="?/destrabar" class="od-mover-form">
+        <input type="hidden" name="orden" value={orden.id} />
+        <label class="od-mover-campo">
+          <span class="snoc-label">Aclaración para el técnico</span>
+          <textarea name="aclaracion" required maxlength="500" rows="2"
+                    class="snoc-input"
+                    placeholder="Qué se resolvió y cómo sigue. Es lo que le llega al teléfono."></textarea>
+        </label>
+        <button type="submit" class="snoc-btn snoc-btn-primario">Devolver al técnico</button>
+      </form>
+    </div>
+  {/if}
+  <!-- SE COMPARA LA ORDEN, igual que en «Mover»: `form` es de la página
+       entera. Y va FUERA del bloque de arriba porque, cuando sale bien, la
+       orden ya no trae bloqueo y ese bloque no se dibuja. -->
+  {#if form?.de === 'destrabar' && form?.orden === orden.id}
+    <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">
+      {form?.hecho ?? form?.error}
+    </p>
+  {/if}
+
+  <RevisionDelCierre {orden} />
+
+  <!-- COMPLETADA SIN REVISIÓN (30/10/2026): dice su validación, y si ya está
+       aprobada, solo falta cerrarla. -->
+  {#if orden.estado === 'completada_campo' && !orden.revision}
+    <div class="od-validacion">
+      <span>Validación: <strong>{orden.validacion_texto || orden.validacion || '—'}</strong></span>
+      {#if orden.validacion === 'aprobado'}
+        <form method="POST" action="?/cerrar">
+          <input type="hidden" name="orden" value={orden.id} />
+          <input type="hidden" name="vuelta" value={orden.vuelta ?? 1} />
+          <button type="submit" class="snoc-btn snoc-btn-primario">Cerrar</button>
+        </form>
+      {/if}
+    </div>
+  {/if}
+
+  {#if seMueve}
+    <div class="od-mover">
+      <!-- UN `<details>` NATIVO, Y ESTA VEZ SÍ  --  14/11/2026
+
+           El 12/11 el campo de los minutos quedó plegado en uno y el usuario
+           no lo encontró: ahí estaba mal, porque era un AJUSTE, algo que se
+           busca sin saber dónde está. Acá el resumen dice literalmente lo
+           que alguien busca cuando lo necesita.
+
+           Y hay una razon de fondo: toda esta pantalla usa formularios
+           nativos, sin `enhance` ni estado de cliente, y sus pruebas
+           renderizan en el SERVIDOR. Un botón con `$state` no se dibuja
+           ahí, así que el control no tendría forma de medirse. -->
+      <details>
+        <summary class="od-mover-abre">Mover a otro técnico</summary>
+        <!-- FORMULARIO NATIVO, SIN `enhance`, igual que RevisionDelCierre: al
+             confirmar, la página recarga y la orden aparece ya bajo la
+             cuadrilla nueva. Con `enhance` se quedaría dibujada donde estaba,
+             que es justo lo contrario de lo que se acaba de hacer. -->
+        <form method="POST" action="?/mover" class="od-mover-form">
+          <input type="hidden" name="orden" value={orden.id} />
+          <label class="od-mover-campo">
+            <span class="snoc-label">Se la paso a</span>
+            <select name="profile" required class="snoc-input">
+              {#each aQuienMover as p (p.profile)}
+                <option value={p.profile}>{p.nombre}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="od-mover-campo">
+            <span class="snoc-label">Por qué</span>
+            <input type="text" name="motivo" required maxlength="200"
+                   class="snoc-input" placeholder="Se enfermó, la zona le queda lejos…" />
+          </label>
+          <button type="submit" class="snoc-btn snoc-btn-primario">Mover</button>
+          <!-- LO QUE DE VERDAD PASA (14/11/2026). Acá decía «al anterior se le
+               borra de la app, con lo que tenga sin subir», y las dos mitades
+               eran falsas en direcciones opuestas: con `asignar()` no se le
+               borraba nada —seguía viendo y pudiendo cerrar la orden— y, si
+               se le borrara, `ordenTieneAlgoSinSubir`
+               (`local_database.dart:3999`) impide soltar una orden con la
+               cola pendiente. El texto alarmaba por una pérdida imposible y
+               ocultaba el acceso que sí quedaba. -->
+          <p class="snoc-body-sm snoc-secundario">
+            Al anterior se le quita: deja de verla en su app y no puede seguir
+            trabajándola. Si tiene fotos sin subir, el teléfono la conserva hasta
+            que terminen de subir.
+          </p>
+        </form>
+      </details>
+      <!-- LO QUE PASO, EN LA TARJETA DE ESTA ORDEN  --  14/11/2026
+           El control salio sin ningun lugar donde mostrar su resultado: el
+           usuario elegia un tecnico, tocaba «Mover», la pagina recargaba y no
+           decia nada -- ni el exito ni el error. Y el error estaba: el
+           servidor rechazaba al lider del dia. Una accion que no puede
+           reportar es una accion que falla en silencio.
+
+           SE COMPARA LA ORDEN porque `form` es de la pagina entera y hay una
+           tarjeta por orden: sin esta condicion el mismo mensaje saldria en
+           las treinta. -->
+      {#if form?.de === 'mover' && form?.orden === orden.id}
+        <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">
+          {form?.hecho ?? form?.error}
+        </p>
+      {/if}
+    </div>
+  {/if}
+
+  <footer class="od-pie">
+    <span>
+      <span class="od-estado">{orden.estado_texto}</span>
+      {#if orden.tecnicos?.length}<span class="od-tecnicos">{orden.tecnicos.join(', ')}</span>{/if}
+    </span>
+    <span class="od-asigno">
+      {quienLaAsigno(orden, dia)}{#if aviso}<span class="od-aviso" class:od-aviso-mal={orden.aviso === 'no_llego' || orden.aviso === 'sin_telefono'}>{aviso}</span>{/if}
+    </span>
+  </footer>
+</article>
+
+<style>
+  .od-bloqueo {
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: var(--snoc-r-xl);
+    background: var(--snoc-error-container);
+    color: var(--snoc-on-error-container);
+  }
+  .od-bloqueo-titulo { margin: 0; font-size: 13px; line-height: 18px; font-weight: 700; }
+  .od-bloqueo-motivo { margin: 0; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+
+  .od-mover {
+    display: grid;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--snoc-outline-variant);
+  }
+  .od-mover-form { display: grid; gap: 6px; }
+  .od-mover-campo { display: grid; gap: 2px; }
+  .od-mover-abre { cursor: pointer; font-size: 12px; line-height: 18px; font-weight: 600; }
+
+  .od {
+    /* El ámbar de «vence hoy» y de la prioridad media: el Supervisor NOC no
+       tiene uno propio, y no se toca el sistema compartido por una tarjeta. */
+    --od-ambar: #8a5300;
+    --od-ambar-fondo: #ffe9c7;
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--snoc-surface-container-lowest);
+    border: 1px solid var(--snoc-outline-variant);
+    border-radius: var(--snoc-r-xl);
+  }
+  .od-siguiente {
+    border-color: var(--snoc-primary);
+    box-shadow: inset 3px 0 0 var(--snoc-primary);
+  }
+  .od-terminada { opacity: 0.6; }
+
+  .od-cabeza {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    line-height: 18px;
+  }
+  .od-lugar {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--snoc-surface-container-high);
+    color: var(--snoc-primary);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .od-siguiente .od-lugar {
+    background: var(--snoc-primary);
+    color: var(--snoc-on-primary);
+  }
+  .od-numero {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    color: var(--snoc-on-surface-variant);
+  }
+  .od-prioridad {
+    padding: 0 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .od-prioridad-alta { background: var(--snoc-error-container); color: var(--snoc-on-error-container); }
+  .od-prioridad-media { background: var(--od-ambar-fondo); color: var(--od-ambar); }
+  .od-prioridad-baja { background: var(--snoc-surface-container); color: var(--snoc-on-surface-variant); }
+  .od-vence { color: var(--snoc-secondary); }
+  .od-vence-vencida { color: var(--snoc-error); font-weight: 600; }
+  .od-vence-hoy { color: var(--od-ambar); font-weight: 600; }
+  .od-marca {
+    margin-left: auto;
+    color: var(--snoc-primary);
+    font-weight: 700;
+  }
+
+  .od-asunto {
+    margin: 0;
+    font-size: 14px;
+    line-height: 19px;
+    font-weight: 600;
+    color: var(--snoc-on-surface);
+    overflow-wrap: anywhere;
+  }
+
+  .od-quien {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    line-height: 17px;
+    color: var(--snoc-on-surface-variant);
+  }
+  .od-barrio { color: var(--snoc-secondary); }
+
+  .od-pie {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 4px 12px;
+    flex-wrap: wrap;
+    padding-top: 6px;
+    border-top: 1px solid var(--snoc-surface-container-high);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--snoc-secondary);
+  }
+  .od-estado {
+    font-weight: 600;
+    color: var(--snoc-on-surface-variant);
+  }
+  .od-tecnicos { margin-left: 6px; }
+  .od-aviso { margin-left: 6px; }
+  .od-aviso-mal { color: var(--snoc-error); }
+
+  /* Los tiempos y la regla de los 30 minutos (30/10/2026). */
+  .od-tiempos {
+    margin: 0;
+    font-size: 12px;
+    color: var(--snoc-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  .od-seguimiento { font-weight: 600; }
+  .od-recordatorio { margin: 0; font-size: 12px; font-weight: 600; color: var(--snoc-primary); }
+  .od-recordatorio-mal { color: var(--snoc-error); }
+  .od-recordatorios > summary { cursor: pointer; }
+  .od-recordatorio-fila { padding-left: 14px; font-weight: 400; }
+  .od-validacion {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--snoc-r-xl);
+    background: var(--snoc-surface-container);
+    font-size: 13px;
+  }
+  .od-seguimiento-vencido { color: var(--snoc-error); }
+</style>

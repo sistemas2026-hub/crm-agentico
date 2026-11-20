@@ -1,0 +1,1181 @@
+import 'dart:async';
+
+import 'package:campo/core/estado/ordenes_jornada.dart';
+import 'package:campo/core/sync/sync_queue_service.dart';
+import 'package:campo/core/theme/app_theme.dart';
+import 'package:campo/features/inicio/inicio_screen.dart';
+import 'package:campo/features/notificaciones/notificaciones_screen.dart';
+import 'package:campo/features/inicio/labor_de_hoy.dart';
+import 'package:campo/features/inicio/novedad_de_cuadrilla.dart';
+import 'package:campo/features/materiales/estado_de_jornada.dart';
+import 'package:campo/features/trabajo/seleccion_jornada.dart';
+import 'package:campo/features/trabajo/trabajo_vista.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// El inicio, con datos reales y nada más.
+///
+/// LO QUE CUIDAN ESTAS PRUEBAS
+/// ---------------------------
+/// Que en esta pantalla **no quede una sola cifra inventada**. Hasta acá el
+/// inicio mostraba un vehículo, un curso obligatorio y una potencia de la OLT
+/// que no existían en ningún backend: se veían igual que los números buenos, y
+/// un técnico no tiene forma de distinguirlos. La prueba que lo cuida es la
+/// que busca esos textos y exige no encontrarlos.
+///
+/// Y que la pantalla **no decida por su cuenta** cuál es el próximo trabajo.
+/// Esa regla vive en `ResumenDeInicio`, probada aparte; acá se verifica que lo
+/// que se dibuja sea lo que esa lógica eligió.
+
+Map<String, dynamic> _orden({
+  required String id,
+  required int numero,
+  required String estado,
+  String cliente = 'Cliente de prueba',
+  DateTime? compromiso,
+}) {
+  return <String, dynamic>{
+    'id': id,
+    'numero': numero,
+    'estado': estado,
+    'cliente_nombre': cliente,
+    'direccion': 'Calle 45 #12-30',
+    'telefono': '',
+    'tipo_nombre': 'Instalación FTTH',
+    'tipo_codigo': 'ftth_instalacion',
+    'schema_version': 1,
+    'diagnostico_previo_ia': '',
+    'fecha_compromiso': compromiso?.toIso8601String(),
+  };
+}
+
+TrabajoVista _vista({
+  required String id,
+  required int numero,
+  required String estado,
+  DateTime? compromiso,
+}) =>
+    TrabajoVista.desdeOrden(_orden(
+      id: id,
+      numero: numero,
+      estado: estado,
+      compromiso: compromiso,
+    ));
+
+/// Una jornada como la que baja el servidor. `hay: false` es el espejo vacío:
+/// todavía no sincronizó, o no hay kit entregado.
+EstadoDeJornada _jornada({
+  bool hay = true,
+  String recibido = '24',
+  String consumido = '14',
+  String aDevolver = '10',
+  int diferencias = 0,
+  List<String> motivos = const <String>[],
+  int sinSubir = 0,
+  bool cerrada = false,
+  bool cierreTomado = false,
+}) =>
+    EstadoDeJornada(
+      recibido: recibido,
+      consumido: consumido,
+      aDevolver: aDevolver,
+      devuelto: '0',
+      diferencias: diferencias,
+      ordenesAsignadas: 0,
+      ordenesCompletadas: 0,
+      materiales: const <MaterialDeJornada>[],
+      transferencias: const <TransferenciaPendiente>[],
+      motivos: motivos,
+      sinSubir: sinSubir,
+      cerrada: cerrada,
+      hayJornada: hay,
+      cierreTomado: cierreTomado,
+    );
+
+SyncSummary _sync({
+  int pendientes = 0,
+  int conflicto = 0,
+  int evidencias = 0,
+  bool sinConexion = false,
+}) =>
+    SyncSummary(
+      status: SyncStatus.idle,
+      isSyncing: false,
+      hasConnectionError: sinConexion,
+      mutacionesPendientes: pendientes,
+      mutacionesConflicto: conflicto,
+      evidenciasPendientes: evidencias,
+      datosDirty: 0,
+    );
+
+class _Banco {
+  _Banco({this.filas = const <Map<String, dynamic>>[], this.falla = false});
+
+  final List<Map<String, dynamic>> filas;
+  final bool falla;
+
+  final StreamController<SyncStatus> avisos = StreamController<SyncStatus>.broadcast();
+  int cargas = 0;
+  final List<String> abiertos = <String>[];
+
+  late final OrdenesJornada ordenes = OrdenesJornada(
+    leerOrdenes: () async {
+      cargas++;
+      if (falla) throw StateError('base ilegible');
+      return filas;
+    },
+    sincronizar: () async {},
+    avisosDeSincronizacion: avisos.stream,
+  );
+
+  /// La jornada se inyecta siempre: sin eso la pantalla iría a la base real y
+  /// la prueba dependería del almacenamiento del entorno, no del caso.
+  Widget app({
+    SyncSummary? resumen,
+    EstadoDeJornada? jornada,
+    VoidCallback? onVerTodos,
+    DateTime? ahora,
+    LaborDeHoy? laborDeHoy,
+    VoidCallback? onVerMateriales,
+    List<NovedadLocal> novedades = const <NovedadLocal>[],
+    Future<void> Function(String, String, String)? onAvisarNovedad,
+    Future<void> Function(String)? onYaSegui,
+    //  CON CUANTAS ARRANCO EL DIA, DECLARADO  --  11/11/2026.
+    //
+    //  En produccion esto lo sella `SelloDelArranque` leyendo la sesion y
+    //  escribiendo en SQLite. En una prueba de widget ese camino devuelve
+    //  null --no hay sesion-- y entonces la nota «arrancó con N» no apareceria
+    //  nunca: una guarda sobre un numero que el entorno apaga no afirma nada.
+    //
+    //  `null` a proposito es el caso «todavia no se sello», que tambien hay
+    //  que poder probar.
+    int? arrancoCon,
+  }) =>
+      MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: Scaffold(
+          body: InicioScreen(
+            sellador: ({
+              required int abiertas,
+              required int cerradasHoy,
+              DateTime? ahora,
+            }) async =>
+                arrancoCon,
+            ordenes: ordenes,
+            nombreTecnico: 'Carlos',
+            resumenSincronizacion: resumen,
+            jornada: jornada ?? _jornada(hay: false),
+            onVerTodos: onVerTodos,
+            onVerMateriales: onVerMateriales,
+            laborDeHoy: laborDeHoy,
+            novedades: novedades,
+            onAvisarNovedad: onAvisarNovedad,
+            onYaSegui: onYaSegui,
+            ahora: ahora,
+            abrirTrabajo: (BuildContext contexto, TrabajoVista trabajo) async {
+              abiertos.add(trabajo.id);
+              await Navigator.of(contexto).push(
+                MaterialPageRoute<void>(
+                  builder: (BuildContext c) => Scaffold(
+                    body: Center(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(c).pop(),
+                        child: const Text('Cerrar detalle'),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+  Future<void> cerrar() async {
+    await avisos.close();
+    ordenes.dispose();
+  }
+}
+
+/// Inicio es una lista larga: en el alto de prueba por defecto, lo de abajo ni
+/// siquiera se construye. Con una pantalla alta entra todo y las pruebas
+/// hablan del contenido, no del scroll.
+void _pantallaAlta(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1000, 3200);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+void main() {
+  final ahora = DateTime.now();
+  final enUnaHora = ahora.add(const Duration(hours: 1));
+  final enDosHoras = ahora.add(const Duration(hours: 2));
+
+  group('Lectura de la jornada, compartida con Trabajo', () {
+    test('1. Sin ninguno empezado no hay trabajo en curso', () {
+      final trabajos = <TrabajoVista>[
+        _vista(id: '1', numero: 1, estado: 'asignada'),
+        _vista(id: '2', numero: 2, estado: 'completada_campo'),
+      ];
+
+      expect(SeleccionJornada.enCursoDestacado(trabajos), isNull);
+      expect(SeleccionJornada.hayVariosEnCurso(trabajos), isFalse);
+    });
+
+    test('2. Con uno empezado, ese es el trabajo en curso', () {
+      final trabajos = <TrabajoVista>[
+        _vista(id: '1', numero: 1, estado: 'asignada'),
+        _vista(id: '2', numero: 2, estado: 'en_sitio'),
+      ];
+
+      expect(SeleccionJornada.enCursoDestacado(trabajos)!.id, '2');
+      expect(SeleccionJornada.hayVariosEnCurso(trabajos), isFalse);
+    });
+
+    test('3. Con varios empezados elige siempre el mismo y avisa', () {
+      final trabajos = <TrabajoVista>[
+        _vista(id: 'tarde', numero: 9, estado: 'en_sitio', compromiso: enDosHoras),
+        _vista(id: 'temprano', numero: 3, estado: 'en_camino', compromiso: enUnaHora),
+      ];
+
+      // El de compromiso mas temprano, sin importar el orden de la lista.
+      expect(SeleccionJornada.enCursoDestacado(trabajos)!.id, 'temprano');
+      expect(
+        SeleccionJornada.enCursoDestacado(trabajos.reversed.toList())!.id,
+        'temprano',
+        reason: 'la eleccion no puede depender del orden en que vino la base',
+      );
+      expect(SeleccionJornada.hayVariosEnCurso(trabajos), isTrue);
+    });
+
+    test('4. Los proximos van en el orden de Órdenes y excluyen los empezados', () {
+      // Desde el 29/10/2026 el de Órdenes (`OrdenOperativo`): primero el
+      // lugar que le dio el Supervisor, aunque su hora sea más tarde.
+      final String dia =
+          '${ahora.year.toString().padLeft(4, '0')}-${ahora.month.toString().padLeft(2, '0')}-${ahora.day.toString().padLeft(2, '0')}';
+      TrabajoVista conLugar(String id, int numero, DateTime cuando, int lugar) =>
+          TrabajoVista.desdeOrden(<String, dynamic>{
+            ..._orden(id: id, numero: numero, estado: 'asignada', compromiso: cuando),
+            'orden_del_dia': lugar,
+            'orden_del_dia_fecha': dia,
+          });
+      final trabajos = <TrabajoVista>[
+        conLugar('a', 1, enUnaHora, 2),
+        conLugar('b', 2, enDosHoras, 1),
+        _vista(id: 'curso', numero: 3, estado: 'en_sitio', compromiso: ahora),
+        _vista(id: 'listo', numero: 4, estado: 'cerrada', compromiso: enUnaHora),
+      ];
+
+      final proximos = SeleccionJornada.proximos(trabajos, desde: ahora);
+      expect(proximos.map((TrabajoVista t) => t.id).toList(), <String>['b', 'a']);
+    });
+
+    test('5. Una orden activa sin fecha no entra en la agenda, pero se cuenta', () {
+      final trabajos = <TrabajoVista>[
+        _vista(id: 'sin', numero: 7, estado: 'asignada'),
+        _vista(id: 'con', numero: 8, estado: 'asignada', compromiso: enUnaHora),
+      ];
+
+      expect(
+        SeleccionJornada.proximos(trabajos, desde: ahora)
+            .map((TrabajoVista t) => t.id),
+        <String>['con'],
+      );
+      expect(
+        SeleccionJornada.activosSinFecha(trabajos).map((TrabajoVista t) => t.id),
+        <String>['sin'],
+        reason: 'existe y hay que hacerla: no se la esconde ni se le inventa hora',
+      );
+    });
+  });
+
+  group('6. Lo que se ve sale de la jornada real', () {
+    testWidgets('El avance del día lo cuentan las órdenes, no una constante',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'correccion_requerida'),
+        _orden(id: '3', numero: 3, estado: 'completada_campo'),
+      ]);
+      //  EL DIA TUVO TRES, y ahora eso se declara en vez de deducirse de la
+      //  lista descargada. Antes salia de `trabajos.length`, que es el
+      //  historial del telefono: por eso la pantalla llego a decir «arrancó
+      //  con 38» con dos ordenes en la mano.
+      await tester.pumpWidget(banco.app(arrancoCon: 3));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Carlos'), findsWidgets);
+      //  «1 de 3» POR RESTA: el dia tuvo 3, quedan 2 abiertas, cerro 1. No se
+      //  cuenta por fecha de cierre -- ese es el dato que puede faltar.
+      expect(find.text('1 de 3'), findsOneWidget);
+      expect(find.textContaining('arrancó con 3'), findsOneWidget);
+      // El porcentaje y la linea '2 pendientes' se fueron con la rejilla del
+      // diseño, que dice lo mismo con mas claridad: tres celdas con el total,
+      // las que estan en curso y las que faltan. Lo que esta prueba cuida
+      // --que los numeros salgan de las ordenes y no de una constante-- se
+      // afirma igual sobre las celdas.
+      expect(find.text('ASIGNADAS'), findsOneWidget);
+      //  DOS Y NO TRES  --  11/11/2026. «Asignadas» pasó a ser lo que
+      //  LE QUEDA, sin las cerradas: de las tres órdenes, una está
+      //  completada. El «1 de 3» de arriba sigue contando el día
+      //  entero, que es lo que mide el avance.
+      expect(find.text('2'), findsWidgets);
+      expect(find.text('PENDIENTES'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('CON CUANTAS ARRANCO EL DIA sale del sello, no del historial',
+        (WidgetTester tester) async {
+      //  EL DEFECTO QUE ESTA GUARDA MATA  --  11/11/2026. La pantalla decia
+      //  «2 asignadas · arrancó con 38»: el 38 era `trabajos.length`, todo el
+      //  historial que el telefono tenia descargado. Aca el telefono tiene
+      //  SEIS ordenes en la lista --cuatro cerradas de dias anteriores-- y el
+      //  dia sello SIETE. Si algo volviera a leer la lista, este numero seria
+      //  6 y no 7.
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'en_sitio'),
+        _orden(id: '3', numero: 3, estado: 'cerrada'),
+        _orden(id: '4', numero: 4, estado: 'cerrada'),
+        _orden(id: '5', numero: 5, estado: 'cerrada'),
+        _orden(id: '6', numero: 6, estado: 'cerrada'),
+      ]);
+
+      await tester.pumpWidget(banco.app(arrancoCon: 7));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('arrancó con 7'), findsOneWidget,
+          reason: 'el dia lo dice el sello');
+      expect(find.textContaining('arrancó con 6'), findsNothing,
+          reason: 'seis es el historial descargado, que es el defecto');
+      //  Y LA BARRA CUENTA POR RESTA: el dia tuvo 7, quedan 2 abiertas.
+      expect(find.text('5 de 7'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('SIN SELLO no hay nota, y las cifras siguen cerrando',
+        (WidgetTester tester) async {
+      //  El primer build de la jornada, antes de que la escritura async
+      //  conteste -- y tambien el telefono donde SQLite falla. Antes de esto
+      //  la pantalla no tenia nota, asi que no mostrarla es volver a como
+      //  estaba: una cifra sobre el dia no justifica un hueco en rojo.
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'cerrada'),
+      ]);
+
+      await tester.pumpWidget(banco.app(arrancoCon: null));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('arrancó con'), findsNothing);
+      //  Y lo que se ve es lo que se sabe: una abierta.
+      expect(find.text('ASIGNADAS'), findsOneWidget);
+      expect(find.text('0 de 1'), findsOneWidget,
+          reason: 'sin sello el dia es lo que queda, y no se inventa nada');
+      await banco.cerrar();
+    });
+
+    testWidgets('UN SELLO MENOR QUE LO ABIERTO no puede dar una cifra absurda',
+        (WidgetTester tester) async {
+      //  Un sello viejo contra una lista que crecio: puede pasar si el
+      //  despacho asigna ordenes y la escritura del sello todavia no fue.
+      //  Sin el piso, «asignadas» seria mayor que el dia entero y la barra
+      //  diria «-1 de 2».
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'asignada'),
+        _orden(id: '3', numero: 3, estado: 'asignada'),
+      ]);
+
+      await tester.pumpWidget(banco.app(arrancoCon: 2));
+      await tester.pumpAndSettle();
+
+      expect(find.text('0 de 3'), findsOneWidget,
+          reason: 'el dia no puede tener menos que lo que esta abierto');
+      expect(find.textContaining('arrancó con'), findsNothing,
+          reason: 'y entonces la nota no dice nada nuevo');
+      await banco.cerrar();
+    });
+
+    testWidgets('Un trabajo hecho y sin subir ya cuenta como hecho',
+        (WidgetTester tester) async {
+      // Decirle pendiente le diría al técnico que todavía tiene que ir.
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'completada_pendiente_sync'),
+        _orden(id: '2', numero: 2, estado: 'asignada'),
+      ]);
+      await tester.pumpWidget(banco.app(arrancoCon: 2));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 de 2'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('Las tres celdas de la rejilla SUMAN', (WidgetTester tester) async {
+      // Lo encontro mirar la pantalla, no una prueba: decia "5 asignadas ·
+      // 1 en curso · 5 pendientes". No cerraba, y una rejilla que no cierra
+      // se lee como un error de la aplicacion aunque cada numero salga de
+      // su propia definicion correcta.
+      //
+      // La causa: `resumen.pendientes` es "todo lo que no esta completado",
+      // asi que cuenta tambien la que esta en curso. En el diseño pendiente
+      // significa "todavia no empezada".
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'en_sitio'),
+        _orden(id: '2', numero: 2, estado: 'asignada'),
+        _orden(id: '3', numero: 3, estado: 'asignada'),
+        _orden(id: '4', numero: 4, estado: 'completada_campo'),
+      ]);
+      await tester.pumpWidget(banco.app(arrancoCon: 4));
+      await tester.pumpAndSettle();
+
+      int cifraDe(String rotulo) {
+        final Finder celda = find.ancestor(
+          of: find.text(rotulo),
+          matching: find.byType(Column),
+        );
+        final Finder numeros = find.descendant(
+          of: celda.first,
+          matching: find.byType(Text),
+        );
+        return int.parse(tester.widget<Text>(numeros.first).data!);
+      }
+
+      final int asignadas = cifraDe('ASIGNADAS');
+      final int enCurso = cifraDe('EN CURSO');
+      final int pendientes = cifraDe('PENDIENTES');
+
+      //  LA REGLA SE ENDURECIO  --  11/11/2026. Antes «asignadas» era
+      //  el total con las cerradas adentro, y lo unico que se podia
+      //  afirmar era que las otras dos no se pasaran. Ahora
+      //  «asignadas» es LO QUE QUEDA, asi que las tres cierran
+      //  EXACTO -- y eso es una guarda mas fuerte, no la misma
+      //  relajada para que pase.
+      expect(asignadas, 3, reason: 'las cuatro menos la ya cerrada');
+      expect(enCurso, 1, reason: 'la que esta en sitio');
+      expect(pendientes, 2, reason: 'las dos asignadas sin empezar');
+      expect(
+        enCurso + pendientes,
+        asignadas,
+        reason: 'la rejilla cierra exacto: en curso + pendientes = lo '
+            'que queda',
+      );
+      //  El avance sigue contra el DIA ENTERO: con un denominador que
+      //  baja en cada cierre, «1 de 4» pasaria a «2 de 2» y nunca
+      //  llegaria a 4 de 4.
+      expect(find.text('1 de 4'), findsOneWidget);
+      expect(find.textContaining('arrancó con 4'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('El kit son los números de la jornada, no una cuenta propia',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        jornada: _jornada(recibido: '24', consumido: '14', aDevolver: '10'),
+      ));
+      await tester.pumpAndSettle();
+
+      // El kit pasó a la cinta oscura del diseño, que lo dice en una línea
+      // en vez de en tres columnas. Los números siguen saliendo de la
+      // jornada, que es lo que esta prueba cuida.
+      expect(find.text('INVENTARIO EN MÓVIL'), findsOneWidget);
+      expect(find.text('Recibido 24 · consumido 14'), findsOneWidget);
+      expect(find.text('EN MANO 10'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('Sin jornada cargada no se dibuja un kit en cero',
+        (WidgetTester tester) async {
+      // "0 disponible" y "todavía no sincronizó" se ven igual y significan lo
+      // contrario: ante la duda, no se afirma.
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(jornada: _jornada(hay: false)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('INVENTARIO EN MÓVIL'), findsNothing);
+      expect(find.textContaining('Recibido'), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  group('7. No queda ninguna cifra inventada', () {
+    testWidgets('Vehículo, academia y la potencia de la OLT ya no se dibujan',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'en_sitio', compromiso: enUnaHora),
+      ]);
+      await tester.pumpWidget(banco.app(jornada: _jornada()));
+      await tester.pumpAndSettle();
+
+      for (final String falso in <String>[
+        'VEHÍCULO',
+        'ACADEMIA',
+        'KIT DROP',
+        'ENGINE SYNC',
+        'Diagnóstico Central OLT',
+        'Telemetría & Recursos de Turno',
+        'Curso Obligatorio',
+        'Preoperacional ✓',
+      ]) {
+        expect(find.textContaining(falso), findsNothing, reason: '"$falso" no tiene fuente');
+      }
+      await banco.cerrar();
+    });
+
+    testWidgets('Tampoco el turno, la cuadrilla ni el selector de modos',
+        (WidgetTester tester) async {
+      // El selector "En ruta / Pausa" se veía y no guardaba nada: un aviso que
+      // el supervisor nunca recibe es peor que no poder darlo.
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+      ]);
+      await tester.pumpWidget(banco.app(jornada: _jornada()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('En ruta'), findsNothing);
+      expect(find.text('Pausa'), findsNothing);
+      expect(find.text('Disponible'), findsNothing);
+      expect(find.textContaining('Turno:'), findsNothing);
+      expect(find.textContaining('Cuadrilla'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('Sin sla_vence_en no se muestra un reloj corriendo',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'en_sitio', compromiso: enUnaHora),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('SLA'), findsNothing);
+      expect(find.textContaining('ETA'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('Con sla_vence_en sí, y con los minutos del servidor',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final momento = DateTime(2026, 9, 22, 10, 0);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        <String, dynamic>{
+          ..._orden(id: '1', numero: 1, estado: 'en_sitio'),
+          'sla_vence_en': '2026-09-22T10:30:00',
+        },
+      ]);
+      await tester.pumpWidget(banco.app(ahora: momento));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SLA: 30 min'), findsOneWidget);
+      await banco.cerrar();
+    });
+  });
+
+  group('8. Cuál es el próximo trabajo lo decide el dominio', () {
+    testWidgets('El empezado gana al urgente, y el botón dice continuar',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        <String, dynamic>{
+          ..._orden(id: 'urgente', numero: 10, estado: 'asignada', cliente: 'Urgente'),
+          'prioridad': 'alta',
+        },
+        _orden(id: 'empezado', numero: 20, estado: 'en_sitio', cliente: 'Empezado'),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Próximo trabajo'), findsOneWidget);
+      expect(find.text('Empezado'), findsOneWidget);
+      expect(find.text('CONTINUAR OT #20'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('Uno que no se abrió todavía se ofrece empezar, no continuar',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 4832, estado: 'asignada', cliente: 'Carlos Gomez'),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('EMPEZAR OT #4832'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('El próximo no se repite abajo en la lista',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: 'a', numero: 1, estado: 'asignada', cliente: 'Uno', compromiso: enUnaHora),
+        _orden(id: 'b', numero: 2, estado: 'asignada', cliente: 'Dos', compromiso: enDosHoras),
+      ]);
+      await tester.pumpWidget(banco.app(ahora: ahora));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Uno'), findsOneWidget, reason: 'el destacado');
+      expect(find.text('OT #2'), findsOneWidget, reason: 'el otro, en la lista');
+      expect(find.text('OT #1'), findsNothing, reason: 'ya está arriba');
+      await banco.cerrar();
+    });
+
+    testWidgets('Con varios empezados lo dice, en vez de elegir en silencio',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'en_camino', cliente: 'Uno', compromiso: enUnaHora),
+        _orden(id: '2', numero: 2, estado: 'en_sitio', cliente: 'Dos', compromiso: enDosHoras),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Tenés 2 trabajos empezados a la vez. Se muestra el más próximo.'),
+        findsOneWidget,
+      );
+      await banco.cerrar();
+    });
+  });
+
+  group('9. Los vacíos dicen cuál vacío es', () {
+    testWidgets('Sin nada asignado no se dice que terminó',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('No tenés trabajos asignados'), findsOneWidget);
+      expect(find.text('Terminaste todos tus trabajos'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('Con todo hecho sí, y son cosas distintas',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'cerrada'),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Terminaste todos tus trabajos'), findsOneWidget);
+      expect(find.text('No tenés trabajos asignados'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('Si no se puede leer la base lo dice, no finge jornada vacía',
+        (WidgetTester tester) async {
+      final banco = _Banco(falla: true);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('No se pudieron leer tus trabajos'), findsOneWidget);
+      expect(find.text('No tenés trabajos asignados'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('Los trabajos sin fecha se avisan, sin inventarles hora',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+        _orden(id: '2', numero: 2, estado: 'asignada'),
+        _orden(id: '3', numero: 3, estado: 'asignada'),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+
+      // Tres sin fecha: uno sube a "próximo trabajo" y quedan dos.
+      expect(find.text('Tenés 2 trabajos sin fecha asignada'), findsOneWidget);
+      await banco.cerrar();
+    });
+  });
+
+  group('10. En qué estado está la jornada', () {
+    testWidgets('Abierta lo dice, y no promete un acta', (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(jornada: _jornada()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Jornada en curso'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('Tomar el cierre NO es tenerla cerrada', (WidgetTester tester) async {
+      // Decirle cerrada a una intención que viaja en la cola haría que alguien
+      // se fuera a su casa creyendo que entregó.
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(jornada: _jornada(cierreTomado: true)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Cierre enviado · esperando confirmación'), findsOneWidget);
+      expect(find.text('Jornada cerrada'), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('Cerrada la dice el servidor', (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(jornada: _jornada(cerrada: true)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Jornada cerrada'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('Sin jornada no se afirma ninguno de los tres',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(jornada: _jornada(hay: false)));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Jornada'), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  /// LAS ALERTAS DE LA JORNADA SE FUERON A LA CAMPANA (09/11/2026).
+  ///
+  /// El usuario, viendo la campana ya andando: «hay un aviso que dice para
+  /// resolver hoy y un mensaje en rojo, ¿por qué no se pone igual en
+  /// notificación?». Eligió un solo lugar para todo lo que avisa.
+  ///
+  /// QUÉ PRUEBA QUÉ, DESPUÉS DE LA MUDANZA
+  /// --------------------------------------
+  /// Las cuatro pruebas que vivían acá afirmaban dos cosas a la vez: QUÉ se
+  /// avisa y que se DIBUJARA en Inicio. Lo primero ya lo prueba
+  /// `resumen_de_inicio_test.dart` sobre la función pura --gravedad, orden,
+  /// las dos colas sumadas, el conflicto-- y no hace falta montar una
+  /// pantalla para eso. Lo segundo cambió de lugar: ahora se dibuja en el
+  /// panel de la campana, y lo mide `campana_de_avisos_test.dart`.
+  ///
+  /// Lo que queda acá es lo único que esta pantalla todavía decide: que NO
+  /// las dibuje.
+  group('11. Los problemas ya no se dibujan en Inicio', () {
+    testWidgets('ni las alertas de la jornada ni los avisos de la plataforma',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada'),
+      ]);
+      //  Con tres registros sin enviar y un material que no cuadra: antes
+      //  esto dibujaba dos alertas en la pantalla.
+      await tester.pumpWidget(banco.app(
+        resumen: _sync(pendientes: 3, conflicto: 1),
+        jornada: _jornada(
+          diferencias: 2,
+          motivos: <String>['Faltan 2 unidades sin explicar.'],
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NotificacionesScreen), findsNothing);
+      expect(find.text('Para resolver hoy'), findsNothing);
+      expect(find.text('3 registros sin enviar'), findsNothing);
+      expect(find.text('2 materiales no cuadran'), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+
+  group('12. Sin señal se sigue trabajando', () {
+    testWidgets('La cola dice que se guarda igual', (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(resumen: _sync(sinConexion: true)));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Sin conexión con el servidor · lo que hagas se guarda igual'),
+        findsOneWidget,
+      );
+      await banco.cerrar();
+    });
+
+    testWidgets('Con pendientes dice que se envían al volver la conexión',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        resumen: _sync(pendientes: 2, sinConexion: true),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('2 cambios guardados acá · se envían al volver la conexión'),
+        findsOneWidget,
+      );
+      await banco.cerrar();
+    });
+
+    testWidgets('El bloque de sincronización usa la misma lectura de la cola',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(resumen: _sync(pendientes: 2)));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('2 cambios guardados acá · esperando turno para enviarse'),
+        findsOneWidget,
+      );
+      expect(find.text('2 sin enviar'), findsOneWidget, reason: 'la chapa del saludo');
+      await banco.cerrar();
+    });
+  });
+
+  group('13. Lo que la pantalla hace al tocarla', () {
+    testWidgets('Abrir el próximo trabajo y volver recarga la jornada',
+        (WidgetTester tester) async {
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: 'abc', numero: 4832, estado: 'en_sitio', cliente: 'Carlos Gomez'),
+      ]);
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+      final cargasAntes = banco.cargas;
+
+      await tester.tap(find.textContaining('CONTINUAR OT #'));
+      await tester.pumpAndSettle();
+      expect(banco.abiertos, <String>['abc']);
+
+      await tester.tap(find.text('Cerrar detalle'));
+      await tester.pumpAndSettle();
+
+      expect(banco.cargas, greaterThan(cargasAntes));
+      await banco.cerrar();
+    });
+
+    testWidgets('"Ver Agenda" lleva a Trabajo sin tocar los datos',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      var vecesQueLlamo = 0;
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada', compromiso: enUnaHora),
+        _orden(id: '2', numero: 2, estado: 'asignada', compromiso: enDosHoras),
+      ]);
+      await tester.pumpWidget(banco.app(
+        onVerTodos: () => vecesQueLlamo++,
+        ahora: ahora,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Ver Agenda'));
+      await tester.pumpAndSettle();
+      expect(vecesQueLlamo, 1);
+      expect(banco.abiertos, isEmpty);
+      await banco.cerrar();
+    });
+
+    testWidgets('Una sincronización exitosa actualiza la jornada una sola vez',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app());
+      await tester.pumpAndSettle();
+      final cargasAntes = banco.cargas;
+
+      banco.avisos.add(SyncStatus.success);
+      await tester.pumpAndSettle();
+      expect(banco.cargas, cargasAntes + 1);
+
+      // Y una fallida no: no hay dato nuevo que leer.
+      banco.avisos.add(SyncStatus.error);
+      await tester.pumpAndSettle();
+      expect(banco.cargas, cargasAntes + 1);
+      await banco.cerrar();
+    });
+  });
+
+  group('12. El saludo y la labor del día (29/10/2026)', () {
+    // El usuario: «cuando se abre la aplicación, que salga hola, nombre del
+    // técnico, y tu labor para hoy es…, que se actualiza según esté en la
+    // plataforma de Dexter».
+    final DateTime hoy = DateTime(2026, 10, 29, 9);
+    LaborDeHoy labor({String fecha = '2026-10-29', JornadaDeHoy? jornada}) =>
+        LaborDeHoy(fecha: fecha, jornada: jornada);
+    const JornadaDeHoy instalacion = JornadaDeHoy(
+      cuadrilla: 'Cuadrilla #1',
+      labor: 'Instalación',
+      zonas: <String>['Norte', 'Soledad zona 2'],
+    );
+
+    String textoDe(WidgetTester t, String llave) =>
+        (t.widget(find.byKey(ValueKey<String>(llave))) as Text)
+            .textSpan!
+            .toPlainText();
+
+    testWidgets('dice hola con el primer nombre y la labor que armó la oficina',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: hoy,
+        laborDeHoy: labor(jornada: instalacion),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hola, Carlos'), findsOneWidget);
+      expect(textoDe(tester, 'labor-de-hoy'), 'Tu labor para hoy es Instalación');
+      expect(find.text('Cuadrilla #1 · Norte, Soledad zona 2'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('con labor de apoyo lo dice: «y apoyás …» (30/10/2026)',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: hoy,
+        laborDeHoy: labor(
+          jornada: const JornadaDeHoy(
+              cuadrilla: 'Cuadrilla #1', labor: 'Soporte', apoyo: 'Instalación'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(textoDe(tester, 'labor-de-hoy'),
+          'Tu labor para hoy es Soporte, y apoyás Instalación');
+      expect(
+        LaborDeHoy.desdeTexto(
+          labor(jornada: const JornadaDeHoy(
+                  cuadrilla: 'C', labor: 'Soporte', apoyo: 'Instalación'))
+              .aTexto(),
+        )?.jornada?.apoyo,
+        'Instalación',
+        reason: 'guardado sin señal, el apoyo vuelve',
+      );
+      await banco.cerrar();
+    });
+
+    testWidgets('la labor de otro día no se muestra: mandaría a hacer otra cosa',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: hoy,
+        laborDeHoy: labor(fecha: '2026-10-28', jornada: instalacion),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hola, Carlos'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('labor-de-hoy')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('sin-labor-de-hoy')), findsNothing);
+      await banco.cerrar();
+    });
+
+    testWidgets('sin cuadrilla hoy lo dice; sin saber, no inventa nada',
+        (WidgetTester tester) async {
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(ahora: hoy, laborDeHoy: labor()));
+      await tester.pumpAndSettle();
+      expect(find.text('Hoy no te asignaron cuadrilla en Programación'), findsOneWidget);
+
+      await tester.pumpWidget(banco.app(ahora: hoy));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<String>('labor-de-hoy')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('sin-labor-de-hoy')), findsNothing);
+      await banco.cerrar();
+    });
+
+    test('lo que contesta el servidor: con jornada, sin jornada, y uno viejo', () {
+      final LaborDeHoy? con = LaborDeHoy.desdeJson(<String, dynamic>{
+        'fecha': '2026-10-29',
+        'jornada': <String, dynamic>{
+          'cuadrilla': 'Cuadrilla #1',
+          'labor': 'instalacion',
+          'labor_nombre': 'Instalación',
+          'zonas': <String>['Norte'],
+        },
+      });
+      expect(con?.jornada?.labor, 'Instalación');
+      expect(con?.esDe(hoy), isTrue);
+      expect(con?.esDe(hoy.add(const Duration(days: 1))), isFalse);
+
+      final LaborDeHoy? sin =
+          LaborDeHoy.desdeJson(<String, dynamic>{'fecha': '2026-10-29', 'jornada': null});
+      expect(sin, isNotNull, reason: '«hoy no salís» es un dato');
+      expect(sin?.jornada, isNull);
+
+      expect(LaborDeHoy.desdeJson(<String, dynamic>{'fecha': '2026-10-29'}), isNull,
+          reason: 'un servidor viejo no dice nada: no es «sin cuadrilla»');
+
+      final LaborDeHoy? guardada = LaborDeHoy.desdeTexto(con!.aTexto());
+      expect(guardada?.jornada?.detalle, 'Cuadrilla #1 · Norte');
+      expect(LaborDeHoy.desdeTexto('{roto'), isNull);
+    });
+  });
+
+  //  ACA ESTABA EL GRUPO 13 (29/10/2026 - 09/11/2026): las alertas de la
+  //  jornada de a dos, con su recuadro deslizable, dentro de Inicio.
+  //
+  //  Se fue con el bloque. Las alertas ahora viven en el panel de la campana
+  //  (09/11/2026, el usuario: un solo lugar para todo lo que avisa) y el
+  //  desplazamiento lo da el panel, que ya tiene su alto maximo y su scroll:
+  //  dos recuadros deslizables, uno dentro del otro, es peor que uno.
+  //
+  //  Que la alerta se vea, y antes que los avisos, lo mide
+  //  campana_de_avisos_test.dart. Que Inicio ya no las dibuje, el grupo 11.
+
+  group('14. El inventario lleva a Materiales (29/10/2026)', () {
+    testWidgets('tocarlo abre Materiales', (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      int veces = 0;
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        jornada: _jornada(),
+        onVerMateriales: () => veces++,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('INVENTARIO EN MÓVIL'));
+      await tester.pumpAndSettle();
+      expect(veces, 1);
+      await banco.cerrar();
+    });
+  });
+
+  group('15. Una orden sin hora no dice «12:00 AM» (29/10/2026)', () {
+    // El Supervisor crea la orden para un día y la guarda a las 00:00. El
+    // usuario: «tiene una hora, dice 12:00 AM, ¿qué significa?».
+    final DateTime hoy = DateTime.now();
+    final DateTime medianoche = DateTime(hoy.year, hoy.month, hoy.day);
+
+    test('a las 00:00 no hay hora; a cualquier otra, sí', () {
+      expect(
+          _vista(id: '1', numero: 1, estado: 'asignada', compromiso: medianoche)
+              .horaComprometida,
+          isNull);
+      final DateTime nueve = medianoche.add(const Duration(hours: 9, minutes: 30));
+      expect(
+          _vista(id: '2', numero: 2, estado: 'asignada', compromiso: nueve)
+              .horaComprometida,
+          nueve);
+    });
+
+    testWidgets('ni en «Después» ni como reloj rojo en las horas del día',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[
+        _orden(id: '1', numero: 1, estado: 'asignada', compromiso: medianoche),
+        _orden(id: '2', numero: 2, estado: 'asignada', compromiso: medianoche),
+        _orden(id: '3', numero: 3, estado: 'asignada', compromiso: medianoche),
+      ]);
+      await tester.pumpWidget(banco.app(ahora: medianoche.add(const Duration(hours: 9))));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('12:00 AM'), findsNothing);
+      expect(find.text('00:00'), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  group('16. Después: todas, de a tres a la vista (29/10/2026)', () {
+    // El usuario: «cuando salgan más de 3 tickets se va a alargar; que tenga
+    // su propio scroll». Y hasta ese día se cortaba en tres: la quinta orden
+    // no aparecía en Inicio.
+    final DateTime ahora = DateTime(2026, 10, 29, 7);
+    Map<String, dynamic> a(int n) => _orden(
+        id: '$n',
+        numero: n,
+        estado: 'asignada',
+        compromiso: DateTime(2026, 10, 29, 8 + n));
+
+    testWidgets('seis órdenes: una sigue, cinco en Después, tres a la vista',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[for (int n = 1; n <= 6; n++) a(n)]);
+      await tester.pumpWidget(banco.app(ahora: ahora));
+      await tester.pumpAndSettle();
+
+      expect(find.text('5 pendientes'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('despues-con-scroll')), findsOneWidget);
+      expect(find.text('Deslizá dentro del recuadro para ver los otros 2'), findsOneWidget);
+      await banco.cerrar();
+    });
+
+    testWidgets('con tres o menos no hay recuadro', (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco(filas: <Map<String, dynamic>>[for (int n = 1; n <= 4; n++) a(n)]);
+      await tester.pumpWidget(banco.app(ahora: ahora));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 pendientes'), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('despues-con-scroll')), findsNothing);
+      await banco.cerrar();
+    });
+  });
+
+  group('17. La novedad de la cuadrilla (30/10/2026)', () {
+    // El usuario: «¿cómo el técnico reporta alguna novedad sin escribir en el
+    // ticket, por ejemplo se pinchó la llanta?».
+    final DateTime ahora = DateTime(2026, 10, 30, 10, 15);
+    NovedadLocal llanta({String afecta = 'media_hora'}) => NovedadLocal(
+          id: 'n-1',
+          tipo: 'llanta',
+          afecta: afecta,
+          avisadaEn: DateTime(2026, 10, 30, 10, 0),
+        );
+
+    testWidgets('sin novedad, el botón para avisar; avisar manda lo elegido',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final List<(String, String, String)> avisadas = <(String, String, String)>[];
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: ahora,
+        onAvisarNovedad: (String t, String a, String x) async => avisadas.add((t, a, x)),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<String>('franja-de-novedad')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey<String>('avisar-una-novedad')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('tipo-vehiculo')));
+      await tester.tap(find.byKey(const ValueKey<String>('afecta-una_hora')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey<String>('avisar-novedad')));
+      await tester.pumpAndSettle();
+
+      expect(avisadas, <(String, String, String)>[('vehiculo', 'una_hora', '')]);
+      await banco.cerrar();
+    });
+
+    testWidgets('con una vigente, la franja en vez del botón, y «Ya seguí» la cierra',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final List<String> cerradas = <String>[];
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: ahora,
+        novedades: <NovedadLocal>[llanta()],
+        onAvisarNovedad: (String t, String a, String x) async {},
+        onYaSegui: (String id) async => cerradas.add(id),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<String>('franja-de-novedad')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('avisar-una-novedad')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey<String>('ya-segui')));
+      expect(cerradas, <String>['n-1']);
+      await banco.cerrar();
+    });
+
+    testWidgets('la que ya venció no se muestra: vuelve el botón',
+        (WidgetTester tester) async {
+      _pantallaAlta(tester);
+      final banco = _Banco();
+      await tester.pumpWidget(banco.app(
+        ahora: ahora.add(const Duration(hours: 1)),
+        novedades: <NovedadLocal>[llanta()],
+        onAvisarNovedad: (String t, String a, String x) async {},
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey<String>('franja-de-novedad')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('avisar-una-novedad')), findsOneWidget);
+      await banco.cerrar();
+    });
+  });
+}

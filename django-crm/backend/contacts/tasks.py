@@ -1,0 +1,34 @@
+from celery import shared_task
+from django.core.mail import EmailMessage
+from django.template.loader import render_to_string
+
+from common.links import frontend_url
+from common.models import Profile
+from common.tasks import set_rls_context
+from contacts.models import Contact
+
+
+@shared_task
+def send_email_to_assigned_user(recipients, contact_id, org_id):
+    """Send Mail To Users When they are assigned to a contact"""
+    set_rls_context(org_id)
+    contact = Contact.objects.get(id=contact_id)
+    created_by = contact.created_by
+    for profile_id in recipients:
+        recipients_list = []
+        profile = Profile.objects.filter(id=profile_id, is_active=True).first()
+        if profile:
+            recipients_list.append(profile.user.email)
+            context = {}
+            context["url"] = frontend_url(f"/contacts/{contact.id}")
+            context["user"] = profile.user
+            context["contact"] = contact
+            context["created_by"] = created_by
+            subject = "Assigned a contact for you."
+            html_content = render_to_string(
+                "assigned_to/contact_assigned.html", context=context
+            )
+
+            msg = EmailMessage(subject, html_content, to=recipients_list)
+            msg.content_subtype = "html"
+            msg.send()

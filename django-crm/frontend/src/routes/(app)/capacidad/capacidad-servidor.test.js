@@ -1,0 +1,195 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('$lib/server/v2/tenant.js', () => ({
+  destinoDelAsistente: async () => ({ baseUrl: 'http://motor', tenant: 'rapilink' })
+}));
+vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
+//  /team (12/11/2026): las personas activas del CRM, para contar el equipo.
+const equipo = vi.hoisted(() => ({ respuesta: /** @type {any} */ ({ active: [] }) }));
+vi.mock('$lib/server/v2/team.js', () => ({ listTeam: async () => equipo.respuesta }));
+
+const { load, actions } = await import('./+page.server.js');
+/** @param {any} e */
+const cargar = async (e) => /** @type {any} */ (await load(e));
+
+/**
+ * El tablero de capacidad (30/10/2026, PRD §2 y §8.17 Ola 1).
+ *
+ * Lo que se protege es la CADENA, no el cálculo (ese está probado contra
+ * PostgreSQL en tests/test_tablero_capacidad_base.py): que cada clave que
+ * escribe el motor llegue a la pantalla con el MISMO nombre. CLAUDE.md §6: el
+ * 29/09/2026 `requiere_noc` viajaba bien desde el backend y la capa servidor
+ * del frontend lo dejaba caer, con todas las pruebas de backend en verde.
+ */
+
+// La forma EXACTA que devuelve GET /reportes/capacidad
+// (nucleo/observabilidad/capacidad.py::componer), copiada de una corrida real.
+const DEL_MOTOR = {
+  dias: 30,
+  desde: '2026-09-30T00:00:00+00:00',
+  hasta: '2026-10-30T00:00:00+00:00',
+  canales: ['whatsapp'],
+  casos_por_persona: { valor: 4.0, casos: 8, personas: 2 },
+  resolucion_sin_persona: { tasa: 0.375, resueltas: 3, cerradas: 8 },
+  recontacto: { ventana_horas: 72, tasa: 0.125, tasa_sin_persona: 0.3333,
+                recontactos: 1, recontactos_sin_persona: 1 },
+  satisfaccion: { promedio: 4.0, respondidas: 2, enviadas: 3 },
+  visitas_evitadas: { valor: 1, reinicios_confirmados: 2, dias_sin_visita: 7,
+                      definicion: 'accion remota confirmada sin visita...' },
+  minutos_ahorrados: { total: null, por_conversaciones: null, por_visitas: null,
+                       motivo: 'la empresa no declaro: minutos por conversacion, minutos por visita' },
+  tiempo_hasta_resolucion: { mediana_minutos: 45.0 }
+};
+
+const SEIS = ['casos_por_persona', 'resolucion_sin_persona', 'recontacto', 'satisfaccion',
+  'visitas_evitadas', 'minutos_ahorrados', 'tiempo_hasta_resolucion'];
+
+/** @param {{ rol?: string, dias?: number }} [o] */
+function evento({ rol = 'ADMIN', dias } = {}) {
+  const url = new URL('http://crm/capacidad' + (dias ? `?dias=${dias}` : ''));
+  return /** @type {any} */ ({ locals: { profile: { role: rol } }, url, fetch: globalThis.fetch });
+}
+
+describe('el tablero de capacidad, de la respuesta del motor a la pantalla', () => {
+  /** @type {any} */
+  let pedido;
+  beforeEach(() => {
+    pedido = null;
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url) => {
+      pedido = String(url);
+      return { ok: true, status: 200, json: async () => structuredClone(DEL_MOTOR) };
+    }));
+  });
+
+  it('cada una de las métricas llega con el nombre y el valor que escribe el motor', async () => {
+    const data = await cargar(evento());
+    for (const clave of SEIS) {
+      expect(data.tablero[clave], clave).toEqual(DEL_MOTOR[clave]);
+    }
+  });
+
+  it('un null del motor llega como null, con su motivo: no se convierte en 0', async () => {
+    const data = await cargar(evento());
+    expect(data.tablero.minutos_ahorrados.total).toBeNull();
+    expect(data.tablero.minutos_ahorrados.motivo).toContain('no declaro');
+  });
+
+  it('pide el período elegido y para la empresa de la sesión', async () => {
+    await cargar(evento({ dias: 7 }));
+    expect(pedido).toContain('/reportes/capacidad?');
+    expect(pedido).toContain('tenant=rapilink');
+    expect(pedido).toContain('dias=7');
+  });
+
+  it('un período que no está en la lista vuelve a 30 días', async () => {
+    const data = await cargar(evento({ dias: 5000 }));
+    expect(data.dias).toBe(30);
+    expect(pedido).toContain('dias=30');
+  });
+
+  it('si el motor falla, la pantalla lo dice y no inventa un tablero', async () => {
+    globalThis.fetch = /** @type {any} */ (vi.fn(async () => ({
+      ok: false, status: 500, json: async () => ({ error: 'No se pudo calcular el tablero.' })
+    })));
+    const data = await cargar(evento());
+    expect(data.tablero).toBeNull();
+    expect(data.error).toBeTruthy();
+  });
+
+  it('solo ADMIN: son cifras de negocio de la empresa', async () => {
+    await expect(cargar(evento({ rol: 'USER' }))).rejects.toMatchObject({ status: 303 });
+  });
+});
+
+/** @param {Record<string, string>} campos @param {string} [rol] */
+function envio(campos, rol = 'ADMIN') {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(campos)) f.set(k, v);
+  return /** @type {any} */ ({ locals: { profile: { role: rol } }, request: { formData: async () => f },
+                               fetch: globalThis.fetch });
+}
+
+describe('lo que declara la empresa: minutos y personas del equipo (§3.3)', () => {
+  /** @type {any} */
+  let cuerpo;
+  beforeEach(() => {
+    cuerpo = null;
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url, opciones) => {
+      cuerpo = { url: String(url), metodo: opciones?.method, datos: JSON.parse(opciones?.body || '{}') };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }));
+  });
+
+  it('manda los tres números al motor, para la empresa de la sesión', async () => {
+    await actions.declarar(envio({ minutos_por_conversacion: '12', minutos_por_visita: '90',
+                                   personas_del_equipo: '4' }));
+    expect(cuerpo.url).toContain('/configuracion/capacidad');
+    expect(cuerpo.metodo).toBe('PUT');
+    expect(cuerpo.datos).toEqual({ tenant: 'rapilink', minutos_por_conversacion: 12,
+                                   minutos_por_visita: 90, personas_del_equipo: 4 });
+  });
+
+  it('un campo vacío se manda como null: "sin declarar", nunca un 0', async () => {
+    await actions.declarar(envio({ minutos_por_conversacion: '', minutos_por_visita: '90',
+                                   personas_del_equipo: '' }));
+    expect(cuerpo.datos.minutos_por_conversacion).toBeNull();
+    expect(cuerpo.datos.personas_del_equipo).toBeNull();
+  });
+
+  it('un número que no es entero positivo no viaja', async () => {
+    const r = /** @type {any} */ (await actions.declarar(envio({ minutos_por_conversacion: '-3',
+      minutos_por_visita: '', personas_del_equipo: '' })));
+    expect(r.status).toBe(400);
+    expect(cuerpo).toBeNull();
+  });
+
+  it('solo ADMIN', async () => {
+    const r = /** @type {any} */ (await actions.declarar(envio({ minutos_por_conversacion: '12',
+      minutos_por_visita: '', personas_del_equipo: '' }, 'USER')));
+    expect(r.status).toBe(403);
+    expect(cuerpo).toBeNull();
+  });
+});
+
+
+describe('las personas del equipo salen de /team si nadie las declaró (12/11/2026)', () => {
+  /** @type {string[]} */
+  let pedidos;
+  /** @param {any} tablero */
+  function motorCon(tablero) {
+    globalThis.fetch = /** @type {any} */ (vi.fn(async (url) => {
+      pedidos.push(String(url));
+      if (String(url).includes('/agentes/asignaciones')) {
+        //  p3 tiene área pero está INACTIVA; p2 está activa sin área.
+        return { ok: true, json: async () => ({ areas_por_persona: { p1: 'soporte', p3: 'soporte', p4: 'ventas', p2: '' } }) };
+      }
+      return { ok: true, status: 200, json: async () => tablero };
+    }));
+  }
+  beforeEach(() => {
+    pedidos = [];
+    equipo.respuesta = { active: [{ id: 'p1' }, { id: 'p2' }, { id: 'p4' }], inactive: [{ id: 'p3' }] };
+  });
+
+  it('cuenta solo las ACTIVAS con un área de atención, y se lo pasa al motor', async () => {
+    motorCon({ ...DEL_MOTOR, personas_usadas: 2, personas_origen: 'equipo' });
+    const data = await cargar(evento());
+    expect(data.personasEquipo).toBe(2);
+    expect(pedidos.find((u) => u.includes('/reportes/capacidad'))).toContain('personas_equipo=2');
+  });
+
+  it('de dónde salió el número llega a la página con el nombre del motor', async () => {
+    motorCon({ ...DEL_MOTOR, personas_usadas: 2, personas_origen: 'equipo' });
+    const data = await cargar(evento());
+    expect(data.tablero.personas_origen).toBe('equipo');
+    expect(data.tablero.personas_usadas).toBe(2);
+  });
+
+  it('si no se puede leer el equipo, no se manda nada (nunca un 0)', async () => {
+    equipo.respuesta = { forbidden: true };
+    motorCon(DEL_MOTOR);
+    const data = await cargar(evento());
+    expect(data.personasEquipo).toBeNull();
+    expect(pedidos.find((u) => u.includes('/reportes/capacidad'))).not.toContain('personas_equipo');
+  });
+});

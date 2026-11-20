@@ -1,0 +1,76 @@
+- generic [ref=f7e3]:
+  - generic [ref=f7e4]:
+    - generic [ref=f7e5]: Humano, respondiendo al cliente
+    - generic [ref=f7e6]:
+      - status [ref=f7e7]:
+        - generic [ref=f7e8]: Ventana abierta · quedan 3600s
+      - generic [ref=f7e9]:
+        - generic [ref=f7e10]:
+          - generic [ref=f7e12]:
+            - strong [ref=f7e13]: Se envía directo al cliente
+            - text: · no pasa por el asistente · Enter envía
+          - generic [ref=f7e14]: Canal directo del operador
+        - generic [ref=f7e15]:
+          - generic [ref=f7e16]:
+            - button "Emoji" [ref=f7e18] [cursor=pointer]
+            - button "Adjuntar" [ref=f7e23] [cursor=pointer]
+            - button "Grabar una nota de voz" [ref=f7e26] [cursor=pointer]
+          - group "Qué estás escribiendo" [ref=f7e31]:
+            - button "Al cliente" [pressed] [ref=f7e32] [cursor=pointer]
+            - button "Nota interna" [ref=f7e33] [cursor=pointer]
+            - button "Devolver a la IA" [ref=f7e34] [cursor=pointer]
+          - button "Plantillas" [ref=f7e35] [cursor=pointer]
+          - generic [ref=f7e39]: WhatsApp · ventana abierta
+        - textbox "Escribí tu respuesta…" [ref=f7e40]
+        - generic [ref=f7e41]:
+          - generic [ref=f7e42]: Enter envía · Shift+Enter salto de línea
+          - button "Enviar" [disabled] [ref=f7e43]
+  - generic [ref=f7e47]:
+    - generic [ref=f7e48]: Nota interna
+    - generic [ref=f7e49]:
+      - status [ref=f7e50]:
+        - generic [ref=f7e51]: Ventana abierta · quedan 3600s
+      - generic [ref=f7e52]:
+        - generic [ref=f7e53]:
+          - generic [ref=f7e55]:
+            - strong [ref=f7e56]: Solo la ve el equipo
+            - text: · no se le envía al cliente · Enter envía
+          - generic [ref=f7e57]: Interno
+        - generic [ref=f7e58]:
+          - generic [ref=f7e59]:
+            - button "Emoji" [ref=f7e61] [cursor=pointer]
+            - button "Adjuntar" [ref=f7e66] [cursor=pointer]
+            - button "Grabar una nota de voz" [ref=f7e69] [cursor=pointer]
+          - group "Qué estás escribiendo" [ref=f7e74]:
+            - button "Al cliente" [ref=f7e75] [cursor=pointer]
+            - button "Nota interna" [pressed] [ref=f7e76] [cursor=pointer]
+            - button "Devolver a la IA" [ref=f7e77] [cursor=pointer]
+          - button "Plantillas" [ref=f7e78] [cursor=pointer]
+          - generic [ref=f7e82]: WhatsApp · ventana abierta
+        - textbox "Nota para el equipo — el cliente no la ve…" [ref=f7e83]
+        - generic [ref=f7e84]:
+          - generic [ref=f7e85]: Enter envía · Shift+Enter salto de línea
+          - button "Guardar nota" [disabled] [ref=f7e86]
+  - generic [ref=f7e87]:
+    - generic [ref=f7e88]: La atiende la IA
+    - generic [ref=f7e89]:
+      - status [ref=f7e90]:
+        - generic [ref=f7e91]: Ventana abierta · quedan 3600s
+      - generic [ref=f7e92]:
+        - generic [ref=f7e93]:
+          - generic [ref=f7e95]:
+            - text: La atiende la IA · para escribirle al cliente hace falta tomar el control
+            - button "Intervenir" [ref=f7e96]
+          - generic [ref=f7e97]: Responde el asistente
+        - generic [ref=f7e98]:
+          - generic [ref=f7e99]:
+            - button "Emoji" [ref=f7e101] [cursor=pointer]
+            - button "Adjuntar" [ref=f7e106] [cursor=pointer]
+            - button "Grabar una nota de voz" [ref=f7e109] [cursor=pointer]
+          - group "Qué estás escribiendo" [ref=f7e114]:
+            - button "Al cliente" [pressed] [ref=f7e115] [cursor=pointer]
+            - button "Nota interna" [ref=f7e116] [cursor=pointer]
+          - button "Plantillas" [ref=f7e117] [cursor=pointer]
+          - generic [ref=f7e121]: WhatsApp · ventana abierta
+        - textbox "La IA está atendiendo — dejá una nota interna para el equipo" [disabled] [ref=f7e122]
+        - button "Enviar" [disabled] [ref=f7e124]

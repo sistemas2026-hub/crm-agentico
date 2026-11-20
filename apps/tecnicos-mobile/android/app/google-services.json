@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "119689157438",
+    "project_id": "dexter-app-d4b93",
+    "storage_bucket": "dexter-app-d4b93.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:119689157438:android:f95d545ef060117afe2a6f",
+        "android_client_info": {
+          "package_name": "com.dexter.campo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHtua4nvhVeu1LttWPij86QxGSzlTeYTQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

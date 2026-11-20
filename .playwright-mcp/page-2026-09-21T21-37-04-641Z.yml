@@ -1,0 +1,18 @@
+- generic [ref=e2]:
+  - generic [ref=e38]:
+    - link "BottleCRM" [ref=e39] [cursor=pointer]:
+      - /url: /
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - heading "Elegí una organización" [level=1] [ref=e43]
+        - paragraph [ref=e44]: Elegí el espacio de trabajo que querés abrir.
+      - button "Q QA BANDEJA (datos de prueba) administrador" [ref=e46] [cursor=pointer]:
+        - generic [ref=e47]: Q
+        - generic [ref=e48]:
+          - generic [ref=e49]: QA BANDEJA (datos de prueba)
+          - generic [ref=e50]: administrador
+      - link "Crear nueva organización" [ref=e52] [cursor=pointer]:
+        - /url: /org/new
+    - link "Cerrar sesión" [ref=e55] [cursor=pointer]:
+      - /url: /logout
+  - generic [ref=e57]: Elegir organización · BottleCRM

@@ -17,3 +17,19 @@ if [ -n "$CAMBIADOS" ]; then
     echo "================================================================"
     echo ""
 fi
+
+# Ver el comentario largo en post-merge: la config vive en la base, no en el
+# archivo, asi que cambiar de rama NO cambia lo que el motor esta usando.
+CONFIG=$(git diff --name-only "$PREV" "$NUEVO" -- 'tenants/*.config.yaml' 2>/dev/null)
+
+if [ -n "$CONFIG" ]; then
+    echo ""
+    echo "================================================================"
+    echo "  Esta rama tiene otra version de la configuracion:"
+    echo "$CONFIG" | sed 's/^/    - /'
+    echo ""
+    echo "  Tu base sigue con la de la rama anterior. Para alinearla:"
+    echo "$CONFIG" | sed 's|^|    py -3.13 cli/cargar_config.py |'
+    echo "================================================================"
+    echo ""
+fi

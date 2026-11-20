@@ -1,0 +1,409 @@
+# -*- coding: utf-8 -*-
+"""Dejar escrita la ubicacion de un cliente en los sistemas del ISP.
+
+POR QUE EXISTE  --  10/11/2026.
+
+El dato lo tiene el tecnico, parado en la casa del cliente, y hasta hoy no
+habia forma de que lo dejara escrito. Medido el mismo dia contra la instancia
+real: de 5.186 equipos, **10** tienen coordenada (0,19 %) -- 5.082 en `null` y
+94 en cadena vacia. Del lado del otro sistema hay mas (1.350 de 2.700), pero
+siguen faltando 1.350.
+
+POR QUE NO ES UNA HERRAMIENTA DEL MODELO, Y NO ES UNA PREFERENCIA. La
+coordenada esta en `nunca_revelar` para todos los roles: es el domicilio de
+una persona. El modelo no la lee y no la escribe. Esto lo llama el backend
+cuando una persona identificada toca un boton, y entra por `frontera.humana()`
+-- nunca por `/interno/herramienta/`, que es la puerta AUTONOMA y hoy esta
+cerrada por Autonomia 2 (`frontera.py`, `autonomia2.veredicto()`): por ese
+camino el boton fallaria SOLO en produccion, con un sintoma que no senala la
+causa.
+
+EL ORDEN LO DECIDIO EL USUARIO, y se corrigio el 11/11/2026 despues de la
+primera prueba de campo: **primero el SERVICIO, que es el que manda**. Si esa
+escritura falla, la accion fallo y el equipo no se intenta -- dejar escrito
+solo el segundo produciria dos sistemas que se contradicen sin que nadie lo
+sepa.
+
+El EQUIPO va despues y es el que puede faltar: hay ordenes sin serial de ONU
+--la ficha se congela al despachar y a veces el equipo no estaba cargado-- y
+eso no puede impedir que la casa quede ubicada donde si se puede. Si el equipo
+no aplica, o falla, el resultado NO es un fracaso: el dato ya esta en el lugar
+que importa.
+
+(La version anterior tenia el orden al reves, porque el equipo es donde el
+dato mas falta: 0,19 % contra 50 %. Que falte mas no lo vuelve el que manda.)
+
+CADA DESTINO TIENE SU PROPIA CLAVE DE IDEMPOTENCIA, y eso es lo que hace
+reintentable un exito a medias: si el equipo se escribio y el servicio no,
+volver a tocar el boton reintenta SOLO el que falta -- el otro devuelve
+`repetida` sin tocar al tercero. Una sola clave para los dos dejaria el caso
+parcial sin salida, que es exactamente el defecto que se arreglo hoy en la cola
+de la app.
+
+LO QUE ESTO NO PUEDE PROMETER (CLAUDE.md 12): si la llamada salio y la
+respuesta se perdio, nadie sabe si el tercero la aplico. La idempotencia evita
+la segunda escritura; no convierte un `unknown` en un `confirmado`.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from nucleo.observabilidad.registro import registrar
+
+#: Resultados posibles. Son los que el backend traduce a una respuesta HTTP.
+GUARDADA = "guardada"
+PARCIAL = "parcial"
+FALLO = "fallo"
+SIN_HERRAMIENTA = "sin_herramienta"
+BLOQUEADO_POR_INTERRUPTOR = "bloqueado_por_interruptor"
+COORDENADA_INVALIDA = "coordenada_invalida"
+FALTA_IDENTIFICADOR = "falta_identificador"
+
+#: El planeta. Fuera de esto no es una coordenada: es un dato roto, y
+#: escribirlo pondria la casa en un lugar que no existe.
+_LAT_MAX = 90.0
+_LNG_MAX = 180.0
+
+#: Cuantos decimales se escriben. Seis son ~11 cm en el ecuador, de sobra para
+#: una casa; mas digitos son ruido del GPS presentado como precision.
+_DECIMALES = 6
+
+
+@dataclass
+class DestinoEscrito:
+    """Como le fue a UNO de los destinos."""
+
+    herramienta: str
+    ok: bool
+    detalle: str = ""
+    repetida: bool = False
+    #: El sistema no sabe de este cliente: la orden no trae con que
+    #: identificarlo ahi. NO ES UN FALLO -- es un destino que no aplica, y la
+    #: diferencia decide si se intenta el otro. Medido el 11/11/2026: la OT
+    #: #255 no tiene serial de ONU y si tiene servicio, y cortar en el primero
+    #: dejaba la casa sin ubicar en los DOS lados pudiendo escribir en uno.
+    no_aplica: bool = False
+    #: El interruptor dijo que no, o no se pudo leer. TAMPOCO ES UN FALLO del
+    #: proveedor: nada salio, y el codigo HTTP que le toca es 409 y no 502 --
+    #: la peticion estaba bien y el sistema decidio no ejecutarla.
+    bloqueado: bool = False
+
+
+@dataclass
+class ResultadoCoordenada:
+    estado: str
+    motivo: str = ""
+    referencia: str = ""
+    destinos: list[DestinoEscrito] = field(default_factory=list)
+
+    @property
+    def escribio_algo(self) -> bool:
+        return any(d.ok for d in self.destinos)
+
+
+def _numero(valor) -> float | None:
+    """Un float, o `None`. Nunca una excepcion hacia afuera."""
+    try:
+        n = float(valor)
+    except (TypeError, ValueError):
+        return None
+    #  NaN e infinito pasan `float()` y rompen la comparacion de rango: `nan >
+    #  90` es False, asi que sin esto un NaN se escribiria como coordenada
+    #  valida.
+    if n != n or n in (float("inf"), float("-inf")):
+        return None
+    return n
+
+
+def validar(latitud, longitud) -> tuple[float, float] | None:
+    """La coordenada, o `None` si no se puede afirmar que sea una.
+
+    FAIL-CLOSED, con el mismo criterio que el parser que las LEE
+    (`campo/coordenadas_del_cliente.py`): lo que no se reconoce no se arregla,
+    se descarta. Acá importa el doble, porque esto no interpreta un dato ajeno:
+    lo ESCRIBE sobre el domicilio de una persona.
+    """
+    lat = _numero(latitud)
+    lng = _numero(longitud)
+    if lat is None or lng is None:
+        return None
+    if abs(lat) > _LAT_MAX or abs(lng) > _LNG_MAX:
+        return None
+    #  EL CRUCE DEL ECUADOR CON EL MERIDIANO CERO, descartado a proposito y por
+    #  la misma razon que en el parser: `0,0` es como se ve un formulario a
+    #  medio llenar, no un cliente en el Golfo de Guinea.
+    if lat == 0.0 and lng == 0.0:
+        return None
+    return (lat, lng)
+
+
+def _texto(n: float) -> str:
+    return f"{n:.{_DECIMALES}f}"
+
+
+def _herramientas(config) -> tuple[object | None, object | None]:
+    """Las dos escrituras, buscadas POR SU MARCA y nunca por su nombre.
+
+    El nucleo no conoce a ningun cliente (CLAUDE.md 3.1). Un `if nombre ==
+    '...'` aca seria el nombre de una herramienta de un ISP concreto dentro del
+    motor, y la guarda de arquitectura lo caza.
+    """
+    equipo = next((h for h in config.herramientas
+                   if getattr(h, "escribe_coordenada_equipo", False)), None)
+    servicio = next((h for h in config.herramientas
+                     if getattr(h, "escribe_coordenada_servicio", False)), None)
+    return (equipo, servicio)
+
+
+def _argumentos(herr, identificador: str, lat: float, lng: float) -> dict:
+    """El cuerpo, con los nombres que ESTE proveedor declara."""
+    pc = herr.parametros_de_coordenada
+    args = dict(getattr(herr, "argumentos_fijos", None) or {})
+    args[pc.identificador] = identificador
+    if pc.combinada:
+        #  Coma y sin espacio: es la forma que el proveedor ya tiene cargada y
+        #  la unica que el parser lee sin ambiguedad.
+        args[pc.combinada] = f"{_texto(lat)},{_texto(lng)}"
+    else:
+        args[pc.latitud] = _texto(lat)
+        args[pc.longitud] = _texto(lng)
+    return args
+
+
+def guardar(config, tenant: str, *, actor: str, identificadores: dict,
+            latitud, longitud, origen: str) -> ResultadoCoordenada:
+    """Escribe la ubicacion en los sistemas del ISP que la sepan recibir.
+
+    `identificadores` trae, por nombre de parametro, con que se identifica al
+    cliente en cada sistema -- por ejemplo `{"sn_onu": ..., "id_servicio":
+    ...}`. Los nombres salen de la configuracion, no de aca.
+
+    `origen` identifica LA SOLICITUD y es la base de la clave idempotente: el
+    id de la orden sirve; un uuid nuevo por intento NO, que es un identificador
+    unico y no una clave idempotente (CLAUDE.md 12).
+    """
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.seguridad import frontera, idempotencia, interruptor
+
+    punto = validar(latitud, longitud)
+    if punto is None:
+        #  SIN EL VALOR EN EL LOG: una coordenada es el domicilio de una
+        #  persona, y el registro del motor no lleva datos de cliente.
+        registrar("coordenada_cliente",
+                  "la ubicacion recibida no es una coordenada: no se escribe")
+        return ResultadoCoordenada(COORDENADA_INVALIDA,
+                                   "la ubicacion no esta en el planeta o es 0,0")
+    lat, lng = punto
+
+    equipo, servicio = _herramientas(config)
+    if equipo is None and servicio is None:
+        return ResultadoCoordenada(
+            SIN_HERRAMIENTA,
+            "el tenant no declara ninguna herramienta que escriba una ubicacion")
+
+    destinos: list[DestinoEscrito] = []
+
+    def _puerta(herr) -> DestinoEscrito | None:
+        """El interruptor, leido sin cache. `None` si deja pasar.
+
+        ANTES DE CADA ESCRITURA, Y NO UNA VEZ PARA LAS DOS  --  12/11/2026.
+        -----------------------------------------------------------------
+        Esta lectura estaba arriba de todo, una sola vez, y despues se
+        escribia en DOS sistemas. CLAUDE.md 8 no lo deja a interpretacion: el
+        interruptor "se lee sin cache ANTES DE CADA ESCRITURA y falla
+        CERRADO". Una lectura para dos escrituras es media garantia: entre la
+        primera y la segunda hay una llamada HTTP a un tercero --segundos, con
+        su reintento-- y si alguien baja el interruptor en esa ventana la
+        segunda salia igual.
+
+        No es teorico: el interruptor existe para cortar en caliente, asi que
+        el momento en que se usa de verdad es exactamente el momento en que
+        algo esta saliendo.
+
+        FALLA CERRADO Y SE ANOTA: si no se puede leer, no se escribe, igual
+        que antes. Y cada bloqueo deja su propia marca por `anotar_bloqueo` --
+        dos intentos frenados son dos hechos, no uno.
+        """
+        try:
+            veredicto = interruptor.veredicto(tenant)
+        except Exception as e:                               # noqa: BLE001
+            registrar("coordenada_cliente",
+                      "no se pudo leer el interruptor: NO se escribe la ubicacion",
+                      error=e)
+            return DestinoEscrito(
+                herr.nombre, False,
+                f"no se pudo comprobar el interruptor ({type(e).__name__})",
+                bloqueado=True)
+        if not veredicto.permitido:
+            interruptor.anotar_bloqueo(
+                tenant, actor=actor, recurso="coordenada_del_cliente",
+                motivo=f"{veredicto.estado}: {veredicto.motivo}")
+            return DestinoEscrito(herr.nombre, False,
+                                  f"{veredicto.estado}: {veredicto.motivo}",
+                                  bloqueado=True)
+        return None
+
+    def _escribir(herr) -> DestinoEscrito:
+        ident = identificadores.get(herr.parametros_de_coordenada.identificador)
+        if not ident:
+            #  NO APLICA, y no falla. Hay ordenes sin serial de ONU --la ficha
+            #  se congela al despachar y a veces el equipo no estaba cargado--
+            #  y eso no puede impedir escribir donde SI se puede.
+            return DestinoEscrito(
+                herr.nombre, False,
+                f"la orden no trae '{herr.parametros_de_coordenada.identificador}'",
+                no_aplica=True)
+        #  EL INTERRUPTOR ACA Y NO ANTES DEL IDENTIFICADOR: un destino que
+        #  no aplica no va a escribir nada, y anotar un bloqueo por una
+        #  escritura que no iba a ocurrir ensucia la auditoria con un hecho
+        #  que no paso.
+        cerrada = _puerta(herr)
+        if cerrada is not None:
+            return cerrada
+
+        args = _argumentos(herr, str(ident), lat, lng)
+
+        def _hacer():
+            ejecutor_http.ejecutar(
+                herr, args, tenant,
+                variables_tenant=config.variables_tenant)
+            #  LO QUE SE GUARDA ES UN ACUSE, NO EL CUERPO DEL PROVEEDOR
+            #  (10/11/2026, hallazgo de una revision de PII).
+            #
+            #  Lo que devuelve este `_hacer` termina, tal cual, en
+            #  `asistente.operaciones_externas.respuesta`, en claro y sin
+            #  truncar (`idempotencia.ejecutar` -> `db.py`,
+            #  `json.dumps(respuesta)`). Por este camino NO corre ninguna
+            #  lista blanca --esa vive en el bucle del modelo, y esta ruta no
+            #  pasa por ahi-- asi que lo que conteste el proveedor se guarda
+            #  entero.
+            #
+            #  Y una de las dos escrituras es un PUT sobre el RECURSO DEL
+            #  CLIENTE: su serializer trae 34 campos, entre ellos la
+            #  coordenada que acabamos de escribir, y el del cliente completo
+            #  llega a traer cuatro contrasenas y la cedula. Guardar ese eco
+            #  convertiria la unica tabla propia de este flujo en el unico
+            #  lugar del sistema donde el domicilio queda escrito de nuestro
+            #  lado -- justo lo que toda esta capacidad trata de no hacer.
+            #
+            #  NO SE PIERDE NADA: `_escribir` nunca lee `res.respuesta`; lo
+            #  unico que `repetida` tiene que contestar es "ya estaba
+            #  escrita", y eso sale del ESTADO de la fila.
+            return {"escrita": True}
+
+        try:
+            with frontera.humana(tenant, herr.nombre, actor=actor,
+                                 evidencia=origen, origen=origen):
+                #  LA CLAVE POR OMISION, Y ESO ES LO CORRECTO ACA.
+                #
+                #  Antes fijaba `clave={origen}|{herramienta}`, copiando a
+                #  `cierre_por_validacion`, y ROMPIA LA CAPACIDAD. Medido el
+                #  10/11/2026 por una auditoria de frontera: la clave fija no
+                #  lleva la huella de los argumentos, pero `reclamar` la
+                #  compara igual Y LA COMPARA PRIMERO --`db.py`, antes de
+                #  `exitosa` y antes de `fallida`--. Como el boton re-lee el
+                #  GPS en cada toque y esto escribe 6 decimales (~11 cm), dos
+                #  lecturas seguidas casi nunca dan la misma cadena: el
+                #  segundo toque llegaba con otra huella y la misma clave, y
+                #  salia `CLAVE_REUTILIZADA`. El tecnico veia «proba de nuevo
+                #  en un momento» y no iba a andar NUNCA -- la fila `exitosa`
+                #  no vence.
+                #
+                #  POR QUE ACA SI Y EN EL CIERRE NO. Alla el texto cambia
+                #  entre intentos --una foto mas, otro nombre-- y eso NO es
+                #  otra operacion: el ticket recibiria el mensaje dos veces.
+                #  Aca una coordenada distinta SI es otra operacion: el
+                #  tecnico se corrio tres metros y quiere ESE punto. Y el
+                #  mismo punto dos veces sigue dando la misma clave, asi que
+                #  el doble toque sigue protegido.
+                #
+                #  Sigue habiendo una clave POR DESTINO, porque el nombre de
+                #  la herramienta entra en la clave por omision: un exito a
+                #  medias reintenta solo el que falta.
+                res = idempotencia.ejecutar(
+                    tenant, herr.nombre, args, origen, _hacer,
+                    #  REINTENTAR LO QUE FALLO, Y ACA SI (10/11/2026).
+                    #
+                    #  Por omision una operacion 'fallida' no se vuelve a
+                    #  intentar, y es a proposito: "un reintento automatico
+                    #  sobre una mutacion que no es idempotente es justo lo
+                    #  que esta tabla existe para evitar"
+                    #  ('persistencia/db.py'). Un pago repetido es un pago de
+                    #  mas.
+                    #
+                    #  Esta mutacion SI es idempotente por naturaleza, y esa
+                    #  es la diferencia: el efecto es "el campo queda en ESTE
+                    #  valor", no "sumar un hecho". Escribir dos veces la
+                    #  misma coordenada deja la misma coordenada. Sin esto, un
+                    #  exito a medias no tendria salida --el tecnico tocaria
+                    #  el boton y no pasaria nada-- que es exactamente el
+                    #  defecto que se arreglo hoy en la cola de la app.
+                    #
+                    #  Lo que sigue sin poder prometerse: si la llamada salio
+                    #  y la respuesta se perdio, nadie sabe si el tercero la
+                    #  aplico. Acá no importa, porque el reintento la deja en
+                    #  el mismo valor de todos modos.
+                    reintentar_fallida=True)
+        except Exception as e:                               # noqa: BLE001
+            registrar("coordenada_cliente",
+                      "no se pudo escribir la ubicacion en un sistema",
+                      error=e)
+            return DestinoEscrito(herr.nombre, False, type(e).__name__)
+
+        if res.decision == "repetida":
+            return DestinoEscrito(herr.nombre, True, "ya estaba escrita",
+                                  repetida=True)
+        if not res.ejecutada:
+            return DestinoEscrito(herr.nombre, False,
+                                  res.codigo or res.decision or "no ejecutada")
+        return DestinoEscrito(herr.nombre, True)
+
+    #  PRIMERO EL SERVICIO, QUE ES EL QUE MANDA. Si falla, el equipo no se
+    #  intenta: dejar escrito solo el segundo produce dos sistemas que se
+    #  contradicen. Si no aplica, se saltea --son dos cosas distintas--.
+    if servicio is not None:
+        d = _escribir(servicio)
+        destinos.append(d)
+        if d.bloqueado:
+            #  MISMO ESTADO QUE ANTES: nada salio, y el 409 de la ruta
+            #  distingue "el sistema decidio no hacerlo" de "el proveedor
+            #  fallo". Lo unico que cambio es DONDE se leyo el interruptor.
+            return ResultadoCoordenada(BLOQUEADO_POR_INTERRUPTOR, d.detalle,
+                                       referencia=origen, destinos=destinos)
+        if not d.ok and not d.no_aplica:
+            return ResultadoCoordenada(FALLO, d.detalle,
+                                       referencia=origen, destinos=destinos)
+
+    #  DESPUES EL EQUIPO, y aca un fallo NO tumba la accion: el dato ya quedo
+    #  donde importa. Se informa como PARCIAL para que el boton pueda
+    #  completarlo despues --cada destino tiene su propia clave-- pero la casa
+    #  ya esta ubicada.
+    if equipo is not None:
+        d = _escribir(equipo)
+        destinos.append(d)
+        if d.bloqueado and any(x.ok for x in destinos):
+            #  EL INTERRUPTOR BAJO ENTRE LAS DOS ESCRITURAS. La casa ya quedo
+            #  ubicada donde importa; esto es PARCIAL y no un bloqueo, porque
+            #  bloqueado significa "no salio nada" y aca salio una. El boton
+            #  completa la que falta cuando el interruptor vuelva.
+            return ResultadoCoordenada(
+                PARCIAL, f"{equipo.nombre}: {d.detalle}",
+                referencia=origen, destinos=destinos)
+        if d.bloqueado:
+            return ResultadoCoordenada(BLOQUEADO_POR_INTERRUPTOR, d.detalle,
+                                       referencia=origen, destinos=destinos)
+        if not d.ok and not d.no_aplica:
+            return ResultadoCoordenada(
+                PARCIAL, f"{equipo.nombre}: {d.detalle}",
+                referencia=origen, destinos=destinos)
+
+    #  SI NO SE PUDO INTENTAR NINGUNO, eso si es un problema de la peticion:
+    #  la orden no trae con que identificar al cliente en ningun sistema.
+    if not any(d.ok for d in destinos):
+        return ResultadoCoordenada(
+            FALTA_IDENTIFICADOR,
+            "; ".join(d.detalle for d in destinos) or
+            "la orden no trae con que identificar al cliente",
+            referencia=origen, destinos=destinos)
+
+    return ResultadoCoordenada(GUARDADA, referencia=origen, destinos=destinos)
