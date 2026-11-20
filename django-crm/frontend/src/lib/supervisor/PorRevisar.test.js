@@ -50,9 +50,12 @@ describe('por revisar, de días anteriores', () => {
       { cuando: '30/10 16:50', llego: false }
     ] })]);
 
-    expect(h).toContain('El Supervisor le recordó reportar · 30/10 16:05');
-    expect(h).toContain('El Supervisor le recordó reportar · 30/10 16:50 (no llegó al teléfono)');
-    expect(h.match(/no llegó al teléfono/g)).toHaveLength(1);
+    //  20/11/2026: de dos en adelante van plegados en un renglón, que cuenta
+    //  los que no llegaron; la lista sigue adentro. Ver `OrdenDelDia.test.js`.
+    expect(h).toContain('le recordó reportar 2 veces · último 30/10 16:50 (1 no llegó al teléfono)');
+    expect(h).toContain('30/10 16:05');
+    expect(h).toContain('30/10 16:50 (no llegó al teléfono)');
+    expect(h.match(/no llegó al teléfono/g)).toHaveLength(2);
     expect(html([orden()])).not.toContain('le recordó reportar');
   });
 

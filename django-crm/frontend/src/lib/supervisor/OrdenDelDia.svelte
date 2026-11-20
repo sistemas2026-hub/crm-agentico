@@ -58,6 +58,10 @@
   let terminada = $derived(orden.estado === 'cerrada'
     || (orden.estado === 'completada_campo' && !orden.revision && orden.validacion !== 'aprobado'));
   let tono = $derived(tonoDelVencimiento(orden.vence_en, dia));
+  //  Llegan del más viejo al más nuevo (`dia_publicado.py` ordena por fecha):
+  //  el último de la lista es el más reciente.
+  let recordatorios = $derived(orden.recordatorios ?? []);
+  let sinLlegar = $derived(recordatorios.filter((/** @type {any} */ r) => !r.llego).length);
   let aviso = $derived(textoDelAviso(orden.aviso));
   //  El seguimiento (30/10/2026): cuánto lleva y si dejó de reportar.
   let tiempos = $derived(textoDeTiempos(orden.tiempos));
@@ -103,11 +107,36 @@
   <!-- LOS RECORDATORIOS (31/10/2026): se ven aunque la orden ya esté
        terminada. Si «no llegó al teléfono», el aviso salió pero Google no lo
        aceptó; si no hay ninguno, no se cumplió la regla de los 30 minutos. -->
-  {#each orden.recordatorios ?? [] as r, i (i)}
-    <p class="od-recordatorio" class:od-recordatorio-mal={!r.llego}>
-      El Supervisor le recordó reportar · {r.cuando}{r.llego ? '' : ' (no llegó al teléfono)'}
+  <!-- PLEGADOS CUANDO SON VARIOS  --  20/11/2026, OT #328
+
+       El Supervisor recuerda cada 15 minutos, y una orden parada varios días
+       llenaba la tarjeta con decenas de renglones iguales que empujaban todo
+       lo demás fuera de la vista. Uno solo se sigue viendo entero; de dos en
+       adelante queda UN renglón con cuántos fueron y cuándo el último, y la
+       lista completa se abre al tocarlo.
+
+       LO QUE EL RESUMEN NO PUEDE ESCONDER: los que no llegaron al teléfono.
+       Era lo único que distinguía un renglón de otro, así que se cuenta en
+       el renglón plegado y lo tiñe de rojo.
+
+       `<details>` NATIVO: sin estado ni JavaScript, como el resto de la
+       tarjeta. -->
+  {#if recordatorios.length === 1}
+    <p class="od-recordatorio" class:od-recordatorio-mal={!recordatorios[0].llego}>
+      El Supervisor le recordó reportar · {recordatorios[0].cuando}{recordatorios[0].llego ? '' : ' (no llegó al teléfono)'}
     </p>
-  {/each}
+  {:else if recordatorios.length > 1}
+    <details class="od-recordatorios">
+      <summary class="od-recordatorio" class:od-recordatorio-mal={sinLlegar > 0}>
+        El Supervisor le recordó reportar {recordatorios.length} veces · último {recordatorios[recordatorios.length - 1].cuando}{sinLlegar > 0 ? ` (${sinLlegar === 1 ? '1 no llegó' : `${sinLlegar} no llegaron`} al teléfono)` : ''}
+      </summary>
+      {#each recordatorios as r, i (i)}
+        <p class="od-recordatorio od-recordatorio-fila" class:od-recordatorio-mal={!r.llego}>
+          {r.cuando}{r.llego ? '' : ' (no llegó al teléfono)'}
+        </p>
+      {/each}
+    </details>
+  {/if}
 
   <!-- DETENIDA POR EL TÉCNICO  --  20/11/2026, OT #328
 
@@ -388,6 +417,8 @@
   .od-seguimiento { font-weight: 600; }
   .od-recordatorio { margin: 0; font-size: 12px; font-weight: 600; color: var(--snoc-primary); }
   .od-recordatorio-mal { color: var(--snoc-error); }
+  .od-recordatorios > summary { cursor: pointer; }
+  .od-recordatorio-fila { padding-left: 14px; font-weight: 400; }
   .od-validacion {
     display: flex;
     flex-wrap: wrap;

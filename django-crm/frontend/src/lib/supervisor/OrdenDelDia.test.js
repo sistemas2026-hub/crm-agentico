@@ -226,6 +226,64 @@ describe('la tarjeta de una orden detenida', () => {
     expect(h).not.toContain('action="?/destrabar"');
   });
 
+  //  LOS RECORDATORIOS SE PLIEGAN  --  20/11/2026, OT #328. El Supervisor
+  //  recuerda cada 15 minutos: una orden parada días dibujaba decenas de
+  //  renglones iguales. Se mide el efecto: cuántas veces sale la frase.
+  describe('los recordatorios del Supervisor', () => {
+    const FRASE = 'El Supervisor le recordó reportar';
+    const veces = (/** @type {string} */ h) => h.split(FRASE).length - 1;
+    const r = (/** @type {string} */ cuando, llego = true) => ({ cuando, llego });
+
+    it('uno solo se ve entero, sin plegar', () => {
+      const h = html({ orden: { ...orden, recordatorios: [r('14:55')] } });
+
+      expect(veces(h)).toBe(1);
+      expect(h).toContain('14:55');
+      expect(h).not.toContain('<details class="od-recordatorios');
+    });
+
+    it('varios quedan en UN renglón, con cuántos y cuándo el último', () => {
+      const h = html({ orden: { ...orden, recordatorios: [
+        r('14/11 14:55'), r('14/11 15:10'), r('14/11 15:25')] } });
+
+      expect(veces(h)).toBe(1);
+      expect(h).toContain('3 veces');
+      expect(h).toContain('último 14/11 15:25');
+      expect(h).toContain('<details class="od-recordatorios');
+      //  Cerrado al nacer: abierto no pliega nada. Con regex, porque Svelte
+      //  le agrega su clase de alcance al atributo.
+      expect(h).not.toMatch(/<details[^>]*od-recordatorios[^>]*\sopen/);
+    });
+
+    it('la lista completa sigue adentro, para quien la abra', () => {
+      const h = html({ orden: { ...orden, recordatorios: [
+        r('14/11 14:55'), r('14/11 15:10'), r('14/11 15:25')] } });
+
+      expect(h.split('od-recordatorio-fila').length - 1).toBe(3);
+      expect(h).toContain('14/11 14:55');
+      expect(h).toContain('14/11 15:10');
+    });
+
+    it('plegado no esconde los que no llegaron al teléfono', () => {
+      const dos = html({ orden: { ...orden, recordatorios: [
+        r('14:55', false), r('15:10'), r('15:25', false)] } });
+      const uno = html({ orden: { ...orden, recordatorios: [
+        r('14:55', false), r('15:10')] } });
+      const bien = html({ orden: { ...orden, recordatorios: [r('14:55'), r('15:10')] } });
+
+      expect(dos).toContain('(2 no llegaron al teléfono)');
+      expect(uno).toContain('(1 no llegó al teléfono)');
+      expect(dos).toMatch(/<summary class="[^"]*od-recordatorio-mal/);
+      expect(bien).not.toContain('no lleg');
+      expect(bien).not.toContain('od-recordatorio-mal');
+    });
+
+    it('sin recordatorios no se dibuja nada', () => {
+      expect(veces(html({ orden }))).toBe(0);
+      expect(html({ orden })).not.toContain('od-recordatorios');
+    });
+  });
+
   //  EL RESULTADO SE VE AUNQUE EL BLOQUE YA NO ESTÉ: cuando sale bien, la
   //  orden recarga sin bloqueo. Si el mensaje viviera adentro del bloque, el
   //  éxito no se mostraría nunca.
