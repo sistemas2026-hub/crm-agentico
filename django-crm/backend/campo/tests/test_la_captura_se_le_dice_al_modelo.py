@@ -66,6 +66,13 @@ def _evidencia(org, *, es_captura, numero, instrucciones=INSTRUCCION):
         estado_archivo=EvidenciaTrabajo.RECIBIDO)
 
 
+def _de_galeria(evidencia, valor=True):
+    """La app marca asi la imagen que no salio de la camara (09/11/2026)."""
+    evidencia.metadatos_captura = {"de_galeria": valor}
+    evidencia.save(update_fields=["metadatos_captura"])
+    return evidencia
+
+
 def _texto(evidencia):
     from campo.inspeccion_visual import que_tenia_que_mostrar
 
@@ -147,3 +154,58 @@ def test_una_foto_comun_SIN_instrucciones_tampoco(org_a):
                               instrucciones=""))
 
     assert texto == "Esta foto tenia que mostrar: Test de velocidad.", texto
+
+# ---------------------------------------------------------------------------
+#  LA CAPTURA QUE NADIE DECLARO: LA IMAGEN ELEGIDA DE LA GALERIA
+#  --  20/11/2026, OT #281
+# ---------------------------------------------------------------------------
+#  El usuario adjunto una captura en vez de una foto y la orden volvio
+#  devuelta, con la regla general ya desplegada. La app marca `de_galeria`, y
+#  una captura solo puede entrar por ahi: a ESA imagen se le dice, junto a la
+#  foto, que ser captura no la frena.
+
+def test_a_la_imagen_de_GALERIA_se_le_dice_que_una_captura_vale(org_a):
+    texto = _texto(_de_galeria(_evidencia(org_a, es_captura=False, numero=710)))
+
+    assert "puede ser una captura de pantalla" in texto, texto
+    assert "NO es motivo de atencion ni de 'MUESTRA: no'" in texto, texto
+    assert "si en ella se ve lo que se pedia, es 'MUESTRA: si'" in texto, texto
+    #  En el MISMO envoltorio: las reglas 7 y 12 disparan por el prefijo.
+    assert texto.startswith("Esta foto tenia que mostrar: Test de velocidad. "
+                            + INSTRUCCION), texto
+
+
+def test_la_de_galeria_que_muestra_OTRA_COSA_se_sigue_marcando(org_a):
+    """El caso del 06/11 --el sistema de tickets donde iba el test-- tiene
+    que seguir volviendo: se afloja el formato, no el contenido."""
+    texto = _texto(_de_galeria(_evidencia(org_a, es_captura=False, numero=711)))
+
+    assert "Marca solo si lo que muestra es otra cosa o no se distingue" in texto, texto
+
+
+def test_la_de_galeria_SIN_instrucciones_tambien_lo_recibe(org_a):
+    """La plantilla base de «Daño encontrado» no trae instrucciones."""
+    texto = _texto(_de_galeria(_evidencia(org_a, es_captura=False, numero=712,
+                                          instrucciones="")))
+
+    assert texto.startswith("Esta foto tenia que mostrar: Test de velocidad."), texto
+    assert "puede ser una captura de pantalla" in texto, texto
+
+
+def test_a_la_foto_de_CAMARA_no_se_le_dice_nada(org_a):
+    """De la camara no sale una captura. Y solo vale el `True` de la app."""
+    for numero, valor in ((713, False), (714, "true"), (715, 1), (716, None)):
+        texto = _texto(_de_galeria(
+            _evidencia(org_a, es_captura=False, numero=numero), valor))
+
+        assert "captura" not in texto.lower(), (valor, texto)
+        assert texto.endswith(INSTRUCCION), (valor, texto)
+
+
+def test_la_DECLARADA_captura_conserva_su_propio_texto(org_a):
+    """El test de velocidad acepta ademas la foto a otra pantalla (08/11):
+    que venga de la galeria no puede cambiarle ese pie por el mas angosto."""
+    texto = _texto(_de_galeria(_evidencia(org_a, es_captura=True, numero=717)))
+
+    assert "foto tomada de otra pantalla" in texto, texto
+    assert "se eligio de la galeria" not in texto, texto

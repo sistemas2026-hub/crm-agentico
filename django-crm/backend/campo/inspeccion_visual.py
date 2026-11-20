@@ -199,6 +199,41 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
                      "pantalla este inclinada--. Deci cual de las dos parece, "
                      "en pocas palabras, y marca atencion SOLO si los numeros "
                      "que se pedian no se pueden leer.")
+        elif _vino_de_la_galeria(evidencia):
+            #  LA CAPTURA QUE NADIE DECLARO, DICHA JUNTO A LA IMAGEN
+            #  --  20/11/2026, OT #281
+            #
+            #  Ese mismo dia se escribio en `INSTRUCCION_EVIDENCIA` (reglas 11
+            #  y 12) que una captura no frena por ser captura, se desplego, y
+            #  la primera prueba del usuario volvio devuelta igual: «adjunte
+            #  una captura en vez de foto y aun asi me la devolvio».
+            #
+            #  POR QUE ACA. Lo unico que ya habia funcionado con las capturas
+            #  es este pie --el del test de velocidad, 07 y 08/11--: va pegado
+            #  a la imagen y habla de ESTA foto. Una frase mas en una
+            #  instruccion general de trece reglas compite con la regla 12,
+            #  que dice que 'no' es para lo que muestra «algo DISTINTO», y una
+            #  captura de la galeria se ve distinta de una foto.
+            #
+            #  Y EL DATO ES DURO, NO UNA SOSPECHA DEL MODELO: la app marca
+            #  `de_galeria` cuando la imagen no salio de la camara (09/11), y
+            #  una captura de pantalla solo puede entrar por ahi. A la foto de
+            #  camara no se le dice nada: ahi no hay captura posible.
+            #
+            #  NO AFLOJA LO QUE LA CAPTURA MUESTRA. Si muestra otra cosa, o no
+            #  se distingue, se sigue marcando: el caso del 06/11 --el sistema
+            #  de tickets donde iba el test-- tiene que seguir volviendo.
+            #
+            #  NO ESTA MEDIDO QUE ESTA FUERA LA CAUSA EN LA #281: no se pudo
+            #  leer su bitacora. Las otras reglas que devuelven solas --el
+            #  numero que no coincide con el escrito, el rango, el catalogo--
+            #  no se tocan, y si fue una de esas esto no la cambia. PRD 8.28.1.
+            marca = (" Esta imagen se eligio de la galeria del telefono y "
+                     "puede ser una captura de pantalla: la empresa la "
+                     "acepta. Que sea una captura NO es motivo de atencion ni "
+                     "de 'MUESTRA: no'. Juzga lo que la captura muestra: si "
+                     "en ella se ve lo que se pedia, es 'MUESTRA: si'. Marca "
+                     "solo si lo que muestra es otra cosa o no se distingue.")
         else:
             marca = ""
         #  EL RANGO QUE LA EMPRESA DECLARO, ANTES DE LEER  --  11/11/2026
@@ -251,6 +286,17 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
             return f"Esta foto tenia que mostrar: {titulo}.{marca}{rango}"
         break
     return ""
+
+
+def _vino_de_la_galeria(evidencia) -> bool:
+    """Si la app dijo que esta imagen se eligio de la galeria.
+
+    `is True` y no «verdadero»: la misma lectura estricta que
+    `services/marca_de_agua.py`. Sin el dato --una version vieja de la app,
+    una subida por otra via-- se contesta que no, y el pie queda como estaba.
+    """
+    metadatos = getattr(evidencia, "metadatos_captura", None)
+    return isinstance(metadatos, dict) and metadatos.get("de_galeria") is True
 
 
 def _motor() -> tuple[str, dict]:

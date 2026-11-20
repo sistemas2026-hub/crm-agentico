@@ -1471,3 +1471,16 @@ El backend ya lo resolvía entero (`campo/services/bloqueos.py::resolver`) y des
 
 **VERIFICADO:** 4 guardas nuevas (`tests/test_vision_evidencia_campo.py`, sección J) y sus mutaciones muertas; miden que la regla **llega** al modelo.
 **NO VERIFICADO:** que el modelo la obedezca. `cli/evaluar.py` no recorre este camino y fuera de producción no hay capturas reales de técnicos. Se mide después del despliegue con una orden de prueba.
+
+#### 8.28.1 La primera prueba volvió devuelta: la regla se dice junto a la imagen (20/11/2026, OT #281)
+
+**El caso.** Con 8.28 ya desplegado, el usuario adjuntó una captura en lugar de una foto en la OT #281 y la orden volvió al técnico igual: *«aún así me la devolvió»*.
+
+**Lo que NO se pudo medir, y se dice primero.** No hubo forma de leer la bitácora de la #281 (`por_que_no_cerro` se corre dentro del contenedor de producción). Cuatro reglas devuelven una orden solas: `MUESTRA: no`, `CATALOGO: si`, el número de la foto que no coincide con el escrito, y la medida fuera de rango. **Cuál disparó es INFERIDO, no verificado.**
+
+**Qué se cambió, y por qué ahí.** La regla de 8.28 vivía en una instrucción general de trece reglas, donde compite con la regla 12 («'no' es para lo que muestra algo DISTINTO»). Lo único que ya había funcionado con capturas es el **pie que viaja pegado a la imagen** (el del test de velocidad, 07 y 08/11). Ahora ese pie también lo recibe toda imagen que la app marca `de_galeria`: una captura solo puede entrar por la galería, así que el dato es duro y no una sospecha del modelo. A la foto de cámara no se le dice nada.
+
+**Qué no se afloja.** Una imagen de galería que muestra otra cosa, o que no se distingue, se sigue marcando. Las otras tres reglas no se tocan: una captura de un medidor cuyo número no coincide con el que escribió el técnico **sigue volviendo**, y no por ser captura.
+
+**VERIFICADO:** 5 pruebas nuevas contra PostgreSQL (`campo/tests/test_la_captura_se_le_dice_al_modelo.py`) y sus mutaciones muertas; miden que el texto **llega** junto a la imagen.
+**NO VERIFICADO:** que esta fuera la causa en la #281, y que el modelo obedezca. Si la próxima prueba vuelve devuelta, el motivo está escrito en la devolución que recibe el técnico en la app: con eso se sabe cuál de las cuatro reglas fue.
