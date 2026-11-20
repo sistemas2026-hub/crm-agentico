@@ -576,3 +576,117 @@ def test_z_otra_empresa_no_ve_los_bloqueos(org_a, org_b, version, tecnico,
     assert r.data["bloqueos"] == []
     # Y por el servicio, lo mismo.
     assert serv.abiertos_de(org_b) == []
+
+
+# --------------------------------------------------------------------------- #
+# AA-AF. Destrabar le avisa a quien estaba esperando  --  20/11/2026, OT #328
+# --------------------------------------------------------------------------- #
+#  El tecnico detuvo la orden y nadie podia sacarla: la app no ofrece nada sobre
+#  una orden bloqueada, y destrabarla desde la oficina no le avisaba a nadie.
+#  Aca se mide el EFECTO --la notificacion que le queda al tecnico y lo que
+#  viaja al telefono--, no que la funcion exista.
+
+def _avisos_de(profile):
+    from common.models import Notification
+
+    return list(Notification.objects.filter(recipient=profile,
+                                            verb="trabajo_destrabado"))
+
+
+def test_aa_destrabar_le_deja_al_tecnico_la_aclaracion(orden, tecnico, jefe):
+    serv.bloquear(orden, profile=tecnico[1], respuestas=RESPUESTAS, requiere_noc=False)
+    b = serv.bloqueo_abierto_de(orden)
+
+    serv.resolver(b, profile=jefe[1],
+                  que_se_hizo="El dueño ya abrió el portón, podés entrar")
+
+    avisos = _avisos_de(tecnico[1])
+    assert len(avisos) == 1
+    assert avisos[0].data["aclaracion"] == "El dueño ya abrió el portón, podés entrar"
+    assert avisos[0].data["orden_numero"] == orden.numero
+    #  Y la orden VOLVIO: el aviso dice a donde, y es donde estaba.
+    orden.refresh_from_db()
+    assert orden.estado_operativo == OrdenTrabajo.EN_SITIO
+    assert avisos[0].data["volvio_a"] == OrdenTrabajo.EN_SITIO
+
+
+def test_ab_la_aclaracion_viaja_al_telefono_y_no_al_chat(
+        orden, org_a, tecnico, jefe, django_capture_on_commit_callbacks):
+    from unittest import mock
+
+    from campo.services import avisos
+
+    serv.bloquear(orden, profile=tecnico[1], respuestas=RESPUESTAS, requiere_noc=False)
+    b = serv.bloqueo_abierto_de(orden)
+
+    with mock.patch.object(avisos, "_enviar_ahora") as enviar, \
+            django_capture_on_commit_callbacks(execute=True):
+        serv.resolver(b, profile=jefe[1], que_se_hizo="Ya hay material en bodega")
+
+    assert enviar.call_count == 1
+    k = enviar.call_args.kwargs
+    assert "Ya hay material en bodega" in k["texto"]
+    assert f"#{orden.numero}" in k["asunto"]
+    assert k["verbo"] == "trabajo_destrabado"
+    #  SOLO AL TELEFONO: es texto libre de una persona, y no va al chat de la
+    #  empresa.
+    assert k["solo_telefono"] is True
+    assert [p.id for p in k["perfiles"]] == [tecnico[1].id]
+    #  La clave es del HECHO: este bloqueo se destraba una vez.
+    assert k["clave"] == f"destrabe|{b.id}"
+
+
+def test_ac_lo_que_sale_no_lleva_el_telefono_que_alguien_escribio(orden, tecnico, jefe):
+    serv.bloquear(orden, profile=tecnico[1], respuestas=RESPUESTAS, requiere_noc=False)
+    b = serv.bloqueo_abierto_de(orden)
+
+    serv.resolver(b, profile=jefe[1],
+                  que_se_hizo="Llamá al 3001234567 que ya te abren")
+
+    (aviso,) = _avisos_de(tecnico[1])
+    assert "3001234567" not in aviso.data["aclaracion"]
+    assert "ya te abren" in aviso.data["aclaracion"]
+
+
+def test_ad_a_quien_lo_destrabo_no_se_le_avisa(orden, tecnico):
+    """Si lo destraba el propio asignado, ya lo sabe."""
+    serv.bloquear(orden, profile=tecnico[1], respuestas=RESPUESTAS, requiere_noc=False)
+    b = serv.bloqueo_abierto_de(orden)
+
+    serv.resolver(b, profile=tecnico[1], que_se_hizo="Ya pude entrar")
+
+    assert _avisos_de(tecnico[1]) == []
+
+
+def test_ae_un_bloqueo_que_no_detuvo_nada_no_avisa(orden, tecnico, jefe):
+    """Se anoto sin parar el trabajo: nadie quedo esperando."""
+    serv.bloquear(orden, profile=tecnico[1], respuestas=RESPUESTAS,
+                  requiere_noc=False, detener=False)
+    b = serv.bloqueo_abierto_de(orden)
+
+    serv.resolver(b, profile=jefe[1], que_se_hizo="Anotado")
+
+    assert _avisos_de(tecnico[1]) == []
+
+
+def test_af_la_api_dice_si_el_aviso_salio(orden, org_a, version, tecnico, jefe):
+    """La pantalla lo PREGUNTA: una orden sin nadie asignado no avisa a nadie."""
+    user, prof = jefe
+    serv.bloquear(orden, profile=tecnico[1], respuestas=RESPUESTAS, requiere_noc=False)
+    con = _cliente(user, org_a, prof).post(
+        f"/api/campo/trabajos/{orden.id}/bloqueo/resolver/",
+        {"que_se_hizo": "Resuelto", "resuelto_por_rol": "coordinacion"},
+        format="json")
+
+    sola = _orden(org_a, version, tecnico[1], 4190)
+    serv.bloquear(sola, profile=tecnico[1], respuestas=RESPUESTAS, requiere_noc=False)
+    AsignacionTrabajo.objects.filter(orden=sola).delete()
+    sin = _cliente(user, org_a, prof).post(
+        f"/api/campo/trabajos/{sola.id}/bloqueo/resolver/",
+        {"que_se_hizo": "Resuelto", "resuelto_por_rol": "coordinacion"},
+        format="json")
+
+    assert con.status_code == 200 and sin.status_code == 200, (con.data, sin.data)
+    assert con.data["aviso"] is True
+    assert sin.data["aviso"] is False
+    assert sin.data["estado_operativo"] == OrdenTrabajo.EN_SITIO

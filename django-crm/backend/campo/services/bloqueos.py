@@ -262,6 +262,18 @@ def resolver(
             "abierto_en": bloqueo.abierto_en.isoformat(),
         },
     )
+
+    #  QUIEN ESTABA ESPERANDO SE ENTERA  --  20/11/2026, OT #328
+    #
+    #  Solo cuando el bloqueo habia DETENIDO el trabajo: uno que se anoto sin
+    #  parar nada no dejo a nadie esperando. Va dentro de la transaccion por lo
+    #  mismo que la devolucion: la notificacion es parte del hecho, y la
+    #  entrega al telefono sale despues del commit (`avisos._despachar`).
+    if bloqueo.detuvo_el_trabajo:
+        from campo.services import avisos
+
+        evento.se_aviso = avisos.avisar_destrabe(
+            orden, bloqueo, que_se_hizo, quien=profile)
     return bloqueo, evento, volvio_a
 
 

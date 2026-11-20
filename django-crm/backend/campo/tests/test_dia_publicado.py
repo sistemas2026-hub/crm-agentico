@@ -861,3 +861,80 @@ def test_m_cada_persona_del_dia_dice_QUIEN_es_para_poder_moverle_la_orden(
 
     assert por_nombre["Cuadrilla #1 0"]["profile"] == str(admin_profile.id)
     assert por_nombre["Cuadrilla #1 1"]["profile"] == str(user_profile.id)
+
+
+# ---------------------------------------------------------------------------
+# BL · la orden detenida lo dice, con quien la paro y por que  --  20/11/2026
+# ---------------------------------------------------------------------------
+#  OT #328: el tecnico la detuvo y la tarjeta no decia nada. Sin esta clave la
+#  pantalla no tiene con que dibujar el motivo ni el boton que la devuelve.
+
+def _detener(org, orden, profile, *, detuvo=True, resuelto=False):
+    from django.utils import timezone
+
+    from campo.bloqueos import BloqueoDeTrabajo
+
+    if detuvo:
+        OrdenTrabajo.objects.filter(pk=orden.pk).update(
+            estado_operativo=OrdenTrabajo.BLOQUEADA)
+    return BloqueoDeTrabajo.objects.create(
+        org=org, orden=orden, abierto_por=profile,
+        estado_operativo_anterior=OrdenTrabajo.EN_SITIO,
+        detuvo_el_trabajo=detuvo, categoria="acceso",
+        motivo="No hay quien abra", necesita="Llamar al cliente",
+        resuelto_en=timezone.now() if resuelto else None)
+
+
+def test_bl_la_detenida_trae_quien_la_paro_y_por_que(
+        org_a, version, norte, admin_profile):
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    parada = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_SITIO)
+    normal = _orden(org_a, version, de=admin_profile)
+    _detener(org_a, parada, admin_profile)
+
+    f = _filas(D.del_dia(org_a, LUNES))
+
+    b = f[parada.numero]["bloqueo"]
+    assert f[parada.numero]["estado"] == OrdenTrabajo.BLOQUEADA
+    assert b["categoria"] == "acceso"
+    assert b["motivo"] == "No hay quien abra"
+    assert b["necesita"] == "Llamar al cliente"
+    assert b["quien"] and b["desde"]
+    assert f[normal.numero]["bloqueo"] is None
+
+
+def test_bl2_el_resuelto_y_el_que_no_detuvo_no_piden_nada(
+        org_a, version, norte, admin_profile):
+    """Ninguno de los dos dejo la orden parada: no hay nada que devolver."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    ya = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_SITIO)
+    anotado = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_SITIO)
+    #  El resuelto SI habia detenido el trabajo: asi el unico filtro que lo
+    #  deja afuera es `resuelto_en`. Con `detuvo=False` lo tapaban los dos y
+    #  quitar ese filtro no rompia nada (medido mutandolo, 20/11/2026).
+    _detener(org_a, ya, admin_profile, resuelto=True)
+    OrdenTrabajo.objects.filter(pk=ya.pk).update(
+        estado_operativo=OrdenTrabajo.EN_SITIO)
+    _detener(org_a, anotado, admin_profile, detuvo=False)
+
+    f = _filas(D.del_dia(org_a, LUNES))
+
+    assert f[ya.numero]["bloqueo"] is None
+    assert f[anotado.numero]["bloqueo"] is None
+
+
+def test_bl3_el_bloqueo_de_otra_empresa_no_aparece(
+        org_a, org_b, version, norte, admin_profile):
+    from campo.bloqueos import BloqueoDeTrabajo
+
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, version, de=admin_profile, estado=OrdenTrabajo.EN_SITIO)
+    #  Una fila con la empresa equivocada sobre la MISMA orden: el filtro por
+    #  empresa es el que la deja afuera, no la suerte.
+    BloqueoDeTrabajo.objects.create(
+        org=org_b, orden=o, detuvo_el_trabajo=True, motivo="de otra empresa",
+        estado_operativo_anterior=OrdenTrabajo.EN_SITIO)
+
+    f = _filas(D.del_dia(org_a, LUNES))
+
+    assert f[o.numero]["bloqueo"] is None

@@ -10,6 +10,7 @@ import {
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 import { aprobarYCerrar, cerrarAprobada, devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
 import { moverOrden } from '$lib/server/v2/mover-orden.js';
+import { destrabarOrden } from '$lib/server/v2/destrabar-orden.js';
 import { leerCerradas } from '$lib/server/v2/cerradas.js';
 import { rangoDeCerradas } from '$lib/supervisor/dia-publicado.js';
 import {
@@ -296,6 +297,42 @@ export const actions = {
         : 'Movida. No le llega aviso: ya figuraba en esta orden.' };
     } catch (e) {
       return fail(400, { de: 'mover', orden, error: mensajeDeError(e, 'No se pudo mover.') });
+    }
+  },
+
+  //  DEVOLVER AL TÉCNICO UNA ORDEN QUE ÉL DETUVO  --  20/11/2026, OT #328
+  //
+  //  El técnico reportó un bloqueo y la orden quedó sin salida: la app no
+  //  ofrece nada sobre una orden detenida (a propósito: se destraba desde la
+  //  oficina), «Devolver» solo existe para lo ya completado, y el único botón
+  //  que la destrababa estaba en otra pantalla. El backend lo resolvía entero
+  //  (`campo/services/bloqueos.py::resolver`) y desde acá nadie lo llamaba.
+  //
+  //  LA ACLARACIÓN ES OBLIGATORIA Y LA ESCRIBE UNA PERSONA: es lo que el
+  //  técnico lee en el aviso, y lo único que después explica por qué una
+  //  orden parada volvió a andar. El servicio también la exige.
+  //
+  //  VUELVE AL ESTADO DESDE EL QUE SE BLOQUEÓ, que guardó la fila del bloqueo
+  //  al abrirse. Acá no se elige destino: el técnico retoma donde estaba.
+  destrabar: async ({ request, cookies, locals }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'destrabar', error: 'Esto es para quien gestiona.' });
+    const f = await request.formData();
+    const orden = String(f.get('orden') ?? '');
+    const aclaracion = String(f.get('aclaracion') ?? '').trim();
+    if (!orden) return fail(400, { de: 'destrabar', error: 'Falta la orden.' });
+    if (!aclaracion) {
+      return fail(400, { de: 'destrabar', orden, error: 'Escribí la aclaración: es lo que el técnico va a leer.' });
+    }
+    try {
+      const r = await destrabarOrden({ cookies }, { orden, aclaracion });
+      //  NO SE AFIRMA EL AVISO, SE PREGUNTA: una orden sin nadie asignado se
+      //  destraba igual y no le llega a nadie.
+      return { de: 'destrabar', orden, hecho: r?.aviso
+        ? 'Devuelta al técnico. Le llega el aviso con tu aclaración.'
+        : 'Ya no está detenida. No salió aviso: no tiene a nadie asignado.' };
+    } catch (e) {
+      return fail(400, { de: 'destrabar', orden, error: mensajeDeError(e, 'No se pudo devolver.') });
     }
   }
 };

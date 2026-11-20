@@ -475,3 +475,83 @@ describe('Programación: el control de mover llega dibujado', () => {
     expect(fuente).toMatch(/<OrdenDelDia[^>]*\{form\}/);
   });
 });
+
+
+/**
+ * DEVOLVER AL TÉCNICO UNA ORDEN DETENIDA (20/11/2026, OT #328).
+ *
+ * El backend ya sabía destrabar y desde esta pantalla nadie lo llamaba. Acá se
+ * mide esta capa: qué viaja, a dónde, y qué se le dice a quien apretó.
+ */
+describe('Programación: devolver al técnico una orden detenida', () => {
+  /** @param {{rol?: string, aclaracion?: string}} d */
+  const pedido = ({ rol = 'SUPERVISOR', aclaracion = 'Ya abrieron el portón' } = {}) => {
+    const f = new FormData();
+    f.set('orden', 'o-1');
+    f.set('aclaracion', aclaracion);
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } }
+    });
+  };
+
+  it('la aclaración viaja como lo que se hizo, al endpoint del bloqueo', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ aviso: true, estado_operativo: 'en_sitio' });
+
+    const r = /** @type {any} */ (await actions.destrabar(pedido()));
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/trabajos/o-1/bloqueo/resolver/');
+    expect(apiRequest.mock.calls[0][1].method).toBe('POST');
+    expect(apiRequest.mock.calls[0][1].body).toEqual({
+      que_se_hizo: 'Ya abrieron el portón',
+      resuelto_por_rol: 'coordinacion'
+    });
+    //  SIN `volver_a`: el destino lo guardó el bloqueo al abrirse.
+    expect(apiRequest.mock.calls[0][1].body).not.toHaveProperty('volver_a');
+    expect(r.orden).toBe('o-1');
+    expect(r.hecho).toContain('Le llega el aviso');
+  });
+
+  //  NO AFIRMA EL AVISO: lo lee de la respuesta.
+  it('si no había a quién avisarle, lo dice', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ aviso: false, estado_operativo: 'en_sitio' });
+
+    const r = /** @type {any} */ (await actions.destrabar(pedido()));
+
+    expect(r.hecho).toContain('No salió aviso');
+  });
+
+  it('sin aclaración no se destraba nada', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.destrabar(pedido({ aclaracion: '   ' })));
+
+    expect(r.status).toBe(400);
+    expect(r.data.orden).toBe('o-1');
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('el motivo del rechazo del servidor llega a la tarjeta', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockRejectedValue({ status: 409, body: {
+      detalle: 'Esta orden no tiene ningún bloqueo abierto.' } });
+
+    const r = /** @type {any} */ (await actions.destrabar(pedido()));
+
+    expect(r.status).toBe(400);
+    expect(r.data.error).toContain('ningún bloqueo abierto');
+    expect(r.data.orden).toBe('o-1');
+  });
+
+  it('quien no gestiona no destraba', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.destrabar(pedido({ rol: 'USER' })));
+
+    expect(r.status).toBe(403);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+});

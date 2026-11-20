@@ -109,6 +109,52 @@
     </p>
   {/each}
 
+  <!-- DETENIDA POR EL TÉCNICO  --  20/11/2026, OT #328
+
+       La barra de arriba dibuja `bloqueada` en el casillero de «En sitio», y
+       hasta hoy la tarjeta no decía ni que estaba parada ni por qué. Y no
+       había por dónde sacarla: la app no ofrece nada sobre una orden detenida
+       y el botón que la destrababa vivía en otra pantalla.
+
+       NO VA PLEGADO EN UN `<details>`: no es un ajuste que alguien va a
+       buscar, es lo que hay que resolver para que la orden siga.
+
+       FORMULARIO NATIVO, SIN `enhance`, como el resto de la tarjeta: al
+       confirmar la página recarga y la orden aparece ya en marcha. -->
+  {#if orden.bloqueo}
+    <div class="od-bloqueo">
+      <p class="od-bloqueo-titulo">
+        Detenida{orden.bloqueo.quien ? ` por ${orden.bloqueo.quien}` : ''} · {orden.bloqueo.desde}
+      </p>
+      {#if orden.bloqueo.motivo || orden.bloqueo.categoria}
+        <p class="od-bloqueo-motivo">
+          {#if orden.bloqueo.categoria}<strong>{orden.bloqueo.categoria}</strong>{/if}{#if orden.bloqueo.categoria && orden.bloqueo.motivo}: {/if}{orden.bloqueo.motivo}
+        </p>
+      {/if}
+      {#if orden.bloqueo.necesita}
+        <p class="od-bloqueo-motivo">Necesita: {orden.bloqueo.necesita}</p>
+      {/if}
+      <form method="POST" action="?/destrabar" class="od-mover-form">
+        <input type="hidden" name="orden" value={orden.id} />
+        <label class="od-mover-campo">
+          <span class="snoc-label">Aclaración para el técnico</span>
+          <textarea name="aclaracion" required maxlength="500" rows="2"
+                    class="snoc-input"
+                    placeholder="Qué se resolvió y cómo sigue. Es lo que le llega al teléfono."></textarea>
+        </label>
+        <button type="submit" class="snoc-btn snoc-btn-primario">Devolver al técnico</button>
+      </form>
+    </div>
+  {/if}
+  <!-- SE COMPARA LA ORDEN, igual que en «Mover»: `form` es de la página
+       entera. Y va FUERA del bloque de arriba porque, cuando sale bien, la
+       orden ya no trae bloqueo y ese bloque no se dibuja. -->
+  {#if form?.de === 'destrabar' && form?.orden === orden.id}
+    <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">
+      {form?.hecho ?? form?.error}
+    </p>
+  {/if}
+
   <RevisionDelCierre {orden} />
 
   <!-- COMPLETADA SIN REVISIÓN (30/10/2026): dice su validación, y si ya está
@@ -206,6 +252,17 @@
 </article>
 
 <style>
+  .od-bloqueo {
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: var(--snoc-r-xl);
+    background: var(--snoc-error-container);
+    color: var(--snoc-on-error-container);
+  }
+  .od-bloqueo-titulo { margin: 0; font-size: 13px; line-height: 18px; font-weight: 700; }
+  .od-bloqueo-motivo { margin: 0; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+
   .od-mover {
     display: grid;
     gap: 6px;

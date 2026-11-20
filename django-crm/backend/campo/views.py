@@ -512,6 +512,10 @@ class ResolverBloqueoView(APIView):
                 "evento_id": str(evento.id),
                 "volvio_a": volvio_a,
                 "estado_operativo": bloqueo.orden.estado_operativo,
+                #  Si quedo alguien a quien avisarle (20/11/2026). La pantalla
+                #  lo PREGUNTA en vez de afirmarlo: una orden sin nadie
+                #  asignado se destraba igual y no le llega a nadie.
+                "aviso": bool(getattr(evento, "se_aviso", False)),
             }
         )
 

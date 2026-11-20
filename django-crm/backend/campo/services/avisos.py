@@ -114,6 +114,68 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
     )
 
 
+#: El trabajo estaba detenido y alguien lo destrabo (20/11/2026).
+VERBO_DESTRABADO = "trabajo_destrabado"
+
+
+def avisar_destrabe(orden, bloqueo, aclaracion: str, *, quien=None) -> bool:
+    """Le dice a la cuadrilla que la orden ya no esta detenida, y POR QUE.
+
+    EL CASO  --  OT #328, 20/11/2026. El tecnico reporto un bloqueo y la orden
+    quedo detenida dias: la app no ofrece ninguna accion sobre una orden
+    bloqueada (a proposito: se destraba desde la oficina) y destrabarla no le
+    avisaba a nadie. Quien la paro se enteraba recien si abria la app y la
+    volvia a mirar.
+
+    LA ACLARACION LA ESCRIBE UNA PERSONA y es lo que el tecnico necesita leer:
+    que cambio para que ahora si pueda seguir.
+
+    SOLO AL TELEFONO, NO AL CHAT DE LA EMPRESA, y sin los identificadores que
+    alguien haya escrito ahi: es texto libre que sale del sistema hacia un
+    push. Mismo criterio que el motivo de `mover_la_orden`.
+
+    NO SE LE AVISA A QUIEN LO DESTRABO: ya lo sabe.
+
+    Devuelve si quedo alguien a quien avisarle, para que la pantalla no
+    afirme un aviso que no salio.
+    """
+    from operaciones.razonamiento import sin_identificadores
+
+    aclaracion = sin_identificadores((aclaracion or "").strip())
+    perfiles = [p for p in _asignados(orden)
+                if p is not None and (quien is None or p.id != quien.id)]
+    if not perfiles:
+        return False
+
+    contenido = {
+        "orden_numero": orden.numero,
+        "aclaracion": aclaracion,
+        "volvio_a": orden.estado_operativo,
+    }
+    avisos_por_perfil = _notificar(
+        perfiles, VERBO_DESTRABADO, entity=orden,
+        entity_name=f"OT #{orden.numero}", link=f"/ot/{orden.id}",
+        contenido=contenido)
+    lineas = [f"▶️ La OT #{orden.numero} ya no está detenida: podés continuar."]
+    if aclaracion:
+        lineas.append(f"«{aclaracion}»")
+    _despachar(
+        org=orden.org,
+        #  La clave describe el HECHO: este bloqueo se destraba una sola vez.
+        clave=f"destrabe|{bloqueo.id}",
+        asunto=f"OT #{orden.numero}: ya podés continuar",
+        texto="\n".join(lineas),
+        enlace_a=orden.id,
+        perfiles=perfiles,
+        enlace_interno=f"/ot/{orden.id}",
+        avisos_por_perfil=avisos_por_perfil,
+        contenido=contenido,
+        verbo=VERBO_DESTRABADO,
+        solo_telefono=True,
+    )
+    return True
+
+
 def _notificar_en_la_app(orden, perfiles, contenido: dict):
     """Escribe una notificacion por persona, con el despachador que YA existe.
 

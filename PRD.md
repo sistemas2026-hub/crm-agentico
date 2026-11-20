@@ -1420,3 +1420,35 @@ Y el pie que acompaña la foto es solo *«Esta foto tenía que mostrar: Daño en
 **VERIFICADO:** el texto llega al modelo (la sección F de `tests/test_vision_evidencia_campo.py` afirma que el `system` que sale es esta constante), siete guardas nuevas (sección I) y **8 mutaciones muertas**. `test_vision_propositos.py` sigue en verde: ninguna palabra del detector de respaldo quedó en la parte descriptiva.
 
 **NO VERIFICADO: que el modelo cumpla.** Es un cambio de prompt, o sea guía y no garantía (§7.4), y no hay fotos de daño fuera de producción con las que medirlo antes de desplegar. Se mide después, con lo que ya existe: `comparar_calidad_vision --evidencia <uuid> --solo-una` sobre una foto que hoy esté rechazada, y `que_foto_frena` otra vez en dos semanas. **Los números a mover: el 44% de «no muestra lo pedido» y el 30% de atención sobre fotos buenas.** Si no bajan, la causa no era esta.
+
+### 8.27 El supervisor devuelve al técnico una orden que él detuvo (20/11/2026)
+
+**El caso.** OT #328, instalación nueva: el técnico reportó un bloqueo y la orden quedó días sin salida. El usuario: *«no deja continuar y no deja devolver ni al técnico volver a iniciar»*, y pidió que el supervisor pueda devolverla **aclarando el bloqueo, con el contexto escrito por un humano**.
+
+**Por qué no tenía salida — tres cosas a la vez, ninguna un error aislado:**
+
+| Dónde | Qué pasaba |
+|---|---|
+| La app | No ofrece ninguna acción sobre una orden bloqueada. Es a propósito (`pasos_orden.dart`: se destraba desde la oficina) y **no se cambió** |
+| La tarjeta de Programación | No mostraba el bloqueo: la barra dibuja `bloqueada` en el casillero de «En sitio», sin quién la paró ni por qué |
+| El botón que destraba | Existía, pero solo en `/supervisor-noc/planes-semanales`. «Devolver» en Programación aplica solo a lo ya completado |
+
+El backend ya lo resolvía entero (`campo/services/bloqueos.py::resolver`) y desde la pantalla donde el supervisor trabaja nadie lo llamaba: *código construido no es código que corre* (CLAUDE.md §6). Y destrabar **no le avisaba a nadie**.
+
+**Qué se construyó.**
+
+- `dia_publicado` manda `bloqueo` en la fila de la orden —quién, desde cuándo, categoría, motivo, qué necesita— solo cuando hay uno **abierto que detuvo el trabajo**.
+- La tarjeta lo muestra y ofrece **«Devolver al técnico»**, con la aclaración obligatoria en las dos capas.
+- La orden vuelve **al estado desde el que se bloqueó**, que guardó la fila del bloqueo al abrirse. Desde la pantalla no se elige destino.
+- `resolver` le avisa a la cuadrilla (`avisos.avisar_destrabe`), por **cualquier** camino que destrabe, no solo este botón.
+
+**Decisiones, con su motivo.**
+
+- **El aviso va solo al teléfono, no al chat de la empresa**, y pasa por `sin_identificadores`: la aclaración es texto libre de una persona y sale del sistema hacia un push. Mismo criterio que el motivo de `mover_la_orden` (14/11/2026).
+- **No se le avisa a quien destrabó**, ni por un bloqueo que se anotó sin detener el trabajo: en ninguno de los dos casos alguien quedó esperando.
+- **La pantalla pregunta si el aviso salió** en vez de afirmarlo: una orden sin nadie asignado se destraba igual y no le llega a nadie.
+- **La app no se tocó.** La versión instalada muestra el aviso como notificación del teléfono, con el texto completo; en su lista interna de avisos el verbo `trabajo_destrabado` sale con el nombre de la orden hasta que una versión nueva lo traduzca.
+
+**VERIFICADO:** 9 pruebas nuevas de backend contra PostgreSQL y 11 de frontend; 10 mutaciones de backend y 8 de frontend, todas muertas (una de frontend sobrevivió a la primera versión de las pruebas y por eso existe la guarda «bloqueada pero sin bloqueo abierto»).
+
+**Queda abierto, visto en la misma orden y no tocado:** el Supervisor le siguió mandando el recordatorio de «reportar» cada 15 minutos a una orden que estaba detenida.

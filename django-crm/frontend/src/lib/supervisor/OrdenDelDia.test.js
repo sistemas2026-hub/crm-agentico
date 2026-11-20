@@ -166,3 +166,84 @@ describe('mover la orden a otro técnico (14/11/2026)', () => {
     expect(h).toContain('action="?/mover"');
   });
 });
+
+
+/**
+ * DETENIDA POR EL TÉCNICO (20/11/2026, OT #328). El técnico bloqueó la orden
+ * y en esta pantalla no se veía ni se podía sacar: la barra dibuja `bloqueada`
+ * en el casillero de «En sitio», y el botón que la destrababa vivía en otra
+ * pantalla. Se mide lo que se dibuja, con la forma de `campo/dia_publicado.py`.
+ */
+describe('la tarjeta de una orden detenida', () => {
+  const detenida = {
+    ...orden,
+    estado: 'bloqueada',
+    estado_texto: 'Bloqueada',
+    bloqueo: {
+      quien: 'Mario Vásquez',
+      desde: '14/11 14:40',
+      categoria: 'acceso',
+      motivo: 'No hay quien abra',
+      necesita: 'Llamar al cliente'
+    }
+  };
+
+  it('dice que está detenida, quién la paró, desde cuándo y por qué', () => {
+    const h = html({ orden: detenida });
+
+    expect(h).toContain('Detenida por Mario Vásquez · 14/11 14:40');
+    expect(h).toContain('No hay quien abra');
+    expect(h).toContain('acceso');
+    expect(h).toContain('Necesita: Llamar al cliente');
+  });
+
+  it('ofrece devolverla, con la aclaración obligatoria y el id de la orden', () => {
+    const h = html({ orden: detenida });
+
+    expect(h).toContain('action="?/destrabar"');
+    expect(h).toMatch(/<textarea[^>]*name="aclaracion"[^>]*required/);
+    expect(h).toMatch(/<input[^>]*name="orden"[^>]*value="o-1"/);
+    expect(h).toContain('Devolver al técnico');
+  });
+
+  //  LA QUE NO ESTÁ DETENIDA NO LO OFRECE: un botón que el servidor va a
+  //  negar (409, sin bloqueo abierto) es peor que no tenerlo.
+  it('una orden sin bloqueo no dibuja nada de esto', () => {
+    const h = html({ orden });
+
+    expect(h).not.toContain('action="?/destrabar"');
+    expect(h).not.toContain('Detenida');
+  });
+
+  //  MANDA EL BLOQUEO, NO EL ESTADO. El servidor solo manda `bloqueo` cuando
+  //  hay uno abierto que detuvo el trabajo; una orden que figura `bloqueada`
+  //  sin esa fila no tiene qué devolver (el servidor contestaría 409), y la
+  //  tarjeta no puede romperse leyendo un motivo que no llegó.
+  it('bloqueada pero sin bloqueo abierto: se dibuja, y sin el botón', () => {
+    const h = html({ orden: { ...orden, estado: 'bloqueada', estado_texto: 'Bloqueada' } });
+
+    expect(h).toContain('OT 83');
+    expect(h).not.toContain('action="?/destrabar"');
+  });
+
+  //  EL RESULTADO SE VE AUNQUE EL BLOQUE YA NO ESTÉ: cuando sale bien, la
+  //  orden recarga sin bloqueo. Si el mensaje viviera adentro del bloque, el
+  //  éxito no se mostraría nunca.
+  it('el resultado se muestra en la orden que ya no está detenida', () => {
+    const h = html({ orden, form: { de: 'destrabar', orden: 'o-1',
+                                    hecho: 'Devuelta al técnico.' } });
+
+    expect(h).toContain('Devuelta al técnico.');
+  });
+
+  it('el error se muestra, y solo en su orden', () => {
+    const mia = html({ orden: detenida, form: { de: 'destrabar', orden: 'o-1',
+                                                error: 'No se pudo devolver.' } });
+    const otra = html({ orden: detenida, form: { de: 'destrabar', orden: 'OTRA',
+                                                 error: 'No se pudo devolver.' } });
+
+    expect(mia).toContain('No se pudo devolver.');
+    expect(mia).toContain('snoc-error-txt');
+    expect(otra).not.toContain('No se pudo devolver.');
+  });
+});

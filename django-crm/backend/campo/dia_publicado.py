@@ -501,6 +501,36 @@ def del_dia(org, fecha) -> dict:
                     "llego": "push" in (canales or []),
                 })
 
+    #  EL BLOQUEO ABIERTO DE CADA ORDEN  --  20/11/2026, OT #328
+    #
+    #  El tecnico detuvo una orden y en esta pantalla no se veia: la barra de
+    #  progreso dibuja `bloqueada` en el mismo casillero que `en_sitio`, la
+    #  tarjeta no decia por que estaba parada, y la unica pantalla que la
+    #  destrababa era otra (`/supervisor-noc/planes-semanales`). La app no
+    #  ofrece nada sobre una orden bloqueada --a proposito--, asi que la orden
+    #  quedaba sin salida por ningun lado.
+    #
+    #  UNA CONSULTA PARA TODAS, no una por tarjeta. Y solo los que DETUVIERON:
+    #  un bloqueo anotado sin parar el trabajo no necesita que nadie lo
+    #  devuelva.
+    bloqueos_abiertos = {}
+    if todas:
+        from campo.bloqueos import BloqueoDeTrabajo
+
+        for b in (BloqueoDeTrabajo.objects
+                  .filter(org=org, orden_id__in=[o.id for o in todas],
+                          resuelto_en__isnull=True, detuvo_el_trabajo=True)
+                  .select_related("abierto_por__user")):
+            local = b.abierto_en.astimezone(zona)
+            bloqueos_abiertos[b.orden_id] = {
+                "quien": _nombre(b.abierto_por) if b.abierto_por_id else "",
+                "desde": local.strftime("%H:%M" if local.date() == fecha
+                                        else "%d/%m %H:%M"),
+                "categoria": b.categoria or "",
+                "motivo": b.motivo or "",
+                "necesita": b.necesita or "",
+            }
+
     def fila(o) -> dict:
         quienes = sorted(o.asignaciones.all(),
                          key=lambda a: (not a.es_principal, _nombre(a.profile)))
@@ -566,6 +596,9 @@ def del_dia(org, fecha) -> dict:
             "tiempos": tiempos.get(o.id),
             "seguimiento": salud.get(o.id),
             "recordatorios": recordatorios.get(str(o.id), []),
+            #  20/11/2026: si esta detenida, quien la paro y por que. `None`
+            #  cuando no hay bloqueo abierto que haya detenido el trabajo.
+            "bloqueo": bloqueos_abiertos.get(o.id),
             #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
             #  valido trae lo que dice el Supervisor. Indica, no decide.
             "revision": revision_de(o),
