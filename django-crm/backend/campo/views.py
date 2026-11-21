@@ -6,7 +6,7 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import logging
 
@@ -149,6 +149,34 @@ class MiDiaView(APIView):
         })
 
 
+#: Cuantos dias sigue viajando al telefono una orden ya TERMINADA.
+#:
+#: EL LISTADO NO BAJA LA HISTORIA ENTERA  --  21/11/2026
+#: El usuario: «la app demora mucho en sincronizar (...) sale siempre
+#: sincronizando (...) a las horas es que sincronizan».
+#:
+#: Leido en el codigo de la app, no medido en el telefono: cada pasada baja
+#: este listado y POR CADA ORDEN pide su detalle, una detras de otra, DOS
+#: veces por pasada; y lo que el tecnico escribio no empieza a subir hasta que
+#: la primera termina. El listado le devolvia todo lo que alguna vez tuvo
+#: asignado --las cerradas de hace un mes tambien--, asi que el costo de
+#: sincronizar crecia con la antiguedad del tecnico y no con su trabajo.
+#:
+#: SE ARREGLA ACA Y NO EN LA APP porque esto llega hoy a los telefonos que ya
+#: estan instalados. La app suelta sola lo que el servidor deja de listarle
+#: (`soltarOrdenesQueYaNoSonMias`) y protege lo que tenga algo sin subir.
+#:
+#: TRES DIAS: lo de hoy lo cuenta la pantalla de la jornada, y lo de ayer es
+#: lo que alguien todavia puede querer mirar. Lo que sigue ABIERTO no vence
+#: nunca: una orden detenida hace un mes es justo la que hay que ver.
+#:
+#: SE MIDE CON `updated_at`: una orden terminada que alguien vuelve a tocar
+#: reaparece unos dias, que es el lado seguro.
+DIAS_DE_TERMINADAS_EN_EL_LISTADO = 3
+
+#: Los estados de los que una orden ya no sale.
+ESTADOS_TERMINADOS = (OrdenTrabajo.CERRADA, OrdenTrabajo.CANCELADA)
+
 #: Cuantas ordenes se entregan por pagina si el cliente no pide otra cosa.
 LIMITE_POR_DEFECTO = 100
 
@@ -217,6 +245,14 @@ class TrabajosListView(APIView):
         if estado:
             estados = [e.strip() for e in estado.split(",") if e.strip()]
             qs = qs.filter(estado_operativo__in=estados)
+        elif request.query_params.get("historia", "").lower() != "completa":
+            #  Lo terminado hace dias no viaja. Ver
+            #  `DIAS_DE_TERMINADAS_EN_EL_LISTADO`. Quien pide un estado, o la
+            #  historia completa, la recibe entera.
+            corte = timezone.now() - timedelta(
+                days=DIAS_DE_TERMINADAS_EN_EL_LISTADO)
+            qs = qs.exclude(estado_operativo__in=ESTADOS_TERMINADOS,
+                            updated_at__lt=corte)
 
         # Orden estable: sin un desempate, dos ordenes creadas en el mismo
         # milisegundo pueden intercambiarse entre paginas y una se pierde.

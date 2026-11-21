@@ -1507,3 +1507,30 @@ La app marca `de_galeria` desde el 09/11 y una captura de pantalla solo puede en
 
 **VERIFICADO:** pruebas nuevas contra PostgreSQL de las dos reglas (con su control: la misma imagen tomada con la cámara sí devuelve) y de la tarjeta, con sus mutaciones muertas.
 **NO VERIFICADO:** cuál regla devolvía las órdenes del usuario. Si después de este despliegue una orden con captura vuelve devuelta, la tarjeta ya lo dice.
+
+### 8.29 DECISIÓN — El listado que baja la app ya no trae la historia entera (21/11/2026)
+
+**El reclamo.** El usuario: *«la app demora mucho en sincronizar y eso que tiene conexión wifi (…) sale siempre sincronizando (…) a las horas es que sincronizan»*.
+
+**Lo que se leyó en el código — VERIFICADO leyendo, NO medido en un teléfono.**
+
+| Dónde | Qué hace |
+|---|---|
+| `sync_queue_service.dart::_descargarOrdenesAsignadas` | Baja el listado y **por cada orden** pide su detalle, una detrás de otra |
+| `_unaPasada` | Hace esa descarga **dos veces** por pasada, y lo que el técnico escribió no empieza a subir hasta que la primera termina |
+| `TrabajosListView` (servidor) | Devolvía **todo** lo que el técnico tuvo asignado alguna vez, en cualquier estado |
+
+El costo de una pasada crecía con la antigüedad del técnico y no con su trabajo del día. Con 200 órdenes en la historia son más de 400 pedidos por pasada; la pasada dura más que los 2 minutos del reloj que dispara la siguiente, y de ahí «siempre sincronizando».
+
+**Qué se cambió.** El listado deja afuera lo **cerrado o cancelado hace más de 3 días** (`DIAS_DE_TERMINADAS_EN_EL_LISTADO`, medido con `updated_at`). Lo que sigue abierto no vence nunca. Quien pide un `estado` o `historia=completa` lo recibe entero. El detalle de una orden vieja se sigue pudiendo abrir.
+
+**Por qué en el servidor y no en la app.** Llega hoy a los teléfonos ya instalados: la app suelta sola lo que el servidor deja de listarle y protege lo que tenga algo sin subir. El único consumidor de este listado es la app (medido: la web no lo llama).
+
+**Lo que NO arregla, y queda abierto.**
+
+- La app sigue pidiendo el detalle de cada orden **abierta** dos veces por pasada, y sigue bajando antes de subir. Eso se arregla en la app y exige instalar una versión nueva.
+- Una cuenta con rol de gestión que use la app recibe las órdenes de **toda** la empresa, no solo las suyas.
+- «N cambios necesitan que alguien los revise» es otra cosa: cambios que el servidor **rechazó**. No se midió por qué; el motivo está escrito en la hoja de pendientes de la app.
+
+**VERIFICADO:** 13 pruebas nuevas contra PostgreSQL y 8 mutaciones muertas.
+**NO VERIFICADO:** cuántas órdenes baja hoy cada teléfono, ni cuánto tarda una pasada antes y después. El número a medir: segundos de una pasada completa en el teléfono de un técnico con más de un mes de trabajo.
