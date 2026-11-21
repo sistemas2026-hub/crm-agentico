@@ -20,6 +20,7 @@ import '../trabajo/trabajo_vista.dart';
 import 'campo_del_formulario.dart';
 import 'cierre_de_orden.dart';
 import 'datos_de_ejecucion.dart';
+import 'origen_de_la_imagen.dart';
 import 'pasos_del_trabajo.dart';
 import 'resumen_para_finalizar.dart';
 import 'widgets/consumo_de_material.dart';
@@ -298,6 +299,21 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     await _tomarFoto(requisitoId, fuente: elegida);
   }
 
+  /// La pantalla de ESTE teléfono en pixeles de verdad, que es lo que mide
+  /// una captura hecha en él. `null` si el sistema no lo dice: entonces esa
+  /// comparación no se hace, y el servidor lo sabe porque la clave no llega.
+  ({int ancho, int alto})? _tamanoDeLaPantalla() {
+    try {
+      final tamano = WidgetsBinding
+          .instance.platformDispatcher.views.first.display.size;
+      final int ancho = tamano.width.round();
+      final int alto = tamano.height.round();
+      return (ancho > 0 && alto > 0) ? (ancho: ancho, alto: alto) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _tomarFoto(String requisitoId,
       {ImageSource fuente = ImageSource.camera}) async {
     if (_orgId == null || _profileId == null) return;
@@ -335,6 +351,21 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         // Va en los metadatos, que ya es un mapa libre que viaja con la
         // evidencia junto con la ubicación de captura.
         'de_galeria': esDeGaleria(fuente),
+        // DE DÓNDE SALIÓ Y DE CUÁNDO ES (21/11/2026). «Que revise la fecha
+        // en que es la captura y si es de internet o captura del teléfono.»
+        // Decir «vino de la galería» no alcanzaba: una captura de hoy y una
+        // imagen bajada de una tienda llegaban con la misma cara.
+        //
+        // SOLO PARA LA GALERÍA: de la cámara no hay nada que averiguar, la
+        // foto se acaba de tomar. Y nunca levanta ni frena la evidencia: lo
+        // que no se pudo leer no viaja. Ver `origen_de_la_imagen.dart`.
+        if (esDeGaleria(fuente))
+          ...await leerOrigenDeLaImagen(
+            foto.path,
+            nombre: foto.name,
+            pantallaAncho: _tamanoDeLaPantalla()?.ancho,
+            pantallaAlto: _tamanoDeLaPantalla()?.alto,
+          ),
       };
 
       final tempFile = File(foto.path);

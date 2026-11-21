@@ -294,6 +294,16 @@
                   <span class="rc-foto-mal">⚠ {q.texto}</span>
                 {/if}
 
+                <!-- DE DÓNDE SALIÓ Y DE CUÁNDO ES  --  21/11/2026
+                     Solo para la imagen elegida de la galería: la foto de
+                     cámara no trae `origen`. Es lo que el teléfono declara,
+                     comparado en código, sin modelo. Indica; no decide. -->
+                {#if e.origen}
+                  <span class="rc-origen" class:rc-origen-duda={e.origen.duda}>
+                    {e.origen.duda ? '⚠' : '·'} {e.origen.texto}
+                  </span>
+                {/if}
+
                 <!-- EL DETALLE SIGUE ENTERO, A UN CLIC, y ABIERTO cuando hay
                      algo que mirar. No se borra: lo que permite decidir es
                      justamente lo que pedía la plantilla CONTRA lo que el
@@ -506,6 +516,8 @@
       acá con su motivo. */
   .rc-foto-ok { color: var(--snoc-on-surface-variant, #666); }
   .rc-foto-mal { color: #b91c1c; font-weight: 600; }
+  .rc-origen { color: var(--snoc-on-surface-variant, #666); overflow-wrap: anywhere; }
+  .rc-origen-duda { color: #b45309; font-weight: 600; }
   .rc-foto-detalle > summary {
     cursor: pointer; color: var(--snoc-on-surface-variant, #666);
     font-size: 11px; list-style: none;

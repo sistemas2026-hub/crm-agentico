@@ -382,6 +382,32 @@ describe('las fotos, para poder compararlas', () => {
     expect(b).not.toContain('Sin observaciones');
   });
 
+  //  DE DÓNDE SALIÓ Y DE CUÁNDO ES  --  21/11/2026. «Cuando él verifica
+  //  una imagen, ¿mira la hora y el origen?» No lo hacía.
+  it('la imagen de galería dice de dónde salió y de cuándo es', () => {
+    const b = html([foto({ origen: {
+      texto: 'Captura de pantalla de este teléfono · del 21/11 09:23, el mismo día en que se adjuntó',
+      duda: false } })]);
+
+    expect(b).toContain('Captura de pantalla de este teléfono');
+    expect(b).toContain('el mismo día en que se adjuntó');
+    expect(b).not.toContain('rc-origen-duda');
+  });
+
+  it('la que levanta una duda se marca', () => {
+    const b = html([foto({ origen: {
+      texto: 'Captura de pantalla · es del 14/11 09:23 y se adjuntó el 21/11',
+      duda: true } })]);
+
+    expect(b).toContain('es del 14/11 09:23 y se adjuntó el 21/11');
+    expect(b).toMatch(/class="rc-origen[^"]*rc-origen-duda/);
+  });
+
+  it('la foto de cámara no dice nada de su origen', () => {
+    expect(html([foto({ origen: null })])).not.toContain('rc-origen');
+    expect(html([foto()])).not.toContain('rc-origen');
+  });
+
   it('con una plantilla vieja --sin estos datos-- no dibuja la sección vacía', () => {
     //  Compatibilidad: las evidencias de antes son `{id, titulo}` a secas.
     //  Mostrar una lista de fotos sin fotos ni instrucciones sería ruido.

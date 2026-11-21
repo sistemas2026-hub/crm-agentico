@@ -906,6 +906,13 @@ void main() {
           File('lib/features/ejecucion/ejecucion_screen.dart').readAsStringSync();
 
       expect(fuente, contains("'de_galeria': esDeGaleria(fuente)"));
+      //  21/11/2026: y, solo para la galería, de dónde salió y de cuándo es.
+      //  La lectura se prueba por su efecto en `origen_de_la_imagen_test.dart`;
+      //  acá se mide que la captura la LLAMA, con el archivo que se eligió.
+      //  Sin espacios, para que no dependa de cómo quede el sangrado.
+      final String junto = fuente.replaceAll(RegExp(r'\s+'), '');
+      expect(junto,
+          contains('if(esDeGaleria(fuente))...awaitleerOrigenDeLaImagen(foto.path,nombre:foto.name,'));
       //  Y el botón pasa por la elección, no por una fuente fija.
       expect(fuente, contains('_elegirDeDondeSaleLaFoto(reqId, req)'));
       expect(fuente, isNot(contains('fuente: fuenteDeLaEvidencia(req)')));

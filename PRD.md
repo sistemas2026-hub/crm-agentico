@@ -1550,3 +1550,30 @@ El costo de una pasada crecía con la antigüedad del técnico y no con su traba
 
 **VERIFICADO:** 13 pruebas nuevas contra PostgreSQL y 8 mutaciones muertas.
 **NO VERIFICADO:** cuántas órdenes baja hoy cada teléfono, ni cuánto tarda una pasada antes y después. El número a medir: segundos de una pasada completa en el teléfono de un técnico con más de un mes de trabajo.
+
+### 8.30 DECISIÓN — El Supervisor mira de dónde salió una imagen de galería y de cuándo es (21/11/2026)
+
+**El pedido.** El usuario: *«cuando él verifica una imagen, ¿mira la hora y el origen?»* — no lo hacía — y después: *«que revise la fecha en que es la captura y si es de internet o captura del teléfono»*.
+
+**Qué había.** De una imagen elegida de la galería se sabía una sola cosa: que venía de la galería. La hora que viajaba era la del momento en que el técnico la **eligió**. Lo único que separaba una captura de hoy de una imagen de tienda era la opinión de un modelo, que el mismo día se vio fallar (8.28.3).
+
+**Qué se construyó — sin modelo, en código.**
+
+| Dónde | Qué |
+|---|---|
+| App (`origen_de_la_imagen.dart`) | Al elegir de la galería lee de la cabecera del archivo: su tamaño en pixeles, si el nombre dice «captura», la fecha que trae el nombre, y la fecha y la cámara que trae adentro (EXIF). Manda además el tamaño de la pantalla del teléfono. **No manda el nombre del archivo.** |
+| Servidor (`campo/origen_de_la_imagen.py`) | Clasifica: *captura de este teléfono* (mide exactamente lo que la pantalla), *captura* (lo dice el nombre), *foto guardada* (trae cámara) u *origen desconocido*. Compara la fecha con el día en que se adjuntó |
+| Revisión del cierre | Un décimo punto, `origen`, y una línea al lado de cada imagen |
+
+**Las reglas, con su motivo.**
+
+- **Nunca devuelve una orden ni niega un cierre.** Vale `True` o `None`. Todo lo declara el teléfono, que el técnico controla: sirve para ver un descuido, no para probar un engaño (CLAUDE.md §10).
+- **Solo la evidencia positiva levanta una duda:** la fecha se leyó y es de otro día, o la app miró y la imagen no es captura ni foto de cámara. «No se pudo saber de cuándo es» **no** es una duda: cómo nombra cada marca sus capturas no está medido, y tratar lo ilegible como sospechoso marcaría todas las capturas de una marca que nombra distinto.
+- **No dice «es de internet».** No se puede probar; se dice lo que no es.
+- **La fecha se compara contra el día en que se adjuntó**, no contra la visita: las dos salen del mismo reloj —el del teléfono—, así que la comparación no depende de que ese reloj esté en hora.
+- **Una app vieja no levanta dudas:** sin `origen_version` nadie miró, y eso no es «origen desconocido».
+- **La opinión del modelo sigue aparte.** Este punto no tapa un «es una imagen de producto»: una captura de pantalla de la página de una tienda es una captura de este teléfono, de hoy.
+
+**VERIFICADO:** pruebas de la app (cabeceras PNG y JPEG armadas byte a byte, nombres de cuatro marcas), del servidor contra PostgreSQL y de la tarjeta, con sus mutaciones.
+**NO VERIFICADO, y es lo primero que hay que medir:** en un teléfono real, que el tamaño de una captura coincida con el que la app lee de la pantalla, y que el nombre del archivo llegue con la palabra y la fecha. Si no coinciden, la tarjeta lo muestra: una captura legítima saldría como «origen desconocido» con las dos medidas escritas.
+**Exige instalar una versión nueva de la app.** Hasta entonces el servidor no recibe estos datos y el punto no aparece.

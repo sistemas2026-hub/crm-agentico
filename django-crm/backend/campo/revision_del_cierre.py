@@ -109,7 +109,8 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     cierre = _cierre_de_esta_vuelta(orden)
     puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
                           _medicion(orden, pendientes), _material(orden, cierre),
-                          _fotos(orden), _potencia(orden, cierre),
+                          _fotos(orden), _origen(orden),
+                          _potencia(orden, cierre),
                           _en_rango(orden, cierre),
                           #  EL NOVENO (12/11/2026): los ocho de arriba miran
                           #  si el trabajo esta COMPLETO; este mira si es el
@@ -502,6 +503,22 @@ def _evidencias_para_revisar(orden, esquema) -> list[dict]:
         por_foto.setdefault(str(a.evidencia_id), []).append(a)
     visto = {k: la_que_vale(filas) for k, filas in por_foto.items()}
 
+    #  DE DONDE SALIO CADA UNA (21/11/2026): `None` para la foto de camara.
+    #  Va al lado de la imagen porque es ahi donde se decide; el punto de
+    #  arriba dice que hay algo que mirar, esto dice en cual.
+    from campo import origen_de_la_imagen as OI
+
+    zona = _zona_de(orden)
+
+    def _origen_de(ev):
+        try:
+            leido = OI.leer(ev, zona) if ev else None
+        except Exception:                                        # noqa: BLE001
+            return None
+        if leido is None:
+            return None
+        return {"texto": leido["texto"], "duda": leido["duda"]}
+
     salida = []
     for e in esquema.get("evidencias", []):
         if not e.get("id"):
@@ -509,6 +526,7 @@ def _evidencias_para_revisar(orden, esquema) -> list[dict]:
         ev = llegaron.get(e["id"])
         a = visto.get(str(ev.id)) if ev else None
         salida.append({
+            "origen": _origen_de(ev),
             "id": e["id"],
             "titulo": e.get("titulo") or e["id"],
             #  Lo que tenia que mostrar. Es la mitad de la comparacion.
@@ -583,6 +601,81 @@ def _fotos(orden):
     if p is None or p.get("ok") is False:
         return None
     return p
+
+
+def _zona_de(orden):
+    """La hora de la empresa, o `None` si no se puede saber (y entonces las
+    fechas se comparan tal como estan guardadas)."""
+    try:
+        from campo import reparto as R
+
+        return R._zona_de(orden.org)
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _origen(orden):
+    """De donde salieron las imagenes de galeria, y de cuando son.
+
+    EL DECIMO PUNTO  --  21/11/2026
+    --------------------------------
+    El usuario: «cuando el verifica una imagen mira la hora y el origen?». No
+    lo hacia. Ver `campo/origen_de_la_imagen.py` para que se lee y que no se
+    puede afirmar.
+
+    VALE `True` O `None`, NUNCA `False`, igual que el punto de las fotos y por
+    el mismo motivo: lo que se compara lo declara el telefono, que el tecnico
+    controla. Deja en duda para una persona; no niega un cierre ni nombra
+    nada que rehacer, asi que NO DEVUELVE la orden.
+
+    NO APARECE cuando no hay nada que decir: ninguna imagen de galeria, o una
+    app que todavia no manda estos datos. Un punto que siempre dice «no se
+    sabe» entrena a ignorarlo.
+
+    LA ULTIMA IMAGEN DE CADA REQUISITO, con la vuelta primero: la misma que
+    muestra `_evidencias_para_revisar`. Si el tecnico reemplazo una imagen
+    dudosa por una foto de camara, la duda se va con ella.
+
+    NO TUMBA LA REVISION: un fallo aca devuelve None.
+    """
+    try:
+        from campo import origen_de_la_imagen as OI
+        from campo.models import EvidenciaTrabajo
+
+        esquema = getattr(orden.tipo_trabajo_version, "esquema", None) or {}
+        titulos = {e.get("id"): str(e.get("titulo") or e.get("id"))
+                   for e in esquema.get("evidencias") or []
+                   if isinstance(e, dict) and e.get("id")}
+        ultima = {}
+        for ev in EvidenciaTrabajo.objects.filter(
+                org=orden.org,
+                orden_trabajo=orden).order_by("vuelta", "recibida_en_servidor"):
+            ultima[ev.requisito_id] = ev
+
+        zona = _zona_de(orden)
+        miradas, dudas = 0, []
+        for requisito, ev in ultima.items():
+            if requisito not in titulos:
+                continue
+            leido = OI.leer(ev, zona)
+            if leido is None or leido["tipo"] == OI.SIN_DATOS:
+                continue
+            miradas += 1
+            if leido["duda"]:
+                dudas.append(f"{titulos[requisito]}: {leido['texto']}")
+        if not miradas:
+            return None
+        if dudas:
+            return _punto("origen", None,
+                          "Revisá de dónde salieron las imágenes. "
+                          + "; ".join(dudas) + ".")
+        return _punto("origen", True,
+                      ("La imagen elegida de la galería no levanta dudas"
+                       if miradas == 1 else
+                       f"Las {miradas} imágenes elegidas de la galería no "
+                       f"levantan dudas") + " por su origen ni por su fecha.")
+    except Exception:                                            # noqa: BLE001
+        return None
 
 
 #:  COMO SE LLAMAN LOS CAMPOS DE POTENCIA EN LA PLANTILLA.
