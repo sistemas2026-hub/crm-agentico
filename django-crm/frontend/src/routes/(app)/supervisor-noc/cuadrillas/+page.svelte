@@ -10,17 +10,58 @@
    * separadas: armar el día no es editar la cuadrilla. La cuadrilla sigue
    * siendo la misma; lo que cambia es su labor y su gente.
    *
+   * REDISEÑO DEL 21/11/2026 (maqueta aprobada): diez paneles apilados pasan a
+   * siete pestañas —Hoy, Armar la jornada, Personas, Cuadrillas, Zonas,
+   * Horario y ciclo, Historial—, así lo del día no queda enterrado entre lo
+   * que se configura una vez. Armar el día, la ficha y los barrios se abren
+   * en un panel al costado (antes, al fondo de su tabla). Publicar pide
+   * confirmar con el resumen. Los resultados salen en un aviso a la vista,
+   * no arriba de todo ni repetidos al pie del ciclo.
+   *
    * POR QUÉ SE MANDA LA JORNADA ENTERA
    * El backend es idempotente por cuadrilla y fecha: reescribe todo con lo que
    * llega. Mandar sólo lo que cambió obligaría a decidir acá qué es un cambio,
    * que es justo lo que la idempotencia evita.
    */
   import { enhance } from '$app/forms';
+  import { page } from '$app/state';
+  import { untrack } from 'svelte';
   import { opcionesDeLider } from '$lib/supervisor/lider-de-cuadrilla.js';
   import '../supervisor-noc.css';
+  import Pestanas from '$lib/supervisor/ui/Pestanas.svelte';
+  import PanelLateral from '$lib/supervisor/ui/PanelLateral.svelte';
+  import Confirmar from '$lib/supervisor/ui/Confirmar.svelte';
+  import ComoFunciona from '$lib/supervisor/ui/ComoFunciona.svelte';
+  import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
+
+  /**
+   * LA PESTAÑA ABIERTA. Vive en la URL (`?pestana=`). Los enlaces viejos
+   * siguen abriendo donde corresponde: `?reparto=1` es «Armar la jornada» y
+   * un historial pedido (`?desde=…`) abre «Historial».
+   */
+  let pestana = $state(untrack(() => {
+    const u = page.url.searchParams;
+    return u.get('pestana') ?? (u.get('reparto') ? 'jornada' : u.get('desde') ? 'historial' : 'hoy');
+  }));
+
+  //  Cada resultado de un formulario, en un aviso a la vista: con trece
+  //  formularios en la pantalla, la caja de arriba quedaba a varias pantallas
+  //  del botón que se tocó.
+  $effect(() => {
+    const f = form;
+    if (!f) return;
+    untrack(() => {
+      if (f.error) avisar(f.error, { tono: 'error' });
+      else if (f.hecho) avisar(f.hecho);
+      if (f.aviso) avisar(f.aviso, { tono: 'error' });
+    });
+  });
+
+  /** Publicar pide confirmar con el resumen. */
+  let confirmarPublicar = $state(false);
 
   /**
    * LAS DOS CASILLAS DEL CICLO, CON ESTADO PROPIO  --  19/10/2026
@@ -385,36 +426,49 @@
        recortado y no hay forma de llegar (ver supervisor-noc/+page.svelte). -->
   <div class="v2-scroll">
     <div class="snoc-lienzo">
-    <!-- ============ CABECERA ============ -->
-    <section class="snoc-panel" style="gap:var(--snoc-md);">
-      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
-        <div class="snoc-pila-xs">
-          <h1 class="snoc-h1">Cuadrillas</h1>
-          <p class="snoc-body snoc-secundario">
-            Quiénes son, y qué hace cada una el día que elijas. La cuadrilla sigue siendo la
-            misma mañana; lo que cambia es su labor y su gente.
-          </p>
-        </div>
-      </div>
-
-      {#if data.error}
-        <p class="snoc-aviso snoc-error-txt">
-          No se pudieron leer todos los datos. Lo que falta no está vacío: no se sabe.
+    <header class="snoc-encabezado">
+      <div class="snoc-encabezado-texto">
+        <h1 class="snoc-h1">Cuadrillas</h1>
+        <p class="snoc-bajada">
+          Quiénes son, y qué hace cada una el día que elijas. La cuadrilla sigue siendo la misma
+          mañana; lo que cambia es su labor y su gente.
         </p>
-      {/if}
-      {#if form?.error}
-        <p class="snoc-aviso snoc-error-txt">{form.error}</p>
-      {/if}
-      {#if form?.hecho}
-        <p class="snoc-aviso">{form.hecho}</p>
-      {/if}
-      <!-- El homónimo se avisa, no se bloquea (acción persona_alta). Hasta el
-           21/11/2026 la acción lo devolvía y la pantalla no lo dibujaba. -->
-      {#if form?.aviso}
-        <p class="snoc-aviso" role="status">{form.aviso}</p>
-      {/if}
-    </section>
+      </div>
+      <!-- La fecha va en la URL: así un día se puede compartir por enlace. -->
+      <form method="GET" class="snoc-encabezado-acciones">
+        <input type="hidden" name="pestana" value={pestana} />
+        <label class="snoc-fila snoc-body-sm">
+          <span class="snoc-secundario">Día</span>
+          <input class="snoc-campo" type="date" name="dia" bind:value={diaElegido} />
+        </label>
+        <button class="snoc-btn" type="submit">Ver ese día</button>
+        <button class="snoc-btn" type="button" onclick={() => { pestana = 'hoy'; verPrevia(); }} disabled={cargandoPrevia}>
+          {cargandoPrevia ? 'Calculando…' : 'Ver qué armaría el Supervisor'}
+        </button>
+      </form>
+    </header>
 
+    {#if data.error}
+      <p class="snoc-recuadro snoc-recuadro-error">
+        No se pudieron leer todos los datos. Lo que falta no está vacío: no se sabe.
+      </p>
+    {/if}
+
+    <Pestanas
+      bind:activa={pestana}
+      etiqueta="Secciones de Cuadrillas"
+      pestanas={[
+        { id: 'hoy', texto: 'Hoy' },
+        { id: 'jornada', texto: 'Armar la jornada' },
+        { id: 'personas', texto: 'Personas', n: (data.personas ?? []).length },
+        { id: 'cuadrillas', texto: 'Cuadrillas', n: (data.cuadrillas ?? []).length },
+        { id: 'zonas', texto: 'Zonas', n: (data.zonas ?? []).length },
+        { id: 'horario', texto: 'Horario y ciclo' },
+        { id: 'historial', texto: 'Historial' }
+      ]}
+    />
+
+    {#if pestana === 'hoy'}
     <!-- ============ EL DÍA ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-sm);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
@@ -425,18 +479,10 @@
             {gentePorJornada === 1 ? 'persona' : 'personas'} con trabajo asignado.
           </p>
         </div>
-        <!-- La fecha va en la URL: así un día se puede compartir por enlace. -->
-        <form method="GET" class="snoc-fila" style="gap:var(--snoc-xs);">
-          <input class="snoc-campo" type="date" name="dia" bind:value={diaElegido} />
-          <button class="snoc-btn" type="submit">Ver ese día</button>
-          <button class="snoc-btn" type="button" onclick={verPrevia} disabled={cargandoPrevia}>
-            {cargandoPrevia ? 'Calculando…' : 'Ver qué armaría el Supervisor'}
-          </button>
-        </form>
       </div>
 
       {#if errorPrevia}
-        <p class="snoc-aviso snoc-error-txt">{errorPrevia}</p>
+        <p class="snoc-recuadro snoc-recuadro-error">{errorPrevia}</p>
       {/if}
       {#if previa}
         <div class="snoc-tarjeta snoc-pila" style="gap:var(--snoc-sm);">
@@ -530,7 +576,7 @@
                 </td>
                 <td>
                   {#if j}
-                    <span class="snoc-insignia snoc-insignia-primaria">{j.labor_nombre}</span>
+                    <span class="snoc-insignia snoc-insignia-secundaria-suave">{j.labor_nombre}</span>
                     {#if j.labor_de_apoyo_nombre}
                       <span class="snoc-tag">Apoyo: {j.labor_de_apoyo_nombre}</span>
                     {/if}
@@ -539,19 +585,19 @@
                          labor mientras no tenga órdenes; corregirla a mano la
                          vuelve de una persona y ya no la toca. -->
                     {#if j.armada_por === 'automatica'}
-                      <span class="snoc-tag">Armada sola</span>
+                      <span class="snoc-insignia snoc-insignia-ok">Armada sola</span>
                     {/if}
                     {#if j.zonas?.length}
                       {#each j.zonas as z (z.id)}
                         <span class="snoc-tag">{z.nombre}</span>
                       {/each}
                     {:else}
-                      <span class="snoc-sin-dato" style="display:block;">sin zona</span>
+                      <span class="snoc-insignia snoc-insignia-alerta">sin zona</span>
                     {/if}
                   {:else}
                     <!-- SIN JORNADA NO ES «NO TRABAJA»: es que nadie se lo asignó
                          todavía. Decirlo distinto que «descansa» importa a las 6 am. -->
-                    <span class="snoc-sin-dato">Sin armar</span>
+                    <span class="snoc-insignia snoc-insignia-alerta">Sin armar</span>
                   {/if}
                 </td>
                 <td>
@@ -564,7 +610,7 @@
                   {/if}
                 </td>
                 <td class="snoc-derecha">
-                  <button class="snoc-pildora" type="button" onclick={() => armar(c)}>
+                  <button class="snoc-btn {j ? '' : 'snoc-btn-primario'}" type="button" onclick={() => armar(c)}>
                     {j ? 'Cambiar el día' : 'Armar el día'}
                   </button>
                 </td>
@@ -575,155 +621,7 @@
       {/if}
     </section>
 
-    <!-- ============ ARMAR EL DÍA DE UNA CUADRILLA ============ -->
-    {#if armando}
-      <section class="snoc-panel" style="gap:var(--snoc-sm);">
-        <h2 class="snoc-h2">{armando.nombre} · {data.dia}</h2>
-
-        <form method="POST" action="?/jornada" use:enhance={() => {
-          return async ({ result, update }) => {
-            await update();
-            if (result.type === 'success') armando = null;
-          };
-        }} class="snoc-pila">
-          <input type="hidden" name="cuadrilla" value={armando.id} />
-          <input type="hidden" name="fecha" value={data.dia} />
-
-          <div class="snoc-fila" style="gap:var(--snoc-md); flex-wrap:wrap;">
-            <label class="snoc-campo-grupo">
-              <span class="snoc-label">Labor</span>
-              <select class="snoc-select" name="labor" bind:value={labor}>
-                {#each LABORES as l (l.id)}
-                  <option value={l.id}>{l.texto}</option>
-                {/each}
-              </select>
-            </label>
-
-            <!-- LA LABOR DE APOYO (30/10/2026): con el cupo que su labor deja
-                 libre, la cuadrilla recibe órdenes de esta otra en sus zonas. -->
-            <label class="snoc-campo-grupo">
-              <span class="snoc-label">Apoyo con el cupo libre</span>
-              <select class="snoc-select" name="labor_de_apoyo" bind:value={laborDeApoyo}>
-                <option value="">— sin apoyo —</option>
-                {#each LABORES.filter((l) => l.id !== labor) as l (l.id)}
-                  <option value={l.id}>{l.texto}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label class="snoc-campo-grupo">
-              <span class="snoc-label">Líder de hoy</span>
-              <select class="snoc-select" name="lider" bind:value={lider}>
-                <option value="">— el de la cuadrilla —</option>
-                {#if lideresDeHoy.actual}
-                  <option value={lideresDeHoy.actual.profile}>{lideresDeHoy.actual.nombre}</option>
-                {/if}
-                {#if lideresDeHoy.deCampo.length}
-                  <optgroup label="Personas de campo">
-                    {#each lideresDeHoy.deCampo as p (p.profile)}
-                      <option value={p.profile}>{p.nombre}</option>
-                    {/each}
-                  </optgroup>
-                {/if}
-                {#if lideresDeHoy.cuentas.length}
-                  <optgroup label="Otras cuentas del equipo">
-                    {#each lideresDeHoy.cuentas as p (p.profile)}
-                      <option value={p.profile}>{p.nombre}</option>
-                    {/each}
-                  </optgroup>
-                {/if}
-              </select>
-            </label>
-          </div>
-
-          <div class="snoc-pila-xs">
-            <span class="snoc-label">Zonas que cubre hoy</span>
-            {#if (data.zonas ?? []).length === 0}
-              <p class="snoc-body-sm snoc-secundario">
-                Todavía no hay zonas. Se arman más abajo; sin ellas la cuadrilla queda sin
-                zona, que no es lo mismo que cubrir todas.
-              </p>
-            {:else}
-              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                {#each data.zonas as z (z.id)}
-                  <label class="snoc-pildora" style="cursor:pointer;">
-                    <input
-                      type="checkbox"
-                      name="zona"
-                      value={z.id}
-                      checked={zonasDelDia.includes(z.id)}
-                      onchange={(e) => {
-                        zonasDelDia = e.currentTarget.checked
-                          ? [...zonasDelDia, z.id]
-                          : zonasDelDia.filter((x) => x !== z.id);
-                      }}
-                    />
-                    {z.nombre}
-                  </label>
-                {/each}
-              </div>
-              {#if zonasDelDia.length === 0}
-                <!-- Vacío NO es «cubre todas», y hay que decirlo: con zona dura
-                     una cuadrilla sin zona no recibe trabajo por zona. -->
-                <p class="snoc-body-sm snoc-secundario">
-                  Sin zona asignada. No significa que cubra todas: significa que no va a
-                  recibir trabajo por zona.
-                </p>
-              {/if}
-            {/if}
-          </div>
-
-          <p class="snoc-body-sm snoc-secundario">
-            El líder del día puede no ser el de la cuadrilla: si está de vacaciones, alguien
-            la lleva igual, y quién respondía ese día no puede depender de quién la lidera
-            hoy.
-          </p>
-
-          <div class="snoc-pila-xs">
-            <span class="snoc-label">Quiénes van</span>
-            {#each integrantes as ig, i (i)}
-              {@const ocupada = ig.persona ? tomadaPorOtra(ig.persona, armando.id) : ''}
-              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                <select class="snoc-select" name="integrante_persona" bind:value={ig.persona}>
-                  <option value="">— elegí a alguien —</option>
-                  {#each data.personas as p (p.id)}
-                    <option value={p.id}>
-                      {p.nombre}{p.tiene_cuenta ? '' : ' · sin celular'}
-                    </option>
-                  {/each}
-                </select>
-                <select class="snoc-select" name="integrante_rol" bind:value={ig.rol}>
-                  {#each ROLES as r (r.id)}
-                    <option value={r.id}>{r.texto}</option>
-                  {/each}
-                </select>
-                <button class="snoc-pildora" type="button" onclick={() => quitarIntegrante(i)}>
-                  Quitar
-                </button>
-                {#if ocupada}
-                  <!-- Se avisa ANTES de enviar. La regla vive en el backend y
-                       sigue viviendo ahí; esto evita el viaje para enterarse. -->
-                  <span class="snoc-error-txt snoc-body-sm">
-                    Ya está en {ocupada} hoy
-                  </span>
-                {/if}
-              </div>
-            {/each}
-            <button class="snoc-pildora" type="button" onclick={agregarIntegrante}>
-              Agregar a alguien
-            </button>
-          </div>
-
-          <div class="snoc-fila" style="gap:var(--snoc-sm);">
-            <button class="snoc-btn snoc-btn-primario" type="submit">Guardar el día</button>
-            <button class="snoc-pildora" type="button" onclick={() => (armando = null)}>
-              Cancelar
-            </button>
-          </div>
-        </form>
-      </section>
-    {/if}
-
+    {:else if pestana === 'jornada'}
     <!-- ============ EL REPARTO ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-sm);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
@@ -752,7 +650,7 @@
             ninguna caiga en las zonas que se cubren hoy — abajo se dice cuál de las dos.
           </p>
         {:else}
-          <form method="POST" action="?/publicar" use:enhance class="snoc-pila">
+          <form id="cu-publicar" method="POST" action="?/publicar" use:enhance class="snoc-pila">
             {#each conOrdenes as a (a.jornada)}
               <!-- Se manda lo que se está MIRANDO, no la fecha: entre ver y
                    publicar pueden entrar órdenes nuevas.
@@ -825,9 +723,11 @@
                 </button>
               </p>
             {/if}
-            <button class="snoc-btn snoc-btn-primario" type="submit">
-              Publicar esta jornada
-            </button>
+            <div>
+              <button class="snoc-btn snoc-btn-primario" type="button" onclick={() => (confirmarPublicar = true)}>
+                Publicar esta jornada
+              </button>
+            </div>
             <p class="snoc-body-sm snoc-secundario">
               Recién ahí el técnico la ve en su teléfono. Una orden que alguien ya asignó a
               mano no se pisa: esa decisión la tomó una persona mirando el caso.
@@ -887,6 +787,257 @@
       {/if}
     </section>
 
+    {:else if pestana === 'personas'}
+    <!-- ============ QUIÉNES TRABAJAN EN CAMPO ============ -->
+    <!--
+      Dos preguntas distintas que antes eran la misma:
+
+        quién ENTRA al sistema    una cuenta, con correo y contraseña
+        quién TRABAJÓ             con cuenta o sin ella
+
+      Los auxiliares no tienen celular asignado, así que no tienen cuenta — y
+      mientras el integrante de una jornada fue un `Profile`, anotarlos
+      obligaba a inventarles una que nadie iba a usar. Ver
+      `campo.cuadrillas.PersonaDeCampo`.
+    -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">Quiénes trabajan en campo</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Incluye a quienes no tienen celular asignado: también integran la cuadrilla, y
+            así queda escrito quién estuvo cada día. Lo que no reciben es el trabajo en un
+            teléfono.
+          </p>
+        </div>
+      </div>
+
+      <form method="POST" action="?/persona_alta" use:enhance class="snoc-fila"
+            style="gap:var(--snoc-xs); flex-wrap:wrap; align-items:flex-end;">
+        <label class="snoc-campo-grupo" style="flex:1 1 180px; min-width:0;">
+          <span class="snoc-label">Nombre y apellido</span>
+          <input class="snoc-campo" name="nombre" placeholder="Pedro Ayudante" required />
+        </label>
+        <label class="snoc-campo-grupo">
+          <span class="snoc-label">Rol habitual</span>
+          <select class="snoc-select" name="rol_habitual">
+            {#each ROLES as r (r.id)}
+              <option value={r.id} selected={r.id === 'ayudante'}>{r.texto}</option>
+            {/each}
+          </select>
+        </label>
+        <button class="snoc-btn" type="submit">Dar de alta</button>
+      </form>
+
+      {#if (data.cuentasSinPersona ?? []).length}
+        <!-- El equipo que ya tiene cuenta se da de alta en un clic, en vez de
+             teclear el nombre de alguien que el sistema ya conoce. -->
+        <div class="snoc-pila-xs">
+          <span class="snoc-label">Del equipo, todavía sin dar de alta</span>
+          <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+            {#each data.cuentasSinPersona as c (c.profile)}
+              <form method="POST" action="?/persona_alta" use:enhance>
+                <input type="hidden" name="profile" value={c.profile} />
+                <input type="hidden" name="rol_habitual" value="tecnico" />
+                <button class="snoc-pildora" type="submit">+ {c.nombre}</button>
+              </form>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if (data.personas ?? []).length === 0}
+        <p class="snoc-body-sm snoc-secundario">
+          Todavía no hay nadie cargado. Sin esto no se puede armar una cuadrilla.
+        </p>
+      {:else}
+        <div class="snoc-pila-xs">
+          {#each data.personas as p (p.id)}
+            <div class="snoc-tarjeta snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
+              <div class="snoc-pila-xs" style="min-width:0;">
+                <span class="snoc-body">{p.nombre}</span>
+                <span class="snoc-body-sm snoc-secundario">
+                  {ROLES.find((r) => r.id === p.rol_habitual)?.texto ?? p.rol_habitual}
+                  {#if p.tiene_cuenta}
+                    · entra al sistema
+                  {:else}
+                    · sin celular asignado
+                  {/if}
+                  {#if !p.activa} · dado de baja{/if}
+                </span>
+              </div>
+              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                {#if !p.tiene_cuenta && (data.cuentasSinPersona ?? []).length}
+                  <!-- EL AUXILIAR AL QUE LE ASIGNAN CELULAR: se le engancha la
+                       cuenta a ESTA persona, así su historial sigue siendo uno
+                       en vez de empezar de cero. -->
+                  <form method="POST" action="?/persona_editar" use:enhance
+                        class="snoc-fila" style="gap:var(--snoc-xs);">
+                    <input type="hidden" name="id" value={p.id} />
+                    <select class="snoc-select" name="profile">
+                      <option value="">— enlazar una cuenta —</option>
+                      {#each data.cuentasSinPersona as c (c.profile)}
+                        <option value={c.profile}>{c.nombre}</option>
+                      {/each}
+                    </select>
+                    <button class="snoc-pildora" type="submit">Enlazar</button>
+                  </form>
+                {/if}
+                <form method="POST" action="?/persona_editar" use:enhance>
+                  <input type="hidden" name="id" value={p.id} />
+                  <input type="hidden" name="activa" value={p.activa ? '0' : '1'} />
+                  <button class="snoc-pildora" type="submit">
+                    {p.activa ? 'Dar de baja' : 'Reactivar'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          {/each}
+        </div>
+        <p class="snoc-body-sm snoc-secundario">
+          Dar de baja no borra nada: sus jornadas siguen explicando quién estuvo cada día.
+        </p>
+      {/if}
+    </section>
+
+    {:else if pestana === 'cuadrillas'}
+    <!-- ============ QUIÉNES SON ============ -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">Las cuadrillas</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Una cuadrilla no se borra: se da de baja. Sus jornadas la referencian y son las
+            que explican quién hizo qué.
+          </p>
+        </div>
+        <div class="snoc-fila" style="gap:var(--snoc-xs);">
+          <a
+            class="snoc-pildora"
+            href="?dia={data.dia}&bajas={data.verBajas ? '0' : '1'}"
+          >
+            {data.verBajas ? 'Ocultar las dadas de baja' : 'Ver las dadas de baja'}
+          </a>
+          <button class="snoc-btn snoc-btn-primario" type="button" onclick={() => abrirFicha(null)}>
+            Cuadrilla nueva
+          </button>
+        </div>
+      </div>
+
+      {#if (data.cuadrillas ?? []).length === 0}
+        <p class="snoc-body snoc-secundario">Todavía no hay ninguna.</p>
+      {:else}
+        <table class="snoc-tabla">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Líder</th>
+              <th>Vehículo</th>
+              <th>Labor habitual</th>
+              <th>Zonas habituales</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each data.cuadrillas as c (c.id)}
+              <tr>
+                <td>
+                  <strong>{c.nombre}</strong>
+                  {#if !c.activa}
+                    <span class="snoc-insignia snoc-insignia-neutra">Dada de baja</span>
+                  {/if}
+                </td>
+                <td>{c.lider?.nombre ?? '—'}</td>
+                <td>{c.vehiculo?.nombre ?? '—'}</td>
+                <td>{LABORES.find((l) => l.id === c.labor_habitual)?.texto ?? '—'}</td>
+                <td>
+                  {#if (c.zonas_habituales ?? []).length}
+                    {c.zonas_habituales.map((/** @type {any} */ z) => z.nombre).join(', ')}
+                  {:else}
+                    <span class="snoc-insignia snoc-insignia-neutra">Sin zona</span>
+                  {/if}
+                </td>
+                <td class="snoc-derecha">
+                  <div class="snoc-fila" style="gap:var(--snoc-xs); justify-content:flex-end;">
+                    <button class="snoc-pildora" type="button" onclick={() => abrirFicha(c)}>
+                      Editar
+                    </button>
+                    <form method="POST" action="?/baja" use:enhance onsubmit={(e) => {
+                      if (c.activa && !confirm(`¿Dar de baja «${c.nombre}»? Sus jornadas siguen enteras.`)) e.preventDefault();
+                    }}>
+                      <input type="hidden" name="cuadrilla_id" value={c.id} />
+                      <input type="hidden" name="activa" value={c.activa ? '0' : '1'} />
+                      <button class="snoc-pildora" type="submit">
+                        {c.activa ? 'Dar de baja' : 'Reactivar'}
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+    </section>
+    {:else if pestana === 'zonas'}
+    <!-- ============ LAS ZONAS ============ -->
+    <section class="snoc-panel" style="gap:var(--snoc-sm);">
+      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+        <div class="snoc-pila-xs">
+          <h2 class="snoc-h2">Zonas operativas</h2>
+          <p class="snoc-body-sm snoc-secundario">
+            Cómo divide la empresa su territorio. No son las zonas del proveedor —ésas son
+            de corte de facturación— y por eso se declaran acá.
+          </p>
+        </div>
+        <form method="POST" action="?/zona" use:enhance class="snoc-fila"
+              style="gap:var(--snoc-xs);">
+          <input class="snoc-campo" name="nombre" required placeholder="Norte" />
+          <button class="snoc-btn" type="submit">Crear zona</button>
+        </form>
+      </div>
+
+      {#if (data.zonas ?? []).length === 0}
+        <p class="snoc-body snoc-secundario">
+          Todavía no hay ninguna. Sin zonas, una cuadrilla no puede recibir trabajo por
+          zona.
+        </p>
+      {:else}
+        <table class="snoc-tabla">
+          <thead>
+            <tr>
+              <th>Zona</th>
+              <th>Barrios</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each data.zonas as z (z.id)}
+              <tr>
+                <td><strong>{z.nombre}</strong></td>
+                <td>
+                  {#if z.localidades?.length}
+                    {#each z.localidades as l (l)}
+                      <span class="snoc-tag">{l}</span>
+                    {/each}
+                  {:else}
+                    <span class="snoc-sin-dato">sin barrios asignados</span>
+                  {/if}
+                </td>
+                <td class="snoc-derecha">
+                  <button class="snoc-pildora" type="button" onclick={() => abrirMapeo(z)}>
+                    Elegir barrios
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+
+    </section>
+
+    {:else if pestana === 'horario'}
     <!-- ============ EL HORARIO DE LAS CUADRILLAS (21/10/2026) ============
          Pedido del usuario: el horario por defecto de la empresa es el de
          atención al cliente. El Supervisor arma y despacha con ESTE, y sin
@@ -1217,268 +1368,10 @@
         {/if}
       </div>
 
-        {#if form?.error}
-          <p class="snoc-aviso snoc-error-txt">{form.error}</p>
-        {/if}
-        {#if form?.hecho}
-          <p class="snoc-aviso">{form.hecho}</p>
-        {/if}
       {/if}
     </section>
 
-    <!-- ============ QUIÉNES TRABAJAN EN CAMPO ============ -->
-    <!--
-      Dos preguntas distintas que antes eran la misma:
-
-        quién ENTRA al sistema    una cuenta, con correo y contraseña
-        quién TRABAJÓ             con cuenta o sin ella
-
-      Los auxiliares no tienen celular asignado, así que no tienen cuenta — y
-      mientras el integrante de una jornada fue un `Profile`, anotarlos
-      obligaba a inventarles una que nadie iba a usar. Ver
-      `campo.cuadrillas.PersonaDeCampo`.
-    -->
-    <section class="snoc-panel" style="gap:var(--snoc-sm);">
-      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-        <div class="snoc-pila-xs">
-          <h2 class="snoc-h2">Quiénes trabajan en campo</h2>
-          <p class="snoc-body-sm snoc-secundario">
-            Incluye a quienes no tienen celular asignado: también integran la cuadrilla, y
-            así queda escrito quién estuvo cada día. Lo que no reciben es el trabajo en un
-            teléfono.
-          </p>
-        </div>
-      </div>
-
-      <form method="POST" action="?/persona_alta" use:enhance class="snoc-fila"
-            style="gap:var(--snoc-xs); flex-wrap:wrap; align-items:flex-end;">
-        <label class="snoc-campo-grupo" style="flex:1 1 180px; min-width:0;">
-          <span class="snoc-label">Nombre y apellido</span>
-          <input class="snoc-campo" name="nombre" placeholder="Pedro Ayudante" required />
-        </label>
-        <label class="snoc-campo-grupo">
-          <span class="snoc-label">Rol habitual</span>
-          <select class="snoc-select" name="rol_habitual">
-            {#each ROLES as r (r.id)}
-              <option value={r.id} selected={r.id === 'ayudante'}>{r.texto}</option>
-            {/each}
-          </select>
-        </label>
-        <button class="snoc-btn" type="submit">Dar de alta</button>
-      </form>
-
-      {#if (data.cuentasSinPersona ?? []).length}
-        <!-- El equipo que ya tiene cuenta se da de alta en un clic, en vez de
-             teclear el nombre de alguien que el sistema ya conoce. -->
-        <div class="snoc-pila-xs">
-          <span class="snoc-label">Del equipo, todavía sin dar de alta</span>
-          <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-            {#each data.cuentasSinPersona as c (c.profile)}
-              <form method="POST" action="?/persona_alta" use:enhance>
-                <input type="hidden" name="profile" value={c.profile} />
-                <input type="hidden" name="rol_habitual" value="tecnico" />
-                <button class="snoc-pildora" type="submit">+ {c.nombre}</button>
-              </form>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      {#if (data.personas ?? []).length === 0}
-        <p class="snoc-body-sm snoc-secundario">
-          Todavía no hay nadie cargado. Sin esto no se puede armar una cuadrilla.
-        </p>
-      {:else}
-        <div class="snoc-pila-xs">
-          {#each data.personas as p (p.id)}
-            <div class="snoc-tarjeta snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
-              <div class="snoc-pila-xs" style="min-width:0;">
-                <span class="snoc-body">{p.nombre}</span>
-                <span class="snoc-body-sm snoc-secundario">
-                  {ROLES.find((r) => r.id === p.rol_habitual)?.texto ?? p.rol_habitual}
-                  {#if p.tiene_cuenta}
-                    · entra al sistema
-                  {:else}
-                    · sin celular asignado
-                  {/if}
-                  {#if !p.activa} · dado de baja{/if}
-                </span>
-              </div>
-              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-                {#if !p.tiene_cuenta && (data.cuentasSinPersona ?? []).length}
-                  <!-- EL AUXILIAR AL QUE LE ASIGNAN CELULAR: se le engancha la
-                       cuenta a ESTA persona, así su historial sigue siendo uno
-                       en vez de empezar de cero. -->
-                  <form method="POST" action="?/persona_editar" use:enhance
-                        class="snoc-fila" style="gap:var(--snoc-xs);">
-                    <input type="hidden" name="id" value={p.id} />
-                    <select class="snoc-select" name="profile">
-                      <option value="">— enlazar una cuenta —</option>
-                      {#each data.cuentasSinPersona as c (c.profile)}
-                        <option value={c.profile}>{c.nombre}</option>
-                      {/each}
-                    </select>
-                    <button class="snoc-pildora" type="submit">Enlazar</button>
-                  </form>
-                {/if}
-                <form method="POST" action="?/persona_editar" use:enhance>
-                  <input type="hidden" name="id" value={p.id} />
-                  <input type="hidden" name="activa" value={p.activa ? '0' : '1'} />
-                  <button class="snoc-pildora" type="submit">
-                    {p.activa ? 'Dar de baja' : 'Reactivar'}
-                  </button>
-                </form>
-              </div>
-            </div>
-          {/each}
-        </div>
-        <p class="snoc-body-sm snoc-secundario">
-          Dar de baja no borra nada: sus jornadas siguen explicando quién estuvo cada día.
-        </p>
-      {/if}
-    </section>
-
-    <!-- ============ LAS ZONAS ============ -->
-    <section class="snoc-panel" style="gap:var(--snoc-sm);">
-      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-        <div class="snoc-pila-xs">
-          <h2 class="snoc-h2">Zonas operativas</h2>
-          <p class="snoc-body-sm snoc-secundario">
-            Cómo divide la empresa su territorio. No son las zonas del proveedor —ésas son
-            de corte de facturación— y por eso se declaran acá.
-          </p>
-        </div>
-        <form method="POST" action="?/zona" use:enhance class="snoc-fila"
-              style="gap:var(--snoc-xs);">
-          <input class="snoc-campo" name="nombre" required placeholder="Norte" />
-          <button class="snoc-btn" type="submit">Crear zona</button>
-        </form>
-      </div>
-
-      {#if (data.zonas ?? []).length === 0}
-        <p class="snoc-body snoc-secundario">
-          Todavía no hay ninguna. Sin zonas, una cuadrilla no puede recibir trabajo por
-          zona.
-        </p>
-      {:else}
-        <table class="snoc-tabla">
-          <thead>
-            <tr>
-              <th>Zona</th>
-              <th>Barrios</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each data.zonas as z (z.id)}
-              <tr>
-                <td><strong>{z.nombre}</strong></td>
-                <td>
-                  {#if z.localidades?.length}
-                    {#each z.localidades as l (l)}
-                      <span class="snoc-tag">{l}</span>
-                    {/each}
-                  {:else}
-                    <span class="snoc-sin-dato">sin barrios asignados</span>
-                  {/if}
-                </td>
-                <td class="snoc-derecha">
-                  <button class="snoc-pildora" type="button" onclick={() => abrirMapeo(z)}>
-                    Elegir barrios
-                  </button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-
-      {#if mapeando}
-        <div class="snoc-pila" style="gap:var(--snoc-sm);">
-          <h3 class="snoc-h2">Barrios de {mapeando.nombre}</h3>
-          <!--
-            LOS BARRIOS SE ELIGEN, NO SE ESCRIBEN. La lista la arma el motor
-            recorriendo el catálogo del proveedor —«nunca la escribe una
-            persona»— y ya resolvió las variantes: un intento de «mejorar» el
-            nombre colapsando SOLEDAD ATLANTICO devolvió SOLEDA, un typo de
-            tres clientes. Teclearlos acá repetiría ese error.
-          -->
-          {#if data.localidadesError}
-            <p class="snoc-aviso snoc-error-txt">
-              No se pudieron leer las localidades. Sin ellas no se puede mapear: no están
-              vacías, no se saben.
-            </p>
-          {:else}
-            <p class="snoc-body-sm snoc-secundario">
-              {data.localidades.length} barrios sincronizados, con sus clientes.
-              {#if data.localidadesActualizadoEn}
-                Última sincronización: {data.localidadesActualizadoEn}.
-              {/if}
-              Se actualizan desde Configuración · Planes de venta.
-            </p>
-
-            <form method="POST" action="?/mapeo" use:enhance={() => {
-              return async ({ result, update }) => {
-                await update();
-                if (result.type === 'success') mapeando = null;
-              };
-            }} class="snoc-pila" style="gap:var(--snoc-sm);">
-              <input type="hidden" name="zona_id" value={mapeando.id} />
-
-              <input
-                class="snoc-campo"
-                bind:value={buscaBarrio}
-                placeholder="Buscar un barrio…"
-              />
-
-              <div style="max-height:320px; overflow:auto;" class="snoc-pila-xs">
-                {#each barriosOfrecidos as l (l.localidad)}
-                  {@const tomado = barrioTomado[l.localidad]}
-                  <label
-                    class="snoc-fila"
-                    style="gap:var(--snoc-xs); cursor:{tomado ? 'not-allowed' : 'pointer'};"
-                  >
-                    <input
-                      type="checkbox"
-                      name="localidad"
-                      value={l.localidad}
-                      checked={barriosElegidos.includes(l.localidad)}
-                      disabled={Boolean(tomado)}
-                      onchange={() => alternarBarrio(l.localidad)}
-                    />
-                    <span class={tomado ? 'snoc-secundario' : ''}>{l.localidad}</span>
-                    <span class="snoc-body-sm snoc-secundario">
-                      {l.n_clientes}
-                      {l.n_clientes === 1 ? 'cliente' : 'clientes'}
-                    </span>
-                    {#if tomado}
-                      <!-- Se dice EN CUÁL está: el servidor lo rechazaría igual,
-                           pero sin el nombre hay que salir a buscarlo. -->
-                      <span class="snoc-body-sm snoc-secundario">· ya está en {tomado}</span>
-                    {/if}
-                  </label>
-                {:else}
-                  <p class="snoc-body-sm snoc-secundario">
-                    Ningún barrio coincide con la búsqueda.
-                  </p>
-                {/each}
-              </div>
-
-              <div class="snoc-fila" style="gap:var(--snoc-sm);">
-                <button class="snoc-btn snoc-btn-primario" type="submit">
-                  Guardar {barriosElegidos.length}
-                  {barriosElegidos.length === 1 ? 'barrio' : 'barrios'}
-                </button>
-                <button class="snoc-pildora" type="button" onclick={() => (mapeando = null)}>
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          {/if}
-        </div>
-      {/if}
-    </section>
-
+    {:else if pestana === 'historial'}
     <!-- ============ EL HISTORIAL ============ -->
     <section class="snoc-panel" style="gap:var(--snoc-sm);">
       <div class="snoc-pila-xs">
@@ -1577,31 +1470,172 @@
       {/if}
     </section>
 
-    <!-- ============ QUIÉNES SON ============ -->
-    <section class="snoc-panel" style="gap:var(--snoc-sm);">
-      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-        <div class="snoc-pila-xs">
-          <h2 class="snoc-h2">Las cuadrillas</h2>
-          <p class="snoc-body-sm snoc-secundario">
-            Una cuadrilla no se borra: se da de baja. Sus jornadas la referencian y son las
-            que explican quién hizo qué.
-          </p>
-        </div>
-        <div class="snoc-fila" style="gap:var(--snoc-xs);">
-          <a
-            class="snoc-pildora"
-            href="?dia={data.dia}&bajas={data.verBajas ? '0' : '1'}"
-          >
-            {data.verBajas ? 'Ocultar las dadas de baja' : 'Ver las dadas de baja'}
-          </a>
-          <button class="snoc-pildora" type="button" onclick={() => abrirFicha(null)}>
-            Cuadrilla nueva
-          </button>
-        </div>
-      </div>
+    {/if}
+    </div>
+  </div>
+</div>
 
+<PanelLateral
+  abierto={!!armando}
+  antetitulo="Armar el día"
+  titulo={armando ? `${armando.nombre} · ${data.dia}` : ''}
+  alCerrar={() => (armando = null)}
+>
+    <!-- ============ ARMAR EL DÍA DE UNA CUADRILLA ============ -->
+    {#if armando}
+        <form id="cu-jornada" method="POST" action="?/jornada" use:enhance={() => {
+          return async ({ result, update }) => {
+            await update();
+            if (result.type === 'success') armando = null;
+          };
+        }} class="snoc-pila">
+          <input type="hidden" name="cuadrilla" value={armando.id} />
+          <input type="hidden" name="fecha" value={data.dia} />
+
+          <div class="snoc-fila" style="gap:var(--snoc-md); flex-wrap:wrap;">
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Labor</span>
+              <select class="snoc-select" name="labor" bind:value={labor}>
+                {#each LABORES as l (l.id)}
+                  <option value={l.id}>{l.texto}</option>
+                {/each}
+              </select>
+            </label>
+
+            <!-- LA LABOR DE APOYO (30/10/2026): con el cupo que su labor deja
+                 libre, la cuadrilla recibe órdenes de esta otra en sus zonas. -->
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Apoyo con el cupo libre</span>
+              <select class="snoc-select" name="labor_de_apoyo" bind:value={laborDeApoyo}>
+                <option value="">— sin apoyo —</option>
+                {#each LABORES.filter((l) => l.id !== labor) as l (l.id)}
+                  <option value={l.id}>{l.texto}</option>
+                {/each}
+              </select>
+            </label>
+
+            <label class="snoc-campo-grupo">
+              <span class="snoc-label">Líder de hoy</span>
+              <select class="snoc-select" name="lider" bind:value={lider}>
+                <option value="">— el de la cuadrilla —</option>
+                {#if lideresDeHoy.actual}
+                  <option value={lideresDeHoy.actual.profile}>{lideresDeHoy.actual.nombre}</option>
+                {/if}
+                {#if lideresDeHoy.deCampo.length}
+                  <optgroup label="Personas de campo">
+                    {#each lideresDeHoy.deCampo as p (p.profile)}
+                      <option value={p.profile}>{p.nombre}</option>
+                    {/each}
+                  </optgroup>
+                {/if}
+                {#if lideresDeHoy.cuentas.length}
+                  <optgroup label="Otras cuentas del equipo">
+                    {#each lideresDeHoy.cuentas as p (p.profile)}
+                      <option value={p.profile}>{p.nombre}</option>
+                    {/each}
+                  </optgroup>
+                {/if}
+              </select>
+            </label>
+          </div>
+
+          <div class="snoc-pila-xs">
+            <span class="snoc-label">Zonas que cubre hoy</span>
+            {#if (data.zonas ?? []).length === 0}
+              <p class="snoc-body-sm snoc-secundario">
+                Todavía no hay zonas. Se arman más abajo; sin ellas la cuadrilla queda sin
+                zona, que no es lo mismo que cubrir todas.
+              </p>
+            {:else}
+              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                {#each data.zonas as z (z.id)}
+                  <label class="snoc-pildora" style="cursor:pointer;">
+                    <input
+                      type="checkbox"
+                      name="zona"
+                      value={z.id}
+                      checked={zonasDelDia.includes(z.id)}
+                      onchange={(e) => {
+                        zonasDelDia = e.currentTarget.checked
+                          ? [...zonasDelDia, z.id]
+                          : zonasDelDia.filter((x) => x !== z.id);
+                      }}
+                    />
+                    {z.nombre}
+                  </label>
+                {/each}
+              </div>
+              {#if zonasDelDia.length === 0}
+                <!-- Vacío NO es «cubre todas», y hay que decirlo: con zona dura
+                     una cuadrilla sin zona no recibe trabajo por zona. -->
+                <p class="snoc-body-sm snoc-secundario">
+                  Sin zona asignada. No significa que cubra todas: significa que no va a
+                  recibir trabajo por zona.
+                </p>
+              {/if}
+            {/if}
+          </div>
+
+          <p class="snoc-body-sm snoc-secundario">
+            El líder del día puede no ser el de la cuadrilla: si está de vacaciones, alguien
+            la lleva igual, y quién respondía ese día no puede depender de quién la lidera
+            hoy.
+          </p>
+
+          <div class="snoc-pila-xs">
+            <span class="snoc-label">Quiénes van</span>
+            {#each integrantes as ig, i (i)}
+              {@const ocupada = ig.persona ? tomadaPorOtra(ig.persona, armando.id) : ''}
+              <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
+                <select class="snoc-select" name="integrante_persona" bind:value={ig.persona}>
+                  <option value="">— elegí a alguien —</option>
+                  {#each data.personas as p (p.id)}
+                    <option value={p.id}>
+                      {p.nombre}{p.tiene_cuenta ? '' : ' · sin celular'}
+                    </option>
+                  {/each}
+                </select>
+                <select class="snoc-select" name="integrante_rol" bind:value={ig.rol}>
+                  {#each ROLES as r (r.id)}
+                    <option value={r.id}>{r.texto}</option>
+                  {/each}
+                </select>
+                <button class="snoc-pildora" type="button" onclick={() => quitarIntegrante(i)}>
+                  Quitar
+                </button>
+                {#if ocupada}
+                  <!-- Se avisa ANTES de enviar. La regla vive en el backend y
+                       sigue viviendo ahí; esto evita el viaje para enterarse. -->
+                  <span class="snoc-error-txt snoc-body-sm">
+                    Ya está en {ocupada} hoy
+                  </span>
+                {/if}
+              </div>
+            {/each}
+            <button class="snoc-pildora" type="button" onclick={agregarIntegrante}>
+              Agregar a alguien
+            </button>
+          </div>
+
+        </form>
+    {/if}
+
+  {#snippet pie()}
+    <div class="snoc-fila" style="justify-content:flex-end;">
+      <button class="snoc-btn" type="button" onclick={() => (armando = null)}>Cancelar</button>
+      <button class="snoc-btn snoc-btn-primario" type="submit" form="cu-jornada">Guardar el día</button>
+    </div>
+  {/snippet}
+</PanelLateral>
+
+<PanelLateral
+  abierto={!!editando}
+  antetitulo={editando?.id ? 'Ficha de la cuadrilla' : 'Cuadrilla nueva'}
+  titulo={editando?.nombre || 'Sin nombre todavía'}
+  alCerrar={() => (editando = null)}
+>
       {#if editando}
-        <form method="POST" action="?/cuadrilla" use:enhance={() => {
+        <form id="cu-ficha" method="POST" action="?/cuadrilla" use:enhance={() => {
           return async ({ result, update }) => {
             await update();
             if (result.type === 'success') editando = null;
@@ -1707,68 +1741,126 @@
             De acá arma el Supervisor la jornada de cada día: las zonas adónde va y la labor
             cuando no hay casos que digan otra. Sin zonas, la cuadrilla no recibe trabajo.
           </p>
-          <div class="snoc-fila" style="gap:var(--snoc-sm);">
-            <button class="snoc-btn snoc-btn-primario" type="submit">Guardar</button>
-            <button class="snoc-pildora" type="button" onclick={() => (editando = null)}>
-              Cancelar
-            </button>
-          </div>
         </form>
       {/if}
 
-      {#if (data.cuadrillas ?? []).length === 0}
-        <p class="snoc-body snoc-secundario">Todavía no hay ninguna.</p>
-      {:else}
-        <table class="snoc-tabla">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Líder</th>
-              <th>Vehículo</th>
-              <th>Labor habitual</th>
-              <th>Zonas habituales</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each data.cuadrillas as c (c.id)}
-              <tr>
-                <td>
-                  <strong>{c.nombre}</strong>
-                  {#if !c.activa}
-                    <span class="snoc-insignia snoc-insignia-neutra">Dada de baja</span>
-                  {/if}
-                </td>
-                <td>{c.lider?.nombre ?? '—'}</td>
-                <td>{c.vehiculo?.nombre ?? '—'}</td>
-                <td>{LABORES.find((l) => l.id === c.labor_habitual)?.texto ?? '—'}</td>
-                <td>
-                  {#if (c.zonas_habituales ?? []).length}
-                    {c.zonas_habituales.map((/** @type {any} */ z) => z.nombre).join(', ')}
-                  {:else}
-                    <span class="snoc-insignia snoc-insignia-neutra">Sin zona</span>
-                  {/if}
-                </td>
-                <td class="snoc-derecha">
-                  <div class="snoc-fila" style="gap:var(--snoc-xs); justify-content:flex-end;">
-                    <button class="snoc-pildora" type="button" onclick={() => abrirFicha(c)}>
-                      Editar
-                    </button>
-                    <form method="POST" action="?/baja" use:enhance>
-                      <input type="hidden" name="cuadrilla_id" value={c.id} />
-                      <input type="hidden" name="activa" value={c.activa ? '0' : '1'} />
-                      <button class="snoc-pildora" type="submit">
-                        {c.activa ? 'Dar de baja' : 'Reactivar'}
-                      </button>
-                    </form>
-                  </div>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-    </section>
+  {#snippet pie()}
+    <div class="snoc-fila" style="justify-content:flex-end;">
+      <button class="snoc-btn" type="button" onclick={() => (editando = null)}>Cancelar</button>
+      <button class="snoc-btn snoc-btn-primario" type="submit" form="cu-ficha">Guardar</button>
     </div>
-  </div>
-</div>
+  {/snippet}
+</PanelLateral>
+
+<PanelLateral
+  abierto={!!mapeando}
+  antetitulo="Barrios de la zona"
+  titulo={mapeando?.nombre ?? ''}
+  alCerrar={() => (mapeando = null)}
+>
+      {#if mapeando}
+        <div class="snoc-pila" style="gap:var(--snoc-sm);">
+          <!--
+            LOS BARRIOS SE ELIGEN, NO SE ESCRIBEN. La lista la arma el motor
+            recorriendo el catálogo del proveedor —«nunca la escribe una
+            persona»— y ya resolvió las variantes: un intento de «mejorar» el
+            nombre colapsando SOLEDAD ATLANTICO devolvió SOLEDA, un typo de
+            tres clientes. Teclearlos acá repetiría ese error.
+          -->
+          {#if data.localidadesError}
+            <p class="snoc-aviso snoc-error-txt">
+              No se pudieron leer las localidades. Sin ellas no se puede mapear: no están
+              vacías, no se saben.
+            </p>
+          {:else}
+            <p class="snoc-body-sm snoc-secundario">
+              {data.localidades.length} barrios sincronizados, con sus clientes.
+              {#if data.localidadesActualizadoEn}
+                Última sincronización: {data.localidadesActualizadoEn}.
+              {/if}
+              Se actualizan desde Configuración · Planes de venta.
+            </p>
+
+            <form id="cu-mapeo" method="POST" action="?/mapeo" use:enhance={() => {
+              return async ({ result, update }) => {
+                await update();
+                if (result.type === 'success') mapeando = null;
+              };
+            }} class="snoc-pila" style="gap:var(--snoc-sm);">
+              <input type="hidden" name="zona_id" value={mapeando.id} />
+
+              <input
+                class="snoc-campo"
+                bind:value={buscaBarrio}
+                placeholder="Buscar un barrio…"
+              />
+
+              <div class="snoc-pila-xs">
+                {#each barriosOfrecidos as l (l.localidad)}
+                  {@const tomado = barrioTomado[l.localidad]}
+                  <label
+                    class="snoc-fila"
+                    style="gap:var(--snoc-xs); cursor:{tomado ? 'not-allowed' : 'pointer'};"
+                  >
+                    <input
+                      type="checkbox"
+                      name="localidad"
+                      value={l.localidad}
+                      checked={barriosElegidos.includes(l.localidad)}
+                      disabled={Boolean(tomado)}
+                      onchange={() => alternarBarrio(l.localidad)}
+                    />
+                    <span class={tomado ? 'snoc-secundario' : ''}>{l.localidad}</span>
+                    <span class="snoc-body-sm snoc-secundario">
+                      {l.n_clientes}
+                      {l.n_clientes === 1 ? 'cliente' : 'clientes'}
+                    </span>
+                    {#if tomado}
+                      <!-- Se dice EN CUÁL está: el servidor lo rechazaría igual,
+                           pero sin el nombre hay que salir a buscarlo. -->
+                      <span class="snoc-body-sm snoc-secundario">· ya está en {tomado}</span>
+                    {/if}
+                  </label>
+                {:else}
+                  <p class="snoc-body-sm snoc-secundario">
+                    Ningún barrio coincide con la búsqueda.
+                  </p>
+                {/each}
+              </div>
+
+            </form>
+          {/if}
+        </div>
+      {/if}
+  {#snippet pie()}
+    {#if !data.localidadesError}
+      <div class="snoc-fila" style="justify-content:flex-end;">
+        <button class="snoc-btn" type="button" onclick={() => (mapeando = null)}>Cancelar</button>
+        <button class="snoc-btn snoc-btn-primario" type="submit" form="cu-mapeo">
+          Guardar {barriosElegidos.length} {barriosElegidos.length === 1 ? 'barrio' : 'barrios'}
+        </button>
+      </div>
+    {/if}
+  {/snippet}
+</PanelLateral>
+
+<Confirmar
+  abierto={confirmarPublicar}
+  titulo="¿Publicar la jornada del {data.dia}?"
+  confirmar="Publicar"
+  alCancelar={() => (confirmarPublicar = false)}
+  alConfirmar={() => {
+    confirmarPublicar = false;
+    /** @type {HTMLFormElement | null} */ (document.getElementById('cu-publicar'))?.requestSubmit();
+  }}
+>
+  {@const asignadas = (data.reparto?.propuesta?.asignaciones ?? []).filter((/** @type {any} */ a) => repartoDe(a.jornada).length)}
+  <p style="margin:0;">
+    <strong>{asignadas.reduce((/** @type {number} */ n, /** @type {any} */ a) => n + repartoDe(a.jornada).length, 0)} órdenes</strong>
+    a <strong>{asignadas.length} {asignadas.length === 1 ? 'cuadrilla' : 'cuadrillas'}</strong>.
+    {#if hayMudanzas}Con {Object.keys(mudanzas).length} {Object.keys(mudanzas).length === 1 ? 'orden movida' : 'órdenes movidas'} a mano.{/if}
+  </p>
+  <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+    Recién ahí el técnico la ve en su teléfono. Una orden que alguien ya asignó a mano no se pisa.
+  </p>
+</Confirmar>
