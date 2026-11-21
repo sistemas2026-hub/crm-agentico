@@ -262,8 +262,14 @@ def recordar_reportes() -> dict:
     return salida
 
 
-@shared_task(name="campo.tasks.revisar_el_cierre_ya")
-def revisar_el_cierre_ya(org_id: str, orden_id: str) -> dict:
+#  `max_retries=None` VA EN EL DECORADOR, no en la llamada a `retry` (21/11/2026,
+#  medido por el auditor con un worker real): pasarlo a `self.retry(...)` NO
+#  significa «sin tope», significa «usa el de la tarea», y el de la tarea es 3.
+#  Con eso esta tarea esperaba 9 s y moria con MaxRetriesExceededError, sin
+#  cerrar y sin rastro. El tope de verdad es `TOPE_DE_ESPERAS`.
+@shared_task(bind=True, max_retries=None,
+             name="campo.tasks.revisar_el_cierre_ya")
+def revisar_el_cierre_ya(self, org_id: str, orden_id: str) -> dict:
     """El Supervisor mira ESTA orden apenas el tecnico manda su reporte.
 
     POR QUE UNA TAREA Y NO DENTRO DE LA PETICION  --  31/10/2026
@@ -285,6 +291,18 @@ def revisar_el_cierre_ya(org_id: str, orden_id: str) -> dict:
     from campo.cierre_por_el_supervisor import cerrar_esta_orden
     from campo.models import OrdenTrabajo
     from common.tasks import clear_rls_context, set_rls_context
+
+    #  EL CIERRE NO LE GANA AL REPORTE  --  21/11/2026
+    #
+    #  Desde hoy la nota del tecnico al ISP sale por su propia tarea
+    #  (`anotar_en_el_isp`), no dentro de su peticion. Cada nota deja el
+    #  ticket En Progreso; si este camino cerrara el ticket ANTES de que esa
+    #  nota llegue, la nota lo reabriria y nadie lo veria. Mientras haya una
+    #  nota de esta orden en vuelo, esta tarea se reprograma. FUERA del `try`
+    #  de abajo a proposito: ese `try` se traga todo, y se tragaria tambien
+    #  el reintento.
+    if _hay_que_esperar_a_las_notas(self, orden_id):
+        raise self.retry(countdown=ESPERA_ENTRE_NOTAS)
 
     try:
         #  EL CONTEXTO ANTES DE LEER LA ORDEN: estas tablas tienen RLS, y sin
@@ -387,6 +405,277 @@ def pedir_revision_del_cierre(orden) -> None:
                            type(e).__name__)
 
     transaction.on_commit(_encolar)
+
+
+# ---------------------------------------------------------------------------
+#  LA NOTA AL ISP SALE DESPUES DE CONTESTARLE AL TECNICO  --  21/11/2026
+# ---------------------------------------------------------------------------
+#
+#  EL ERROR QUE LO ORIGINO. El usuario: «demoran en llegar los reportes del
+#  tecnico que manda por app», y en el telefono «10 cambios necesitan que
+#  alguien los revise». Leido en el codigo: marcar "en camino", "llegada" y
+#  mandar el reporte le escribian al ISP DENTRO de la peticion del tecnico, y
+#  esa llamada espera hasta 45 s (`nota_al_isp._pedir`). La app espera 20
+#  (`api_client.dart`). Con el ISP lento la app se rendia, reintentaba con la
+#  misma clave, recibia 409 «en curso» y dejaba el cambio como conflicto --
+#  aunque el servidor SI lo habia aplicado.
+#
+#  Es ademas lo que CLAUDE.md §12 prohibe con todas las letras: esperar una
+#  operacion externa con el tecnico parado en la calle. `revisar_el_cierre_ya`
+#  y `analizar_evidencia` ya habian salido de la peticion por lo mismo; estas
+#  dos notas habian quedado adentro.
+#
+#  LO QUE NO PUEDE PERDERSE AL SACARLAS: EL ORDEN. Dentro de la peticion las
+#  notas salian una detras de otra porque la app no manda el cambio siguiente
+#  hasta que le contestan el anterior. Un telefono que estuvo sin senal manda
+#  "en camino", "llegada" y el reporte en el mismo segundo, y un worker de
+#  Celery corre varias tareas a la vez: sin cuidado, el ticket diria "llego"
+#  antes que "va en camino". Y cada nota deja el ticket En Progreso, asi que
+#  una nota que llegue DESPUES del cierre lo reabre.
+#
+#  COMO SE CUIDA: cada nota pedida deja una MARCA en la cache compartida
+#  hasta que su tarea termina. Una tarea no escribe mientras haya una marca
+#  de un momento ANTERIOR de la misma orden: se reprograma. La marca vence
+#  sola, asi que una tarea perdida no deja a las demas esperando para
+#  siempre: pasado el tope, la siguiente sale igual.
+#
+#  LO QUE ESTO NO PROMETE (y la auditoria del 21/11/2026 lo dejo escrito):
+#
+#    - Si la cache no contesta, las marcas no existen y las notas salen sin
+#      esperarse: pueden quedar desordenadas.
+#    - Si el broker no esta, la nota no sale y queda dicho en la bitacora de
+#      la orden (`nota_isp_no_anotada`, codigo `sin_cola`).
+#    - Si el worker MUERE con la nota a medio escribir --un despliegue--, esa
+#      nota se pierde SIN rastro: la tarea ya estaba tomada y nadie la
+#      reintenta. Las que venian detras esperan su tope y salen. Antes del
+#      cambio pasaba lo mismo si el despliegue cortaba la peticion.
+#    - Una persona que aprueba y cierra en el mismo segundo en que el reporte
+#      se esta escribiendo puede ganarle. La tarea no escribe si el ticket ya
+#      cerro, pero entre mirar y escribir hay una llamada de hasta 45 s.
+
+#: Segundos entre un intento y el siguiente mientras se espera a otra nota.
+ESPERA_ENTRE_NOTAS = 3
+#: Cuanto vive la marca de una nota en vuelo si NADIE la suelta. La suelta la
+#: tarea al terminar, asi que esto solo cuenta para una tarea que se perdio.
+#:
+#: LARGA A PROPOSITO, y separada del tope de abajo (auditoria del 21/11/2026).
+#: Con 120 s la marca vencia mientras la tarea todavia esperaba su turno en la
+#: cola --un worker reiniciado por un despliegue, u ocupado con el ciclo del
+#: Supervisor-- y al liberarse corrian las tres notas y el cierre a la vez,
+#: sin orden. Una marca que dura no deja a nadie esperando de mas: lo que
+#: acota la espera de cada tarea es `TOPE_DE_ESPERAS`, no esto.
+VIDA_DE_LA_MARCA = 900
+#: Cuantas veces se reprograma una tarea antes de salir igual: 60 x 3 s = 180 s.
+#: Por encima de la cadena mas larga que puede tener adelante --tres notas de
+#: 45 s cada una, 135 s--, para que el cierre no salga con el reporte todavia
+#: escribiendose.
+TOPE_DE_ESPERAS = 60
+
+
+def _orden_de_las_notas() -> tuple:
+    """En que orden se escriben en el ticket las notas de UNA orden."""
+    from campo.services import nota_al_isp
+
+    return (nota_al_isp.EN_CAMINO, nota_al_isp.EN_SITIO,
+            nota_al_isp.REPORTE_DEL_TECNICO)
+
+
+def _marca_de_nota(orden_id, momento: str) -> str:
+    return f"campo:nota_isp_en_vuelo:{orden_id}:{momento}"
+
+
+def _notas_en_vuelo(orden_id, antes_de: str | None = None) -> list:
+    """Los momentos de esta orden con una nota todavia sin terminar.
+
+    Con `antes_de`, solo los ANTERIORES a ese momento. Sin el, todos: es lo
+    que pregunta el cierre, que va despues de cualquier nota.
+
+    Si la cache no contesta devuelve vacio. Es la direccion correcta de
+    fallar: no saber si hay algo en vuelo no puede dejar una nota sin salir.
+    """
+    from django.core.cache import cache
+
+    momentos = _orden_de_las_notas()
+    if antes_de is not None:
+        if antes_de not in momentos:
+            return []
+        momentos = momentos[:momentos.index(antes_de)]
+    if not momentos:
+        return []
+    try:
+        vivas = cache.get_many([_marca_de_nota(orden_id, m) for m in momentos])
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota al ISP: la cache no contesto (%s)",
+                       type(e).__name__)
+        return []
+    return [m for m in momentos if _marca_de_nota(orden_id, m) in vivas]
+
+
+def _hay_que_esperar_a_las_notas(tarea, orden_id,
+                                 antes_de: str | None = None) -> bool:
+    """¿Esta tarea tiene que reprogramarse porque otra nota va primero?
+
+    Tiene tope: una tarea que ya espero `TOPE_DE_ESPERAS` veces sale igual.
+    Sin el, una marca que alguien dejara viva de mas seria una nota --o un
+    cierre-- que no sale nunca, y eso es peor que un ticket desordenado.
+    """
+    intentos = int(getattr(getattr(tarea, "request", None), "retries", 0) or 0)
+    if intentos >= TOPE_DE_ESPERAS:
+        return False
+    return bool(_notas_en_vuelo(orden_id, antes_de))
+
+
+def _soltar_la_marca(orden_id, momento: str) -> None:
+    from django.core.cache import cache
+
+    try:
+        cache.delete(_marca_de_nota(orden_id, momento))
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota al ISP: no se pudo soltar la marca (%s)",
+                       type(e).__name__)
+
+
+def pedir_nota_al_isp(orden, momento: str, profile=None) -> bool:
+    """Deja pedida la nota al ISP y vuelve enseguida. Devuelve si se pidio.
+
+    Es lo unico que hace la peticion del tecnico: nada de lo que sigue le
+    habla a un tercero. La nota la escribe `anotar_en_el_isp`, despues del
+    commit y en otro proceso.
+
+    NO SE PIDE LO QUE NO VA A SALIR. Una orden que no nacio de un ticket del
+    ISP, o una instalacion con la nota apagada, no encola nada: una tarea por
+    cada "en camino" de cada orden, para que conteste «sin ticket», es
+    trafico que no trae nada.
+
+    NUNCA LEVANTA: el tecnico ya hizo lo que vino a hacer.
+    """
+    from django.core.cache import cache
+
+    from campo.services import nota_al_isp
+
+    try:
+        if momento not in _orden_de_las_notas():
+            return False
+        if not nota_al_isp.hay_a_quien_anotar(orden):
+            return False
+        org_id, orden_id = str(orden.org_id), str(orden.id)
+        vuelta = nota_al_isp._vuelta_de(orden)
+        profile_id = str(profile.pk) if profile is not None else ""
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota al ISP: no se pudo pedir (%s)", type(e).__name__)
+        return False
+
+    #  LA MARCA SE DEJA AQUI Y NO EN LA TAREA: la tarea siguiente puede
+    #  arrancar antes que esta, y tiene que encontrarla ya puesta.
+    try:
+        cache.set(_marca_de_nota(orden_id, momento), 1, VIDA_DE_LA_MARCA)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota al ISP: no se pudo marcar (%s)", type(e).__name__)
+
+    def _encolar():
+        try:
+            anotar_en_el_isp.delay(org_id, orden_id, momento, vuelta,
+                                   profile_id)
+        except Exception as e:                                   # noqa: BLE001
+            #  SIN COLA NO HAY NOTA, Y TIENE QUE QUEDAR DICHO. Hacerla aca
+            #  mismo seria volver a esperar al ISP dentro de la peticion,
+            #  justo cuando algo ya anda mal. Se suelta la marca para que
+            #  nadie la espere, y la bitacora de la orden dice por que el
+            #  ISP no se entero.
+            logger.warning("nota al ISP: no se pudo encolar (%s)",
+                           type(e).__name__)
+            _soltar_la_marca(orden_id, momento)
+            nota_al_isp._anotar_evento(
+                orden, profile, nota_al_isp.EVENTO_NO_ANOTADA,
+                {"momento": momento, "vuelta": vuelta, "codigo": "sin_cola",
+                 "detalle": type(e).__name__})
+
+    transaction.on_commit(_encolar)
+    return True
+
+
+#  `max_retries=None` EN EL DECORADOR: ver `revisar_el_cierre_ya`. Sin esto la
+#  nota esperaba 9 s a la anterior y moria sin escribirse ni dejar rastro.
+@shared_task(bind=True, max_retries=None, name="campo.tasks.anotar_en_el_isp")
+def anotar_en_el_isp(self, org_id: str, orden_id: str, momento: str,
+                     vuelta: int, profile_id: str = "") -> dict:
+    """Escribe en el ticket del ISP lo que el tecnico acaba de hacer.
+
+    MISMO CONTRATO QUE `revisar_el_cierre_ya`: fuera de la peticion porque le
+    habla a un tercero, con el contexto RLS antes de leer, el `finally` que
+    lo limpia, y sin levantar nunca -- salvo para reprogramarse.
+
+    UNA SOLA VEZ AUNQUE CORRA DOS: el motor excluye por
+    `orden|momento|vuelta` (`nucleo/seguimiento/nota_en_el_ticket.py`), asi
+    que una tarea entregada dos veces contesta `ya_anotada` la segunda.
+
+    LO QUE LLEGA TARDE NO SE ESCRIBE. La tarea vuelve a leer la orden, y si
+    ya esta cerrada o cancelada, o ya va por otra vuelta, la nota no sale:
+    dejaria En Progreso un ticket que ya cerro, o firmaria con la vuelta
+    equivocada. Queda en la bitacora como `llego_tarde`.
+    """
+    from campo.models import OrdenTrabajo
+    from campo.services import nota_al_isp
+    from common.tasks import clear_rls_context, set_rls_context
+
+    #  PRIMERO LAS ANTERIORES. Fuera del `try`, igual que en el cierre.
+    if _hay_que_esperar_a_las_notas(self, orden_id, antes_de=momento):
+        raise self.retry(countdown=ESPERA_ENTRE_NOTAS)
+
+    try:
+        #  La marca se renueva al empezar: lo que venga detras tiene que
+        #  esperar mientras ESTA llamada dure, no solo desde que se pidio.
+        try:
+            from django.core.cache import cache
+
+            cache.set(_marca_de_nota(orden_id, momento), 1, VIDA_DE_LA_MARCA)
+        except Exception:                                        # noqa: BLE001
+            pass
+
+        set_rls_context(org_id)
+        try:
+            orden = OrdenTrabajo.objects.get(pk=orden_id, org_id=org_id)
+        except OrdenTrabajo.DoesNotExist:
+            return {"anotada": False, "codigo": "sin_orden"}
+        profile = (Profile.objects.filter(pk=profile_id, org_id=org_id).first()
+                   if profile_id else None)
+
+        tarde = ""
+        if orden.estado_operativo in (OrdenTrabajo.CERRADA,
+                                      OrdenTrabajo.CANCELADA):
+            tarde = f"la orden ya esta {orden.estado_operativo}"
+        elif nota_al_isp._vuelta_de(orden) != int(vuelta or 1):
+            tarde = (f"se pidio en la vuelta {vuelta} y la orden va por la "
+                     f"{nota_al_isp._vuelta_de(orden)}")
+        else:
+            #  EL TICKET PUEDE CERRAR CON LA ORDEN TODAVIA ABIERTA (auditoria
+            #  del 21/11/2026). Aprobar a mano y el ciclo de cada hora cierran
+            #  el ticket del ISP sin mirar las marcas, y la orden sigue en
+            #  `completada_campo` hasta el paso siguiente. Mirar solo el
+            #  estado de la orden dejaba pasar esta nota por ese hueco, y
+            #  reabria el ticket. Lo que dice si el ticket cerro es su evento.
+            from campo.services import cierre_en_isp
+
+            if cierre_en_isp._ya_cerrado(orden):
+                tarde = "el ticket del ISP ya se cerro"
+        if tarde:
+            nota_al_isp._anotar_evento(
+                orden, profile, nota_al_isp.EVENTO_NO_ANOTADA,
+                {"momento": momento, "vuelta": vuelta,
+                 "codigo": "llego_tarde", "detalle": tarde})
+            return {"anotada": False, "codigo": "llego_tarde",
+                    "detalle": tarde}
+
+        if momento == nota_al_isp.REPORTE_DEL_TECNICO:
+            return nota_al_isp.anotar_reporte_del_tecnico(orden, profile)
+        return nota_al_isp.anotar_avance(orden, momento, profile=profile)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("nota al ISP: fallo (%s)", type(e).__name__)
+        return {"anotada": False, "codigo": "fallo",
+                "detalle": type(e).__name__}
+    finally:
+        _soltar_la_marca(orden_id, momento)
+        clear_rls_context()
 
 
 @shared_task(name="campo.tasks.analizar_evidencia")

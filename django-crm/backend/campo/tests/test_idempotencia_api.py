@@ -120,8 +120,18 @@ def test_reuso_de_key_con_distinto_payload_genera_409(user_client, orden_test):
     assert data2["error"] == "IDEMPOTENCY_KEY_REUSED"
 
 
-def test_operacion_en_curso_genera_409(user_client, orden_test, org_a):
-    """Si la key se encuentra en estado 'procesando', llamadas concurrentes reciben 409 OPERACION_EN_CURSO."""
+def test_operacion_en_curso_pide_volver_en_un_rato(user_client, orden_test, org_a):
+    """Con la clave todavia 'procesando', quien reintenta recibe 429 + Retry-After.
+
+    Hasta el 21/11/2026 esto era 409, y la app de campo trata el 409 como un
+    conflicto que alguien tiene que revisar: no lo reintenta mas. El primer
+    intento seguia corriendo y terminaba bien, y el tecnico quedaba con «10
+    cambios necesitan que alguien los revise» sobre cambios ya aplicados.
+
+    429 con `Retry-After` es lo que la app YA sabe reintentar
+    (`sync_queue_service.dart`, `_leerRetryAfter`): vuelve a los segundos y
+    encuentra la respuesta guardada. Ver `_respuesta_en_curso`.
+    """
     key = "uuid-key-concurrente-004"
     url = f"/api/campo/trabajos/{orden_test.id}/acciones/"
 
@@ -142,5 +152,104 @@ def test_operacion_en_curso_genera_409(user_client, orden_test, org_a):
         format="json",
         HTTP_IDEMPOTENCY_KEY=key,
     )
-    assert res.status_code == 409
+    assert res.status_code == 429, res.content
     assert res.json()["error"] == "OPERACION_EN_CURSO"
+    #  El plazo viaja en la cabecera, que es lo que la app lee. Sin ella la
+    #  app reintenta igual, pero con su propio retroceso.
+    assert res["Retry-After"] == "5"
+    #  Y NO se ejecuto de nuevo: la orden sigue como estaba.
+    orden_test.refresh_from_db()
+    assert orden_test.estado_operativo == OrdenTrabajo.ASIGNADA
+
+
+def test_el_reintento_ENCUENTRA_la_respuesta_cuando_el_primero_termina(
+        user_client, orden_test, org_a):
+    """El efecto completo, que es lo que le importa al tecnico.
+
+    Primer reintento: «en curso, volve en un rato». El primer intento
+    termina. Segundo reintento, con la MISMA clave: la respuesta guardada,
+    200, y el cambio queda sincronizado en el telefono en vez de trabado.
+    """
+    key = "uuid-key-reintento-021"
+    url = f"/api/campo/trabajos/{orden_test.id}/acciones/"
+    body = {"accion": "marcar_en_camino"}
+    fila = MutacionIdempotente.objects.create(
+        org=org_a, idempotency_key=key, http_method="POST", endpoint=url,
+        request_hash=calcular_hash_canonico(body),
+        estado=MutacionIdempotente.PROCESANDO,
+    )
+
+    r1 = user_client.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY=key)
+    assert r1.status_code == 429, r1.content
+
+    #  El primer intento termina.
+    MutacionIdempotente.objects.filter(pk=fila.pk).update(
+        estado=MutacionIdempotente.COMPLETADA, status_code=200,
+        respuesta_json={"aplicada": True, "estado_operativo": "en_camino",
+                        "revision": 2})
+
+    r2 = user_client.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY=key)
+    assert r2.status_code == 200, r2.content
+    assert r2["Idempotent-Replay"] == "true"
+    assert r2.json()["estado_operativo"] == "en_camino"
+
+
+def test_una_clave_HUERFANA_sigue_siendo_409(user_client, orden_test, org_a):
+    """La otra mitad, y la que impide que el arreglo de arriba haga dano.
+
+    Una fila que lleva 'procesando' mas de lo que una peticion dura no esta
+    en curso: el proceso que la creo murio. Nadie va a completarla. Contestar
+    429 ahi dejaria al telefono reintentando para siempre; eso SI es para una
+    persona, y sigue siendo 409 como siempre.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from campo.services import idempotencia
+
+    key = "uuid-key-huerfana-022"
+    url = f"/api/campo/trabajos/{orden_test.id}/acciones/"
+    body = {"accion": "marcar_en_camino"}
+    fila = MutacionIdempotente.objects.create(
+        org=org_a, idempotency_key=key, http_method="POST", endpoint=url,
+        request_hash=calcular_hash_canonico(body),
+        estado=MutacionIdempotente.PROCESANDO,
+    )
+    vieja = timezone.now() - timedelta(
+        seconds=idempotencia.EN_CURSO_HASTA_SEGUNDOS + 30)
+    MutacionIdempotente.objects.filter(pk=fila.pk).update(created_at=vieja)
+
+    res = user_client.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY=key)
+
+    assert res.status_code == 409, res.content
+    assert res.json()["error"] == "OPERACION_EN_CURSO"
+    assert "Retry-After" not in res
+    orden_test.refresh_from_db()
+    assert orden_test.estado_operativo == OrdenTrabajo.ASIGNADA
+
+
+def test_justo_ANTES_del_tope_todavia_es_en_curso(user_client, orden_test,
+                                                  org_a):
+    """El borde, para que el tope no se corra solo."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from campo.services import idempotencia
+
+    key = "uuid-key-borde-023"
+    url = f"/api/campo/trabajos/{orden_test.id}/acciones/"
+    body = {"accion": "marcar_en_camino"}
+    fila = MutacionIdempotente.objects.create(
+        org=org_a, idempotency_key=key, http_method="POST", endpoint=url,
+        request_hash=calcular_hash_canonico(body),
+        estado=MutacionIdempotente.PROCESANDO,
+    )
+    casi = timezone.now() - timedelta(
+        seconds=idempotencia.EN_CURSO_HASTA_SEGUNDOS - 30)
+    MutacionIdempotente.objects.filter(pk=fila.pk).update(created_at=casi)
+
+    res = user_client.post(url, body, format="json", HTTP_IDEMPOTENCY_KEY=key)
+
+    assert res.status_code == 429, res.content

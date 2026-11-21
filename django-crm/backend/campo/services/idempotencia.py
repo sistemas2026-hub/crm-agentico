@@ -70,6 +70,73 @@ EFECTO_INCIERTO = {
                 "operación nueva."),
 }
 
+#  «EN CURSO» ES «VOLVE EN UN RATO», NO «ESTO CHOCO»  --  21/11/2026
+#
+#  EL ERROR QUE LO ORIGINO. La app de campo espera 20 s por respuesta. Si el
+#  servidor tarda mas, se rinde y reintenta con la MISMA clave; el primer
+#  intento sigue corriendo, asi que la fila esta `procesando` y hasta hoy se
+#  contestaba 409. La app trata el 409 como un conflicto que alguien tiene
+#  que revisar (`sync_queue_service.dart`) y no lo reintenta mas: el tecnico
+#  veia «10 cambios necesitan que alguien los revise» sobre cambios que el
+#  servidor SI habia aplicado.
+#
+#  Las dos situaciones no son la misma y ahora se contestan distinto:
+#
+#    - La fila es RECIENTE: el primer intento sigue vivo. Se contesta 429 con
+#      `Retry-After`, que la app ya sabe leer (`_leerRetryAfter`): vuelve a
+#      los pocos segundos, encuentra la fila `completada` y recibe la
+#      respuesta guardada. No hace falta una version nueva de la app.
+#
+#    - La fila es VIEJA: lleva `procesando` mas de lo que una peticion de
+#      campo dura (el tope es 180 s: cuatro veces los 45 s de la espera
+#      externa mas larga que estas vistas hacian, y por encima de los 120 s
+#      del `--timeout` de gunicorn). Lo mas probable es que el proceso que la
+#      creo haya muerto a mitad de camino -- un despliegue, memoria --, nadie
+#      va a completarla y no se sabe si el efecto ocurrio. Eso SI es para una
+#      persona: sigue siendo 409, como siempre. Contestar 429 aca dejaria al
+#      telefono reintentando para siempre contra algo que no va a terminar.
+#
+#  429 y no 503: un 5xx se lee como que el servidor se cayo, en los monitores
+#  y en la tabla de diagnostico de DESPLIEGUE.md. Esto no es una caida.
+EN_CURSO_HASTA_SEGUNDOS = 180
+REINTENTAR_EN_SEGUNDOS = 5
+
+
+def _respuesta_en_curso(creada_en=None, detalle: str = "") -> Response:
+    """Lo que recibe quien reintenta una clave que todavia se esta procesando.
+
+    `creada_en` es cuando nacio la fila. Sin el dato se la trata como
+    reciente: es el caso de la carrera, donde la otra peticion la acaba de
+    crear en este mismo instante.
+    """
+    from django.utils import timezone
+
+    detalle = detalle or ("La operación con esta clave se está procesando "
+                          "actualmente.")
+    huerfana = False
+    if creada_en is not None:
+        try:
+            edad = (timezone.now() - creada_en).total_seconds()
+            huerfana = edad > EN_CURSO_HASTA_SEGUNDOS
+        except Exception:                                        # noqa: BLE001
+            huerfana = False
+    if huerfana:
+        return Response(
+            {"error": "OPERACION_EN_CURSO",
+             "detalle": ("El intento anterior con esta clave empezó y nunca "
+                         "terminó. Puede haberse aplicado: revisalo antes de "
+                         "repetirlo.")},
+            status=status.HTTP_409_CONFLICT,
+        )
+    resp = Response(
+        {"error": "OPERACION_EN_CURSO", "detalle": detalle,
+         "reintentar_en": REINTENTAR_EN_SEGUNDOS},
+        status=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+    resp["Retry-After"] = str(REINTENTAR_EN_SEGUNDOS)
+    return resp
+
+
 #  LAS QUE SIGNIFICAN «la peticion no pasa», no «se rompio a mitad de camino».
 #  APIException cubre ValidationError, PermissionDenied, NotAuthenticated,
 #  Throttled y las demas de DRF; Http404 y PermissionDenied de Django entran
@@ -193,13 +260,8 @@ def manejar_idempotencia(vista_func):
                         )
 
                     if existente.estado == MutacionIdempotente.PROCESANDO:
-                        return Response(
-                            {
-                                "error": "OPERACION_EN_CURSO",
-                                "detalle": "La operación con esta clave se está procesando actualmente.",
-                            },
-                            status=status.HTTP_409_CONFLICT,
-                        )
+                        return _respuesta_en_curso(
+                            getattr(existente, "created_at", None))
 
                     if existente.estado == MutacionIdempotente.COMPLETADA:
                         resp = Response(
@@ -220,13 +282,9 @@ def manejar_idempotencia(vista_func):
                 )
         except (IntegrityError, OperationalError):
             # Carrera de concurrencia: otra petición paralela acaba de crear o bloquear el registro
-            return Response(
-                {
-                    "error": "OPERACION_EN_CURSO",
-                    "detalle": "Conflicto concurrente: la operación ya está siendo procesada.",
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
+            return _respuesta_en_curso(
+                detalle="Conflicto concurrente: la operación ya está siendo "
+                        "procesada.")
 
         # 2. Ejecutar la vista de negocio
         try:

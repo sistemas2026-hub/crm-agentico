@@ -1577,3 +1577,52 @@ El costo de una pasada crecía con la antigüedad del técnico y no con su traba
 **VERIFICADO:** pruebas de la app (cabeceras PNG y JPEG armadas byte a byte, nombres de cuatro marcas), del servidor contra PostgreSQL y de la tarjeta, con sus mutaciones.
 **NO VERIFICADO, y es lo primero que hay que medir:** en un teléfono real, que el tamaño de una captura coincida con el que la app lee de la pantalla, y que el nombre del archivo llegue con la palabra y la fecha. Si no coinciden, la tarjeta lo muestra: una captura legítima saldría como «origen desconocido» con las dos medidas escritas.
 **Exige instalar una versión nueva de la app.** Hasta entonces el servidor no recibe estos datos y el punto no aparece.
+
+**MEDIDO EN UN TELÉFONO REAL (21/11/2026, OT #283, app 1.0.19).** Cuatro capturas adjuntadas desde la galería: las cuatro salieron como *«Captura de pantalla de este teléfono»* — el tamaño que la app lee de la pantalla **sí** coincide con el de sus capturas en ese modelo. Las cuatro dijeron también *«el archivo no dice de cuándo es»*: en ese teléfono la fecha no llega en el nombre en una forma conocida. No levanta una duda (es la regla de arriba), pero queda sin medir **cómo** nombra ese modelo sus capturas — falta anotar marca y modelo y un nombre de archivo de ejemplo.
+
+### 8.31 DECISIÓN — La nota al ISP sale después de contestarle al técnico, y «en curso» ya no traba el cambio (21/11/2026)
+
+**El error que lo originó.** El usuario: *«demoran en llegar los reportes del técnico que manda por app»*, y en el teléfono *«10 cambios necesitan que alguien los revise»*.
+
+**La causa, leída en el código (no medida en producción: ese día no había cómo).**
+
+| Qué | Dónde | Número |
+|---|---|---|
+| Marcar «en camino», «llegada» y mandar el reporte le escribían al ISP **dentro** de la petición del técnico | `campo/views.py` → `nota_al_isp._pedir` | espera hasta **45 s** |
+| La app espera la respuesta | `api_client.dart` | **20 s** |
+| El reintento de la app, con la misma clave, encontraba el primer intento todavía corriendo | `campo/services/idempotencia.py` | contestaba **409** |
+| La app trata un 409 como conflicto y no lo reintenta más | `sync_queue_service.dart` | el cambio quedaba «para revisar» **estando aplicado** |
+
+Es además lo que CLAUDE.md §12 prohíbe: esperar una operación externa con el técnico en la calle. `revisar_el_cierre_ya` y `analizar_evidencia` ya habían salido de la petición por lo mismo; estas dos notas habían quedado adentro.
+
+**Qué se decidió.**
+
+1. **La petición solo deja pedida la nota** (`campo.tasks.pedir_nota_al_isp`); la escribe una tarea de Celery, `anotar_en_el_isp`, después del commit. La nota al ticket de Dexter y las fotos adjuntas siguen dentro de la petición: son locales.
+2. **El orden no se pierde.** Dentro de la petición las notas salían de a una; un worker corre varias tareas a la vez, y un teléfono que estuvo sin señal manda las tres en el mismo segundo. Cada nota pedida deja una marca en la caché compartida hasta que su tarea termina, y una tarea no escribe mientras haya una marca de un momento anterior de la misma orden. **El cierre automático espera igual**: cada nota deja el ticket En Progreso, y una nota que llegara después del cierre lo reabriría.
+3. **Nada espera para siempre.** Cada tarea se reprograma como mucho 60 veces (180 s, por encima de la cadena más larga que puede tener adelante: tres notas de 45 s) y después sale igual. La marca dura 900 s si nadie la suelta —solo cuenta para una tarea que se perdió—. Si la caché no contesta, las notas salen sin esperarse: pueden quedar desordenadas.
+4. **Lo que llega tarde no se escribe**: si la orden ya cerró, se canceló, va por otra vuelta, **o el ticket del ISP ya se cerró aunque la orden siga abierta**, la nota no sale y queda en la bitácora como `llego_tarde`.
+5. **«En curso» es «volvé en un rato»**: 429 con `Retry-After: 5`, que la app instalada ya sabe reintentar — **no hace falta una versión nueva de la app**. Una clave que lleva `procesando` más de 180 s sigue siendo 409: el proceso que la creó murió, nadie va a completarla, y eso sí es para una persona.
+
+**Lo que NO promete.** Sin broker la nota no sale (queda `sin_cola` en la bitácora); no se hace dentro de la petición como respaldo, porque sería volver a esperar al ISP justo cuando algo ya anda mal. Y los cambios que **ya** quedaron «para revisar» en un teléfono no se destraban solos: hay que reenviarlos desde la app.
+
+**No se tocó, y sigue pendiente del mismo diagnóstico:** la pestaña de Programación recalcula la revisión de **todas** las órdenes por revisar en cada refresco de 15 s, por cada pestaña abierta. Es la otra mitad de la lentitud y compite por los mismos hilos del servidor.
+
+**Lo que encontró la auditoría independiente antes de integrar, y quedó corregido (21/11/2026).**
+
+| Hallazgo | Cómo se midió | Qué se hizo |
+|---|---|---|
+| En un worker real la tarea esperaba 9 s y **moría** sin escribir la nota ni dejar rastro: `self.retry(max_retries=None)` no es «sin tope», es «usá el de la tarea», que es 3 | Worker de Celery 5.6.3 con broker en memoria: corrió 4 veces y terminó en `MaxRetriesExceededError`. Las pruebas no lo veían porque llamaban la tarea como función | `max_retries=None` en el decorador; pruebas nuevas por `.apply()`, que recorre el camino del worker |
+| La marca vencía a los 120 s mientras la tarea todavía esperaba en la cola | Deducido leyendo | La vida de la marca (900 s) se separó del tope de espera (180 s) |
+| Aprobar a mano y el ciclo de cada hora cierran el ticket sin mirar las marcas, con la orden todavía en `completada_campo` | Leído en `despacho_views.py` y `cierre_por_el_supervisor.py` | La tarea mira el evento `ticket_isp_cerrado`, no solo el estado de la orden |
+
+**Límites que quedan, a propósito.** Si el worker muere con una nota a medio escribir (un despliegue), esa nota se pierde sin rastro: nadie la reintenta. Durante un despliegue, un backend nuevo puede pedir una nota que el worker viejo todavía no conoce, y el mensaje se descarta. Y una persona que aprueba en el mismo segundo en que el reporte se está escribiendo puede ganarle. `CAMPO_NOTA_AL_ISP` no está declarada en ningún servicio del compose: ponerla en Dokploy no llega a ningún contenedor (ya era así).
+
+**VERIFICADO:** `campo/tests/test_la_nota_al_isp_sale_despues.py` y `test_idempotencia_api.py` contra PostgreSQL (32 casos), con 18 mutaciones; y por el auditor, leyendo `docker-compose.prod.yml`, que el worker de producción tiene las variables del motor, el mismo Redis de caché y el mismo volumen de fotos que el backend. **NO VERIFICADO:** el tiempo real en producción antes y después —la primera medición es mirar si «en camino» contesta en menos de un segundo con el ISP lento—, cuánto tarda en producción la nota del reporte con sus fotos, y el aislamiento por empresa de la tarea contra una base con las políticas reales (se apoya en que `revisar_el_cierre_ya` usa el mismo patrón y ya corre).
+
+### 8.32 DECISIÓN — De una foto con un problema se lee el por qué en un renglón (21/11/2026)
+
+**El pedido.** El usuario, con la OT #283 en la pantalla: *«el texto que describe es muy largo»*. El 17/11 ya había pedido *«que mejor muestre si pasa, y cuando no pase, por qué»*, y quedó a medias: la foto sin problemas se resumió en una línea, pero la que tenía un problema **abría sola** su detalle — la instrucción entera de la plantilla (escrita para el modelo), la prosa entera y las tres marcas del protocolo tal cual: *«CATALOGO: no MUESTRA: si ATENCION: si»*.
+
+**Qué cambia.** Sin tocar nada se lee una frase: la conclusión del modelo, sin las marcas, hasta 110 caracteres y cortada donde termina una frase (`texto-de-la-foto.js`). El detalle entero sigue a un clic y ya no se abre solo. Ningún dato nuevo y ninguna decisión nueva: qué foto pasa lo sigue diciendo `estado-de-la-foto.js`.
+
+**Lo que ese mismo caso mostró sobre las capturas, y no se cambió.** De las cuatro capturas de la #283, dos pasaron sin observaciones. Las dos que pidieron una mirada no fue por ser capturas (§8.28) ni por su origen (§8.30, que quedó en ✓): el modelo vio **una imagen de catálogo del medidor**, sobre fondo blanco, donde se pedía una medición. Es la regla del catálogo, que sigue en pie; cambiarla es otra decisión.

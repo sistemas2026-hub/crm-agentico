@@ -824,8 +824,13 @@ class AccionesTrabajoView(APIView):
                     orden,
                     f"{quien + ': ' if quien else ''}{que_paso}.",
                     momento, profile=request.profile)
-                nota_al_isp.anotar_avance(orden, momento,
-                                          profile=request.profile)
+                #  AL ISP, FUERA DE LA PETICION  --  21/11/2026. Hasta hoy
+                #  esta linea le escribia a WispHub aca mismo y esperaba
+                #  hasta 45 s; la app espera 20, se rendia, reintentaba, y
+                #  el cambio quedaba «para revisar» aunque ya estaba hecho.
+                #  Ver `campo.tasks.pedir_nota_al_isp`.
+                tareas_de_campo.pedir_nota_al_isp(orden, momento,
+                                                  request.profile)
         except Exception as e:                                   # noqa: BLE001
             #  SE DEJA RASTRO, no `pass` a secas. Un `except` mudo aca
             #  significa que el dia que el aviso deje de salir nadie se entera
@@ -1450,25 +1455,29 @@ class CompletarTrabajoView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        #  LA OTRA MITAD (31/10/2026). Ver el comentario en SeguimientoView:
-        #  con la orden ya en 'completada_campo', si el reporte de cierre
-        #  llego antes, el Supervisor la revisa y decide en segundos.
-        tareas_de_campo.pedir_revision_del_cierre(orden)
-
-        #  Y EL REPORTE VA AL TICKET DEL ISP (06/11/2026). Es el momento que
+        #  EL REPORTE VA AL TICKET DEL ISP (06/11/2026). Es el momento que
         #  hoy el tecnico hace a mano en WispHub: manda su reporte por el
         #  ticket y pide que lo revisen. Sin esto, quien mira WispHub ve el
         #  ticket igual que antes -- "Nuevo", con el plazo corriendo -- hasta
         #  que alguien cierre, que puede ser dos dias despues.
         #
-        #  Envuelto: la orden YA esta completada y un fallo del ISP no puede
-        #  deshacer eso ni devolver un 500 al telefono del tecnico.
-        try:
-            from campo.services.nota_al_isp import anotar_reporte_del_tecnico
+        #  SE PIDE, NO SE HACE ACA  --  21/11/2026. Hasta hoy esta vista le
+        #  escribia a WispHub antes de contestarle al telefono, fotos
+        #  incluidas, y esperaba hasta 45 s; la app espera 20. Ver
+        #  `campo.tasks.pedir_nota_al_isp`.
+        #
+        #  ANTES QUE LA REVISION, y el orden importa: pedirla deja la marca
+        #  que la revision mira para no cerrar el ticket antes de que el
+        #  reporte llegue. Al reves, la revision podria arrancar sin verla.
+        from campo.services import nota_al_isp as _isp
 
-            anotar_reporte_del_tecnico(orden, request.profile)
-        except Exception:                                        # noqa: BLE001
-            pass
+        tareas_de_campo.pedir_nota_al_isp(
+            orden, _isp.REPORTE_DEL_TECNICO, request.profile)
+
+        #  LA OTRA MITAD (31/10/2026). Ver el comentario en SeguimientoView:
+        #  con la orden ya en 'completada_campo', si el reporte de cierre
+        #  llego antes, el Supervisor la revisa y decide en segundos.
+        tareas_de_campo.pedir_revision_del_cierre(orden)
 
         #  Y AL TICKET DE DEXTER TAMBIEN  --  06/11/2026
         #

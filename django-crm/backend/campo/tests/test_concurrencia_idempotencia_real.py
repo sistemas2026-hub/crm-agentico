@@ -58,7 +58,9 @@ def test_concurrencia_cinco_requests_simultaneos(org_a, regular_user, user_profi
     - Exactamente 1 mutación efectiva en la orden
     - Exactamente 1 registro EventoTrabajo
     - Exactamente 1 MutacionIdempotente en base de datos
-    - Las otras 4 peticiones reciben 200 (replay) o 409 (operación en curso), NUNCA un 500
+    - Las otras 4 peticiones reciben 200 (replay) o 429 (operación en curso:
+      «volvé en un rato»; era 409 hasta el 21/11/2026), NUNCA un 500 ni un
+      409 -- un 409 acá dejaría el cambio trabado en el teléfono
     - Cero duplicación de estado
     """
     if connection.vendor != "postgresql":
@@ -80,8 +82,8 @@ def test_concurrencia_cinco_requests_simultaneos(org_a, regular_user, user_profi
         respuestas = [f.result() for f in futuros]
 
     codigos = [r.status_code for r in respuestas]
-    # Todos los códigos deben ser 200 (éxito/replay) o 409 (operación en curso / conflicto)
-    assert all(code in (200, 409) for code in codigos), f"Códigos inesperados: {codigos}"
+    # Todos los códigos deben ser 200 (éxito/replay) o 429 (operación en curso)
+    assert all(code in (200, 429) for code in codigos), f"Códigos inesperados: {codigos}"
     assert 200 in codigos, "Al menos una petición debió ganar y responder 200"
 
     # En la base de datos:
@@ -103,8 +105,10 @@ def test_carrera_concurrente_intercalada_cinco_intentos(user_client, orden_concu
     """
     Verifica determinísticamente el ciclo de vida de 5 peticiones concurrentes con la misma key:
     1. Request 1 crea registro en estado PROCESANDO
-    2. Request 2 llega mientras procesa -> 409 OPERACION_EN_CURSO
-    3. Request 3 llega mientras procesa -> 409 OPERACION_EN_CURSO
+    2. Request 2 llega mientras procesa -> 429 OPERACION_EN_CURSO (volve en un rato)
+    3. Request 3 llega mientras procesa -> 429 OPERACION_EN_CURSO
+       (era 409 hasta el 21/11/2026: la app lo trataba como conflicto y no
+       reintentaba mas; ver `idempotencia._respuesta_en_curso`)
     4. Request 1 finaliza con éxito -> estado COMPLETADA
     5. Request 4 llega tras completarse -> 200 OK con header Idempotent-Replay
     6. Request 5 llega con payload modificado -> 409 IDEMPOTENCY_KEY_REUSED
@@ -127,12 +131,12 @@ def test_carrera_concurrente_intercalada_cinco_intentos(user_client, orden_concu
 
     # 2. Request 2 concurrente mientras está procesando
     res_2 = user_client.post(url, payload, format="json", HTTP_IDEMPOTENCY_KEY=key)
-    assert res_2.status_code == 409
+    assert res_2.status_code == 429
     assert res_2.json()["error"] == "OPERACION_EN_CURSO"
 
     # 3. Request 3 concurrente mientras sigue procesando
     res_3 = user_client.post(url, payload, format="json", HTTP_IDEMPOTENCY_KEY=key)
-    assert res_3.status_code == 409
+    assert res_3.status_code == 429
     assert res_3.json()["error"] == "OPERACION_EN_CURSO"
 
     # 4. Request 1 concluye su trabajo real: transiciona la orden y guarda la respuesta en COMPLETADA

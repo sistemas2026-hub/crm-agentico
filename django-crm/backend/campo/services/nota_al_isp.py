@@ -107,6 +107,23 @@ def _apagado() -> str:
     return ""
 
 
+def hay_a_quien_anotar(orden) -> bool:
+    """¿Tiene sentido pedir una nota para esta orden?
+
+    Lo pregunta `campo.tasks.pedir_nota_al_isp` ANTES de encolar: una orden
+    que no nacio de un ticket del ISP, o una instalacion con la nota apagada,
+    no necesita una tarea para que conteste «sin ticket».
+
+    Es un ATAJO, no la puerta: `_pedir` y cada `anotar_*` vuelven a comprobar
+    lo mismo, asi que si esto dijera que si por error no se escribe de mas.
+    """
+    from campo.services.cierre_en_isp import numero_de_ticket
+
+    if _apagado():
+        return False
+    return bool(numero_de_ticket(getattr(orden, "contexto", None)))
+
+
 def _json_seguro(valor):
     """Un valor que `JSONField` pueda guardar, o su `repr` acortado.
 

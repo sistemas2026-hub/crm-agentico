@@ -130,6 +130,9 @@ def test_la_misma_clave_repetida_sigue_creando_una_sola(org_a, version_concurren
         respuestas = list(pool.map(crear, range(CANTIDAD)))
 
     codigos = [r.status_code for r in respuestas]
-    assert all(c in (201, 409) for c in codigos), f"codigos inesperados: {codigos}"
+    #  Las que pierden reciben 429 «en curso, volvé en un rato». Era 409 hasta
+    #  el 21/11/2026: ver `idempotencia._respuesta_en_curso`. Lo que esta
+    #  guarda mide no cambio: una sola gana y sale una sola orden.
+    assert all(c in (201, 429) for c in codigos), f"codigos inesperados: {codigos}"
     assert 201 in codigos, "alguna tenia que ganar"
     assert OrdenTrabajo.objects.filter(org=org_a).count() == 1

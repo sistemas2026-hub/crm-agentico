@@ -207,8 +207,15 @@ def test_el_enganche_del_reporte_esta_en_la_vista():
 
     ruta = (pathlib.Path(__file__).resolve().parents[1] / "views.py")
     fuente = io.open(ruta, encoding="utf-8").read()
-    i = fuente.find("anotar_reporte_del_tecnico(orden, request.profile)")
+    #  DESDE EL 21/11/2026 EL AVISO AL ISP SE PIDE, NO SE HACE EN LA VISTA:
+    #  la nota la escribe `campo.tasks.anotar_en_el_isp` despues de
+    #  contestarle al telefono. Que de verdad se pida y se escriba lo mide
+    #  `test_la_nota_al_isp_sale_despues.py`; esto sigue siendo solo la red
+    #  de atras contra un borrado accidental.
+    i = fuente.find("orden, _isp.REPORTE_DEL_TECNICO, request.profile)")
     assert i != -1, "se fue el aviso al ISP"
+    assert "tareas_de_campo.pedir_nota_al_isp(" in fuente[i - 80:i], \
+        "el reporte ya no pide la nota al ISP"
     #  El del CRM va despues, en el mismo tramo.
-    assert "nota_al_isp.REPORTE_DEL_TECNICO" in fuente[i:i + 2000], \
+    assert "nota_al_isp.REPORTE_DEL_TECNICO" in fuente[i + 60:i + 3000], \
         "el reporte ya no avisa al ticket del CRM"

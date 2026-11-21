@@ -81,11 +81,34 @@ def _notas(caso):
     return Comment.objects.filter(object_id=caso.pk)
 
 
-def test_en_camino_avisa_en_LOS_DOS_tickets(user_client, orden_con_ticket):
+def test_en_camino_avisa_en_LOS_DOS_tickets(user_client, orden_con_ticket,
+                                            django_capture_on_commit_callbacks):
+    """El efecto de punta a punta: la peticion, y la tarea que ella deja pedida.
+
+    DESDE EL 21/11/2026 EL DEL ISP NO SALE DENTRO DE LA PETICION: lo escribe
+    `campo.tasks.anotar_en_el_isp` despues de contestarle al telefono (antes
+    la app esperaba a WispHub hasta 45 s). Aca la tarea se corre en el lugar
+    de la cola, para seguir afirmando lo que esta guarda siempre afirmo: que
+    los DOS tickets se enteran. Que la peticion no espere al ISP lo mide
+    `test_la_nota_al_isp_sale_despues.py`.
+    """
+    from campo import tasks
+
     orden, caso = orden_con_ticket
 
-    with mock.patch("requests.post", return_value=_Resp()) as post, _con_tenant():
+    with mock.patch("requests.post", return_value=_Resp()) as post, \
+            _con_tenant(), \
+            mock.patch.object(tasks.anotar_en_el_isp, "delay",
+                              side_effect=lambda *a: tasks.anotar_en_el_isp(*a)), \
+            django_capture_on_commit_callbacks(execute=True):
         r = _marcar(user_client, orden)
+
+    #  La tarea limpia el contexto de empresa al terminar, que en el worker
+    #  es lo correcto: la conexion vuelve al pool. Aca corrio en la conexion
+    #  de la prueba, asi que se repone para poder leer el ticket.
+    from common.tasks import set_rls_context
+
+    set_rls_context(str(orden.org_id))
 
     assert r.status_code == 200, r.content
 

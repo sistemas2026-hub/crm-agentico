@@ -79,7 +79,7 @@ Almacenamiento durable independiente de `asistente.media`:
 - `estado`: `PROCESANDO` | `COMPLETADA`.
 - **Reglas de Guarda**:
   - `UNIQUE(org, idempotency_key)` en BD.
-  - Si llega otra request con la misma key y está `PROCESANDO` -> Retorna `409 Conflict` (`OPERACION_EN_CURSO`).
+  - Si llega otra request con la misma key y está `PROCESANDO` -> Retorna `429 Too Many Requests` (`OPERACION_EN_CURSO`) con `Retry-After: 5`. **Cambió el 21/11/2026 (PRD §8.31):** era `409`, y la app trata un 409 como conflicto que no reintenta — el cambio quedaba «para revisar» estando aplicado. Una key que lleva `PROCESANDO` más de 180 s (el proceso que la creó murió) sigue devolviendo `409 Conflict`.
   - Si está `COMPLETADA` y el `request_hash` coincide -> Devuelve respuesta cacheada con cabecera `Idempotent-Replay: true`.
   - Misma `idempotency_key` + distinto `request_hash` -> Retorna `409 Conflict` (`IDEMPOTENCY_KEY_REUSED`).
   - Todo bajo `transaction.atomic()`. Si la mutación lanza excepción, se hace rollback y no se guarda falso éxito.
