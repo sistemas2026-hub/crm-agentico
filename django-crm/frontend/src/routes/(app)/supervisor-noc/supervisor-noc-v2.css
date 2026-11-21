@@ -457,3 +457,16 @@
 @media (prefers-reduced-motion: reduce) {
   .snv-fila, .snv-btn, .snv-analisis summary .snv-chevron { transition: none; }
 }
+
+/* REDISEÑO DEL 21/11/2026 ------------------------------------------------- */
+/* El freno de mano, a la vista en la cabecera. */
+.snv-btn-freno { background: var(--v2-critica-soft); border-color: var(--v2-critica-line); color: var(--v2-rust); }
+.snv-btn-freno-puesto { background: var(--v2-rust); border-color: var(--v2-rust); color: #fff; }
+/* Los encabezados de la bandeja: la misma rejilla que las filas. */
+.snv-fila-cabeza, .snv-fila-cabeza:hover {
+  background: var(--v2-paper); border-top: 0; padding-top: 8px; padding-bottom: 8px;
+  font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--snv-tinta-2);
+}
+.snv-fila-cabeza .snv-c-plazo { font-family: var(--v2-sans); font-size: 11px; color: var(--snv-tinta-2); }
+/* Desincronizados con número: índigo, no gris. */
+.snv-signo.snv-tono-accion .snv-signo-n { color: var(--v2-ember-text); }

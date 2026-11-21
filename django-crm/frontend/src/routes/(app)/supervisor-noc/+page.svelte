@@ -1,7 +1,11 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
+  import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
 
   import { avisoDeRevision } from '$lib/v2/resultado-del-cierre.js';
+  import PanelLateral from '$lib/supervisor/ui/PanelLateral.svelte';
+  import AutonomiaYFreno from '$lib/supervisor/ui/AutonomiaYFreno.svelte';
+  import { Alcance } from '$lib/supervisor/ui/alcance.svelte.js';
   //  La burbuja del chat del Supervisor ya no se monta aca: vive en
   //  +layout.svelte (21/10/2026), para que salga en todas las pestañas.
   import { deserialize, enhance } from '$app/forms';
@@ -68,6 +72,21 @@
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
 
+  //  21/11/2026: lo que pasó al decidir, también en un aviso a la vista. La
+  //  caja de la bandeja sigue, pero queda lejos cuando se decide desde el
+  //  panel de detalle, que salta solo a la siguiente propuesta.
+  $effect(() => {
+    const f = form;
+    if (!f) return;
+    untrack(() => {
+      if (f.error) avisar(f.error, { tono: 'error' });
+      else if (f.ok && f.tipo === 'revision') {
+        const r = avisoDeRevision({ decision: f.decision, ejecutada: f.ejecutada, motivo: f.motivo, detalle: f.detalle });
+        avisar(`Revisión registrada: ${r.titulo}.`, { tono: r.tono === 'critico' ? 'error' : 'ok' });
+      } else if (f.ok && f.tipo === 'cancelacion') avisar('Propuesta cancelada. Ninguna acción se ejecutó.');
+    });
+  });
+
   // ---------------------------------------------------------------------
   //  ESTADO LOCAL
   //  Nada de esto decide permisos ni protege nada: el backend es la
@@ -84,44 +103,23 @@
   //  hace falta es justo cuando nadie quiere estar buscando como abrir una
   //  terminal.
   let modalAlcance = $state(false);
-  let alcance = $state(/** @type {any} */ (null));
-  let alcanceCargando = $state(false);
-  let alcanceError = $state('');
-  let alcanceGuardando = $state(false);
-  let nivelElegido = $state(/** @type {number | null} */ (null));
-  let motivoAlcance = $state('');
-  let criteriosAlcance = $state('');
-  let motivoFreno = $state('');
+  //  21/11/2026: la lógica del alcance vive en lib/supervisor/ui (la comparte
+  //  Ajustes). `alcance` sigue siendo el estado leído, como antes.
+  const alcanceCtl = new Alcance();
+  const alcance = $derived(alcanceCtl.estado);
 
   /**
-   * Lee el alcance. La usa el modal al abrirse y, desde el 01/11/2026, la
+   * Lee el alcance. La usa el panel al abrirse y, desde el 01/11/2026, la
    * pantalla al cargar: «Qué hace el Supervisor solo» muestra las tareas
    * delegadas sin tener que abrir nada. Una sola lectura para los dos.
    */
   async function leerAlcance() {
-    alcanceError = '';
-    try {
-      const r = await fetch('/api/supervisor-noc/autonomia');
-      const d = await r.json();
-      if (!r.ok) {
-        alcanceError = d?.error ?? 'No se pudo leer el alcance.';
-      } else {
-        alcance = d;
-        nivelElegido = d.configurado;
-      }
-    } catch (/** @type {any} */ e) {
-      alcanceError = `No se pudo leer el alcance: ${e?.message ?? e}`;
-    }
+    await alcanceCtl.leer();
   }
 
   async function abrirAlcance() {
     modalAlcance = true;
-    alcanceCargando = true;
-    try {
-      await leerAlcance();
-    } finally {
-      alcanceCargando = false;
-    }
+    await alcanceCtl.leer();
   }
 
   //  Se vuelve a leer cada vez que corre la carga del servidor --al decidir,
@@ -132,63 +130,6 @@
   });
 
   const tarjetas = $derived(tarjetasDeSolo(alcance));
-
-  async function guardarNivel() {
-    alcanceGuardando = true;
-    alcanceError = '';
-    try {
-      const r = await fetch('/api/supervisor-noc/autonomia', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nivel: nivelElegido,
-          motivo: motivoAlcance,
-          criterios: criteriosAlcance
-        })
-      });
-      const d = await r.json();
-      if (!r.ok) {
-        //  El mensaje del backend se muestra TAL CUAL: ya dice cual de los
-        //  tres requisitos falta. Reescribirlo aca serian dos textos que se
-        //  separan el dia que uno cambie.
-        alcanceError = d?.error ?? 'No se pudo cambiar el nivel.';
-      } else {
-        alcance = { ...alcance, ...d };
-        motivoAlcance = '';
-        criteriosAlcance = '';
-        await invalidateAll();
-      }
-    } catch (/** @type {any} */ e) {
-      alcanceError = `No se pudo cambiar el nivel: ${e?.message ?? e}`;
-    } finally {
-      alcanceGuardando = false;
-    }
-  }
-
-  /** @param {boolean} detener */
-  async function moverFreno(detener) {
-    alcanceGuardando = true;
-    alcanceError = '';
-    try {
-      const r = await fetch('/api/supervisor-noc/autonomia', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ detener, motivo: motivoFreno })
-      });
-      const d = await r.json();
-      if (!r.ok) {
-        alcanceError = d?.error ?? 'No se pudo mover el interruptor.';
-      } else {
-        alcance = { ...alcance, ...d };
-        motivoFreno = '';
-        await invalidateAll();
-      }
-    } catch (/** @type {any} */ e) {
-      alcanceError = `No se pudo mover el interruptor: ${e?.message ?? e}`;
-    } finally {
-      alcanceGuardando = false;
-    }
-  }
 
   let modalCiclo = $state(false);
   let corriendo = $state(false);
@@ -241,12 +182,13 @@
     verDesincronizados = 'ocultar';
     filtro = null;
     busqueda = '';
+    soloSinTecnico = false;
   }
 
   /** Si hay algo que limpiar. El estado abre en 'pendientes', que es el
       valor por defecto y no cuenta como filtro puesto. */
   const hayFiltros = $derived(
-    Boolean(filtro || filtroNivel || filtroPropuesta || busqueda.trim()) ||
+    Boolean(filtro || filtroNivel || filtroPropuesta || busqueda.trim() || soloSinTecnico) ||
       filtroEstado !== 'pendientes'
   );
 
@@ -256,6 +198,7 @@
     filtroPropuesta = '';
     filtroEstado = 'pendientes';
     busqueda = '';
+    soloSinTecnico = false;
   }
 
   let revisando = $state(/** @type {string | null} */ (null));
@@ -523,6 +466,8 @@
    * No desaparecen: el recuadro de Desincronizaciones los trae con 'solo'.
    */
   let verDesincronizados = $state(/** @type {'ocultar'|'solo'} */ ('ocultar'));
+  /** «Sin técnico» filtra la bandeja (21/11/2026): antes parecía un botón y no hacía nada. */
+  let soloSinTecnico = $state(false);
 
   const bandeja = $derived(
     bandejaDeRevision(propuestas, {
@@ -532,7 +477,7 @@
       conPropuesta: filtroPropuesta,
       texto: busqueda,
       desincronizados: verDesincronizados
-    })
+    }).filter((/** @type {any} */ p) => !soloSinTecnico || !p.tecnico)
   );
 
   const pag = $derived(paginacion(bandeja.length, nPagina, POR_PAGINA));
@@ -614,7 +559,7 @@
   // Cambiar un filtro o buscar vuelve a la primera pagina. Sin esto, filtrar
   // de 121 a 4 resultados estando en la pagina 7 deja la tabla vacia.
   $effect(() => {
-    void [filtroEstado, filtroNivel, filtro, filtroPropuesta, busqueda];
+    void [filtroEstado, filtroNivel, filtro, filtroPropuesta, busqueda, soloSinTecnico];
     nPagina = 1;
   });
 
@@ -1274,7 +1219,10 @@
         <header class="snv-cabecera">
           <div class="snv-cabecera-fila">
             <div class="snv-cabecera-izq">
-              <h1 class="snv-titulo-pantalla"><span class="snv-rombo" aria-hidden="true"></span>Supervisor NOC</h1>
+              <!-- 21/11/2026: el mismo nombre que el menú. Eran tres —«Pendientes
+                   por revisión» en el menú, «Supervisor NOC» acá y «Para decidir» en
+                   la bandeja— para la misma pantalla. -->
+              <h1 class="snv-titulo-pantalla">Pendientes por revisión</h1>
               <!--
                 La respuesta a «¿cómo está la operación?», antes que cualquier
                 número. La frase y los grupos de la bandeja cuentan con la MISMA
@@ -1300,6 +1248,11 @@
               >
                 Última propuesta: {ultimaPropuesta ? haceCuanto(ultimaPropuesta) : 'ninguna todavía'}
               </span>
+              <!-- EL FRENO DE MANO A LA VISTA (21/11/2026): era lo más crítico y
+                   vivía dentro de un modal; desde acá se ve si está puesto. -->
+              <button class="snv-btn {tarjetas.frenado ? 'snv-btn-freno-puesto' : 'snv-btn-freno'}" type="button" onclick={abrirAlcance}>
+                {tarjetas.frenado ? 'Freno puesto' : 'Freno de mano'}
+              </button>
               <button class="snv-btn snv-btn-pri" type="button" onclick={() => (modalCiclo = true)} disabled={corriendo}>
                 <span aria-hidden="true">▶</span>
                 {corriendo ? 'Analizando…' : 'Analizar ahora'}
@@ -1333,25 +1286,58 @@
                 {enRiesgo.total == null ? 'la bandeja no se pudo leer' : `${enRiesgo.vencido} vencidas · ${enRiesgo.pronto} por vencer`}
               </span>
             </a>
+            <!-- 21/11/2026: los cinco signos hacen algo. Antes tres tenían el
+                 aspecto de un botón y no hacían nada. «Bloqueados» lleva a Planes
+                 semanales, donde se ven y se destraban; «Sin programar» filtra
+                 la bandeja por ese tipo; «Sin técnico», por las que no lo tienen. -->
             {#each signosDelBackend as k (k.clave)}
-              <div class="snv-signo {k.n ? (k.clave === 'bloqueados' ? 'snv-tono-alerta' : '') : 'snv-tono-calma'}">
-                <!-- Un hueco, no un cero: el backend no entregó el indicador. -->
-                <span class="snv-signo-n">{k.n ?? (esperandoIndicadores ? '…' : 'Sin dato')}</span>
-                <span class="snv-signo-rot">{k.rotulo}</span>
-                {#if esperandoIndicadores}<span class="snv-signo-sub">cargando</span>{/if}
-              </div>
+              {#if k.clave === 'bloqueados'}
+                <a class="snv-signo snv-signo-enlace {k.n ? 'snv-tono-alerta' : 'snv-tono-calma'}" href="/supervisor-noc/planes-semanales">
+                  <!-- Un hueco, no un cero: el backend no entregó el indicador. -->
+                  <span class="snv-signo-n">{k.n ?? (esperandoIndicadores ? '…' : 'Sin dato')}</span>
+                  <span class="snv-signo-rot">{k.rotulo}</span>
+                  <span class="snv-signo-sub">{esperandoIndicadores ? 'cargando' : 'ver en Planes semanales'}</span>
+                </a>
+              {:else}
+                <button
+                  class="snv-signo snv-signo-enlace {k.n ? 'snv-tono-alerta' : 'snv-tono-calma'}"
+                  type="button"
+                  aria-pressed={filtro === 'orden_sin_programar'}
+                  onclick={() => {
+                    const prender = filtro !== 'orden_sin_programar';
+                    irAPendientes();
+                    filtro = prender ? 'orden_sin_programar' : null;
+                    document.getElementById('pendientes')?.scrollIntoView({ block: 'start' });
+                  }}
+                >
+                  <span class="snv-signo-n">{k.n ?? (esperandoIndicadores ? '…' : 'Sin dato')}</span>
+                  <span class="snv-signo-rot">{k.rotulo}</span>
+                  <span class="snv-signo-sub">{esperandoIndicadores ? 'cargando' : filtro === 'orden_sin_programar' ? 'viéndolas · tocá para volver' : 'filtrar la bandeja'}</span>
+                </button>
+              {/if}
             {/each}
-            <div class="snv-signo {sinTecnico ? '' : 'snv-tono-calma'}">
+            <button
+              class="snv-signo snv-signo-enlace {sinTecnico ? 'snv-tono-alerta' : 'snv-tono-calma'}"
+              type="button"
+              aria-pressed={soloSinTecnico}
+              onclick={() => {
+                const prender = !soloSinTecnico;
+                irAPendientes();
+                soloSinTecnico = prender;
+                document.getElementById('pendientes')?.scrollIntoView({ block: 'start' });
+              }}
+            >
               <span class="snv-signo-n">{sinTecnico ?? 'Sin dato'}</span>
               <span class="snv-signo-rot">Sin técnico</span>
-            </div>
+              <span class="snv-signo-sub">{soloSinTecnico ? 'viéndolas · tocá para volver' : 'filtrar la bandeja'}</span>
+            </button>
             <!--
               13/10/2026: los desincronizados salieron de la bandeja --los
               cierra el Supervisor solo-- y este signo es SU LUGAR. Es un
               <button>: muestra solo esos casos.
             -->
             <button
-              class="snv-signo snv-signo-enlace snv-tono-calma"
+              class="snv-signo snv-signo-enlace {desincronizados ? 'snv-tono-accion' : 'snv-tono-calma'}"
               type="button"
               aria-pressed={verDesincronizados === 'solo'}
               title="Ver los casos desincronizados en la bandeja"
@@ -1419,7 +1405,7 @@
         <section class="snv-solo" aria-labelledby="snv-solo-titulo">
           <div class="snv-seccion-cab">
             <h2 class="snv-h3" id="snv-solo-titulo">Qué hace el Supervisor solo</h2>
-            <button class="snv-enlace" type="button" onclick={abrirAlcance}>Ver reglas de autonomía ↗</button>
+            <button class="snv-enlace" type="button" onclick={abrirAlcance}>Ver reglas de autonomía</button>
           </div>
           {#if tarjetas.frenado}
             <p class="snv-freno">
@@ -1432,7 +1418,7 @@
               <article class="snv-tarjeta">
                 <h3 class="snv-tarjeta-titulo">{c.titulo}</h3>
                 {#if !alcance}
-                  <p class="snv-nota">{alcanceError || 'Leyendo…'}</p>
+                  <p class="snv-nota">{alcanceCtl.error || 'Leyendo…'}</p>
                 {:else if !c.t}
                   <p class="snv-nota">El catálogo de tareas no la trae.</p>
                 {:else}
@@ -1794,6 +1780,20 @@
                     </div>
                   {/snippet}
 
+                  <!-- LOS ENCABEZADOS (21/11/2026): eran nueve columnas sin rótulo.
+                       Llevan las MISMAS clases que las celdas, así que se ocultan
+                       juntas cuando la bandeja se angosta. -->
+                  <div class="snv-fila snv-fila-cabeza" aria-hidden="true">
+                    <div class="snv-c-check"></div>
+                    <div class="snv-c-plazo">Plazo</div>
+                    <div class="snv-c-quien">Cliente y asunto</div>
+                    <div class="snv-c-prio">Prioridad</div>
+                    <div class="snv-c-tipo">Tipo</div>
+                    <div class="snv-c-propone">Propone</div>
+                    <div class="snv-c-tecnico">Técnico</div>
+                    <div class="snv-c-ids">IDs</div>
+                    <div class="snv-c-accion"></div>
+                  </div>
                   {#if ordenar === 'plazo'}
                     {#each gruposDeLaPagina as g (g.clave)}
                       {@const plegado = estaPlegado(g.clave)}
@@ -2462,7 +2462,7 @@
             </details>
             <!-- INFORMACIÓN TÉCNICA -->
             <details class="snoc-detalles">
-              <summary class="snoc-label-sm">Información técnica</summary>
+              <summary class="snoc-label-sm">Identificadores y datos crudos</summary>
               <div class="snoc-meta" style="margin-top:var(--snoc-sm);">
                 <div style="grid-column:1 / -1;">
                   <span>ID de propuesta:</span><span class="snoc-mono-sm snoc-copiable">{detalle.id}</span>
@@ -2639,205 +2639,14 @@
        Dos controles que NO son lo mismo, y la pantalla los separa:
        el NIVEL dice qué clase de cosas puede hacer solo, y el INTERRUPTOR
        es el freno de mano. Tirar el freno no baja el nivel. -->
-  {#if modalAlcance}
-    <div
-      class="snoc-velo"
-      role="presentation"
-      onclick={(e) => {
-        if (e.target === e.currentTarget) modalAlcance = false;
-      }}
-    >
-      <div class="snoc-modal" role="dialog" aria-modal="true" aria-labelledby="snoc-alcance-titulo">
-        <div class="snoc-fila snoc-primario">
-          <span class="snoc-icono" style="font-size:28px;">tune</span>
-          <h4 class="snoc-h3" id="snoc-alcance-titulo">Alcance del Supervisor NOC IA</h4>
-        </div>
-
-        {#if alcanceCargando}
-          <p class="snoc-body snoc-secundario" style="margin:0;">Leyendo el estado…</p>
-        {:else if alcance}
-          <!-- QUÉ PUEDE HACER HOY, antes de ofrecer cambiarlo -->
-          <div class="snoc-mono-sm snoc-caja-datos">
-            <div>• Nivel autorizado: <strong>{alcance.configurado}</strong></div>
-            <div>
-              • Nivel que de verdad aplica: <strong>{alcance.efectivo}</strong>
-              {#if alcance.recortado}<span class="snoc-error-txt"> (recortado)</span>{/if}
-            </div>
-            <div>
-              • Interruptor:
-              {#if alcance.interruptor_permite}
-                <strong>permite actuar</strong>
-              {:else}
-                <strong class="snoc-error-txt">NO permite actuar</strong>
-              {/if}
-            </div>
-            {#if alcance.motivo}
-              <div class="snoc-tenue">• {alcance.motivo}</div>
-            {/if}
-            <!-- LA OTRA MITAD DEL ESTADO, y faltaba (21/10/2026). El nivel
-                 dice CUANTO puede hacer; esto, QUE le pidieron que haga. Las
-                 dos hacen falta: una tarea delegada con el nivel en 1 no
-                 cierra nada, y el nivel en 3 sin tareas delegadas tampoco
-                 hace nada. El detalle va al final del modal para no empujar
-                 el freno de mano hacia abajo. -->
-            {#if alcance.delegaciones}
-              <div>
-                • Tareas delegadas:
-                <strong>{alcance.delegaciones.filter((/** @type {any} */ d) => d.delegada).length}</strong>
-                de {alcance.delegaciones.length}
-              </div>
-            {/if}
-          </div>
-
-          <!-- EL FRENO VA PRIMERO, y es a propósito: si alguien abre esta
-               pantalla con apuro es para parar, no para ampliar. -->
-          <section class="snoc-columna" style="gap:var(--snoc-xs);">
-            <span class="snoc-label-sm" style="text-transform:uppercase;">Freno de mano</span>
-            <p class="snoc-body-sm snoc-secundario" style="margin:0;">
-              Detiene <strong>todas</strong> las acciones automáticas de inmediato. No cambia el nivel: cuando
-              lo reactivés, el alcance vuelve a ser el que era.
-            </p>
-            <input
-              class="snoc-campo"
-              type="text"
-              bind:value={motivoFreno}
-              placeholder="Motivo (obligatorio) — ej: algo raro en la bandeja"
-              disabled={alcanceGuardando}
-            />
-            <div class="snoc-fila" style="gap:var(--snoc-xs);">
-              {#if alcance.interruptor_permite}
-                <button
-                  class="snoc-btn snoc-btn-error"
-                  type="button"
-                  disabled={alcanceGuardando || !motivoFreno.trim()}
-                  onclick={() => moverFreno(true)}
-                >
-                  Detener las acciones automáticas
-                </button>
-              {:else}
-                <button
-                  class="snoc-btn"
-                  type="button"
-                  disabled={alcanceGuardando || !motivoFreno.trim()}
-                  onclick={() => moverFreno(false)}
-                >
-                  Reactivar
-                </button>
-              {/if}
-            </div>
-          </section>
-
-          <!-- EL NIVEL: ampliar exige demostrar que se midió algo -->
-          <section class="snoc-columna" style="gap:var(--snoc-xs);">
-            <span class="snoc-label-sm" style="text-transform:uppercase;">Qué puede hacer sin preguntar</span>
-            <select class="snoc-select" bind:value={nivelElegido} disabled={alcanceGuardando}>
-              {#each alcance.niveles as n (n.nivel)}
-                <option value={n.nivel}>{n.etiqueta}</option>
-              {/each}
-            </select>
-            <input
-              class="snoc-campo"
-              type="text"
-              bind:value={motivoAlcance}
-              placeholder="Motivo del cambio (obligatorio)"
-              disabled={alcanceGuardando}
-            />
-            <input
-              class="snoc-campo"
-              type="text"
-              bind:value={criteriosAlcance}
-              placeholder="Qué mediste para decidirlo (obligatorio)"
-              disabled={alcanceGuardando}
-            />
-            <p class="snoc-body-sm snoc-tenue" style="margin:0;">
-              Los criterios no son burocracia: sin saber qué se midió, esta decisión se vuelve a discutir cada
-              vez que alguien la mire.
-            </p>
-            <div class="snoc-fila" style="justify-content:flex-end;">
-              <button
-                class="snoc-btn snoc-btn-primario"
-                type="button"
-                disabled={alcanceGuardando || nivelElegido === alcance.configurado}
-                onclick={guardarNivel}
-              >
-                {alcanceGuardando ? 'Guardando…' : 'Cambiar el nivel'}
-              </button>
-            </div>
-          </section>
-          <!-- QUÉ LE PIDIERON QUE HAGA  --  21/10/2026
-               Hasta hoy esto no se veía en ninguna pantalla: se delegaba
-               hablándole al Supervisor en el chat, y para saber si había
-               quedado encendido había que volver a preguntarle.
-               SOLO LECTURA acá. Desde el 27/10/2026 se delega y se quita
-               también en «Ajustes del Supervisor», que escribe por las mismas
-               funciones que el chat (`td.delegar` / `td.quitar`): dos caras,
-               una sola regla. -->
-          <section class="snoc-columna" style="gap:var(--snoc-xs);">
-            <span class="snoc-label-sm" style="text-transform:uppercase;">Qué le pidieron que haga</span>
-            {#each alcance.delegaciones ?? [] as d (d.clave)}
-              <div class="snoc-caja-datos snoc-columna" style="gap:2px;">
-                <div class="snoc-fila" style="gap:var(--snoc-xs); align-items:baseline;">
-                  <!-- TRES ESTADOS Y NO DOS. "Delegada" y "delegada y
-                       funcionando" no son lo mismo: el 15/10 una tarea estuvo
-                       delegada, con el nivel en 3, y nada la corrió en cinco
-                       vueltas porque faltaba el ciclo horario. Un punto verde
-                       ahí habría mentido. -->
-                  <span
-                    class="snoc-punto {!d.delegada
-                      ? 'snoc-punto-tenue'
-                      : d.nivel_alcanza && d.la_despierta_algo?.si
-                        ? 'snoc-punto-secundario'
-                        : 'snoc-punto-error'}"
-                  ></span>
-                  <strong class="snoc-body-sm">{d.nombre}</strong>
-                </div>
-                {#if !d.delegada}
-                  <div class="snoc-body-sm snoc-tenue">
-                    No delegada. Se enciende en <a href="/supervisor-noc/ajustes">Ajustes</a>, o
-                    pidiéndosela al Supervisor en el chat.
-                  </div>
-                {:else}
-                  <div class="snoc-body-sm snoc-secundario">
-                    Delegada el {fecha(d.delegada_en)}
-                  </div>
-                  {#if d.con_estas_palabras}
-                    <!-- LA FRASE TAL CUAL, que es el único registro de qué
-                         creía estar pidiendo quien la delegó. Si la tarea hace
-                         algo distinto de lo que esa frase dice, el problema es
-                         del catálogo y conviene poder verlo. -->
-                    <div class="snoc-body-sm snoc-tenue">«{d.con_estas_palabras}»</div>
-                  {/if}
-                  {#if !d.nivel_alcanza}
-                    <div class="snoc-body-sm snoc-error-txt">
-                      No va a actuar: necesita nivel {d.exige_nivel} y el que aplica hoy es
-                      {alcance.efectivo}.
-                    </div>
-                  {/if}
-                  {#if d.la_despierta_algo && !d.la_despierta_algo.si}
-                    <div class="snoc-body-sm snoc-error-txt">{d.la_despierta_algo.por_que}</div>
-                  {/if}
-                {/if}
-                <div class="snoc-body-sm snoc-tenue">{d.que_hace}</div>
-              </div>
-            {/each}
-            {#if !(alcance.delegaciones ?? []).length}
-              <p class="snoc-body-sm snoc-tenue" style="margin:0;">
-                El backend no devolvió el catálogo de tareas.
-              </p>
-            {/if}
-          </section>
-        {/if}
-
-        {#if alcanceError}
-          <p class="snoc-body-sm snoc-error-txt" style="margin:0;">{alcanceError}</p>
-        {/if}
-
-        <div class="snoc-fila" style="justify-content:flex-end; padding-top:var(--snoc-xs);">
-          <button class="snoc-btn" type="button" onclick={() => (modalAlcance = false)}>Cerrar</button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <PanelLateral
+    abierto={modalAlcance}
+    antetitulo="Alcance del Supervisor NOC IA"
+    titulo="Autonomía y freno de mano"
+    alCerrar={() => (modalAlcance = false)}
+  >
+    <AutonomiaYFreno alcance={alcanceCtl} mostrarTareas {fecha} />
+  </PanelLateral>
 
   {#if modalCiclo}
     <div
