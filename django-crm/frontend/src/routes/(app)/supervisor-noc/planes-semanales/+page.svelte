@@ -10,6 +10,21 @@
 
   let trabajando = $state(false);
   let modalSecuenciar = $state(false);
+
+  //  REDISEÑO DEL 21/11/2026 (maqueta aprobada): ver las recomendaciones que
+  //  pasan de seis (antes se cortaban sin avisar) y cerrar con Escape lo que
+  //  esté abierto encima.
+  let verTodas = $state(false);
+  /** @param {KeyboardEvent} e */
+  function alTeclear(e) {
+    if (e.key !== 'Escape') return;
+    if (modalProgramar) modalProgramar = null;
+    else if (modalSecuencia) modalSecuencia = null;
+    else if (modalReprogramar) modalReprogramar = null;
+    else if (modalAnalizar) modalAnalizar = false;
+    else if (modalSecuenciar) modalSecuenciar = false;
+    else if (drawer) cerrarDrawer();
+  }
   let seleccionada = $state(/** @type {any} */ (null));
 
   // Paneles laterales. Cada uno pide SU dato y muestra su propio cargando: la
@@ -121,6 +136,10 @@
   let fPrioridad = $state('');
 
   const lineas = $derived(data.jornada?.lineas ?? []);
+  /** La primera línea de un plan en borrador: con ella se publica el plan. */
+  const enBorrador = $derived(
+    lineas.find((/** @type {any} */ l) => l.plan_estado === 'borrador' && l.programacion) ?? null
+  );
 
   const opciones = (/** @type {string} */ campo) =>
     [...new Set(lineas.map((/** @type {any} */ l) => l[campo]).filter(Boolean))].sort();
@@ -585,6 +604,8 @@
   }
 </script>
 
+<svelte:window onkeydown={alTeclear} />
+
 <svelte:head>
   <title>Planes semanales · Supervisor NOC IA</title>
   <!-- Las fuentes se sirven desde la plataforma (static/fuentes/fuentes.css,
@@ -612,56 +633,61 @@
         </div>
       </section>
     {:else}
-      <!-- ============ CABECERA Y GUARDARRAÍLES ============ -->
-      <section class="snoc-panel" style="gap:var(--snoc-md);">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
-          <div class="snoc-pila-xs">
-            <div class="snoc-fila">
-              <h1 class="snoc-h1">Planes semanales</h1>
-              <span class="snoc-insignia snoc-insignia-neutra snoc-primario">Shadow Mode</span>
-            </div>
-            <p class="snoc-body snoc-secundario">
-              Órdenes de trabajo, carga por persona y orden propuesto de la jornada.
-            </p>
-          </div>
-
-          <div class="snoc-envuelve snoc-guardarrailes">
-            <span class="snoc-guardarrail">
-              <span class="snoc-punto snoc-punto-primario"></span>
-              <span class="snoc-label-sm snoc-secundario">MODO:</span>
-              <span class="snoc-insignia snoc-insignia-neutra snoc-primario">Observación</span>
-            </span>
-            <span class="snoc-guardarrail">
-              <span class="snoc-label-sm snoc-secundario">AUTONOMÍA:</span>
-              {#if data.autonomia.estado == null}
-                <span class="snoc-insignia snoc-insignia-variante">No se pudo leer</span>
-              {:else}
-                <span
-                  class="snoc-insignia {data.autonomia.permitido
-                    ? 'snoc-insignia-secundaria-suave'
-                    : 'snoc-insignia-error'}">{data.autonomia.estado}</span
-                >
-              {/if}
-            </span>
-            <span class="snoc-guardarrail">
-              <span class="snoc-label-sm snoc-secundario">TECHO:</span>
-              <span class="snoc-insignia snoc-insignia-variante">Sin configurar</span>
-            </span>
-            <span class="snoc-guardarrail">
-              <span class="snoc-label-sm snoc-secundario">ACCIONES:</span>
-              <span class="snoc-mono" style="font-weight:700;">0</span>
-            </span>
-          </div>
+      <!-- ============ CABECERA ============
+           Rediseño del 21/11/2026: los guardarraíles «TECHO: Sin configurar»
+           y «ACCIONES: 0» eran valores fijos que no decían nada y se fueron;
+           quedan el modo y la autonomía, que sí se leen. Los dos botones de
+           la jornada suben acá desde el medio de la tabla. -->
+      <nav class="snoc-body-sm" aria-label="Ruta"><a href="/supervisor-noc/programacion">← Programación</a></nav>
+      <header class="snoc-encabezado">
+        <div class="snoc-encabezado-texto">
+          <h1 class="snoc-h1">Planes semanales</h1>
+          <p class="snoc-bajada">Órdenes de trabajo, carga por persona y orden propuesto de la jornada.</p>
         </div>
-
-        <!-- Desde el 28/10/2026 esta es la pantalla de los PLANES SEMANALES
-             (la de antes de Programación): se llega desde Programación. Las
-             subpantallas están en el menú lateral desde el 13/11/2026; queda
-             solo el regreso. -->
-        <div class="snoc-envuelve snoc-pestanas">
-          <a class="snoc-pildora" href="/supervisor-noc/programacion">← Volver a Programación</a>
+        <div class="snoc-encabezado-acciones">
+          <span class="snoc-insignia snoc-insignia-secundaria-suave">Modo observación</span>
+          {#if data.autonomia.estado == null}
+            <span class="snoc-insignia">Autonomía: no se pudo leer</span>
+          {:else}
+            <span class="snoc-insignia {data.autonomia.permitido ? 'snoc-insignia-ok' : 'snoc-insignia-error'}">
+              Autonomía: {data.autonomia.estado}
+            </span>
+          {/if}
+          <button
+            class="snoc-btn"
+            type="button"
+            onclick={() => (modalAnalizar = true)}
+            disabled={trabajando}
+            title="Corre el asistente de programación: lee sus señales y escribe propuestas. No programa ni asigna."
+          >
+            Analizar programación
+          </button>
+          <button
+            class="snoc-btn snoc-btn-primario"
+            type="button"
+            onclick={() => (modalSecuenciar = true)}
+            disabled={trabajando || !!data.jornada.error || lineas.length === 0}
+            title="Reordena el orden propuesto. No reprograma ninguna orden ni cambia asignaciones."
+          >
+            {trabajando ? 'Secuenciando…' : 'Secuenciar jornada'}
+          </button>
         </div>
-      </section>
+      </header>
+
+      <!-- PUBLICAR YA NO SE ESCONDE detrás de elegir una línea cuyo plan esté
+           en borrador: si lo hay, se ofrece acá. -->
+      {#if enBorrador}
+        <form class="snoc-recuadro snoc-recuadro-alerta pl-banda" method="POST" action="?/publicar" use:enhance={alTrabajar}>
+          <input type="hidden" name="programacion" value={enBorrador.programacion} />
+          <span>
+            <strong>El plan de la semana {enBorrador.plan_semana ?? ''} está en borrador.</strong>
+            Publicarlo solo cambia su estado: no programa ni asigna nada.
+          </span>
+          <button class="snoc-btn snoc-btn-primario" type="submit" disabled={trabajando}>
+            {trabajando ? 'Publicando…' : 'Publicar plan'}
+          </button>
+        </form>
+      {/if}
 
       <!-- ============ FILTROS ============ -->
       <section class="snoc-panel" style="gap:var(--snoc-sm);">
@@ -822,28 +848,6 @@
                 no reprograma ni reasigna, pero el orden nuevo queda registrado
                 y alguien lo va a leer para trabajar.
               -->
-              <div class="snoc-envuelve" style="justify-content:flex-end;">
-              <button
-                class="snoc-btn"
-                type="button"
-                onclick={() => (modalAnalizar = true)}
-                disabled={trabajando}
-                title="Corre el asistente de programación: lee sus señales y escribe propuestas. No programa ni asigna."
-              >
-                <span class="snoc-icono" style="font-size:14px;">neurology</span>
-                Analizar programación
-              </button>
-              <button
-                class="snoc-btn snoc-btn-primario"
-                type="button"
-                onclick={() => (modalSecuenciar = true)}
-                disabled={trabajando || !!data.jornada.error || lineas.length === 0}
-                title="Reordena el orden propuesto. No reprograma ninguna orden ni cambia asignaciones."
-              >
-                <span class="snoc-icono" style="font-size:14px;">low_priority</span>
-                {trabajando ? 'Secuenciando…' : 'Secuenciar jornada'}
-              </button>
-              </div>
             </div>
 
             {#if data.jornada.error}
@@ -1047,11 +1051,11 @@
               </p>
             {:else}
               <div class="snoc-rejilla snoc-rejilla-2">
-                {#each data.recomendaciones.slice(0, 6) as p (p.id)}
+                {#each verTodas ? data.recomendaciones : data.recomendaciones.slice(0, 6) as p (p.id)}
                   <div class="snoc-tarjeta">
                     <div class="snoc-fila-sep">
                       <span class="snoc-label">{p.tipo_senal_display}</span>
-                      <span class="snoc-insignia {p.prioridad === 'alta' ? 'snoc-insignia-error-solida' : 'snoc-insignia'}">
+                      <span class="snoc-insignia {p.prioridad === 'alta' ? 'snoc-insignia-error' : p.prioridad === 'media' ? 'snoc-insignia-alerta' : ''}">
                         {p.prioridad}
                       </span>
                     </div>
@@ -1071,6 +1075,13 @@
                   </div>
                 {/each}
               </div>
+              {#if data.recomendaciones.length > 6}
+                <div>
+                  <button class="snoc-btn" type="button" onclick={() => (verTodas = !verTodas)}>
+                    {verTodas ? 'Ver menos' : `Ver las ${data.recomendaciones.length - 6} restantes`}
+                  </button>
+                </div>
+              {/if}
             {/if}
           </section>
         </div>
@@ -1219,6 +1230,16 @@
           </button>
         </div>
 
+        {#if drawer === 'orden' && !cargandoFicha && !errorFicha}
+          <!-- SALTOS (21/11/2026): el panel junta ficha, seguimiento, lo que
+               llenó el técnico y materiales; estos enlaces llevan a cada parte. -->
+          <nav class="pl-saltos" aria-label="Partes de la orden">
+            <a href="#po-ficha">Ficha</a>
+            <a href="#po-seguimiento">Seguimiento</a>
+            <a href="#po-formulario">Lo que llenó el técnico</a>
+            <a href="#po-materiales">Materiales</a>
+          </nav>
+        {/if}
         <div class="snoc-drawer-cuerpo">
           {#if cargandoFicha}
             <div class="snoc-cargando">
@@ -1232,7 +1253,7 @@
             </div>
           {:else if ficha && drawer === 'orden'}
             <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">Cliente</span>
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;" id="po-ficha">Cliente</span>
               <div class="snoc-meta">
                 <div><span>Nombre:</span><span class="snoc-body-sm">{ficha.cliente?.nombre ?? '—'}</span></div>
                 <div><span>Dirección:</span><span class="snoc-body-sm">{ficha.cliente?.direccion ?? '—'}</span></div>
@@ -1303,7 +1324,7 @@
               empresa siguiente trae los suyos sin tocar codigo.
             -->
             <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;" id="po-seguimiento">
                 Seguimiento de la intervención
               </span>
 
@@ -1756,6 +1777,7 @@
               de un reporte no están: ya se ven dentro de ese reporte.
             -->
             {#if bitacora?.formulario_del_trabajo}
+              <span id="po-formulario"></span>
               <FormularioDelTrabajo form={bitacora.formulario_del_trabajo} />
             {/if}
 
@@ -1771,7 +1793,7 @@
               contabilidad.
             -->
             <div class="snoc-pila-xs">
-              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;">
+              <span class="snoc-label-sm snoc-tenue" style="text-transform:uppercase;" id="po-materiales">
                 Materiales de esta orden
               </span>
 
@@ -2179,3 +2201,16 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .pl-banda { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .pl-saltos {
+    display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 16px;
+    border-bottom: 1px solid var(--v2-line); background: var(--v2-card);
+  }
+  .pl-saltos a {
+    font-size: 12.5px; font-weight: 600; color: var(--v2-ember-text); text-decoration: none;
+    padding: 4px 10px; border-radius: 8px;
+  }
+  .pl-saltos a:hover { background: var(--v2-ember-soft); }
+</style>
