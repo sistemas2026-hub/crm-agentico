@@ -3,6 +3,7 @@
   import { invalidateAll, goto } from '$app/navigation';
   import '../supervisor-noc.css';
   import FormularioDelTrabajo from './FormularioDelTrabajo.svelte';
+  import { avisoDelPlan } from '$lib/supervisor/aviso-de-plan.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -738,9 +739,7 @@
         <div class="snoc-aviso">
           <span class="snoc-icono snoc-primario" style="font-size:18px;">check_circle</span>
           <span class="snoc-body">
-            {form.tipo === 'secuenciar'
-              ? 'Orden propuesto actualizado. No se reprogramó ninguna orden ni se cambió ninguna asignación.'
-              : 'Plan publicado. No se ejecutó ninguna programación.'}
+            {avisoDelPlan(form)}
           </span>
         </div>
       {/if}

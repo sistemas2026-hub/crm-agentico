@@ -1,7 +1,7 @@
 <script>
   import { onDestroy } from 'svelte';
 
-  import { resultadoDelCierre } from '$lib/v2/resultado-del-cierre.js';
+  import { avisoDeRevision } from '$lib/v2/resultado-del-cierre.js';
   //  La burbuja del chat del Supervisor ya no se monta aca: vive en
   //  +layout.svelte (21/10/2026), para que salga en todas las pestañas.
   import { deserialize, enhance } from '$app/forms';
@@ -1597,8 +1597,8 @@
               $lib/v2/resultado-del-cierre.js y esta probada aparte; aca solo se
               muestra, sin rediseniar nada.
             -->
-            {@const res = resultadoDelCierre({
-              estado: 'aceptada',
+            {@const res = avisoDeRevision({
+              decision: form.decision,
               ejecutada: form.ejecutada,
               motivo: form.motivo,
               detalle: form.detalle
@@ -1856,7 +1856,7 @@
                 se pudo leer.
               -->
               {#if sondeoVivo}
-                <span class="snoc-vivo" title="Se actualiza solo cada 10 segundos{ultimoSondeo ? ` · última lectura ${hora(ultimoSondeo.toISOString())}` : ''}">
+                <span class="snoc-vivo" title="Se actualiza solo cada 30 segundos{ultimoSondeo ? ` · última lectura ${hora(ultimoSondeo.toISOString())}` : ''}">
                   <span class="snoc-vivo-punto"></span>En vivo
                 </span>
               {:else}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	resultadoDelCierre,
+	avisoDeRevision,
 	BLOQUEADO_POR_INTERRUPTOR,
 	CAMBIO_LA_CONDICION,
 	LECTURA_NO_CONFIABLE,
@@ -247,5 +248,23 @@ describe('los dos que se parecen y no son lo mismo', () => {
 		const r = resultadoDelCierre({ ejecutada: false, motivo: 'ALGO_NUEVO' });
 		expect(r.titulo).toBe('Aceptada pero el cierre falló');
 		expect(r.accionable).toBe(true);
+	});
+});
+
+describe('el aviso después de revisar dice lo que se decidió', () => {
+	it('rechazar ya no se cuenta como «Aceptada»', () => {
+		const r = avisoDeRevision({ decision: 'rechazada' });
+		expect(r.titulo).toBe('Rechazada');
+		expect(r.explicacion).toContain('No se ejecutó ninguna acción');
+	});
+
+	it('modificar se cuenta como revisada con cambios', () => {
+		expect(avisoDeRevision({ decision: 'modificada' }).titulo).toBe('Revisada con cambios');
+	});
+
+	it('aceptar sigue contando el cierre como antes', () => {
+		expect(avisoDeRevision({ decision: 'aceptada', ejecutada: true }).titulo).toBe('Cerrada correctamente');
+		expect(avisoDeRevision({ decision: 'aceptada', motivo: BLOQUEADO_POR_INTERRUPTOR }).titulo)
+			.toBe('Bloqueada por el interruptor');
 	});
 });

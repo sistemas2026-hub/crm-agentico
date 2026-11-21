@@ -32,7 +32,9 @@
               <li>
                 <span class="snoc-mono">#{o.numero}</span>
                 <span>{o.tipo}</span>
-                <span class="ec-prio">{textoDePrioridad(o.prioridad)}</span>
+                <!-- El color sigue a la prioridad: hasta el 21/11/2026 iba rojo
+                     siempre, también una Baja. -->
+                <span class="ec-prio ec-prio-{o.prioridad ?? 'nada'}">{textoDePrioridad(o.prioridad)}</span>
                 <span class="snoc-secundario">{o.barrio}</span>
               </li>
             {/each}
@@ -68,5 +70,7 @@
     border-top: 1px solid var(--snoc-surface-container-low);
     font-size: 13px;
   }
-  .ec-prio { color: var(--snoc-error); font-weight: 600; }
+  .ec-prio { font-weight: 600; color: var(--snoc-on-surface-variant); }
+  .ec-prio-alta { color: var(--snoc-error); }
+  .ec-prio-media { color: #9a5b00; }
 </style>

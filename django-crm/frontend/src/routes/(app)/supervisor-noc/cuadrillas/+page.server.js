@@ -443,7 +443,11 @@ export const actions = {
         'falla_de_servicio',
         'trabajo_pedido',
         'instalacion_nueva',
-        'obra_de_red'
+        'obra_de_red',
+        //  21/11/2026: la pantalla dibuja estos dos desde el 25/10 y la
+        //  acción no los leía, así que lo elegido se perdía sin aviso.
+        'ni_cliente_ni_red',
+        'nada_lo_mide'
       ];
       if (grupos.some((g) => f.has(`labor_de_${g}`))) {
         cuerpo.labor_por_grupo = Object.fromEntries(

@@ -204,3 +204,34 @@ export function resultadoDelCierre(r) {
 		accionable: true
 	};
 }
+
+/**
+ * EL AVISO DESPUÉS DE REVISAR  --  21/11/2026.
+ *
+ * La pantalla le pasaba a `resultadoDelCierre` siempre `estado: 'aceptada'`,
+ * así que rechazar mostraba «Revisión registrada: rechazada. Aceptada. La
+ * decisión quedó registrada…». Solo una propuesta ACEPTADA intenta cerrar
+ * algo; rechazar o modificar no ejecuta nada y se cuenta como tal.
+ *
+ * @param {{ decision?: string, ejecutada?: boolean, motivo?: string, detalle?: string }} r
+ */
+export function avisoDeRevision(r) {
+	const decision = String(r?.decision ?? '').toLowerCase();
+	if (decision === 'rechazada') {
+		return {
+			titulo: 'Rechazada',
+			tono: 'ok',
+			explicacion: 'Quedó registrada con tu motivo. No se ejecutó ninguna acción.',
+			accionable: false
+		};
+	}
+	if (decision === 'modificada') {
+		return {
+			titulo: 'Revisada con cambios',
+			tono: 'ok',
+			explicacion: 'Quedó registrada con tu comentario. No se ejecutó ninguna acción.',
+			accionable: false
+		};
+	}
+	return resultadoDelCierre({ ...r, estado: 'aceptada' });
+}

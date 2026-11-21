@@ -785,6 +785,12 @@
                 Buscar casos que necesiten visita
               </button>
             </form>
+            <!-- El resultado va al lado del botón, no en el panel del caso. -->
+            {#if form?.de === 'ciclo'}
+              <p class="snoc-aviso {form.error ? 'snoc-error-txt' : ''}" role="status">
+                {form.error ?? form.hecho}
+              </p>
+            {/if}
           </div>
         </div>
 
@@ -1233,10 +1239,10 @@
           </div>
         </form>
 
-        {#if form?.error}
+        {#if form?.error && form?.de !== 'ciclo'}
           <p class="snoc-aviso snoc-error-txt">{form.error}</p>
         {/if}
-        {#if form?.hecho}
+        {#if form?.hecho && form?.de !== 'ciclo'}
           <p class="snoc-aviso">{form.hecho}</p>
         {/if}
       </section>

@@ -408,6 +408,11 @@
       {#if form?.hecho}
         <p class="snoc-aviso">{form.hecho}</p>
       {/if}
+      <!-- El homónimo se avisa, no se bloquea (acción persona_alta). Hasta el
+           21/11/2026 la acción lo devolvía y la pantalla no lo dibujaba. -->
+      {#if form?.aviso}
+        <p class="snoc-aviso" role="status">{form.aviso}</p>
+      {/if}
     </section>
 
     <!-- ============ EL DÍA ============ -->

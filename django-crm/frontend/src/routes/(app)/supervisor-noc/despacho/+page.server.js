@@ -198,20 +198,25 @@ export const actions = {
   ciclo: async ({ cookies, locals }) => {
     if (!ROLES_GESTION.has(/** @type {any} */ (locals).profile?.role)) {
       return fail(403, {
+        de: 'ciclo',
         error: 'Solo el Jefe de Operaciones puede hacer que el Supervisor mire.'
       });
     }
     try {
       const r = await correrCiclo({ cookies });
       const nuevas = r?.resumen?.propuestas_nuevas ?? r?.resumen?.nuevas ?? null;
+      //  `de` dice de qué formulario viene: hasta el 21/11/2026 este
+      //  resultado solo se dibujaba dentro del panel del caso, que casi nunca
+      //  está abierto al apretar el botón, y en la práctica no se veía.
       return {
+        de: 'ciclo',
         hecho: nuevas === null
           ? 'El Supervisor revisó la operación. Mirá Pendientes por revisión.'
           : `El Supervisor dejó ${nuevas} ${nuevas === 1 ? 'propuesta' : 'propuestas'}. ` +
             'Las que aceptes aparecen acá.'
       };
     } catch (e) {
-      return fail(502, { error: mensajeDe(e) });
+      return fail(502, { de: 'ciclo', error: mensajeDe(e) });
     }
   },
 

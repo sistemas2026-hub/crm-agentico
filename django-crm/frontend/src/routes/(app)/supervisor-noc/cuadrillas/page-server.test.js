@@ -191,6 +191,25 @@ describe('la configuración del reparto manda la labor de cada caso solo si vien
     });
   });
 
+  it('los dos grupos del 25/10 también viajan: antes se perdían sin aviso', async () => {
+    //  La pantalla dibuja seis selectores desde el 25/10/2026, pero la acción
+    //  solo leía cuatro: lo elegido en «Ni de un cliente ni de la red» y en
+    //  «Reclamo que ninguna herramienta mide» no llegaba al backend, que sí
+    //  los acepta (ConfiguracionDeReparto.LABOR_POR_GRUPO_DE_FABRICA).
+    await actions.reparto_config(envio({
+      ...LO_DE_SIEMPRE,
+      labor_de_falla_de_servicio: 'correctivo',
+      labor_de_ni_cliente_ni_red: 'trabajos',
+      labor_de_nada_lo_mide: ''
+    }));
+    const [, cuerpo] = guardarConfiguracionDeReparto.mock.calls[0];
+    expect(cuerpo.labor_por_grupo).toEqual({
+      falla_de_servicio: 'correctivo',
+      ni_cliente_ni_red: 'trabajos',
+      nada_lo_mide: ''
+    });
+  });
+
   it('una pantalla de antes del 18/10, con tres selectores, no manda la fila nueva', async () => {
     //  La instalación de un cliente nuevo se partió del trabajo pedido el
     //  18/10/2026. Un formulario sin ese selector no la manda, y para esa

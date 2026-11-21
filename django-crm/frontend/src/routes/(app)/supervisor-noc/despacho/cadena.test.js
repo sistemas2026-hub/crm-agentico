@@ -594,6 +594,14 @@ describe('ciclo', () => {
     expect(r.hecho).not.toContain('propuestas');
   });
 
+  it('el resultado dice que viene del ciclo, para dibujarse junto a su botón', async () => {
+    //  Hasta el 21/11/2026 se dibujaba en el panel del caso, casi siempre
+    //  cerrado: el resultado no se veía.
+    apiRequest.mockResolvedValue({ resumen: { propuestas_nuevas: 2 } });
+    expect((await actions.ciclo(conRol('ADMIN'))).de).toBe('ciclo');
+    expect((await actions.ciclo(conRol('AGENT'))).data.de).toBe('ciclo');
+  });
+
   it('sin número no se inventa un cero', async () => {
     apiRequest.mockResolvedValue({});
     const r = await actions.ciclo(conRol('OPERACIONES'));
