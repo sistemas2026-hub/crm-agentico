@@ -1508,6 +1508,22 @@ La app marca `de_galeria` desde el 09/11 y una captura de pantalla solo puede en
 **VERIFICADO:** pruebas nuevas contra PostgreSQL de las dos reglas (con su control: la misma imagen tomada con la cámara sí devuelve) y de la tarjeta, con sus mutaciones muertas.
 **NO VERIFICADO:** cuál regla devolvía las órdenes del usuario. Si después de este despliegue una orden con captura vuelve devuelta, la tarjeta ya lo dice.
 
+
+#### 8.28.3 La tarjeta mostró la regla: era «imagen de producto» (21/11/2026, OT #284)
+
+**MEDIDO, por primera vez.** Con 8.28.2 desplegado, la tarjeta de la OT #284 dijo por qué volvió: *«Tiene que rehacer: Medicion al salir — Revisá las fotos: 1 es una imagen de producto, no una foto del trabajo»*. La captura del medidor se tomó por material de catálogo (`CATALOGO: si`).
+
+**Era la única regla que 8.28.2 dejó afuera**, con un razonamiento que parecía bueno y resultó ser el que fallaba: *«toda imagen de tienda entra por la galería: eximirla habría apagado esa regla entera»*. Tres despliegues apuntaron a otras reglas; el cuarto la dejó viva a propósito. Lo que la encontró no fue leer más código sino **hacer visible el motivo**.
+
+**Qué cambia.** Una imagen elegida de la galería que el modelo toma por catálogo ya no devuelve la orden sola: queda en duda, con su texto, para una persona.
+
+**Lo que se pierde, y es más que antes.** La regla del 09/11 (*la foto bajada de una tienda vuelve sola*) queda en la práctica apagada para la devolución automática, porque esas imágenes entran por la galería. Una persona la sigue viendo marcada —«es una imagen de producto»— y decide. Se elige eso sobre devolverle a un técnico un trabajo bien hecho: el modelo no separa una captura de una imagen de producto, y la regla 13 de la instrucción, que se lo pide, no alcanzó.
+
+**Lo que sigue devolviendo, sea de galería o no:** lo que falta en el checklist, la medida fuera de rango y el número leído que no coincide con el escrito.
+
+**VERIFICADO:** 5 pruebas nuevas contra PostgreSQL, con su control (la misma imagen tomada con la cámara sí devuelve) y el caso de la #284 entero.
+**Queda abierto, visto en la misma tarjeta:** el motivo de la devolución arrastra frases que el técnico no puede corregir (*«No se pudo comparar el reporte con el ticket»*). No se tocó.
+
 ### 8.29 DECISIÓN — El listado que baja la app ya no trae la historia entera (21/11/2026)
 
 **El reclamo.** El usuario: *«la app demora mucho en sincronizar y eso que tiene conexión wifi (…) sale siempre sincronizando (…) a las horas es que sincronizan»*.

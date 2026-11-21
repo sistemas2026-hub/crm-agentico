@@ -156,9 +156,12 @@
           <strong>Tiene que rehacer:</strong> {orden.devolucion.rehacer.join(', ')}
         </p>
       {/if}
-      {#if orden.devolucion.motivo}
-        <p class="od-devuelta-texto">{orden.devolucion.motivo}</p>
-      {/if}
+      <!-- UN RENGLÓN POR COSA: el motivo llega con cada punto separado por
+           « | », y todo junto en un párrafo no dejaba ver cuál de las frases
+           era la que devolvía (OT #284). -->
+      {#each (orden.devolucion.motivo || '').split(' | ').filter((/** @type {string} */ m) => m.trim()) as parte, i (i)}
+        <p class="od-devuelta-texto">{parte.trim()}</p>
+      {/each}
     </div>
   {/if}
 

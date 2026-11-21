@@ -178,6 +178,10 @@ def _es_de_galeria(evidencia) -> bool:
     la imagen: lo que falta en el checklist, la medida fuera de rango, y el
     numero LEIDO de la foto que no coincide con el que el tecnico escribio.
 
+    Y «ES DE CATALOGO» TAMBIEN ES UNA OPINION SOBRE LA IMAGEN: quedo afuera en
+    la primera version y era la regla que disparaba (OT #284). Ver
+    `_fotos_de_catalogo`.
+
     LO QUE SE PIERDE, dicho antes de que cueste: una imagen equivocada elegida
     de la galeria ya no vuelve sola al tecnico; espera a que alguien la mire.
     No cierra sola --el veredicto queda en «hay dudas»--, pero cuesta un clic.
@@ -316,8 +320,26 @@ def _fotos_de_catalogo(orden) -> list[str]:
             ultimo[a.evidencia.requisito_id] = a
     except Exception:                                            # noqa: BLE001
         return []
+    #  LA DE GALERIA TAMPOCO DEVUELVE POR ESTO  --  21/11/2026, OT #284
+    #
+    #  MEDIDO, por fin: la tarjeta de la #284 mostro el motivo --«1 es una
+    #  imagen de producto, no una foto del trabajo»-- sobre «Medicion al
+    #  salir», que el tecnico habia adjuntado como captura. Era ESTA regla la
+    #  que devolvia las capturas, y es justo la que el 21/11 por la mañana se
+    #  dejo afuera de la garantia con un razonamiento que parecia bueno: «toda
+    #  imagen de tienda entra por la galeria, eximirla apagaria la regla».
+    #
+    #  Es cierto, y aun asi se exime. El modelo no separa una captura de una
+    #  imagen de producto --la regla 13 de la instruccion se lo pide y no
+    #  alcanzo--, y el usuario lo dijo cuatro veces: una captura no devuelve.
+    #  Entre devolverle al tecnico un trabajo bien hecho y que una persona
+    #  mire una imagen dudosa, se elige lo segundo.
+    #
+    #  NO CIERRA SOLA: el punto de las fotos sigue diciendo «es una imagen de
+    #  producto» y deja el veredicto en duda. Lo que cambia es quien decide.
     return sorted(r for r, a in ultimo.items()
-                  if es_de_catalogo(a.texto or "") is True)
+                  if not _es_de_galeria(a.evidencia)
+                  and es_de_catalogo(a.texto or "") is True)
 
 
 def _que_rehacer(puntos, esquema, orden=None) -> list[str]:

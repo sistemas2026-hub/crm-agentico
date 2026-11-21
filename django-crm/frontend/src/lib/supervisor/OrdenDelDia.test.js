@@ -249,6 +249,16 @@ describe('la tarjeta de una orden detenida', () => {
       expect(h).toContain('no deja leer ningún número');
     });
 
+    it('cada punto del motivo va en su renglón, sin la barra', () => {
+      const h = html({ orden: { ...devuelta, devolucion: { ...devuelta.devolucion,
+        motivo: 'Revisá las fotos: 1 es una imagen de producto. | No se pudo comparar el reporte con el ticket.' } } });
+
+      //  Dos del motivo y uno de «Tiene que rehacer».
+      expect(h.split('od-devuelta-texto').length - 1).toBe(3);
+      expect(h).not.toContain(' | ');
+      expect(h).toContain('No se pudo comparar el reporte con el ticket.');
+    });
+
     it('sin motivo escrito igual dice qué rehacer', () => {
       const h = html({ orden: { ...devuelta,
         devolucion: { ...devuelta.devolucion, motivo: '' } } });

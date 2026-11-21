@@ -55,6 +55,12 @@ SE_LEE = ("Medidor óptico, pantalla legible: 1550 nm, -21.0 dBm.\n"
 OTRO_VALOR = ("Medidor óptico, pantalla legible: 1550 nm, -40.0 dBm.\n"
               "CATALOGO: no\nMUESTRA: si\nATENCION: no")
 
+#: Lo que el modelo escribio de la captura de la OT #284: lee el numero, y
+#: aun asi la toma por material de producto.
+DE_CATALOGO = ("Medidor óptico sobre fondo liso, sin entorno de instalación: "
+               "1550 nm, -21.0 dBm.\n"
+               "CATALOGO: si\nMUESTRA: si\nATENCION: no")
+
 REQUISITOS = ("dano_encontrado", "medicion_al_llegar", "medicion_al_salir")
 
 
@@ -253,6 +259,68 @@ def test_y_la_captura_que_reemplazo_al_medidor_de_camara_NO(org_a):
     _foto(org_a, orden, "medicion_al_salir", NO_SE_LEE, galeria=True, vuelta=2)
 
     assert "medicion_al_salir" not in _revision(orden)["sugeridas"]
+
+
+# ---------------------------------------------------------------------------
+#  2b) «ES UNA IMAGEN DE PRODUCTO»  --  LA QUE DISPARABA, OT #284
+# ---------------------------------------------------------------------------
+#  La tarjeta mostro el motivo: «1 es una imagen de producto, no una foto del
+#  trabajo», sobre una captura de «Medicion al salir». La primera version de
+#  la garantia habia dejado esta regla afuera.
+
+def test_CONTROL_la_de_CAMARA_que_es_de_catalogo_se_pide_rehacer(org_a):
+    orden = _orden(org_a, 9631)
+    _foto(org_a, orden, "medicion_al_llegar", SE_LEE, galeria=False)
+    _foto(org_a, orden, "medicion_al_salir", DE_CATALOGO, galeria=False)
+
+    assert "medicion_al_salir" in _revision(orden)["sugeridas"]
+
+
+def test_la_de_GALERIA_que_el_modelo_toma_por_catalogo_NO(org_a):
+    orden = _orden(org_a, 9632)
+    _foto(org_a, orden, "medicion_al_llegar", SE_LEE, galeria=False)
+    _foto(org_a, orden, "medicion_al_salir", DE_CATALOGO, galeria=True)
+
+    r = _revision(orden)
+
+    assert "medicion_al_salir" not in r["sugeridas"], r["sugeridas"]
+
+
+def test_pero_la_de_catalogo_TAMPOCO_cierra_sola(org_a):
+    from campo import revision_del_cierre as RC
+
+    orden = _orden(org_a, 9633)
+    _foto(org_a, orden, "dano_encontrado", BIEN, galeria=True)
+    _foto(org_a, orden, "medicion_al_llegar", SE_LEE, galeria=True)
+    _foto(org_a, orden, "medicion_al_salir", DE_CATALOGO, galeria=True)
+
+    r = _revision(orden)
+
+    assert r["veredicto"] == RC.REVISAR
+    assert "imagen de producto" in " ".join(p["texto"] for p in r["puntos"])
+
+
+def test_el_caso_de_la_284_entero_el_Supervisor_NO_la_devuelve(org_a):
+    from campo import cierre_por_el_supervisor as CS
+    from campo.models import OrdenTrabajo
+
+    orden = _orden(org_a, 9634)
+    _foto(org_a, orden, "dano_encontrado", BIEN, galeria=True)
+    _foto(org_a, orden, "medicion_al_llegar", SE_LEE, galeria=True)
+    _foto(org_a, orden, "medicion_al_salir", DE_CATALOGO, galeria=True)
+
+    assert CS.atender_la_que_no_cierra(orden, _revision(orden)) == "nada"
+    orden.refresh_from_db()
+    assert orden.estado_operativo == OrdenTrabajo.COMPLETADA_CAMPO
+
+
+def test_la_de_catalogo_REHECHA_con_la_camara_si_devuelve(org_a):
+    orden = _orden(org_a, 9635, vuelta=2)
+    _foto(org_a, orden, "medicion_al_llegar", SE_LEE, galeria=False, vuelta=2)
+    _foto(org_a, orden, "medicion_al_salir", DE_CATALOGO, galeria=True, vuelta=1)
+    _foto(org_a, orden, "medicion_al_salir", DE_CATALOGO, galeria=False, vuelta=2)
+
+    assert "medicion_al_salir" in _revision(orden)["sugeridas"]
 
 
 # ---------------------------------------------------------------------------
