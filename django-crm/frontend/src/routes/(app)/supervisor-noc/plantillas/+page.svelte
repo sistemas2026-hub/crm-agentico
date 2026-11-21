@@ -49,7 +49,9 @@
   let asuntos = $state((inicial?.asuntos ?? []).join('\n'));
   let plazoDias = $state(/** @type {number | null} */ (inicial?.plazo_dias ?? null));
   /** Lo que llegó del servidor, para saber si hay cambios sin guardar. */
-  let original = $state(JSON.stringify([borrador, nombre, labor, asuntos, plazoDias]));
+  //  Vacío hasta que el efecto lo fija: mientras tanto no hay «cambios sin
+  //  guardar» que decir (ni en el servidor ni antes de hidratar).
+  let original = $state('');
   $effect(() => {
     const e = data.edicion;
     borrador = e?.definicion ? clonar(e.definicion) : null;
@@ -64,7 +66,7 @@
   function foto() {
     return JSON.stringify([borrador, nombre, labor, asuntos, plazoDias]);
   }
-  const sinGuardar = $derived(!!data.edicion && foto() !== original);
+  const sinGuardar = $derived(!!data.edicion && original !== '' && foto() !== original);
 
   let publicando = $state(false);
 
