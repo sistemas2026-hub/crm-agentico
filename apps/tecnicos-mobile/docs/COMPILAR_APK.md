@@ -13,10 +13,33 @@ compilar: se sube en el commit que hace falta publicar (ver §6).
 
 | Qué | Cómo comprobarlo |
 |---|---|
-| Flutter **3.47.8**, Android SDK 37, NDK 28.2.13676358 | `flutter --version` y `flutter doctor` |
-| La llave de firma de siempre, en `.android/debug.keystore` del usuario que compila | No se comprueba mirando el archivo: se comprueba en el paso 4 |
+| Flutter **3.47.x**, Android SDK 37, NDK 28.2.13676358 | `flutter --version` y `flutter doctor` |
+| La llave de firma de siempre — **ver «Dónde está la llave» acá abajo** | No se comprueba mirando el archivo: se comprueba en el paso 4 |
 | El código al día | `git fetch origin` y `git status` sobre `fix/integracion-wisphub` |
 | Unos 5 GB libres en disco y 4 GB de memoria libres | El 21/11/2026 la otra máquina se quedó con 0 MB de disco a mitad de las pruebas y tumbó Docker |
+
+**Qué versión de Flutter.** La 1.0.18 se compiló con la 3.47.8 y las 1.0.16,
+1.0.17 y 1.0.19 con la 3.47.2, en otra máquina, sin errores. Vale cualquiera
+de la línea 3.47; otra línea no está probada.
+
+### Dónde está la llave
+
+**No dar por buena la de `~/.android/debug.keystore`: depende de la máquina.**
+Flutter crea una llave nueva en esa ruta en cada instalación, así que el
+archivo siempre existe y casi nunca es el correcto.
+
+| Máquina | Dónde está la llave buena | Qué pasa con `~/.android/debug.keystore` |
+|---|---|---|
+| La de Docker (la primera) | En el volumen `dexter-adb-keys`, montado en `/root/.android` | Dentro del contenedor es la buena |
+| La segunda (compiló la 1.0.16, 1.0.17 y 1.0.19) | Un archivo aparte que se le llevó a mano; el 21/11/2026 estaba en `Descargas\debug.keystore` | **Es otra llave** (su firma empieza `1FF3D3FA…`): con ella Android pediría desinstalar |
+
+En la segunda máquina hay que firmar con el archivo que se le llevó, no con
+el que Flutter usa por omisión. *Cómo se le indicó esa llave a la
+compilación no quedó escrito en el reporte del 21/11/2026: quien compile ahí
+la próxima vez, que lo anote en este párrafo.*
+
+La única prueba de que se usó la llave correcta es la del paso 4. Una llave
+se reconoce por la firma que produce, no por dónde está guardada.
 
 `android/gradle.properties` le pide 8 GB a Gradle. En una máquina con menos,
 **no editar ese archivo**: escribir `org.gradle.jvmargs=-Xmx1536m` en el
@@ -57,8 +80,8 @@ git checkout -- linux macos windows
 flutter build apk --release --dart-define=BACKEND_URL=https://agent-api.rapilinksas.co
 ```
 
-Tarda unos 9 minutos. Sale en
-`build/app/outputs/flutter-apk/app-release.apk`, de unos 77 MB.
+Tarda entre 5 y 9 minutos según la máquina. Sale en
+`build/app/outputs/flutter-apk/app-release.apk`, de unos 75 MB.
 
 **`--dart-define=BACKEND_URL` no es opcional.** Sin él la app apunta a
 `127.0.0.1`, que dentro del teléfono es el teléfono mismo. En una
@@ -149,6 +172,9 @@ del nombre, y la fecha y la cámara que trae adentro— y lo manda con la
 evidencia. El servidor ya lo sabe leer (desplegado el 21/11/2026, `5168edf4`):
 en la revisión del cierre sale un renglón al lado de cada imagen de galería.
 Decisión y motivos: `PRD.md` §8.30.
+
+**Estado al 21/11/2026:** compilada y firmada (`…a579cf`, 1453 pruebas en
+verde, ninguna en rojo), **sin instalar en ningún teléfono todavía**.
 
 **Qué hay que medir, porque no se pudo medir sin un teléfono.** En el
 teléfono de prueba, con una orden de prueba (cliente MARIO SABANAGRANDE,
