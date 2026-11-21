@@ -1484,3 +1484,26 @@ El backend ya lo resolvía entero (`campo/services/bloqueos.py::resolver`) y des
 
 **VERIFICADO:** 5 pruebas nuevas contra PostgreSQL (`campo/tests/test_la_captura_se_le_dice_al_modelo.py`) y sus mutaciones muertas; miden que el texto **llega** junto a la imagen.
 **NO VERIFICADO:** que esta fuera la causa en la #281, y que el modelo obedezca. Si la próxima prueba vuelve devuelta, el motivo está escrito en la devolución que recibe el técnico en la app: con eso se sabe cuál de las cuatro reglas fue.
+
+#### 8.28.2 Tercera vez devuelta: la garantía pasa al código, y la tarjeta dice por qué (21/11/2026)
+
+**El caso.** Con 8.28 y 8.28.1 desplegados, el usuario: *«aún sigue devolviendo las órdenes que mandaron las evidencias por captura y no por foto»*.
+
+**El error, que es mío y es de método.** Dos arreglos seguidos fueron **texto para el modelo**, desplegados sin poder medir si el modelo obedecía (`cli/evaluar.py` no recorre este camino). Es lo que CLAUDE.md §4 prohíbe: *el prompt es guía, el código es la garantía*. Y debajo había un segundo hueco: la tarjeta de una orden devuelta decía «Corrección requerida» y nada más, así que nadie podía decir **cuál** regla la devolvía. Se arreglaba a ciegas.
+
+**Qué cambia — dos cosas.**
+
+| | Antes | Ahora |
+|---|---|---|
+| Imagen elegida de la galería que el modelo dice que «muestra otra cosa» | Volvía sola al técnico | Queda en duda y la mira una persona |
+| Imagen de galería del medidor en la que el modelo no lee ningún número | Volvía sola al técnico | Queda en duda y la mira una persona |
+| Tarjeta de una orden devuelta | «Corrección requerida» | Quién la devolvió, cuándo, qué tiene que rehacer y el motivo |
+
+La app marca `de_galeria` desde el 09/11 y una captura de pantalla solo puede entrar por ahí: el dato es duro. Es la regla del 31/10 —*una opinión no verificada de un modelo no puede frenar el trabajo de un técnico*— aplicada donde el modelo más se equivoca.
+
+**Qué sigue devolviendo, sea de galería o no**, porque no es una opinión sobre la imagen: lo que falta en el checklist, la medida fuera de rango, el número leído de la foto que no coincide con el que escribió el técnico, y la imagen de catálogo (toda imagen de tienda entra por la galería: eximirla habría apagado esa regla entera).
+
+**Lo que se pierde.** Una imagen equivocada elegida de la galería ya no vuelve sola: espera a una persona. No cierra sola —el veredicto queda en «hay dudas»—, pero cuesta un clic, y un técnico que elija siempre de la galería se saltea la devolución automática. Si eso aparece, el número a mirar es cuántas órdenes en «hay dudas» traen una imagen de galería.
+
+**VERIFICADO:** pruebas nuevas contra PostgreSQL de las dos reglas (con su control: la misma imagen tomada con la cámara sí devuelve) y de la tarjeta, con sus mutaciones muertas.
+**NO VERIFICADO:** cuál regla devolvía las órdenes del usuario. Si después de este despliegue una orden con captura vuelve devuelta, la tarjeta ya lo dice.

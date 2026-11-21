@@ -938,3 +938,107 @@ def test_bl3_el_bloqueo_de_otra_empresa_no_aparece(
     f = _filas(D.del_dia(org_a, LUNES))
 
     assert f[o.numero]["bloqueo"] is None
+
+# ---------------------------------------------------------------------------
+#  LA DEVUELTA DICE POR QUE  --  21/11/2026, OT #281
+# ---------------------------------------------------------------------------
+#  «Corrección requerida» y nada mas: tres despliegues a ciegas porque nadie
+#  podia decir cual regla habia devuelto la orden.
+
+def _devolver(org, orden, *, requisitos, observacion="", profile=None):
+    from campo.models import EventoTrabajo
+
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(
+        estado_operativo=OrdenTrabajo.CORRECCION_REQUERIDA,
+        estado_validacion=OrdenTrabajo.REQUIERE_CORRECCION)
+    return EventoTrabajo.objects.create(
+        org=org, orden=orden, tipo="correccion_requerida", profile=profile,
+        datos={"requisitos_a_corregir": requisitos, "observacion": observacion})
+
+
+@pytest.fixture
+def con_fotos(org_a):
+    wt = WorkType.objects.create(org=org_a, codigo="dv", nombre="Soporte",
+                                 labor=JornadaDeCuadrilla.INSTALACION)
+    return WorkTypeVersion.objects.create(
+        work_type=wt, version=1, estado=WorkTypeVersion.PUBLICADA,
+        esquema={"campos": [], "evidencias": [
+            {"id": "medicion_al_salir", "titulo": "Medición al salir"},
+            {"id": "dano_encontrado", "titulo": "Daño encontrado"}]})
+
+
+def test_dv_la_devuelta_trae_quien_que_rehacer_y_por_que(
+        org_a, con_fotos, norte, admin_profile):
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    devuelta = _orden(org_a, con_fotos, de=admin_profile)
+    normal = _orden(org_a, con_fotos, de=admin_profile)
+    _devolver(org_a, devuelta, requisitos=["medicion_al_salir"],
+              observacion="La foto del medidor al salir no deja leer ningún número.")
+
+    f = _filas(D.del_dia(org_a, LUNES))
+
+    d = f[devuelta.numero]["devolucion"]
+    assert d["quien"] == "el Supervisor"
+    #  El TITULO de la plantilla, no el id interno.
+    assert d["rehacer"] == ["Medición al salir"]
+    assert d["motivo"] == "La foto del medidor al salir no deja leer ningún número."
+    assert d["cuando"]
+    assert f[normal.numero]["devolucion"] is None
+
+
+def test_dv2_la_que_devolvio_una_persona_la_nombra(
+        org_a, con_fotos, norte, admin_profile):
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, con_fotos, de=admin_profile)
+    _devolver(org_a, o, requisitos=["dano_encontrado"], profile=admin_profile)
+
+    d = _filas(D.del_dia(org_a, LUNES))[o.numero]["devolucion"]
+
+    assert d["quien"] != "el Supervisor" and d["quien"]
+    assert d["rehacer"] == ["Daño encontrado"]
+    assert d["motivo"] == ""
+
+
+def test_dv3_la_ULTIMA_devolucion_es_la_que_se_muestra(
+        org_a, con_fotos, norte, admin_profile):
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, con_fotos, de=admin_profile)
+    vieja = _devolver(org_a, o, requisitos=["dano_encontrado"], observacion="vieja")
+    from campo.models import EventoTrabajo
+    EventoTrabajo.objects.filter(pk=vieja.pk).update(
+        created_at=timezone.now() - dt.timedelta(hours=3))
+    _devolver(org_a, o, requisitos=["medicion_al_salir"], observacion="nueva")
+
+    d = _filas(D.del_dia(org_a, LUNES))[o.numero]["devolucion"]
+
+    assert d["motivo"] == "nueva"
+    assert d["rehacer"] == ["Medición al salir"]
+
+
+def test_dv4_cuando_ya_no_espera_la_correccion_no_se_muestra(
+        org_a, con_fotos, norte, admin_profile):
+    """El tecnico volvio a mandar el reporte: lo que se le pidio ya paso."""
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, con_fotos, de=admin_profile)
+    _devolver(org_a, o, requisitos=["dano_encontrado"], observacion="x")
+    OrdenTrabajo.objects.filter(pk=o.pk).update(
+        estado_operativo=OrdenTrabajo.EN_SITIO,
+        estado_validacion=OrdenTrabajo.PENDIENTE)
+
+    assert _filas(D.del_dia(org_a, LUNES))[o.numero]["devolucion"] is None
+
+
+def test_dv5_la_devolucion_de_otra_empresa_no_aparece(
+        org_a, org_b, con_fotos, norte, admin_profile):
+    from campo.models import EventoTrabajo
+
+    _jornada(org_a, [norte], "Cuadrilla #1", admin_profile)
+    o = _orden(org_a, con_fotos, de=admin_profile)
+    OrdenTrabajo.objects.filter(pk=o.pk).update(
+        estado_validacion=OrdenTrabajo.REQUIERE_CORRECCION)
+    EventoTrabajo.objects.create(
+        org=org_b, orden=o, tipo="correccion_requerida",
+        datos={"requisitos_a_corregir": ["dano_encontrado"],
+               "observacion": "de otra empresa"})
+
+    assert _filas(D.del_dia(org_a, LUNES))[o.numero]["devolucion"] is None

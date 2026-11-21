@@ -138,6 +138,30 @@
     </details>
   {/if}
 
+  <!-- POR QUÉ SE DEVOLVIÓ  --  21/11/2026, OT #281
+
+       «Corrección requerida» no decía qué se pidió rehacer ni por qué. El
+       motivo lo recibía el técnico en el teléfono y acá no se veía, así que
+       nadie en la oficina podía decir cuál regla había devuelto la orden.
+
+       SOLO LEE: desde acá no se hace nada con una orden devuelta; el técnico
+       la corrige y la vuelve a mandar. -->
+  {#if orden.devolucion}
+    <div class="od-devuelta">
+      <p class="od-devuelta-titulo">
+        Devuelta por {orden.devolucion.quien} · {orden.devolucion.cuando}
+      </p>
+      {#if orden.devolucion.rehacer?.length}
+        <p class="od-devuelta-texto">
+          <strong>Tiene que rehacer:</strong> {orden.devolucion.rehacer.join(', ')}
+        </p>
+      {/if}
+      {#if orden.devolucion.motivo}
+        <p class="od-devuelta-texto">{orden.devolucion.motivo}</p>
+      {/if}
+    </div>
+  {/if}
+
   <!-- DETENIDA POR EL TÉCNICO  --  20/11/2026, OT #328
 
        La barra de arriba dibuja `bloqueada` en el casillero de «En sitio», y
@@ -289,6 +313,16 @@
     background: var(--snoc-error-container);
     color: var(--snoc-on-error-container);
   }
+  .od-devuelta {
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: var(--snoc-r-xl);
+    border: 1px solid var(--snoc-outline-variant);
+    background: var(--snoc-surface-container);
+  }
+  .od-devuelta-titulo { margin: 0; font-size: 13px; line-height: 18px; font-weight: 700; }
+  .od-devuelta-texto { margin: 0; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
   .od-bloqueo-titulo { margin: 0; font-size: 13px; line-height: 18px; font-weight: 700; }
   .od-bloqueo-motivo { margin: 0; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
 

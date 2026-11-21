@@ -150,6 +150,67 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     }
 
 
+def _es_de_galeria(evidencia) -> bool:
+    """Si esta imagen se eligio de la galeria en vez de tomarse con la camara.
+
+    LA IMAGEN DE GALERIA NO DEVUELVE LA ORDEN SOLA  --  21/11/2026
+    ----------------------------------------------------------------
+    El usuario, tres veces en dos dias: «el supervisor no puede detener una
+    orden solo por ser captura», «aun asi me la devolvio», «aun sigue
+    devolviendo las ordenes que mandaron las evidencias por captura».
+
+    LAS DOS PRIMERAS RESPUESTAS FUERON TEXTO PARA EL MODELO --una regla en la
+    instruccion general (20/11) y una frase junto a la imagen (20/11)-- y las
+    dos se desplegaron sin poder medir si el modelo obedecia. No obedecio, o
+    no era esa la regla que disparaba: no se pudo saber, porque la tarjeta no
+    decia por que se habia devuelto. Es CLAUDE.md §4 al pie de la letra: el
+    prompt es guia, el codigo es la garantia.
+
+    LA GARANTIA. Una captura de pantalla solo puede entrar por la galeria, y
+    la app lo marca (`de_galeria`, 09/11). Sobre ESA imagen, lo que el modelo
+    opine --«muestra otra cosa», «no deja leer el numero»-- ya no devuelve la
+    orden sola: el punto sigue quedando en duda y la mira una persona, que es
+    la regla del 31/10 («una opinion no verificada de un modelo no puede
+    frenar el trabajo de un tecnico») aplicada donde el modelo mas se
+    equivoca.
+
+    LO QUE SIGUE DEVOLVIENDO, de galeria o no, porque no es una opinion sobre
+    la imagen: lo que falta en el checklist, la medida fuera de rango, y el
+    numero LEIDO de la foto que no coincide con el que el tecnico escribio.
+
+    LO QUE SE PIERDE, dicho antes de que cueste: una imagen equivocada elegida
+    de la galeria ya no vuelve sola al tecnico; espera a que alguien la mire.
+    No cierra sola --el veredicto queda en «hay dudas»--, pero cuesta un clic.
+
+    FALLA HACIA LO DE ANTES: sin el dato, o si algo se rompe al leerlo,
+    contesta que no y la regla vieja corre igual.
+    """
+    try:
+        from campo.inspeccion_visual import vino_de_la_galeria
+
+        return vino_de_la_galeria(evidencia)
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+def _la_foto_es_de_galeria(orden, requisito_id: str) -> bool:
+    """Lo mismo, para la foto de un requisito: LA MISMA que lee
+    `_lecturas_de_la_foto` --la ultima analizada, con la vuelta primero--.
+    Si eligieran fotos distintas, se perdonaria la que el tecnico ya rehizo
+    con la camara por lo que traia la captura que reemplazo."""
+    try:
+        from campo.models import AnalisisDeEvidencia
+
+        ultima = (AnalisisDeEvidencia.objects
+                  .filter(org=orden.org, evidencia__orden_trabajo=orden,
+                          evidencia__requisito_id=requisito_id)
+                  .select_related("evidencia")
+                  .order_by("-vuelta", "-created_at").first())
+    except Exception:                                            # noqa: BLE001
+        return False
+    return ultima is not None and _es_de_galeria(ultima.evidencia)
+
+
 def _fotos_que_muestran_otra_cosa(orden) -> list[str]:
     """Los requisitos cuya foto llego pero muestra algo DISTINTO.
 
@@ -193,7 +254,7 @@ def _fotos_que_muestran_otra_cosa(orden) -> list[str]:
     #  y despues su lectura impide caer a la lectura de la VUELTA ANTERIOR
     #  cuando la foto rehecha no se pudo leer: serian dos fotos distintas, y
     #  se devolveria al tecnico por lo que mostraba la que ya reemplazo.
-    por_foto, foto_del_requisito = {}, {}
+    por_foto, foto_del_requisito, la_evidencia = {}, {}, {}
     try:
         for a in (AnalisisDeEvidencia.objects
                   .filter(org=orden.org, evidencia__orden_trabajo=orden)
@@ -201,11 +262,15 @@ def _fotos_que_muestran_otra_cosa(orden) -> list[str]:
                   .order_by("evidencia__vuelta", "created_at")):
             por_foto.setdefault(a.evidencia_id, []).append(a)
             foto_del_requisito[a.evidencia.requisito_id] = a.evidencia_id
+            la_evidencia[a.evidencia_id] = a.evidencia
     except Exception:                                            # noqa: BLE001
         return []
+    #  LA DE GALERIA NO ENTRA (21/11/2026): ver `_es_de_galeria`. Se mira la
+    #  foto que VALE para el requisito, no cualquiera de sus vueltas.
     return sorted(
         r for r, ev in foto_del_requisito.items()
-        if muestra_lo_pedido(la_que_vale(por_foto[ev]).texto or "") is False)
+        if not _es_de_galeria(la_evidencia[ev])
+        and muestra_lo_pedido(la_que_vale(por_foto[ev]).texto or "") is False)
 
 
 def _fotos_de_catalogo(orden) -> list[str]:
@@ -988,7 +1053,11 @@ def _potencia(orden, cierre):
             if (not crudos and texto_foto.strip()
                     and requisito in declaradas):
                 ilegibles.append(cuando)
-                if requisito not in rehacer:
+                #  DE GALERIA, SE DICE PERO NO SE PIDE REHACER (21/11/2026):
+                #  el punto sigue en duda con su texto y lo mira una persona.
+                #  Ver `_es_de_galeria`.
+                if (requisito not in rehacer
+                        and not _la_foto_es_de_galeria(orden, requisito)):
                     rehacer.append(requisito)
             #  UNA LECTURA IMPOSIBLE NO SE COMPARA, se descarta. Ver
             #  `_lectura_creible`: no se "corrige" lo que el modelo leyo

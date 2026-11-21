@@ -531,6 +531,48 @@ def del_dia(org, fecha) -> dict:
                 "necesita": b.necesita or "",
             }
 
+    #  POR QUE SE DEVOLVIO  --  21/11/2026, OT #281
+    #
+    #  Una orden devuelta decia «Corrección requerida» y nada mas: ni que se
+    #  le pidio rehacer ni por que. El motivo existia --lo recibe el tecnico
+    #  en el telefono y queda en el ticket del ISP-- y en la pantalla donde la
+    #  oficina decide no se veia. Costo tres despliegues a ciegas: el usuario
+    #  veia ordenes devueltas y nadie podia decir cual regla las devolvia.
+    #
+    #  SOLO MIENTRAS ESPERA LA CORRECCION: cuando el tecnico manda el reporte
+    #  otra vez deja de estar en `requiere_correccion` y esto desaparece.
+    #  LA ULTIMA devolucion, que es la que el tecnico tiene pendiente. Y una
+    #  consulta para todas, no una por tarjeta.
+    devoluciones = {}
+    devueltas = [o for o in todas
+                 if o.estado_validacion == OrdenTrabajo.REQUIERE_CORRECCION]
+    if devueltas:
+        ultimo = {}
+        for ev in (EventoTrabajo.objects
+                   .filter(org=org, orden_id__in=[o.id for o in devueltas],
+                           tipo="correccion_requerida")
+                   .select_related("profile__user").order_by("created_at")):
+            ultimo[ev.orden_id] = ev
+        for o in devueltas:
+            ev = ultimo.get(o.id)
+            if ev is None:
+                continue
+            datos = ev.datos if isinstance(ev.datos, dict) else {}
+            esquema = getattr(o.tipo_trabajo_version, "esquema", None) or {}
+            titulos = {e.get("id"): str(e.get("titulo") or "").strip()
+                       for e in esquema.get("evidencias") or []
+                       if isinstance(e, dict)}
+            local = ev.created_at.astimezone(zona)
+            devoluciones[o.id] = {
+                #  Sin persona es la devolucion automatica.
+                "quien": _nombre(ev.profile) if ev.profile_id else "el Supervisor",
+                "cuando": local.strftime("%H:%M" if local.date() == fecha
+                                         else "%d/%m %H:%M"),
+                "rehacer": [titulos.get(r) or str(r)
+                            for r in datos.get("requisitos_a_corregir") or []],
+                "motivo": str(datos.get("observacion") or "").strip()[:500],
+            }
+
     def fila(o) -> dict:
         quienes = sorted(o.asignaciones.all(),
                          key=lambda a: (not a.es_principal, _nombre(a.profile)))
@@ -599,6 +641,9 @@ def del_dia(org, fecha) -> dict:
             #  20/11/2026: si esta detenida, quien la paro y por que. `None`
             #  cuando no hay bloqueo abierto que haya detenido el trabajo.
             "bloqueo": bloqueos_abiertos.get(o.id),
+            #  21/11/2026: si esta devuelta, quien, que se pidio rehacer y por
+            #  que. `None` cuando no espera una correccion.
+            "devolucion": devoluciones.get(o.id),
             #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
             #  valido trae lo que dice el Supervisor. Indica, no decide.
             "revision": revision_de(o),

@@ -199,7 +199,7 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
                      "pantalla este inclinada--. Deci cual de las dos parece, "
                      "en pocas palabras, y marca atencion SOLO si los numeros "
                      "que se pedian no se pueden leer.")
-        elif _vino_de_la_galeria(evidencia):
+        elif vino_de_la_galeria(evidencia):
             #  LA CAPTURA QUE NADIE DECLARO, DICHA JUNTO A LA IMAGEN
             #  --  20/11/2026, OT #281
             #
@@ -288,7 +288,7 @@ def que_tenia_que_mostrar(evidencia, instrucciones_propias: str = "") -> str:
     return ""
 
 
-def _vino_de_la_galeria(evidencia) -> bool:
+def vino_de_la_galeria(evidencia) -> bool:
     """Si la app dijo que esta imagen se eligio de la galeria.
 
     `is True` y no «verdadero»: la misma lectura estricta que

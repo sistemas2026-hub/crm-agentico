@@ -226,6 +226,43 @@ describe('la tarjeta de una orden detenida', () => {
     expect(h).not.toContain('action="?/destrabar"');
   });
 
+  //  POR QUÉ SE DEVOLVIÓ  --  21/11/2026, OT #281. «Corrección requerida»
+  //  no decía qué se pidió rehacer ni por qué.
+  describe('la orden devuelta dice por qué', () => {
+    const devuelta = {
+      ...orden,
+      estado: 'correccion_requerida',
+      estado_texto: 'Corrección requerida',
+      devolucion: {
+        quien: 'el Supervisor',
+        cuando: '21/11 09:14',
+        rehacer: ['Medición al salir', 'Daño encontrado'],
+        motivo: 'La foto del medidor al salir no deja leer ningún número.'
+      }
+    };
+
+    it('quién la devolvió, cuándo, qué tiene que rehacer y el motivo', () => {
+      const h = html({ orden: devuelta });
+
+      expect(h).toContain('Devuelta por el Supervisor · 21/11 09:14');
+      expect(h).toContain('Medición al salir, Daño encontrado');
+      expect(h).toContain('no deja leer ningún número');
+    });
+
+    it('sin motivo escrito igual dice qué rehacer', () => {
+      const h = html({ orden: { ...devuelta,
+        devolucion: { ...devuelta.devolucion, motivo: '' } } });
+
+      expect(h).toContain('Tiene que rehacer:');
+      expect(h.split('od-devuelta-texto').length - 1).toBe(1);
+    });
+
+    it('la que no está devuelta no dibuja nada', () => {
+      expect(html({ orden })).not.toContain('od-devuelta');
+      expect(html({ orden: { ...orden, devolucion: null } })).not.toContain('Devuelta por');
+    });
+  });
+
   //  LOS RECORDATORIOS SE PLIEGAN  --  20/11/2026, OT #328. El Supervisor
   //  recuerda cada 15 minutos: una orden parada días dibujaba decenas de
   //  renglones iguales. Se mide el efecto: cuántas veces sale la frase.
