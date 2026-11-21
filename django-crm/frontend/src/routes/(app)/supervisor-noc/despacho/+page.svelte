@@ -8,6 +8,18 @@
    *
    * La sugerencia viene del Supervisor y NO decide: muestra qué labor sostiene
    * la evidencia y por qué, y quien despacha acepta o cambia.
+   *
+   * REDISEÑO DEL 21/11/2026 (maqueta aprobada):
+   *   - Lo principal primero: los casos para despachar son la primera pestaña;
+   *     simular, lo que crearía el Supervisor y la jornada van en las otras.
+   *     Antes tres paneles de diagnóstico tapaban la tarea.
+   *   - «Despachar» abre un panel al costado, en cinco pasos (qué, cuándo,
+   *     dónde, quién, para el técnico). Antes el formulario aparecía al fondo
+   *     de la página, debajo de la tabla, sin moverse hasta él.
+   *   - La sugerencia del Supervisor y la orden que ya existe van en columnas
+   *     propias, con color, en vez de apiladas en la celda del asunto.
+   *   - La jornada se puede mirar de otro día (`?dia=`), con su rótulo.
+   *   - Los resultados salen en un aviso a la vista.
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
@@ -17,8 +29,42 @@
   import { fechaSugerida } from '$lib/v2/despacho-sugerencias.js';
   import { textoDeLosTotales, totalesDeLoQueCrearia } from '$lib/supervisor/lo-que-crearia.js';
   import '../supervisor-noc.css';
+  import Pestanas from '$lib/supervisor/ui/Pestanas.svelte';
+  import PanelLateral from '$lib/supervisor/ui/PanelLateral.svelte';
+  import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
 
   let { data, form } = $props();
+
+  /** @type {string} */
+  let pestana = $state(untrack(() => page.url.searchParams.get('pestana') ?? 'casos'));
+
+  let buscando = $state(false);
+  /** El resultado de «Buscar casos que necesiten visita», en un aviso. */
+  const alBuscar = () => {
+    buscando = true;
+    return async (/** @type {any} */ { result, update }) => {
+      await update();
+      buscando = false;
+      if (result?.type === 'success') avisar(result.data?.hecho ?? 'El Supervisor revisó la operación.');
+      else if (result?.type === 'failure') avisar(result.data?.error ?? 'No se pudo.', { tono: 'error' });
+    };
+  };
+
+  let creandoOrden = $state(false);
+  /** Crear la orden: si sale bien, se cierra el panel y se avisa. */
+  const alDespachar = () => {
+    creandoOrden = true;
+    return async (/** @type {any} */ { result, update }) => {
+      await update({ reset: false });
+      creandoOrden = false;
+      if (result?.type === 'success') {
+        despachando = null;
+        avisar(result.data?.hecho ?? 'Orden creada.', { enlace: { texto: 'Ver en Programación', href: '/supervisor-noc/programacion' } });
+      } else if (result?.type === 'failure') {
+        avisar(result.data?.error ?? 'No se pudo crear la orden.', { tono: 'error' });
+      }
+    };
+  };
 
   // ---------------------------------------------------------------------
   //  FILTRAR, CONTAR Y PAGINAR LOS CASOS  --  18/10/2026
@@ -57,7 +103,7 @@
    * La URL de la lista con lo que cambia. Conserva lo demás (`ficha`, `dia`)
    * y vuelve a la página 1 salvo que se pida otra: filtrar estando en la 3
    * puede dejar esa página sin filas.
-   * @param {{ q?: string, asunto?: string, pagina?: number, ficha?: boolean, conTecnico?: boolean }} cambio
+   * @param {{ q?: string, asunto?: string, pagina?: number, ficha?: boolean, conTecnico?: boolean, dia?: string }} cambio
    */
   function enlace(cambio) {
     const p = new URLSearchParams(page.url.searchParams);
@@ -67,6 +113,7 @@
     if ('asunto' in cambio) fijar('asunto', cambio.asunto ?? '');
     if ('ficha' in cambio) fijar('ficha', cambio.ficha ? '1' : '');
     if ('conTecnico' in cambio) fijar('con_tecnico', cambio.conTecnico ? '1' : '');
+    if ('dia' in cambio) fijar('dia', cambio.dia ?? '');
     fijar('pagina', cambio.pagina && cambio.pagina > 1 ? String(cambio.pagina) : '');
     const s = p.toString();
     return s ? `?${s}` : page.url.pathname;
@@ -389,40 +436,289 @@
        recortado y no hay forma de llegar (ver supervisor-noc/+page.svelte). -->
   <div class="v2-scroll">
     <div class="snoc-lienzo">
-    <!-- ============ CABECERA ============ -->
-    <section class="snoc-panel" style="gap:var(--snoc-md);">
-      <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
-        <div class="snoc-pila-xs">
-          <h1 class="snoc-h1">Despacho a campo</h1>
-          <p class="snoc-body snoc-secundario">
-            Qué casos van a una visita, y con qué plantilla. Lo que se despacha acá es lo
-            que el ciclo de la madrugada reparte entre las cuadrillas.
-          </p>
-        </div>
+    <header class="snoc-encabezado">
+      <div class="snoc-encabezado-texto">
+        <h1 class="snoc-h1">Despacho a campo</h1>
+        <p class="snoc-bajada">
+          Qué casos van a una visita, y con qué plantilla. Lo que se despacha acá es lo que el ciclo
+          de la madrugada reparte entre las cuadrillas.
+        </p>
       </div>
-    </section>
+      {#if !data.error}
+        <!-- EL SUPERVISOR MIRA UNA VEZ POR HORA, pero solo si la empresa le
+             delegó «Revisar solo». Sin esa delegación espera a que alguien lo
+             despierte, y esta pantalla queda vacía sin que nada lo explique.
+             Esto lo despierta: no ejecuta nada, solo deja propuestas para que
+             una persona las lea. -->
+        <form class="snoc-encabezado-acciones" method="POST" action="?/ciclo" use:enhance={alBuscar}>
+          <button class="snoc-btn snoc-btn-primario" type="submit" disabled={buscando}>
+            {buscando ? 'Buscando…' : 'Buscar casos que necesiten visita'}
+          </button>
+        </form>
+      {/if}
+    </header>
+    {#if form?.de === 'ciclo'}
+      <p class="snoc-recuadro {form.error ? 'snoc-recuadro-error' : 'snoc-recuadro-ok'}" role="status">
+        {form.error ?? form.hecho}
+      </p>
+    {/if}
 
     {#if data.error}
-      <section class="snoc-panel">
-        <p class="snoc-aviso snoc-error-txt">
-          No se pudieron leer los casos ni las plantillas. Si otras pantallas tampoco
-          cargan, es el backend.
-        </p>
-      </section>
+      <p class="snoc-recuadro snoc-recuadro-error">
+        No se pudieron leer los casos ni las plantillas. Si otras pantallas tampoco cargan, es el backend.
+      </p>
     {:else}
       {#if data.plantillasSinClasificar}
         <!-- Sin labor, el ciclo de la madrugada no las reparte. Se avisa acá
              —donde se despacha— y no solo en la pantalla de configuración. -->
-        <section class="snoc-panel">
-          <p class="snoc-aviso">
-            {data.plantillasSinClasificar}
-            {data.plantillasSinClasificar === 1 ? 'plantilla' : 'plantillas'} sin labor.
-            Las órdenes que salgan con ellas no entran al reparto automático; se clasifican
-            en <a href="/supervisor-noc/cuadrillas">Cuadrillas</a>.
-          </p>
-        </section>
+        <p class="snoc-recuadro snoc-recuadro-alerta">
+          <strong>{data.plantillasSinClasificar}
+          {data.plantillasSinClasificar === 1 ? 'plantilla' : 'plantillas'} sin labor.</strong>
+          Las órdenes que salgan con ellas no entran al reparto automático; se clasifican en
+          <a href="/supervisor-noc/cuadrillas">Cuadrillas</a>.
+        </p>
       {/if}
 
+      <Pestanas
+        bind:activa={pestana}
+        etiqueta="Secciones de Despacho"
+        pestanas={[
+          { id: 'casos', texto: 'Casos para despachar', n: data.sinAprobados ? null : data.totalSinFiltro },
+          { id: 'simular', texto: 'Simular el día' },
+          { id: 'crearia', texto: 'Lo que crearía el Supervisor' },
+          { id: 'jornada', texto: 'Cómo quedaría la jornada' }
+        ]}
+      />
+
+      {#if pestana === 'casos'}
+      <section class="snoc-panel" style="gap:var(--snoc-sm);">
+        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
+          <div class="snoc-pila-xs">
+            <h2 class="snoc-h2">
+              Casos abiertos
+              {#if !data.sinAprobados}
+                <!-- EL NÚMERO ES EL DE TODA LA COLA, no el de la página. Con
+                     filtro dice los dos: «3 de 41». -->
+                <span class="snoc-chip-conteo">
+                  {#if hayFiltro}{data.total} de {data.totalSinFiltro}{:else}{data.total}{/if}
+                </span>
+              {/if}
+            </h2>
+            <p class="snoc-body-sm snoc-secundario">
+              Solo los que ya aprobaste en <a href="/supervisor-noc">Pendientes por
+              revisión</a>. Nada sale a campo sin pasar por ahí.
+            </p>
+            <!-- LO QUE YA TIENE TÉCNICO ESTÁ EN PROGRAMACIÓN (28/10/2026):
+                 Despacho es lo que falta. Se cuenta, y se puede volver a ver
+                 acá para una segunda visita al mismo caso. -->
+            {#if data.conTecnico}
+              <p class="snoc-body-sm snoc-secundario">
+                {#if data.mostrandoConTecnico}
+                  Se ven también {data.conTecnico}
+                  {data.conTecnico === 1 ? 'caso que ya tiene técnico' : 'casos que ya tienen técnico'}.
+                  <a href={enlace({ conTecnico: false })}>Ocultarlos</a>
+                {:else}
+                  {data.conTecnico}
+                  {data.conTecnico === 1 ? 'caso ya tiene técnico' : 'casos ya tienen técnico'}: están en
+                  <a href="/supervisor-noc/programacion">Programación</a>.
+                  <a href={enlace({ conTecnico: true })}>Mostrarlos acá</a> (para una segunda visita).
+                {/if}
+              </p>
+            {/if}
+          </div>
+          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+            {#if !data.conFicha && (data.casos ?? []).length}
+              <!-- La ficha cuesta una llamada al motor POR CASO, que a su vez
+                   habla con WispHub y SmartOLT. Se pide, no viene sola, y
+                   solo para la página que se está mirando. -->
+              <a class="snoc-btn" href={enlace({ ficha: true, pagina: data.pagina })}>
+                Traer el diagnóstico de esta página
+              </a>
+            {/if}
+          </div>
+        </div>
+
+        {#if !data.sinAprobados && data.totalSinFiltro > 0}
+          <!-- EL FILTRO. Busca en lo que se ve en la fila --asunto, cliente,
+               N.º de ticket o de servicio-- y nada más: buscar en la
+               descripción haría salir casos por un texto que no está a la
+               vista. Los asuntos son los de TODA la cola, con cuántos hay. -->
+          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+            <label class="snoc-buscador">
+              <span class="snoc-icono snoc-tenue" style="font-size:18px;" aria-hidden="true">search</span>
+              <input
+                type="search"
+                class="snoc-buscador-campo"
+                placeholder="Buscar asunto, cliente o N.º de ticket…"
+                aria-label="Buscar en los casos abiertos"
+                maxlength="100"
+                bind:this={campoBusqueda}
+                bind:value={busqueda}
+                oninput={alEscribir}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') { clearTimeout(espera); filtrar({ q: busqueda }); }
+                }}
+              />
+            </label>
+            <select
+              class="snoc-select"
+              aria-label="Filtrar por asunto"
+              value={data.filtro?.asunto ?? ''}
+              onchange={(e) => filtrar({ asunto: e.currentTarget.value })}
+            >
+              <option value="">Todos los asuntos ({data.totalSinFiltro})</option>
+              {#each data.asuntos ?? [] as a (a.asunto)}
+                <option value={a.asunto}>{a.asunto} ({a.n})</option>
+              {/each}
+            </select>
+            {#if hayFiltro}
+              <button
+                class="snoc-pildora"
+                type="button"
+                onclick={() => { busqueda = ''; clearTimeout(espera); filtrar({ q: '', asunto: '' }); }}
+              >
+                Limpiar filtro
+              </button>
+            {/if}
+          </div>
+        {/if}
+
+        {#if (data.casos ?? []).length === 0 && hayFiltro}
+          <p class="snoc-body-sm snoc-secundario">
+            Ningún caso coincide con el filtro. El N.º de ticket se busca completo.
+          </p>
+        {:else if (data.casos ?? []).length === 0}
+          <!-- VACÍO NO ES UN ERROR, y las dos razones de estar vacío se
+               dibujan distinto: una dice qué hacer, la otra que algo falló. -->
+          {#if data.sinAprobados}
+            <p class="snoc-body-sm snoc-secundario">
+              Todavía no aprobaste ningún caso para visita. El Supervisor propone los que
+              su diagnóstico sostiene —equipo caído por fibra, señal débil, varios del
+              mismo puerto— y aparecen en
+              <a href="/supervisor-noc">Pendientes por revisión</a>. Lo que aceptes ahí
+              llega acá.
+            </p>
+            <p class="snoc-body-sm snoc-secundario">
+              Con <strong>Buscar casos que necesiten visita</strong> lo hacés mirar ahora,
+              sin esperar a su ronda de cada hora.
+            </p>
+          {:else}
+            <p class="snoc-body-sm snoc-secundario">
+              No hay casos abiertos entre los aprobados. Nada que despachar.
+            </p>
+          {/if}
+        {:else}
+          <!-- LA LISTA SE DESPLAZA POR SU CUENTA (18/10/2026): con la página
+               entera desplazándose, despachar el caso 20 dejaba la jornada y
+               el filtro a una pantalla de distancia. La cabecera queda fija. -->
+          <div class="snoc-tabla-caja snoc-despacho-lista" bind:this={lista}>
+            <table class="snoc-tabla">
+              <thead>
+                <tr>
+                  <th scope="col">Asunto</th>
+                  <th scope="col">N.º ticket</th>
+                  <th scope="col">Cliente</th>
+                  <th scope="col">Qué sugiere el Supervisor</th>
+                  <th scope="col">Orden existente</th>
+                  <th scope="col"><span class="snoc-solo-lector">Acción</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each data.casos as c (c.id)}
+                  <tr class={despachando?.id === c.id ? 'snoc-fila-elegida' : ''}>
+                    <td>
+                      <div class="snoc-pila-xs" style="min-width:0;">
+                        <span class="snoc-body">{c.nombre}</span>
+                        <span class="snoc-body-sm snoc-secundario">
+                          {c.estado}{c.prioridad ? ` · ${c.prioridad}` : ''}
+                          {#if c.servicio}· servicio {c.servicio}{/if}
+                        </span>
+
+                      </div>
+                    </td>
+                    <td class="snoc-mono" style="white-space:nowrap;">
+                      {#if c.ticket}#{c.ticket}{:else}<span class="snoc-tenue">—</span>{/if}
+                    </td>
+                    <td class="snoc-body-sm">
+                      {#if c.cliente}{c.cliente}{:else}<span class="snoc-tenue">Sin nombre</span>{/if}
+                    </td>
+                    <td class="snoc-body-sm" style="max-width:280px;">
+                      {#if c.sugerencia}
+                        {#if c.sugerencia.labor === 'no_requiere_visita'}
+                          <span class="snoc-insignia snoc-insignia-ok">No requiere visita</span>
+                        {:else if c.sugerencia.labor}
+                          <span class="snoc-insignia snoc-insignia-secundaria-suave">
+                            {nombreDeLabor(c.sugerencia.labor)}{c.sugerencia.verificada ? '' : ' · sin verificar'}
+                          </span>
+                        {:else}
+                          <span class="snoc-insignia">Sin concluir</span>
+                        {/if}
+                        <div class="snoc-secundario" style="margin-top:3px;">{c.sugerencia.porque}</div>
+                      {:else}
+                        <span class="snoc-tenue">—</span>
+                      {/if}
+                    </td>
+                    <td class="snoc-body-sm">
+                      <!-- No bloquea: una segunda visita al mismo caso es
+                           legítima. Pero tiene que verse ANTES. -->
+                      {#if c.orden_activa}
+                        <span class="snoc-insignia {c.orden_activa_tecnico ? 'snoc-insignia-ok' : 'snoc-insignia-alerta'}">
+                          #{c.orden_activa} · {c.orden_activa_tecnico ? `asignada a ${c.orden_activa_tecnico}` : 'sin asignar'}
+                        </span>
+                      {:else}
+                        <span class="snoc-tenue">—</span>
+                      {/if}
+                    </td>
+                    <td style="text-align:right;">
+                      <button class="snoc-btn snoc-btn-primario" type="button" onclick={() => abrir(c)}>
+                        Despachar
+                      </button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- PAGINACIÓN. Son enlaces y no botones: la página vive en la URL,
+               así que se puede copiar y volver atrás. -->
+          <div class="snoc-paginacion">
+            <span class="snoc-mono-sm snoc-tenue">
+              Mostrando {pag.desde} a {pag.hasta} de {pag.total} caso{pag.total === 1 ? '' : 's'}
+            </span>
+            {#if pag.paginas > 1}
+              <nav class="snoc-paginacion-botones" aria-label="Páginas de casos">
+                {#if pag.actual > 1}
+                  <a class="snoc-pildora" href={enlace({ pagina: pag.actual - 1 })}
+                     data-sveltekit-noscroll>Anterior</a>
+                {:else}
+                  <span class="snoc-pildora snoc-pildora-apagada" aria-disabled="true">Anterior</span>
+                {/if}
+                {#each pag.ventana as n, i (i)}
+                  {#if n === null}
+                    <span class="snoc-paginacion-hueco" aria-hidden="true">…</span>
+                  {:else}
+                    <a
+                      class="snoc-pildora {n === pag.actual ? 'snoc-pildora-activa' : ''}"
+                      href={enlace({ pagina: n })}
+                      data-sveltekit-noscroll
+                      aria-current={n === pag.actual ? 'page' : undefined}
+                      aria-label="Página {n}"
+                    >{n}</a>
+                  {/if}
+                {/each}
+                {#if pag.actual < pag.paginas}
+                  <a class="snoc-pildora" href={enlace({ pagina: pag.actual + 1 })}
+                     data-sveltekit-noscroll>Siguiente</a>
+                {:else}
+                  <span class="snoc-pildora snoc-pildora-apagada" aria-disabled="true">Siguiente</span>
+                {/if}
+              </nav>
+            {/if}
+          </div>
+        {/if}
+      </section>
+      {:else if pestana === 'simular'}
       <!-- SIMULAR EL DÍA (24/10/2026): ver `simularElDia`. -->
       <section class="snoc-panel" style="gap:var(--snoc-sm);">
         <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
@@ -434,9 +730,9 @@
             </p>
           </div>
           <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-            <input id="dia-simulado" class="snoc-campo" type="date" bind:value={diaSimulado}
-                   aria-label="Día a simular" />
-            <button class="snoc-btn" type="button" onclick={simularElDia} disabled={simulando}>
+            <label class="snoc-fila snoc-body-sm" for="dia-simulado"><span class="snoc-secundario">Día a simular</span></label>
+            <input id="dia-simulado" class="snoc-campo" type="date" bind:value={diaSimulado} />
+            <button class="snoc-btn snoc-btn-primario" type="button" onclick={simularElDia} disabled={simulando}>
               {simulando ? 'Simulando…' : 'Simular el día'}
             </button>
           </div>
@@ -527,6 +823,7 @@
         {/if}
       </section>
 
+      {:else if pestana === 'crearia'}
       <!-- LO QUE CREARÍA EL SUPERVISOR (23/10/2026): ver `verOrdenesPrevia`. -->
       <section class="snoc-panel" style="gap:var(--snoc-sm);">
         <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
@@ -537,7 +834,7 @@
               <strong>No crea nada.</strong>
             </p>
           </div>
-          <button class="snoc-btn" type="button" onclick={verOrdenesPrevia} disabled={cargandoOrdenes}>
+          <button class="snoc-btn snoc-btn-primario" type="button" onclick={verOrdenesPrevia} disabled={cargandoOrdenes}>
             {cargandoOrdenes ? 'Calculando…' : 'Ver qué crearía el Supervisor'}
           </button>
         </div>
@@ -631,6 +928,7 @@
         {/if}
       </section>
 
+      {:else}
       <!--
         COMO QUEDARIA LA JORNADA  --  13/10/2026
         ========================================
@@ -655,9 +953,16 @@
               <strong>Es una propuesta: no se publica sola.</strong>
             </p>
           </div>
-          <a class="snoc-btn" href="/supervisor-noc/cuadrillas?dia={data.dia}&reparto=1">
-            Ver el detalle y publicar
-          </a>
+          <div class="snoc-fila" style="flex-wrap:wrap;">
+            <label class="snoc-fila snoc-body-sm">
+              <span class="snoc-secundario">Día</span>
+              <input class="snoc-campo" type="date" value={data.dia}
+                     onchange={(e) => goto(enlace({ dia: e.currentTarget.value }), { keepFocus: true, noScroll: true })} />
+            </label>
+            <a class="snoc-btn snoc-btn-primario" href="/supervisor-noc/cuadrillas?dia={data.dia}&reparto=1">
+              Ver el detalle y publicar
+            </a>
+          </div>
         </div>
 
         {#if data.repartoError}
@@ -713,273 +1018,42 @@
             </p>
           {/if}
           {#if data.conteos.sinZona || data.conteos.sinCuadrilla || data.conteos.sobrantes || data.conteos.sinClasificar}
-            <ul class="snoc-lote-fallos">
+            <div class="dp-fallos">
               {#if data.conteos.sinZona}
-                <li>{data.conteos.sinZona} sin zona mapeada — se arregla en Cuadrillas.</li>
+                <p class="snoc-recuadro snoc-recuadro-error"><strong>{data.conteos.sinZona}</strong> sin zona mapeada — <a href="/supervisor-noc/cuadrillas?pestana=zonas">se arregla en Cuadrillas</a>.</p>
               {/if}
               {#if data.conteos.sinCuadrilla}
-                <li>{data.conteos.sinCuadrilla} en zonas que hoy no cubre nadie.</li>
+                <p class="snoc-recuadro snoc-recuadro-error"><strong>{data.conteos.sinCuadrilla}</strong> en zonas que hoy no cubre nadie.</p>
               {/if}
               {#if data.conteos.sobrantes}
-                <li>{data.conteos.sobrantes} no entraron por el tope por cuadrilla.</li>
+                <p class="snoc-recuadro snoc-recuadro-alerta"><strong>{data.conteos.sobrantes}</strong> no entraron por el tope por cuadrilla.</p>
               {/if}
               {#if data.conteos.sinClasificar}
-                <li>{data.conteos.sinClasificar} sin tipo de trabajo declarado.</li>
+                <p class="snoc-recuadro"><strong>{data.conteos.sinClasificar}</strong> sin tipo de trabajo declarado.</p>
               {/if}
-            </ul>
+            </div>
           {/if}
         {/if}
       </section>
 
-      <section class="snoc-panel" style="gap:var(--snoc-sm);">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-          <div class="snoc-pila-xs">
-            <h2 class="snoc-h2">
-              Casos abiertos
-              {#if !data.sinAprobados}
-                <!-- EL NÚMERO ES EL DE TODA LA COLA, no el de la página. Con
-                     filtro dice los dos: «3 de 41». -->
-                <span class="snoc-chip-conteo">
-                  {#if hayFiltro}{data.total} de {data.totalSinFiltro}{:else}{data.total}{/if}
-                </span>
-              {/if}
-            </h2>
-            <p class="snoc-body-sm snoc-secundario">
-              Solo los que ya aprobaste en <a href="/supervisor-noc">Pendientes por
-              revisión</a>. Nada sale a campo sin pasar por ahí.
-            </p>
-            <!-- LO QUE YA TIENE TÉCNICO ESTÁ EN PROGRAMACIÓN (28/10/2026):
-                 Despacho es lo que falta. Se cuenta, y se puede volver a ver
-                 acá para una segunda visita al mismo caso. -->
-            {#if data.conTecnico}
-              <p class="snoc-body-sm snoc-secundario">
-                {#if data.mostrandoConTecnico}
-                  Se ven también {data.conTecnico}
-                  {data.conTecnico === 1 ? 'caso que ya tiene técnico' : 'casos que ya tienen técnico'}.
-                  <a href={enlace({ conTecnico: false })}>Ocultarlos</a>
-                {:else}
-                  {data.conTecnico}
-                  {data.conTecnico === 1 ? 'caso ya tiene técnico' : 'casos ya tienen técnico'}: están en
-                  <a href="/supervisor-noc/programacion">Programación</a>.
-                  <a href={enlace({ conTecnico: true })}>Mostrarlos acá</a> (para una segunda visita).
-                {/if}
-              </p>
-            {/if}
-          </div>
-          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-            {#if !data.conFicha && (data.casos ?? []).length}
-              <!-- La ficha cuesta una llamada al motor POR CASO, que a su vez
-                   habla con WispHub y SmartOLT. Se pide, no viene sola, y
-                   solo para la página que se está mirando. -->
-              <a class="snoc-btn" href={enlace({ ficha: true, pagina: data.pagina })}>
-                Traer el diagnóstico de esta página
-              </a>
-            {/if}
-            <!-- EL SUPERVISOR MIRA UNA VEZ POR HORA, pero solo si la empresa le
-                 delegó «Revisar solo». Sin esa delegación espera a que alguien
-                 lo despierte, y esta pantalla queda vacía sin que nada lo
-                 explique. Esto lo despierta: no ejecuta nada, solo deja
-                 propuestas para que una persona las lea. -->
-            <form method="POST" action="?/ciclo" use:enhance>
-              <button class="snoc-btn" type="submit">
-                Buscar casos que necesiten visita
-              </button>
-            </form>
-            <!-- El resultado va al lado del botón, no en el panel del caso. -->
-            {#if form?.de === 'ciclo'}
-              <p class="snoc-aviso {form.error ? 'snoc-error-txt' : ''}" role="status">
-                {form.error ?? form.hecho}
-              </p>
-            {/if}
-          </div>
-        </div>
-
-        {#if !data.sinAprobados && data.totalSinFiltro > 0}
-          <!-- EL FILTRO. Busca en lo que se ve en la fila --asunto, cliente,
-               N.º de ticket o de servicio-- y nada más: buscar en la
-               descripción haría salir casos por un texto que no está a la
-               vista. Los asuntos son los de TODA la cola, con cuántos hay. -->
-          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
-            <label class="snoc-buscador">
-              <span class="snoc-icono snoc-tenue" style="font-size:18px;" aria-hidden="true">search</span>
-              <input
-                type="search"
-                class="snoc-buscador-campo"
-                placeholder="Buscar asunto, cliente o N.º de ticket…"
-                aria-label="Buscar en los casos abiertos"
-                maxlength="100"
-                bind:this={campoBusqueda}
-                bind:value={busqueda}
-                oninput={alEscribir}
-                onkeydown={(e) => {
-                  if (e.key === 'Enter') { clearTimeout(espera); filtrar({ q: busqueda }); }
-                }}
-              />
-            </label>
-            <select
-              class="snoc-select"
-              aria-label="Filtrar por asunto"
-              value={data.filtro?.asunto ?? ''}
-              onchange={(e) => filtrar({ asunto: e.currentTarget.value })}
-            >
-              <option value="">Todos los asuntos ({data.totalSinFiltro})</option>
-              {#each data.asuntos ?? [] as a (a.asunto)}
-                <option value={a.asunto}>{a.asunto} ({a.n})</option>
-              {/each}
-            </select>
-            {#if hayFiltro}
-              <button
-                class="snoc-pildora"
-                type="button"
-                onclick={() => { busqueda = ''; clearTimeout(espera); filtrar({ q: '', asunto: '' }); }}
-              >
-                Limpiar filtro
-              </button>
-            {/if}
-          </div>
-        {/if}
-
-        {#if (data.casos ?? []).length === 0 && hayFiltro}
-          <p class="snoc-body-sm snoc-secundario">
-            Ningún caso coincide con el filtro. El N.º de ticket se busca completo.
-          </p>
-        {:else if (data.casos ?? []).length === 0}
-          <!-- VACÍO NO ES UN ERROR, y las dos razones de estar vacío se
-               dibujan distinto: una dice qué hacer, la otra que algo falló. -->
-          {#if data.sinAprobados}
-            <p class="snoc-body-sm snoc-secundario">
-              Todavía no aprobaste ningún caso para visita. El Supervisor propone los que
-              su diagnóstico sostiene —equipo caído por fibra, señal débil, varios del
-              mismo puerto— y aparecen en
-              <a href="/supervisor-noc">Pendientes por revisión</a>. Lo que aceptes ahí
-              llega acá.
-            </p>
-            <p class="snoc-body-sm snoc-secundario">
-              Con <strong>Buscar casos que necesiten visita</strong> lo hacés mirar ahora,
-              sin esperar a su ronda de cada hora.
-            </p>
-          {:else}
-            <p class="snoc-body-sm snoc-secundario">
-              No hay casos abiertos entre los aprobados. Nada que despachar.
-            </p>
-          {/if}
-        {:else}
-          <!-- LA LISTA SE DESPLAZA POR SU CUENTA (18/10/2026): con la página
-               entera desplazándose, despachar el caso 20 dejaba la jornada y
-               el filtro a una pantalla de distancia. La cabecera queda fija. -->
-          <div class="snoc-tabla-caja snoc-despacho-lista" bind:this={lista}>
-            <table class="snoc-tabla">
-              <thead>
-                <tr>
-                  <th scope="col">Asunto</th>
-                  <th scope="col">N.º ticket</th>
-                  <th scope="col">Cliente</th>
-                  <th scope="col"><span class="snoc-solo-lector">Acción</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each data.casos as c (c.id)}
-                  <tr class={despachando?.id === c.id ? 'snoc-fila-elegida' : ''}>
-                    <td>
-                      <div class="snoc-pila-xs" style="min-width:0;">
-                        <span class="snoc-body">{c.nombre}</span>
-                        <span class="snoc-body-sm snoc-secundario">
-                          {c.estado}{c.prioridad ? ` · ${c.prioridad}` : ''}
-                          {#if c.servicio}· servicio {c.servicio}{/if}
-                        </span>
-
-                        {#if c.orden_activa}
-                          <!-- No bloquea: una segunda visita al mismo caso es
-                               legítima. Pero tiene que verse ANTES. -->
-                          <span class="snoc-tag">Ya tiene la orden #{c.orden_activa} abierta ·
-                            {c.orden_activa_tecnico ? `asignada a ${c.orden_activa_tecnico}` : 'SIN ASIGNAR'}</span>
-                        {/if}
-
-                        {#if c.sugerencia}
-                          <p class="snoc-body-sm" style="margin:2px 0 0">
-                            {#if c.sugerencia.labor === 'no_requiere_visita'}
-                              <strong>No requiere visita.</strong>
-                            {:else if c.sugerencia.labor}
-                              <strong>{nombreDeLabor(c.sugerencia.labor)}</strong>
-                              {#if !c.sugerencia.verificada}
-                                <span class="snoc-tag">sin verificar</span>
-                              {/if}
-                            {:else}
-                              <strong>Sin concluir.</strong>
-                            {/if}
-                            <span class="snoc-secundario">{c.sugerencia.porque}</span>
-                          </p>
-                        {/if}
-                      </div>
-                    </td>
-                    <td class="snoc-mono" style="white-space:nowrap;">
-                      {#if c.ticket}#{c.ticket}{:else}<span class="snoc-tenue">—</span>{/if}
-                    </td>
-                    <td class="snoc-body-sm">
-                      {#if c.cliente}{c.cliente}{:else}<span class="snoc-tenue">Sin nombre</span>{/if}
-                    </td>
-                    <td style="text-align:right;">
-                      <button class="snoc-btn" type="button" onclick={() => abrir(c)}>
-                        Despachar
-                      </button>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-
-          <!-- PAGINACIÓN. Son enlaces y no botones: la página vive en la URL,
-               así que se puede copiar y volver atrás. -->
-          <div class="snoc-paginacion">
-            <span class="snoc-mono-sm snoc-tenue">
-              Mostrando {pag.desde} a {pag.hasta} de {pag.total} caso{pag.total === 1 ? '' : 's'}
-            </span>
-            {#if pag.paginas > 1}
-              <nav class="snoc-paginacion-botones" aria-label="Páginas de casos">
-                {#if pag.actual > 1}
-                  <a class="snoc-pildora" href={enlace({ pagina: pag.actual - 1 })}
-                     data-sveltekit-noscroll>Anterior</a>
-                {:else}
-                  <span class="snoc-pildora snoc-pildora-apagada" aria-disabled="true">Anterior</span>
-                {/if}
-                {#each pag.ventana as n, i (i)}
-                  {#if n === null}
-                    <span class="snoc-paginacion-hueco" aria-hidden="true">…</span>
-                  {:else}
-                    <a
-                      class="snoc-pildora {n === pag.actual ? 'snoc-pildora-activa' : ''}"
-                      href={enlace({ pagina: n })}
-                      data-sveltekit-noscroll
-                      aria-current={n === pag.actual ? 'page' : undefined}
-                      aria-label="Página {n}"
-                    >{n}</a>
-                  {/if}
-                {/each}
-                {#if pag.actual < pag.paginas}
-                  <a class="snoc-pildora" href={enlace({ pagina: pag.actual + 1 })}
-                     data-sveltekit-noscroll>Siguiente</a>
-                {:else}
-                  <span class="snoc-pildora snoc-pildora-apagada" aria-disabled="true">Siguiente</span>
-                {/if}
-              </nav>
-            {/if}
-          </div>
-        {/if}
-      </section>
+      {/if}
     {/if}
 
-    {#if despachando}
-      <section class="snoc-panel" style="gap:var(--snoc-sm);">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-          <h2 class="snoc-h2">{despachando.nombre}</h2>
-          <button class="snoc-pildora" type="button" onclick={() => (despachando = null)}>
-            Cerrar
-          </button>
-        </div>
+    </div>
+  </div>
+</div>
+
+<PanelLateral
+  abierto={!!despachando}
+  ancho="ancho"
+  antetitulo={despachando?.ticket ? `Despachar · #${despachando.ticket}` : 'Despachar'}
+  titulo={despachando ? `${despachando.nombre}${despachando.cliente ? ' · ' + despachando.cliente : ''}` : ''}
+  alCerrar={() => (despachando = null)}
+>
+  {#if despachando}
 
         {#if despachando.sugerencia?.porque}
-          <p class="snoc-aviso">
+          <p class="snoc-recuadro {despachando.sugerencia.labor === 'no_requiere_visita' ? 'snoc-recuadro-alerta' : 'snoc-recuadro-ok'}">
             {#if despachando.sugerencia.labor === 'no_requiere_visita'}
               <strong>La evidencia dice que no hace falta ir.</strong>
             {:else if despachando.sugerencia.labor}
@@ -989,9 +1063,10 @@
           </p>
         {/if}
 
-        <form method="POST" action="?/despachar" use:enhance class="snoc-pila-xs">
+        <form id="dp-despachar" method="POST" action="?/despachar" use:enhance={alDespachar} class="dp-pasos">
           <input type="hidden" name="case_id" value={despachando.id} />
 
+          <span class="dp-paso">1 · Qué y con qué plantilla</span>
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Con qué plantilla va</span>
             <select class="snoc-select" name="work_type_version_id"
@@ -1046,7 +1121,8 @@
             {/if}
           </label>
 
-          <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+          <span class="dp-paso">2 · Cuándo</span>
+          <div class="dp-par">
             <label class="snoc-campo-grupo">
               <span class="snoc-label">Prioridad</span>
               <select class="snoc-select" name="prioridad" bind:value={prioridadElegida}
@@ -1073,6 +1149,7 @@
           <!-- EL BARRIO DECIDE LA ZONA, Y LA ZONA DECIDE LA CUADRILLA. Viene
                de la ficha del cliente en el ISP; si hay que escribirlo, se
                elige de los barrios que ya están en alguna zona. -->
+          <span class="dp-paso">3 · Dónde</span>
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Barrio</span>
             <input class="snoc-campo" name="zona" required maxlength="128"
@@ -1091,7 +1168,7 @@
                cuadrilla la cubre ese día con esta labor. Misma regla que el
                reparto, calculada en el backend. -->
           {#if cobertura}
-            <div class="snoc-tarjeta snoc-pila-xs">
+            <div class="snoc-recuadro {cobertura.motivo === 'cubierta' ? 'snoc-recuadro-ok' : 'snoc-recuadro-alerta'} snoc-pila-xs">
               {#if cobertura.motivo === 'sin_zona'}
                 <span class="snoc-body-sm"><strong>Este barrio no está en ninguna zona.</strong>
                   La orden se crea, pero no se reparte hasta que alguien lo agregue a una
@@ -1099,7 +1176,7 @@
                 {#if cobertura.parecidas?.length}
                   <span class="snoc-body-sm">¿Quisiste decir
                     {#each cobertura.parecidas as p, i (p.localidad)}
-                      {i ? ' o ' : ''}<button type="button" class="snoc-btn"
+                      {i ? ' o ' : ''}<button type="button" class="snoc-pildora"
                         onclick={() => { barrio = p.localidad; revisarCobertura(); }}>
                         {p.localidad}</button> <span class="snoc-secundario">({p.zona})</span>
                     {/each}?</span>
@@ -1138,8 +1215,14 @@
                una cuadrilla, le llega a su líder (el único con celular) como al
                publicar el reparto, y el reparto la respeta después. Se ofrecen las que
                cubren esa zona ese día; un técnico puntual, dentro de ella. -->
+          <span class="dp-paso">4 · Quién</span>
+          {#if !cobertura?.jornadas?.length}
+            <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+              Sin cuadrilla para elegir: la orden queda para que la reparta el sistema.
+            </p>
+          {/if}
           {#if cobertura?.jornadas?.length}
-            <div class="snoc-fila" style="gap:var(--snoc-sm); flex-wrap:wrap;">
+            <div class="dp-par">
               <label class="snoc-campo-grupo">
                 <span class="snoc-label">Cuadrilla</span>
                 <select class="snoc-select" name="jornada_id" bind:value={jornadaElegida}
@@ -1175,12 +1258,13 @@
                 {/if}
               </p>
             {:else if jornada}
-              <p class="snoc-aviso snoc-error-txt">
+              <p class="snoc-recuadro snoc-recuadro-error">
                 {jornada.aviso ?? `${jornada.cuadrilla}: nadie la vería en un teléfono.`}
               </p>
             {/if}
           {/if}
 
+          <span class="dp-paso">5 · Para el técnico</span>
           <label class="snoc-campo-grupo">
             <span class="snoc-label">Cómo se entra al inmueble (opcional)</span>
             <input class="snoc-campo" name="detalle_acceso" maxlength="255"
@@ -1191,7 +1275,7 @@
                ticket, y sacarlo de ahí sería que un modelo adivine en un campo
                que el técnico lee como dato. Se muestra el ticket para copiarlo. -->
           {#if despachando.descripcion}
-            <details class="snoc-tarjeta" open>
+            <details class="snoc-recuadro" open>
               <summary class="snoc-body-sm"><strong>Lo que dice el ticket</strong>
                 <span class="snoc-secundario">· datos personales tapados</span></summary>
               <p class="snoc-body-sm" style="white-space:pre-wrap; margin-top:var(--snoc-xs);">
@@ -1206,14 +1290,14 @@
                pudo medir" no confirma nada. Se confirma con el cliente antes
                de mandar a alguien. Vacío si lo aceptó una persona. -->
           {#if despachando.lectura?.por_que_paso}
-            <p class="snoc-aviso snoc-body-sm">
+            <p class="snoc-recuadro">
               <strong>Pasó solo a Despacho:</strong> {despachando.lectura.por_que_paso}
             </p>
           {/if}
           <!-- EL CORTE DE RED (19/10/2026), lo haya pasado el Supervisor o una
                persona: varios casos del mismo puerto son un solo trabajo. -->
           {#if despachando.lectura?.corte_de_red}
-            <p class="snoc-aviso snoc-body-sm">
+            <p class="snoc-recuadro snoc-recuadro-alerta">
               <strong>Corte de red:</strong> {despachando.lectura.corte_de_red}
             </p>
           {/if}
@@ -1234,22 +1318,24 @@
             <p class="snoc-body-sm snoc-secundario">Trayendo la ficha del caso…</p>
           {/if}
 
-          <div>
-            <button class="snoc-btn" type="submit">Crear la orden</button>
-          </div>
         </form>
 
         {#if form?.error && form?.de !== 'ciclo'}
-          <p class="snoc-aviso snoc-error-txt">{form.error}</p>
+          <p class="snoc-recuadro snoc-recuadro-error" role="alert">{form.error}</p>
         {/if}
-        {#if form?.hecho && form?.de !== 'ciclo'}
-          <p class="snoc-aviso">{form.hecho}</p>
-        {/if}
-      </section>
-    {/if}
+  {/if}
+  {#snippet pie()}
+    <div class="snoc-fila-sep" style="flex-wrap:wrap;">
+      <span class="snoc-body-sm snoc-secundario">Si el caso ya tenía una orden abierta, se avisa al crearla.</span>
+      <div class="snoc-fila">
+        <button class="snoc-btn" type="button" onclick={() => (despachando = null)}>Cerrar</button>
+        <button class="snoc-btn snoc-btn-primario" type="submit" form="dp-despachar" disabled={creandoOrden}>
+          {creandoOrden ? 'Creando…' : 'Crear la orden'}
+        </button>
+      </div>
     </div>
-  </div>
-</div>
+  {/snippet}
+</PanelLateral>
 
 <style>
   /*  LAS FOTOS QUE PIDE LA PLANTILLA (06/11/2026): una lista corta, legible
@@ -1266,4 +1352,12 @@
     border-left: 2px solid var(--snoc-outline-variant, #ddd);
   }
   .dp-fotos-titulo { font-weight: 600; }
+  .dp-pasos { display: flex; flex-direction: column; gap: 10px; }
+  .dp-paso {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700;
+    color: var(--v2-ember-text); margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--v2-line-soft);
+  }
+  .dp-paso:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+  .dp-par { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+  .dp-fallos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
 </style>
