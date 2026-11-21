@@ -617,7 +617,7 @@
         <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
           <div class="snoc-pila-xs">
             <div class="snoc-fila">
-              <h1 class="snoc-h1">PLANES SEMANALES</h1>
+              <h1 class="snoc-h1">Planes semanales</h1>
               <span class="snoc-insignia snoc-insignia-neutra snoc-primario">Shadow Mode</span>
             </div>
             <p class="snoc-body snoc-secundario">

@@ -72,7 +72,7 @@
     <section class="snoc-panel" style="gap:var(--snoc-md);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
         <div class="snoc-pila-xs">
-          <h1 class="snoc-h1">AJUSTES DEL SUPERVISOR</h1>
+          <h1 class="snoc-h1">Ajustes del Supervisor</h1>
           <p class="snoc-body snoc-secundario">
             Lo que no es crítico, el Supervisor lo hace solo desde el primer día. Acá se
             <strong>quita</strong>: cada tarea tiene su interruptor, y queda registrado quién y

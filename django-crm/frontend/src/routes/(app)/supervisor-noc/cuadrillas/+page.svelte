@@ -389,7 +389,7 @@
     <section class="snoc-panel" style="gap:var(--snoc-md);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
         <div class="snoc-pila-xs">
-          <h1 class="snoc-h1">CUADRILLAS</h1>
+          <h1 class="snoc-h1">Cuadrillas</h1>
           <p class="snoc-body snoc-secundario">
             Quiénes son, y qué hace cada una el día que elijas. La cuadrilla sigue siendo la
             misma mañana; lo que cambia es su labor y su gente.

@@ -26,71 +26,44 @@
  */
 
 .snoc.snv {
-  --snv-fondo: oklch(0.972 0.005 250);
-  --snv-superficie: oklch(0.995 0.002 250);
-  --snv-superficie-2: oklch(0.955 0.006 250);
-  --snv-linea: oklch(0.91 0.008 250);
-  --snv-linea-2: oklch(0.85 0.01 250);
-  --snv-tinta: oklch(0.235 0.022 258);
-  --snv-tinta-2: oklch(0.415 0.02 258);
-  --snv-tinta-3: oklch(0.53 0.016 258);
+  /* 21/11/2026: los nombres --snv-* se conservan, pero apuntan a la paleta
+     Fibra de Dexter (lib/v2/styles/v2.css), igual que la hoja compartida.
+     Antes Pendientes tenía colores oklch y tipografías propias (Barlow,
+     Atkinson) y no seguía el modo oscuro. El significado del color no
+     cambia: índigo = acción, rojo = vencido, ámbar = en riesgo, verde = vivo. */
+  --snv-fondo: var(--v2-paper);
+  --snv-superficie: var(--v2-card);
+  --snv-superficie-2: var(--v2-line-soft);
+  --snv-linea: var(--v2-line);
+  --snv-linea-2: var(--v2-line-strong);
+  --snv-tinta: var(--v2-ink);
+  --snv-tinta-2: var(--v2-slate);
+  --snv-tinta-3: var(--v2-slate);
 
-  --snv-accion: oklch(0.33 0.085 255);
-  --snv-accion-alta: oklch(0.28 0.08 255);
-  --snv-accion-suave: oklch(0.945 0.022 255);
-  --snv-enlace: oklch(0.42 0.13 255);
+  --snv-accion: var(--v2-ember);
+  --snv-accion-alta: var(--v2-ember-hover);
+  --snv-accion-suave: var(--v2-ember-soft);
+  --snv-enlace: var(--v2-ember-text);
 
-  --snv-critico: oklch(0.54 0.19 27);
-  --snv-critico-tinta: oklch(0.47 0.17 27);
-  --snv-critico-suave: oklch(0.958 0.026 27);
-  --snv-alerta: oklch(0.735 0.145 72);
-  --snv-alerta-tinta: oklch(0.5 0.11 62);
-  --snv-alerta-suave: oklch(0.966 0.04 85);
-  --snv-vivo: oklch(0.6 0.13 155);
-  --snv-vivo-tinta: oklch(0.42 0.1 155);
-  --snv-vivo-suave: oklch(0.955 0.035 155);
+  --snv-critico: var(--v2-rust);
+  --snv-critico-tinta: var(--v2-rust);
+  --snv-critico-suave: var(--v2-critica-soft);
+  --snv-alerta: var(--v2-espera-fuerte);
+  --snv-alerta-tinta: var(--v2-espera);
+  --snv-alerta-suave: var(--v2-espera-soft);
+  --snv-vivo: var(--v2-sola-fuerte);
+  --snv-vivo-tinta: var(--v2-sola);
+  --snv-vivo-suave: var(--v2-sola-soft);
 
-  --snv-f-titulo: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
-  --snv-f-texto: 'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', system-ui, sans-serif;
+  --snv-f-titulo: var(--v2-sans);
+  --snv-f-texto: var(--v2-sans);
   --snv-ancho-detalle: clamp(420px, 32vw, 520px);
-  --snv-radio: 10px;
-  --snv-sombra: 0 1px 2px oklch(0.24 0.02 258 / 0.05);
+  --snv-radio: var(--v2-radius);
+  --snv-sombra: var(--v2-shadow);
 
-  /* --- los tokens M3 de la hoja compartida, remapeados a esta paleta --- */
-  --snoc-surface: var(--snv-fondo);
-  --snoc-surface-container-lowest: var(--snv-superficie);
-  --snoc-surface-container-low: oklch(0.965 0.006 250);
-  --snoc-surface-container: var(--snv-superficie-2);
-  --snoc-surface-container-high: oklch(0.935 0.008 250);
-  --snoc-surface-container-highest: oklch(0.915 0.009 250);
-  --snoc-surface-variant: oklch(0.93 0.008 250);
-  --snoc-on-surface: var(--snv-tinta);
-  --snoc-on-surface-variant: var(--snv-tinta-2);
-  --snoc-secondary: var(--snv-tinta-2);
-  --snoc-on-secondary-container: var(--snv-tinta-2);
-  --snoc-on-secondary-fixed-variant: var(--snv-tinta-2);
-  --snoc-secondary-container: var(--snv-accion-suave);
-  --snoc-secondary-fixed-dim: oklch(0.86 0.02 258);
-  --snoc-outline: var(--snv-tinta-3);
-  --snoc-outline-variant: var(--snv-linea);
-  --snoc-primary: var(--snv-accion);
-  --snoc-primary-container: var(--snv-accion);
-  --snoc-on-primary: oklch(0.985 0.005 258);
-  --snoc-on-primary-container: oklch(0.985 0.005 258);
-  --snoc-tertiary: var(--snv-accion-alta);
-  --snoc-primary-fixed: var(--snv-accion-suave);
-  --snoc-primary-fixed-dim: oklch(0.86 0.05 258);
-  --snoc-inverse-surface: var(--snv-tinta);
-  --snoc-inverse-on-surface: var(--snv-superficie);
-  --snoc-error: var(--snv-critico);
-  --snoc-error-container: var(--snv-critico-suave);
-  --snoc-on-error-container: var(--snv-critico-tinta);
-  --snoc-on-error: oklch(0.985 0.005 258);
-  --snoc-r: 4px;
-  --snoc-r-lg: 6px;
-  --snoc-r-xl: 8px;
-  --snoc-r-full: 10px;
-  --snoc-sombra: none;
+  /* El texto sobre el índigo: blanco en claro, tinta en oscuro (v2.css). */
+  --snoc-on-primary: var(--v2-on-ember);
+  --snoc-on-primary-container: var(--v2-on-ember);
 
   font-family: var(--snv-f-texto);
   font-size: 14px;
@@ -132,7 +105,7 @@
   transition: background 120ms, border-color 120ms;
 }
 .snv-btn:disabled { opacity: 0.55; cursor: default; }
-.snv-btn-pri { background: var(--snv-accion); color: oklch(0.985 0.005 258); }
+.snv-btn-pri { background: var(--snv-accion); color: var(--v2-on-ember); }
 .snv-btn-pri:hover:not(:disabled) { background: var(--snv-accion-alta); }
 .snv-btn-sec { background: var(--snv-superficie); color: var(--snv-tinta); border-color: var(--snv-linea-2); }
 .snv-btn-sec:hover:not(:disabled) { background: var(--snv-superficie-2); }
@@ -146,7 +119,7 @@
   background: var(--snv-superficie-2); border-radius: 5px; padding: 0 7px; white-space: nowrap;
 }
 .snv-tag-alta { color: var(--snv-critico-tinta); background: var(--snv-critico-suave); }
-.snv-tag-decidida { color: var(--snv-tinta); background: oklch(0.92 0.01 250); }
+.snv-tag-decidida { color: var(--snv-tinta); background: var(--v2-line); }
 .snv-punto { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: currentColor; }
 .snv-punto-vivo { background: var(--snv-vivo); }
 .snv-punto-alerta { background: var(--snv-alerta); }
@@ -229,7 +202,7 @@
 .snv-decidir-cab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .snv-pildora-n {
   display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 24px; padding: 0 8px;
-  border-radius: 6px; background: var(--snv-accion); color: oklch(0.985 0.005 258);
+  border-radius: 6px; background: var(--snv-accion); color: var(--v2-on-ember);
   font-family: var(--snv-f-titulo); font-weight: 700; font-size: 15px;
 }
 .snv-segmentado { display: inline-flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
@@ -238,12 +211,12 @@
   border: 1px solid var(--snv-linea-2); border-radius: 8px; background: var(--snv-superficie);
   font: inherit; font-size: 13px; font-weight: 600; color: var(--snv-tinta-2);
 }
-.snv-segmentado button[aria-pressed='true'] { background: var(--snv-accion); border-color: var(--snv-accion); color: oklch(0.985 0.005 258); }
+.snv-segmentado button[aria-pressed='true'] { background: var(--snv-accion); border-color: var(--snv-accion); color: var(--v2-on-ember); }
 .snv-cuenta {
   font-family: var(--snv-f-titulo); font-variant-numeric: tabular-nums; font-weight: 700;
-  padding: 0 6px; border-radius: 5px; background: oklch(0.24 0.02 258 / 0.08);
+  padding: 0 6px; border-radius: 5px; background: var(--v2-hover);
 }
-.snv-segmentado button[aria-pressed='true'] .snv-cuenta { background: oklch(1 0 0 / 0.18); }
+.snv-segmentado button[aria-pressed='true'] .snv-cuenta { background: rgba(255,255,255,.18); }
 .snv-filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
 .snv-buscador {
   flex: 1 1 240px; min-width: 200px; display: flex; align-items: center; gap: 8px;
@@ -286,7 +259,7 @@
   gap: 12px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--snv-linea);
   font-size: 13px; transition: background 120ms;
 }
-.snv-fila:hover { background: oklch(0.982 0.004 250); }
+.snv-fila:hover { background: var(--v2-ember-soft); }
 .snv-fila-abierta, .snv-fila-abierta:hover { background: var(--snv-accion-suave); }
 .snv-fila-decidida { color: var(--snv-tinta-2); }
 .snv-c-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--snv-accion); }
@@ -359,7 +332,7 @@
 .snv-detalle {
   height: 100%; display: flex; flex-direction: column;
   background: var(--snv-superficie); border-left: 1px solid var(--snv-linea-2);
-  box-shadow: -12px 0 40px oklch(0.24 0.02 258 / 0.1);
+  box-shadow: var(--v2-shadow-lift);
 }
 .snv-det-cab { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 20px 12px; }
 .snv-cerrar {
@@ -381,7 +354,7 @@
 }
 .snv-det-icono {
   width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
-  font-weight: 800; color: oklch(0.985 0.005 258); background: var(--snv-tinta-3);
+  font-weight: 800; color: var(--v2-on-ember); background: var(--snv-tinta-3);
 }
 .snv-det-icono.snv-tono-critico { background: var(--snv-critico); }
 .snv-det-icono.snv-tono-alerta { background: var(--snv-alerta); }
@@ -408,7 +381,7 @@
 .snv-hechos { margin: 0 0 6px; padding-left: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
 .snv-det-acepto {
   margin: 8px 0; padding: 12px 14px; border-radius: var(--snv-radio);
-  background: var(--snv-vivo-suave); border: 1px solid oklch(0.86 0.05 155);
+  background: var(--snv-vivo-suave); border: 1px solid var(--v2-sola-line);
 }
 .snv-det-sub { margin: 6px 0 4px; font-size: 13px; font-weight: 700; }
 .snv-lista-si, .snv-lista-no { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
@@ -473,7 +446,7 @@
 }
 @media (max-width: 1100px) {
   .snv-con-detalle .snoc-lienzo { padding-right: 0; }
-  .snv-velo-detalle { left: 0; width: auto; background: oklch(0.24 0.02 258 / 0.25); display: flex; justify-content: flex-end; }
+  .snv-velo-detalle { left: 0; width: auto; background: rgba(20,18,46,.32); display: flex; justify-content: flex-end; }
   .snv-detalle { width: min(100%, 540px); }
 }
 @media (max-width: 720px) {

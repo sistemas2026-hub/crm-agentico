@@ -393,7 +393,7 @@
     <section class="snoc-panel" style="gap:var(--snoc-md);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
         <div class="snoc-pila-xs">
-          <h1 class="snoc-h1">DESPACHO A CAMPO</h1>
+          <h1 class="snoc-h1">Despacho a campo</h1>
           <p class="snoc-body snoc-secundario">
             Qué casos van a una visita, y con qué plantilla. Lo que se despacha acá es lo
             que el ciclo de la madrugada reparte entre las cuadrillas.

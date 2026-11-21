@@ -140,7 +140,7 @@
     <section class="snoc-panel" style="gap:var(--snoc-md);">
       <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
         <div class="snoc-pila-xs">
-          <h1 class="snoc-h1">PLANTILLAS DE TRABAJO</h1>
+          <h1 class="snoc-h1">Plantillas de trabajo</h1>
           <p class="snoc-body snoc-secundario">
             Qué anota y qué fotos saca el técnico en cada visita, y con qué labor sale la
             orden. Un cambio se publica como versión nueva: las órdenes ya creadas no cambian.

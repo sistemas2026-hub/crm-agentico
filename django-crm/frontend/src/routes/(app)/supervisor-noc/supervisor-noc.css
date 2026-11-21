@@ -25,39 +25,56 @@
  */
 
 .snoc {
-  /* --- paleta del config de Stitch (valores exactos) --- */
-  --snoc-outline: #707881;
-  --snoc-on-surface: #0b1c30;
-  --snoc-inverse-on-surface: #eaf1ff;
-  --snoc-surface-variant: #d3e4fe;
+  /* --- LA PALETA ES LA DE DEXTER (21/11/2026) ---
+     Hasta hoy eran los 45 valores Material 3 azules de Stitch (#00639b), y
+     Pendientes tenía otra paleta propia (oklch, Barlow, Atkinson): el
+     Supervisor parecía tres aplicaciones. Ahora cada token apunta a la
+     paleta Fibra de lib/v2/styles/v2.css, así que las nueve pantallas se ven
+     como el resto de Dexter y siguen el modo oscuro sin nada aparte.
+     Los NOMBRES se conservan: los usan ~600 lugares del marcado. */
+  --snoc-outline: var(--v2-slate);
+  --snoc-on-surface: var(--v2-ink);
+  --snoc-inverse-on-surface: var(--v2-paper);
+  --snoc-surface-variant: var(--v2-line-soft);
   --snoc-on-error: #ffffff;
-  --snoc-surface-container-high: #dce9ff;
-  --snoc-error: #ba1a1a;
-  --snoc-surface-container: #e5eeff;
-  --snoc-primary-container: #007bb9;
-  --snoc-on-primary-container: #fdfcff;
-  --snoc-on-primary: #ffffff;
-  --snoc-primary-fixed-dim: #93ccff;
-  --snoc-primary-fixed: #cce5ff;
-  --snoc-on-error-container: #93000a;
-  --snoc-secondary-container: #dae2fd;
-  --snoc-outline-variant: #bfc7d2;
-  --snoc-secondary: #565e74;
-  --snoc-inverse-surface: #213145;
-  --snoc-error-container: #ffdad6;
-  --snoc-secondary-fixed-dim: #bec6e0;
-  --snoc-on-secondary-container: #5c647a;
-  --snoc-on-secondary-fixed-variant: #3f465c;
-  --snoc-surface-container-lowest: #ffffff;
-  --snoc-on-secondary: #ffffff;
-  --snoc-tertiary: #006195;
-  --snoc-surface: #f8f9ff;
+  --snoc-surface-container-high: var(--v2-line);
+  --snoc-error: var(--v2-rust);
+  --snoc-surface-container: var(--v2-line-soft);
+  --snoc-primary-container: var(--v2-ember-hover);
+  --snoc-on-primary-container: var(--v2-on-ember);
+  --snoc-on-primary: var(--v2-on-ember);
+  --snoc-primary-fixed-dim: var(--v2-ember-line);
+  --snoc-primary-fixed: var(--v2-ember);
+  --snoc-on-error-container: var(--v2-rust);
+  --snoc-secondary-container: var(--v2-ember-soft);
+  --snoc-outline-variant: var(--v2-line);
+  --snoc-secondary: var(--v2-slate);
+  --snoc-inverse-surface: var(--v2-ink);
+  --snoc-error-container: var(--v2-critica-soft);
+  --snoc-secondary-fixed-dim: var(--v2-line-strong);
+  --snoc-on-secondary-container: var(--v2-ember-text);
+  --snoc-on-secondary-fixed-variant: var(--v2-slate);
+  --snoc-surface-container-lowest: var(--v2-card);
+  --snoc-on-secondary: var(--v2-card);
+  --snoc-tertiary: var(--v2-ember-text);
+  --snoc-surface: var(--v2-paper);
+  --snoc-primary: var(--v2-ember);
+  --snoc-surface-container-low: var(--v2-paper);
+  --snoc-surface-container-highest: var(--v2-line-strong);
+  --snoc-on-surface-variant: var(--v2-slate);
 
-  /* --- los cuatro que faltaban (ver cabecera) --- */
-  --snoc-primary: #00639b;
-  --snoc-surface-container-low: #eff3fd;
-  --snoc-surface-container-highest: #d6e3f9;
-  --snoc-on-surface-variant: #424a54;
+  /* --- los tonos que faltaban: «en riesgo» y «bien» (21/11/2026) ---
+     Solo había rojo y azul: «sin armar», «sin zona» o «armada sola» no
+     tenían color. Son los de la ficha de Agentes. */
+  --snoc-alerta: var(--v2-espera);
+  --snoc-alerta-fuerte: var(--v2-espera-fuerte);
+  --snoc-alerta-suave: var(--v2-espera-soft);
+  --snoc-alerta-linea: var(--v2-espera-line);
+  --snoc-ok: var(--v2-sola);
+  --snoc-ok-fuerte: var(--v2-sola-fuerte);
+  --snoc-ok-suave: var(--v2-sola-soft);
+  --snoc-ok-linea: var(--v2-sola-line);
+  --snoc-error-linea: var(--v2-critica-line);
 
   /* --- espaciado del config --- */
   --snoc-xs: 0.25rem;
@@ -67,18 +84,18 @@
   --snoc-xl: 1.5rem;
 
   /* --- radios del config: consola, no tarjetas redondeadas --- */
-  --snoc-r: 0.125rem;
-  --snoc-r-lg: 0.25rem;
-  --snoc-r-xl: 0.5rem;
-  --snoc-r-full: 0.75rem;
+  --snoc-r: 6px;
+  --snoc-r-lg: var(--v2-radius-control);
+  --snoc-r-xl: var(--v2-radius);
+  --snoc-r-full: 999px;
 
-  --snoc-sombra: 0 1px 8px rgba(0, 0, 0, 0.04);
+  --snoc-sombra: var(--v2-shadow);
 
   background: var(--snoc-surface);
   color: var(--snoc-on-surface);
-  font-family: Inter, system-ui, sans-serif;
-  font-size: 13px;
-  line-height: 18px;
+  font-family: var(--v2-sans);
+  font-size: 13.5px;
+  line-height: 19px;
   -webkit-font-smoothing: antialiased;
   /* Sin min-height ni fondo de documento: el layout de (app) ya los define y
      esta pantalla es una seccion dentro de el, no una app aparte.
@@ -103,10 +120,10 @@
    Los datos tecnicos van SIEMPRE en mono: es lo que separa una cifra de una
    frase de un vistazo.
    --------------------------------------------------------------------------- */
-.snoc-h1 { font-family: 'Hanken Grotesk', sans-serif; font-size: 28px; line-height: 34px; letter-spacing: -0.02em; font-weight: 700; margin: 0; }
-.snoc-h2 { font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; line-height: 28px; letter-spacing: -0.015em; font-weight: 600; margin: 0; }
-.snoc-h3 { font-family: 'Hanken Grotesk', sans-serif; font-size: 18px; line-height: 24px; letter-spacing: -0.01em; font-weight: 600; margin: 0; }
-.snoc-h4 { font-family: 'Hanken Grotesk', sans-serif; font-size: 15px; line-height: 20px; letter-spacing: -0.005em; font-weight: 600; margin: 0; }
+.snoc-h1 { font-family: var(--v2-sans); font-size: 26px; line-height: 32px; letter-spacing: -0.02em; font-weight: 700; margin: 0; }
+.snoc-h2 { font-family: var(--v2-sans); font-size: 17px; line-height: 24px; letter-spacing: -0.01em; font-weight: 700; margin: 0; }
+.snoc-h3 { font-family: var(--v2-sans); font-size: 15px; line-height: 21px; letter-spacing: -0.005em; font-weight: 700; margin: 0; }
+.snoc-h4 { font-family: var(--v2-sans); font-size: 14px; line-height: 20px; font-weight: 600; margin: 0; }
 .snoc-body-lg { font-size: 15px; line-height: 22px; font-weight: 400; }
 .snoc-body { font-size: 13px; line-height: 18px; font-weight: 400; }
 .snoc-body-sm { font-size: 12px; line-height: 16px; font-weight: 400; }
@@ -115,23 +132,34 @@
 .snoc-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 16px; font-weight: 500; }
 .snoc-mono-sm { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 14px; letter-spacing: 0.02em; font-weight: 500; }
 .snoc-mono-lg { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; line-height: 18px; letter-spacing: -0.01em; font-weight: 500; }
-.snoc-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; line-height: 12px; letter-spacing: 0.05em; font-weight: 700; text-transform: uppercase; }
+/* 21/11/2026: era texto mono de 10px en mayúsculas sin fondo, y una fila de
+   integrantes o de barrios se leía como una tira pegada. Ahora es pastilla. */
+.snoc-tag {
+  display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px;
+  border-radius: 6px; background: var(--v2-origen); color: var(--v2-origen-ink);
+  font-family: var(--v2-sans); font-size: 11.5px; line-height: 14px; font-weight: 600;
+  white-space: nowrap;
+}
 
 /* El lienzo. La barra lateral y la cabecera las pone el layout de (app):
    esta pantalla es contenido, no una aplicacion aparte. */
-.snoc-lienzo { display: flex; flex-direction: column; gap: var(--snoc-lg); }
+/* 21/11/2026: con ancho máximo y margen, como el resto de Dexter. */
+.snoc-lienzo { display: flex; flex-direction: column; gap: 18px; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 28px; }
+@media (max-width: 700px) { .snoc-lienzo { padding: 0 16px; } }
 
 /* ---------------------------------------------------------------------------
    PIEZAS
    --------------------------------------------------------------------------- */
 .snoc-tarjeta {
+  border: 1px solid var(--v2-line);
   background: var(--snoc-surface-container-lowest); padding: var(--snoc-md);
   border-radius: var(--snoc-r-xl); box-shadow: var(--snoc-sombra);
   display: flex; flex-direction: column; justify-content: space-between;
   position: relative; overflow: hidden;
 }
 .snoc-panel {
-  background: var(--snoc-surface-container-lowest); padding: var(--snoc-md);
+  border: 1px solid var(--v2-line);
+  background: var(--snoc-surface-container-lowest); padding: 16px 18px;
   border-radius: var(--snoc-r-xl); box-shadow: var(--snoc-sombra);
   display: flex; flex-direction: column; gap: var(--snoc-md);
 }
@@ -164,17 +192,20 @@
 
 /* Insignias. El tono dice el estado; el texto nunca depende solo del color. */
 .snoc-insignia {
-  display: inline-flex; align-items: center; gap: var(--snoc-xs);
-  padding: 2px var(--snoc-xs); border-radius: var(--snoc-r);
-  background: var(--snoc-surface-container-high); color: var(--snoc-on-surface);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 10px; line-height: 12px; letter-spacing: 0.05em; font-weight: 700;
-  text-transform: uppercase; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 22px; padding: 0 8px; border-radius: var(--snoc-r-full);
+  border: 1px solid var(--v2-line);
+  background: var(--v2-origen); color: var(--v2-origen-ink);
+  font-family: var(--v2-sans);
+  font-size: 11.5px; line-height: 14px; font-weight: 600;
+  white-space: nowrap;
 }
-.snoc-insignia-error { background: var(--snoc-error-container); color: var(--snoc-on-error-container); }
-.snoc-insignia-error-solida { background: var(--snoc-error); color: var(--snoc-on-error); }
+.snoc-insignia-error { background: var(--snoc-error-container); border-color: var(--snoc-error-linea); color: var(--snoc-on-error-container); }
+.snoc-insignia-alerta { background: var(--snoc-alerta-suave); border-color: var(--snoc-alerta-linea); color: var(--snoc-alerta); }
+.snoc-insignia-ok { background: var(--snoc-ok-suave); border-color: var(--snoc-ok-linea); color: var(--snoc-ok); }
+.snoc-insignia-error-solida { background: var(--snoc-error); border-color: var(--snoc-error); color: var(--snoc-on-error); }
 .snoc-insignia-secundaria { background: var(--snoc-secondary); color: var(--snoc-on-secondary); }
-.snoc-insignia-secundaria-suave { background: var(--snoc-secondary-container); color: var(--snoc-on-secondary-container); }
+.snoc-insignia-secundaria-suave { background: var(--snoc-secondary-container); border-color: var(--v2-ember-line); color: var(--snoc-on-secondary-container); }
 .snoc-insignia-variante { background: var(--snoc-surface-variant); color: var(--snoc-on-surface); }
 .snoc-insignia-neutra { background: var(--snoc-surface-container); color: var(--snoc-secondary); }
 
@@ -186,38 +217,41 @@
 
 /* Botones */
 .snoc-btn {
-  display: inline-flex; align-items: center; gap: var(--snoc-xs);
-  padding: 4px var(--snoc-sm); border-radius: var(--snoc-r-lg); border: 0;
-  background: var(--snoc-surface-container); color: var(--snoc-on-surface);
-  font-family: Inter, sans-serif; font-size: 12px; line-height: 16px;
-  letter-spacing: 0.02em; font-weight: 600; cursor: pointer;
-  transition: background 0.15s;
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 34px; padding: 0 12px; border-radius: var(--snoc-r-lg);
+  border: 1px solid var(--v2-line-strong);
+  background: var(--v2-card); color: var(--snoc-on-surface);
+  font-family: var(--v2-sans); font-size: 13px; line-height: 16px;
+  font-weight: 600; cursor: pointer; white-space: nowrap; text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
 }
-.snoc-btn:hover { background: var(--snoc-surface-container-high); }
+.snoc-btn:hover { background: var(--v2-ember-soft); border-color: var(--v2-ember-line); }
+.snoc-btn:focus-visible, .snoc-pildora:focus-visible { outline: 2px solid var(--v2-ember); outline-offset: 2px; }
 .snoc-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.snoc-btn-primario { background: var(--snoc-primary); color: var(--snoc-on-primary); box-shadow: var(--snoc-sombra); }
-.snoc-btn-primario:hover { background: var(--snoc-primary-container); }
-.snoc-btn-error { background: var(--snoc-error); color: var(--snoc-on-error); }
-.snoc-btn-error:hover { background: var(--snoc-on-error-container); }
+.snoc-btn-primario { background: var(--snoc-primary); border-color: var(--snoc-primary); color: var(--snoc-on-primary); }
+.snoc-btn-primario:hover { background: var(--snoc-primary-container); border-color: var(--snoc-primary-container); }
+.snoc-btn-error { background: var(--snoc-error); border-color: var(--snoc-error); color: var(--snoc-on-error); }
+.snoc-btn-error:hover { filter: brightness(0.92); background: var(--snoc-error); }
 
 .snoc-pildora {
-  padding: 4px var(--snoc-sm); border-radius: var(--snoc-r-lg); border: 0;
-  background: var(--snoc-surface-container); color: var(--snoc-on-surface);
-  font-size: 12px; line-height: 16px; letter-spacing: 0.02em; font-weight: 600;
-  cursor: pointer; text-decoration: none; display: inline-block;
+  min-height: 30px; padding: 0 11px; border-radius: var(--snoc-r-lg);
+  border: 1px solid var(--v2-line-strong);
+  background: var(--v2-card); color: var(--snoc-on-surface);
+  font-size: 12.5px; line-height: 28px; font-weight: 600;
+  cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
 }
-.snoc-pildora:hover { background: var(--snoc-surface-container-high); }
-.snoc-pildora-activa { background: var(--snoc-primary); color: var(--snoc-on-primary); }
+.snoc-pildora:hover { background: var(--v2-ember-soft); border-color: var(--v2-ember-line); }
+.snoc-pildora-activa, .snoc-pildora-activa:hover { background: var(--snoc-primary); border-color: var(--snoc-primary); color: var(--snoc-on-primary); }
 
 /* Tablas: densas a proposito, es una consola de operacion. */
 .snoc-tabla-caja { overflow-x: auto; }
-.snoc-tabla { width: 100%; text-align: left; border-collapse: collapse; font-size: 12px; line-height: 16px; }
+.snoc-tabla { width: 100%; text-align: left; border-collapse: collapse; font-size: 13px; line-height: 18px; }
 .snoc-tabla thead tr { background: var(--snoc-surface-container-low); color: var(--snoc-secondary); text-transform: uppercase; }
-.snoc-tabla th { padding: var(--snoc-xs) var(--snoc-sm); font-size: 11px; letter-spacing: 0.03em; font-weight: 600; white-space: nowrap; }
-.snoc-tabla td { padding: var(--snoc-sm); vertical-align: top; }
-.snoc-tabla tbody tr { border-top: 1px solid var(--snoc-surface-container); }
-.snoc-tabla tbody tr:hover { background: var(--snoc-surface-container-low); }
-.snoc-fila-activa { background: color-mix(in srgb, var(--snoc-surface-container-low) 80%, transparent); }
+.snoc-tabla th { padding: 9px 12px; font-size: 11px; letter-spacing: 0.06em; font-weight: 600; white-space: nowrap; border-bottom: 1px solid var(--v2-line); }
+.snoc-tabla td { padding: 10px 12px; vertical-align: top; }
+.snoc-tabla tbody tr { border-top: 1px solid var(--v2-line-soft); }
+.snoc-tabla tbody tr:hover { background: var(--v2-ember-soft); }
+.snoc-fila-activa { background: var(--v2-ember-soft); }
 .snoc-id { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; color: var(--snoc-primary); }
 .snoc-recorte { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -231,9 +265,10 @@
 
 .snoc-aviso {
   display: flex; align-items: center; gap: var(--snoc-sm);
-  background: var(--snoc-surface-container-low); padding: var(--snoc-sm) var(--snoc-md);
-  border-radius: var(--snoc-r-lg); box-shadow: var(--snoc-sombra);
+  background: var(--v2-paper); padding: 10px 14px;
+  border: 1px solid var(--v2-line); border-radius: var(--snoc-r-xl);
 }
+.snoc-aviso.snoc-error-txt { background: var(--snoc-error-container); border-color: var(--snoc-error-linea); }
 .snoc-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--snoc-sm); background: var(--snoc-surface-container-low); padding: var(--snoc-md); border-radius: var(--snoc-r-lg); }
 @media (min-width: 640px) { .snoc-meta { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .snoc-meta span:first-child { display: block; color: var(--snoc-outline); font-size: 11px; letter-spacing: 0.03em; font-weight: 600; }
@@ -246,7 +281,7 @@
 }
 .snoc-modal {
   background: var(--snoc-surface-container-lowest); max-width: 28rem; width: 100%;
-  border-radius: var(--snoc-r-xl); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  border-radius: var(--snoc-r-xl); box-shadow: var(--v2-shadow-lift);
   padding: var(--snoc-lg); display: flex; flex-direction: column; gap: var(--snoc-md);
   /* ALTO ACOTADO Y CON SCROLL PROPIO (08/10/2026).
      Tenia ancho maximo y ninguna altura maxima, asi que un panel con varios
@@ -265,7 +300,7 @@
 .snoc-pila { display: flex; flex-direction: column; gap: var(--snoc-sm); }
 .snoc-pila-xs { display: flex; flex-direction: column; gap: var(--snoc-xs); }
 .snoc-envuelve { display: flex; flex-wrap: wrap; align-items: center; gap: var(--snoc-xs); }
-.snoc-cifra { font-family: 'Hanken Grotesk', sans-serif; font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -0.02em; }
+.snoc-cifra { font-family: var(--v2-sans); font-size: 26px; line-height: 32px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .snoc-error-txt { color: var(--snoc-error); }
 .snoc-tenue { color: var(--snoc-outline); }
 .snoc-secundario { color: var(--snoc-secondary); }
@@ -297,7 +332,7 @@
      entra en dos columnas, y por encima de 900px las lineas se vuelven
      demasiado largas para leerlas de un vistazo. */
   width: clamp(460px, 50vw, 900px); max-width: 100%;
-  background: var(--snoc-surface); box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+  background: var(--snoc-surface); box-shadow: var(--v2-shadow-lift); border-left: 1px solid var(--v2-line);
   display: flex; flex-direction: column;
 }
 .snoc-drawer-cabecera {
@@ -457,7 +492,7 @@
 }
 .snoc-contraste-lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .snoc-contraste-vs {
-  font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; font-weight: 700;
+  font-family: var(--v2-sans); font-size: 22px; font-weight: 700;
   color: var(--snoc-error); text-align: center;
 }
 
@@ -503,7 +538,7 @@
   background: var(--snoc-error-container); color: var(--snoc-on-error-container);
 }
 .snoc-hallazgo-titulo {
-  font-family: 'Hanken Grotesk', sans-serif; font-size: 18px; line-height: 24px;
+  font-family: var(--v2-sans); font-size: 18px; line-height: 24px;
   font-weight: 700; letter-spacing: -0.01em; text-transform: uppercase; margin: 0;
 }
 
@@ -592,7 +627,7 @@
 }
 .snoc-mismatch-lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--snoc-on-surface); }
 .snoc-mismatch-vs {
-  font-family: 'Hanken Grotesk', sans-serif; font-size: 22px; font-weight: 700;
+  font-family: var(--v2-sans); font-size: 22px; font-weight: 700;
   color: var(--snoc-error); text-align: center;
 }
 
@@ -1313,3 +1348,67 @@
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+
+/* ===========================================================================
+   PIEZAS DEL REDISEÑO  --  21/11/2026
+   Las comparten las nueve pantallas del Supervisor (maqueta aprobada el
+   21/11/2026). Todas leen la paleta de Dexter, así que siguen el modo oscuro.
+   =========================================================================== */
+
+/* El encabezado de cada pantalla: título y bajada a la izquierda, acciones a
+   la derecha. La bajada es UNA frase: lo largo va en «Cómo funciona». */
+.snoc-encabezado { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; padding-top: 4px; }
+.snoc-encabezado-texto { display: grid; gap: 4px; max-width: 780px; }
+.snoc-bajada { margin: 0; color: var(--v2-slate); font-size: 14px; line-height: 20px; }
+.snoc-encabezado-acciones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Indicadores grandes. Un indicador que filtra o lleva a algún lado es un
+   <a> o un <button>; uno que solo informa es un <div>: el aspecto de clic
+   sin clic fue uno de los problemas de la auditoría del 21/11. */
+.snoc-indicadores { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+.snoc-indicador {
+  display: flex; flex-direction: column; gap: 2px; padding: 14px 16px;
+  background: var(--v2-card); border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
+  color: var(--v2-ink); text-decoration: none; text-align: left; font: inherit;
+}
+a.snoc-indicador:hover, button.snoc-indicador:hover { border-color: var(--v2-ember-line); background: var(--v2-ember-soft); cursor: pointer; }
+a.snoc-indicador:focus-visible, button.snoc-indicador:focus-visible { outline: 2px solid var(--v2-ember); outline-offset: 2px; }
+.snoc-indicador-valor { font-size: 26px; line-height: 32px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.snoc-indicador-rotulo { font-size: 12.5px; color: var(--v2-slate); }
+.snoc-indicador-critico { border-color: var(--v2-critica-line); }
+.snoc-indicador-critico .snoc-indicador-valor { color: var(--v2-rust); }
+.snoc-indicador-alerta .snoc-indicador-valor { color: var(--v2-espera); }
+.snoc-indicador-ok .snoc-indicador-valor { color: var(--v2-sola); }
+.snoc-indicador-accion .snoc-indicador-valor { color: var(--v2-ember-text); }
+.snoc-indicador-activo { border-color: var(--v2-ember); background: var(--v2-ember-soft); }
+
+/* Segmentado: elegir UNA vista de la misma lista. */
+.snoc-segmentado { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--v2-radius-control); background: var(--v2-line-soft); }
+.snoc-segmentado button {
+  font: inherit; font-size: 12.5px; font-weight: 600; border: 0; background: none; color: var(--v2-slate);
+  border-radius: 8px; padding: 5px 11px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center;
+}
+.snoc-segmentado button[aria-pressed='true'] { background: var(--v2-card); color: var(--v2-ink); box-shadow: var(--v2-shadow); }
+.snoc-segmentado button:focus-visible { outline: 2px solid var(--v2-ember); outline-offset: 1px; }
+.snoc-cuenta { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--v2-origen); color: var(--v2-origen-ink); font-size: 11px; font-weight: 700; text-align: center; }
+
+/* Notas con significado: rojo = no va a pasar / error, ámbar = ojo, verde =
+   listo. Reemplazan al texto gris que escondía lo importante. */
+.snoc-recuadro { border-radius: 12px; padding: 10px 14px; font-size: 13px; line-height: 19px; border: 1px solid var(--v2-line); background: var(--v2-paper); margin: 0; }
+.snoc-recuadro-error { background: var(--snoc-error-container); border-color: var(--snoc-error-linea); }
+.snoc-recuadro-alerta { background: var(--snoc-alerta-suave); border-color: var(--snoc-alerta-linea); }
+.snoc-recuadro-ok { background: var(--snoc-ok-suave); border-color: var(--snoc-ok-linea); }
+
+/* Filas de datos «rótulo valor» en una línea. */
+.snoc-datos { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; margin: 0; }
+.snoc-datos > div { display: flex; gap: 6px; }
+.snoc-datos dt { color: var(--v2-slate); }
+.snoc-datos dd { margin: 0; font-weight: 600; }
+
+/* Barra de avance. */
+.snoc-avance { height: 8px; border-radius: 999px; background: var(--v2-line-soft); overflow: hidden; display: flex; }
+.snoc-avance > span { display: block; height: 100%; background: var(--v2-ember); }
+.snoc-avance > .snoc-avance-ok { background: var(--v2-sola-fuerte); }
+
+/* Tarjeta con cabecera, como en la maqueta. */
+.snoc-tarjeta-cabeza { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }

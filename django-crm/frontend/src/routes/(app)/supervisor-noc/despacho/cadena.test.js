@@ -598,8 +598,8 @@ describe('ciclo', () => {
     //  Hasta el 21/11/2026 se dibujaba en el panel del caso, casi siempre
     //  cerrado: el resultado no se veía.
     apiRequest.mockResolvedValue({ resumen: { propuestas_nuevas: 2 } });
-    expect((await actions.ciclo(conRol('ADMIN'))).de).toBe('ciclo');
-    expect((await actions.ciclo(conRol('AGENT'))).data.de).toBe('ciclo');
+    expect(/** @type {any} */ (await actions.ciclo(conRol('ADMIN'))).de).toBe('ciclo');
+    expect(/** @type {any} */ (await actions.ciclo(conRol('AGENT'))).data.de).toBe('ciclo');
   });
 
   it('sin número no se inventa un cero', async () => {

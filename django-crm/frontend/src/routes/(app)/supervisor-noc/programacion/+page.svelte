@@ -161,7 +161,7 @@
       <section class="snoc-panel" style="gap:var(--snoc-md);">
         <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
           <div class="snoc-pila-xs">
-            <h1 class="snoc-h1">PROGRAMACIÓN</h1>
+            <h1 class="snoc-h1">Programación</h1>
             <p class="snoc-body snoc-secundario">
               Lo que quedó publicado para el día: a quién le tocó cada orden, quién se la
               asignó —el Supervisor o una persona— y si al técnico le llegó el aviso.

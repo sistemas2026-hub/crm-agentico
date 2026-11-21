@@ -10,13 +10,23 @@
    * desmonta al cambiar de pestaña, la conversación tampoco se corta.
    */
   import ChatBurbuja from '$lib/supervisor/ChatBurbuja.svelte';
+  import PulsoDelNoc from '$lib/supervisor/ui/PulsoDelNoc.svelte';
+  import Avisos from '$lib/supervisor/ui/Avisos.svelte';
 
   /** @type {{ children: import('svelte').Snippet }} */
   let { children } = $props();
 </script>
+
+<!-- EL PULSO DEL NOC (21/11/2026): la misma franja en las siete pantallas.
+     Va acá, fuera del contenedor que se desplaza de cada página, así queda
+     siempre a la vista. Ver PulsoDelNoc.svelte. -->
+<PulsoDelNoc />
 
 {@render children()}
 
 <!-- La burbuja es fija y de la pantalla, no de una sección. Ver
      ChatBurbuja.svelte: recupera el hilo al montarse. -->
 <ChatBurbuja />
+
+<!-- El resultado de cada acción, a la vista (ver avisos.svelte.js). -->
+<Avisos />
