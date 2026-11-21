@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { avance, motivosLegibles, textoDeDetencion, textoDelError } from './fallas.js';
+import { avance, duracion, estadoDeLaCaida, motivosLegibles, resumenDeFallas, textoDeDetencion, textoDelError, TIPO_ALERTA } from './fallas.js';
 
 /**
  * «Fallas de red»: lo que lee quien aprueba el aviso (30/10/2026).
@@ -52,5 +52,39 @@ describe('avance', () => {
     expect(avance({ clientes: 40, pendientes: 10 })).toBe(75);
     expect(avance({ clientes: 0, pendientes: 0 })).toBe(0);
     expect(avance(null)).toBe(0);
+  });
+});
+
+describe('el estado de cada caída (rediseño del 21/11/2026)', () => {
+  it('viva sin aviso es activa y roja; con aviso en curso, avisando', () => {
+    expect(estadoDeLaCaida({ estado: 'confirmada' })).toEqual({ grupo: 'activa', texto: 'Activa · confirmada', tono: 'critico' });
+    expect(estadoDeLaCaida({ estado: 'confirmada', aviso: { estado: 'en_curso' } }).grupo).toBe('avisando');
+  });
+
+  it('en verificación sigue activa pero en ámbar; resuelta es verde', () => {
+    expect(estadoDeLaCaida({ estado: 'en_verificacion' }).tono).toBe('alerta');
+    expect(estadoDeLaCaida({ estado: 'resuelta', aviso: { estado: 'terminado' } })).toMatchObject({ grupo: 'resuelta', tono: 'ok', texto: 'Restablecida' });
+  });
+
+  it('el resumen cuenta equipos solo de las vivas', () => {
+    const r = resumenDeFallas([
+      { estado: 'confirmada', equipos: 9 },
+      { estado: 'detectada', equipos: 24, aviso: { estado: 'en_curso', enviados: 14, clientes: 21 } },
+      { estado: 'resuelta', equipos: 17, aviso: { estado: 'terminado' } }
+    ]);
+    expect(r).toEqual({ activas: 2, equipos: 33, avisando: 1, avisados: 14, aprobados: 21, resueltas: 1 });
+    expect(resumenDeFallas(null).activas).toBe(0);
+  });
+
+  it('la duración se dice en minutos, horas o días', () => {
+    const ahora = Date.parse('2026-11-21T10:40:00Z');
+    expect(duracion('2026-11-21T10:28:00Z', ahora)).toBe('12 min');
+    expect(duracion('2026-11-21T07:42:00Z', ahora)).toBe('2 h 58 min');
+    expect(duracion('2026-11-20T07:40:00Z', ahora)).toBe('1 d 3 h');
+    expect(duracion(null, ahora)).toBe('');
+  });
+
+  it('los tipos de alerta de SmartOLT tienen nombre', () => {
+    expect(TIPO_ALERTA.power).toBe('Energía');
   });
 });

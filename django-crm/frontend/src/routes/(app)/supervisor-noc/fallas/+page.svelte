@@ -8,37 +8,103 @@
    * La lista la arma el motor: solo los equipos que se cayeron JUNTOS, de
    * clientes activos. Un corte de energía no se avisa.
    *
-   * Mientras un envío está en curso la pantalla se actualiza sola.
+   * REDISEÑO DEL 21/11/2026 (maqueta aprobada):
+   *   - Resumen arriba: activas, equipos afectados, avisos en curso, restablecidas.
+   *   - Cada caída dice su estado, su tipo (LOS, LOS parcial, energía) y su
+   *     riesgo, que el backend ya mandaba y no se usaban: antes todas tenían el
+   *     mismo punto rojo.
+   *   - Avisar pide confirmar con el resumen: un WhatsApp a N clientes no se
+   *     retira, y era un solo clic.
+   *   - Lo preparado de cada caída se recuerda: antes preparar una segunda
+   *     borraba la primera.
+   *   - Se refresca sola cada 20 s, no solo con un envío en curso: una caída
+   *     nueva aparecía recién al recargar.
    */
   import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import '../supervisor-noc.css';
-  import { avance, motivosLegibles, NO_LISTO, POR_QUE_NO, textoDeDetencion } from '$lib/supervisor/fallas.js';
+  import Confirmar from '$lib/supervisor/ui/Confirmar.svelte';
+  import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
+  import {
+    avance,
+    duracion,
+    estadoDeLaCaida,
+    motivosLegibles,
+    NO_LISTO,
+    POR_QUE_NO,
+    resumenDeFallas,
+    textoDeDetencion,
+    TIPO_ALERTA
+  } from '$lib/supervisor/fallas.js';
 
   let { data, form } = $props();
 
+  const REFRESCO_MS = 20_000;
+
   const fallas = $derived(/** @type {any[]} */ (data.fallas ?? []));
-  const enCurso = $derived(fallas.some((f) => f.aviso?.estado === 'en_curso'));
+  const resumen = $derived(resumenDeFallas(fallas));
+
+  /** @type {'todas' | 'activa' | 'avisando' | 'resuelta'} */
+  let filtro = $state('todas');
+  /** @type {'equipos' | 'reciente'} */
+  let orden = $state('equipos');
+
+  const visibles = $derived(
+    fallas
+      .filter((f) => filtro === 'todas' || estadoDeLaCaida(f).grupo === filtro)
+      .toSorted((a, b) =>
+        orden === 'equipos'
+          ? (Number(b.equipos) || 0) - (Number(a.equipos) || 0)
+          : Date.parse(b.detectada_en ?? '') - Date.parse(a.detectada_en ?? '')
+      )
+  );
+  const cuantas = $derived({
+    todas: fallas.length,
+    activa: fallas.filter((f) => estadoDeLaCaida(f).grupo === 'activa').length,
+    avisando: resumen.avisando,
+    resuelta: resumen.resueltas
+  });
+
+  /** Lo preparado de CADA caída, para que preparar otra no lo borre. */
+  let preparadas = $state(/** @type {Record<string, any>} */ ({}));
+  $effect(() => {
+    if (form?.situacion && form?.preparada) preparadas[form.situacion] = form.preparada;
+  });
 
   /** La que se está mandando, para no dejar apretar dos veces. */
   let enviando = $state(/** @type {string | null} */ (null));
+  /** La que espera confirmación para avisar. */
+  let porConfirmar = $state(/** @type {any | null} */ (null));
 
-  /** @param {string} id */
-  const alEnviar = (id) => {
+  /** @param {string} id @param {'preparar' | 'aprobar'} que */
+  const alEnviar = (id, que) => {
     enviando = id;
-    return async (/** @type {any} */ { update }) => {
+    return async (/** @type {any} */ { result, update }) => {
       await update({ reset: false });
       enviando = null;
+      if (que === 'aprobar' && result?.type === 'success') {
+        delete preparadas[id];
+        avisar('Aviso aprobado. Sale por WhatsApp en la próxima tanda.');
+      }
     };
   };
 
+  let leidoEn = $state(Date.now());
+  let ahora = $state(Date.now());
+  async function actualizar() {
+    await invalidateAll();
+    leidoEn = Date.now();
+  }
   $effect(() => {
-    if (!enCurso) return;
-    const t = setInterval(() => invalidateAll(), 20000);
+    const t = setInterval(() => {
+      ahora = Date.now();
+      if (document.visibilityState === 'visible') actualizar();
+    }, REFRESCO_MS);
     return () => clearInterval(t);
   });
+  const haceCuanto = $derived(Math.max(0, Math.round((ahora - leidoEn) / 1000)));
 
-  const ESTADO = { en_curso: 'Enviando', terminado: 'Terminado', detenido: 'Detenido' };
+  const ESTADO_AVISO = { en_curso: 'Enviando', terminado: 'Terminado', detenido: 'Detenido' };
 
   /** En el reloj de la empresa (la zona viene del servidor). @param {string | null} iso */
   const fecha = (iso) =>
@@ -48,87 +114,150 @@
           timeZone: data.zona || 'UTC'
         })
       : '';
+
+  /** @param {string} id */
+  function enviarAprobacion(id) {
+    porConfirmar = null;
+    /** @type {HTMLFormElement | null} */ (document.getElementById(`aprobar-${id}`))?.requestSubmit();
+  }
 </script>
 
 <svelte:head>
   <title>Fallas de red · Supervisor NOC</title>
-  <!-- Las fuentes se sirven desde la plataforma (static/fuentes/fuentes.css,
-       cargado en app.html) desde el 12/11/2026: Google no se entera de
-       cada pantalla que se abre. -->
 </svelte:head>
 
 <div class="snoc">
   <div class="v2-scroll">
     <div class="snoc-lienzo">
-      <section class="snoc-panel" style="gap:var(--snoc-md);">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
-          <div class="snoc-pila-xs">
-            <h1 class="snoc-h1">FALLAS DE RED</h1>
-            <p class="snoc-body snoc-secundario">
-              Las caídas de un puerto PON que están activas. Avisarle a sus clientes antes de que
-              escriban evita que todos pregunten a la vez; lo aprueba una persona y sale por WhatsApp,
-              por tandas.
-            </p>
-          </div>
+      <header class="snoc-encabezado">
+        <div class="snoc-encabezado-texto">
+          <h1 class="snoc-h1">Fallas de red</h1>
+          <p class="snoc-bajada">
+            Caídas de un puerto PON. Avisarles a sus clientes antes de que escriban evita que todos
+            pregunten a la vez: <strong>lo aprueba una persona</strong> y sale por WhatsApp, por tandas.
+          </p>
         </div>
-        {#if form?.error && !form?.situacion}
-          <p class="snoc-aviso snoc-error-txt" role="alert">{form.error}</p>
+        {#if data.puedeVer}
+          <div class="snoc-encabezado-acciones">
+            <span class="snoc-body-sm snoc-secundario" aria-live="polite">
+              Actualizado hace {haceCuanto} s · se refresca solo cada 20 s
+            </span>
+            <button type="button" class="snoc-btn" onclick={actualizar}>Actualizar ahora</button>
+          </div>
         {/if}
-      </section>
+      </header>
+
+      {#if form?.error && !form?.situacion}
+        <p class="snoc-recuadro snoc-recuadro-error" role="alert">{form.error}</p>
+      {/if}
 
       {#if !data.puedeVer}
-        <section class="snoc-panel">
-          <p class="snoc-aviso">
-            Solo el Jefe de Operaciones (o un ADMIN/SUPERVISOR) puede ver las fallas de red y avisar
-            a los clientes.
-          </p>
-        </section>
+        <p class="snoc-recuadro">
+          Solo el Jefe de Operaciones (o un ADMIN/SUPERVISOR) puede ver las fallas de red y avisar a
+          los clientes.
+        </p>
       {:else if data.error}
-        <section class="snoc-panel">
-          <p class="snoc-aviso snoc-error-txt">{data.error}</p>
-        </section>
-      {:else if !fallas.length}
-        <section class="snoc-panel">
-          <p class="snoc-aviso">No hay caídas de PON activas.</p>
-        </section>
+        <p class="snoc-recuadro snoc-recuadro-error">{data.error}</p>
       {:else}
-        <section class="snoc-pila" style="gap:var(--snoc-sm);">
-          {#each fallas as f (f.id)}
+        <div class="snoc-indicadores">
+          <div class="snoc-indicador {resumen.activas ? 'snoc-indicador-critico' : 'snoc-indicador-ok'}">
+            <span class="snoc-indicador-valor">{resumen.activas}</span>
+            <span class="snoc-indicador-rotulo">{resumen.activas === 1 ? 'Caída activa' : 'Caídas activas'}</span>
+          </div>
+          <div class="snoc-indicador">
+            <span class="snoc-indicador-valor">{resumen.equipos}</span>
+            <span class="snoc-indicador-rotulo">Equipos afectados según SmartOLT</span>
+          </div>
+          <div class="snoc-indicador {resumen.avisando ? 'snoc-indicador-accion' : ''}">
+            <span class="snoc-indicador-valor">{resumen.avisando}</span>
+            <span class="snoc-indicador-rotulo">
+              {resumen.avisando ? `Aviso enviándose · ${resumen.avisados} de ${resumen.aprobados}` : 'Avisos enviándose'}
+            </span>
+          </div>
+          <div class="snoc-indicador {resumen.resueltas ? 'snoc-indicador-ok' : ''}">
+            <span class="snoc-indicador-valor">{resumen.resueltas}</span>
+            <span class="snoc-indicador-rotulo">Restablecidas en las últimas 24 h</span>
+          </div>
+        </div>
+
+        {#if !fallas.length}
+          <p class="snoc-recuadro">
+            <strong>No hay caídas de PON activas.</strong> La pantalla se refresca sola: una caída
+            nueva aparece acá sin recargar.
+          </p>
+        {:else}
+          <div class="snoc-fila-sep" style="flex-wrap:wrap;">
+            <div class="snoc-segmentado" role="group" aria-label="Qué caídas ver">
+              {#each [['todas', 'Todas'], ['activa', 'Activas'], ['avisando', 'Avisando'], ['resuelta', 'Restablecidas 24 h']] as [clave, texto] (clave)}
+                <button
+                  type="button"
+                  aria-pressed={filtro === clave}
+                  onclick={() => (filtro = /** @type {any} */ (clave))}
+                >
+                  {texto} <span class="snoc-cuenta">{cuantas[/** @type {keyof typeof cuantas} */ (clave)]}</span>
+                </button>
+              {/each}
+            </div>
+            <label class="snoc-fila snoc-body-sm">
+              <span class="snoc-secundario">Ordenar</span>
+              <select class="snoc-select" bind:value={orden}>
+                <option value="equipos">Más equipos primero</option>
+                <option value="reciente">Más reciente primero</option>
+              </select>
+            </label>
+          </div>
+
+          {#if !visibles.length}
+            <p class="snoc-recuadro">Ninguna caída en esta vista.</p>
+          {/if}
+
+          {#each visibles as f (f.id)}
+            {@const est = estadoDeLaCaida(f)}
             {@const mia = form?.situacion === f.id}
-            {@const previa = mia ? form?.preparada : null}
-            <article class="snoc-panel" style="gap:var(--snoc-xs);" aria-labelledby="falla-{f.id}">
-              <div class="snoc-fila" style="gap:var(--snoc-xs); align-items:baseline; flex-wrap:wrap;">
-                <span class="snoc-punto snoc-punto-error" aria-hidden="true"></span>
-                <h2 class="snoc-h3" id="falla-{f.id}">{f.codigo} · {f.titulo}</h2>
-                <span class="snoc-insignia snoc-insignia-neutra">PON {f.puerto}</span>
-                {#if f.caja}<span class="snoc-insignia snoc-insignia-neutra">{f.caja}</span>{/if}
-                {#if f.aviso}
-                  <span class="snoc-insignia snoc-insignia-secundaria-suave">
-                    Aviso: {ESTADO[/** @type {keyof typeof ESTADO} */ (f.aviso.estado)] ?? f.aviso.estado}
+            {@const previa = preparadas[f.id] ?? null}
+            <article class="snoc-panel fl-caida" aria-labelledby="falla-{f.id}">
+              <div class="snoc-tarjeta-cabeza">
+                <div class="snoc-fila" style="flex-wrap:wrap;">
+                  <span class="snoc-insignia {est.tono === 'critico' ? 'snoc-insignia-error' : est.tono === 'alerta' ? 'snoc-insignia-alerta' : est.tono === 'ok' ? 'snoc-insignia-ok' : 'snoc-insignia-secundaria-suave'}">
+                    {est.texto}
                   </span>
-                {/if}
+                  {#if f.aviso && f.aviso.estado !== 'en_curso'}
+                    <span class="snoc-insignia">Aviso: {ESTADO_AVISO[/** @type {keyof typeof ESTADO_AVISO} */ (f.aviso.estado)] ?? f.aviso.estado}</span>
+                  {/if}
+                  <h2 class="snoc-h3" id="falla-{f.id}">{f.codigo} · {f.titulo}</h2>
+                </div>
+                <div class="snoc-fila">
+                  {#if f.tipo_alerta}<span class="snoc-tag">{TIPO_ALERTA[f.tipo_alerta] ?? f.tipo_alerta}</span>{/if}
+                  {#if f.riesgo}<span class="snoc-tag">Riesgo {f.riesgo}</span>{/if}
+                </div>
               </div>
-              <p class="snoc-body-sm snoc-secundario" style="margin:0;">
-                {f.equipos ?? '—'} equipos afectados según SmartOLT · detectada el {fecha(f.detectada_en)}
-              </p>
+
+              <dl class="snoc-datos">
+                <div><dt>Puerto</dt><dd class="snoc-mono">{f.puerto || '—'}</dd></div>
+                {#if f.caja}<div><dt>Caja</dt><dd class="snoc-mono">{f.caja}</dd></div>{/if}
+                <div><dt>Equipos</dt><dd>{f.equipos ?? '—'}</dd></div>
+                <div>
+                  <dt>Detectada</dt>
+                  <dd>
+                    {fecha(f.detectada_en)}
+                    {#if est.grupo !== 'resuelta'}<span class="snoc-secundario" style="font-weight:400;"> · hace {duracion(f.detectada_en, ahora)}</span>{/if}
+                  </dd>
+                </div>
+              </dl>
 
               {#if f.aviso}
                 {@const pct = avance(f.aviso)}
                 <div class="snoc-pila-xs">
-                  <p class="snoc-body-sm" style="margin:0;">
-                    <strong>{f.aviso.enviados}</strong> avisados de {f.aviso.clientes} aprobados
-                    {#if f.aviso.descartados}· {f.aviso.descartados} ya habían vuelto{/if}
-                    {#if f.aviso.pendientes}· faltan {f.aviso.pendientes}{/if}
-                  </p>
-                  <div
-                    role="progressbar"
-                    aria-label="Avance del aviso"
-                    aria-valuenow={pct}
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    style="height:6px; border-radius:3px; background:var(--snoc-borde, #e5e7eb); overflow:hidden;"
-                  >
-                    <div style="height:100%; width:{pct}%; background:var(--snoc-secundario, #2563eb);"></div>
+                  <div class="snoc-fila-sep snoc-body-sm">
+                    <span>
+                      <strong>{f.aviso.enviados}</strong> avisados de {f.aviso.clientes} aprobados
+                      {#if f.aviso.descartados}· {f.aviso.descartados} ya habían vuelto{/if}
+                      {#if f.aviso.pendientes}· faltan {f.aviso.pendientes}{/if}
+                    </span>
+                    <strong>{pct} %</strong>
+                  </div>
+                  <div class="snoc-avance" role="progressbar" aria-label="Avance del aviso" aria-valuenow={pct} aria-valuemin="0" aria-valuemax="100">
+                    <span style="width:{pct}%"></span>
                   </div>
                   {#if f.aviso.fase === 'restablecido' || f.aviso.restablecidos}
                     <p class="snoc-body-sm" style="margin:0;">
@@ -139,75 +268,116 @@
                     </p>
                   {/if}
                   {#if f.aviso.motivo_detencion}
-                    <p class="snoc-body-sm snoc-error-txt" style="margin:0;">
-                      {textoDeDetencion(f.aviso.motivo_detencion)}
-                    </p>
+                    <p class="snoc-recuadro snoc-recuadro-error">{textoDeDetencion(f.aviso.motivo_detencion)}</p>
                   {/if}
                   {#each motivosLegibles(f.aviso.motivos) as m, i (i)}
-                    <p class="snoc-body-sm snoc-tenue" style="margin:0;">No salió: {m}</p>
+                    <p class="snoc-body-sm snoc-secundario" style="margin:0;">No salió: {m}</p>
                   {/each}
-                  <p class="snoc-body-sm snoc-tenue" style="margin:0;">
+                  <p class="snoc-body-sm snoc-secundario" style="margin:0;">
                     Aprobado por {f.aviso.aprobado_por || 'una persona'} el {fecha(f.aviso.aprobado_en)}
+                    {#if f.aviso.terminado_en} · terminó el {fecha(f.aviso.terminado_en)}{/if}
                   </p>
                 </div>
               {:else if f.por_que_no}
-                <p class="snoc-body-sm snoc-tenue" style="margin:0;">
-                  {POR_QUE_NO[f.por_que_no] ?? f.por_que_no}
-                </p>
+                <!-- Antes era texto gris: para quien opera es lo que decide. -->
+                <p class="snoc-recuadro snoc-recuadro-alerta">{POR_QUE_NO[f.por_que_no] ?? f.por_que_no}</p>
               {:else if previa}
-                <div class="snoc-pila-xs" role="status">
+                <div class="snoc-pila" role="status">
                   {#if previa.cargando}
-                    <p class="snoc-body-sm" style="margin:0;">
+                    <p class="snoc-recuadro">
                       Dexter está armando la lista de clientes del ISP. Probá de nuevo en un momento.
                     </p>
+                    <form method="POST" action="?/preparar" use:enhance={() => alEnviar(f.id, 'preparar')}>
+                      <input type="hidden" name="situacion" value={f.id} />
+                      <button class="snoc-btn" disabled={enviando === f.id}>
+                        {enviando === f.id ? 'Preparando…' : 'Probar de nuevo'}
+                      </button>
+                    </form>
                   {:else}
-                    <p class="snoc-body-sm" style="margin:0;">
-                      Se les avisaría a <strong>{previa.clientes}</strong> clientes que se cayeron juntos.
-                      {#if previa.sin_cliente || previa.fuera_de_estado}
-                        Quedan afuera {previa.sin_cliente} equipos sin cliente y {previa.fuera_de_estado}
-                        de clientes que no están activos.
+                    <div class="snoc-recuadro {previa.no_listo ? 'snoc-recuadro-error' : 'snoc-recuadro-ok'} snoc-pila-xs">
+                      <span>
+                        Se les avisaría a <strong>{previa.clientes}</strong> clientes que se cayeron juntos.
+                        {#if previa.sin_cliente || previa.fuera_de_estado}
+                          Quedan afuera {previa.sin_cliente} equipos sin cliente y {previa.fuera_de_estado}
+                          de clientes que no están activos.
+                        {/if}
+                      </span>
+                      <span class="snoc-secundario">
+                        Cuando la falla se resuelva, Dexter les avisa que quedó restablecido a los que
+                        recibieron este aviso y cuyo equipo ya volvió.
+                      </span>
+                      {#if previa.modo_prueba}
+                        <span style="color:var(--snoc-alerta);">
+                          El aviso está en modo prueba: solo les llega a los números de prueba.
+                        </span>
                       {/if}
-                    </p>
-                    <p class="snoc-body-sm snoc-tenue" style="margin:0;">
-                      Cuando la falla se resuelva, Dexter les avisa que quedó restablecido a los que
-                      recibieron este aviso y cuyo equipo ya volvió.
-                    </p>
-                    {#if previa.modo_prueba}
-                      <p class="snoc-body-sm snoc-tenue" style="margin:0;">
-                        El aviso está en modo prueba: solo les llega a los números de prueba.
-                      </p>
-                    {/if}
-                    {#if previa.no_listo}
-                      <p class="snoc-body-sm snoc-error-txt" style="margin:0;">
-                        {NO_LISTO[previa.no_listo] ?? previa.no_listo} Se cambia en Ajustes → WhatsApp →
-                        Mensajes automáticos.
-                      </p>
-                    {:else if previa.clientes}
-                      <form method="POST" action="?/aprobar" use:enhance={() => alEnviar(f.id)}>
+                      {#if previa.no_listo}
+                        <span class="snoc-error-txt">
+                          {NO_LISTO[previa.no_listo] ?? previa.no_listo} Se cambia en Ajustes → WhatsApp →
+                          Mensajes automáticos.
+                        </span>
+                      {/if}
+                    </div>
+                    {#if !previa.no_listo && previa.clientes}
+                      <form id="aprobar-{f.id}" method="POST" action="?/aprobar" use:enhance={() => alEnviar(f.id, 'aprobar')}>
                         <input type="hidden" name="situacion" value={f.id} />
-                        <button class="snoc-btn snoc-btn-primario" disabled={enviando === f.id}>
-                          {enviando === f.id ? 'Aprobando…' : `Avisar a ${previa.clientes} clientes`}
-                        </button>
+                        <div class="snoc-fila">
+                          <button
+                            type="button"
+                            class="snoc-btn snoc-btn-primario"
+                            disabled={enviando === f.id}
+                            onclick={() => (porConfirmar = { ...f, clientes: previa.clientes, modo_prueba: previa.modo_prueba })}
+                          >
+                            {enviando === f.id ? 'Aprobando…' : `Avisar a ${previa.clientes} clientes`}
+                          </button>
+                          <button type="button" class="snoc-btn" onclick={() => delete preparadas[f.id]}>Descartar</button>
+                        </div>
                       </form>
                     {/if}
                   {/if}
                 </div>
               {:else}
-                <form method="POST" action="?/preparar" use:enhance={() => alEnviar(f.id)}>
+                <form class="snoc-fila" style="flex-wrap:wrap;" method="POST" action="?/preparar" use:enhance={() => alEnviar(f.id, 'preparar')}>
                   <input type="hidden" name="situacion" value={f.id} />
-                  <button class="snoc-btn" disabled={enviando === f.id}>
+                  <button class="snoc-btn snoc-btn-primario" disabled={enviando === f.id}>
                     {enviando === f.id ? 'Preparando…' : 'Preparar el aviso a los clientes'}
                   </button>
+                  <span class="snoc-body-sm snoc-secundario">
+                    No le envía nada a nadie: arma la lista y revisa que WhatsApp esté listo.
+                  </span>
                 </form>
               {/if}
 
               {#if mia && form?.error}
-                <p class="snoc-body-sm snoc-error-txt" role="alert" style="margin:0;">{form.error}</p>
+                <p class="snoc-recuadro snoc-recuadro-error" role="alert">{form.error}</p>
               {/if}
             </article>
           {/each}
-        </section>
+        {/if}
       {/if}
     </div>
   </div>
 </div>
+
+<Confirmar
+  abierto={!!porConfirmar}
+  titulo="¿Avisar a {porConfirmar?.clientes ?? 0} clientes por WhatsApp?"
+  confirmar="Sí, avisar a {porConfirmar?.clientes ?? 0}"
+  alCancelar={() => (porConfirmar = null)}
+  alConfirmar={() => enviarAprobacion(porConfirmar.id)}
+>
+  <p style="margin:0;">
+    Caída del puerto <strong class="snoc-mono">{porConfirmar?.puerto}</strong>{#if porConfirmar?.caja} ({porConfirmar.caja}){/if}.
+    Sale por tandas. <strong>Un aviso enviado no se retira.</strong>
+  </p>
+  {#if porConfirmar?.modo_prueba}
+    <p class="snoc-recuadro snoc-recuadro-alerta">Modo prueba: solo les llega a los números de prueba.</p>
+  {/if}
+  <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+    Cuando el servicio vuelva, Dexter les avisa que quedó restablecido.
+  </p>
+</Confirmar>
+
+<style>
+  .fl-caida { gap: 12px; }
+</style>

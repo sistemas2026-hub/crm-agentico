@@ -111,3 +111,83 @@ export function avance(aviso) {
   const hecho = total - Number(aviso?.pendientes ?? 0);
   return Math.max(0, Math.min(100, Math.round((hecho / total) * 100)));
 }
+
+/* ===========================================================================
+   EL REDISEÑO DEL 21/11/2026: estado, grupo y resumen de cada caída.
+   El backend ya mandaba `estado`, `riesgo` y `tipo_alerta` y la pantalla no
+   los usaba: todas las caídas llevaban el mismo punto rojo, fuera una viva,
+   una de energía o una que terminó hace horas.
+   =========================================================================== */
+
+/** Los estados de una situación que todavía es una caída viva (aviso_de_caida.VIVOS). */
+export const VIVOS = new Set(['detectada', 'investigando', 'confirmada', 'en_atencion']);
+
+const ESTADO_LEGIBLE = /** @type {Record<string, string>} */ ({
+  detectada: 'Detectada',
+  investigando: 'Investigando',
+  confirmada: 'Confirmada',
+  en_atencion: 'En atención',
+  en_verificacion: 'En verificación',
+  resuelta: 'Restablecida',
+  cerrada: 'Cerrada',
+  descartada: 'Descartada'
+});
+
+/** Qué tipo de caída según SmartOLT. */
+export const TIPO_ALERTA = /** @type {Record<string, string>} */ ({
+  los: 'LOS · fibra',
+  partial_los: 'LOS parcial',
+  power: 'Energía'
+});
+
+/**
+ * En qué grupo va una caída y cómo se rotula.
+ *   activa    — viva y sin aviso en curso
+ *   avisando  — con aviso enviándose
+ *   resuelta  — ya no está viva (se ve 24 h por su aviso)
+ *
+ * @param {{ estado?: string, aviso?: { estado?: string } | null }} f
+ * @returns {{ grupo: 'activa' | 'avisando' | 'resuelta', texto: string, tono: 'critico' | 'alerta' | 'accion' | 'ok' }}
+ */
+export function estadoDeLaCaida(f) {
+  const estado = String(f?.estado ?? '');
+  const legible = ESTADO_LEGIBLE[estado] ?? estado;
+  if (f?.aviso?.estado === 'en_curso') return { grupo: 'avisando', texto: `${legible} · avisando`, tono: 'accion' };
+  if (VIVOS.has(estado)) return { grupo: 'activa', texto: `Activa · ${legible.toLowerCase()}`, tono: 'critico' };
+  if (estado === 'en_verificacion') return { grupo: 'activa', texto: legible, tono: 'alerta' };
+  return { grupo: 'resuelta', texto: legible, tono: 'ok' };
+}
+
+/**
+ * Los cuatro números de arriba.
+ * @param {any[]} fallas
+ */
+export function resumenDeFallas(fallas) {
+  const lista = Array.isArray(fallas) ? fallas : [];
+  const vivas = lista.filter((f) => VIVOS.has(String(f?.estado ?? '')));
+  const enviando = lista.filter((f) => f?.aviso?.estado === 'en_curso');
+  return {
+    activas: vivas.length,
+    //  Solo las vivas: una restablecida ya no tiene equipos afectados.
+    equipos: vivas.reduce((s, f) => s + (Number(f?.equipos) || 0), 0),
+    avisando: enviando.length,
+    avisados: enviando.reduce((s, f) => s + (Number(f?.aviso?.enviados) || 0), 0),
+    aprobados: enviando.reduce((s, f) => s + (Number(f?.aviso?.clientes) || 0), 0),
+    resueltas: lista.filter((f) => estadoDeLaCaida(f).grupo === 'resuelta').length
+  };
+}
+
+/**
+ * «2 h 58 min», «12 min», «1 d 3 h». Vacío si no hay fecha.
+ * @param {string | null | undefined} desdeIso
+ * @param {number} [ahora]
+ */
+export function duracion(desdeIso, ahora = Date.now()) {
+  const t = desdeIso ? Date.parse(desdeIso) : NaN;
+  if (!Number.isFinite(t)) return '';
+  const min = Math.max(0, Math.round((ahora - t) / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h ${min % 60} min`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}
