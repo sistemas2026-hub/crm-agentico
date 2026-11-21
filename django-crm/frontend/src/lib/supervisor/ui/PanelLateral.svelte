@@ -54,7 +54,7 @@
 {#if abierto}
   <div class="pl-velo" onclick={alCerrar} aria-hidden="true"></div>
   <div
-    class="pl pl-{ancho}"
+    class="pl pl-{ancho} snoc-capa"
     role="dialog"
     aria-modal="true"
     aria-label={titulo}

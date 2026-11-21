@@ -24,7 +24,10 @@
  * invisibles. Los otros 41 son los del config, al valor exacto.
  */
 
-.snoc {
+/* Los tokens valen también en `.snoc-capa`: el panel lateral y la
+   confirmación se dibujan fuera de `.snoc` (son capas fijas sobre la página)
+   y sin esto sus botones y campos quedaban sin estilo (21/11/2026). */
+.snoc, .snoc-capa {
   /* --- LA PALETA ES LA DE DEXTER (21/11/2026) ---
      Hasta hoy eran los 45 valores Material 3 azules de Stitch (#00639b), y
      Pendientes tenía otra paleta propia (oklch, Barlow, Atkinson): el
@@ -91,6 +94,11 @@
 
   --snoc-sombra: var(--v2-shadow);
 
+  font-family: var(--v2-sans);
+  color: var(--snoc-on-surface);
+}
+
+.snoc {
   background: var(--snoc-surface);
   color: var(--snoc-on-surface);
   font-family: var(--v2-sans);

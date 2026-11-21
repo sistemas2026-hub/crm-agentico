@@ -45,7 +45,7 @@
 
 {#if abierto}
   <div class="cf-velo" onclick={alCancelar} aria-hidden="true"></div>
-  <div class="cf" role="alertdialog" aria-modal="true" aria-label={titulo}>
+  <div class="cf snoc-capa" role="alertdialog" aria-modal="true" aria-label={titulo}>
     <h2 class="cf-titulo">{titulo}</h2>
     {#if children}<div class="cf-cuerpo">{@render children()}</div>{/if}
     <div class="cf-botones">
