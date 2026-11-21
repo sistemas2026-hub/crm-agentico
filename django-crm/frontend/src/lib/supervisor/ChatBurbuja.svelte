@@ -14,6 +14,12 @@
    * ventana privada, y ademas le miente al modelo -- la pantalla mostraria
    * un hilo que el motor no tiene. El hilo vive en PostgreSQL, del lado del
    * motor, y se recupera con GET al abrir.
+   *
+   * REDISEÑO DEL 21/11/2026 (maqueta aprobada): sugerencias para empezar,
+   * la hora de cada mensaje, qué consultó el Supervisor para contestar (el
+   * proxy ya lo mandaba y no se mostraba), las respuestas de error en rojo
+   * y la marca «Lo escribió solo» en lo que llega sin que nadie pregunte.
+   * Los textos van con tildes y en voseo, como el resto de la pantalla.
    */
   import { onMount } from 'svelte';
   import { aBurbujas, esDuplicado, lleganNuevos } from './chat-sesion.js';
@@ -33,8 +39,21 @@
   //  se delega.
   /** @type {string | null} */
   let conversacionId = $state(null);
-  /** @type {Array<{id: string, rol: 'usuario'|'supervisor', texto: string, cuando: string|null}>} */
+  /** @type {Array<{id: string, rol: 'usuario'|'supervisor', texto: string, cuando: string|null, herramientas?: string[], error?: boolean, solo?: boolean}>} */
   let burbujas = $state([]);
+
+  /** Para empezar sin tener que pensar la primera pregunta. */
+  const SUGERENCIAS = [
+    '¿Qué está pasando ahora?',
+    '¿Qué reviso primero hoy?',
+    '¿Cuál es lo más crítico?',
+    '¿Qué información te falta?'
+  ];
+
+  /** La hora de un mensaje, en el reloj de quien mira. @param {string | null} iso */
+  const hora = (iso) => (iso ? new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '');
+  /** El nombre de una herramienta, legible. @param {string} h */
+  const legible = (h) => String(h ?? '').replace(/_/g, ' ');
   let borrador = $state('');
   let enviando = $state(false);
   let cargando = $state(false);
@@ -68,7 +87,10 @@
       const r = lleganNuevos(burbujas, await resp.json(), { conversacionId, descartada });
       //  Si mientras tanto se empezo a enviar, lo de la pantalla es mas nuevo.
       if (!r || enviando) return;
-      burbujas = r.burbujas;
+      //  Lo del Supervisor que no estaba es lo que escribió solo.
+      const antes = new Set(burbujas.map((b) => b.id));
+      burbujas = r.burbujas.map((/** @type {any} */ b) =>
+        !antes.has(b.id) && b.rol === 'supervisor' ? { ...b, solo: true } : b);
       conversacionId = r.conversacionId;
       if (abierta) alFinal();
       else nuevos += r.nuevas;
@@ -112,14 +134,14 @@
     try {
       const resp = await fetch('/api/supervisor-noc/chat');
       const datos = await resp.json();
-      if (!resp.ok) throw new Error(datos.error || 'No se pudo recuperar la conversacion.');
+      if (!resp.ok) throw new Error(datos.error || 'No se pudo recuperar la conversación.');
       burbujas = aBurbujas(datos.mensajes);
       conversacionId = datos.conversacion_id ?? null;
     } catch (/** @type {any} */ e) {
       //  Se permite reintentar: sin esto, un fallo de red al abrir dejaria
       //  la burbuja vacia para siempre, pareciendo que no hay conversacion.
       historialPedido = false;
-      error = e?.message || 'No se pudo recuperar la conversacion.';
+      error = e?.message || 'No se pudo recuperar la conversación.';
     } finally {
       cargando = false;
       alFinal();
@@ -139,6 +161,12 @@
     queueMicrotask(() => {
       if (hilo) hilo.scrollTop = hilo.scrollHeight;
     });
+  }
+
+  /** @param {string} pregunta */
+  function preguntar(pregunta) {
+    borrador = pregunta;
+    enviar();
   }
 
   async function enviar() {
@@ -168,7 +196,7 @@
           : { mensaje: texto })
       });
       const datos = await resp.json();
-      if (!resp.ok) throw new Error(datos.error || 'El Supervisor no respondio.');
+      if (!resp.ok) throw new Error(datos.error || 'El Supervisor no respondió.');
 
       //  El id del hilo con el que contesto: si se acaba de limpiar, este es
       //  el de la conversacion nueva que el backend abrio.
@@ -177,9 +205,11 @@
       const respuesta = (datos.respuesta ?? '').trim();
       if (respuesta) {
         burbujas = [...burbujas, { id: `r-${Date.now()}`, rol: 'supervisor',
-                                   texto: respuesta, cuando: new Date().toISOString() }];
+                                   texto: respuesta, cuando: new Date().toISOString(),
+                                   herramientas: Array.isArray(datos.herramientas) ? datos.herramientas : [],
+                                   error: Boolean(datos.es_error) }];
       } else if (datos.pausada) {
-        error = 'Esta conversacion esta en pausa: la esta atendiendo una persona.';
+        error = 'Esta conversación está en pausa: la está atendiendo una persona.';
       }
       borrador = '';
     } catch (/** @type {any} */ e) {
@@ -220,7 +250,7 @@
       <header class="snoc-chat-cabecera">
         <div>
           <p class="snoc-chat-titulo">Supervisor NOC</p>
-          <p class="snoc-chat-sub">Pregunta sobre la operacion de hoy</p>
+          <p class="snoc-chat-sub">Preguntá sobre la operación de hoy</p>
         </div>
         <div style="display:flex; gap:2px; flex-shrink:0; align-items:center;">
           <!-- Solo si hay algo que limpiar: un boton que no hace nada enseña
@@ -243,24 +273,35 @@
 
       <div class="snoc-chat-hilo" bind:this={hilo}>
         {#if cargando}
-          <p class="snoc-chat-aviso">Recuperando la conversacion...</p>
+          <p class="snoc-chat-aviso">Recuperando la conversación…</p>
         {:else if !hayHilo}
           <p class="snoc-chat-aviso">
-            Todavia no hay conversacion. Pregunta lo que necesites saber de la
-            operacion: que revisar primero, que paso con un ticket, que esta
+            Todavía no hay conversación. Preguntá lo que necesites saber de la
+            operación: qué revisar primero, qué pasó con un ticket, qué está
             en riesgo hoy.
           </p>
+          <div class="snoc-chat-sugerencias">
+            {#each SUGERENCIAS as q (q)}
+              <button type="button" onclick={() => preguntar(q)} disabled={enviando}>{q}</button>
+            {/each}
+          </div>
         {/if}
 
         {#each burbujas as b (b.id)}
-          <div class="snoc-chat-msg snoc-chat-{b.rol}">
-            <p>{b.texto}</p>
+          <div class="snoc-chat-linea snoc-chat-linea-{b.rol}">
+            {#if b.solo}<span class="snoc-chat-solo">● Lo escribió solo</span>{/if}
+            <div class="snoc-chat-msg snoc-chat-{b.rol}" class:snoc-chat-msg-error={b.error}>
+              <p>{b.texto}</p>
+            </div>
+            <span class="snoc-chat-meta">
+              {hora(b.cuando)}{#if b.herramientas?.length} · consultó: {b.herramientas.map(legible).join(', ')}{/if}
+            </span>
           </div>
         {/each}
 
         {#if enviando}
           <div class="snoc-chat-msg snoc-chat-supervisor snoc-chat-pensando">
-            <p>Revisando la operacion...</p>
+            <p>Revisando la operación…</p>
           </div>
         {/if}
       </div>
@@ -274,7 +315,8 @@
           bind:value={borrador}
           onkeydown={alTeclear}
           rows="2"
-          placeholder="Escribe tu pregunta..."
+          placeholder="Escribí tu pregunta…"
+          maxlength="4000"
           aria-label="Mensaje para el Supervisor NOC"
         ></textarea>
         <button type="button" onclick={enviar} disabled={enviando || !borrador.trim()}>
@@ -406,6 +448,25 @@
     border-bottom-left-radius: 4px;
   }
   .snoc-chat-pensando { opacity: 0.7; font-style: italic; }
+  .snoc-chat-linea { display: flex; flex-direction: column; gap: 3px; }
+  .snoc-chat-linea-usuario { align-items: flex-end; }
+  .snoc-chat-linea-supervisor { align-items: flex-start; }
+  .snoc-chat-linea .snoc-chat-msg { align-self: auto; }
+  .snoc-chat-meta { font-size: 0.72rem; color: var(--v2-slate); }
+  .snoc-chat-solo { font-size: 0.72rem; color: var(--v2-fam-auto); font-weight: 600; }
+  .snoc-chat-msg-error {
+    background: color-mix(in srgb, var(--v2-rust) 10%, var(--v2-card));
+    color: var(--v2-rust);
+    border: 1px solid color-mix(in srgb, var(--v2-rust) 30%, var(--v2-card));
+  }
+  .snoc-chat-sugerencias { display: grid; gap: 6px; }
+  .snoc-chat-sugerencias button {
+    text-align: left; font: inherit; font-size: 0.85rem; cursor: pointer;
+    padding: 0.5rem 0.75rem; border-radius: 10px;
+    border: 1px solid var(--v2-line-strong); background: var(--v2-card); color: var(--v2-ink);
+  }
+  .snoc-chat-sugerencias button:hover { background: var(--v2-ember-soft); border-color: var(--v2-ember-line); }
+  .snoc-chat-cerrar:focus-visible, .snoc-chat-sugerencias button:focus-visible { outline: 2px solid var(--v2-ember); outline-offset: 2px; }
 
   .snoc-chat-error {
     margin: 0; padding: 0.6rem 1.1rem; font-size: 0.85rem;
