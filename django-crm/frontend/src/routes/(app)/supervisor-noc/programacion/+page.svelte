@@ -5,6 +5,16 @@
    * El mismo dibujo que «Simular el día» en Despacho, a propósito: el simulacro
    * dice lo que el Supervisor HARÍA; esto, lo que QUEDÓ. Por cuadrilla, cada
    * orden con quién la asignó y a qué hora, y si al técnico le llegó el aviso.
+   *
+   * REDISEÑO DEL 21/11/2026 (maqueta aprobada):
+   *   - El día, Planes semanales y el «en vivo» van en el encabezado: estaban
+   *     casi al fondo, debajo del mapa, las alertas y la configuración.
+   *   - Cuatro pestañas: Hoy, Cerradas, Por revisar y Configuración.
+   *   - La configuración de la empresa (contrato, marca de agua, recordatorios
+   *     del Supervisor, kit y bodega) sale del día a su pestaña, y se ve
+   *     siempre: la marca de agua y los recordatorios desaparecían los días
+   *     sin cuadrillas.
+   *   - Los resultados de guardar salen en un aviso a la vista.
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
@@ -36,9 +46,37 @@
     tituloDelMaterial
   } from '$lib/supervisor/material-del-dia.js';
   import '../supervisor-noc.css';
+  import { page } from '$app/state';
+  import { replaceState } from '$app/navigation';
+  import { untrack } from 'svelte';
+  import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
+
+  /** La sección de la vista «hoy»: el día, lo que falta revisar o la configuración. */
+  let seccion = $state(untrack(() => page.url.searchParams.get('pestana') ?? 'hoy'));
+  /** @param {MouseEvent} e @param {string} s */
+  function irA(e, s) {
+    if (data.vista !== 'hoy') return; // desde Cerradas, el enlace carga la vista de hoy
+    e.preventDefault();
+    seccion = s;
+    const u = new URL(page.url);
+    if (s === 'hoy') u.searchParams.delete('pestana');
+    else u.searchParams.set('pestana', s);
+    replaceState(u, page.state);
+  }
+
+  //  El resultado de cada formulario de la página, en un aviso a la vista.
+  //  Los de las tarjetas de orden también se siguen viendo en la tarjeta.
+  $effect(() => {
+    const f = form;
+    if (!f) return;
+    untrack(() => {
+      if (f.error) avisar(f.error, { tono: 'error' });
+      else if (f.hecho) avisar(f.hecho);
+    });
+  });
 
   //  PROGRAMACIÓN VIVA (30/10/2026). El usuario: «estas tarjetas tienen que
   //  estar vivas: si manda un reporte desde la app, que no se tenga que
@@ -157,26 +195,45 @@
 <div class="snoc">
   <div class="v2-scroll">
     <div class="snoc-lienzo">
-      <!-- ============ CABECERA ============ -->
-      <section class="snoc-panel" style="gap:var(--snoc-md);">
-        <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-md);">
-          <div class="snoc-pila-xs">
-            <h1 class="snoc-h1">Programación</h1>
-            <p class="snoc-body snoc-secundario">
-              Lo que quedó publicado para el día: a quién le tocó cada orden, quién se la
-              asignó —el Supervisor o una persona— y si al técnico le llegó el aviso.
-            </p>
-          </div>
+      <header class="snoc-encabezado">
+        <div class="snoc-encabezado-texto">
+          <h1 class="snoc-h1">Programación</h1>
+          <p class="snoc-bajada">
+            Lo que quedó publicado para el día: a quién le tocó cada orden, quién se la asignó —el
+            Supervisor o una persona— y si al técnico le llegó el aviso.
+          </p>
         </div>
-      </section>
+        {#if data.puedeVer}
+          <div class="snoc-encabezado-acciones">
+            <label class="snoc-fila snoc-body-sm">
+              <span class="snoc-secundario">Día</span>
+              <input class="snoc-campo" type="date" value={data.dia} onchange={cambiarDia} />
+            </label>
+            <a class="snoc-btn" href="/supervisor-noc/planes-semanales">Planes semanales</a>
+            {#if data.vista === 'hoy' && verificadoEn}
+              <span class="snoc-insignia snoc-insignia-ok" title="Se actualiza sola cada 15 s">
+                En vivo · {new Date(verificadoEn).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            {/if}
+          </div>
+        {/if}
+      </header>
 
       {#if data.puedeVer}
-        <!-- HOY / CERRADAS (30/10/2026): lo de hoy, y lo que ya se cerró. -->
-        <nav class="snoc-fila" aria-label="Vista" style="gap:var(--snoc-xs); flex-wrap:wrap;">
-          <a class="snoc-pildora" class:snoc-pildora-activa={data.vista === 'hoy'}
-             aria-current={data.vista === 'hoy' ? 'page' : undefined} href={enlaceDe('hoy')}>Hoy</a>
-          <a class="snoc-pildora" class:snoc-pildora-activa={data.vista === 'cerradas'}
-             aria-current={data.vista === 'cerradas' ? 'page' : undefined} href={enlaceDe('cerradas')}>Cerradas</a>
+        <nav class="pg-pestanas" aria-label="Vista">
+          <a href={enlaceDe('hoy')} class:pg-activa={data.vista === 'hoy' && seccion === 'hoy'}
+             aria-current={data.vista === 'hoy' && seccion === 'hoy' ? 'page' : undefined}
+             onclick={(e) => irA(e, 'hoy')}>Hoy</a>
+          <a href={enlaceDe('cerradas')} class:pg-activa={data.vista === 'cerradas'}
+             aria-current={data.vista === 'cerradas' ? 'page' : undefined}>Cerradas</a>
+          <a href="{enlaceDe('hoy')}&pestana=revisar" class:pg-activa={data.vista === 'hoy' && seccion === 'revisar'}
+             aria-current={data.vista === 'hoy' && seccion === 'revisar' ? 'page' : undefined}
+             onclick={(e) => irA(e, 'revisar')}>
+            Por revisar {#if (publicado?.por_revisar ?? []).length}<span class="snoc-cuenta">{publicado.por_revisar.length}</span>{/if}
+          </a>
+          <a href="{enlaceDe('hoy')}&pestana=config" class:pg-activa={data.vista === 'hoy' && seccion === 'config'}
+             aria-current={data.vista === 'hoy' && seccion === 'config' ? 'page' : undefined}
+             onclick={(e) => irA(e, 'config')}>Configuración</a>
         </nav>
       {/if}
 
@@ -218,70 +275,21 @@
           {/if}
         </section>
       {:else}
-        <!-- ============ EL SEGUIMIENTO DE LAS CUADRILLAS (30/10/2026) ============
-             Arriba de todo: en qué está cada una, hace cuánto, y su log del día. -->
-        <!-- Lo que pasó al aprobar o devolver un cierre (30/10/2026). -->
-        {#if form?.de === 'revision'}
-          <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">{form?.hecho ?? form?.error}</p>
-        {/if}
-        <!-- LA FRANJA DE INDICADORES (31/10/2026): lo primero que se lee.
-             Los números los calcula el servidor; acá solo se muestran. -->
-        {#if publicado}
-          <FranjaDeIndicadores {cuentas} {kitsIncompletos} />
-
-          <!-- EL MAPA (31/10/2026, movido el 01/11/2026). Vivía dentro del
-               bloque de cuadrillas, así que un día sin cuadrillas armadas no
-               lo dibujaba -- y desde afuera eso no se distingue de un mapa
-               roto: le pasó al usuario. Decisión suya: se ve con programación
-               y sin ella; cuando no hay nadie, lo dice.
-
-               Sale de lo mismo que la pantalla ya carga, así que el sondeo de
-               cada 15 s lo mueve solo. Solo el día de hoy: una fecha pasada
-               no tiene posiciones, y mostrar las de ahora bajo otra fecha
-               sería mentir. -->
-          <!-- EL MAPA Y EL SEGUIMIENTO, JUNTOS (05/11/2026). El usuario:
-               «el seguimiento de cuadrilla aparece abajo de eso, ponelo
-               debajo del mapa, y organizá que el mapa no ocupe toda la
-               interfaz». Son la misma pregunta --dónde está cada cuadrilla y
-               en qué anda-- y estaban separadas por dos paneles. Lado a lado
-               en pantalla ancha; apilados en una angosta. -->
-          <div class="pg-donde">
-            {#if seDibujaElMapa(data.dia, data.hoy)}
-              <section class="snoc-panel" style="gap:var(--snoc-sm);">
-                <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} {verificadoEn} />
-              </section>
-            {/if}
-            {#if publicado?.cuadrillas?.length}
-              <section class="snoc-panel" style="gap:var(--snoc-sm);">
-                <span class="snoc-label">Seguimiento de las cuadrillas</span>
-                <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
-              </section>
-            {/if}
-          </div>
-
-          <!-- LO QUE NECESITA QUE ALGUIEN HAGA ALGO, junto; y cuánto se lleva
-               del día. Los dos salen de lo que la página ya cargó. -->
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap:var(--snoc-sm);">
-            <section class="snoc-panel" style="gap:var(--snoc-sm);">
-              <AlertasDelDia {publicado} {material} />
-            </section>
-            <section class="snoc-panel" style="gap:var(--snoc-sm);">
-              <ResumenDelDia {cuentas} />
-            </section>
-          </div>
-        {/if}
-
+        {#if seccion === 'revisar'}
         <!-- POR REVISAR (31/10/2026): lo terminado de días anteriores que nadie
              cerró. Antes no salía en ningún lado (la OT #4 en producción). -->
         <PorRevisar ordenes={publicado?.por_revisar ?? []} dia={data.dia} />
-
+          {#if !(publicado?.por_revisar ?? []).length}
+            <p class="snoc-recuadro">Nada por revisar de días anteriores: todo lo terminado está cerrado.</p>
+          {/if}
+        {:else if seccion === 'config'}
+          <div class="pg-config">
         <!-- EL CONTRATO DE INSTALACIÓN (13/11/2026). Fuera del bloque que pide
              cuadrillas publicadas a propósito: es de la empresa, no del día, y
              una opción que desaparece los días sin reparto no se encuentra. -->
         {#if data.contrato}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
-            <details>
-              <summary class="snoc-body-sm">El contrato de instalación</summary>
+                          <h2 class="snoc-h2">El contrato de instalación</h2>
               <form method="POST" action="?/contrato" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                 <p class="snoc-body-sm" style="margin:0;">
                   El técnico crea el contrato del cliente desde la app: los datos salen de la solicitud,
@@ -312,20 +320,18 @@
                   {#if form?.de === 'contrato'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
                 </div>
               </form>
-            </details>
+            
           </section>
         {/if}
 
-        {#if publicado?.cuadrillas?.length}
-          <section class="snoc-panel" style="gap:var(--snoc-sm);">
             {#if data.marcaDeAgua}
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
               <!-- LA MARCA DE AGUA DE LAS FOTOS (12/11/2026). Se dibuja en el
                    servidor, al recibir cada foto: la aplicación se actualiza a
                    mano teléfono por teléfono, y esto se va a querer ajustar
                    varias veces. El costo de esa decisión, dicho acá abajo: la
                    copia que queda EN el teléfono sale sin marca. -->
-              <details>
-                <summary class="snoc-body-sm">La marca de agua de las fotos</summary>
+                              <h2 class="snoc-h2">La marca de agua de las fotos</h2>
                 <form method="POST" action="?/marcaDeAgua" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                   <label class="snoc-body-sm">
                     <input type="checkbox" name="activa" checked={data.marcaDeAgua.activa} />
@@ -394,15 +400,15 @@
                     {#if form?.de === 'marcaDeAgua'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
                   </div>
                 </form>
-              </details>
+            </section>
             {/if}
 
             {#if data.seguimiento}
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
               <!-- LO QUE EL SUPERVISOR HACE SOLO (30/10/2026). Que cierre solo
                    NO se enciende acá: se le delega desde su chat, con el nivel
                    3 y el interruptor de emergencia, como las otras tareas. -->
-              <details>
-                <summary class="snoc-body-sm">Lo que el Supervisor hace solo</summary>
+                              <h2 class="snoc-h2">Lo que el Supervisor hace solo en campo</h2>
                 <form method="POST" action="?/seguimiento" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                   <label class="snoc-body-sm">
                     <input type="checkbox" name="recordar_al_tecnico" checked={data.seguimiento.recordar_al_tecnico} />
@@ -440,56 +446,16 @@
                     {#if form?.de === 'seguimiento'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
                   </div>
                 </form>
-              </details>
+            </section>
             {/if}
-          </section>
-        {/if}
 
-        <section class="snoc-panel" style="gap:var(--snoc-sm);">
-          <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-sm);">
-            <label class="snoc-campo-grupo">
-              <span class="snoc-label">Día</span>
-              <input class="snoc-campo" type="date" value={data.dia} onchange={cambiarDia} />
-            </label>
-            <a class="snoc-pildora" href="/supervisor-noc/planes-semanales">Planes semanales</a>
-          </div>
-
-          {#if data.error}
-            <p class="snoc-aviso snoc-error-txt">
-              No se pudo leer lo publicado. No es que no haya nada: no se sabe.
-            </p>
-          {:else if publicado}
-            <p class="snoc-body-sm">
-              {cuentas.publicadas} {cuentas.publicadas === 1 ? 'orden publicada' : 'órdenes publicadas'}:
-              {cuentas.por_el_supervisor} por el Supervisor · {cuentas.por_personas} por una persona{#if cuentas.sin_registro}
-                · {cuentas.sin_registro} sin registro de quién{/if}
-              · {cuentas.avisadas} con aviso enviado al teléfono
-              {#if cuentas.esperan}· {cuentas.esperan} esperan cuadrilla{/if}
-            </p>
-
-            <!-- EL MATERIAL DEL DÍA (28/10/2026, SPEC/objetivos/material-del-dia.md).
-                 Fase 1: propone. Nada de esto mueve material todavía. -->
-            <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-sm);">
-              <span class="snoc-label">{tituloDelMaterial(material?.cuadrillas ?? [])}</span>
-              {#if data.errorMaterial}
-                <p class="snoc-body-sm snoc-error-txt">
-                  No se pudo calcular el material. No es que no haga falta: no se sabe.
-                </p>
-              {:else if material}
-                <!-- Las cuentas en pastillas y una línea por bodega, con la
-                     tabla plegada (29/10/2026: eran trece líneas rojas iguales). -->
-                <FaltantesDelDia cuentas={material.cuentas} {faltantes}
-                                 equipos={equipoQueFalta(material.cuadrillas)}
-                                 apps={resumenDeLoSinBajar(publicado.cuadrillas)} />
-              {/if}
               {#if conf}
                 <!-- EL SUPERVISOR ELIGE SOLO (28/10/2026: «la idea era que lo
                      hiciera el Supervisor»). Esto es para corregirlo: lo que
                      queda en «Que elija el Supervisor» lo deduce él. -->
-                <details>
-                  <summary class="snoc-body-sm">
-                    Corregir lo que eligió el Supervisor (kit de cada labor, bodega de cada cuadrilla)
-                  </summary>
+                <section class="snoc-panel" style="gap:var(--snoc-sm);">
+                  <h2 class="snoc-h2">Material: kit de cada labor y bodega de cada cuadrilla</h2>
+                  <p class="snoc-body-sm snoc-secundario" style="margin:0;">Para corregir lo que eligió el Supervisor: lo que queda en «Que elija el Supervisor» lo deduce él.</p>
                   <form method="POST" action="?/material" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                     <span class="snoc-label">Kit de cada labor</span>
                     {#each conf.labores as l (l.codigo)}
@@ -532,7 +498,101 @@
                       {#if form?.error && !form?.de}<span class="snoc-body-sm snoc-error-txt">{form.error}</span>{/if}
                     </div>
                   </form>
-                </details>
+                </section>
+              {/if}
+          </div>
+        {:else}
+        <!-- ============ EL SEGUIMIENTO DE LAS CUADRILLAS (30/10/2026) ============
+             Arriba de todo: en qué está cada una, hace cuánto, y su log del día. -->
+        <!-- Lo que pasó al aprobar o devolver un cierre (30/10/2026). -->
+        {#if form?.de === 'revision'}
+          <p class="snoc-body-sm" class:snoc-error-txt={!!form?.error} role="status">{form?.hecho ?? form?.error}</p>
+        {/if}
+        <!-- LA FRANJA DE INDICADORES (31/10/2026): lo primero que se lee.
+             Los números los calcula el servidor; acá solo se muestran. -->
+        {#if publicado}
+          <FranjaDeIndicadores {cuentas} {kitsIncompletos} />
+
+          <!-- EL MAPA (31/10/2026, movido el 01/11/2026). Vivía dentro del
+               bloque de cuadrillas, así que un día sin cuadrillas armadas no
+               lo dibujaba -- y desde afuera eso no se distingue de un mapa
+               roto: le pasó al usuario. Decisión suya: se ve con programación
+               y sin ella; cuando no hay nadie, lo dice.
+
+               Sale de lo mismo que la pantalla ya carga, así que el sondeo de
+               cada 15 s lo mueve solo. Solo el día de hoy: una fecha pasada
+               no tiene posiciones, y mostrar las de ahora bajo otra fecha
+               sería mentir. -->
+          <!-- EL MAPA Y EL SEGUIMIENTO, JUNTOS (05/11/2026). El usuario:
+               «el seguimiento de cuadrilla aparece abajo de eso, ponelo
+               debajo del mapa, y organizá que el mapa no ocupe toda la
+               interfaz». Son la misma pregunta --dónde está cada cuadrilla y
+               en qué anda-- y estaban separadas por dos paneles. Lado a lado
+               en pantalla ancha; apilados en una angosta. -->
+          <div class="pg-donde">
+            {#if seDibujaElMapa(data.dia, data.hoy)}
+              <section class="snoc-panel" style="gap:var(--snoc-sm);">
+                <MapaDeCuadrillas cuadrillas={publicado.cuadrillas ?? []} {verificadoEn} />
+              </section>
+            {/if}
+            {#if publicado?.cuadrillas?.length}
+              <section class="snoc-panel" style="gap:var(--snoc-sm);">
+                <span class="snoc-label">Seguimiento de las cuadrillas</span>
+                <SeguimientoDeCuadrillas cuadrillas={publicado.cuadrillas} />
+              </section>
+            {/if}
+          </div>
+
+          <!-- LO QUE NECESITA QUE ALGUIEN HAGA ALGO, junto; y cuánto se lleva
+               del día. Los dos salen de lo que la página ya cargó. -->
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap:var(--snoc-sm);">
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
+              <AlertasDelDia {publicado} {material} />
+            </section>
+            <section class="snoc-panel" style="gap:var(--snoc-sm);">
+              <ResumenDelDia {cuentas} />
+            </section>
+          </div>
+        {/if}
+
+
+        <section class="snoc-panel" style="gap:var(--snoc-sm);" aria-labelledby="pg-cuadrillas">
+          <h2 class="snoc-h2" id="pg-cuadrillas">Las cuadrillas del día</h2>
+
+          {#if data.error}
+            <p class="snoc-aviso snoc-error-txt">
+              No se pudo leer lo publicado. No es que no haya nada: no se sabe.
+            </p>
+          {:else if publicado}
+            <p class="snoc-body-sm">
+              {cuentas.publicadas} {cuentas.publicadas === 1 ? 'orden publicada' : 'órdenes publicadas'}:
+              {cuentas.por_el_supervisor} por el Supervisor · {cuentas.por_personas} por una persona{#if cuentas.sin_registro}
+                · {cuentas.sin_registro} sin registro de quién{/if}
+              · {cuentas.avisadas} con aviso enviado al teléfono
+              {#if cuentas.esperan}· {cuentas.esperan} esperan cuadrilla{/if}
+            </p>
+
+            <!-- EL MATERIAL DEL DÍA (28/10/2026, SPEC/objetivos/material-del-dia.md).
+                 Fase 1: propone. Nada de esto mueve material todavía. -->
+            <div class="snoc-pila-xs" style="border-top:1px solid var(--snoc-outline-variant); padding-top:var(--snoc-sm);">
+              <span class="snoc-label">{tituloDelMaterial(material?.cuadrillas ?? [])}</span>
+              {#if data.errorMaterial}
+                <p class="snoc-body-sm snoc-error-txt">
+                  No se pudo calcular el material. No es que no haga falta: no se sabe.
+                </p>
+              {:else if material}
+                <!-- Las cuentas en pastillas y una línea por bodega, con la
+                     tabla plegada (29/10/2026: eran trece líneas rojas iguales). -->
+                <FaltantesDelDia cuentas={material.cuentas} {faltantes}
+                                 equipos={equipoQueFalta(material.cuadrillas)}
+                                 apps={resumenDeLoSinBajar(publicado.cuadrillas)} />
+              {/if}
+              {#if conf}
+                <div>
+                  <a class="snoc-btn" href="{enlaceDe('hoy')}&pestana=config" onclick={(e) => irA(e, 'config')}>
+                    Corregir lo que eligió el Supervisor
+                  </a>
+                </div>
               {/if}
             </div>
 
@@ -626,12 +686,24 @@
             <EsperanCuadrilla esperan={publicado.esperan} />
           {/if}
         </section>
+        {/if}
       {/if}
     </div>
   </div>
 </div>
 
 <style>
+  .pg-pestanas { display: flex; gap: 2px; border-bottom: 1px solid var(--v2-line); flex-wrap: wrap; }
+  .pg-pestanas a {
+    font-size: 13.5px; font-weight: 600; color: var(--v2-slate); text-decoration: none;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 14px;
+    display: inline-flex; gap: 7px; align-items: center;
+  }
+  .pg-pestanas a:hover { color: var(--v2-ink); }
+  .pg-pestanas a:focus-visible { outline: 2px solid var(--v2-ember); outline-offset: -2px; border-radius: 6px; }
+  .pg-pestanas .pg-activa { color: var(--v2-ember-text); border-bottom-color: var(--v2-ember); }
+  .pg-config { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); align-items: start; }
+
   /*  EL MAPA NO SE COME LA PANTALLA (05/11/2026): al lado del seguimiento
       cuando hay ancho, apilados cuando no. */
   .pg-donde {
