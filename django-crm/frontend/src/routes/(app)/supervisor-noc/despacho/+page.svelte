@@ -731,7 +731,7 @@
           </div>
           <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap;">
             <label class="snoc-fila snoc-body-sm" for="dia-simulado"><span class="snoc-secundario">Día a simular</span></label>
-            <input id="dia-simulado" class="snoc-campo" type="date" bind:value={diaSimulado} />
+            <input id="dia-simulado" class="snoc-campo" style="width:auto;" type="date" bind:value={diaSimulado} />
             <button class="snoc-btn snoc-btn-primario" type="button" onclick={simularElDia} disabled={simulando}>
               {simulando ? 'Simulando…' : 'Simular el día'}
             </button>

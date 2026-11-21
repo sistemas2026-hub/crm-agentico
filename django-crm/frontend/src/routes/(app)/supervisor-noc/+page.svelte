@@ -152,6 +152,8 @@
   // muestra. Buscar tambien en la evidencia haria aparecer filas por un texto
   // que no esta a la vista, y quien busca no entenderia por que salieron.
   let busqueda = $state('');
+  /** «Sin técnico» filtra la bandeja (21/11/2026): antes parecía un botón y no hacía nada. */
+  let soloSinTecnico = $state(false);
 
   // La pagina pedida. `paginacion` la recorta a lo que existe: al filtrar, la
   // 7 puede dejar de haber, y quedarse ahi mostraria una tabla vacia sin
@@ -466,8 +468,6 @@
    * No desaparecen: el recuadro de Desincronizaciones los trae con 'solo'.
    */
   let verDesincronizados = $state(/** @type {'ocultar'|'solo'} */ ('ocultar'));
-  /** «Sin técnico» filtra la bandeja (21/11/2026): antes parecía un botón y no hacía nada. */
-  let soloSinTecnico = $state(false);
 
   const bandeja = $derived(
     bandejaDeRevision(propuestas, {
@@ -1446,7 +1446,8 @@
               {#if !ganada.leido}
                 <p class="snv-nota">Leyendo…</p>
               {:else if ganada.error}
-                <p class="snv-nota">No se pudo leer: {ganada.error}</p>
+                <!-- El error ya es una frase entera («No se pudo contactar al asistente.»): sin prefijo. -->
+                <p class="snv-nota">{ganada.error}</p>
               {:else}
                 {#if ganada.autonomas.length}
                   <p class="snv-tarjeta-linea"><span class="snv-punto snv-punto-vivo" aria-hidden="true"></span>

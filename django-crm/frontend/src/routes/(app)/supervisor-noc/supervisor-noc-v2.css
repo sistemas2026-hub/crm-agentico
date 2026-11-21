@@ -255,7 +255,7 @@
 
 .snv-fila {
   display: grid;
-  grid-template-columns: 20px 90px minmax(140px, 1.25fr) 58px 104px minmax(130px, 1.15fr) 96px 88px auto;
+  grid-template-columns: 20px 90px minmax(140px, 1.25fr) 76px 104px minmax(130px, 1.15fr) 96px 88px auto;
   gap: 12px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--snv-linea);
   font-size: 13px; transition: background 120ms;
 }
@@ -425,11 +425,11 @@
    nueve columnas se salian por la derecha, cortando «Revisar». */
 .snv-bandeja { container-type: inline-size; container-name: bandeja; }
 @container bandeja (max-width: 920px) {
-  .snv-fila { grid-template-columns: 20px 92px minmax(0, 1.3fr) 56px minmax(0, 1.1fr) 100px auto; }
+  .snv-fila { grid-template-columns: 20px 92px minmax(0, 1.3fr) 76px minmax(0, 1.1fr) 100px auto; }
   .snv-c-tipo, .snv-c-ids { display: none; }
 }
 @container bandeja (max-width: 800px) {
-  .snv-fila { grid-template-columns: 20px 88px minmax(0, 1.3fr) 56px minmax(0, 1fr) auto; }
+  .snv-fila { grid-template-columns: 20px 88px minmax(0, 1.3fr) 76px minmax(0, 1fr) auto; }
   .snv-c-tecnico { display: none; }
 }
 @container bandeja (max-width: 560px) {
@@ -462,11 +462,19 @@
 /* El freno de mano, a la vista en la cabecera. */
 .snv-btn-freno { background: var(--v2-critica-soft); border-color: var(--v2-critica-line); color: var(--v2-rust); }
 .snv-btn-freno-puesto { background: var(--v2-rust); border-color: var(--v2-rust); color: #fff; }
+/* EL CHAT NO TAPA LA DECISIÓN (21/11/2026): con el detalle abierto, el botón
+   «Preguntar» caía encima de los botones para aceptar o rechazar. Se corre a
+   la izquierda del detalle; en pantallas angostas el detalle ocupa todo y el
+   chat se esconde mientras está abierto. */
+body:has(.snv-con-detalle) .snoc-chat { right: calc(clamp(420px, 32vw, 520px) + 24px); }
+@media (max-width: 1100px) { body:has(.snv-con-detalle) .snoc-chat { display: none; } }
 /* Los encabezados de la bandeja: la misma rejilla que las filas. */
 .snv-fila-cabeza, .snv-fila-cabeza:hover {
   background: var(--v2-paper); border-top: 0; padding-top: 8px; padding-bottom: 8px;
   font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--snv-tinta-2);
 }
 .snv-fila-cabeza .snv-c-plazo { font-family: var(--v2-sans); font-size: 11px; color: var(--snv-tinta-2); }
+/* Un rótulo nunca pisa al de al lado: se corta con puntos suspensivos. */
+.snv-fila-cabeza > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Desincronizados con número: índigo, no gris. */
 .snv-signo.snv-tono-accion .snv-signo-n { color: var(--v2-ember-text); }

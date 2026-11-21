@@ -294,7 +294,7 @@
               <p>{b.texto}</p>
             </div>
             <span class="snoc-chat-meta">
-              {hora(b.cuando)}{#if b.herramientas?.length} · consultó: {b.herramientas.map(legible).join(', ')}{/if}
+              {hora(b.cuando)}{#if b.herramientas?.length}{` · consultó: ${b.herramientas.map(legible).join(', ')}`}{/if}
             </span>
           </div>
         {/each}

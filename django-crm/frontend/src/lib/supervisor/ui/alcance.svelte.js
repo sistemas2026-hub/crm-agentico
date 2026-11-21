@@ -24,9 +24,14 @@ export class Alcance {
   criterios = $state('');
   motivoFreno = $state('');
 
-  /** Si el freno está puesto (el interruptor NO permite actuar). */
+  /**
+   * Si el freno está puesto (el interruptor NO permite actuar). Solo un
+   * `false` explícito: un dato que falta no es un freno puesto. Es la misma
+   * regla que `tarjetasDeSolo`, para que el botón de la cabecera y el panel
+   * no digan cosas distintas (21/11/2026).
+   */
   get frenado() {
-    return this.estado ? !this.estado.interruptor_permite : false;
+    return this.estado?.interruptor_permite === false;
   }
 
   async leer() {

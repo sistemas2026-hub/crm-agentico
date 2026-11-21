@@ -135,12 +135,14 @@ describe('la ruta de alcance', () => {
    * dibuja, pero sí ve el renombre que se pierde.
    */
   it('la plantilla del panel no lee ninguna clave inventada', () => {
+    //  Desde el 21/11/2026 el panel vive en un componente compartido por
+    //  Pendientes y Ajustes: se lee ése.
     const panel = readFileSync(
-      new URL('../../../(app)/supervisor-noc/+page.svelte', import.meta.url),
+      new URL('../../../../lib/supervisor/ui/AutonomiaYFreno.svelte', import.meta.url),
       'utf8'
     );
 
-    const bloque = panel.split('{#each alcance.delegaciones')[1]?.split('{/each}')[0];
+    const bloque = panel.split('{#each a.delegaciones')[1]?.split('{/each}')[0];
     expect(bloque, 'no se encontró el bloque de delegaciones en el panel').toBeTruthy();
 
     const usadas = [...new Set([...bloque.matchAll(/\bd\.(\w+)/g)].map((m) => m[1]))];

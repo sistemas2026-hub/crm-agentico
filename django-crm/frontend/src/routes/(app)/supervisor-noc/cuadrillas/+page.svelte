@@ -1596,6 +1596,8 @@
                   {/each}
                 </select>
                 <select class="snoc-select" name="integrante_rol" bind:value={ig.rol}>
+                  <!-- Vacío = el habitual de la persona (21/11/2026: antes se veía en blanco). -->
+                  <option value="">— su rol habitual —</option>
                   {#each ROLES as r (r.id)}
                     <option value={r.id}>{r.texto}</option>
                   {/each}

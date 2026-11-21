@@ -247,6 +247,7 @@
   background: var(--v2-card); color: var(--snoc-on-surface);
   font-size: 12.5px; line-height: 28px; font-weight: 600;
   cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+  white-space: nowrap;
 }
 .snoc-pildora:hover { background: var(--v2-ember-soft); border-color: var(--v2-ember-line); }
 .snoc-pildora-activa, .snoc-pildora-activa:hover { background: var(--snoc-primary); border-color: var(--snoc-primary); color: var(--snoc-on-primary); }
@@ -283,7 +284,8 @@
 
 /* Modal de confirmacion del ciclo. */
 .snoc-velo {
-  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  /* 65, no 60 (21/11/2026): con 60 empataba con el chat, que quedaba encima del velo. */
+  position: fixed; inset: 0; z-index: 65; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--snoc-inverse-surface) 60%, transparent);
   backdrop-filter: blur(4px); padding: var(--snoc-md);
 }
@@ -303,8 +305,10 @@
 }
 
 /* Utilidades chicas, para no repetir style="" en el marcado. */
-.snoc-fila { display: flex; align-items: center; gap: var(--snoc-sm); }
-.snoc-fila-sep { display: flex; align-items: center; justify-content: space-between; gap: var(--snoc-sm); }
+/* flex-direction explícito (21/11/2026): combinadas con .snoc-tarjeta, que es
+   columna, la fila salía apilada y centrada (Personas, en Cuadrillas). */
+.snoc-fila { display: flex; flex-direction: row; align-items: center; gap: var(--snoc-sm); }
+.snoc-fila-sep { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: var(--snoc-sm); }
 .snoc-pila { display: flex; flex-direction: column; gap: var(--snoc-sm); }
 .snoc-pila-xs { display: flex; flex-direction: column; gap: var(--snoc-xs); }
 .snoc-envuelve { display: flex; flex-wrap: wrap; align-items: center; gap: var(--snoc-xs); }
@@ -822,7 +826,9 @@
   gap: var(--snoc-sm); height: 122px;
 }
 .snoc-barra-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
-.snoc-barra {
+/* Acotada a .snoc-barras (21/11/2026): suelta pisaba la barra de ocupación de
+   Planes semanales, que salía de 34 px y sin fondo. */
+.snoc-barras .snoc-barra {
   width: 100%; max-width: 34px; border-radius: 3px 3px 0 0;
   background: var(--snoc-primary); min-height: 2px;
 }

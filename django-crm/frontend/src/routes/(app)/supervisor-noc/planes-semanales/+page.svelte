@@ -869,7 +869,7 @@
                       <th>Sec.</th><th>OT</th><th>Cliente</th><th>Horario</th>
                       <th>Zona</th><th>Prioridad</th><th>Estado línea</th><th>Estado OT</th>
                       <th>Seguimiento</th>
-                      <th class="snoc-derecha">Acciones</th>
+                      <th class="snoc-derecha pl-acciones">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -932,8 +932,10 @@
                             <span class="snoc-tenue">—</span>
                           {/if}
                         </td>
-                        <td class="snoc-derecha">
-                          <div class="snoc-envuelve" style="justify-content:flex-end;">
+                        <!-- 21/11/2026: los tres botones en una línea y la columna fija
+                             a la derecha; apilados, cada fila medía 120 px. -->
+                        <td class="snoc-derecha pl-acciones">
+                          <div class="snoc-fila" style="justify-content:flex-end; gap:var(--snoc-xs);">
                             <button class="snoc-pildora" type="button" onclick={() => abrirOrden(l.orden)}>
                               Ver OT
                             </button>
@@ -2203,6 +2205,11 @@
 </div>
 
 <style>
+  .pl-acciones {
+    position: sticky; right: 0; z-index: 1; white-space: nowrap;
+    background: var(--v2-card); box-shadow: -8px 0 8px -8px rgba(15, 23, 42, 0.18);
+  }
+  thead .pl-acciones { background: inherit; }
   .pl-banda { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .pl-saltos {
     display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 16px;
