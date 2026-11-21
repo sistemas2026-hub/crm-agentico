@@ -354,21 +354,78 @@ describe('las fotos, para poder compararlas', () => {
     expect(b).toMatch(/<details[^>]*class="[^"]*rc-foto-detalle(?![^>]*\sopen)/);
   });
 
-  it('la foto con un problema lo dice en la línea, y abre el detalle sola', () => {
-    //  Cuando hay algo que mirar, lo que permite decidir es lo que pedía la
-    //  plantilla CONTRA lo que el modelo vio. Ahí el detalle no se esconde:
-    //  esconderlo cambiaría «menos ruido» por «un clic más justo cuando
-    //  importa».
+  it('la foto con un problema dice el POR QUÉ en un renglón, sin abrir el detalle', () => {
+    //  CAMBIÓ EL 21/11/2026. Hasta ese día el detalle se abría solo cuando
+    //  había algo que mirar, y el usuario lo midió con la OT #283 en la
+    //  pantalla: «el texto que describe es muy largo» -- la instrucción
+    //  entera, la prosa entera y las marcas, doce renglones por foto.
+    //
+    //  El motivo ahora va AFUERA del detalle, en una frase, y el detalle
+    //  queda cerrado. No se cambió «menos ruido» por «un clic más justo
+    //  cuando importa»: lo que importa --por qué-- se lee sin ningún clic.
     const b = html([
       foto({ analisis: 'Se ve un televisor encendido.',
              muestra_lo_pedido: false, pide_atencion: true })
     ]);
 
     expect(b).toContain('⚠ No es lo que se pidió.');
-    expect(b).toMatch(/<details[^>]*rc-foto-detalle[^>]*\sopen/);
+    expect(b).toMatch(/<details[^>]*class="[^"]*rc-foto-detalle(?![^>]*\sopen)/);
+    //  El por qué está ANTES del detalle, o sea, a la vista.
+    const antes = b.slice(0, b.indexOf('rc-foto-detalle'));
+    expect(antes).toContain('Se ve un televisor encendido.');
     //  Y el detalle sigue teniendo las dos mitades de la comparación.
-    expect(b).toContain('El router, con sus luces visibles.');
-    expect(b).toContain('Se ve un televisor encendido.');
+    const detalle = b.slice(b.indexOf('rc-foto-detalle'));
+    expect(detalle).toContain('El router, con sus luces visibles.');
+    expect(detalle).toContain('Se ve un televisor encendido.');
+  });
+
+  it('las MARCAS del protocolo no se le muestran a quien revisa', () => {
+    //  EL CASO DE LA OT #283, con el texto de la captura del usuario:
+    //  «…no medición real. CATALOGO: no MUESTRA: si ATENCION: si». Son cómo
+    //  el código habla consigo mismo; la app del técnico ya las quitaba.
+    const b = html([
+      foto({ analisis: 'Es captura de foto de catálogo, no medición real.\n' +
+                       'CATALOGO: no\nMUESTRA: si\nATENCION: si',
+             muestra_lo_pedido: true, pide_atencion: true })
+    ]);
+
+    expect(b).toContain('Es captura de foto de catálogo, no medición real.');
+    expect(b).not.toContain('CATALOGO:');
+    expect(b).not.toContain('MUESTRA:');
+    expect(b).not.toContain('ATENCION:');
+  });
+
+  it('lo largo NO queda a la vista: la instrucción y la prosa van en el detalle', () => {
+    //  La instrucción de la plantilla está escrita para el modelo. Afuera
+    //  del detalle solo va la primera frase de lo que el modelo concluyó.
+    const b = html([
+      foto({ instrucciones: 'Pantalla del medidor con la lectura legible. ' +
+                            'Copiá los dígitos tal como aparecen en la pantalla.',
+             analisis: 'Medidor óptico en imagen de catálogo, sobre fondo blanco. ' +
+                       'Pantalla legible: 1550 nm, ID, -21.0 dBm, 0.682 µW, 2kHz. ' +
+                       'Es material de producto, no evidencia de una medición en el trabajo.',
+             muestra_lo_pedido: true, pide_atencion: true })
+    ]);
+
+    const antes = b.slice(0, b.indexOf('rc-foto-detalle'));
+    expect(antes).toContain('Medidor óptico en imagen de catálogo, sobre fondo blanco.');
+    expect(antes).not.toContain('Copiá los dígitos');
+    expect(antes).not.toContain('Es material de producto');
+    //  Entero, a un clic.
+    const detalle = b.slice(b.indexOf('rc-foto-detalle'));
+    expect(detalle).toContain('Copiá los dígitos');
+    expect(detalle).toContain('Es material de producto');
+  });
+
+  it('la foto SIN problemas no repite el texto del modelo afuera', () => {
+    //  «Sin observaciones» ya lo dice. Volcar la descripción igual sería
+    //  volver a los ocho renglones por foto del 17/11.
+    const b = html([
+      foto({ analisis: 'Se ve el router con sus luces.', muestra_lo_pedido: true })
+    ]);
+
+    const antes = b.slice(0, b.indexOf('rc-foto-detalle'));
+    expect(antes).not.toContain('Se ve el router con sus luces.');
   });
 
   it('sin análisis no aparece NI ✓ NI ⚠', () => {

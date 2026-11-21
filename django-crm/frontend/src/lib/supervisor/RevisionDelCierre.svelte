@@ -23,6 +23,7 @@
   } from './afinar_instruccion.js';
   import { motivosDeLaRevision } from './dia-publicado.js';
   import { comoQuedoLaFoto } from './estado-de-la-foto.js';
+  import { porQue, sinMarcas } from './texto-de-la-foto.js';
 
   /** @type {{ orden: any }} */
   let { orden } = $props();
@@ -304,23 +305,43 @@
                   </span>
                 {/if}
 
-                <!-- EL DETALLE SIGUE ENTERO, A UN CLIC, y ABIERTO cuando hay
-                     algo que mirar. No se borra: lo que permite decidir es
-                     justamente lo que pedía la plantilla CONTRA lo que el
-                     modelo vio. Lo que cambia es que deja de ser lo primero
-                     que se lee cuando no hay nada que hacer.
+                <!-- EL POR QUÉ, EN UN RENGLÓN  --  21/11/2026
+                     El usuario, con la OT #283 abierta: «el texto que
+                     describe es muy largo». Hasta hoy la foto con algo que
+                     mirar ABRÍA SOLA su detalle: la instrucción entera de la
+                     plantilla --que está escrita para el modelo--, la prosa
+                     entera y las tres marcas del protocolo tal cual
+                     («CATALOGO: no MUESTRA: si ATENCION: si»). Doce
+                     renglones por foto.
+
+                     Ahora lo que se lee sin tocar nada es UNA frase: la
+                     conclusión del modelo, sin las marcas. Solo cuando hay
+                     algo que mirar: la foto sin problemas ya decía «Sin
+                     observaciones» y no necesita más. -->
+                {#if q.ok === false && e.analisis && porQue(e.analisis)}
+                  <span class="rc-ia rc-ia-ojo rc-por-que">{porQue(e.analisis)}</span>
+                {/if}
+
+                <!-- EL DETALLE SIGUE ENTERO, A UN CLIC, Y YA NO SE ABRE SOLO.
+                     No se borra: lo que permite decidir es lo que pedía la
+                     plantilla CONTRA lo que el modelo vio, y sigue estando.
+                     Lo que cambió el 21/11/2026 es que el motivo corto de
+                     arriba alcanza para decidir en la mayoría de los casos,
+                     y abrir todo era lo que hacía la tarjeta ilegible.
+
+                     Sin las marcas también acá: no son para quien revisa.
 
                      Nativo, sin `enhance`: ver el encabezado de este
                      archivo. -->
                 {#if e.instrucciones || e.analisis}
-                  <details class="rc-foto-detalle" open={q.ok === false}>
+                  <details class="rc-foto-detalle">
                     <summary>ver detalle</summary>
                     {#if e.instrucciones}
                       <span class="rc-pedia">Tenía que mostrar: {e.instrucciones}</span>
                     {/if}
                     {#if e.analisis}
                       <span class="rc-ia" class:rc-ia-ojo={e.pide_atencion}>
-                        {e.pide_atencion ? '⚠' : '·'} {e.analisis}
+                        {e.pide_atencion ? '⚠' : '·'} {sinMarcas(e.analisis)}
                       </span>
                     {/if}
                   </details>
@@ -509,6 +530,7 @@
   .rc-pedia { color: var(--snoc-on-surface-variant, #666); }
   .rc-ia { color: var(--snoc-on-surface-variant, #666); }
   .rc-ia-ojo { color: #8a5300; }
+  .rc-por-que { overflow-wrap: anywhere; }
   /*  CÓMO QUEDÓ LA FOTO, en una línea (17/11/2026). El ✓ va en gris y no en
       verde a propósito: dice «sin observaciones», no «está bien», y un verde
       lo leería como una aprobación que el modelo no da. El rojo es el mismo
