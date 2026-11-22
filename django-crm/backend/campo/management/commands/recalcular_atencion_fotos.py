@@ -112,10 +112,17 @@ class Command(BaseCommand):
                     "\n  SIMULACRO: no se escribió nada. Con --aplicar se escribe.")
                 return
 
+            #  `bulk_update` no mueve `updated_at` solo. Se mueve a mano para
+            #  que Programacion lo vea en el pedido siguiente y no un minuto
+            #  despues (`campo/revision_sin_repetir.py` mira esa fecha).
+            from django.utils import timezone
+
+            momento = timezone.now()
             for f, ahora in cambian:
                 f.pide_atencion = ahora
+                f.updated_at = momento
             AnalisisDeEvidencia.objects.bulk_update(
-                [f for f, _ in cambian], ["pide_atencion"])
+                [f for f, _ in cambian], ["pide_atencion", "updated_at"])
 
             #  SE AFIRMA SOBRE LO QUE QUEDÓ, releído de la base.
             quedan = AnalisisDeEvidencia.objects.filter(

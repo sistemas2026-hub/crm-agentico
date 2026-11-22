@@ -1605,7 +1605,7 @@ Es además lo que CLAUDE.md §12 prohíbe: esperar una operación externa con el
 
 **Lo que NO promete.** Sin broker la nota no sale (queda `sin_cola` en la bitácora); no se hace dentro de la petición como respaldo, porque sería volver a esperar al ISP justo cuando algo ya anda mal. Y los cambios que **ya** quedaron «para revisar» en un teléfono no se destraban solos: hay que reenviarlos desde la app.
 
-**No se tocó, y sigue pendiente del mismo diagnóstico:** la pestaña de Programación recalcula la revisión de **todas** las órdenes por revisar en cada refresco de 15 s, por cada pestaña abierta. Es la otra mitad de la lentitud y compite por los mismos hilos del servidor.
+**No se tocó, y sigue pendiente del mismo diagnóstico:** la pestaña de Programación recalcula la revisión de **todas** las órdenes por revisar en cada refresco de 15 s, por cada pestaña abierta. Es la otra mitad de la lentitud y compite por los mismos hilos del servidor. **Resuelto en §8.33.**
 
 **Lo que encontró la auditoría independiente antes de integrar, y quedó corregido (21/11/2026).**
 
@@ -1626,3 +1626,56 @@ Es además lo que CLAUDE.md §12 prohíbe: esperar una operación externa con el
 **Qué cambia.** Sin tocar nada se lee una frase: la conclusión del modelo, sin las marcas, hasta 110 caracteres y cortada donde termina una frase (`texto-de-la-foto.js`). El detalle entero sigue a un clic y ya no se abre solo. Ningún dato nuevo y ninguna decisión nueva: qué foto pasa lo sigue diciendo `estado-de-la-foto.js`.
 
 **Lo que ese mismo caso mostró sobre las capturas, y no se cambió.** De las cuatro capturas de la #283, dos pasaron sin observaciones. Las dos que pidieron una mirada no fue por ser capturas (§8.28) ni por su origen (§8.30, que quedó en ✓): el modelo vio **una imagen de catálogo del medidor**, sobre fondo blanco, donde se pedía una medición. Es la regla del catálogo, que sigue en pie; cambiarla es otra decisión.
+
+### 8.33 DECISIÓN — Programación no recalcula la revisión del cierre si nada cambió (21–22/11/2026)
+
+**El error que lo originó.** El usuario: *«la pestaña de Supervisor cuando se recarga demora en salir»*. Es la otra mitad del diagnóstico de §8.31, que había quedado anotada sin tocar.
+
+**Lo que se midió** (PostgreSQL real, órdenes de prueba **sin fotos**: es un piso, una orden real lee más).
+
+| Qué | Antes | Después |
+|---|---|---|
+| Un pedido con 10 órdenes viejas por revisar + 5 del día | **339** consultas | **50** en el pedido repetido |
+| De esas, dentro de `revisar()` | 275 | 0 |
+| Llamadas a `revisar()` para 15 órdenes | **20** (las del día, dos veces: una para las cuentas y otra para la tarjeta) | 15 en frío, 0 repetido |
+| Consultas que agrega cada orden por revisar | ~15 | 0 (la huella son 6 para todas) |
+| Al **cargar** la pantalla, cuántas veces se revisaba cada orden | hasta **4**: el material del día armaba el día publicado entero, en paralelo, para leer la prioridad de cada orden | **1** en frío, 0 si alguien la miró en el último minuto |
+| Viajes al backend en fila al cargar | la marca de agua y el contrato, uno detrás del otro, **después** de los otros cuatro | los seis a la vez |
+
+El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
+
+**Qué se decidió.**
+
+1. **Una huella por orden, antes de calcular** (`campo/revision_sin_repetir.py`): cuántas filas tiene y cuándo se tocó la última en cada tabla que la revisión lee —eventos, fotos, análisis, material, cotejo con el ticket—; lo que lee de la orden misma y de su plantilla, **por su valor** (no por la fecha de la fila, que un `.update()` no mueve); un sello de las mediciones después del arreglo; si la orden espera esa medición; la zona de la empresa; y el código desplegado. Si la huella es la de la última vez, se devuelve la revisión de entonces.
+2. **No contradice «se calcula, no se guarda»** (`revision_del_cierre.py`). Aquella decisión existe porque la medición llega después del cierre y un veredicto guardado diría «revisar» cuando ya se sabe. Por eso la medición **entra en la huella**: cuando llega, se recalcula en el pedido siguiente. No se guarda una decisión; se evita repetir una cuenta cuyo resultado no pudo cambiar.
+3. **Solo para mostrar.** Quien cierra —una persona al aprobar (`despacho_views.py`), o el Supervisor por su puerta (`cierre_por_el_supervisor.py`)— llama a `revisar()` directo, y el serializer de la aprobación no recibe ningún veredicto de la pantalla.
+4. **Un minuto como red de atrás.** Lo que la huella no ve —una fila escrita con `bulk_update`, dos escritores que confirman cruzados— no queda viejo más de 60 s.
+5. **Si algo falla, se calcula.** Caché caída, huella que no sale o revisión que revienta: la pantalla sale por el camino de siempre. Una revisión que falló no se guarda. Con la caché caída no se intenta además guardar: cada intento espera su tope y sería pagarlo dos veces. Si falla **todo**, cada tarjeta lo dice en vez de quedar sin botones.
+6. **Una sola perilla de operación:** `CAMPO_REVISION_VIDA_SEGUNDOS` (60 por defecto, tope 600; `0` vuelve a calcular siempre). No es configuración de una empresa: es si el atajo está puesto y cuánto se le confía. **Está declarada en el servicio `backend` del compose de producción**, con guarda (`tests/test_perilla_de_la_revision_declarada.py`).
+7. **El material del día ya no pide la revisión** (`del_dia(..., con_revision=False)`): de cada orden lee el estado y la prioridad.
+
+**Un defecto que apareció al pasar, y quedó corregido.** En `del_dia`, el diccionario de «por qué se devolvió» (21/11) se llamaba `ultimo`, igual que el de «quién la asignó», y lo pisaba: con **una** orden devuelta en la pantalla, todas las demás decían «sin registro» y las cuentas «por el Supervisor / por personas» salían mal.
+
+**La lección de método que dejó.** La primera versión no ahorraba nada y todas las pruebas de Programación estaban en verde: la huella reventaba por un nombre de campo mal escrito y el código caía, callado, a calcular siempre —que es exactamente lo que el diseño pide cuando algo falla—. Solo se vio al **medir** el segundo pedido (339 contra 339). Un respaldo silencioso necesita una prueba que cuente si el camino rápido se toma; «devuelve lo correcto» no distingue un atajo que funciona de uno que nunca se usa. Y pasó una segunda vez el 22/11: al repetir sobre el código corregido las mutaciones que ya habían muerto, **una sobrevivió** —quitarle la empresa a la clave—. La prueba armaba la huella por su cuenta para plantar una entrada ajena; al sumarle a la huella la zona y el código, la suya dejó de coincidir con la real, la entrada plantada nunca valía y la prueba pasaba sola. Ahora copia la huella de lo que quedó guardado. Las mutaciones se repiten después de cada corrección, no una vez.
+
+**Lo que encontró la auditoría independiente antes de integrar (22/11/2026), sin bloqueantes.**
+
+| Hallazgo | Cómo se midió | Qué se hizo |
+|---|---|---|
+| El interruptor no se podía accionar en producción: el backend recibe una lista explícita de variables y la nueva no estaba | Leído en `docker-compose.prod.yml` | Declarada en el compose, con guarda en la raíz |
+| El número medido era el del pedido repetido; **la recarga en frío seguía pagando casi todo, y dos veces**, porque el material del día armaba el día publicado entero en paralelo | Leído en `material_del_dia.py` y en la carga de la página | El material ya no revisa (punto 7) |
+| Reemplazar todo lo que la huella toma de la orden por su id dejaba las 22 pruebas en verde | Mutación corrida por el auditor | Grupo F de pruebas: cada cambio con `.update()`, mirando el efecto en la tarjeta |
+| Renombrar una plantilla, cambiar la zona de la empresa, `recalcular_atencion_fotos` y un despliegue que cambie el criterio no movían la huella | Leído | El nombre del tipo, la zona y el código entran en la huella; el comando mueve `updated_at` |
+| Si fallaba toda la revisión, las tarjetas quedaban sin revisión y sin botones | Leído | Cada tarjeta muestra el error (punto 5) |
+| Las pruebas solo recorrían la caché en memoria | El auditor corrió las 22 contra un Redis real con el `KEY_PREFIX` de producción: 22 pasaron | — |
+
+**Qué cambia de dónde viven los datos.** La revisión guardada lleva lo que la tarjeta ya muestra —el resumen del ticket, lo que escribió el técnico, la prosa del análisis de cada foto— y pasa a estar en el Redis de la misma instalación (sin puertos publicados), con la clave por empresa y por orden. No sale a ningún tercero ni a ningún log. «60 s» es lo que vale en memoria; el volcado a disco de Redis puede retenerlo más.
+
+**Límites que quedan, a propósito.**
+
+- **La recarga en frío sigue revisando cada orden una vez.** Si nadie tuvo la pantalla a la vista en el último minuto (el sondeo se detiene con la pestaña oculta), la primera carga paga la cuenta entera. Subir la vida de lo guardado lo achica, y es una decisión que se toma con el número de producción a la vista: `python manage.py medir_programacion` lo imprime.
+- **Cuando el Supervisor mide cualquier orden, se recalculan todas las de la pantalla** (el sello de mediciones es uno para todas). Durante su ciclo de cada hora el atajo ahorra menos. Inferido, no medido.
+- Los recordatorios de cada orden se siguen leyendo desde la fecha de la orden más vieja de la pantalla; y las 40 consultas de base del pedido (cuadrillas, avisos, tiempos) quedaron igual.
+- `despacho_views.py` guarda la foto de la revisión al aprobar llamando a `revisar(orden)` **sin** decirle qué órdenes esperan medición: esa foto puede diferir de la tarjeta en una orden que la espera. Ya era así; no se tocó.
+
+**VERIFICADO:** `campo/tests/test_la_revision_no_se_repite.py` (41 casos) contra PostgreSQL real, con **45 mutaciones** en tres rondas, todas muertas, y las de la primera ronda repetidas sobre el código ya corregido; la suite completa de `campo/` más `operaciones/tests/test_el_supervisor_arma_la_jornada.py`: 2.613 pasan, y fallan las dos que ya fallaban en `origin` (`test_a4_cada_empresa_la_suya`, `test_n2_un_ticket_de_OTRA_empresa_no_se_toca`); `page-server.test.js` (35) con su mutación; y por el auditor, las pruebas de la primera versión contra un Redis real. **NO VERIFICADO:** ningún tiempo de producción —los números de arriba son consultas contra una base local con órdenes sin fotos—; cuánto tarda allá la recarga en frío, que es lo que decide si conviene subir la vida de lo guardado; y si durante el ciclo de cada hora del Supervisor el atajo ahorra algo. Lo mide `python manage.py medir_programacion`, corrido en el contenedor del backend.

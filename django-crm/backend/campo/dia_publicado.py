@@ -320,8 +320,13 @@ def por_jornada_de(jornadas, receptores, ordenes) -> tuple:
     return por, sin
 
 
-def del_dia(org, fecha) -> dict:
+def del_dia(org, fecha, *, con_revision=True) -> dict:
     """Lo publicado para `fecha`. Ver el encabezado.
+
+    `con_revision=False` deja cada fila sin lo que dice el Supervisor del
+    cierre: para quien solo necesita las cuadrillas y sus ordenes (el material
+    del dia). Revisar es lo caro de esta funcion, y el material lo pagaba
+    entero, en paralelo con la pantalla, para leer la prioridad de cada orden.
 
         {"fecha", "cuadrillas": [{jornada, cuadrilla, labor, zonas, tope,
                                   ordenes: [fila], posicion}],
@@ -389,45 +394,25 @@ def del_dia(org, fecha) -> dict:
     except Exception:                                            # noqa: BLE001
         logger.warning("Programacion: no se pudo leer la regla de los 30 minutos")
 
-    pendientes = []
+    #  LO QUE DICE EL SUPERVISOR DEL CIERRE, de todas las ordenes de la
+    #  pantalla de una vez (21/11/2026). Antes cada tarjeta lo pedia por su
+    #  cuenta: las del dia se revisaban dos veces por pedido, y todas se
+    #  recalculaban cada 15 segundos aunque nada hubiera cambiado. Ver
+    #  `campo/revision_sin_repetir.py`. No tumba Programacion.
+    from campo import revision_sin_repetir as RSR
 
-    def revision_de(o):
-        """Lo que dice el Supervisor del cierre. No tumba Programacion."""
-        from campo import revision_del_cierre as RC
-
-        from campo.cierre_por_el_supervisor import EVENTO_BLOQUEADO
-
+    if not con_revision:
+        revisiones = {}
+    else:
         try:
-            if not RC.aplica(o):
-                return None
-            #  Las que esperan la medicion, UNA vez por pantalla y solo si hay
-            #  algo que revisar.
-            if not pendientes:
-                medir = RC.pendientes_de_medir(org, ahora)
-                #  Sin poder saberlo, la tarjeta no dice «Se puede cerrar» de
-                #  una que quiza espera la medicion.
-                pendientes.append(RC.NO_SE_SABE if medir is None else medir)
-            r = RC.revisar(o, pendientes=pendientes[0])
-            if r is not None:
-                #  Si el Supervisor la quiso cerrar solo y el motor no lo
-                #  dejo: cuando, y que compuerta (30/10/2026).
-                ev = (EventoTrabajo.objects
-                      .filter(org=org, orden=o, tipo=EVENTO_BLOQUEADO)
-                      .order_by("-created_at").first())
-                r["supervisor_no_pudo"] = ({
-                    "hora": ev.created_at.astimezone(zona).strftime("%H:%M"),
-                    "detalle": str((ev.datos or {}).get("detalle") or ""),
-                } if ev else None)
-            return r
+            revisiones = RSR.de_las_ordenes(org, todas, ahora=ahora, zona=zona)
         except Exception as e:                                   # noqa: BLE001
-            #  Que se VEA: una revision que falla en silencio deja la tarjeta
-            #  sin botones y nadie sabe por que. El tipo, nunca el texto.
-            logger.warning("Programacion: no se pudo revisar un cierre (%s)", type(e).__name__)
-            return {"veredicto": "revisar", "texto": "No se pudo revisar el cierre",
-                    "puntos": [{"clave": "error", "ok": None,
-                                "texto": f"La revisión falló ({type(e).__name__}): miralo antes de cerrar."}],
-                    "evidencias": [], "sugeridas": [], "solucion": "",
-                    "supervisor_no_pudo": None}
+            #  SI FALLA TODO, CADA TARJETA LO DICE: sin esto quedaban sin
+            #  revision y sin botones, que se lee como «no hay nada que
+            #  revisar».
+            logger.warning("Programacion: no se pudieron revisar los cierres "
+                           "(%s)", type(e).__name__)
+            revisiones = RSR.de_error(todas, type(e).__name__)
 
     #  QUIEN LA ASIGNO: el ultimo evento de asignacion de cada orden.
     ultimo = {}
@@ -547,14 +532,19 @@ def del_dia(org, fecha) -> dict:
     devueltas = [o for o in todas
                  if o.estado_validacion == OrdenTrabajo.REQUIERE_CORRECCION]
     if devueltas:
-        ultimo = {}
+        #  CON SU PROPIO NOMBRE (21/11/2026). Se llamaba `ultimo`, igual que
+        #  el diccionario de «quien la asigno» de arriba, y lo pisaba: con
+        #  una sola orden devuelta en la pantalla, TODAS las demas pasaban a
+        #  decir «sin registro» y la devuelta decia que la asigno quien la
+        #  devolvio. `fila()` lee esa variable al armarse, despues de esto.
+        ultima_devolucion = {}
         for ev in (EventoTrabajo.objects
                    .filter(org=org, orden_id__in=[o.id for o in devueltas],
                            tipo="correccion_requerida")
                    .select_related("profile__user").order_by("created_at")):
-            ultimo[ev.orden_id] = ev
+            ultima_devolucion[ev.orden_id] = ev
         for o in devueltas:
-            ev = ultimo.get(o.id)
+            ev = ultima_devolucion.get(o.id)
             if ev is None:
                 continue
             datos = ev.datos if isinstance(ev.datos, dict) else {}
@@ -646,7 +636,7 @@ def del_dia(org, fecha) -> dict:
             "devolucion": devoluciones.get(o.id),
             #  30/10/2026 (`revision_del_cierre.py`): lo terminado que nadie
             #  valido trae lo que dice el Supervisor. Indica, no decide.
-            "revision": revision_de(o),
+            "revision": revisiones.get(o.id),
             #  30/10/2026: una completada sin revision tiene que decir por que
             #  (aprobada y sin cerrar, sin presentar): en produccion la OT #3
             #  quedo asi, sin revision y sin poder llegar a Cerradas.

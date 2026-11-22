@@ -87,11 +87,17 @@ export async function load({ url, cookies, locals }) {
       configuracion: null, seguimiento: null
     };
   }
-  const [dp, mat, conf, seg] = await Promise.all([
+  //  LOS SEIS A LA VEZ (21/11/2026). La marca de agua y el contrato se pedían
+  //  después, uno detrás del otro: la pantalla esperaba dos viajes más al
+  //  backend, en fila, antes de dibujar nada. El usuario: «cuando se recarga
+  //  demora en salir». Ninguno depende de otro.
+  const [dp, mat, conf, seg, marca, contrato] = await Promise.all([
     leerDiaPublicado({ cookies }, dia),
     leerMaterialDelDia({ cookies }, dia),
     leerConfiguracionDeMaterial({ cookies }),
-    leerConfiguracionDeSeguimiento({ cookies })
+    leerConfiguracionDeSeguimiento({ cookies }),
+    leerMarcaDeAgua({ cookies }),
+    leerContrato({ cookies })
   ]);
   return {
     puedeVer: true,
@@ -105,9 +111,9 @@ export async function load({ url, cookies, locals }) {
     //  Lo que el Supervisor hace solo (30/10/2026): recordar y cerrar.
     seguimiento: seg.configuracion,
     //  Qué dice la marca de agua de las fotos de campo (12/11/2026).
-    marcaDeAgua: (await leerMarcaDeAgua({ cookies })).configuracion,
+    marcaDeAgua: marca.configuracion,
     //  Los servidores, el NIT y las condiciones del contrato (13/11/2026).
-    contrato: (await leerContrato({ cookies })).configuracion,
+    contrato: contrato.configuracion,
     vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
   };
 }

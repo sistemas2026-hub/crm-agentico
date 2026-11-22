@@ -158,6 +158,14 @@ services:
       # peor porque no se nota. LA EMPRESA NO VA ACA (31/10/2026): sale de la
       # organizacion del documento, y la purga recorre todas.
       ASISTENTE_URL: ${ASISTENTE_URL:-http://motor:5000}
+      # --- Programacion ---
+      # Cuantos segundos vale la revision del cierre de una orden sin
+      # recalcularse (campo/revision_sin_repetir.py). 0 la recalcula en cada
+      # pedido, como antes del 21/11/2026: es el interruptor si una tarjeta
+      # llegara a mostrar algo viejo. Tope 600. Va declarada aca porque este
+      # servicio recibe una lista explicita: puesta solo en Dokploy no llega
+      # (guarda: tests/test_perilla_de_la_revision_declarada.py).
+      CAMPO_REVISION_VIDA_SEGUNDOS: ${CAMPO_REVISION_VIDA_SEGUNDOS:-60}
       # --- Correo ---
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@rapilinksas.co}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?}

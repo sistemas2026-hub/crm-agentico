@@ -349,6 +349,32 @@ describe('Programación: la carga', () => {
     expect(d.publicado).toBe(null);
     expect(d.error).toBe(true);
   });
+
+  it('los seis pedidos salen A LA VEZ: ninguno espera a que otro conteste', async () => {
+    //  21/11/2026, el usuario: «cuando se recarga demora en salir». La marca
+    //  de agua y el contrato se pedían después de los otros cuatro, uno
+    //  detrás del otro: dos viajes más al backend, en fila, antes de dibujar.
+    //
+    //  SE MIDE CON EL BACKEND SIN CONTESTAR. Afirmar solo «se pidieron los
+    //  seis» pasaba igual con el código de antes: en fila también terminan
+    //  pidiéndose todos.
+    /** @type {Array<(v: any) => void>} */
+    const soltar = [];
+    apiRequest.mockImplementation(() => new Promise((ok) => soltar.push(ok)));
+
+    const carga = load(ctx('http://x/supervisor-noc/programacion', 'ADMIN'));
+    await new Promise((ok) => setTimeout(ok, 0));
+
+    const pedidos = apiRequest.mock.calls.map((c) => c[0]);
+    expect(pedidos).toHaveLength(6);
+    expect(pedidos).toContain('/campo/marca-de-agua/configuracion/');
+    expect(pedidos).toContain('/campo/contrato/configuracion/');
+
+    soltar.forEach((ok) => ok({ dato: 1 }));
+    const d = /** @type {any} */ (await carga);
+    expect(d.marcaDeAgua).toEqual({ dato: 1 });
+    expect(d.contrato).toEqual({ dato: 1 });
+  });
 });
 
 /**

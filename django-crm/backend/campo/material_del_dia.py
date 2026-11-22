@@ -383,7 +383,12 @@ def calcular(org, fecha) -> dict:
     #  EL PESO DE CADA CUADRILLA: su trabajo publicado del dia, con la misma
     #  cuenta que muestra Programacion. Lo terminado no pide material.
     peso = defaultdict(int)
-    for c in dia_publicado.del_dia(org, fecha)["cuadrillas"]:
+    #  SIN LA REVISION DEL CIERRE (21/11/2026): de cada orden aca se lee el
+    #  estado y la prioridad. Pedirla entera hacia que cargar Programacion
+    #  revisara todas las ordenes terminadas DOS veces a la vez -- una para la
+    #  pantalla y otra aca, para tirarla.
+    for c in dia_publicado.del_dia(org, fecha,
+                                   con_revision=False)["cuadrillas"]:
         for o in c["ordenes"]:
             if o["estado"] in ("completada_campo", "cerrada"):
                 continue
