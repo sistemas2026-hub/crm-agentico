@@ -24,3 +24,21 @@ export async function prepararAviso(ctx, id) {
 export async function aprobarAviso(ctx, id) {
   return apiRequest(`${RUTA}${id}/aviso/`, { method: 'POST', body: { accion: 'aprobar' } }, ctx);
 }
+
+/**
+ * Detiene el envío en curso (22/11/2026). La tanda que ya está en el motor
+ * termina y se cuenta; no sale ninguna más, tampoco el «ya volvió».
+ * @param {{ cookies: any }} ctx @param {string} id @param {string} motivo
+ */
+export async function detenerAviso(ctx, id, motivo) {
+  return apiRequest(`${RUTA}${id}/aviso/`, { method: 'POST', body: { accion: 'detener', motivo } }, ctx);
+}
+
+/**
+ * A quién le llega el aviso aprobado (22/11/2026): los servicios, el nombre
+ * cuando el CRM tiene un caso de ese servicio, y si su tanda ya salió.
+ * @param {{ cookies: any }} ctx @param {string} id
+ */
+export async function leerDestinatarios(ctx, id) {
+  return apiRequest(`${RUTA}${id}/aviso/`, {}, ctx);
+}

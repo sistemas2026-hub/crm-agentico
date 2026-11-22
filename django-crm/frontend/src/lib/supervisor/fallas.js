@@ -27,6 +27,9 @@ export const ERRORES = /** @type {Record<string, string>} */ ({
   MOTOR_NO_CONTESTA: 'Dexter no respondió. Probá de nuevo.',
   OPTICO_NO_CONTESTA: 'SmartOLT no respondió. Probá de nuevo.',
   FALTA_QUIEN_APRUEBA: 'No se pudo saber quién aprueba. Volvé a iniciar sesión.',
+  FALTA_QUIEN_DETIENE: 'No se pudo saber quién lo detiene. Volvé a iniciar sesión.',
+  SIN_AVISO: 'Esta caída no tiene un aviso aprobado.',
+  NO_ESTA_EN_CURSO: 'El envío ya no estaba en curso: terminó o lo detuvieron antes.',
   NO_EXISTE: 'Esa caída ya no existe.',
   ...POR_QUE_NO
 });
@@ -59,7 +62,8 @@ export const MOTIVOS = /** @type {Record<string, string>} */ ({
 export const DETENCION = /** @type {Record<string, string>} */ ({
   SITUACION_RESUELTA: 'La caída se resolvió antes de terminar: no se le escribe a nadie más.',
   TOPE_DE_VUELTAS: 'Se agotaron los reintentos; los que faltaban no recibieron el aviso.',
-  VOLVIO_A_CAER: 'La falla volvió antes de avisar que estaba resuelta: no se le dijo a nadie que volvió.'
+  VOLVIO_A_CAER: 'La falla volvió antes de avisar que estaba resuelta: no se le dijo a nadie que volvió.',
+  DETENIDO_POR_PERSONA: 'Lo detuvo una persona: no sale ninguna tanda más, tampoco el «ya volvió».'
 });
 
 /**

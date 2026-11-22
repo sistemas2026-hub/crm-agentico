@@ -11,11 +11,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const leerFallas = vi.fn();
 const prepararAviso = vi.fn();
 const aprobarAviso = vi.fn();
+const detenerAviso = vi.fn();
 
 vi.mock('$lib/server/v2/fallas-de-red.js', () => ({
   leerFallas: (/** @type {any[]} */ ...a) => leerFallas(...a),
   prepararAviso: (/** @type {any[]} */ ...a) => prepararAviso(...a),
-  aprobarAviso: (/** @type {any[]} */ ...a) => aprobarAviso(...a)
+  aprobarAviso: (/** @type {any[]} */ ...a) => aprobarAviso(...a),
+  detenerAviso: (/** @type {any[]} */ ...a) => detenerAviso(...a)
 }));
 vi.mock('$lib/server/v2/hoy-de-la-empresa.js', () => ({
   zonaDeLaEmpresa: async () => 'America/Lima'
@@ -38,7 +40,7 @@ function evento(campos, locals = JEFA) {
 }
 
 beforeEach(() => {
-  for (const f of [leerFallas, prepararAviso, aprobarAviso]) f.mockReset();
+  for (const f of [leerFallas, prepararAviso, aprobarAviso, detenerAviso]) f.mockReset();
 });
 
 describe('la lista', () => {
@@ -90,5 +92,27 @@ describe('preparar y aprobar', () => {
     expect(r1.status).toBe(403);
     expect(r2.status).toBe(400);
     expect(aprobarAviso).not.toHaveBeenCalled();
+  });
+});
+
+describe('detener el envío (22/11/2026)', () => {
+  it('detiene el de ESA caída y le pasa el motivo, recortado a 200', async () => {
+    detenerAviso.mockResolvedValue({ aviso: { estado: 'detenido', motivo_detencion: 'DETENIDO_POR_PERSONA' } });
+    const r = await actions.detener(evento({ situacion: ID, motivo: 'x'.repeat(300) }));
+    expect(detenerAviso).toHaveBeenCalledWith(expect.anything(), ID, 'x'.repeat(200));
+    expect(r).toEqual({ situacion: ID, detenida: { estado: 'detenido', motivo_detencion: 'DETENIDO_POR_PERSONA' } });
+  });
+
+  it('si ya no estaba en curso lo dice en palabras', async () => {
+    detenerAviso.mockRejectedValue({ status: 409, body: { error: 'NO_ESTA_EN_CURSO' } });
+    const r = /** @type {any} */ (await actions.detener(evento({ situacion: ID })));
+    expect(r.status).toBe(400);
+    expect(r.data.error).toMatch(/ya no estaba en curso/);
+  });
+
+  it('sin rol de gestión no viaja nada', async () => {
+    const r = /** @type {any} */ (await actions.detener(evento({ situacion: ID }, { profile: { role: 'USER' } })));
+    expect(r.status).toBe(403);
+    expect(detenerAviso).not.toHaveBeenCalled();
   });
 });

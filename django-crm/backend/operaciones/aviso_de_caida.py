@@ -70,6 +70,14 @@ TIMEOUT_LOTE_S = 170
 #: y cuantas veces (12 x 30 min = 6 h). Despues se deja de esperar.
 ESPERA_SIGUEN_CAIDOS_S = 30 * 60
 MAX_VUELTAS_RESTABLECIDO = 12
+#: El motivo cuando lo detiene una PERSONA desde la pantalla (22/11/2026). No
+#: es un codigo del motor: con este, 'retomar' NO manda despues el "ya volvio"
+#: -- si alguien freno el envio, freno el aviso entero, no solo la primera fase.
+DETENIDO_POR_PERSONA = "DETENIDO_POR_PERSONA"
+#: Tope de destinatarios que devuelve la lista. Un PON grande tiene 128.
+TOPE_DESTINATARIOS = 1000
+#: Tope de casos por caida en la lista de fallas.
+TOPE_CASOS = 10
 
 
 class NoAvisable(Exception):
@@ -273,7 +281,8 @@ def retomar(ahora=None) -> int:
     for aviso in (AvisoDeCaida.objects.select_related("situacion")
                   .filter(estado__in=[AvisoDeCaida.TERMINADO, AvisoDeCaida.DETENIDO],
                           fase=AvisoDeCaida.CAIDA, enviados__gt=0,
-                          situacion__estado__in=TERMINADAS)):
+                          situacion__estado__in=TERMINADAS)
+                  .exclude(motivo_detencion=DETENIDO_POR_PERSONA)):
         pasar_a_restablecido(aviso)
         turno = programar(aviso, 0)
         pedir_vuelta(str(aviso.id), str(aviso.org_id), turno, 0)
@@ -347,6 +356,10 @@ def avanzar(aviso: AvisoDeCaida) -> int | None:
     aviso.pendientes = pendientes_del_motor + resto
     aviso.save(update_fields=["enviados", "descartados", "motivos", "pendientes", "vueltas",
                               "updated_at"])
+    if not _sigue_en_curso(aviso):
+        #  Lo detuvo una persona mientras esta tanda estaba en el motor: lo que
+        #  salio queda contado, y no se agenda nada mas.
+        return None
     if not aviso.pendientes:
         return _cerrar(aviso, AvisoDeCaida.TERMINADO)
     if datos.get("reintentar_en"):
@@ -404,6 +417,8 @@ def _avanzar_restablecido(aviso, situacion) -> int | None:
     pendientes_motor = [str(s) for s in (datos.get("pendientes") or []) if str(s) in del_lote]
     aviso.pendientes = list(dict.fromkeys(pendientes_motor + siguen)) + resto
     aviso.save(update_fields=["restablecidos", "pendientes", "vueltas", "updated_at"])
+    if not _sigue_en_curso(aviso):
+        return None
     if not aviso.pendientes:
         return _cerrar(aviso, AvisoDeCaida.TERMINADO)
     if resto:
@@ -413,14 +428,123 @@ def _avanzar_restablecido(aviso, situacion) -> int | None:
     return ESPERA_SIGUEN_CAIDOS_S
 
 
+def _sigue_en_curso(aviso) -> bool:
+    """Lo que dice la BASE, no la copia en memoria: una persona pudo haberlo
+    detenido mientras la tanda estaba en el motor."""
+    return AvisoDeCaida.objects.filter(id=aviso.id, estado=AvisoDeCaida.EN_CURSO).exists()
+
+
 def _cerrar(aviso, estado, motivo: str = "") -> None:
-    aviso.estado = estado
-    aviso.terminado_en = timezone.now()
-    aviso.motivo_detencion = motivo[:48]
-    aviso.proxima_vuelta_en = None
-    aviso.save(update_fields=["estado", "terminado_en", "motivo_detencion", "proxima_vuelta_en",
-                              "updated_at"])
+    """Cierra el envio si SIGUE en curso. Una escritura condicionada: si una
+    persona lo detuvo mientras tanto, su detencion no se pisa con un
+    'terminado' (22/11/2026)."""
+    ahora = timezone.now()
+    cerrados = (AvisoDeCaida.objects.filter(id=aviso.id, estado=AvisoDeCaida.EN_CURSO)
+                .update(estado=estado, terminado_en=ahora, motivo_detencion=motivo[:48],
+                        proxima_vuelta_en=None, updated_at=ahora))
+    if cerrados:
+        aviso.estado, aviso.terminado_en = estado, ahora
+        aviso.motivo_detencion, aviso.proxima_vuelta_en = motivo[:48], None
     return None
+
+
+def detener(situacion, profile, motivo: str = "") -> AvisoDeCaida:
+    """
+    Una persona detiene el envio en curso (22/11/2026). Queda escrito quien y
+    por que en la linea de tiempo; la tanda que ya estaba en el motor termina
+    y se cuenta, y no sale ninguna mas -- tampoco el "ya volvio".
+
+    Cambiar la ficha del turno es lo que corta la cadena: la vuelta que estaba
+    agendada llega con la ficha vieja y no hace nada.
+    """
+    import uuid
+
+    if profile is None:
+        raise NoAvisable("FALTA_QUIEN_DETIENE")
+    aviso = AvisoDeCaida.objects.filter(situacion=situacion).first()
+    if aviso is None:
+        raise NoAvisable("SIN_AVISO")
+    ahora = timezone.now()
+    with transaction.atomic():
+        detenidos = (AvisoDeCaida.objects.filter(id=aviso.id, estado=AvisoDeCaida.EN_CURSO)
+                     .update(estado=AvisoDeCaida.DETENIDO, terminado_en=ahora,
+                             motivo_detencion=DETENIDO_POR_PERSONA, proxima_vuelta_en=None,
+                             turno=uuid.uuid4(), updated_at=ahora))
+        if not detenidos:
+            raise NoAvisable("NO_ESTA_EN_CURSO")
+        aviso.refresh_from_db()
+        fase = "del restablecido" if aviso.fase == AvisoDeCaida.RESTABLECIDO else "de la caída"
+        motivo = " ".join(str(motivo or "").split())[:200]
+        svc.anotar(situacion, TipoEvento.COORDINACION,
+                   f"Envío del aviso {fase} detenido; quedaban {len(aviso.pendientes or [])}"
+                   + (f": {motivo}" if motivo else ""),
+                   datos={"aviso_de_caida": str(aviso.id), "accion": "detener",
+                          "pendientes": len(aviso.pendientes or []), "motivo": motivo},
+                   actor=profile)
+    return aviso
+
+
+def destinatarios(aviso: AvisoDeCaida) -> dict:
+    """
+    A QUIEN le llega el aviso (22/11/2026): los servicios aprobados y si ya
+    salio su tanda. Pedido aparte y solo por gestion; la lista de fallas y la
+    vista previa siguen sin traerla.
+
+    El nombre NO se guarda: se lee aca de los casos que el CRM ya tiene de ese
+    servicio (el ultimo), el mismo dato que muestra la ficha del cliente. Sin
+    caso, sin nombre -- no se le pregunta al ISP por cada uno.
+
+    Por servicio solo se sabe si sigue pendiente: el motor contesta conteos
+    (enviados, descartados y por que), no quien recibio y quien no.
+    """
+    from cases.models import Case
+
+    servicios = [str(x) for x in (aviso.servicios or [])][:TOPE_DESTINATARIOS]
+    pendientes = {str(x) for x in (aviso.pendientes or [])}
+    nombres: dict[str, str] = {}
+    for sid, nombre in (Case.objects.filter(org_id=aviso.org_id, external_service_id__in=servicios)
+                        .exclude(external_client_name="")
+                        .order_by("-created_at")
+                        .values_list("external_service_id", "external_client_name")):
+        nombres.setdefault(sid, nombre)
+    return {
+        "fase": aviso.fase,
+        "estado": aviso.estado,
+        "total": len(aviso.servicios or []),
+        "recortada": len(aviso.servicios or []) > TOPE_DESTINATARIOS,
+        "destinatarios": [{"servicio": sid, "cliente": nombres.get(sid, ""),
+                           "pendiente": sid in pendientes} for sid in servicios],
+    }
+
+
+def casos_de(situaciones) -> dict:
+    """{situacion_id: {'casos': [...], 'total': n}} con los casos que la
+    correlacion ligo a cada caida por su PON (22/11/2026): el ticket de la
+    caida, para abrirlo desde la pantalla. Una sola consulta para todas.
+    Espera los afectados ya precargados."""
+    from cases.models import Case
+
+    por_situacion: dict[str, list[str]] = {}
+    for s in situaciones:
+        ids = [a.identificador for a in s.afectados.all()
+               if a.tipo == TipoAfectado.CASO and a.recuperado_en is None]
+        por_situacion[str(s.id)] = ids
+    todos = {i for ids in por_situacion.values() for i in ids}
+    filas = {}
+    if todos:
+        org_ids = {s.org_id for s in situaciones}
+        for c in Case.objects.filter(id__in=todos, org_id__in=org_ids):
+            filas[str(c.id)] = {"id": str(c.id), "ticket": c.external_ticket_id or "",
+                                "servicio": c.external_service_id or "",
+                                "cliente": c.external_client_name or "",
+                                "abierto": c.resolved_at is None}
+    salida = {}
+    for sid, ids in por_situacion.items():
+        casos = [filas[i] for i in ids if i in filas]
+        #  Abiertos primero: es lo que hay que mirar.
+        casos.sort(key=lambda c: not c["abierto"])
+        salida[sid] = {"casos": casos[:TOPE_CASOS], "total": len(casos)}
+    return salida
 
 
 def resumen(aviso: AvisoDeCaida | None) -> dict | None:
@@ -434,7 +558,21 @@ def resumen(aviso: AvisoDeCaida | None) -> dict | None:
             "aprobado_por": _nombre(aviso.aprobado_por),
             "motivo_detencion": aviso.motivo_detencion or None,
             "fase": aviso.fase, "restablecidos": aviso.restablecidos,
-            "terminado_en": aviso.terminado_en.isoformat() if aviso.terminado_en else None}
+            "terminado_en": aviso.terminado_en.isoformat() if aviso.terminado_en else None,
+            "detenido_por": _quien_detuvo(aviso)}
+
+
+def _quien_detuvo(aviso) -> str | None:
+    """El nombre de quien lo detuvo, de la linea de tiempo. Solo si fue una persona."""
+    if aviso.motivo_detencion != DETENIDO_POR_PERSONA:
+        return None
+    from operaciones.situaciones_modelos import SituacionEvento
+
+    ev = (SituacionEvento.objects.filter(situacion_id=aviso.situacion_id,
+                                         datos__aviso_de_caida=str(aviso.id),
+                                         datos__accion="detener")
+          .select_related("actor__user").order_by("-ocurrido_en").first())
+    return _nombre(ev.actor) if ev and ev.actor_id else ""
 
 
 def _nombre(profile) -> str:

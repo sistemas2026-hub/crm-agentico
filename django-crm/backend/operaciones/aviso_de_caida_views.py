@@ -21,10 +21,12 @@ S = SituacionOperativa
 #: Codigo -> http. Lo que no esta aca es un 400.
 HTTP_DE = {"YA_APROBADO": http.HTTP_409_CONFLICT, "CARGANDO": http.HTTP_202_ACCEPTED,
            "MOTOR_NO_CONTESTA": http.HTTP_502_BAD_GATEWAY,
-           "NO_CONFIGURADO": http.HTTP_503_SERVICE_UNAVAILABLE}
+           "NO_CONFIGURADO": http.HTTP_503_SERVICE_UNAVAILABLE,
+           "SIN_AVISO": http.HTTP_404_NOT_FOUND,
+           "NO_ESTA_EN_CURSO": http.HTTP_409_CONFLICT}
 
 
-def _fila(s) -> dict:
+def _fila(s, casos=None) -> dict:
     pon = next((a for a in s.afectados.all() if a.tipo == TipoAfectado.PON), None)
     datos = (pon.datos or {}) if pon else {}
     try:
@@ -35,7 +37,10 @@ def _fila(s) -> dict:
             "riesgo": s.riesgo, "detectada_en": s.detectada_en.isoformat(),
             "puerto": pon.identificador if pon else "", "caja": pon.etiqueta if pon else "",
             "equipos": datos.get("afectados"), "tipo_alerta": datos.get("tipo_alerta") or "",
-            "por_que_no": A.por_que_no(s), "aviso": A.resumen(aviso)}
+            "por_que_no": A.por_que_no(s), "aviso": A.resumen(aviso),
+            #  22/11/2026: los casos (tickets) que la correlacion ligo a esta
+            #  caida por su PON, para abrirlos desde la pantalla.
+            "casos": (casos or {}).get("casos", []), "casos_total": (casos or {}).get("total", 0)}
 
 
 class FallasDeRedView(APIView):
@@ -59,13 +64,25 @@ class FallasDeRedView(APIView):
                           | Q(aviso_de_caida__terminado_en__gte=reciente))
                   .prefetch_related("afectados").select_related("aviso_de_caida__aprobado_por__user")
                   .distinct().order_by("-detectada_en"))
-        return Response({"fallas": [_fila(s) for s in fallas]})
+        fallas = list(fallas)
+        casos = A.casos_de(fallas)
+        return Response({"fallas": [_fila(s, casos.get(str(s.id))) for s in fallas]})
 
 
 class AvisoDeCaidaView(APIView):
-    """POST {accion: 'preparar' | 'aprobar'} sobre una caida."""
+    """
+    GET: a quien le llega el aviso aprobado (22/11/2026).
+    POST {accion: 'preparar' | 'aprobar' | 'detener', motivo?} sobre una caida.
+    """
 
     permission_classes = [EsJefeDeOperaciones]
+
+    def get(self, request, situacion_id):
+        aviso = (AvisoDeCaida.objects
+                 .filter(situacion_id=situacion_id, org=request.org).first())
+        if aviso is None:
+            return Response({"error": "SIN_AVISO"}, status=http.HTTP_404_NOT_FOUND)
+        return Response(A.destinatarios(aviso))
 
     def post(self, request, situacion_id):
         s = (S.objects.filter(id=situacion_id, org=request.org)
@@ -79,6 +96,10 @@ class AvisoDeCaidaView(APIView):
             if accion == "aprobar":
                 aviso = A.aprobar(s, getattr(request, "profile", None))
                 return Response({"aviso": A.resumen(aviso)}, status=http.HTTP_201_CREATED)
+            if accion == "detener":
+                motivo = (request.data or {}).get("motivo") or ""
+                aviso = A.detener(s, getattr(request, "profile", None), str(motivo))
+                return Response({"aviso": A.resumen(aviso)})
         except A.NoAvisable as e:
             return Response({"error": e.codigo}, status=HTTP_DE.get(e.codigo, http.HTTP_400_BAD_REQUEST))
         return Response({"error": "ACCION_DESCONOCIDA"}, status=http.HTTP_400_BAD_REQUEST)

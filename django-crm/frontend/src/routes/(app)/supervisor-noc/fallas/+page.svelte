@@ -24,6 +24,7 @@
   import { invalidateAll } from '$app/navigation';
   import '../supervisor-noc.css';
   import Confirmar from '$lib/supervisor/ui/Confirmar.svelte';
+  import PanelLateral from '$lib/supervisor/ui/PanelLateral.svelte';
   import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
   import {
     avance,
@@ -76,7 +77,7 @@
   /** La que espera confirmación para avisar. */
   let porConfirmar = $state(/** @type {any | null} */ (null));
 
-  /** @param {string} id @param {'preparar' | 'aprobar'} que */
+  /** @param {string} id @param {'preparar' | 'aprobar' | 'detener'} que */
   const alEnviar = (id, que) => {
     enviando = id;
     return async (/** @type {any} */ { result, update }) => {
@@ -86,8 +87,58 @@
         delete preparadas[id];
         avisar('Aviso aprobado. Sale por WhatsApp en la próxima tanda.');
       }
+      if (que === 'detener' && result?.type === 'success') {
+        avisar('Envío detenido. No sale ninguna tanda más.');
+      }
     };
   };
+
+  /* -------------------------------------------------------------------------
+     22/11/2026: DETENER EL ENVÍO, A QUIÉN LE LLEGA Y LOS TICKETS. Los tres
+     estaban en la maqueta aprobada y esperaban al backend
+     (operaciones/aviso_de_caida.py: detener, destinatarios, casos_de).
+     ------------------------------------------------------------------------- */
+
+  /** La caída cuyo envío se quiere detener. */
+  let porDetener = $state(/** @type {any | null} */ (null));
+  let motivoDetener = $state('');
+  /** @param {string} id */
+  function enviarDetencion(id) {
+    porDetener = null;
+    /** @type {HTMLFormElement | null} */ (document.getElementById(`detener-${id}`))?.requestSubmit();
+  }
+
+  /** La caída cuya lista de destinatarios está abierta, y lo que llegó. */
+  let verDestinatarios = $state(/** @type {any | null} */ (null));
+  let destinatarios = $state(/** @type {any | null} */ (null));
+  let errorDestinatarios = $state('');
+  let buscarDestinatario = $state('');
+  /** @param {any} f */
+  async function abrirDestinatarios(f) {
+    verDestinatarios = f;
+    destinatarios = null;
+    errorDestinatarios = '';
+    buscarDestinatario = '';
+    try {
+      const r = await fetch(`/supervisor-noc/fallas/${f.id}/destinatarios`, { headers: { accept: 'application/json' } });
+      const d = await r.json().catch(() => ({}));
+      if (verDestinatarios?.id !== f.id) return;
+      if (!r.ok) throw new Error(d?.error || 'No se pudo leer la lista.');
+      destinatarios = d;
+    } catch (/** @type {any} */ e) {
+      if (verDestinatarios?.id === f.id) errorDestinatarios = e?.message || 'No se pudo leer la lista.';
+    }
+  }
+  const listaFiltrada = $derived.by(() => {
+    const todos = /** @type {any[]} */ (destinatarios?.destinatarios ?? []);
+    const q = buscarDestinatario.trim().toLowerCase();
+    return q ? todos.filter((d) => d.servicio.includes(q) || String(d.cliente).toLowerCase().includes(q)) : todos;
+  });
+  const cuentaDestinatarios = $derived.by(() => {
+    const todos = /** @type {any[]} */ (destinatarios?.destinatarios ?? []);
+    const pendientes = todos.filter((d) => d.pendiente).length;
+    return { pendientes, salieron: todos.length - pendientes };
+  });
 
   let leidoEn = $state(Date.now());
   let ahora = $state(Date.now());
@@ -275,8 +326,28 @@
                   {/each}
                   <p class="snoc-body-sm snoc-secundario" style="margin:0;">
                     Aprobado por {f.aviso.aprobado_por || 'una persona'} el {fecha(f.aviso.aprobado_en)}
+                    {#if f.aviso.detenido_por}· lo detuvo {f.aviso.detenido_por}{/if}
                     {#if f.aviso.terminado_en} · terminó el {fecha(f.aviso.terminado_en)}{/if}
                   </p>
+                  <div class="snoc-fila" style="flex-wrap:wrap;">
+                    <button type="button" class="snoc-btn" onclick={() => abrirDestinatarios(f)}>
+                      Ver a quién le llega
+                    </button>
+                    {#if f.aviso.estado === 'en_curso'}
+                      <form id="detener-{f.id}" method="POST" action="?/detener" use:enhance={() => alEnviar(f.id, 'detener')}>
+                        <input type="hidden" name="situacion" value={f.id} />
+                        <input type="hidden" name="motivo" value={motivoDetener} />
+                        <button
+                          type="button"
+                          class="snoc-btn snoc-btn-error"
+                          disabled={enviando === f.id}
+                          onclick={() => { motivoDetener = ''; porDetener = f; }}
+                        >
+                          {enviando === f.id ? 'Deteniendo…' : 'Detener el envío'}
+                        </button>
+                      </form>
+                    {/if}
+                  </div>
                 </div>
               {:else if f.por_que_no}
                 <!-- Antes era texto gris: para quien opera es lo que decide. -->
@@ -348,6 +419,29 @@
                 </form>
               {/if}
 
+              {#if f.casos?.length}
+                <!-- LOS TICKETS DE LA CAÍDA (22/11/2026): los casos que Dexter ligó a
+                     este puerto. Los abiertos primero. -->
+                <details class="fl-casos">
+                  <summary class="snoc-body-sm">
+                    <strong>{f.casos_total}</strong> {f.casos_total === 1 ? 'ticket ligado' : 'tickets ligados'} a esta caída
+                    {#if f.casos.some((/** @type {any} */ c) => c.abierto)}· {f.casos.filter((/** @type {any} */ c) => c.abierto).length} abiertos{/if}
+                  </summary>
+                  <ul class="fl-lista">
+                    {#each f.casos as c (c.id)}
+                      <li>
+                        <a href="/tickets/{c.id}">{c.ticket ? `#${c.ticket}` : 'Ticket'}{c.cliente ? ` · ${c.cliente}` : ''}</a>
+                        <span class="snoc-tag {c.abierto ? '' : 'fl-cerrado'}">{c.abierto ? 'Abierto' : 'Cerrado'}</span>
+                        {#if c.servicio}<a class="snoc-body-sm" href="/clientes/{encodeURIComponent(c.servicio)}">ficha del cliente</a>{/if}
+                      </li>
+                    {/each}
+                  </ul>
+                  {#if f.casos_total > f.casos.length}
+                    <p class="snoc-body-sm snoc-secundario" style="margin:0;">Se muestran {f.casos.length} de {f.casos_total}.</p>
+                  {/if}
+                </details>
+              {/if}
+
               {#if mia && form?.error}
                 <p class="snoc-recuadro snoc-recuadro-error" role="alert">{form.error}</p>
               {/if}
@@ -378,6 +472,80 @@
   </p>
 </Confirmar>
 
+<Confirmar
+  abierto={!!porDetener}
+  titulo="¿Detener el envío del aviso?"
+  confirmar="Sí, detener"
+  tono="peligro"
+  alCancelar={() => (porDetener = null)}
+  alConfirmar={() => enviarDetencion(porDetener.id)}
+>
+  <p style="margin:0;">
+    Caída del puerto <strong class="snoc-mono">{porDetener?.puerto}</strong>. Quedan
+    <strong>{porDetener?.aviso?.pendientes ?? 0}</strong> por avisar.
+  </p>
+  <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+    La tanda que ya está saliendo termina. No sale ninguna más, <strong>tampoco el «ya volvió»</strong>,
+    y no se puede volver a aprobar para esta caída.
+  </p>
+  <label class="snoc-pila-xs snoc-body-sm">
+    <span>Por qué (opcional, queda en la historia de la caída)</span>
+    <input class="snoc-campo" maxlength="200" bind:value={motivoDetener} placeholder="ej: falsa alarma, el mensaje no corresponde" />
+  </label>
+</Confirmar>
+
+<PanelLateral
+  abierto={!!verDestinatarios}
+  antetitulo="Aviso de la caída · {verDestinatarios?.puerto ?? ''}"
+  titulo="A quién le llega"
+  alCerrar={() => (verDestinatarios = null)}
+>
+  {#if errorDestinatarios}
+    <p class="snoc-recuadro snoc-recuadro-error" role="alert">{errorDestinatarios}</p>
+  {:else if !destinatarios}
+    <p class="snoc-body-sm snoc-secundario">Leyendo la lista…</p>
+  {:else}
+    <div class="snoc-pila">
+      <p class="snoc-body-sm" style="margin:0;">
+        <strong>{destinatarios.total}</strong> servicios aprobados ·
+        {destinatarios.fase === 'restablecido' ? 'aviso de «ya volvió»' : 'aviso de la caída'} ·
+        {cuentaDestinatarios.salieron} con su tanda ya enviada · {cuentaDestinatarios.pendientes} pendientes
+      </p>
+      <p class="snoc-body-sm snoc-secundario" style="margin:0;">
+        «Tanda enviada» no dice que le llegó: los que no recibieron el aviso y por qué se cuentan en la
+        tarjeta de la caída. El nombre sale del último ticket de ese servicio; sin ticket, se ve el número.
+      </p>
+      {#if destinatarios.recortada}
+        <p class="snoc-recuadro snoc-recuadro-alerta">Se muestran los primeros {destinatarios.destinatarios.length}.</p>
+      {/if}
+      <input class="snoc-campo" type="search" placeholder="Buscar por servicio o nombre" bind:value={buscarDestinatario} aria-label="Buscar destinatario" />
+      <ul class="fl-lista fl-destinatarios">
+        {#each listaFiltrada as d (d.servicio)}
+          <li>
+            <a href="/clientes/{encodeURIComponent(d.servicio)}">
+              {d.cliente || 'Sin nombre en el CRM'} <span class="snoc-mono snoc-secundario">· {d.servicio}</span>
+            </a>
+            <span class="snoc-tag {d.pendiente ? 'fl-pendiente' : ''}">{d.pendiente ? 'Pendiente' : 'Tanda enviada'}</span>
+          </li>
+        {:else}
+          <li class="snoc-secundario">Nadie coincide con la búsqueda.</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+</PanelLateral>
+
 <style>
   .fl-caida { gap: 12px; }
+  .fl-casos summary { cursor: pointer; }
+  .fl-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; }
+  .fl-lista li {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    padding: 8px 0; border-top: 1px solid var(--v2-line);
+  }
+  .fl-lista li:first-child { border-top: 0; }
+  .fl-lista a { color: var(--v2-ember-text); text-decoration: none; font-weight: 600; }
+  .fl-lista a:hover { text-decoration: underline; }
+  .fl-cerrado { opacity: 0.7; }
+  .fl-pendiente { background: var(--v2-ember-soft); color: var(--v2-ember-text); }
 </style>

@@ -475,3 +475,133 @@ def test_h3_la_pantalla_sigue_mostrando_la_caida_mientras_su_aviso_corre(admin_c
     assert str(s.id) in ids and str(vieja.id) not in ids
     fila = next(f for f in r.json()["fallas"] if f["id"] == str(s.id))
     assert fila["aviso"]["fase"] == "restablecido" and fila["aviso"]["restablecidos"] == 7
+
+
+# ---------------------------------------------------------------------------
+# I · lo que pidio el rediseño del Supervisor (22/11/2026): detener un envio,
+#     ver a quien le llega y abrir los tickets de la caida
+# ---------------------------------------------------------------------------
+
+def _caso(org, *, servicio="", ticket="", nombre="", resuelto=False):
+    from cases.models import Case
+    #  Proveedor y ticket van juntos o no van (case_external_ref_complete).
+    return Case.objects.create(org=org, name="caso de prueba", status="New", priority="Normal",
+                               provider="wisphub" if ticket else "", external_ticket_id=ticket,
+                               external_service_id=servicio, external_client_name=nombre,
+                               resolved_at=timezone.now() if resuelto else None)
+
+
+def test_i_detener_deja_escrito_quien_y_corta_la_cadena(org_a, admin_profile, motor):
+    s = _situacion(org_a)
+    aviso = _aviso(org_a, admin_profile, s)
+    turno_viejo = str(aviso.turno)
+    A.detener(s, admin_profile, "  el mensaje   tenia un error ")
+    aviso.refresh_from_db()
+    assert aviso.estado == AvisoDeCaida.DETENIDO and aviso.motivo_detencion == A.DETENIDO_POR_PERSONA
+    assert aviso.terminado_en and aviso.proxima_vuelta_en is None
+    assert str(aviso.turno) != turno_viejo, "la vuelta agendada llega con la ficha vieja"
+    assert A.tomar_turno(str(aviso.id), turno_viejo) is None
+    ev = SituacionEvento.objects.filter(situacion=s, datos__accion="detener").get()
+    assert ev.actor == admin_profile and ev.datos["pendientes"] == 3
+    assert ev.datos["motivo"] == "el mensaje tenia un error"
+    assert A.resumen(aviso)["detenido_por"] is not None
+    with pytest.raises(A.NoAvisable) as e:
+        A.detener(s, admin_profile)
+    assert e.value.codigo == "NO_ESTA_EN_CURSO"
+
+
+def test_i2_sin_persona_o_sin_aviso_no_se_detiene_nada(org_a, admin_profile):
+    s = _situacion(org_a)
+    with pytest.raises(A.NoAvisable) as e:
+        A.detener(s, admin_profile)
+    assert e.value.codigo == "SIN_AVISO"
+    _aviso(org_a, admin_profile, s)
+    with pytest.raises(A.NoAvisable) as e:
+        A.detener(s, None)
+    assert e.value.codigo == "FALTA_QUIEN_DETIENE"
+
+
+def test_i3_lo_que_freno_una_persona_no_manda_despues_el_ya_volvio(org_a, admin_profile, motor):
+    from operaciones import tasks
+    s = _situacion(org_a)
+    aviso = _aviso(org_a, admin_profile, s)
+    AvisoDeCaida.objects.filter(id=aviso.id).update(enviados=2)
+    A.detener(s, admin_profile)
+    S.objects.filter(id=s.id).update(estado=S.RESUELTA, verificacion="volvio", verificada_en=timezone.now())
+    with mock.patch.object(tasks.avanzar_aviso_de_caida, "apply_async") as vuelta:
+        assert A.retomar() == 0
+    vuelta.assert_not_called()
+    aviso.refresh_from_db()
+    assert aviso.fase == AvisoDeCaida.CAIDA and aviso.estado == AvisoDeCaida.DETENIDO
+
+
+def test_i4_la_tanda_que_estaba_en_el_motor_se_cuenta_y_no_pisa_la_detencion(org_a, admin_profile, motor):
+    s = _situacion(org_a)
+    aviso = _aviso(org_a, admin_profile, s, pendientes=("101", "102"))
+
+    def el_motor_tarda(*_a, **_k):
+        #  Mientras el motor manda, una persona aprieta «Detener».
+        A.detener(s, admin_profile)
+        return _R({"enviados": 2, "descartados": 0, "motivos": {}, "pendientes": [], "reintentar_en": None})
+
+    with mock.patch("requests.post", side_effect=el_motor_tarda):
+        assert A.avanzar(aviso) is None, "no se agenda nada mas"
+    aviso.refresh_from_db()
+    assert aviso.enviados == 2, "lo que salio queda contado"
+    assert aviso.estado == AvisoDeCaida.DETENIDO and aviso.motivo_detencion == A.DETENIDO_POR_PERSONA
+
+
+def test_i5_a_quien_le_llega_con_el_nombre_del_caso_y_si_ya_salio(admin_client, org_a, org_b, admin_profile):
+    s = _situacion(org_a)
+    aviso = _aviso(org_a, admin_profile, s)
+    AvisoDeCaida.objects.filter(id=aviso.id).update(pendientes=["103"])
+    from conftest import set_rls_context
+    #  El caso ajeno se escribe con SU contexto: con RLS, desde el de org_a ni
+    #  se puede. Lo que se prueba es que el filtro por empresa no lo preste.
+    set_rls_context(org_b)
+    _caso(org_b, servicio="102", nombre="De otra empresa")
+    set_rls_context(org_a)
+    _caso(org_a, servicio="101", nombre="María Gómez")
+    r = admin_client.get(f"{LISTA}{s.id}/aviso/")
+    assert r.status_code == 200, r.content
+    d = r.json()
+    assert d["total"] == 3 and d["fase"] == "caida" and d["recortada"] is False
+    por = {x["servicio"]: x for x in d["destinatarios"]}
+    assert por["101"] == {"servicio": "101", "cliente": "María Gómez", "pendiente": False}
+    assert por["102"]["cliente"] == "", "el caso de otra empresa no presta su nombre"
+    assert por["103"]["pendiente"] is True
+    sin_aviso = _situacion(org_a, codigo="S-002", pon="3/2/12")
+    assert admin_client.get(f"{LISTA}{sin_aviso.id}/aviso/").status_code == 404
+    ajena = _situacion(org_b, codigo="S-003")
+    _aviso(org_b, admin_profile, ajena)
+    assert admin_client.get(f"{LISTA}{ajena.id}/aviso/").status_code == 404
+
+
+def test_i6_detener_por_la_pantalla_y_solo_gestion(admin_client, user_client, org_a, admin_profile):
+    s = _situacion(org_a)
+    _aviso(org_a, admin_profile, s)
+    url = f"{LISTA}{s.id}/aviso/"
+    assert user_client.post(url, {"accion": "detener"}, format="json").status_code == 403
+    assert user_client.get(url).status_code == 403
+    r = admin_client.post(url, {"accion": "detener", "motivo": "falsa alarma"}, format="json")
+    assert r.status_code == 200, r.content
+    assert r.json()["aviso"]["estado"] == "detenido"
+    assert r.json()["aviso"]["motivo_detencion"] == A.DETENIDO_POR_PERSONA
+    r = admin_client.post(url, {"accion": "detener"}, format="json")
+    assert r.status_code == 409 and r.json()["error"] == "NO_ESTA_EN_CURSO"
+
+
+def test_i7_la_lista_trae_los_tickets_de_la_caida_abiertos_primero(admin_client, org_a, admin_profile):
+    s = _situacion(org_a)
+    cerrado = _caso(org_a, servicio="101", ticket="58001", nombre="Ana", resuelto=True)
+    abierto = _caso(org_a, servicio="102", ticket="58190", nombre="Luis")
+    ahora = timezone.now()
+    for c in (cerrado, abierto):
+        SituacionAfectado.objects.create(situacion=s, org=org_a, tipo=TipoAfectado.CASO,
+                                         identificador=str(c.id), etiqueta="", detectado_en=ahora,
+                                         visto_en=ahora, datos={"pon": "3/2/11"})
+    fila = admin_client.get(LISTA).json()["fallas"][0]
+    assert fila["casos_total"] == 2
+    assert [c["ticket"] for c in fila["casos"]] == ["58190", "58001"], "abiertos primero"
+    assert fila["casos"][0] == {"id": str(abierto.id), "ticket": "58190", "servicio": "102",
+                                "cliente": "Luis", "abierto": True}

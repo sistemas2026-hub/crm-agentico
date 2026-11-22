@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { aprobarAviso, leerFallas, prepararAviso } from '$lib/server/v2/fallas-de-red.js';
+import { aprobarAviso, detenerAviso, leerFallas, prepararAviso } from '$lib/server/v2/fallas-de-red.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 import { zonaDeLaEmpresa } from '$lib/server/v2/hoy-de-la-empresa.js';
 import { textoDelError } from '$lib/supervisor/fallas.js';
@@ -56,9 +56,10 @@ async function situacionDe(request, locals) {
   if (!gestiona(locals)) {
     return { error: fail(403, { error: 'Solo el Jefe de Operaciones (o un ADMIN/SUPERVISOR) puede avisar una caída.' }) };
   }
-  const id = String((await request.formData()).get('situacion') ?? '');
+  const datos = await request.formData();
+  const id = String(datos.get('situacion') ?? '');
   if (!UUID.test(id)) return { error: fail(400, { error: 'Esa caída no se reconoce.' }) };
-  return { id };
+  return { id, motivo: String(datos.get('motivo') ?? '').slice(0, 200) };
 }
 
 /** @type {import('./$types').Actions} */
@@ -84,6 +85,22 @@ export const actions = {
       const r = await aprobarAviso({ cookies }, id);
       if (codigoDe(r)) return fail(400, { situacion: id, error: textoDelError(codigoDe(r)) });
       return { situacion: id, aprobada: r?.aviso ?? null };
+    } catch (e) {
+      return fail(400, { situacion: id, error: textoDelError(codigoDe(e)) });
+    }
+  },
+
+  /**
+   * Una persona detiene el envío en curso (22/11/2026). La tanda que ya está
+   * en el motor termina; no sale ninguna más, tampoco el «ya volvió».
+   */
+  detener: async ({ request, cookies, locals }) => {
+    const { id, motivo, error } = await situacionDe(request, locals);
+    if (error) return error;
+    try {
+      const r = await detenerAviso({ cookies }, id, motivo ?? '');
+      if (codigoDe(r)) return fail(400, { situacion: id, error: textoDelError(codigoDe(r)) });
+      return { situacion: id, detenida: r?.aviso ?? null };
     } catch (e) {
       return fail(400, { situacion: id, error: textoDelError(codigoDe(e)) });
     }
