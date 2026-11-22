@@ -130,7 +130,7 @@
               </span>
             {:else}
               <span class="snoc-body-sm snoc-secundario">
-                Delegada el {fecha(d.delegada_en)}{#if d.con_estas_palabras} · «{d.con_estas_palabras}»{/if}
+                Delegada el {fecha(d.delegada_en)}{#if d.con_estas_palabras}{' '}· «{d.con_estas_palabras}»{/if}
               </span>
               {#if !d.nivel_alcanza}
                 <span class="snoc-body-sm snoc-error-txt">No va a actuar: necesita nivel {d.exige_nivel} y el que aplica hoy es {a.efectivo}.</span>

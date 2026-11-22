@@ -367,7 +367,7 @@
   alConfirmar={() => enviarAprobacion(porConfirmar.id)}
 >
   <p style="margin:0;">
-    Caída del puerto <strong class="snoc-mono">{porConfirmar?.puerto}</strong>{#if porConfirmar?.caja} ({porConfirmar.caja}){/if}.
+    Caída del puerto <strong class="snoc-mono">{porConfirmar?.puerto}</strong>{#if porConfirmar?.caja}{' '}({porConfirmar.caja}){/if}.
     Sale por tandas. <strong>Un aviso enviado no se retira.</strong>
   </p>
   {#if porConfirmar?.modo_prueba}

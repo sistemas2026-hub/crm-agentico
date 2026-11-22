@@ -25,7 +25,7 @@
   </header>
   <p class="oc-asunto">{orden.asunto || orden.tipo}</p>
   <div class="oc-quien">
-    <span>{orden.cliente || 'Sin cliente'}{#if orden.direccion} · {orden.direccion}{/if}</span>
+    <span>{orden.cliente || 'Sin cliente'}{#if orden.direccion}{' '}· {orden.direccion}{/if}</span>
     {#if orden.barrio}<span class="snoc-secundario">{orden.barrio}</span>{/if}
   </div>
 

@@ -769,7 +769,7 @@
                   <div class="snoc-fila-sep" style="flex-wrap:wrap; gap:var(--snoc-xs);">
                     <strong>{c.cuadrilla}</strong>
                     <span class="snoc-mono">
-                      {c.carga} de {c.tope}{#if c.carga >= c.tope} · llena{:else if c.carga === 0} · sin trabajo{/if}
+                      {c.carga} de {c.tope}{#if c.carga >= c.tope}{' '}· llena{:else if c.carga === 0}{' '}· sin trabajo{/if}
                     </span>
                     {#if c.ya_tiene}
                       <!-- Lo asignado a mano o ya empezado no cuenta para el tope
@@ -785,7 +785,7 @@
                     {#each c.zonas as z (z)}<span class="snoc-body-sm snoc-secundario">{z}</span>{/each}
                   </div>
                   <p class="snoc-body-sm snoc-secundario">
-                    {c.lider || 'Sin líder'}{#if c.gente.length} · {c.gente.map((/** @type {any} */ g) => g.nombre).join(', ')}{/if}
+                    {c.lider || 'Sin líder'}{#if c.gente.length}{' '}· {c.gente.map((/** @type {any} */ g) => g.nombre).join(', ')}{/if}
                     <br />{c.que_haria}
                   </p>
                   {#each c.ordenes as o, i (i)}

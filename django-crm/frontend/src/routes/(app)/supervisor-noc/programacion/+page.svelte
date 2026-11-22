@@ -350,7 +350,7 @@
                   </label>
                   <label class="snoc-body-sm">
                     <input type="checkbox" name="mostrar_empresa" checked={data.marcaDeAgua.mostrar_empresa} />
-                    El nombre de la empresa{#if data.marcaDeAgua.empresa} ({data.marcaDeAgua.empresa}){/if}
+                    El nombre de la empresa{#if data.marcaDeAgua.empresa}{' '}({data.marcaDeAgua.empresa}){/if}
                   </label>
                   <label class="snoc-body-sm">
                     <input type="checkbox" name="mostrar_tecnico" checked={data.marcaDeAgua.mostrar_tecnico} />
@@ -566,8 +566,8 @@
           {:else if publicado}
             <p class="snoc-body-sm">
               {cuentas.publicadas} {cuentas.publicadas === 1 ? 'orden publicada' : 'órdenes publicadas'}:
-              {cuentas.por_el_supervisor} por el Supervisor · {cuentas.por_personas} por una persona{#if cuentas.sin_registro}
-                · {cuentas.sin_registro} sin registro de quién{/if}
+              {cuentas.por_el_supervisor} por el Supervisor · {cuentas.por_personas} por una persona
+              {#if cuentas.sin_registro}· {cuentas.sin_registro} sin registro de quién{/if}
               · {cuentas.avisadas} con aviso enviado al teléfono
               {#if cuentas.esperan}· {cuentas.esperan} esperan cuadrilla{/if}
             </p>
