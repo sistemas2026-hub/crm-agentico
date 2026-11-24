@@ -37,6 +37,12 @@
 
 <style>
   .pg {
+    /*  LA LISTA ES LA CAJA DEL RÓTULO OCULTO (24/11/2026). En compacto cada
+        nombre va con `position: absolute`; sin un antecesor posicionado se
+        anclaba a la ventana, escapaba del contenedor que se desplaza y
+        alargaba la página entera: en producción quedaba un hueco en blanco
+        abajo y el Pulso se iba de la vista. Ver `.pg-compacto .pg-nombre`. */
+    position: relative;
     list-style: none;
     margin: 0;
     padding: 0;

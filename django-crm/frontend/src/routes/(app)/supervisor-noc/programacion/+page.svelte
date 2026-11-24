@@ -97,6 +97,10 @@
   $effect(() => {
     data.publicado;
     vivo = null;
+    //  El load también verificó (24/11/2026): trajo las posiciones recién
+    //  leídas. Sin esto el mapa decía «Verificando ubicaciones…» los primeros
+    //  15 s, con las ubicaciones ya en pantalla.
+    if (data.publicado && data.vista === 'hoy') verificadoEn = Date.now();
   });
 
   $effect(() => {

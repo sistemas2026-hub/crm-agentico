@@ -156,7 +156,11 @@
   .sc-reloj { margin: 0; font-size: 18px; font-weight: 700; color: var(--snoc-primary); font-variant-numeric: tabular-nums; }
   .sc-viejo { margin: 0; font-weight: 600; color: var(--snoc-error); font-variant-numeric: tabular-nums; }
 
-  .sc-paso { display: grid; gap: 4px; margin-top: 2px; }
+  /*  La misma regla que `.sc-cuadro`, un nivel más adentro (24/11/2026). La
+      columna implícita de esta grilla es `auto`, y su piso es el ancho del
+      «Sigue: OT #161 · Router Wifi Reseteado(Valores De Fábrica)» entero: el
+      botón se salía de la tarjeta y la pantalla ganaba una barra horizontal. */
+  .sc-paso { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 2px; min-width: 0; }
   .sc-paso-fila { display: flex; align-items: center; gap: 6px; font-size: 12px; }
   .sc-atras {
     flex: none;
@@ -188,6 +192,7 @@
     align-items: center;
     gap: 8px;
     width: 100%;
+    min-width: 0;
     padding: 6px 10px;
     border-radius: 10px;
     border: 1px solid var(--snoc-outline-variant);
@@ -210,7 +215,21 @@
   .sc-ultima { margin: 0; font-size: 12px; color: var(--snoc-outline); }
 
   .sc-avance { display: grid; gap: 2px; font-size: 12px; }
-  .sc-avance progress { width: 100%; height: 6px; accent-color: var(--snoc-primary); }
+  /*  Dibujada a mano (24/11/2026): la nativa de Chrome pintaba el riel vacío
+      en gris oscuro, y «0 de 10» se leía como una barra llena. */
+  .sc-avance progress {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    border: 0;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--snoc-surface-container-high);
+  }
+  .sc-avance progress::-webkit-progress-bar { background: var(--snoc-surface-container-high); border-radius: 999px; }
+  .sc-avance progress::-webkit-progress-value { background: var(--snoc-primary); border-radius: 999px; }
+  .sc-avance progress::-moz-progress-bar { background: var(--snoc-primary); border-radius: 999px; }
   .sc-aviso { margin: 0; color: var(--snoc-error); font-weight: 600; }
   .sc-log summary { cursor: pointer; font-weight: 600; color: var(--snoc-secondary); }
   .sc-log ol { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }

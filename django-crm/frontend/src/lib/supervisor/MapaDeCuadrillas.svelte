@@ -454,10 +454,13 @@
   :global(.mp-destino) { background: none; border: none; }
   .mp-vacio { font-weight: 600; }
   .mp-sin { font-weight: 600; }
+  /*  A LA DERECHA (24/11/2026): a la izquierda quedaba debajo del + y − de
+      Leaflet, que van arriba a la izquierda con z-index 1000, y se leía
+      «pa | Satélite». Arriba a la derecha Leaflet no pone nada. */
   .mp-capas {
     position: absolute;
     top: 10px;
-    left: 10px;
+    right: 10px;
     z-index: 500;
     display: flex;
     gap: 2px;
