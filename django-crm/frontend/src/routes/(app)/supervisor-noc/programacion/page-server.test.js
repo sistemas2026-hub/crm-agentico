@@ -494,11 +494,18 @@ describe('Programación: el control de mover llega dibujado', () => {
     const fuente = readFileSync(
       new URL('./+page.svelte', import.meta.url), 'utf-8');
 
-    expect(fuente).toMatch(/<OrdenDelDia[^>]*\{aQuienMover\}/);
+    //  Desde el 24/11/2026 la tarjeta va dentro de una fila: la página se lo
+    //  pasa a las filas y las filas a la tarjeta. Se miden los dos tramos.
+    const filas = readFileSync(
+      new URL('../../../../lib/supervisor/OrdenesDeLaCuadrilla.svelte', import.meta.url), 'utf-8');
+
+    expect(fuente).toMatch(/<OrdenesDeLaCuadrilla[^>]*\{aQuienMover\}/);
+    expect(filas).toMatch(/<OrdenDelDia[^>]*\{aQuienMover\}/);
     expect(fuente).toContain('aQuienSeLePuedeMover(publicado?.cuadrillas)');
     //  Y `form`, o la tarjeta no tiene con que mostrar si la orden se movio
     //  o por que no (14/11/2026).
-    expect(fuente).toMatch(/<OrdenDelDia[^>]*\{form\}/);
+    expect(fuente).toMatch(/<OrdenesDeLaCuadrilla[^>]*\{form\}/);
+    expect(filas).toMatch(/<OrdenDelDia[^>]*\{form\}/);
   });
 });
 

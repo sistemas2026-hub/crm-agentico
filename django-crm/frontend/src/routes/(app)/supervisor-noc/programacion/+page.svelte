@@ -24,7 +24,8 @@
   import MaterialDeLaCuadrilla from '$lib/supervisor/MaterialDeLaCuadrilla.svelte';
   import NovedadesDeLaCuadrilla from '$lib/supervisor/NovedadesDeLaCuadrilla.svelte';
   import SeguimientoDeCuadrillas from '$lib/supervisor/SeguimientoDeCuadrillas.svelte';
-  import OrdenDelDia from '$lib/supervisor/OrdenDelDia.svelte';
+  import OrdenesDeLaCuadrilla from '$lib/supervisor/OrdenesDeLaCuadrilla.svelte';
+  import { FILTROS, cuentasDeLosFiltros } from '$lib/supervisor/filas-de-ordenes.js';
   import PorRevisar from '$lib/supervisor/PorRevisar.svelte';
   import MapaDeCuadrillas from '$lib/supervisor/MapaDeCuadrillas.svelte';
   import FranjaDeIndicadores from '$lib/supervisor/FranjaDeIndicadores.svelte';
@@ -86,6 +87,9 @@
   //  log abierto sigue abierto. Sin respuesta, queda lo último que se vio.
   let vivo = $state(/** @type {any} */ (null));
   let vivoDe = $state('');
+  //  EL FILTRO DE LAS ÓRDENES (24/11/2026). Ver filas-de-ordenes.js.
+  let filtroOrdenes = $state('todas');
+  let buscarOrden = $state('');
   //  Cuando la pantalla verifico las ubicaciones por ultima vez, con exito.
   //  Lo lee el mapa para decirlo abajo. Ver el comentario en 'refrescar'.
   let verificadoEn = $state(/** @type {number | null} */ (null));
@@ -610,7 +614,25 @@
                  las otras dos cosas que alguien tiene que resolver hoy: es la
                  misma clase de cosa y se lee de una. En la tarjeta queda la
                  marca de a quién le pasa. -->
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap:var(--snoc-xs);">
+            <!-- FILTRAR Y BUSCAR (24/11/2026): con 47 órdenes, ir directo a
+                 lo que importa en vez de recorrerlas. Con un filtro puesto,
+                 ninguna cuadrilla pliega nada. -->
+            {#if publicado.cuadrillas.length}
+              {@const nFiltro = cuentasDeLosFiltros(publicado.cuadrillas, data.dia)}
+              <div class="pg-filtro">
+                <div class="snoc-segmentado" role="group" aria-label="Qué órdenes ver">
+                  {#each FILTROS as f (f.id)}
+                    <button type="button" aria-pressed={filtroOrdenes === f.id}
+                            onclick={() => (filtroOrdenes = f.id)}>
+                      {f.texto} <span class="pg-filtro-n" class:pg-filtro-alerta={f.id === 'atencion' && nFiltro[f.id] > 0}>{nFiltro[f.id]}</span>
+                    </button>
+                  {/each}
+                </div>
+                <input class="snoc-input pg-buscar" type="search" bind:value={buscarOrden}
+                       placeholder="Buscar OT, cliente o barrio" aria-label="Buscar una orden" />
+              </div>
+            {/if}
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap:var(--snoc-xs); align-items:start;">
               {#each publicado.cuadrillas as c (c.jornada)}
                 {@const m = materialPor.get(c.jornada)}
                 <!-- «20 de 10 órdenes» se leía como una pantalla rota
@@ -657,13 +679,14 @@
                   {#if !c.ordenes.length}
                     <p class="snoc-body-sm snoc-secundario">Sin órdenes publicadas.</p>
                   {/if}
-                  <!-- Las órdenes, cada una en su tarjeta y en el orden del día
-                       que arma el Supervisor y sigue la app (29/10/2026). -->
+                  <!-- Las órdenes en el orden del día que arma el Supervisor y
+                       sigue la app (29/10/2026); desde el 24/11/2026 en filas
+                       que se abren a su tarjeta. Ver OrdenesDeLaCuadrilla. -->
                   {#if c.ordenes.length}
-                    <div class="snoc-pila-xs" style="gap:var(--snoc-sm); padding-top:var(--snoc-xs);">
-                      {#each c.ordenes as o (o.id)}
-                        <OrdenDelDia orden={o} dia={data.dia} marca={textoDeLaSiguiente(c.ordenes)} {aQuienMover} {form} />
-                      {/each}
+                    <div style="padding-top:var(--snoc-xs);">
+                      <OrdenesDeLaCuadrilla ordenes={c.ordenes} dia={data.dia}
+                                            marca={textoDeLaSiguiente(c.ordenes)} {aQuienMover} {form}
+                                            filtro={filtroOrdenes} texto={buscarOrden} />
                     </div>
                   {/if}
                 </div>
@@ -697,6 +720,10 @@
 </div>
 
 <style>
+  .pg-filtro { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+  .pg-filtro-n { font-variant-numeric: tabular-nums; color: var(--v2-slate); font-weight: 700; }
+  .pg-filtro-alerta { color: var(--v2-rust); }
+  .pg-buscar { width: min(100%, 280px); min-height: 32px; font-size: 13px; }
   .pg-pestanas { display: flex; gap: 2px; border-bottom: 1px solid var(--v2-line); flex-wrap: wrap; }
   .pg-pestanas a {
     font-size: 13.5px; font-weight: 600; color: var(--v2-slate); text-decoration: none;
