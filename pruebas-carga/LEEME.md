@@ -107,12 +107,7 @@ Tiempo de respuesta (p95 = el 95 % tardó menos que esto):
 
 ## El laboratorio local
 
-`laboratorio.sh` levanta Dexter completo y aislado en tu PC, con contenedores `cargalab-*` en los puertos 55432, 58000 y 53000. Incluye:
-- base nueva armada por el ledger;
-- backend con gunicorn;
-- motor con 1 proceso y 16 hilos, con WispHub en modo simulado;
-- frontend compilado como en producción;
-- una empresa con 6 cuentas de prueba y 600 chats de 25 mensajes.
+`laboratorio.sh` corre la prueba contra la **preproducción** de tu PC (`scripts/preproduccion.sh`, ver DESPLIEGUE.md): Dexter armado con el mismo `docker-compose.prod.yml` que despliega Dokploy, con base nueva por el ledger, WispHub simulado, una empresa con cuentas de prueba y 600 chats de 25 mensajes. Los puertos son 3300 (frontend), 8300 (backend) y 54330 (base), solo en 127.0.0.1.
 
 ```bash
 bash pruebas-carga/laboratorio.sh arriba    # ~10 min la primera vez
@@ -120,7 +115,7 @@ bash pruebas-carga/laboratorio.sh humo      # o normal, doble, estres
 bash pruebas-carga/laboratorio.sh abajo
 ```
 
-Las contraseñas de prueba se generan al azar en `pruebas-carga/.laboratorio/`, que no va al repositorio.
+Las contraseñas de prueba se generan al azar en `.preproduccion/`, que no va al repositorio.
 
 ## Lo que se midió en el laboratorio (24/11/2026)
 
