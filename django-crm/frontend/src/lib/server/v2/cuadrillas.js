@@ -328,6 +328,20 @@ export async function crearZona(ctx, cuerpo) {
 }
 
 /**
+ * Elimina una zona.
+ *
+ * El servidor decide entre dos desenlaces y la respuesta dice cuál: una zona
+ * que ninguna jornada cubrió se borra (`eliminada`); una con jornadas se da de
+ * baja (`dada_de_baja`) para no dejar esas jornadas sin su zona. En los dos
+ * casos sus barrios quedan libres para otra zona.
+ *
+ * @param {{ cookies: any }} ctx @param {string} id
+ */
+export async function eliminarZona(ctx, id) {
+  return apiRequest(`/campo/zonas/${id}/`, { method: 'DELETE' }, ctx);
+}
+
+/**
  * Reemplaza ENTERO el mapeo de una zona.
  *
  * Se manda la lista completa de localidades, no un delta: la pantalla tiene

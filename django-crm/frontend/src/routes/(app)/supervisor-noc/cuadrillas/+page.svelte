@@ -1025,9 +1025,19 @@
                   {/if}
                 </td>
                 <td class="snoc-derecha">
-                  <button class="snoc-pildora" type="button" onclick={() => abrirMapeo(z)}>
-                    Elegir barrios
-                  </button>
+                  <div class="snoc-fila" style="gap:var(--snoc-xs); justify-content:flex-end;">
+                    <button class="snoc-pildora" type="button" onclick={() => abrirMapeo(z)}>
+                      Elegir barrios
+                    </button>
+                    <form method="POST" action="?/eliminar_zona" use:enhance onsubmit={(e) => {
+                      const n = z.localidades?.length ?? 0;
+                      const barrios = n ? ` ${n === 1 ? 'Su barrio queda libre' : `Sus ${n} barrios quedan libres`}.` : '';
+                      if (!confirm(`¿Eliminar la zona «${z.nombre}»?${barrios} Si alguna jornada la cubrió, se da de baja en vez de borrarse.`)) e.preventDefault();
+                    }}>
+                      <input type="hidden" name="zona_id" value={z.id} />
+                      <button class="snoc-pildora" type="submit">Eliminar</button>
+                    </form>
+                  </div>
                 </td>
               </tr>
             {/each}

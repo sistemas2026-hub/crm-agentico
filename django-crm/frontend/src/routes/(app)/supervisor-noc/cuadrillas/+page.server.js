@@ -8,6 +8,7 @@ import {
   armarJornada,
   leerZonas,
   crearZona,
+  eliminarZona,
   mapearZona,
   leerLocalidades,
   proponerReparto,
@@ -361,6 +362,36 @@ export const actions = {
     try {
       const r = await crearZona({ cookies }, { nombre: f.get('nombre') });
       return { hecho: `La zona ${r?.nombre} quedó creada.` };
+    } catch (e) {
+      return fail(409, { error: mensajeDe(e) });
+    }
+  },
+
+  /**
+   * Elimina una zona.
+   *
+   * El mensaje dice lo que PASÓ, no lo que se pidió: una zona con jornadas no
+   * se borra, se da de baja, y quien la eliminó tiene que enterarse de que la
+   * historia de esas jornadas sigue ahí.
+   */
+  eliminar_zona: async ({ request, cookies }) => {
+    const f = await request.formData();
+    const id = String(f.get('zona_id') ?? '').trim();
+    if (!id) return fail(400, { error: 'Falta la zona.' });
+    try {
+      const r = await eliminarZona({ cookies }, id);
+      const n = r?.barrios_liberados ?? 0;
+      const libres =
+        n > 0 ? ` ${n === 1 ? 'Su barrio quedó libre' : `Sus ${n} barrios quedaron libres`}.` : '';
+      if (r?.dada_de_baja) {
+        const j = r?.jornadas ?? 0;
+        return {
+          hecho:
+            `La zona ${r?.nombre} quedó dada de baja y ya no se ve. No se borró porque ` +
+            `${j === 1 ? 'una jornada la cubrió' : `${j} jornadas la cubrieron`}.${libres}`
+        };
+      }
+      return { hecho: `La zona ${r?.nombre} quedó eliminada.${libres}` };
     } catch (e) {
       return fail(409, { error: mensajeDe(e) });
     }

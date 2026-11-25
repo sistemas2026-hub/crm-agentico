@@ -180,3 +180,132 @@ def test_p_un_tecnico_no_puede_tocar_zonas(user_client):
     r = user_client.post(ZONAS, {"nombre": "La mia"}, format="json")
     assert r.status_code == 403
     assert user_client.get(ZONAS).status_code == 200, "pero SI puede mirarlas"
+
+
+# ---------------------------------------------------------------------------
+# ELIMINAR UNA ZONA  --  pedido del usuario, 25/11/2026
+# ---------------------------------------------------------------------------
+# Dos desenlaces, y se afirma sobre el EFECTO de cada uno: la que nadie cubrio
+# desaparece con sus barrios; la que tiene jornadas deja de verse pero la
+# jornada conserva su zona. En los dos, sus barrios quedan libres.
+
+def test_q_eliminar_una_zona_sin_jornadas_la_borra_con_sus_barrios(
+    admin_client, org_a, norte
+):
+    r = admin_client.delete(f"{ZONAS}{norte.id}/")
+    assert r.status_code == 200, r.content
+    assert r.json()["eliminada"] is True
+    assert r.json()["dada_de_baja"] is False
+    assert r.json()["barrios_liberados"] == 2
+
+    assert not ZonaOperativa.objects.filter(id=norte.id).exists()
+    assert not AliasDeZona.objects.filter(org=org_a).exists()
+    assert zona_de(org_a, "MARTHA GISELA") is None, "el barrio deja de resolver"
+    todas = admin_client.get(ZONAS, {"todas": "1"}).json()["zonas"]
+    assert todas == [], "tampoco queda como zona dada de baja"
+
+
+def test_r_los_barrios_de_la_eliminada_se_pueden_dar_a_otra(
+    admin_client, norte, sur
+):
+    """Sin esto el mapeo daria 409 nombrando una zona que ya no existe."""
+    admin_client.delete(f"{ZONAS}{norte.id}/")
+
+    r = admin_client.put(f"{ZONAS}{sur.id}/localidades/",
+                         {"localidades": ["EL CARMEN", "MARTHA GISELA"]},
+                         format="json")
+    assert r.status_code == 200, r.content
+    assert sorted(r.json()["localidades"]) == ["EL CARMEN", "MARTHA GISELA"]
+
+
+def test_s_una_zona_con_jornadas_no_se_borra_se_da_de_baja(
+    admin_client, org_a, norte, sur
+):
+    """Las jornadas viejas explican por que una cuadrilla fue a donde fue."""
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla 1")
+    j = JornadaDeCuadrilla.objects.create(
+        org=org_a, cuadrilla=c, fecha=LUNES,
+        labor=JornadaDeCuadrilla.INSTALACION,
+    )
+    j.zonas.set([norte])
+
+    r = admin_client.delete(f"{ZONAS}{norte.id}/")
+    assert r.status_code == 200, r.content
+    assert r.json()["eliminada"] is False
+    assert r.json()["dada_de_baja"] is True
+    assert r.json()["jornadas"] == 1
+
+    # La jornada conserva su zona: es lo que el borrado le habria quitado.
+    assert [z.nombre for z in j.zonas.all()] == ["Norte"]
+    # Deja de verse y de resolver...
+    assert [z["nombre"] for z in admin_client.get(ZONAS).json()["zonas"]] == ["Sur"]
+    assert zona_de(org_a, "MARTHA GISELA") is None
+    # ...y sus barrios quedan libres para otra zona.
+    r = admin_client.put(f"{ZONAS}{sur.id}/localidades/",
+                         {"localidades": ["EL CARMEN", "MARTHA GISELA"]},
+                         format="json")
+    assert r.status_code == 200, r.content
+
+
+def test_t_eliminar_la_saca_de_las_zonas_habituales_de_la_cuadrilla(
+    admin_client, org_a, norte, sur
+):
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla 1")
+    c.zonas_habituales.set([norte, sur])
+
+    admin_client.delete(f"{ZONAS}{norte.id}/")
+
+    assert [z.nombre for z in c.zonas_habituales.all()] == ["Sur"]
+
+
+def test_u_la_dada_de_baja_al_eliminar_tambien_sale_de_lo_habitual(
+    admin_client, org_a, norte
+):
+    """Una zona que ya no se ve no puede seguir armando el dia de nadie."""
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla 1")
+    c.zonas_habituales.set([norte])
+    j = JornadaDeCuadrilla.objects.create(
+        org=org_a, cuadrilla=c, fecha=LUNES,
+        labor=JornadaDeCuadrilla.INSTALACION,
+    )
+    j.zonas.set([norte])
+
+    admin_client.delete(f"{ZONAS}{norte.id}/")
+
+    assert list(c.zonas_habituales.all()) == []
+    assert ZonaOperativa.objects.get(id=norte.id).activa is False
+
+
+def test_v_crear_de_nuevo_una_eliminada_con_historia_la_trae_de_vuelta(
+    admin_client, org_a, norte
+):
+    """El nombre sigue ocupado por la zona dada de baja: sin esto, 409."""
+    c = Cuadrilla.objects.create(org=org_a, nombre="Cuadrilla 1")
+    j = JornadaDeCuadrilla.objects.create(
+        org=org_a, cuadrilla=c, fecha=LUNES,
+        labor=JornadaDeCuadrilla.INSTALACION,
+    )
+    j.zonas.set([norte])
+    admin_client.delete(f"{ZONAS}{norte.id}/")
+
+    r = admin_client.post(ZONAS, {"nombre": "Norte"}, format="json")
+    assert r.status_code == 201, r.content
+    assert r.json()["id"] == str(norte.id), "es la misma zona, no una gemela"
+    assert r.json()["activa"] is True
+    assert r.json()["localidades"] == [], "vuelve sin barrios: quedaron libres"
+    assert ZonaOperativa.objects.filter(org=org_a, nombre="Norte").count() == 1
+
+
+def test_w_un_tecnico_no_puede_eliminar_zonas(user_client, org_a, norte):
+    r = user_client.delete(f"{ZONAS}{norte.id}/")
+    assert r.status_code == 403
+    assert ZonaOperativa.objects.filter(id=norte.id, activa=True).exists()
+    assert AliasDeZona.objects.filter(zona=norte).count() == 2
+
+
+def test_x_la_zona_de_OTRA_empresa_no_se_elimina(org_b_client, norte):
+    r = org_b_client.delete(f"{ZONAS}{norte.id}/")
+    assert r.status_code == 404
+    assert ZonaOperativa.objects.filter(id=norte.id, activa=True).exists()
+    assert AliasDeZona.objects.filter(zona=norte).count() == 2
+

@@ -773,6 +773,20 @@ class ZonasView(APIView):
         if not nombre:
             return Response({"detail": "Una zona necesita un nombre."},
                             status=status.HTTP_400_BAD_REQUEST)
+        #  UNA ZONA DADA DE BAJA CON ESE NOMBRE VUELVE, no choca. Desde que la
+        #  pantalla deja eliminar zonas, una con historia no se borra: se da de
+        #  baja (ver `ZonaView.delete`) y deja de verse. El nombre sigue ocupado
+        #  por la restriccion de unicidad, asi que sin esto «elimine Norte y no
+        #  puedo volver a crearla» terminaba en un 409 que nombra una zona que
+        #  la persona ya no ve en ninguna parte.
+        dormida = ZonaOperativa.objects.filter(
+            org=org, nombre=nombre, activa=False).first()
+        if dormida is not None:
+            dormida.activa = True
+            if "notas" in request.data:
+                dormida.notas = (request.data.get("notas") or "").strip()
+            dormida.save()
+            return Response(_zona_json(dormida), status=status.HTTP_201_CREATED)
         try:
             z = ZonaOperativa.objects.create(
                 org=org, nombre=nombre,
@@ -785,7 +799,7 @@ class ZonasView(APIView):
 
 
 class ZonaView(APIView):
-    """``PATCH`` el nombre o la baja de una zona."""
+    """``PATCH`` el nombre o la baja de una zona · ``DELETE`` la elimina."""
 
     permission_classes = [IsCampoAuthenticated]
 
@@ -812,6 +826,54 @@ class ZonaView(APIView):
             return Response({"detail": "Ya hay otra zona con ese nombre."},
                             status=status.HTTP_409_CONFLICT)
         return Response(_zona_json(z))
+
+    def delete(self, request, pk):
+        """Elimina la zona. Si alguna jornada la cubrio, la da de baja.
+
+        Pedido del usuario (25/11/2026): poder eliminar una zona desde la
+        pantalla. Hasta aca solo se podia crear, y una zona creada por error
+        --o de prueba-- quedaba para siempre.
+
+        SON DOS DESENLACES, Y LA RESPUESTA DICE CUAL:
+
+          sin jornadas   se BORRA: la fila, sus barrios y su marca de «zona
+                         habitual» en las cuadrillas. Nada la nombraba.
+          con jornadas   NO se borra: se da de baja. `zonas.py` lo dice desde
+                         el primer dia --«las jornadas viejas la referencian y
+                         son las que explican por que una cuadrilla fue a donde
+                         fue»-- y borrarla le quitaria la zona a esas jornadas.
+                         Deja de verse y de repartir, que es lo que se pidio.
+
+        En los dos casos SUS BARRIOS QUEDAN LIBRES. Un barrio solo puede estar
+        en una zona (`unique_localidad_en_una_sola_zona`): si la zona dada de
+        baja se los quedara, mapearlos a otra daria «ya esta en la zona
+        'Norte'», una zona que la persona acaba de eliminar y ya no ve.
+        """
+        _exigir_gestion(request)
+        org = request.profile.org
+        z = ZonaOperativa.objects.filter(org=org, id=pk).first()
+        if z is None:
+            return Response({"detail": "No existe esa zona."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        nombre = z.nombre
+        barrios = z.alias.count()
+        jornadas = z.jornadas.count()
+        with transaction.atomic():
+            if jornadas:
+                z.alias.all().delete()
+                z.cuadrillas_habituales.clear()
+                z.activa = False
+                z.save()
+            else:
+                z.delete()
+        return Response({
+            "nombre": nombre,
+            "eliminada": not jornadas,
+            "dada_de_baja": bool(jornadas),
+            "barrios_liberados": barrios,
+            "jornadas": jornadas,
+        })
 
 
 def _con_parecida(org, orden) -> dict:

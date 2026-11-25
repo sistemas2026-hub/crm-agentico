@@ -27,6 +27,7 @@ const editarCuadrilla = vi.fn();
 const crearCuadrilla = vi.fn();
 const guardarConfiguracionDeReparto = vi.fn();
 const guardarHorarioDeCuadrillas = vi.fn();
+const eliminarZona = vi.fn();
 
 vi.mock('$lib/server/v2/cuadrillas.js', () => {
   const nada = async () => ({});
@@ -39,6 +40,7 @@ vi.mock('$lib/server/v2/cuadrillas.js', () => {
     armarJornada: nada,
     leerZonas: nada,
     crearZona: nada,
+    eliminarZona: (...a) => eliminarZona(...a),
     mapearZona: nada,
     leerLocalidades: nada,
     proponerReparto: nada,
@@ -326,5 +328,53 @@ describe('el horario de las cuadrillas (21/10/2026)', () => {
       { fecha: '2026-11-16', abre: '07:00', cierra: '12:00', nombre: 'Independencia de Cartagena' },
       { fecha: '2026-12-25', nombre: 'Navidad' }
     ]);
+  });
+});
+
+describe('eliminar una zona (25/11/2026)', () => {
+  /**
+   * El backend decide entre BORRAR y DAR DE BAJA (una zona con jornadas no se
+   * borra). Lo que se afirma es que el mensaje diga lo que PASÓ: «eliminada»
+   * sobre una zona que sigue ahí, dada de baja, sería mentirle a quien la quitó.
+   */
+  it('manda el id de la zona, y dice que se eliminó y cuántos barrios quedaron libres', async () => {
+    eliminarZona.mockReset().mockResolvedValue({
+      nombre: 'Norte', eliminada: true, dada_de_baja: false, barrios_liberados: 4, jornadas: 0
+    });
+    const r = /** @type {any} */ (await actions.eliminar_zona(envio({ zona_id: 'zo-norte' })));
+
+    expect(eliminarZona).toHaveBeenCalledTimes(1);
+    expect(eliminarZona.mock.calls[0][1]).toBe('zo-norte');
+    expect(r.hecho).toMatch(/Norte quedó eliminada/);
+    expect(r.hecho).toMatch(/4 barrios quedaron libres/);
+  });
+
+  it('una zona con jornadas: dice que quedó dada de baja y POR QUÉ no se borró', async () => {
+    eliminarZona.mockReset().mockResolvedValue({
+      nombre: 'Sur', eliminada: false, dada_de_baja: true, barrios_liberados: 1, jornadas: 3
+    });
+    const r = /** @type {any} */ (await actions.eliminar_zona(envio({ zona_id: 'zo-sur' })));
+
+    expect(r.hecho).toMatch(/dada de baja/);
+    expect(r.hecho).toMatch(/3 jornadas la cubrieron/);
+    expect(r.hecho).toMatch(/Su barrio quedó libre/);
+    expect(r.hecho).not.toMatch(/quedó eliminada/);
+  });
+
+  it('sin id no llama al backend', async () => {
+    eliminarZona.mockReset();
+    const r = /** @type {any} */ (await actions.eliminar_zona(envio({})));
+
+    expect(r.status).toBe(400);
+    expect(eliminarZona).not.toHaveBeenCalled();
+  });
+
+  it('lo que el backend rechaza llega como su frase', async () => {
+    eliminarZona.mockReset().mockRejectedValue(
+      Object.assign(new Error('x'), { status: 404, body: { detail: 'No existe esa zona.' } })
+    );
+    const r = /** @type {any} */ (await actions.eliminar_zona(envio({ zona_id: 'zo-ajena' })));
+
+    expect(r.data.error).toContain('No existe esa zona');
   });
 });
