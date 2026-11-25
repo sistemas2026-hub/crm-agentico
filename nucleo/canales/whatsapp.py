@@ -51,7 +51,7 @@ import requests
 
 from nucleo.observabilidad.registro import ref_proveedor, registrar
 from nucleo.canales import avisos
-from nucleo.seguridad import secretos
+from nucleo.seguridad import entorno, secretos
 
 API_BASE_POR_DEFECTO = "https://graph.facebook.com"
 TIMEOUT_SEGUNDOS = 20
@@ -503,6 +503,10 @@ def _url(config, recurso: str) -> str:
 
 
 def _post(config, tenant: str, recurso: str, payload: dict) -> dict:
+    #  Un entorno de pruebas no le escribe a nadie (nucleo/seguridad/entorno.py).
+    if entorno.activo():
+        raise ErrorWhatsApp(entorno.motivo("El mensaje de WhatsApp"),
+                            operacion="el envío")
     token = _secreto(tenant, _cfg(config).token_ref,
                      "de envio (token_ref)")
     r = requests.post(
@@ -656,6 +660,9 @@ def subir_media(config, tenant: str, contenido: bytes, mime: str,
     guarda de nuestro lado son los bytes, en asistente.media, igual que con lo
     que entra.
     """
+    if entorno.activo():
+        raise ErrorWhatsApp(entorno.motivo("El archivo para WhatsApp"),
+                            operacion="la subida")
     cfg = _cfg(config)
     token = _secreto(tenant, cfg.token_ref, "de envio (token_ref)")
     emisor = _secreto(tenant, cfg.phone_number_id_ref,
@@ -1093,6 +1100,12 @@ def crear_plantilla(config, tenant: str, datos: dict) -> dict:
     categoria}: casi siempre 'PENDING', y Meta puede CAMBIAR la categoria
     (una de servicio que suena a promocion pasa a marketing).
     """
+    #  Las plantillas se crean en la cuenta REAL de Meta: desde un entorno de
+    #  pruebas no. Esta escritura y el borrado de abajo son posteriores al
+    #  parche del 20/10/2026, que solo cubria el envio y la subida.
+    if entorno.activo():
+        raise ErrorWhatsApp(entorno.motivo("La plantilla de WhatsApp"),
+                            operacion="el alta de la plantilla")
     pedido = armar_plantilla_nueva(datos)
     cfg = _cfg(config)
     waba = _secreto(tenant, cfg.waba_id_ref, "de la cuenta (waba_id_ref)")
@@ -1110,6 +1123,9 @@ def crear_plantilla(config, tenant: str, datos: dict) -> dict:
 def borrar_plantilla(config, tenant: str, nombre: str) -> None:
     """Borra la plantilla (en todos sus idiomas). Meta no deja reusar el
     nombre de una aprobada por un tiempo: la pantalla lo avisa."""
+    if entorno.activo():
+        raise ErrorWhatsApp(entorno.motivo("El borrado de la plantilla de WhatsApp"),
+                            operacion="el borrado de la plantilla")
     nombre = str(nombre or "").strip()
     if not NOMBRE_PLANTILLA.match(nombre):
         raise PlantillaInvalida(RECHAZOS_CONOCIDOS[2388046])
