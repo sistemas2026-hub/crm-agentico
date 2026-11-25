@@ -67,7 +67,7 @@ def ficha_del_motor():
         yield
 
 
-def test_a_b_c_trae_barrio_lectura_y_descripcion_tapada(
+def test_a_b_c_trae_barrio_lectura_y_descripcion_completa(
         admin_client, org_a, ficha_del_motor):
     caso = _caso(org_a)
     _propuesta(org_a, caso)
@@ -79,8 +79,11 @@ def test_a_b_c_trae_barrio_lectura_y_descripcion_tapada(
     assert d["lectura"]["hipotesis"] == "probable conector dañado (confianza media)"
     assert d["lectura"]["recomendacion"] == "Revisar el conector de la roseta"  # B
     assert "apto 302" in d["descripcion"]                            # C: lo util
-    assert "1045678901" not in d["descripcion"]                      # C: tapado
-    assert "300 123 4567" not in d["descripcion"]
+    #  C: SIN TAPAR (25/11/2026). La lee quien despacha, que ve el ticket
+    #  completo igual; el celular es con lo que confirma con el cliente.
+    assert "1045678901" in d["descripcion"]
+    assert "300 123 4567" in d["descripcion"]
+    assert "███" not in d["descripcion"]
 
 
 def test_d_un_caso_sin_propuesta_aceptada_no_existe(admin_client, org_a,

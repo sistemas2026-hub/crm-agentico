@@ -346,7 +346,7 @@
 
   /**
    * Abre el caso y TRAE SU FICHA (13/10/2026): el barrio del ISP, la lectura
-   * del Supervisor y la descripción del ticket tapada. Antes había que
+   * del Supervisor y la descripción del ticket. Antes había que
    * escribir a mano lo que el sistema ya sabía, o apretar «Traer el
    * diagnóstico» para los veinticinco casos. Si la ficha no llega, el
    * formulario queda como antes y se llena a mano.
@@ -1164,12 +1164,12 @@
             </div>
           {/if}
 
-          <!-- Con datos personales tapados (celular, documento, correo): lo
-               hace el backend, `_descripcion_tapada`. -->
+          <!-- COMPLETO, sin tapar (25/11/2026, decisión del usuario): lo lee
+               quien despacha, que necesita el celular para confirmar con el
+               cliente. Lo que va al modelo sigue tapado en el backend. -->
           {#if despachando.descripcion}
             <details class="snoc-recuadro" open>
-              <summary class="snoc-body-sm"><strong>Lo que dice el ticket</strong>
-                <span class="snoc-secundario">· datos personales tapados</span></summary>
+              <summary class="snoc-body-sm"><strong>Lo que dice el ticket</strong></summary>
               <p class="snoc-body-sm" style="white-space:pre-wrap; margin-top:var(--snoc-xs);">
                 {despachando.descripcion}
               </p>

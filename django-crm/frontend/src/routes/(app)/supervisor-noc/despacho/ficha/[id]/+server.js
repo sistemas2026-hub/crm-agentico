@@ -3,7 +3,7 @@ import { leerFichaDespachable } from '$lib/server/v2/despacho.js';
 
 /**
  * La ficha de UN caso para despacharlo: barrio, lectura del Supervisor y
- * descripción del ticket tapada (13/10/2026).
+ * descripción del ticket (13/10/2026; sin tapar desde el 25/11/2026).
  *
  * NO ES UN PROXY ABIERTO: pide una sola cosa, por id, y la devuelve. El JWT
  * del colaborador viaja en la cookie, así que el 404 de un caso no aprobado o
