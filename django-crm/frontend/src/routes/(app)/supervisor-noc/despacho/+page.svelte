@@ -20,6 +20,12 @@
    *     propias, con color, en vez de apiladas en la celda del asunto.
    *   - La jornada se puede mirar de otro día (`?dia=`), con su rótulo.
    *   - Los resultados salen en un aviso a la vista.
+   *
+   * 25/11/2026: tocar CUALQUIER parte de la fila abre el caso, y el panel
+   * empieza por lo que se sabe del ticket (datos, sugerencia, lectura del
+   * Supervisor, lo que dice el ticket, enlaces al ticket y al cliente). El
+   * formulario va debajo. Antes la fila no respondía y el panel arrancaba
+   * por «con qué plantilla va», con lo que dice el ticket en el paso 5.
    */
   import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
@@ -32,6 +38,7 @@
   import Pestanas from '$lib/supervisor/ui/Pestanas.svelte';
   import PanelLateral from '$lib/supervisor/ui/PanelLateral.svelte';
   import { avisar } from '$lib/supervisor/ui/avisos.svelte.js';
+  import { duracion } from '$lib/supervisor/fallas.js';
 
   let { data, form } = $props();
 
@@ -255,6 +262,8 @@
 
   /** Mientras se trae la ficha del caso abierto. */
   let cargandoFicha = $state(false);
+  /** La ficha no llegó: se dice, para que no se lea como un ticket vacío. */
+  let fichaFallo = $state(false);
 
   /** El barrio del formulario y el día: con eso se sabe a qué zona va. */
   let barrio = $state('');
@@ -343,7 +352,10 @@
    * formulario queda como antes y se llena a mano.
    */
   async function abrir(caso) {
+    //  Tocar de nuevo la fila del caso abierto no borra lo que ya se eligió.
+    if (despachando?.id === caso?.id) return;
     despachando = caso;
+    fichaFallo = false;
     barrio = caso?.localidad || '';
     cobertura = null;
     jornadaElegida = '';
@@ -359,7 +371,11 @@
     try {
       const r = await fetch(`/supervisor-noc/despacho/ficha/${encodeURIComponent(caso.id)}`);
       //  Si mientras tanto se abrió OTRO caso, esta ficha ya no le corresponde.
-      if (!r.ok || despachando?.id !== caso.id) return;
+      if (despachando?.id !== caso.id) return;
+      if (!r.ok) {
+        fichaFallo = true;
+        return;
+      }
       const ficha = await r.json();
       despachando = {
         ...despachando,
@@ -398,6 +414,7 @@
       revisarCobertura();
     } catch {
       //  Sin ficha se despacha igual, escribiendo lo que falte.
+      if (despachando?.id === caso.id) fichaFallo = true;
     } finally {
       if (despachando?.id === caso.id) cargandoFicha = false;
     }
@@ -625,7 +642,16 @@
               </thead>
               <tbody>
                 {#each data.casos as c (c.id)}
-                  <tr class={despachando?.id === c.id ? 'snoc-fila-elegida' : ''}>
+                  <!-- LA FILA ENTERA ABRE EL CASO (25/11/2026). El teclado
+                       sigue entrando por «Despachar», que hace lo mismo; por
+                       eso la fila no necesita su propio manejo de teclas. -->
+                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+                  <tr class="dp-fila {despachando?.id === c.id ? 'snoc-fila-elegida' : ''}"
+                      onclick={(e) => {
+                        //  Un enlace o un botón de la fila hacen lo suyo.
+                        if (/** @type {HTMLElement} */ (e.target).closest('a, button, input, select, label')) return;
+                        abrir(c);
+                      }}>
                     <td>
                       <div class="snoc-pila-xs" style="min-width:0;">
                         <span class="snoc-body">{c.nombre}</span>
@@ -1052,16 +1078,121 @@
 >
   {#if despachando}
 
-        {#if despachando.sugerencia?.porque}
-          <p class="snoc-recuadro {despachando.sugerencia.labor === 'no_requiere_visita' ? 'snoc-recuadro-alerta' : 'snoc-recuadro-ok'}">
-            {#if despachando.sugerencia.labor === 'no_requiere_visita'}
-              <strong>La evidencia dice que no hace falta ir.</strong>
-            {:else if despachando.sugerencia.labor}
-              <strong>Sugerido: {nombreDeLabor(despachando.sugerencia.labor)}.</strong>
+        <!-- LO QUE SE SABE DEL TICKET, ANTES DEL FORMULARIO (25/11/2026). Lo
+             pidió el usuario: «al darle a cada ítem debería mostrar la
+             información que se tiene de ese ticket». Estaba toda, pero
+             repartida: la sugerencia arriba, lo que dice el ticket en el paso
+             5 y la lectura del Supervisor solo dentro del campo «Qué hay que
+             hacer». Primero se entiende el caso; después se despacha. -->
+        <section class="dp-ticket" aria-label="Lo que se sabe del ticket">
+          <dl class="dp-datos">
+            <div>
+              <dt>Ticket</dt>
+              <dd class="snoc-mono">{#if despachando.ticket}#{despachando.ticket}{:else}<span class="snoc-tenue">—</span>{/if}</dd>
+            </div>
+            <div>
+              <dt>Estado</dt>
+              <dd>{despachando.estado || '—'}{despachando.prioridad ? ` · ${despachando.prioridad}` : ''}</dd>
+            </div>
+            <div>
+              <dt>Abierto hace</dt>
+              <dd>{duracion(despachando.creado) || '—'}</dd>
+            </div>
+            <div>
+              <dt>Servicio</dt>
+              <dd class="snoc-mono">{#if despachando.servicio}{despachando.servicio}{:else}<span class="snoc-tenue">—</span>{/if}</dd>
+            </div>
+            <div>
+              <dt>Barrio</dt>
+              <dd>
+                {#if despachando.localidad}{despachando.localidad}
+                {:else if cargandoFicha}<span class="snoc-tenue">…</span>
+                {:else}<span class="snoc-tenue">Sin barrio en el ISP</span>{/if}
+              </dd>
+            </div>
+            <div>
+              <dt>Orden existente</dt>
+              <dd>
+                {#if despachando.orden_activa}
+                  #{despachando.orden_activa} · {despachando.orden_activa_tecnico ? `asignada a ${despachando.orden_activa_tecnico}` : 'sin asignar'}
+                {:else}<span class="snoc-tenue">Ninguna</span>{/if}
+              </dd>
+            </div>
+          </dl>
+
+          {#if despachando.sugerencia?.porque}
+            <p class="snoc-recuadro {despachando.sugerencia.labor === 'no_requiere_visita' ? 'snoc-recuadro-alerta' : 'snoc-recuadro-ok'}">
+              {#if despachando.sugerencia.labor === 'no_requiere_visita'}
+                <strong>La evidencia dice que no hace falta ir.</strong>
+              {:else if despachando.sugerencia.labor}
+                <strong>Sugerido: {nombreDeLabor(despachando.sugerencia.labor)}.</strong>
+              {/if}
+              {despachando.sugerencia.porque}
+            </p>
+          {/if}
+
+          <!-- POR QUÉ PASÓ SOLO (17/10/2026). Si el Supervisor lo pasó sin que
+               nadie lo mirara, quien despacha tiene que saber con qué dato:
+               una caída por LOS puede ser un equipo desenchufado, y "no se
+               pudo medir" no confirma nada. Se confirma con el cliente antes
+               de mandar a alguien. Vacío si lo aceptó una persona. -->
+          {#if despachando.lectura?.por_que_paso}
+            <p class="snoc-recuadro">
+              <strong>Pasó solo a Despacho:</strong> {despachando.lectura.por_que_paso}
+            </p>
+          {/if}
+          <!-- EL CORTE DE RED (19/10/2026), lo haya pasado el Supervisor o una
+               persona: varios casos del mismo puerto son un solo trabajo. -->
+          {#if despachando.lectura?.corte_de_red}
+            <p class="snoc-recuadro snoc-recuadro-alerta">
+              <strong>Corte de red:</strong> {despachando.lectura.corte_de_red}
+            </p>
+          {/if}
+
+          <!-- LA LECTURA DEL SUPERVISOR, a la vista. Antes solo aparecía
+               mezclada en el texto editable de «Qué hay que hacer»: al
+               corregirlo, se perdía qué había dicho él. -->
+          {#if despachando.lectura?.hipotesis || despachando.lectura?.recomendacion}
+            <div class="snoc-recuadro">
+              <strong class="snoc-body-sm">Lo que leyó el Supervisor</strong>
+              {#if despachando.lectura.hipotesis}
+                <p class="snoc-body-sm" style="margin-top:var(--snoc-xs);">{despachando.lectura.hipotesis}</p>
+              {/if}
+              {#if despachando.lectura.recomendacion}
+                <p class="snoc-body-sm" style="margin-top:var(--snoc-xs);"><strong>Recomienda:</strong> {despachando.lectura.recomendacion}</p>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Con datos personales tapados (celular, documento, correo): lo
+               hace el backend, `_descripcion_tapada`. -->
+          {#if despachando.descripcion}
+            <details class="snoc-recuadro" open>
+              <summary class="snoc-body-sm"><strong>Lo que dice el ticket</strong>
+                <span class="snoc-secundario">· datos personales tapados</span></summary>
+              <p class="snoc-body-sm" style="white-space:pre-wrap; margin-top:var(--snoc-xs);">
+                {despachando.descripcion}
+              </p>
+            </details>
+          {:else if cargandoFicha}
+            <p class="snoc-body-sm snoc-secundario">Trayendo lo que dice el ticket…</p>
+          {:else if fichaFallo}
+            <!-- Callar acá se leería como «el ticket no dice nada». -->
+            <p class="snoc-recuadro snoc-recuadro-error">
+              No se pudo traer lo que dice el ticket. Abrilo completo con el enlace de abajo.
+            </p>
+          {:else}
+            <p class="snoc-body-sm snoc-secundario">El ticket no trae descripción.</p>
+          {/if}
+
+          <p class="snoc-body-sm dp-enlaces">
+            <a href="/tickets/{despachando.id}">Abrir el ticket completo</a>
+            {#if despachando.servicio}
+              · <a href="/clientes/{encodeURIComponent(despachando.servicio)}">Ficha del cliente</a>
+              <span class="snoc-secundario">(otros tickets, órdenes y conversaciones)</span>
             {/if}
-            {despachando.sugerencia.porque}
           </p>
-        {/if}
+        </section>
 
         <form id="dp-despachar" method="POST" action="?/despachar" use:enhance={alDespachar} class="dp-pasos">
           <input type="hidden" name="case_id" value={despachando.id} />
@@ -1273,33 +1404,12 @@
           <!-- Con la dirección sola el técnico llega al edificio, no al
                apartamento. NO se llena solo: suele estar escrito a mano en el
                ticket, y sacarlo de ahí sería que un modelo adivine en un campo
-               que el técnico lee como dato. Se muestra el ticket para copiarlo. -->
+               que el técnico lee como dato. Se copia de «Lo que dice el
+               ticket», arriba del formulario. -->
           {#if despachando.descripcion}
-            <details class="snoc-recuadro" open>
-              <summary class="snoc-body-sm"><strong>Lo que dice el ticket</strong>
-                <span class="snoc-secundario">· datos personales tapados</span></summary>
-              <p class="snoc-body-sm" style="white-space:pre-wrap; margin-top:var(--snoc-xs);">
-                {despachando.descripcion}
-              </p>
-            </details>
-          {/if}
-
-          <!-- POR QUÉ PASÓ SOLO (17/10/2026). Si el Supervisor lo pasó sin que
-               nadie lo mirara, quien despacha tiene que saber con qué dato:
-               una caída por LOS puede ser un equipo desenchufado, y "no se
-               pudo medir" no confirma nada. Se confirma con el cliente antes
-               de mandar a alguien. Vacío si lo aceptó una persona. -->
-          {#if despachando.lectura?.por_que_paso}
-            <p class="snoc-recuadro">
-              <strong>Pasó solo a Despacho:</strong> {despachando.lectura.por_que_paso}
-            </p>
-          {/if}
-          <!-- EL CORTE DE RED (19/10/2026), lo haya pasado el Supervisor o una
-               persona: varios casos del mismo puerto son un solo trabajo. -->
-          {#if despachando.lectura?.corte_de_red}
-            <p class="snoc-recuadro snoc-recuadro-alerta">
-              <strong>Corte de red:</strong> {despachando.lectura.corte_de_red}
-            </p>
+            <span class="snoc-body-sm snoc-secundario">
+              Si el ticket dice cómo entrar, copialo de «Lo que dice el ticket», arriba.
+            </span>
           {/if}
 
           <label class="snoc-campo-grupo">
@@ -1359,5 +1469,24 @@
   }
   .dp-paso:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
   .dp-par { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+  /*  LO QUE SE SABE DEL TICKET (25/11/2026): datos cortos en una grilla que
+      se lee de un vistazo, antes del formulario. */
+  .dp-fila { cursor: pointer; }
+  .dp-ticket {
+    display: flex; flex-direction: column; gap: 10px;
+    padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--v2-line-soft);
+  }
+  .dp-datos {
+    display: grid; gap: 8px 16px; margin: 0;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  }
+  .dp-datos dt {
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--snoc-on-surface-variant, #666);
+  }
+  .dp-datos dd { margin: 2px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+  .dp-enlaces { margin: 0; }
+  .dp-enlaces a { color: var(--snoc-primary); font-weight: 600; text-decoration: none; }
+  .dp-enlaces a:hover { text-decoration: underline; }
   .dp-fallos { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
 </style>
