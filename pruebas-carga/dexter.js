@@ -7,7 +7,6 @@
  *
  *   Oficina (Bandeja)   lista de chats cada 8 s   conversaciones/+layout.svelte
  *                       chat abierto cada 5 s      conversaciones/[id]/+page.svelte
- *                       notificaciones cada 45 s   lib/stores/notifications.svelte.js
  *   Supervisor NOC      Programación cada 15 s     supervisor-noc/programacion/+page.svelte
  *                       Pulso cada 60 s            lib/supervisor/ui/PulsoDelNoc.svelte
  *   Técnico (app)       ubicación cada 90 s        core/ubicacion/compartir_ubicacion.dart
@@ -107,7 +106,7 @@ function escenario(quien, funcion) {
 }
 
 /** Las pantallas, para que el resumen las muestre una por una. */
-const PANTALLAS = ['bandeja', 'chat', 'bandeja-cola', 'chat-nuevos', 'notificaciones', 'notificaciones-308', 'programacion',
+const PANTALLAS = ['bandeja', 'chat', 'bandeja-cola', 'chat-nuevos', 'programacion',
   'programacion-vivo', 'pulso', 'campo-mi-dia', 'campo-trabajos', 'campo-notificaciones', 'campo-ubicacion'];
 
 export const options = {
@@ -228,11 +227,6 @@ function revisar(r, nombre) {
 
 const pagina = (s, ruta, nombre) => revisar(http.get(`${FRONT}${ruta}`, frontParams(s, 'pagina', nombre)), nombre);
 const sondeo = (s, ruta, nombre) => revisar(http.get(`${FRONT}${ruta}`, frontParams(s, 'sondeo', nombre)), nombre);
-function notificaciones(s) {
-  const r = http.get(`${FRONT}/api/notifications/?limit=20`, frontParams(s, 'sondeo', 'notificaciones-308'));
-  check(r, { 'notificaciones: redirige sin barra': (x) => x.status === 308 || x.status === 200 });
-  if (r.status === 308) sondeo(s, '/api/notifications?limit=20', 'notificaciones');
-}
 const app = (s, ruta, nombre) => revisar(http.get(`${API}${ruta}`, apiParams(s, 'app', nombre)), nombre);
 
 /**
@@ -268,11 +262,10 @@ export function oficina(d) {
   if (chat) pagina(s, `/conversaciones/${chat}`, 'chat');
   durante(SESION_S, [
     { cada: 8, hacer: () => sondeo(s, `/conversaciones/__data.json?x-sveltekit-invalidated=${BANDEJA_INVALIDA}`, 'bandeja-cola') },
-    ...(chat ? [{ cada: 5, hacer: () => sondeo(s, `/api/conversaciones/${chat}/hilo?limite=1`, 'chat-nuevos') }] : []),
-    //  El navegador pide '/api/notifications/?limit=20' (con barra) y SvelteKit
-    //  le contesta 308 hacia la ruta sin barra: le cuesta DOS pedidos. Acá se
-    //  hacen los dos, como en el navegador (24/11/2026, medido en el laboratorio).
-    { cada: 45, hacer: () => notificaciones(s) }
+    ...(chat ? [{ cada: 5, hacer: () => sondeo(s, `/api/conversaciones/${chat}/hilo?limite=1`, 'chat-nuevos') }] : [])
+    //  Sin sondeo de notificaciones: el contador de la campana lo calcula el
+    //  servidor al abrir cada página. lib/stores/notifications.svelte.js (que
+    //  sondeaba cada 45 s) solo lo usa AppShell, que ya no monta ninguna pantalla.
   ]);
 }
 

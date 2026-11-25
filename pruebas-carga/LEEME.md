@@ -10,7 +10,6 @@ Tres tipos de persona. Cada una repite lo que hace su pantalla real, con el inte
 |---|---|---|---|
 | **Oficina** (Bandeja) | La lista de chats | 8 s | `conversaciones/+layout.svelte` |
 | | El chat que tiene abierto | 5 s | `conversaciones/[id]/+page.svelte` |
-| | Las notificaciones | 45 s | `lib/stores/notifications.svelte.js` |
 | **Supervisor NOC** | Programación en vivo | 15 s | `supervisor-noc/programacion/+page.svelte` |
 | | El Pulso del NOC | 60 s | `lib/supervisor/ui/PulsoDelNoc.svelte` |
 | **Técnico** (app de campo) | Su lista de trabajos y notificaciones | 2 min | `core/sync/envio_automatico.dart` |
@@ -139,4 +138,6 @@ En una PC de desarrollo, con el código de producción de ese día (`67d0f9e6`).
 
 **Qué quiere decir:** con esta mezcla de uso, lo primero que se va a llenar es la base, no los procesos de la aplicación. En el VPS, la base de Supabase comparte máquina con todo lo demás, así que el número que importa es la CPU total del servidor durante la prueba. Esa cifra sale de correr `vigilar.sh` allá.
 
-**Hallazgo:** cada sondeo de notificaciones del navegador cuesta **dos** pedidos. Pide `/api/notifications/?limit=…` con barra final y SvelteKit le contesta 308 hacia la ruta sin barra. Se arregla quitando la barra en `lib/stores/notifications.svelte.js`. La prueba hace los dos pedidos, como el navegador, y el 308 sale aparte como `notificaciones-308`.
+**Corrección (24/11/2026):** la primera versión simulaba además un sondeo de notificaciones cada 45 s, copiado de `lib/stores/notifications.svelte.js`. Ese archivo solo lo usa `AppShell`, que ya no monta ninguna pantalla: la app de hoy calcula el contador de la campana en el servidor al abrir cada página. Las cifras de arriba son de esa primera versión, que exageraba un poco el trabajo de la oficina; la corrida posterior está en `resultados/`.
+
+**Antes de agregar un sondeo nuevo a la prueba:** confirmar que el componente que lo hace está montado en una pantalla real, no solo que existe en el código.
