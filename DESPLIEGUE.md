@@ -137,6 +137,33 @@ Se entra en `http://localhost:3300` con las cuentas de `.preproduccion/cuentas.j
 - **Los correos**: `FRONTEND_URL` es un dominio `.invalid` a propósito, porque el backend en modo producción no acepta `localhost`. Un enlace mandado por correo no funciona.
 - **La app de campo en un teléfono**: los puertos solo escuchan en `127.0.0.1`. Un teléfono en la misma red necesitaría publicarlos en la IP de la PC.
 
+### Idéntica a producción: el mismo código y una copia de los datos
+
+`arriba` arma la base vacía con 600 chats inventados. Para tener **el código y los datos de producción**:
+
+```bash
+git switch --detach origin/fix/integracion-wisphub        # el código que corre en producción
+bash scripts/preproduccion.sh abajo
+bash scripts/preproduccion.sh arriba                      # la estructura de ese código
+bash scripts/preproduccion.sh copiar-produccion C:/wisphub/dexter/.env
+```
+
+`copiar-produccion` recibe un `.env` que tenga las cinco `DB*` de producción. Lee solo esas cinco líneas y no las imprime. Hace un `pg_dump` de **solo datos** de `public` y `asistente` (en producción solo lee), vacía la base local y los carga. Después vuelve a agregar las cuentas de prueba a la empresa, así que también se puede entrar con las cuentas reales.
+
+- **Se niega si la preproducción no se armó con el commit de producción**: los datos de un código entran solo en la estructura de ese mismo código.
+- **No copia `asistente.tenant_secrets`** (credenciales de WhatsApp, WispHub y demás). Además están cifradas con la `SECRETOS_CLAVE_MAESTRA` de producción, que la copia no tiene. Con datos reales y sin credenciales, nada sale de la PC: el motor no puede escribirle a un cliente.
+- **Quedan datos reales de clientes en la PC.** `abajo` los borra.
+- La base local es Postgres 17, igual que el Supabase de producción.
+
+Para probar **tu cambio sobre los datos reales** (la prueba más parecida a subirlo):
+
+```bash
+git switch <tu rama>
+bash scripts/preproduccion.sh actualizar
+```
+
+Igual a producción **no** queda en una sola cosa, a propósito: las conexiones afuera. WispHub simulado, claves de modelo falsas y sin WhatsApp. Con datos reales, cualquiera de las tres le hablaría a un cliente de verdad.
+
 ### El camino de un cambio
 
 1. **Rama propia**, nacida de la de despliegue: `git switch -c feat/<algo> origin/fix/integracion-wisphub`.

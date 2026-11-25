@@ -9,7 +9,11 @@
 #   bash scripts/preproduccion.sh actualizar   # tu cambio, sobre la base que ya tiene datos
 #   bash scripts/preproduccion.sh estado       # qué está arriba y dónde entrar
 #   bash scripts/preproduccion.sh registros [servicio]   # logs en vivo
+#   bash scripts/preproduccion.sh copiar-produccion <archivo>   # los DATOS de producción
 #   bash scripts/preproduccion.sh abajo        # borra todo, base incluida
+#
+# Para que quede IDÉNTICA a producción (código y datos), ver copiar_produccion()
+# más abajo o DESPLIEGUE.md, «Preproducción».
 #
 # 'actualizar' es lo que más importa: aplica TUS migraciones (las de Django al
 # arrancar el backend y las del motor con cli/migrar_asistente.py) sobre una
@@ -127,21 +131,26 @@ arriba() {
   esperar 300 "el backend" sh -c "docker logs dexter-preprod-backend-1 2>&1 | grep -q 'Booting worker'"
 
   echo "5/6 Empresa, cuentas, config del tenant y 600 chats de ejemplo..."
-  sembrar
+  sembrar_cuentas
+  sembrar_ejemplo
 
   echo "6/6 El resto: motor, reloj, celery y frontend..."
   compose up -d >/dev/null 2>&1
   esperar 120 "el frontend" curl -sf -o /dev/null "http://localhost:$(var PUERTO_FRONTEND)/login"
+  git rev-parse HEAD > "$PRE/commit"
   estado
 }
 
-sembrar() {
+sembrar_cuentas() {
+  #  Las cuentas de prueba de .preproduccion/cuentas.json, en la empresa
+  #  Rapilink (la de producción, si la base es una copia; si no, se crea).
   docker cp "$PRE/cuentas.json" dexter-preprod-backend-1:/tmp/cuentas.json >/dev/null
   compose exec -T backend sh -c "cd /app && python manage.py shell" >/dev/null <<'EOF'
 import json
 from common.models import Org, Profile, User
 c = json.load(open("/tmp/cuentas.json"))
-org, _ = Org.objects.get_or_create(name="Rapilink")
+org = (Org.objects.filter(name__iexact="Rapilink").first() or Org.objects.order_by("id").first()
+       or Org.objects.create(name="Rapilink"))
 roles = {"admin": "ADMIN", "oficina": "USER", "supervisor": "SUPERVISOR", "tecnico": "USER"}
 for grupo, lista in c.items():
     for cu in lista:
@@ -150,6 +159,9 @@ for grupo, lista in c.items():
         Profile.objects.get_or_create(user=u, org=org, defaults={"role": roles[grupo]})
 EOF
   compose exec -T backend rm -f /tmp/cuentas.json
+}
+
+sembrar_ejemplo() {
   #  --forzar: la guarda de alineación git no distingue una base local recién
   #  creada de la real (DESPLIEGUE.md, «Un entorno local de verdad»). Esta base
   #  tiene minutos y sale de esta misma copia de trabajo.
@@ -187,6 +199,104 @@ actualizar() {
     sleep 3
   done
   esperar 120 "el frontend" curl -sf -o /dev/null "http://localhost:$(var PUERTO_FRONTEND)/login"
+  git rev-parse HEAD > "$PRE/commit"
+  estado
+}
+
+copiar_produccion() {
+  # Reemplaza los DATOS de la preproducción por los de producción. Solo lee
+  # producción (pg_dump); no escribe nada allá.
+  #
+  # Para que quede idéntica, código y datos:
+  #   git switch --detach origin/fix/integracion-wisphub      # el código de producción
+  #   bash scripts/preproduccion.sh abajo
+  #   bash scripts/preproduccion.sh arriba                    # la estructura de ese código
+  #   bash scripts/preproduccion.sh copiar-produccion C:/wisphub/dexter/.env
+  # Y para probar TU cambio sobre esos datos:
+  #   git switch <tu rama>
+  #   bash scripts/preproduccion.sh actualizar
+  #
+  # <archivo> es un .env con DBHOST, DBPORT, DBNAME, DBUSER y DBPASSWORD de
+  # producción. Se leen solo esas cinco líneas y no se imprimen.
+  #
+  # Lo que NO se copia: asistente.tenant_secrets (credenciales de WhatsApp,
+  # WispHub y demás). Igual estarían cifradas con la SECRETOS_CLAVE_MAESTRA de
+  # producción, que esta copia no tiene. Sin ellas, nada sale de tu PC aunque
+  # los datos sean reales: WispHub sigue simulado y las claves de modelo son
+  # falsas.
+  local origen="${1:-}"
+  [ -n "$origen" ] && [ -f "$origen" ] || {
+    echo "Uso: bash scripts/preproduccion.sh copiar-produccion <archivo .env con las DB* de producción>"; exit 1; }
+  [ -f "$VARS" ] || { echo "No hay preproducción armada: primero 'arriba'."; exit 1; }
+
+  #  Los datos entran en la estructura que armó el código de la preproducción:
+  #  si no es el commit de producción, las tablas no coinciden.
+  git fetch -q origin fix/integracion-wisphub
+  local prod armada
+  prod="$(git rev-parse origin/fix/integracion-wisphub)"
+  armada="$(cat "$PRE/commit" 2>/dev/null || true)"
+  if [ "$armada" != "$prod" ] && [ "${COPIA_OTRO_COMMIT:-}" != "si" ]; then
+    echo "La preproducción está armada con ${armada:0:8} y producción está en ${prod:0:8}."
+    echo "Los datos de producción solo entran en la estructura del código de producción:"
+    echo "  git switch --detach origin/fix/integracion-wisphub"
+    echo "  bash scripts/preproduccion.sh abajo && bash scripts/preproduccion.sh arriba"
+    echo "  bash scripts/preproduccion.sh copiar-produccion $origen"
+    exit 1
+  fi
+
+  local dump="$PRE/produccion.dump"
+  trap "rm -f '$dump'" EXIT
+  echo "1/4 Copiando los datos de producción (solo lectura; sin tenant_secrets)..."
+  (
+    set -a
+    # shellcheck disable=SC1090
+    . <(grep -E '^(DBHOST|DBPORT|DBNAME|DBUSER|DBPASSWORD)=' "$origen" | tr -d '\r')
+    set +a
+    [ -n "${DBHOST:-}" ] && [ -n "${DBPASSWORD:-}" ] || { echo "El archivo no trae DBHOST y DBPASSWORD."; exit 1; }
+    #  La contraseña va por el entorno ('-e PGPASSWORD' sin valor), no en la
+    #  línea de comandos, donde la vería cualquiera que liste los procesos.
+    export PGPASSWORD="$DBPASSWORD"
+    docker run --rm -e PGPASSWORD -v "$PRE:/salida" pgvector/pgvector:pg17 \
+      pg_dump -h "$DBHOST" -p "$DBPORT" -U "$DBUSER" -d "$DBNAME" \
+      --data-only -n public -n asistente --exclude-table-data=asistente.tenant_secrets \
+      -Fc -f /salida/produccion.dump 2> >(grep -vE '^pg_dump: (warning|detail|hint)' >&2)
+    #  Esas advertencias son por claves foráneas circulares (case,
+    #  operaciones_actividad): las resuelve el --disable-triggers de la carga.
+  )
+  echo "    $(du -h "$dump" | cut -f1) copiados."
+
+  echo "2/4 Vaciando la base de la preproducción..."
+  compose stop motor motor-reloj celery-worker celery-beat backend frontend >/dev/null 2>&1
+  #  session_replication_role=replica apaga los triggers, incluido el que hace
+  #  de «solo agregar» al ledger del motor (asistente.migraciones_aplicadas).
+  #  Acá corresponde: es una copia local que se reemplaza entera, y se trae el
+  #  ledger de producción para que 'actualizar' decida qué migraciones aplicar
+  #  exactamente como lo hará el despliegue.
+  compose exec -T db psql -q -U postgres -d "$(var DBNAME)" -v ON_ERROR_STOP=1 <<'EOF'
+set session_replication_role = replica;
+do $$ begin
+  execute (select 'truncate table ' || string_agg(format('%I.%I', schemaname, tablename), ', ') || ' restart identity cascade'
+           from pg_tables where schemaname in ('public', 'asistente'));
+end $$;
+EOF
+
+  echo "3/4 Cargando los datos de producción..."
+  docker cp "$dump" dexter-preprod-db-1:/tmp/produccion.dump >/dev/null
+  #  --disable-triggers: carga cada tabla sin mirar el orden de las claves
+  #  foráneas ni disparar triggers (lo que pasó en producción ya pasó).
+  compose exec -T db pg_restore -U postgres -d "$(var DBNAME)" --data-only --disable-triggers \
+    --no-owner --exit-on-error /tmp/produccion.dump
+  compose exec -T db rm -f /tmp/produccion.dump
+  rm -f "$dump"
+
+  echo "4/4 Arrancando, con las cuentas de prueba agregadas a la empresa..."
+  compose up -d >/dev/null 2>&1
+  esperar 300 "el backend" sh -c "docker logs --since 2m dexter-preprod-backend-1 2>&1 | grep -q 'Booting worker'"
+  sembrar_cuentas
+  esperar 120 "el frontend" curl -sf -o /dev/null "http://localhost:$(var PUERTO_FRONTEND)/login"
+  compose exec -T db psql -U postgres -d "$(var DBNAME)" -tA -c \
+    "select 'Empresas: ' || (select count(*) from public.organization) || ' · usuarios: ' || (select count(*) from public.users) || ' · conversaciones: ' || (select count(*) from asistente.conversations)" || true
+  echo "OJO: ahora hay datos REALES de clientes en tu PC. 'abajo' los borra."
   estado
 }
 
@@ -209,6 +319,7 @@ case "${1:-}" in
   actualizar) actualizar ;;
   estado) estado ;;
   registros) shift; compose logs -f --tail 50 "$@" ;;
+  copiar-produccion) shift; copiar_produccion "$@" ;;
   abajo) abajo ;;
-  *) echo "Uso: bash scripts/preproduccion.sh arriba | actualizar | estado | registros [servicio] | abajo"; exit 1 ;;
+  *) echo "Uso: bash scripts/preproduccion.sh arriba | actualizar | estado | registros [servicio] | copiar-produccion <archivo> | abajo"; exit 1 ;;
 esac

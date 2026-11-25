@@ -29,7 +29,9 @@ name: dexter-preprod
 
 services:
   db:
-    image: pgvector/pgvector:pg16
+    #  pg17: la versión del Supabase de producción. Una copia de sus datos
+    #  (copiar-produccion) se restaura con la misma versión que la escribió.
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${DBPASSWORD:?}
