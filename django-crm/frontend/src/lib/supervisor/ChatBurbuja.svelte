@@ -23,6 +23,108 @@
    */
   import { onMount } from 'svelte';
   import { aBurbujas, esDuplicado, lleganNuevos } from './chat-sesion.js';
+  import { CLAVE, acotar, anclaje, esArrastre, estiloDe, leerGuardada } from './chat-posicion.js';
+
+  //  EL BOTÓN SE PUEDE MOVER (25/11/2026). Pedido del usuario: presionar,
+  //  arrastrar, y que al soltar se quede ahí -- en su esquina tapa lo último
+  //  de las tablas. La geometría vive en chat-posicion.js, probada aparte.
+  //
+  //  `null` = nunca se movió: no se pone ningún estilo y manda la hoja de
+  //  estilos, exactamente como antes de este cambio.
+  //
+  //  LA POSICIÓN SÍ SE GUARDA EN EL NAVEGADOR, y no contradice la nota de
+  //  arriba: lo que no puede vivir acá es la CONVERSACIÓN, porque el motor la
+  //  lee. Dónde le queda cómodo el botón a alguien es una preferencia de esa
+  //  pantalla en ese equipo -- en otra máquina, con otro monitor, la esquina
+  //  correcta es otra.
+  /** @type {{ x: number, y: number } | null} */
+  let posicion = $state(null);
+  let medidaBoton = $state({ ancho: 0, alto: 0 });
+  let ventana = $state({ ancho: 0, alto: 0 });
+  let arrastrando = $state(false);
+  /** @type {HTMLButtonElement | undefined} */
+  let boton = $state();
+  const ancla = $derived(posicion ? anclaje(posicion, medidaBoton, ventana) : null);
+
+  /** Donde empezó el gesto. `null` = no hay ningún puntero apretado. */
+  /** @type {{ id: number, px: number, py: number, x: number, y: number } | null} */
+  let gesto = null;
+  /** Cuándo terminó el último arrastre, para no tomar su clic como un clic. */
+  let finDelArrastre = 0;
+
+  const medirVentana = () => ({ ancho: window.innerWidth, alto: window.innerHeight });
+
+  /** @param {PointerEvent} ev */
+  function alApretar(ev) {
+    //  Solo el botón principal del mouse; un dedo o un lápiz siempre.
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    if (!boton) return;
+    const r = boton.getBoundingClientRect();
+    gesto = { id: ev.pointerId, px: ev.clientX, py: ev.clientY, x: r.left, y: r.top };
+    medidaBoton = { ancho: r.width, alto: r.height };
+    //  Con la captura, el botón sigue recibiendo el movimiento aunque el
+    //  puntero se le adelante -- que es lo que pasa al arrastrar rápido.
+    try { boton.setPointerCapture(ev.pointerId); } catch { /* sin captura igual sirve */ }
+
+    //  EL NAVEGADOR NO PUEDE EMPEZAR SU PROPIO ARRASTRE  --  medido el
+    //  25/11/2026 en Chromium: el botón se movía un tramo y se quedaba. En
+    //  cuanto el botón se aparta, el navegador mira qué quedó debajo del punto
+    //  donde se presionó; si es un enlace (hay pastillas por toda la pantalla)
+    //  arranca el arrastre NATIVO de ese enlace y cancela el nuestro con un
+    //  'pointercancel'. Lo primero evita además que arrastrar seleccione el
+    //  texto de la página; lo segundo corta el arrastre nativo donde nace.
+    ev.preventDefault();
+    document.addEventListener('dragstart', sinArrastreNativo, true);
+  }
+
+  /** @param {DragEvent} ev */
+  function sinArrastreNativo(ev) {
+    ev.preventDefault();
+  }
+
+  /** @param {PointerEvent} ev */
+  function alMover(ev) {
+    if (!gesto || ev.pointerId !== gesto.id) return;
+    const dx = ev.clientX - gesto.px;
+    const dy = ev.clientY - gesto.py;
+    //  Hasta pasar el umbral es un clic con el pulso de siempre, no un arrastre.
+    if (!arrastrando && !esArrastre(dx, dy)) return;
+    arrastrando = true;
+    ventana = medirVentana();
+    posicion = acotar({ x: gesto.x + dx, y: gesto.y + dy }, medidaBoton, ventana);
+  }
+
+  /** @param {PointerEvent} ev */
+  function alSoltar(ev) {
+    if (!gesto || ev.pointerId !== gesto.id) return;
+    gesto = null;
+    document.removeEventListener('dragstart', sinArrastreNativo, true);
+    if (!arrastrando) return;
+    arrastrando = false;
+    finDelArrastre = performance.now();
+    try {
+      if (posicion) localStorage.setItem(CLAVE, JSON.stringify(posicion));
+    } catch {
+      //  Sin almacenamiento (ventana privada, cuota): se queda donde se soltó
+      //  hasta recargar, que es mejor que no poder moverlo.
+    }
+  }
+
+  function alClic() {
+    //  Soltar después de arrastrar también dispara un clic. Sin esto, cada
+    //  vez que se mueve el botón se abriría o cerraría el chat.
+    if (performance.now() - finDelArrastre < 400) return;
+    alternar();
+  }
+
+  /** Vuelve a meter el botón en la ventana cuando ésta cambia de tamaño. */
+  function reubicar() {
+    if (!posicion || !boton) return;
+    const r = boton.getBoundingClientRect();
+    medidaBoton = { ancho: r.width, alto: r.height };
+    ventana = medirVentana();
+    posicion = acotar({ x: r.left, y: r.top }, medidaBoton, ventana);
+  }
 
   let abierta = $state(false);
   //  EL PANEL GRANDE. En la burbuja chica una respuesta con evidencia se lee
@@ -239,11 +341,30 @@
     //  puede decir que hay conversacion antes de que nadie la abra.
     recuperarHistorial();
     const reloj = setInterval(revisarNuevos, CADA_CUANTO_MS);
-    return () => clearInterval(reloj);
+
+    //  Donde lo dejó la última vez, vuelto a meter en ESTA ventana: lo guardado
+    //  puede venir de un monitor más grande.
+    let guardada = null;
+    try { guardada = leerGuardada(localStorage.getItem(CLAVE)); } catch { /* sin almacenamiento */ }
+    if (guardada && boton) {
+      const r = boton.getBoundingClientRect();
+      medidaBoton = { ancho: r.width, alto: r.height };
+      ventana = medirVentana();
+      posicion = acotar(guardada, medidaBoton, ventana);
+    }
+    window.addEventListener('resize', reubicar);
+
+    return () => {
+      clearInterval(reloj);
+      window.removeEventListener('resize', reubicar);
+      //  Por si el componente se desmonta con un gesto a medias.
+      document.removeEventListener('dragstart', sinArrastreNativo, true);
+    };
   });
 </script>
 
-<div class="snoc-chat">
+<div class="snoc-chat" class:snoc-chat-movida={ancla} class:snoc-chat-arrastrando={arrastrando}
+     style={ancla ? estiloDe(ancla) : undefined}>
   {#if abierta}
     <section class="snoc-chat-panel" class:snoc-chat-grande={expandida}
              aria-label="Chat con el Supervisor NOC">
@@ -326,7 +447,15 @@
     </section>
   {/if}
 
-  <button type="button" class="snoc-chat-boton" onclick={alternar}
+  <!-- Un clic abre el chat; presionar y arrastrar lo mueve. Los dos gestos
+       conviven en el mismo botón: los separa el umbral de chat-posicion.js. -->
+  <button type="button" class="snoc-chat-boton" bind:this={boton}
+          onclick={alClic}
+          onpointerdown={alApretar}
+          onpointermove={alMover}
+          onpointerup={alSoltar}
+          onpointercancel={alSoltar}
+          title="Mantené presionado y arrastrá para moverlo"
           aria-expanded={abierta}
           aria-label={abierta ? 'Cerrar el chat del Supervisor' : 'Abrir el chat del Supervisor'}>
     {#if abierta}&times;{:else}Preguntar{/if}
@@ -361,7 +490,15 @@
     font-weight: 600;
     cursor: pointer;
     box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+    /*  SE PUEDE ARRASTRAR. 'touch-action: none' es lo que deja mover el botón
+        con el dedo: sin eso el navegador se queda con el gesto para desplazar
+        la página y el arrastre se corta al primer centímetro. 'user-select'
+        evita que arrastrar seleccione el texto «Preguntar».  */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
+  .snoc-chat-arrastrando .snoc-chat-boton { cursor: grabbing; box-shadow: 0 10px 28px rgb(0 0 0 / 32%); }
   .snoc-chat-boton:hover { filter: brightness(1.08); }
   .snoc-chat-boton:focus-visible { outline: 3px solid var(--v2-ember); outline-offset: 2px; }
 
@@ -402,6 +539,26 @@
   .snoc-chat-panel.snoc-chat-grande {
     width: min(68rem, calc(100vw - 2.5rem));
     height: calc(100vh - 7rem);
+  }
+
+  /*  CON EL BOTÓN MOVIDO (25/11/2026), el panel no puede dar por hecho que
+      tiene toda la pantalla hacia arriba y hacia la izquierda: se abre hacia
+      donde hay lugar (lo decide chat-posicion.js) y no pasa de ese lugar. Sin
+      mover el botón estas dos variables no existen y nada cambia.  */
+  .snoc-chat-movida .snoc-chat-panel {
+    max-width: var(--snoc-chat-max-ancho);
+    max-height: var(--snoc-chat-max-alto);
+  }
+  /*  El panel GRANDE no cabe al lado de un botón que quedó en medio de la
+      pantalla: se centra arriba, con el mismo tamaño de siempre. Puede tapar
+      el botón; se cierra y se achica desde su propia cabecera.  */
+  .snoc-chat-movida .snoc-chat-panel.snoc-chat-grande {
+    position: fixed;
+    top: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: none;
+    max-height: none;
   }
 
   .snoc-chat-cabecera {
