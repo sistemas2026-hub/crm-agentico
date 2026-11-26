@@ -165,6 +165,35 @@ void main() {
       expect(find.text('dBm'), findsOneWidget);
     });
 
+    testWidgets('5b. El DINERO que recibe el técnico: «\$», solo dígitos, y llega como número',
+        (WidgetTester tester) async {
+      //  26/11/2026: «falta registrar el dinero que recibe el técnico». La
+      //  plantilla marca el número como dinero; un «80.000» con punto no puede
+      //  leerse como ochenta.
+      final List<dynamic> conDinero = <dynamic>[
+        <String, dynamic>{
+          'clave': 'valor_instalacion',
+          'etiqueta': 'Valor de la instalación',
+          'tipo': 'decimal',
+          'dinero': true,
+        },
+      ];
+      controladores['valor_instalacion'] = TextEditingController();
+      await tester.pumpWidget(_enApp(formulario(datosFuturos: false, campos: conDinero)));
+      await tester.pumpAndSettle();
+      expect(find.text(r'$'), findsOneWidget);
+      expect(find.text('efectivo'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).last, '80.000');
+      await tester.pumpAndSettle();
+      expect(reportado['valor_instalacion'], 80000);
+      expect(controladores['valor_instalacion']!.text, '80000');
+
+      await tester.enterText(find.byType(TextField).last, '-500');
+      await tester.pumpAndSettle();
+      expect(reportado['valor_instalacion'], 500, reason: 'sin signo: la plata recibida no es negativa');
+    });
+
     testWidgets('6. En demostración, decir que sí muestra el equipo sugerido',
         (WidgetTester tester) async {
       await tester.pumpWidget(_enApp(formulario(datosFuturos: true)));

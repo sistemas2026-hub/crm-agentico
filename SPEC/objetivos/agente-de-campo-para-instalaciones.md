@@ -1037,6 +1037,23 @@ Routing}` en `autorizar_onu_en_smartolt` (por el editor, sin pisar lo que solo
 tiene la base). `EFECTOS_EXTERNOS_PERMITIDOS` no existe en producción ni hace
 falta: allá no hay `SIN_EFECTOS_EXTERNOS`.
 
+### El dinero que recibe el técnico — 1.0.28, 26/11/2026
+
+El usuario: «falta aún registrar el dinero que recibe el técnico». Eligió:
+instalación y equipos o material extra, solo efectivo, el técnico escribe
+cuánto, y queda en Dexter para que la oficina lo reciba (no WispHub).
+
+- **En la plantilla**: un dato de número con la casilla «Es dinero que recibe el
+  técnico». En local, «Instalación de fibra» **v8** lo trae en «Configuración y
+  entrega»: «Valor de la instalación» (obligatorio; «si no cobraste, escribe
+  0»), «Equipos o material extra» y «Qué equipos o material cobraste» (texto).
+  La OT-20 (la única abierta) pasó a v8.
+- **En la app (1.0.28)**: el dato sale con «$», solo dígitos y «efectivo».
+- **En la web**: Campo → **Dinero de técnicos** (solo gestión): cuánto tiene
+  cada uno por entregar, de qué órdenes y conceptos, y «Recibí $X de …».
+- **En producción**: la migración 0060 y marcar los datos en la plantilla de la
+  empresa (desde Plantillas).
+
 **Una falla que no es de esto:** `test_la_accion_relee_la_asignacion` (b y b2)
 falla en el entorno local con o sin estos cambios («database table is
 locked»): son carreras entre dos transacciones y las pruebas corren sobre
@@ -1054,3 +1071,4 @@ SQLite. CLAUDE.md §6 pide Postgres para eso.
 | 26/11/2026 | **La instalación, entera desde la app (1.0.20 a 1.0.25).** Contrato rediseñado, botones por paso en la plantilla, IP que pone el servidor, coordenadas en un mapa, material precargado (la fibra y la serie de la ONU salen de sus campos), puntos de TV, la IP para copiar y «Activar ONU» en SmartOLT construido APAGADO. **No probado contra SmartOLT ni WispHub de verdad**; PRD §8.34 | Backend 319, motor 8 archivos en verde, web 71, app 1.491; en vivo sin escribir: la ONU real encontrada en OLT 3 · placa 3 · puerto 6 y el pedido frenado por la guarda en el último paso | commit del 26/11/2026 |
 | 26/11/2026 | **El contrato a nombre de otra persona (1.0.26).** Modo explícito en la pantalla del contrato; la persona nueva acepta sus autorizaciones al firmar, el PDF y la oficina lo dicen, el alta sale con ella. PRD §8.35 | Backend 247 (16 nuevas), web 19, app 1.496 | sin commit |
 | 26/11/2026 | **La primera ONU activada de verdad, en prueba vigilada (1.0.27).** SmartOLT exige `onu_mode` (Routing, 112 de 112 medidas); el motivo de un rechazo queda a la vista; la app busca sola la ONU recién conectada; permiso angosto `EFECTOS_EXTERNOS_PERMITIDOS`, abierto y cerrado. PRD §8.36 | La ONU de prueba (3/3/15) quedó «activada» confirmada leyendo y el usuario la borró; `test_activar_onu`, `test_entorno_sin_efectos` y la guarda de arquitectura en verde; app `activar_onu_test` 6 | sin commit |
+| 26/11/2026 | **El dinero que recibe el técnico (1.0.28).** Marca `dinero` en los datos de número de la plantilla; la oficina lo recibe en «Dinero de técnicos» con la cifra que vio. PRD §8.37 | Backend 20 nuevas (119 con plantillas y formulario), web 18, app 1.498; la página abre en local | sin commit |

@@ -82,7 +82,10 @@ export const GRUPOS = [
     items: [
       // Insignia: solicitudes que esperan la decisión de factibilidad.
       { href: '/instalaciones', label: 'Instalaciones', icono: 'ClipboardCheck', count: 'instalaciones' },
-      { href: '/inventario', label: 'Inventario', icono: 'Boxes' }
+      { href: '/inventario', label: 'Inventario', icono: 'Boxes' },
+      // El efectivo que cobran los técnicos en la casa (26/11/2026). Recibirlo
+      // es la oficina firmando que lo contó: solo gestión.
+      { href: '/dinero', label: 'Dinero de técnicos', icono: 'Banknote', roles: ROLES_GESTION }
     ]
   },
   {

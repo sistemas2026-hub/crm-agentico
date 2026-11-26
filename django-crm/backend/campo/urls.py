@@ -11,6 +11,7 @@ from campo import (
     marca_de_agua_views,
     contrato_views,
     activacion_onu_views,
+    dinero_views,
     ips_libres_views,
     cuadrillas_views,
     despacho_pantalla_views,
@@ -144,6 +145,9 @@ urlpatterns = [
          name="onu_de_la_orden"),
     path("trabajos/<uuid:pk>/onu/activar/", activacion_onu_views.ActivarOnuView.as_view(),
          name="activar_onu_de_la_orden"),
+    #  El dinero que recibe el tecnico, para la oficina (26/11/2026). Ver campo/dinero.py.
+    path("dinero/", dinero_views.DineroDeLosTecnicosView.as_view(), name="dinero_de_los_tecnicos"),
+    path("dinero/recibir/", dinero_views.RecibirDineroView.as_view(), name="recibir_dinero"),
     path("trabajos/<uuid:pk>/ips-libres/",
          ips_libres_views.IpsLibresDeLaOrdenView.as_view(), name="ips_libres_de_la_orden"),
     path("contrato/configuracion/",

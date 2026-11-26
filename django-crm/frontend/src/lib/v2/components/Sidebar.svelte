@@ -30,6 +30,7 @@
     ClipboardCheck,
     Radar,
     Boxes,
+    Banknote,
     Activity,
     Bot,
     Cable,
@@ -87,7 +88,7 @@
     Sun, Columns3, Target, Building2, Users, CircleCheck, LifeBuoy, BookOpen, Receipt,
     Trophy, Clock, UserCog, FileText, SlidersHorizontal, Smartphone, Sparkles,
     MessageCircle, PlugZap, GraduationCap, Gauge, TrendingUp, ClipboardCheck, Radar,
-    Boxes, Activity, Bot, Cable, BookMarked, Funnel
+    Boxes, Banknote, Activity, Bot, Cable, BookMarked, Funnel
   };
 
   let groups = $derived(

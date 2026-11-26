@@ -147,7 +147,14 @@ class CampoDelFormulario {
     this.permiteOtro = false,
     this.textoOtro = '',
     this.escaneable = false,
+    this.dinero = false,
   });
+
+  /// Si este número es DINERO que recibe el técnico (26/11/2026): el valor de
+  /// la instalación, los equipos o el material extra, en efectivo. Lo marca la
+  /// plantilla; la app lo dibuja con «$» y sin decimales ni signo, y la
+  /// oficina lo suma y lo recibe.
+  final bool dinero;
 
   /// La opción que deja escribir lo que la lista no tiene (18/10/2026).
   static const String otro = 'Otro';
@@ -273,6 +280,7 @@ class CampoDelFormulario {
     //  `== true` y no un cast: la clave puede no venir —las plantillas que no
     //  la declaran no la mandan— y un campo ausente no es un error.
     final bool escaneable = campo['escaneable'] == true;
+    final bool dinero = campo['dinero'] == true;
     final String textoOtro = (valores['${id}_otro'] ?? '').toString();
 
     // --- El estado, en orden de gravedad ---------------------------------
@@ -353,6 +361,7 @@ class CampoDelFormulario {
       referencia: referencia,
       permiteOtro: permiteOtro,
       escaneable: escaneable,
+      dinero: dinero,
       textoOtro: textoOtro,
     );
   }

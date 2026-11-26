@@ -563,6 +563,11 @@
                 <label class="snoc-campo-grupo"><span class="snoc-label">Bueno hasta</span><input class="snoc-campo" type="number" step="any" bind:value={c.bueno_max} /></label>
               </div>
               <span class="snoc-body-sm" style="color:var(--snoc-primary);">Fuera del rango sano, el Supervisor devuelve la orden. Vacío: no juzga.</span>
+              <!-- DINERO QUE RECIBE EL TÉCNICO (26/11/2026): el valor de la
+                   instalación, los equipos o el material extra que cobra en
+                   efectivo. La oficina lo suma y lo recibe en «Dinero de
+                   técnicos». Nunca negativo. -->
+              <label class="snoc-body-sm"><input type="checkbox" bind:checked={c.dinero} /> Es dinero que recibe el técnico (efectivo): la oficina lo recibe en «Dinero de técnicos»</label>
             {:else if c.tipo === 'seleccion'}
               <label class="snoc-campo-grupo">
                 <span class="snoc-label">Una opción por renglón</span>

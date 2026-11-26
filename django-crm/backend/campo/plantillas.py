@@ -510,6 +510,17 @@ def componer(definicion: dict) -> dict:
             unidad = _texto(c.get("unidad"), "la unidad", obligatorio=False, largo=16)
             if unidad:
                 salida["unidad"] = unidad
+            #  DINERO QUE RECIBE EL TECNICO  --  26/11/2026
+            #
+            #  El usuario: «falta registrar el dinero que recibe el tecnico».
+            #  Que se cobra (la instalacion, los equipos o el material extra)
+            #  lo dice cada empresa en SU formato, como todo lo demas: es un
+            #  numero con esta marca. La oficina lo suma por tecnico y lo
+            #  recibe (`campo/dinero.py`). Nunca negativo.
+            if bool(c.get("dinero")):
+                salida["dinero"] = True
+                if reglas.get("min") is None or reglas["min"] < 0:
+                    reglas["min"] = 0
 
             #  EL RANGO QUE SE CONSIDERA BUENO  --  07/11/2026
             #
@@ -777,6 +788,11 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
             fila.update(tipo=NUMERO, min=reglas.get("min"), max=reglas.get("max"),
                         unidad=c.get("unidad", ""),
                         bueno_min=bueno.get("min"), bueno_max=bueno.get("max"))
+            #  La marca de dinero vuelve por donde entro: sin esto, abrir la
+            #  plantilla y publicarla la borraria (el mismo cuidado que la
+            #  camara, arriba).
+            if c.get("dinero"):
+                fila["dinero"] = True
         elif tipo == "seleccion":
             opciones = list(reglas.get("options") or c.get("opciones") or [])
             if c.get("presentacion") == CHECKLIST:

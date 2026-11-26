@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/acciones/lector_de_codigo.dart';
 import '../../../demo/field_mock_data.dart';
@@ -185,6 +186,7 @@ class FormularioDeCampo extends StatelessWidget {
                 unidad,
                 conError: campo.estado == EstadoDeCampo.error,
                 escaneable: campo.escaneable,
+                dinero: campo.dinero,
                 etiqueta: campo.titulo,
               ),
             ],
@@ -547,8 +549,13 @@ class FormularioDeCampo extends StatelessWidget {
   }
 
   Widget _entrada(String clave, String tipo, String? unidad,
-      {bool conError = false, bool escaneable = false, String etiqueta = ''}) {
+      {bool conError = false, bool escaneable = false, bool dinero = false,
+      String etiqueta = ''}) {
     final bool esNumero = tipo == 'numero' || tipo == 'decimal' || tipo == 'integer';
+    //  DINERO (26/11/2026): pesos enteros, con «$» delante y «efectivo»
+    //  detrás. Sin signo ni coma: la plata que se recibe no es negativa y un
+    //  «80.000» con punto se leería como ochenta.
+    final bool esDinero = dinero && esNumero;
     final bool esMedicionOptica = (unidad ?? '').toLowerCase().contains('dbm');
 
     //  SOLO EN TEXTO. Un número no está en ninguna etiqueta de código de
@@ -572,9 +579,14 @@ class FormularioDeCampo extends StatelessWidget {
         children: <Widget>[
           TextField(
             controller: controladores[clave],
-            keyboardType: esNumero
-                ? const TextInputType.numberWithOptions(decimal: true, signed: true)
-                : TextInputType.text,
+            keyboardType: esDinero
+                ? TextInputType.number
+                : esNumero
+                    ? const TextInputType.numberWithOptions(decimal: true, signed: true)
+                    : TextInputType.text,
+            inputFormatters: esDinero
+                ? <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly]
+                : null,
             textAlign: esNumero ? TextAlign.center : TextAlign.start,
             style: esNumero
                 ? AppTypography.medicion.copyWith(color: AppColors.onSurface)
@@ -589,7 +601,7 @@ class FormularioDeCampo extends StatelessWidget {
                 top: AppSpacing.sm,
                 bottom: AppSpacing.sm,
               ),
-              hintText: esNumero ? '-00.0' : null,
+              hintText: esDinero ? '0' : (esNumero ? '-00.0' : null),
             ),
             onChanged: (String val) {
               dynamic valor = val;
@@ -599,6 +611,23 @@ class FormularioDeCampo extends StatelessWidget {
               alCambiar(clave, valor);
             },
           ),
+          if (esDinero)
+            Positioned(
+              left: AppSpacing.md,
+              child: Text(
+                r'$',
+                style: AppTypography.medicion.copyWith(color: AppColors.secondary),
+              ),
+            ),
+          if (esDinero && (unidad == null || unidad.isEmpty))
+            Positioned(
+              right: AppSpacing.md,
+              bottom: AppSpacing.sm,
+              child: Text(
+                'efectivo',
+                style: AppTypography.etiquetaChica.copyWith(color: AppColors.outline),
+              ),
+            ),
           if (esNumero && unidad != null && unidad.isNotEmpty)
             Positioned(
               right: AppSpacing.md,

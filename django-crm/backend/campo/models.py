@@ -1586,6 +1586,7 @@ from campo.contrato import (  # noqa: E402,F401
     ContratoDeServicio,
 )
 from campo.activacion_onu import ActivacionDeOnu  # noqa: E402,F401
+from campo.dinero import EntregaDeDinero  # noqa: E402,F401
 from campo.inventario_operacion import (  # noqa: E402,F401
     Compra,
     ConteoFisico,
