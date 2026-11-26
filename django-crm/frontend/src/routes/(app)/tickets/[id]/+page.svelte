@@ -1084,6 +1084,14 @@
                       </li>
                     {/each}
                   </ul>
+                {:else if enlaces.equipo_no_disponible === 'ficha_no_leida'}
+                  <!-- 26/11/2026: no se pudo leer la ficha en WispHub. NO es
+                       "no tiene serial": puede tenerlo y no lo vimos. -->
+                  <p class="sin-dato">
+                    <strong>No se pudo leer WispHub.</strong>
+                    La ficha del servicio no respondió, así que no se sabe si
+                    tiene serial. Volvé a abrir el ticket en un rato.
+                  </p>
                 {:else if enlaces.equipo_no_disponible === 'onu_no_vinculada'}
                   <!-- El servicio SI se identifico; lo que falta es el
                        serial del otro lado. Medido el 10/09/2026 sobre 600

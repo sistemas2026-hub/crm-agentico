@@ -386,6 +386,16 @@ def test_w_sin_ficha_NO_se_agrega_la_sugerencia():
 # M · sin serial en el ISP: la MAC del router (26/11/2026)
 # ---------------------------------------------------------------------------
 
+def test_m4_ficha_sin_leer_no_dice_que_falta_el_serial():
+    """26/11/2026, servicio 3658: WispHub tenia serial y MAC, la ficha no se
+    pudo leer y la pantalla decia que no tenia ninguno de los dos."""
+    r = clf.clasificar({"contexto_disponible": True,
+                        "equipo_no_disponible": "ficha_no_leida"})
+    assert r["labor"] == clf.SIN_CONCLUIR
+    assert "no se pudo leer la ficha" in r["porque"]
+    assert "no tiene" not in r["porque"]
+
+
 def test_m_sin_serial_dice_en_que_quedo_la_busqueda_por_mac():
     base = {"contexto_disponible": True, "equipo_no_disponible": "onu_no_vinculada"}
     r = clf.clasificar({**base, "busqueda_por_mac": "pendiente"})

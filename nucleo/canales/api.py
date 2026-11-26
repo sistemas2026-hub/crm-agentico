@@ -7670,6 +7670,13 @@ IDENTIDAD_CONVERSACION = "conversacion"
 # pantalla los dice distinto: uno es "todavia no cargaron el serial en el
 # sistema del ISP", el otro es "no sabemos de quien es este ticket".
 SIN_ONU_VINCULADA = "onu_no_vinculada"
+# La ficha del servicio en el sistema del ISP NO SE PUDO LEER (no contesto,
+# fallo la credencial, no aparecio la fila). No es "no tiene serial": no se
+# sabe si lo tiene. Hasta el 26/11/2026 este caso salia como
+# 'onu_no_vinculada' y la pantalla afirmaba que WispHub no tenia ni serial ni
+# MAC de un servicio que tenia las dos cosas cargadas (servicio 3658, visto
+# por el usuario en Despacho).
+FICHA_NO_LEIDA = "ficha_no_leida"
 # El serial que tiene el sistema del ISP no existe en el de la OLT. Casi
 # siempre significa que le cambiaron el equipo al cliente y actualizaron un
 # sistema y no el otro -- confirmado el 10/09/2026 sobre los cuatro casos que
@@ -7807,8 +7814,10 @@ def contexto_tecnico(config, tenant: str, identidad: dict) -> dict:
     #  ONU vio la MAC que el ISP tiene cargada: 10 de 10 correctas medido el
     #  10/11/2026. La consulta va en segundo plano por el cupo del proveedor;
     #  la primera vez sale 'pendiente' y la siguiente lectura ya trae el serial.
+    #  Solo con la ficha LEIDA: sin ella no se sabe si hay MAC, y decir
+    #  'sin_mac' seria afirmar algo que nadie miro.
     por_mac: dict = {}
-    if olt and not sn_onu:
+    if olt and not sn_onu and ficha:
         por_mac = _serial_por_mac(config, tenant, ficha)
         if por_mac.get("sn"):
             sn_onu = por_mac["sn"]
@@ -7849,6 +7858,10 @@ def contexto_tecnico(config, tenant: str, identidad: dict) -> dict:
             if candidatos:
                 enlaces["equipo_no_disponible"] = SERIAL_DESACTUALIZADO
                 enlaces["equipo_candidatos"] = candidatos
+    elif not sn_onu and not ficha:
+        # No se pudo leer la ficha: no se sabe si el ISP tiene serial. Decir
+        # 'onu_no_vinculada' aca era culpar a un dato que quizas esta cargado.
+        enlaces["equipo_no_disponible"] = FICHA_NO_LEIDA
     elif not sn_onu:
         # El servicio esta identificado y el sistema del ISP no tiene serial.
         # No se llama a SmartOLT -- no hay con que -- y se dice POR QUE, que no

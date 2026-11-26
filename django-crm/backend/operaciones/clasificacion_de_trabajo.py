@@ -332,6 +332,9 @@ def clasificar(contexto: dict, *, texto: str = "", mapa_de_texto=None,
     if not contexto.get("contexto_disponible"):
         motivo = ("no se pudo traer la ficha tecnica del caso, asi que no hubo "
                   "nada que medir")
+    elif sin_equipo == "ficha_no_leida":
+        motivo = ("no se pudo leer la ficha del servicio en WispHub, asi que no "
+                  "se sabe si tiene serial ni MAC: no hubo nada que medir")
     elif sin_equipo == "onu_no_vinculada" and contexto.get("busqueda_por_mac"):
         motivo = _sin_serial(contexto["busqueda_por_mac"])
     elif sin_equipo:

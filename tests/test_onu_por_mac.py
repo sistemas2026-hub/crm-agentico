@@ -226,6 +226,15 @@ try:
     e3 = api.contexto_tecnico(config, "t", {"id_servicio": "9"})
     afirmar(e3.get("busqueda_por_mac") == "sin_mac", "sin MAC en el ISP, se dice")
 
+    #  26/11/2026, servicio 3658: la ficha no se pudo leer (WispHub no
+    #  contesto) y se decia «WispHub no tiene ni serial ni MAC».
+    pedidos.clear()
+    ficha_actual = {}
+    e5 = api.contexto_tecnico(config, "t", {"id_servicio": "3658"})
+    afirmar(e5.get("equipo_no_disponible") == api.FICHA_NO_LEIDA
+            and "busqueda_por_mac" not in e5 and not pedidos,
+            "ficha sin leer: lo dice, no afirma que falte el serial ni busca por MAC")
+
     medidos.clear()
     pedidos.clear()
     ficha_actual = {"nombre": "CON SERIAL", "sn_onu": "CARGADO1", "mac_cpe": "11:22:33:44:55:66"}
