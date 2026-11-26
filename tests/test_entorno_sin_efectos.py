@@ -207,6 +207,39 @@ with Banco(None) as b:
         r = f"otro:{type(e).__name__}"
     comprobar("apagada, el envio sale como siempre", r == "salio", r)
 
+print("\n== 9. La prueba vigilada deja salir SOLO la herramienta nombrada (26/11/2026)")
+_antes_permitidas = os.environ.get(entorno.PERMITIDAS)
+os.environ[entorno.PERMITIDAS] = " autorizar_onu ,  crear_cliente "
+try:
+    with Banco("1") as b:
+        r, _ = correr(herramienta("autorizar_onu"))
+        comprobar("la nombrada sale", r == "salio", r)
+        comprobar("y pasa por la frontera", b.frontera == 1, str(b.frontera))
+        r, _ = correr(herramienta("registrar_pago"))
+        comprobar("otra escritura sigue bloqueada", r == "bloqueo", r)
+        r, _ = correr(herramienta("autorizar_onu_masivo"))
+        comprobar("un nombre que EMPIEZA igual no sale", r == "bloqueo", r)
+        r, _ = correr(herramienta("autorizar"))
+        comprobar("un pedazo del nombre no sale", r == "bloqueo", r)
+        try:
+            whatsapp._post(None, "t", "123/messages", {})
+            r = "sin_error"
+        except whatsapp.ErrorWhatsApp:
+            r = "bloqueo"
+        except _Salio:
+            r = "salio"
+        comprobar("WhatsApp sigue sin enviar", r == "bloqueo", r)
+        comprobar("a la red llego solo la nombrada", len(b.red) == 1, str(b.red))
+    os.environ[entorno.PERMITIDAS] = ""
+    with Banco("1") as b:
+        r, _ = correr(herramienta("autorizar_onu"))
+        comprobar("vaciada la lista, vuelve a bloquearse", r == "bloqueo", r)
+finally:
+    if _antes_permitidas is None:
+        os.environ.pop(entorno.PERMITIDAS, None)
+    else:
+        os.environ[entorno.PERMITIDAS] = _antes_permitidas
+
 print()
 if fallos:
     print(f"[FALLA] {len(fallos)} comprobacion(es) no pasaron.")

@@ -1716,6 +1716,50 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 
 **VERIFICADO** (26/11/2026, entorno local con claves reales y `SIN_EFECTOS_EXTERNOS` encendido): backend, 9 archivos de `campo/tests/` (contrato, formato y plan, plantillas, material, TV, activación de la ONU, alta, fotos): **319 pasan**, y `makemigrations --check` sin cambios; motor, `test_activar_onu`, `test_alta_de_cliente`, `test_alta_ruta`, `test_rangos_de_ip`, `test_ocupacion_ip`, `test_m10a_gobierno_frontera`, `test_editor_config` y la guarda de arquitectura, en verde; web, 6 archivos, **71 pasan**; app, **1.491 pasan** (1 saltada, de antes) y `flutter analyze` con los mismos 14 avisos de antes. En vivo y sin escribir: un serial inventado → «no espera»; la ONU real que esperaba → OLT 3, placa 3, puerto 6, la VLAN 300 y las 60 zonas; el pedido recorrió la cadena entera (app → servidor → tarea → motor) y la guarda lo frenó en el último paso. La ONU siguió esperando. Las pantallas nuevas de la app se miraron en capturas con sus fuentes reales, no a ojo.
 
-**NO VERIFICADO:** ninguna escritura real en SmartOLT ni en WispHub —las dos piden una prueba vigilada con permiso explícito del usuario—; la 1.0.25 en el teléfono del usuario; la regla de TV en una instalación real. Fallan, con o sin estos cambios, `test_la_accion_relee_la_asignacion` b y b2 («database table is locked»: carreras sobre SQLite; §6 pide Postgres para eso).
+**NO VERIFICADO:** ninguna escritura real en WispHub —pide una prueba vigilada con permiso explícito del usuario—; SmartOLT sí se probó de verdad el mismo día, con una ONU de prueba (§8.36); la 1.0.25 en el teléfono del usuario; la regla de TV en una instalación real. Fallan, con o sin estos cambios, `test_la_accion_relee_la_asignacion` b y b2 («database table is locked»: carreras sobre SQLite; §6 pide Postgres para eso).
 
 **En producción no llega solo:** las migraciones `campo` 0054–0059; las siete herramientas nuevas en la configuración de la empresa (tres del alta, cuatro de la ONU) y la marca de ocupación en la que ya existía, cargadas **sin pisar** lo que solo tiene la base —los rangos de IP viven ahí—; la plantilla v7, la lista de material con los códigos reales de la empresa, la regla de TV, la VLAN de cada servidor y los dos interruptores. El código primero y la configuración después: las herramientas usan marcas que el código de hoy en producción no conoce.
+
+### 8.35 DECISIÓN — El contrato puede quedar a nombre de otra persona, y esa persona autoriza sus datos al firmar (26/11/2026)
+
+**El error que lo originó.** El usuario: *«cuando el técnico llegue y el contrato se hace a nombre de otra persona, pero los otros datos siguen igual: solo cambiarían el nombre, el apellido y la cédula»*. La app ya dejaba cambiarlos —lo que manda el teléfono gana sobre la solicitud (§8.34, punto 1)—, así que no faltaba poder escribirlos. Lo que estaba mal es lo que el contrato **afirmaba**: las autorizaciones de habeas data y centrales de riesgo salían siempre de la solicitud, y el PDF habría dicho que la persona nueva las aceptó en una solicitud que llenó otra. Desde el 26/11 tampoco había dónde aceptarlas: las casillas se quitaron de la pantalla porque ya venían de la solicitud.
+
+**Lo que se midió.** La oficina aprueba una solicitud mirando si el servicio llega a esa dirección (`solicitudes/gestion.py`), no a la persona: cambiar el titular en la casa no se salta ninguna revisión. El alta en WispHub ya toma los datos tal como se firmaron (`alta_en_el_isp.datos_del_alta`), no los de la solicitud.
+
+**Qué se decidió.**
+
+1. **«A nombre de otra persona» es un modo explícito de la pantalla** (`titular: "otro"`), no algo que se deduce de un nombre distinto. Vacía nombre, apellido y documento, pide el tipo de documento, y lo demás —teléfono, correo, dirección, plan, corte, coordenadas— sigue igual. Se puede volver a los datos de la solicitud.
+2. **Con ese modo, el nombre, el apellido y el documento salen solo del teléfono**, sin caer a los de la solicitud. El mismo documento de la solicitud se rechaza: no es otra persona.
+3. **Esa persona acepta ahí mismo las mismas dos autorizaciones que pide la solicitud**, con la misma regla: habeas data obligatoria, centrales de riesgo no. Sin habeas data no se firma a su nombre. El contrato las guarda con la hora de la firma y `donde: "al_firmar"`, y el PDF dice «aceptadas por el suscriptor al firmar» y que no es quien hizo la solicitud. Los textos los manda el servidor con el nombre de la empresa (`para_otro_titular`); un servidor viejo no los manda y la app no ofrece el botón.
+4. **Una cédula que cambia sin el modo** (una app vieja, o un número mal escrito en la solicitud) se firma como antes y queda `documento_cambiado`; la app nueva advierte en la pantalla. No se bloquea: corregir un dígito mal escrito es legítimo y la app vieja sigue en los teléfonos.
+5. **La oficina ve a nombre de quién quedó** en Instalaciones, porque con esos datos se crea el cliente en el proveedor. Solo viaja el titular cuando es otra persona.
+
+**Límites, a propósito.** La orden y el ticket siguen con el nombre de quien pidió el servicio: son la solicitud, no el contrato. Los textos de las dos autorizaciones (y los de la solicitud pública, que además nombran a una empresa fija en el código) todavía no son configuración de cada empresa; corregirlo es tarea aparte, junto con los de la solicitud.
+
+**VERIFICADO** (entorno local): `campo/tests/test_contrato_de_servicio.py` grupo K, 16 casos (datos nuevos, autorizaciones de la persona nueva y no de la solicitud, sin habeas data no se firma, sin caer a los datos de la solicitud, tipo de documento, el mismo documento, la cédula cambiada sin decirlo, el PDF en los dos casos, la oficina, el alta); contrato + formato + alta + `solicitudes/tests`: **247 pasan**. Web: Instalaciones y contrato, **19 pasan**, y `svelte-check` sin errores en esa página. App: 5 pruebas nuevas; **1.496 pasan** y `flutter analyze` con los 14 avisos de antes. La pantalla se miró en capturas con sus fuentes reales.
+
+**NO VERIFICADO:** la 1.0.26 en el teléfono del usuario.
+
+### 8.36 DECISIÓN — La primera ONU activada de verdad: el modo es obligatorio, el rechazo dice por qué y la prueba vigilada abre una sola puerta (26/11/2026)
+
+**El error que lo originó.** La prueba vigilada de «Activar ONU» (§8.34, punto 7), con el permiso explícito del usuario para UNA ONU de prueba (OLT 3, placa 3, puerto 15) que él mismo borró después en SmartOLT. Tres tropiezos seguidos: la primera búsqueda no la encontró y 23 s después sí; la guarda del entorno la frenó, como debía; y con la puerta abierta el proveedor contestó **400 dos veces sin que quedara por qué**: Dexter solo guardaba «rechazó la autorización».
+
+**Lo que se midió** (todo leído, salvo la autorización autorizada por el usuario):
+
+| Qué | Resultado |
+|---|---|
+| El motivo del 400, ya guardado | `Invalid parameters: Allowed values for ONU mode are 'Routing', 'Bridging'`: el modo es **obligatorio**, aunque el OpenAPI del proveedor solo exige `olt_id`, `pon_type` y `sn` |
+| El modo de las ONU que Rapilink autorizó en las dos semanas anteriores (solo `mode` y el tipo, sin datos de cliente) | **112 de 112 en `Routing`** |
+| El tipo que trae la fila de la ONU que espera | Es uno de los 22 de la cuenta: sirve tal cual |
+| La autorización con `onu_mode=Routing` | 200, y la lectura la confirmó enseguida: **«ONU activada en la red»** |
+
+**Qué se decidió.**
+
+1. **El modo es dato de la empresa**, no código: `argumentos_fijos: {onu_mode: Routing}` en la herramienta de Rapilink (YAML y base). Otra empresa que entregue en puente pone `Bridging`.
+2. **Un rechazo dice por qué.** Del error del proveedor se guarda SOLO el texto del motivo, en una línea de 160 caracteres como máximo, en el registro del pedido, que el técnico y la oficina ya ven (`activar_onu.motivo_del_rechazo`). Nunca la respuesta entera, nunca al log.
+3. **La prueba vigilada abre una sola puerta.** `EFECTOS_EXTERNOS_PERMITIDOS` (en `nucleo/seguridad/entorno.py`): las herramientas que nombra, por su nombre exacto, pueden escribir afuera aunque `SIN_EFECTOS_EXTERNOS` esté puesto; todo lo demás sigue sin salir, WhatsApp no la mira, y lo que sale pasa igual por la frontera entera y queda escrito en el log. Vacía por defecto; se abre con permiso explícito y se cierra al terminar (así se hizo). Apagar `SIN_EFECTOS_EXTERNOS` para una prueba abría todo lo demás mientras durara.
+4. **La app vuelve a buscar sola** la ONU recién conectada: cada 8 s, hasta 8 veces, diciendo «sigo buscando».
+
+**VERIFICADO:** la ONU de prueba quedó autorizada y confirmada leyendo; el permiso se cerró enseguida y la variable quedó vacía; `tests/test_activar_onu.py` (el modo viaja; el motivo del rechazo, corto, de las claves de siempre), `tests/test_entorno_sin_efectos.py` (sección 9: sale solo la nombrada, ni un prefijo ni un pedazo del nombre, WhatsApp sigue sin enviar, vaciada vuelve a bloquear) y la guarda de arquitectura, en verde; app `activar_onu_test.dart` 6.
+
+**NO VERIFICADO:** la configuración que dejó SmartOLT (VLAN, zona, nombre): el usuario la borró antes de leer la ficha. Que SmartOLT use el serial como identificador externo cuando no se manda uno es **inferido**: la confirmación por el serial funcionó. Producción no se tocó: allá falta cargar el modo en la configuración, con lo demás de §8.34.

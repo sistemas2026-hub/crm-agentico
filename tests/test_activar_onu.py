@@ -129,9 +129,15 @@ class Registro:
 
 
 class ErrorHttp(Exception):
-    def __init__(self, codigo):
+    def __init__(self, codigo, cuerpo=...):
         super().__init__(f"{codigo}")
-        self.response = type("R", (), {"status_code": codigo})()
+
+        def _json(_self):
+            if cuerpo is ...:
+                raise ValueError("sin cuerpo JSON")
+            return cuerpo
+
+        self.response = type("R", (), {"status_code": codigo, "json": _json})()
 
 
 class Proveedor:
@@ -253,6 +259,20 @@ afirmar(cuerpo == {"olt_id": "3", "pon_type": "gpon", "sn": SERIAL, "board": "3"
                    "name": "JOSE PENA-ORTIZ JR."},
         f"el cuerpo con los nombres de la config, el lugar de la fila y el nombre limpio: {cuerpo}")
 
+#  EL MODO (26/11/2026): el proveedor lo exige aunque su documentacion lo da
+#  por opcional. Es de la empresa, en `argumentos_fijos` de la herramienta.
+con_modo = HerrAutorizar()
+con_modo.argumentos_fijos = {"onu_mode": "Routing"}
+proveedor = Proveedor()
+with escenario(Registro(), proveedor):
+    r = onu.activar(Config([HerrBuscar(), con_modo, HerrLeer(), HerrZonas()]), TENANT,
+                    actor="Dilan Moreno", origen=ORIGEN,
+                    datos={"serial": SERIAL, "zona": "VILLA ADELA 2", "vlan": 300,
+                           "nombre": "Jose"}, espera_s=5, intervalo_s=0)
+cuerpo = proveedor.de(AUTORIZAR)[0] if proveedor.de(AUTORIZAR) else {}
+afirmar(r.estado == onu.ACTIVADA and cuerpo.get("onu_mode") == "Routing",
+        f"lo fijo de la empresa viaja en el pedido: {cuerpo.get('onu_mode')!r} ({r.estado})")
+
 seccion("2. lo que NO escribe")
 for titulo, prov, esperado in (
         ("ya autorizada", Proveedor(autorizada=True), onu.YA_ESTABA),
@@ -297,6 +317,23 @@ prov = Proveedor(error_al_autorizar=ErrorHttp(400), aplica_igual=False)
 with escenario(Registro(), prov):
     r = activar()
 afirmar(r.estado == onu.FALLO, f"un 4xx es el proveedor diciendo que no: FALLO ({r.estado})")
+afirmar(r.motivo == "el proveedor rechazo la autorizacion",
+        f"sin cuerpo, el motivo de siempre ({r.motivo!r})")
+#  EL MOTIVO DEL PROVEEDOR (26/11/2026): la primera prueba real volvio 400 dos
+#  veces y no quedo por que.
+prov = Proveedor(error_al_autorizar=ErrorHttp(400, {"status": False,
+                 "error": "  The   ONU mode field is required. " + "x" * 300}), aplica_igual=False)
+with escenario(Registro(), prov):
+    r = activar()
+afirmar(r.estado == onu.FALLO and "The ONU mode field is required." in r.motivo,
+        f"el rechazo dice POR QUE, en una linea ({r.motivo!r})")
+afirmar(len(r.motivo) <= len("el proveedor rechazo la autorizacion: ") + 160,
+        f"y corto ({len(r.motivo)})")
+for cuerpo, esperado in (({"message": "bad zone"}, "bad zone"),
+                         ({"errors": {"vlan": ["invalid"]}}, '{"vlan": ["invalid"]}'),
+                         ({"status": False}, ""), (["x"], ""), ("texto", "")):
+    afirmar(onu.motivo_del_rechazo(ErrorHttp(400, cuerpo)) == esperado,
+            f"motivo de {cuerpo!r} -> {esperado!r}")
 prov = Proveedor(aparece_tras=2)
 with escenario(Registro(), prov):
     r = onu.activar(Config(), TENANT, actor="x", origen=ORIGEN, datos={"serial": SERIAL},

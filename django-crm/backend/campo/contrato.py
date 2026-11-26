@@ -48,6 +48,25 @@ instalacion»).
 * UN CONTRATO SE ANULA y la orden firma otro (`anular`). Uno que ya esta en el
   ISP no: deshacerlo es borrar un cliente del otro lado.
 
+EL CONTRATO A NOMBRE DE OTRA PERSONA  --  26/11/2026
+---------------------------------------------------
+El usuario: *«cuando el tecnico llegue y el contrato se hace a nombre de otra
+persona, pero los otros datos siguen igual: solo cambiarian el nombre, el
+apellido y la cedula»*. El telefono ya podia cambiarlos (lo que manda gana
+sobre el borrador). Lo que estaba mal es lo que el contrato AFIRMABA: las
+autorizaciones de habeas data y centrales de riesgo salian de la solicitud,
+asi que el PDF habria dicho que la persona nueva las acepto en una solicitud
+que nunca lleno. Las acepto la otra.
+
+Por eso «otra persona» es una marca explicita (`titular: "otro"`), no algo que
+se deduce de un nombre distinto: con ella el nombre, el apellido y el
+documento salen SOLO del telefono, y las autorizaciones tambien, aceptadas por
+esa persona al firmar (habeas data obligatoria, como en la solicitud). Lo
+demas --telefono, correo, direccion, plan, corte, coordenadas-- sigue igual.
+Una cedula que cambia SIN la marca (una app vieja, o un numero mal escrito en
+la solicitud) se firma como antes y queda `documento_cambiado`: la oficina lo
+ve en Instalaciones.
+
 POR QUE LAS CONDICIONES NO ESTAN ESCRITAS ACA
 ---------------------------------------------
 Son el contrato de cada empresa (permanencia, comodato, mora...). Se cargan como
@@ -74,6 +93,11 @@ logger = logging.getLogger(__name__)
 
 #: Lo minimo para que un contrato identifique a alguien y a un lugar.
 CAMPOS_OBLIGATORIOS = ("nombre", "numero_documento", "direccion")
+
+#: Los tipos de documento: los mismos que ofrece la solicitud
+#: (`solicitud/[token]/+page.svelte`). Solo se eligen cuando el contrato va a
+#: nombre de otra persona; si no, manda el de la solicitud.
+TIPOS_DE_DOCUMENTO = ("Cédula de ciudadanía", "Cédula de extranjería", "Pasaporte", "NIT")
 
 #: Los datos del cliente que el contrato lleva, en el orden de la pantalla.
 CAMPOS_DEL_CLIENTE = ("nombre", "apellido", "tipo_documento", "numero_documento",
@@ -293,6 +317,10 @@ class ContratoDeServicio(BaseModel):
             "plan": (self.datos or {}).get("plan", ""),
             "ip_elegida": (self.datos or {}).get("ip_elegida", ""),
             "gps": (self.datos or {}).get("gps"),
+            #  A nombre de otra persona que la de la solicitud (26/11/2026), y
+            #  si la cedula cambio sin decirlo.
+            "otro_titular": bool((self.datos or {}).get("otro_titular")),
+            "documento_cambiado": bool((self.datos or {}).get("documento_cambiado")),
             "huella": self.huella,
             "tiene_pdf": bool(self.pdf),
             #  Solo uno FIRMADO se puede anular desde aca: el que ya creo al
@@ -487,7 +515,39 @@ def para_la_pantalla(orden) -> dict:
                    for p in (catalogo or [])
                    for sp in [contrato_plan.servidores_del_plan(p, config["servidores"])]],
         "falta_cargar_servidores": bool(reconocido and config["servidores"] and not servidores),
+        #  A NOMBRE DE OTRA PERSONA (26/11/2026): que puede elegir la pantalla
+        #  y que tiene que aceptar esa persona. Lo dice el servidor para que
+        #  el texto sea uno solo, con el nombre de la empresa.
+        "otro_titular": para_otro_titular(orden.org),
     }
+
+
+def para_otro_titular(org) -> dict:
+    """Los tipos de documento y las dos autorizaciones que acepta la persona a
+    cuyo nombre va el contrato cuando no es la de la solicitud. Las mismas dos
+    que pide la solicitud, con la misma regla: habeas data obligatoria,
+    centrales de riesgo no. Los textos son los rotulos del PDF; las
+    condiciones completas son las de la empresa (`texto_condiciones`)."""
+    empresa = (getattr(org, "name", "") or "").strip() or "la empresa"
+    return {
+        "tipos_de_documento": list(TIPOS_DE_DOCUMENTO),
+        "autorizaciones": [
+            {"id": "habeas_data", "obligatoria": True,
+             "texto": f"Autoriza a {empresa} el tratamiento de sus datos personales "
+                      "(habeas data, Ley 1581 de 2012)."},
+            {"id": "centrales_de_riesgo", "obligatoria": False,
+             "texto": f"Autoriza a {empresa} a consultar y reportar su información "
+                      "en centrales de riesgo (Ley 1266 de 2008)."},
+        ],
+    }
+
+
+def _mismo_documento(a, b) -> bool:
+    """Dos numeros de documento son el mismo si coinciden sus letras y digitos:
+    una cedula con puntos o espacios es la misma cedula."""
+    import re
+    limpio = lambda x: re.sub(r"[^0-9A-Za-z]", "", str(x or "")).upper()  # noqa: E731
+    return limpio(a) == limpio(b)
 
 
 # =============================================================================
@@ -632,6 +692,21 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
     #  LO QUE MANDA EL TELEFONO GANA SOBRE EL BORRADOR: el tecnico tiene el
     #  documento delante y pudo corregir un dato mal escrito en la solicitud.
     cliente = {c: _texto(llegado.get(c, base["cliente"].get(c, ""))) for c in CAMPOS_DEL_CLIENTE}
+    #  A NOMBRE DE OTRA PERSONA (26/11/2026, ver el encabezado): el nombre, el
+    #  apellido y el documento salen SOLO del telefono, sin caer a los de la
+    #  solicitud, que son de otra persona.
+    otro_titular = cuerpo.get("titular") == "otro"
+    if otro_titular:
+        for c in ("nombre", "apellido", "tipo_documento", "numero_documento"):
+            cliente[c] = _texto(llegado.get(c))
+        if cliente["tipo_documento"] not in TIPOS_DE_DOCUMENTO:
+            raise ContratoInvalido("Elige el tipo de documento de la persona a cuyo nombre va el contrato.")
+        if (base["origen"] == "solicitud" and cliente["numero_documento"]
+                and _mismo_documento(cliente["numero_documento"],
+                                     base["cliente"].get("numero_documento"))):
+            raise ContratoInvalido(
+                "Ese documento es el de la solicitud: no es otra persona. "
+                "Vuelve a los datos de la solicitud.")
     #  EL TIPO DE DOCUMENTO VACIO NO SE FIRMA ASI: la pantalla lo recibe vacio
     #  para no dibujarlo delante del numero (ver `para_la_pantalla`) y lo
     #  devuelve igual. El contrato lleva el de la solicitud.
@@ -648,6 +723,23 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
         nombres = {"nombre": "el nombre", "numero_documento": "el documento",
                    "direccion": "la dirección"}
         raise ContratoInvalido("Falta " + ", ".join(nombres[c] for c in faltan) + ".")
+
+    #  LAS AUTORIZACIONES DE OTRA PERSONA las acepta ESA persona, al firmar.
+    #  Las de la solicitud no le sirven: las acepto quien la lleno.
+    autorizaciones_nuevas = None
+    if otro_titular:
+        aut = cuerpo.get("autorizaciones") if isinstance(cuerpo.get("autorizaciones"), dict) else {}
+        if aut.get("habeas_data") is not True:
+            raise ContratoInvalido(
+                "Falta que la persona a cuyo nombre va el contrato autorice el "
+                "tratamiento de sus datos (habeas data).")
+        autorizaciones_nuevas = {"habeas_data": True,
+                                 "centrales_de_riesgo": aut.get("centrales_de_riesgo") is True}
+    #  UNA CEDULA QUE CAMBIO SIN DECIR «OTRA PERSONA»: una app vieja, o un
+    #  numero mal escrito en la solicitud. Se firma como antes, y queda dicho.
+    documento_cambiado = (not otro_titular and base["origen"] == "solicitud"
+                          and not _mismo_documento(cliente["numero_documento"],
+                                                   base["cliente"].get("numero_documento")))
 
     plan = _texto(cuerpo.get("plan") or base.get("plan"))
     if not plan:
@@ -751,7 +843,12 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
         #  «telefono» (el ticket no traia).
         "gps_origen": gps_origen,
         "gps_del_telefono": del_telefono,
-        "autorizaciones": base.get("autorizaciones"),
+        #  Las de la solicitud, o las que la otra persona acepto al firmar.
+        "autorizaciones": (base.get("autorizaciones") if autorizaciones_nuevas is None
+                           else {**autorizaciones_nuevas, "aceptadas_en": ahora.isoformat(),
+                                 "donde": "al_firmar"}),
+        "otro_titular": otro_titular,
+        "documento_cambiado": documento_cambiado,
         "tecnico": nombre_para_la_marca(profile),
         "orden_numero": orden.numero,
         "origen": base["origen"],
@@ -915,6 +1012,8 @@ def armar_pdf(contrato: "ContratoDeServicio", firma: bytes, config: dict):
         "plan": d["plan"], "servidor": d["servidor"],
         "tecnico": d.get("tecnico", ""),
         "autorizaciones": aut, "aceptadas_en": aceptadas,
+        "al_firmar": aut.get("donde") == "al_firmar",
+        "otro_titular": bool(d.get("otro_titular")),
         "condiciones": config.get("texto_condiciones", ""),
         "coordenadas": _punto(d.get("gps")),
         "gps": _punto(d.get("gps_del_telefono")),

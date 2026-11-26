@@ -942,3 +942,190 @@ def test_e5_una_costumbre_mal_escrita_se_rechaza_y_no_guarda_nada(admin_client, 
     d = admin_client.get(URL_CONFIG).json()
     assert (d["datos_en_mayusculas"], d["barrio_en_la_direccion"],
             d["digitos_del_telefono"]) == (False, False, 0)
+
+
+# =========================================================================== #
+#  K. A NOMBRE DE OTRA PERSONA  --  26/11/2026
+#
+#  El usuario: «cuando el técnico llegue y el contrato se hace a nombre de otra
+#  persona, pero los otros datos siguen igual: solo cambiarían el nombre, el
+#  apellido y la cédula». Lo que no puede pasar es que el contrato diga que la
+#  persona nueva aceptó las autorizaciones de una solicitud que llenó otra.
+# =========================================================================== #
+URL_BANDEJA = "/api/solicitudes/bandeja/?estado=aprobada"
+
+
+def _otra_persona(**extra):
+    c = {"nombre": "Carlos", "apellido": "Pérez Díaz", "tipo_documento": "Cédula de ciudadanía",
+         "numero_documento": "72.111.222"}
+    c.update(extra)
+    return c
+
+
+def _a_nombre_de_otro(cliente=None, autorizaciones=None, **extra):
+    return _cuerpo(titular="otro", cliente=cliente if cliente is not None else _otra_persona(),
+                   autorizaciones=(autorizaciones if autorizaciones is not None
+                                   else {"habeas_data": True, "centrales_de_riesgo": False}),
+                   **extra)
+
+
+def test_k1_LA_PANTALLA_sabe_que_elegir_y_que_aceptar_y_con_el_nombre_de_la_empresa(
+        user_client, orden, config, org_a):
+    _solicitud(org_a)
+    o = user_client.get(_url(orden)).json()["otro_titular"]
+    assert "Cédula de ciudadanía" in o["tipos_de_documento"]
+    habeas, centrales = o["autorizaciones"]
+    assert (habeas["id"], habeas["obligatoria"]) == ("habeas_data", True)
+    assert (centrales["id"], centrales["obligatoria"]) == ("centrales_de_riesgo", False)
+    assert org_a.name in habeas["texto"], "la autoriza A ESTA empresa"
+
+
+def test_k2_A_NOMBRE_DE_OTRA_PERSONA_cambian_nombre_y_documento_y_lo_demas_sigue_igual(
+        user_client, orden, config, org_a):
+    s = _solicitud(org_a)
+    r = user_client.post(_url(orden), _a_nombre_de_otro(), format="json")
+    assert r.status_code == 201, r.content
+    c = r.json()["contrato"]
+    assert (c["cliente"]["nombre"], c["cliente"]["apellido"]) == ("Carlos", "Pérez Díaz")
+    assert c["cliente"]["tipo_documento"] == "Cédula de ciudadanía"
+    assert c["cliente"]["numero_documento"].replace(".", "") == "72111222"
+    #  Lo demás, de la solicitud.
+    assert c["cliente"]["telefono"] == "3000000000"
+    assert c["cliente"]["correo"] == "laura@ejemplo.co"
+    assert c["cliente"]["direccion"].upper().startswith("CRA 21")
+    assert c["otro_titular"] is True and c["documento_cambiado"] is False
+    fila = ContratoDeServicio.objects.get(orden=orden)
+    assert fila.solicitud_id == s.id, "sigue colgado de la solicitud que pidió el servicio"
+
+
+def test_k3_LAS_AUTORIZACIONES_son_de_la_persona_nueva_aceptadas_al_firmar(
+        user_client, orden, config, org_a):
+    _solicitud(org_a)   # aceptó las dos el 10/11
+    r = user_client.post(_url(orden), _a_nombre_de_otro(), format="json")
+    assert r.status_code == 201, r.content
+    aut = ContratoDeServicio.objects.get(orden=orden).datos["autorizaciones"]
+    assert aut["habeas_data"] is True
+    assert aut["centrales_de_riesgo"] is False, \
+        "la persona nueva NO aceptó centrales; que la de la solicitud sí no cuenta"
+    assert aut["donde"] == "al_firmar"
+    assert not aut["aceptadas_en"].startswith("2026-11-10"), "no la fecha de la solicitud"
+
+
+@pytest.mark.parametrize("autorizaciones", [
+    {}, {"habeas_data": False, "centrales_de_riesgo": True}, {"habeas_data": "true"},
+])
+def test_k4_SIN_que_la_persona_nueva_autorice_sus_datos_no_se_firma(
+        user_client, orden, config, org_a, autorizaciones):
+    _solicitud(org_a)
+    r = user_client.post(_url(orden), _a_nombre_de_otro(autorizaciones=autorizaciones),
+                         format="json")
+    assert r.status_code == 400
+    assert "habeas data" in r.json()["detail"]
+    assert not ContratoDeServicio.objects.filter(orden=orden).exists()
+
+
+def test_k5_NO_CAE_a_los_datos_de_la_solicitud_lo_que_la_persona_nueva_no_dio(
+        user_client, orden, config, org_a):
+    _solicitud(org_a)
+    #  Sin apellido: queda sin apellido, no con el de Laura.
+    r = user_client.post(_url(orden), _a_nombre_de_otro(
+        cliente={"nombre": "Carlos", "tipo_documento": "Pasaporte", "numero_documento": "AB123"}),
+        format="json")
+    assert r.status_code == 201, r.content
+    assert r.json()["contrato"]["cliente"]["apellido"] == ""
+    #  Sin documento: no se firma con el de Laura.
+    ContratoDeServicio.objects.all().delete()
+    r = user_client.post(_url(orden), _a_nombre_de_otro(
+        cliente={"nombre": "Carlos", "tipo_documento": "Pasaporte"}), format="json")
+    assert r.status_code == 400 and "documento" in r.json()["detail"]
+
+
+def test_k6_un_tipo_de_documento_que_no_es_de_la_lista_se_rechaza(
+        user_client, orden, config, org_a):
+    _solicitud(org_a)
+    r = user_client.post(_url(orden), _a_nombre_de_otro(cliente=_otra_persona(tipo_documento="")),
+                         format="json")
+    assert r.status_code == 400 and "tipo de documento" in r.json()["detail"]
+
+
+def test_k7_el_MISMO_documento_de_la_solicitud_no_es_otra_persona(
+        user_client, orden, config, org_a):
+    _solicitud(org_a)
+    r = user_client.post(_url(orden), _a_nombre_de_otro(
+        cliente=_otra_persona(numero_documento="1.043.000.000")), format="json")
+    assert r.status_code == 400 and "no es otra persona" in r.json()["detail"]
+
+
+def test_k8_UNA_CEDULA_QUE_CAMBIA_SIN_DECIRLO_se_firma_y_queda_dicho(
+        user_client, orden, config, org_a):
+    #  Una app vieja, o un número mal escrito en la solicitud: como antes, y la
+    #  oficina lo ve.
+    _solicitud(org_a)
+    r = user_client.post(_url(orden), _cuerpo(cliente={"numero_documento": "1043000001"}),
+                         format="json")
+    assert r.status_code == 201
+    c = r.json()["contrato"]
+    assert c["documento_cambiado"] is True and c["otro_titular"] is False
+    aut = ContratoDeServicio.objects.get(orden=orden).datos["autorizaciones"]
+    assert "donde" not in aut, "las de la solicitud, como antes"
+    #  La misma cédula con puntos no es «cambiada».
+    ContratoDeServicio.objects.all().delete()
+    r = user_client.post(_url(orden), _cuerpo(cliente={"numero_documento": "1.043.000.000"}),
+                         format="json")
+    assert r.json()["contrato"]["documento_cambiado"] is False
+
+
+def test_k9_EL_PAPEL_dice_que_no_es_quien_hizo_la_solicitud_y_que_aceptó_al_firmar(
+        user_client, orden, config, org_a, lo_que_se_imprime):
+    _solicitud(org_a)
+    r = user_client.post(_url(orden), _a_nombre_de_otro(), format="json")
+    assert r.status_code == 201, r.content
+    html = lo_que_se_imprime[0]
+    assert "no es quien hizo la solicitud" in html
+    assert "aceptadas por el suscriptor al firmar" in html
+    assert "aceptadas en la solicitud" not in html
+    assert "Pérez Díaz" in html and "Gómez Ríos" not in html, "el apellido de Laura no va"
+
+
+def test_k10_el_papel_de_SIEMPRE_sigue_diciendo_de_la_solicitud(
+        user_client, orden, config, org_a, lo_que_se_imprime):
+    _solicitud(org_a)
+    assert user_client.post(_url(orden), _cuerpo(), format="json").status_code == 201
+    html = lo_que_se_imprime[0]
+    assert "aceptadas en la solicitud" in html and "no es quien hizo la solicitud" not in html
+
+
+def test_k11_LA_OFICINA_ve_a_nombre_de_quien_quedó(user_client, admin_client, orden, config, org_a):
+    _solicitud(org_a)
+    assert user_client.post(_url(orden), _a_nombre_de_otro(), format="json").status_code == 201
+    contrato = admin_client.get(URL_BANDEJA).json()["solicitudes"][0]["contrato"]
+    assert contrato["otro_titular"] is True
+    assert contrato["titular"]["nombre"] == "Carlos Pérez Díaz"
+    assert contrato["titular"]["documento"].startswith("Cédula de ciudadanía 72")
+
+
+def test_k12_en_un_contrato_NORMAL_la_oficina_no_recibe_otro_titular(
+        user_client, admin_client, orden, config, org_a):
+    _solicitud(org_a)
+    assert user_client.post(_url(orden), _cuerpo(), format="json").status_code == 201
+    contrato = admin_client.get(URL_BANDEJA).json()["solicitudes"][0]["contrato"]
+    assert contrato["otro_titular"] is False and contrato["titular"] is None
+
+
+def test_k13_EL_ALTA_en_el_proveedor_sale_con_la_persona_nueva(user_client, orden, config, org_a):
+    from campo.services.alta_en_el_isp import datos_del_alta
+
+    _solicitud(org_a)
+    assert user_client.post(_url(orden), _a_nombre_de_otro(), format="json").status_code == 201
+    d = datos_del_alta(ContratoDeServicio.objects.get(orden=orden))
+    assert (d["cliente"]["nombre"], d["cliente"]["apellido"]) == ("Carlos", "Pérez Díaz")
+    assert d["cliente"]["documento"].replace(".", "") == "72111222"
+    assert d["cliente"]["telefono"] == "3000000000"
+
+
+def test_k14_SIN_SOLICITUD_tambien_se_puede_y_las_autorizaciones_quedan_por_fin_aceptadas(
+        user_client, orden, config):
+    r = user_client.post(_url(orden), _a_nombre_de_otro(), format="json")
+    assert r.status_code == 201, r.content
+    aut = ContratoDeServicio.objects.get(orden=orden).datos["autorizaciones"]
+    assert aut["habeas_data"] is True and aut["donde"] == "al_firmar"

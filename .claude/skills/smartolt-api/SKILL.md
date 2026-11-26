@@ -954,6 +954,24 @@ público (`https://www.smartolt.com/openapi.json`, 137 rutas — la página
 «decenas de segundos») **NO se llamó**: es una escritura que da servicio. Ver
 SPEC/objetivos/agente-de-campo-para-instalaciones.md → «Activar ONU».
 
+### La primera autorización REAL — 26/11/2026 (permiso explícito del usuario, UNA ONU de prueba)
+
+Prueba vigilada: OLT 3, placa 3, puerto 15, una FD714GS1-R850 de prueba,
+autorizada desde la app (orden OT-18) y borrada después por el usuario en
+SmartOLT. El entorno local seguía con `SIN_EFECTOS_EXTERNOS`; salió solo esta
+herramienta (`EFECTOS_EXTERNOS_PERMITIDOS`, ver `nucleo/seguridad/entorno.py`).
+
+| Qué | Medido |
+|---|---|
+| `authorize_onu` **sin** `onu_mode` | **400** `{"status":false,"error":"Invalid parameters: Allowed values for ONU mode are 'Routing', 'Bridging'"}`. **Obligatorio**, aunque el OpenAPI solo exige `olt_id`, `pon_type` y `sn`: la documentación era la hipótesis, otra vez |
+| Con `onu_mode=Routing` más `olt_id`, `pon_type`, `sn`, `board`, `port`, `onu_type`, `zone` (el NOMBRE), `vlan`, `name` | 200, y la lectura de confirmación la vio autorizada enseguida |
+| Modo de lo que autoriza Rapilink (`get_all_onus_details?authorized_after=2026-11-12&fields=mode,onu_type_name`, solo esos campos) | **112 de 112 en `Routing`** (108 en la OLT 3, 4 en la 4) |
+| `onu_type_name` de la fila de `unconfigured_onus` (`FD714GS1-R850`) | Es uno de los 22 tipos de la cuenta (`get_onu_types`): sirve tal cual como `onu_type`. Ojo: las autorizadas a mano suelen llevar un tipo propio de la empresa (`ONU-CDATA-4-ANTENAS`) |
+| La forma de un 400 | JSON con `status: false`, `error` (texto con el motivo) y a veces `error_code` (`specify_valid_field`) |
+| `get_onu_details/{x}` | Pide el **external ID**. Con una ONU que ya no existe → 400 «Please specify a valid ONU external ID». Autorizada SIN `onu_external_id`, se leyó por su serial: **inferido** que SmartOLT usa el SN como external ID por defecto (la ficha no se leyó antes de que la borraran) |
+| Una ONU borrada en SmartOLT | Vuelve a `unconfigured_onus`, en el mismo lugar |
+| La ONU recién conectada | A las 15:38 no estaba en `unconfigured_onus` y 23 s después sí: SmartOLT tarda en verla. La app ahora vuelve a buscar sola |
+
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 
 - Si hay dirección/contacto poblados en algún registro real (el que se leyó

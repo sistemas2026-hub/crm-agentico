@@ -7,12 +7,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Api extends ApiDeLaOnu {
-  _Api({this.encendido = true, this.vlan = 300, this.ultima, this.errorDeBusqueda});
+  _Api({this.encendido = true, this.vlan = 300, this.ultima, this.errorDeBusqueda,
+      this.apareceTras = 0});
 
   final bool encendido;
   final int? vlan;
   Map<String, dynamic>? ultima;
   final String? errorDeBusqueda;
+
+  /// Cuántas búsquedas del serial bueno contestan «no espera» antes de que la
+  /// red la vea: la ONU recién conectada.
+  int apareceTras;
   final List<String?> buscados = <String?>[];
   final List<List<String>> pedidos = <List<String>>[];
   int preguntas = 0;
@@ -32,6 +37,11 @@ class _Api extends ApiDeLaOnu {
     if (errorDeBusqueda != null) {
       return <String, dynamic>{'encendido': encendido, 'ultima': null, 'onu': null,
         'error': errorDeBusqueda};
+    }
+    if (serial == 'FHTT12345678' && apareceTras > 0) {
+      apareceTras--;
+      return <String, dynamic>{'encendido': encendido, 'ultima': null,
+        'onu': <String, dynamic>{'estado': 'no_espera'}};
     }
     if (serial != 'FHTT12345678') {
       return <String, dynamic>{'encendido': encendido, 'ultima': null,
@@ -58,7 +68,8 @@ Widget _app(_Api api, {List<String> seriales = const <String>['PRE-0001', 'FHTT1
       home: Scaffold(
         body: SingleChildScrollView(
           child: ActivarOnu(ordenId: 'ot-1', seriales: seriales, api: api,
-              cadaCuanto: const Duration(milliseconds: 20), vueltas: 20),
+              cadaCuanto: const Duration(milliseconds: 20), vueltas: 20,
+              esperaEntreBusquedas: const Duration(milliseconds: 30), busquedas: 3),
         ),
       ),
     );
@@ -120,10 +131,17 @@ void main() {
 
   testWidgets('si NINGÚN valor espera, lo dice; y sin serial escrito, pide escribirlo', (WidgetTester t) async {
     _alto(t);
-    await t.pumpWidget(_app(_Api(), seriales: <String>['OTRO-1234']));
+    final _Api nadie = _Api();
+    await t.pumpWidget(_app(nadie, seriales: <String>['OTRO-1234']));
     await t.pumpAndSettle();
     await t.tap(find.text('Buscar la ONU en la red'));
+    await t.pump();
+    for (int i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 30));
+    }
     await t.pumpAndSettle();
+    expect(nadie.buscados, <String>['OTRO-1234', 'OTRO-1234', 'OTRO-1234'],
+        reason: 'busca sola las veces que tiene, y ahí para');
     expect(find.textContaining('no aparece esperando autorización'), findsOneWidget);
     expect(find.text('Activar ONU'), findsNothing);
 
@@ -135,6 +153,24 @@ void main() {
     await t.pumpAndSettle();
     expect(find.textContaining('Primero escribe o escanea el serial'), findsOneWidget);
     expect(api.buscados, isEmpty);
+  });
+
+  testWidgets('LA ONU RECIÉN CONECTADA: si no aparece, sigue buscando sola y la encuentra',
+      (WidgetTester t) async {
+    _alto(t);
+    final _Api api = _Api(apareceTras: 1);
+    await t.pumpWidget(_app(api, seriales: const <String>['FHTT12345678']));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Buscar la ONU en la red'));
+    await t.pump();
+    await t.pump();
+    expect(find.textContaining('sigo buscando (2 de 3)'), findsOneWidget);
+    await t.pump(const Duration(milliseconds: 40));
+    await t.pumpAndSettle();
+    expect(api.buscados, <String>['FHTT12345678', 'FHTT12345678'],
+        reason: 'la segunda vez ya está, sin que el técnico vuelva a tocar');
+    expect(find.text('OLT 3 · placa 3 · puerto 6'), findsOneWidget);
+    expect(find.textContaining('sigo buscando'), findsNothing);
   });
 
   testWidgets('un error del servidor (sin contrato) se dice tal cual', (WidgetTester t) async {

@@ -391,6 +391,22 @@
         <p class="origen"><span>Aviso del alta: {aviso}</span></p>
       {/each}
 
+      <!-- A NOMBRE DE OTRA PERSONA (26/11/2026). Los datos de arriba son de
+           quien hizo la solicitud; el contrato puede haber quedado a nombre de
+           otra persona, y con ESE nombre se crea el cliente en el proveedor.
+           Lo decide el backend (`contrato.otro_titular`); aquí solo se dibuja. -->
+      {#if s.contrato?.otro_titular && s.contrato.titular}
+        <div class="motivo titular">
+          <div class="motivo-rotulo">El contrato quedó a nombre de otra persona</div>
+          <p class="motivo-texto">
+            <strong>{s.contrato.titular.nombre}</strong>{#if s.contrato.titular.documento}{' · '}{s.contrato.titular.documento}{/if}
+          </p>
+          <div class="motivo-cuando">Aceptó el tratamiento de sus datos al firmar. Los demás datos son los de la solicitud.</div>
+        </div>
+      {:else if s.contrato?.documento_cambiado}
+        <p class="origen"><span>El técnico cambió el número de documento en sitio: el del contrato no es el de la solicitud.</span></p>
+      {/if}
+
       <!-- DE DÓNDE VINO (12/11/2026): el prospecto se abre en Prospectos; la
            conversación no, porque la solicitud no la guarda (el asistente no
            la anota al crearla). Se dice en vez de inventar un enlace. -->
@@ -577,6 +593,7 @@
     border-radius: 0 8px 8px 0; padding: 9px 12px;
   }
   .motivo.revision { border-left-color: var(--v2-origen-ink); background: var(--v2-origen); }
+  .motivo.titular { border-left-color: var(--v2-moss); background: color-mix(in srgb, var(--v2-moss) 9%, var(--v2-card)); }
   .motivo-rotulo {
     font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
     color: var(--v2-slate); margin-bottom: 4px;

@@ -77,6 +77,8 @@ class ActivarOnu extends StatefulWidget {
     this.api = const ApiDeLaOnu(),
     this.cadaCuanto = const Duration(seconds: 5),
     this.vueltas = 40,
+    this.esperaEntreBusquedas = const Duration(seconds: 8),
+    this.busquedas = 8,
   });
 
   final String ordenId;
@@ -88,6 +90,13 @@ class ActivarOnu extends StatefulWidget {
   /// Cada cuánto se pregunta cómo va un pedido, y hasta cuántas veces.
   final Duration cadaCuanto;
   final int vueltas;
+
+  /// LA ONU RECIÉN CONECTADA (26/11/2026). En la primera prueba real la red
+  /// no la tenía a las 3:38 p. m. y sí 23 segundos después: el técnico tuvo
+  /// que volver a tocar. Si no aparece, se vuelve a buscar sola, cada
+  /// [esperaEntreBusquedas], hasta [busquedas] veces (~1 minuto).
+  final Duration esperaEntreBusquedas;
+  final int busquedas;
 
   @override
   State<ActivarOnu> createState() => _EstadoActivarOnu();
@@ -103,6 +112,8 @@ class _EstadoActivarOnu extends State<ActivarOnu> {
   Map<String, dynamic>? _ultima;
   Timer? _reloj;
   int _vuelta = 0;
+  //  En qué búsqueda va (1 = la primera); para decir «sigo buscando».
+  int _busqueda = 0;
 
   @override
   void initState() {
@@ -137,31 +148,45 @@ class _EstadoActivarOnu extends State<ActivarOnu> {
       _ocupado = true;
       _error = null;
       _onu = null;
+      _busqueda = 1;
     });
     Map<String, dynamic>? primera;
-    for (final String s in candidatos) {
-      final Map<String, dynamic> d = await widget.api.estado(widget.ordenId, serial: s);
-      if (!mounted) return;
-      if (d['onu'] is! Map) {
-        //  Un error que no es de este serial (sin contrato, sin señal) se dice
-        //  y se para: con el otro valor pasaría lo mismo.
-        setState(() {
-          _ocupado = false;
-          _error = (d['error'] ?? 'No se pudo buscar la ONU.').toString();
-          _encendido = d['encendido'] != false;
-        });
-        return;
+    for (int vez = 1; vez <= widget.busquedas; vez++) {
+      if (vez > 1) {
+        //  No apareció: la red puede tardar unos segundos en verla.
+        setState(() => _busqueda = vez);
+        await Future<void>.delayed(widget.esperaEntreBusquedas);
+        if (!mounted) return;
       }
-      final Map<String, dynamic> onu = Map<String, dynamic>.from(d['onu'] as Map);
-      primera ??= <String, dynamic>{...onu, 'serial': s};
-      _encendido = d['encendido'] != false;
-      if (onu['estado'] == 'esperando' || onu['estado'] == 'ya_estaba') {
-        primera = <String, dynamic>{...onu, 'serial': s};
-        break;
+      primera = null;
+      for (final String s in candidatos) {
+        final Map<String, dynamic> d = await widget.api.estado(widget.ordenId, serial: s);
+        if (!mounted) return;
+        if (d['onu'] is! Map) {
+          //  Un error que no es de este serial (sin contrato, sin señal) se
+          //  dice y se para: con el otro valor, o esperando, pasaría lo mismo.
+          setState(() {
+            _ocupado = false;
+            _busqueda = 0;
+            _error = (d['error'] ?? 'No se pudo buscar la ONU.').toString();
+            _encendido = d['encendido'] != false;
+          });
+          return;
+        }
+        final Map<String, dynamic> onu = Map<String, dynamic>.from(d['onu'] as Map);
+        primera ??= <String, dynamic>{...onu, 'serial': s};
+        _encendido = d['encendido'] != false;
+        if (onu['estado'] == 'esperando' || onu['estado'] == 'ya_estaba') {
+          primera = <String, dynamic>{...onu, 'serial': s};
+          break;
+        }
       }
+      //  Solo «no espera» se vuelve a buscar: lo demás ya es una respuesta.
+      if (primera?['estado'] != 'no_espera') break;
     }
     setState(() {
       _ocupado = false;
+      _busqueda = 0;
       _onu = primera;
       _serial = (primera?['serial'] ?? '').toString();
       final String sugerida = (primera?['zona_sugerida'] ?? '').toString();
@@ -225,6 +250,11 @@ class _EstadoActivarOnu extends State<ActivarOnu> {
         if (ultima != null) _Resultado(ultima: ultima),
         if (onu != null) ..._encontrada(onu),
         if (_error != null) _Nota(texto: _error!, alerta: true),
+        if (_ocupado && _busqueda > 1)
+          _Nota(
+            texto: 'Todavía no aparece. Si la acabas de conectar, la red tarda unos '
+                'segundos en verla: sigo buscando ($_busqueda de ${widget.busquedas}).',
+          ),
         if (onu == null && !enVuelo)
           SizedBox(
             height: AppSpacing.objetivoTactil,
@@ -265,8 +295,9 @@ class _EstadoActivarOnu extends State<ActivarOnu> {
       return <Widget>[
         _Nota(
           texto: estado == 'no_espera'
-              ? 'La ONU no aparece esperando autorización. Revisa que esté conectada y '
-                  'con luz, y que el serial esté bien escrito.'
+              ? 'La ONU no aparece esperando autorización después de buscarla un '
+                  'minuto. Revisa que esté conectada y con luz, y que el serial esté '
+                  'bien escrito.'
               : 'No se pudo saber cómo está la ONU. Intenta de nuevo.',
           alerta: true,
         ),

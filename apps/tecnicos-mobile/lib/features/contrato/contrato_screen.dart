@@ -12,6 +12,14 @@
 ///
 /// El alta en WispHub todavía no sale de aquí: el contrato queda «firmado» y la
 /// pantalla lo dice. Ver SPEC/objetivos/agente-de-campo-para-instalaciones.md.
+///
+/// A NOMBRE DE OTRA PERSONA (26/11/2026). El usuario: «cuando el técnico llegue
+/// y el contrato se hace a nombre de otra persona, pero los otros datos siguen
+/// igual: solo cambiarían el nombre, el apellido y la cédula». Es un modo
+/// explícito, no un nombre cambiado a mano: la persona nueva acepta ahí mismo
+/// el tratamiento de sus datos, porque las autorizaciones de la solicitud las
+/// aceptó otra. Lo que puede elegir y aceptar lo manda el servidor
+/// (`otro_titular`); un servidor viejo no lo manda y el botón no sale.
 library;
 
 import 'dart:async';
@@ -155,6 +163,17 @@ const List<List<String>> _camposDelCliente = <List<String>>[
   <String>['barrio', 'Barrio'],
 ];
 
+/// Lo que cambia cuando el contrato va a nombre de otra persona. Lo demás
+/// (teléfono, correo, dirección, barrio) sigue siendo el de la solicitud.
+const List<String> _datosDelTitular = <String>['nombre', 'apellido', 'numero_documento'];
+
+/// Dos números de documento son el mismo si coinciden letras y dígitos: con
+/// puntos o espacios es la misma cédula. La misma regla que el servidor.
+bool mismoDocumento(String a, String b) {
+  String limpio(String x) => x.replaceAll(RegExp(r'[^0-9A-Za-z]'), '').toUpperCase();
+  return limpio(a) == limpio(b);
+}
+
 class _EstadoContrato extends State<ContratoScreen> {
   bool _cargando = true;
   String? _errorDeCarga;
@@ -183,6 +202,15 @@ class _EstadoContrato extends State<ContratoScreen> {
   final Map<String, TextEditingController> _campos = <String, TextEditingController>{};
   final TextEditingController _plan = TextEditingController();
   String _tipoDocumento = 'CC';
+  //  A NOMBRE DE OTRA PERSONA: qué tipos de documento y qué autorizaciones
+  //  ofrece el servidor (nulo: un servidor viejo, sin el botón), si está
+  //  puesto, lo que había de la solicitud para volver, el tipo elegido y lo
+  //  que la persona nueva aceptó.
+  Map<String, dynamic>? _paraOtroTitular;
+  bool _otraPersona = false;
+  final Map<String, String> _deLaSolicitud = <String, String>{};
+  String _tipoDelOtro = '';
+  final Map<String, bool> _aceptadas = <String, bool>{};
 
   @override
   void initState() {
@@ -239,6 +267,9 @@ class _EstadoContrato extends State<ContratoScreen> {
         _idZona = sugerido as int;
       }
       _coordenadas = _punto(_borrador?['gps']);
+      _paraOtroTitular = d['otro_titular'] is Map
+          ? Map<String, dynamic>.from(d['otro_titular'] as Map)
+          : null;
       //  Un nombre, una vez: el menú exige valores únicos y se cae con dos
       //  planes que se llamen igual.
       final Set<String> vistos = <String>{};
@@ -296,6 +327,59 @@ class _EstadoContrato extends State<ContratoScreen> {
     });
   }
 
+  List<String> get _tiposDeDocumento => <String>[
+        for (final dynamic t in (_paraOtroTitular?['tipos_de_documento'] as List? ?? const <dynamic>[]))
+          if ((t ?? '').toString().isNotEmpty) t.toString(),
+      ];
+
+  List<Map<String, dynamic>> get _autorizacionesDelOtro => <Map<String, dynamic>>[
+        for (final dynamic a in (_paraOtroTitular?['autorizaciones'] as List? ?? const <dynamic>[]))
+          if (a is Map && (a['id'] ?? '').toString().isNotEmpty) Map<String, dynamic>.from(a),
+      ];
+
+  /// Las que la persona nueva TIENE que aceptar para firmar a su nombre.
+  bool get _aceptoLasObligatorias => _autorizacionesDelOtro
+      .where((Map<String, dynamic> a) => a['obligatoria'] == true)
+      .every((Map<String, dynamic> a) => _aceptadas[a['id']] == true);
+
+  /// El técnico tocó «A nombre de otra persona»: nombre, apellido y documento
+  /// quedan vacíos para escribir los de la persona nueva (lo de la solicitud
+  /// se guarda para poder volver). Lo demás no se toca.
+  void _aNombreDeOtraPersona() {
+    setState(() {
+      for (final String c in _datosDelTitular) {
+        _deLaSolicitud[c] = _campos[c]?.text ?? '';
+        _campos[c]?.clear();
+      }
+      _tipoDelOtro = _tiposDeDocumento.isEmpty ? '' : _tiposDeDocumento.first;
+      _aceptadas.clear();
+      _otraPersona = true;
+    });
+  }
+
+  void _volverALaSolicitud() {
+    setState(() {
+      for (final String c in _datosDelTitular) {
+        _campos[c]?.text = _deLaSolicitud[c] ?? '';
+      }
+      _aceptadas.clear();
+      _otraPersona = false;
+    });
+  }
+
+  /// Si el documento escrito ya no es el de la solicitud, sin haber dicho
+  /// «otra persona»: puede ser un número mal escrito en la solicitud, o el
+  /// técnico cambiando de persona por el camino equivocado.
+  bool get _documentoDistinto {
+    final String delBorrador =
+        ((_borrador?['cliente'] as Map?)?['numero_documento'] ?? '').toString();
+    final String escrito = _campos['numero_documento']?.text ?? '';
+    return _borrador?['origen'] == 'solicitud' &&
+        delBorrador.trim().isNotEmpty &&
+        escrito.trim().isNotEmpty &&
+        !mismoDocumento(escrito, delBorrador);
+  }
+
   /// Las coordenadas como las manda el servidor (número o texto), o nulo.
   static ({double lat, double lng})? _punto(dynamic gps) {
     if (gps is! Map) return null;
@@ -339,7 +423,8 @@ class _EstadoContrato extends State<ContratoScreen> {
       (_campos['nombre']?.text.trim().isNotEmpty ?? false) &&
       (_campos['numero_documento']?.text.trim().isNotEmpty ?? false) &&
       (_campos['direccion']?.text.trim().isNotEmpty ?? false) &&
-      _plan.text.trim().isNotEmpty;
+      _plan.text.trim().isNotEmpty &&
+      (!_otraPersona || (_tipoDelOtro.isNotEmpty && _aceptoLasObligatorias));
 
   Future<void> _crear() async {
     setState(() {
@@ -353,7 +438,15 @@ class _EstadoContrato extends State<ContratoScreen> {
     final Map<String, dynamic> cuerpo = <String, dynamic>{
       'cliente': <String, dynamic>{
         for (final List<String> c in _camposDelCliente) c[0]: _campos[c[0]]!.text.trim(),
-        'tipo_documento': _tipoDocumento,
+        'tipo_documento': _otraPersona ? _tipoDelOtro : _tipoDocumento,
+      },
+      //  A nombre de otra persona: lo dice, y manda lo que ESA persona aceptó.
+      if (_otraPersona) ...<String, dynamic>{
+        'titular': 'otro',
+        'autorizaciones': <String, bool>{
+          for (final Map<String, dynamic> a in _autorizacionesDelOtro)
+            a['id'].toString(): _aceptadas[a['id']] == true,
+        },
       },
       'plan': _plan.text.trim(),
       'id_zona': _idZona,
@@ -436,6 +529,13 @@ class _EstadoContrato extends State<ContratoScreen> {
             ),
             if (documento.isNotEmpty)
               DexterFilaDeDato(icono: Icons.badge_outlined, texto: documento),
+            if (c['otro_titular'] == true)
+              DexterFilaDeDato(
+                icono: Icons.swap_horiz,
+                texto: 'A nombre de otra persona: aceptó sus datos al firmar.',
+                estilo: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
+                colorDelIcono: AppColors.outline,
+              ),
             DexterFilaDeDato(icono: Icons.speed, texto: (c['plan'] ?? '').toString()),
             DexterFilaDeDato(
               icono: Icons.dns_outlined,
@@ -487,6 +587,44 @@ class _EstadoContrato extends State<ContratoScreen> {
       decoration: InputDecoration(labelText: etiqueta),
     );
   }
+
+  /// El tipo de documento de la persona nueva, de la lista del servidor.
+  Widget _tipoDeDocumento() => DropdownButtonFormField<String>(
+        initialValue: _tipoDelOtro.isEmpty ? null : _tipoDelOtro,
+        isExpanded: true,
+        icon: const Icon(Icons.expand_more, color: AppColors.secondary),
+        borderRadius: AppRadius.brTarjeta,
+        style: AppTypography.cuerpo,
+        decoration: const InputDecoration(labelText: 'Tipo de documento'),
+        items: <DropdownMenuItem<String>>[
+          for (final String t in _tiposDeDocumento)
+            DropdownMenuItem<String>(value: t, child: Text(t, overflow: TextOverflow.ellipsis)),
+        ],
+        onChanged: (String? v) {
+          if (v != null) setState(() => _tipoDelOtro = v);
+        },
+      );
+
+  /// Lo que acepta la persona nueva, ahí mismo. Las de la solicitud no le
+  /// sirven: las aceptó quien la llenó.
+  Widget _autorizacionesDeLaPersonaNueva() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          const _Rotulo('Lo que autoriza esta persona'),
+          for (final Map<String, dynamic> a in _autorizacionesDelOtro)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: _Autorizacion(
+                texto: (a['texto'] ?? '').toString(),
+                obligatoria: a['obligatoria'] == true,
+                aceptada: _aceptadas[a['id']] == true,
+                alTocar: () => setState(() =>
+                    _aceptadas[a['id'].toString()] = !(_aceptadas[a['id']] ?? false)),
+              ),
+            ),
+        ],
+      );
 
   /// Dos datos cortos lado a lado: nombre y apellido, documento y teléfono.
   /// Cada uno con su mitad: con letra grande el texto se corre adentro del
@@ -650,22 +788,55 @@ class _EstadoContrato extends State<ContratoScreen> {
         DexterBloque(
           titulo: 'El cliente',
           icono: Icons.person_outline,
-          insignia: deSolicitud
-              ? const DexterPastilla.enRegla(texto: 'De la solicitud')
-              : const DexterPastilla.alerta(texto: 'Sin solicitud'),
+          insignia: _otraPersona
+              ? const DexterPastilla.alerta(texto: 'Otra persona')
+              : deSolicitud
+                  ? const DexterPastilla.enRegla(texto: 'De la solicitud')
+                  : const DexterPastilla.alerta(texto: 'Sin solicitud'),
           separacion: AppSpacing.sm,
           children: <Widget>[
             Text(
-              deSolicitud
-                  ? 'Lo llenó el cliente en la solicitud. Revísalo con el documento.'
-                  : 'Sin solicitud: llénalo con el documento a la vista.',
+              _otraPersona
+                  ? 'El contrato va a nombre de otra persona: escribe sus datos con su '
+                      'documento a la vista. Teléfono, dirección y lo demás siguen igual.'
+                  : deSolicitud
+                      ? 'Lo llenó el cliente en la solicitud. Revísalo con el documento.'
+                      : 'Sin solicitud: llénalo con el documento a la vista.',
               style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
             ),
+            //  A NOMBRE DE OTRA PERSONA (26/11/2026): solo si el servidor
+            //  dice qué se le pide a esa persona.
+            if (!_otraPersona && _paraOtroTitular != null)
+              DexterAccionRapida(
+                icono: Icons.swap_horiz,
+                texto: 'A nombre de otra persona',
+                alTocar: _aNombreDeOtraPersona,
+              ),
             //  Uno debajo del otro, a todo el ancho (el usuario, 26/11/2026:
             //  «que salga nombre arriba y apellido abajo, completo»).
             _campo('nombre'),
             _campo('apellido'),
+            if (_otraPersona) _tipoDeDocumento(),
             _dosCampos('numero_documento', 'telefono'),
+            if (!_otraPersona && _documentoDistinto && _paraOtroTitular != null)
+              DexterFilaDeDato(
+                icono: Icons.info_outline,
+                texto: 'Este no es el documento de la solicitud. Si el contrato va a '
+                    'nombre de otra persona, toca «A nombre de otra persona».',
+                estilo: AppTypography.cuerpoChico.copyWith(color: AppColors.precaucion),
+                colorDelIcono: AppColors.precaucion,
+              ),
+            if (_otraPersona) ...<Widget>[
+              _autorizacionesDeLaPersonaNueva(),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _volverALaSolicitud,
+                  icon: const Icon(Icons.undo, size: 18),
+                  label: const Text('Volver a los datos de la solicitud'),
+                ),
+              ),
+            ],
             _campo('correo'),
             _campo('direccion'),
             _campo('barrio'),
@@ -788,6 +959,7 @@ class _EstadoContrato extends State<ContratoScreen> {
       if (_campos['direccion']?.text.trim().isEmpty ?? true) 'la dirección',
       if (_plan.text.trim().isEmpty) 'el plan',
       if (_idZona == null) 'el servidor',
+      if (_otraPersona && !_aceptoLasObligatorias) 'que la persona autorice sus datos',
       if (_trazo.vacio) 'la firma del cliente',
     ];
     return f.isEmpty ? '' : 'Falta ${f.join(', ')}.';
@@ -851,6 +1023,62 @@ class _OpcionDeServidor extends StatelessWidget {
                   child: Text(nombre,
                       style: AppTypography.etiquetaGrande.copyWith(
                           color: elegido ? AppColors.secondary : AppColors.onSurface)),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Una autorización que la persona acepta tocándola. Como un servidor: la
+/// marcada con el azul de acción y un borde, que se ve al sol.
+class _Autorizacion extends StatelessWidget {
+  const _Autorizacion({
+    required this.texto,
+    required this.obligatoria,
+    required this.aceptada,
+    required this.alTocar,
+  });
+  final String texto;
+  final bool obligatoria;
+  final bool aceptada;
+  final VoidCallback alTocar;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        checked: aceptada,
+        child: Material(
+          color: aceptada ? AppColors.infoFondo : AppColors.surfaceContainerLow,
+          borderRadius: AppRadius.brTarjeta,
+          child: InkWell(
+            onTap: alTocar,
+            borderRadius: AppRadius.brTarjeta,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+              decoration: BoxDecoration(
+                borderRadius: AppRadius.brTarjeta,
+                border: Border.all(
+                  color: aceptada ? AppColors.secondary : AppColors.surfaceContainerHigh,
+                  width: 1.5,
+                ),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+                Icon(aceptada ? Icons.check_box : Icons.check_box_outline_blank,
+                    size: 22, color: aceptada ? AppColors.secondary : AppColors.outline),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+                    Text(texto, style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurface)),
+                    if (obligatoria)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text('Obligatoria para firmar a su nombre',
+                            style: AppTypography.etiquetaChica.copyWith(color: AppColors.outline)),
+                      ),
+                  ]),
                 ),
               ]),
             ),

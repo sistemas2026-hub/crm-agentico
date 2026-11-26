@@ -242,7 +242,13 @@ def _exigir_frontera(herramienta, tenant, argumentos=None,
         except ErrorHerramientaHttp:
             destino = ""
         if not entorno.es_de_la_red_local(destino):
-            raise ErrorHerramientaHttp(entorno.motivo(f"'{herramienta.nombre}'"))
+            #  LA PRUEBA VIGILADA (26/11/2026): una herramienta nombrada en
+            #  EFECTOS_EXTERNOS_PERMITIDOS sale, y sigue pasando por la
+            #  frontera de abajo. Queda escrito que salio por aca.
+            if not entorno.permitida(herramienta.nombre):
+                raise ErrorHerramientaHttp(entorno.motivo(f"'{herramienta.nombre}'"))
+            registrar("entorno", "escritura afuera permitida por la prueba vigilada",
+                      herramienta=herramienta.nombre)
 
     #  Los argumentos viajan a la frontera tal como llegan, ANTES de que
     #  url_de() saque los de la ruta: son los mismos que el llamador aprobo, y

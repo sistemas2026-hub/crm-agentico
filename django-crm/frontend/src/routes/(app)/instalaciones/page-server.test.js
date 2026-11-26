@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 const apiRequest = vi.fn();
 vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }));
 
-const { actions } = await import('./+page.server.js');
+const { actions, load } = await import('./+page.server.js');
 
 /** @param {Record<string, string>} campos */
 const pedido = (campos) => {
@@ -85,5 +85,24 @@ describe('Instalaciones: crear al cliente en el proveedor', () => {
     expect(r.status).toBe(400);
     expect(r.data.error).toContain('ya se está creando');
     expect(r.data.id).toBe('sol-1');
+  });
+});
+
+describe('Instalaciones: el contrato a nombre de otra persona (26/11/2026)', () => {
+  it('a nombre de quién quedó llega a la página tal como lo dice el backend', async () => {
+    apiRequest.mockReset();
+    const contrato = {
+      id: 'con-9', numero: 'C-2026-000301', estado: 'firmado', alta: { estado: null },
+      otro_titular: true, documento_cambiado: false,
+      titular: { nombre: 'Carlos Pérez Díaz', documento: 'Cédula de ciudadanía 72111222' }
+    };
+    apiRequest.mockResolvedValue({ solicitudes: [{ id: 'sol-1', contrato }] });
+
+    const d = /** @type {any} */ (await load(/** @type {any} */ ({
+      cookies: { get: () => 'token' }, url: new URL('http://x/instalaciones?estado=aprobada')
+    })));
+
+    expect(d.solicitudes[0].contrato.otro_titular).toBe(true);
+    expect(d.solicitudes[0].contrato.titular).toEqual(contrato.titular);
   });
 });

@@ -127,6 +127,41 @@ def _rechazo(e: BaseException) -> bool:
     return isinstance(codigo, int) and 400 <= codigo < 500 and codigo != 408
 
 
+#: Lo mas largo que se guarda del motivo de un rechazo.
+_LARGO_DEL_MOTIVO = 160
+
+
+def motivo_del_rechazo(e: BaseException) -> str:
+    """POR QUE dijo que no el proveedor, en una linea corta  --  26/11/2026.
+
+    En la primera prueba real (OT-18) el proveedor contesto 400 dos veces y lo
+    unico que quedo fue «rechazo la autorizacion»: sin el motivo no habia como
+    corregir el pedido sin adivinar. Se toma SOLO el texto del error de la
+    respuesta (las claves de siempre: error, message, detail, errors), nunca
+    la respuesta entera, y no va al log: va al registro del pedido, que el
+    tecnico y la oficina ya ven."""
+    import json as _json
+
+    r = getattr(e, "response", None)
+    try:
+        cuerpo = r.json() if r is not None else None
+    except Exception:                                          # noqa: BLE001
+        return ""
+    if not isinstance(cuerpo, dict):
+        return ""
+    for clave in ("error", "message", "detail", "errors"):
+        v = cuerpo.get(clave)
+        if isinstance(v, str) and v.strip():
+            texto = v
+            break
+        if isinstance(v, (list, dict)) and v:
+            texto = _json.dumps(v, ensure_ascii=False)
+            break
+    else:
+        return ""
+    return " ".join(str(texto).split())[:_LARGO_DEL_MOTIVO]
+
+
 def _ejecutar(herr, args: dict, config, tenant: str):
     from nucleo.herramientas import http as ejecutor_http
 
@@ -304,7 +339,9 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos: dict,
     except Exception as e:                                   # noqa: BLE001
         registrar("activar_onu", "el pedido de autorizacion volvio con error", error=e)
         if _rechazo(e):
-            return _fin(FALLO, "el proveedor rechazo la autorizacion")
+            por_que = motivo_del_rechazo(e)
+            return _fin(FALLO, "el proveedor rechazo la autorizacion"
+                               + (f": {por_que}" if por_que else ""))
         #  SALIO Y NO SE SABE SI LLEGO: se mira, como si hubiera contestado.
         res = None
     if res is not None and not res.ejecutada and res.decision not in (

@@ -400,4 +400,118 @@ void main() {
     expect(find.textContaining('En el ticket dice: «FAMILIA 200MB'), findsOneWidget);
     expect(find.textContaining('Falta el plan'), findsOneWidget);
   });
+
+  // ========================================================================
+  //  A NOMBRE DE OTRA PERSONA  --  26/11/2026. El usuario: «cuando el técnico
+  //  llegue y el contrato se hace a nombre de otra persona, pero los otros
+  //  datos siguen igual: solo cambiarían el nombre, el apellido y la cédula».
+  // ========================================================================
+  testWidgets('A NOMBRE DE OTRA PERSONA: cambian nombre y documento, lo demás sigue, y sin autorizar no se firma',
+      (WidgetTester t) async {
+    _telefonoAlto(t);
+    final _ApiFalsa api = _ApiFalsa(lectura: _conOtroTitular());
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('A nombre de otra persona'));
+    await t.pumpAndSettle();
+    expect(find.text('OTRA PERSONA'), findsOneWidget, reason: 'la pastilla escribe en mayúsculas');
+    String texto(String etiqueta) =>
+        t.widget<TextField>(find.widgetWithText(TextField, etiqueta)).controller!.text;
+    expect(texto('Nombre'), '', reason: 'los de la solicitud son de otra persona');
+    expect(texto('Documento'), '');
+    expect(texto('Teléfono'), '3000000000', reason: 'lo demás sigue igual');
+    expect(texto('Dirección'), 'Cra 21 # 45-12');
+
+    await t.enterText(find.widgetWithText(TextField, 'Nombre'), 'Carlos');
+    await t.enterText(find.widgetWithText(TextField, 'Apellido'), 'Pérez Díaz');
+    await t.enterText(find.widgetWithText(TextField, 'Documento'), '72111222');
+    await t.tap(find.text('SERVIDOR 2'));
+    await t.drag(find.byType(LienzoDeFirma), const Offset(140, -40));
+    await t.pump();
+    expect(_boton(t).onPressed, isNull, reason: 'sin que autorice sus datos no se firma a su nombre');
+    expect(find.textContaining('que la persona autorice sus datos'), findsOneWidget);
+
+    await t.tap(find.textContaining('el tratamiento de sus datos'));
+    await t.pump();
+    expect(_boton(t).onPressed, isNotNull);
+    await t.runAsync(() async {
+      await t.tap(find.text('Crear el contrato'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await t.pumpAndSettle();
+
+    final Map<String, dynamic> e = api.enviado!;
+    expect(e['titular'], 'otro');
+    expect(e['autorizaciones'], <String, bool>{'habeas_data': true, 'centrales_de_riesgo': false});
+    final Map<dynamic, dynamic> c = e['cliente'] as Map<dynamic, dynamic>;
+    expect(<dynamic>[c['nombre'], c['apellido'], c['numero_documento']],
+        <String>['Carlos', 'Pérez Díaz', '72111222']);
+    expect(c['tipo_documento'], 'Cédula de ciudadanía');
+    expect(c['telefono'], '3000000000');
+  });
+
+  testWidgets('«Volver a los datos de la solicitud» deja todo como estaba y no manda titular',
+      (WidgetTester t) async {
+    _telefonoAlto(t);
+    final _ApiFalsa api = _ApiFalsa(lectura: _conOtroTitular());
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+    await t.tap(find.text('A nombre de otra persona'));
+    await t.pumpAndSettle();
+    await t.enterText(find.widgetWithText(TextField, 'Nombre'), 'Carlos');
+    await t.tap(find.text('Volver a los datos de la solicitud'));
+    await t.pumpAndSettle();
+    expect(t.widget<TextField>(find.widgetWithText(TextField, 'Nombre')).controller!.text, 'Laura');
+    expect(find.textContaining('el tratamiento de sus datos'), findsNothing);
+
+    await t.tap(find.text('SERVIDOR 2'));
+    await _firmar(t);
+    expect(api.enviado!.containsKey('titular'), isFalse);
+    expect(api.enviado!.containsKey('autorizaciones'), isFalse);
+    expect((api.enviado!['cliente'] as Map)['numero_documento'], '1043000000');
+  });
+
+  testWidgets('un SERVIDOR VIEJO, que no dice qué pedirle a otra persona, no ofrece el botón',
+      (WidgetTester t) async {
+    _telefonoAlto(t);
+    await t.pumpWidget(_montar(_ApiFalsa(lectura: _borrador())));
+    await t.pumpAndSettle();
+    expect(find.text('A nombre de otra persona'), findsNothing);
+  });
+
+  testWidgets('cambiar la cédula SIN decir «otra persona» lo advierte; la misma con puntos no',
+      (WidgetTester t) async {
+    _telefonoAlto(t);
+    await t.pumpWidget(_montar(_ApiFalsa(lectura: _conOtroTitular())));
+    await t.pumpAndSettle();
+    expect(find.textContaining('no es el documento de la solicitud'), findsNothing);
+    await t.enterText(find.widgetWithText(TextField, 'Documento'), '72111222');
+    await t.pump();
+    expect(find.textContaining('no es el documento de la solicitud'), findsOneWidget);
+    await t.enterText(find.widgetWithText(TextField, 'Documento'), '1.043.000.000');
+    await t.pump();
+    expect(find.textContaining('no es el documento de la solicitud'), findsNothing);
+  });
+
+  test('mismoDocumento: puntos y espacios no hacen otra cédula', () {
+    expect(mismoDocumento('1.043.000.000', '1043000000'), isTrue);
+    expect(mismoDocumento('ab 123', 'AB123'), isTrue);
+    expect(mismoDocumento('1043000001', '1043000000'), isFalse);
+  });
 }
+
+/// El servidor de hoy (26/11/2026): dice qué tipos de documento y qué
+/// autorizaciones se le piden a otra persona.
+Map<String, dynamic> _conOtroTitular() => <String, dynamic>{
+      ..._borrador(),
+      'otro_titular': <String, dynamic>{
+        'tipos_de_documento': <String>['Cédula de ciudadanía', 'Cédula de extranjería', 'Pasaporte', 'NIT'],
+        'autorizaciones': <Map<String, dynamic>>[
+          <String, dynamic>{'id': 'habeas_data', 'obligatoria': true,
+            'texto': 'Autoriza a LA EMPRESA el tratamiento de sus datos personales (habeas data, Ley 1581 de 2012).'},
+          <String, dynamic>{'id': 'centrales_de_riesgo', 'obligatoria': false,
+            'texto': 'Autoriza a LA EMPRESA a consultar y reportar su información en centrales de riesgo (Ley 1266 de 2008).'},
+        ],
+      },
+    };

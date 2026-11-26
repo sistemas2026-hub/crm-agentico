@@ -6617,6 +6617,13 @@ herramientas:
     # de segundos» con placa y puerto: el tope general de 15 s no alcanza.
     form_urlencoded: true
     timeout_segundos: 90
+    # EL MODO ES OBLIGATORIO aunque el OpenAPI lo da por opcional: la primera
+    # autorizacion real (26/11/2026, OT-18, con permiso del usuario) volvio
+    # 400 «Allowed values for ONU mode are 'Routing', 'Bridging'». Las 112
+    # ONU que Rapilink autorizo en las dos semanas anteriores estan TODAS en
+    # Routing (medido ese dia, solo lectura).
+    argumentos_fijos:
+      onu_mode: Routing
     autoriza_onu: true
     parametros_de_onu:
       # Como autoriza hoy Rapilink (medido en las 82 de la ultima semana): con

@@ -46,6 +46,18 @@ tipeo en el entorno de pruebas no puede convertirse en un pago real. Y un
 destino que no se puede resolver cuenta como afuera.
 
 En produccion la variable no existe, y nada de esto cambia su conducta.
+
+LA PRUEBA VIGILADA  --  26/11/2026
+----------------------------------
+    EFECTOS_EXTERNOS_PERMITIDOS=<herramienta>[,<herramienta>]
+
+Para probar UNA escritura real con permiso explicito del usuario (la primera
+autorizacion de una ONU, el primer alta de un cliente) sin apagar el entorno
+entero: apagar SIN_EFECTOS_EXTERNOS abria todo lo demas --WhatsApp incluido--
+mientras durara la prueba. Esta lista deja salir SOLO las herramientas que
+nombra, por su nombre exacto; todo lo demas sigue sin salir, y WhatsApp no la
+mira. Lo que sale por aca sigue pasando por la frontera entera. Vacia por
+defecto, y se vacia al terminar la prueba.
 ================================================================================
 """
 
@@ -55,12 +67,20 @@ import os
 from urllib.parse import urlparse
 
 VARIABLE = "SIN_EFECTOS_EXTERNOS"
+PERMITIDAS = "EFECTOS_EXTERNOS_PERMITIDOS"
 _APAGADA = ("", "0", "false", "no")
 
 
 def activo() -> bool:
     """Si este proceso corre en un entorno que no produce efectos afuera."""
     return (os.environ.get(VARIABLE) or "").strip().lower() not in _APAGADA
+
+
+def permitida(nombre: str | None) -> bool:
+    """Si 'nombre' esta en la lista de la prueba vigilada. Por nombre EXACTO:
+    ni prefijos ni comodines, para que una herramienta parecida no salga."""
+    lista = {x.strip() for x in (os.environ.get(PERMITIDAS) or "").split(",") if x.strip()}
+    return bool(nombre) and nombre in lista
 
 
 def es_de_la_red_local(url: str | None) -> bool:

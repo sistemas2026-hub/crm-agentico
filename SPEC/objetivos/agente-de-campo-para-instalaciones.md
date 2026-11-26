@@ -994,6 +994,49 @@ ya está instalado, y la diferencia la cuadra la bodega. En el editor de
 Plantillas, «O sale del campo» ofrece ahora también los campos de texto.
 Pruebas: `material_precargado_test.dart`, 3 nuevas (11).
 
+### El contrato a nombre de otra persona — 1.0.26, 26/11/2026
+
+El usuario: «cuando el técnico llegue y el contrato se hace a nombre de otra
+persona, pero los otros datos siguen igual: solo cambiarían el nombre, el
+apellido y la cédula». En el bloque «El cliente» del contrato, un botón **«A
+nombre de otra persona»**: vacía nombre, apellido y documento, pide el tipo de
+documento y muestra las dos autorizaciones para que esa persona las acepte ahí
+mismo (habeas data obligatoria). Lo demás sigue igual, y «Volver a los datos de
+la solicitud» deshace. El PDF dice que no es quien hizo la solicitud y que
+aceptó al firmar; Instalaciones muestra a nombre de quién quedó; el alta en
+WispHub sale con la persona nueva. Una cédula cambiada sin el botón se firma
+como antes, la app lo advierte y queda `documento_cambiado`. Detalle: PRD §8.35.
+
+### La prueba vigilada: la primera ONU activada de verdad — 26/11/2026
+
+Con el permiso explícito del usuario («Sí, solo esa ONU»; la borra él después
+en SmartOLT). Lo que pasó, en orden (horas de Bogotá):
+
+1. 15:38 — «no la encontró», y 23 s después sí: SmartOLT tardó en ver la ONU
+   recién conectada. **Arreglado en la app (1.0.27):** si no aparece, vuelve a
+   buscar sola cada 8 s, hasta 8 veces, y lo dice («sigo buscando»).
+2. 15:39 y 15:41 — «no salió»: la guarda `SIN_EFECTOS_EXTERNOS`, como debía.
+   Para no apagar el entorno entero (WhatsApp incluido) se agregó una lista
+   angosta, `EFECTOS_EXTERNOS_PERMITIDOS` (por nombre exacto, vacía por
+   defecto, `nucleo/seguridad/entorno.py`, con su prueba), y se abrió SOLO
+   para `autorizar_onu_en_smartolt`.
+3. 16:04 y 16:05 — «la red rechazó la activación»: 400, sin decir por qué.
+   **Arreglado:** el motivo del proveedor queda en el pedido y se ve en la app
+   (`activar_onu.motivo_del_rechazo`: solo el texto del error, corto, nunca la
+   respuesta entera ni al log).
+4. 16:10 y 16:11 — el motivo: `onu_mode` es obligatorio. Medido: las 112 ONU
+   que Rapilink autorizó en dos semanas están en `Routing`. Quedó como dato fijo
+   de la herramienta en la configuración (`argumentos_fijos: {onu_mode:
+   Routing}`), en el YAML y en la base local (versión 11).
+5. 16:14 — **«ONU activada en la red»**, confirmada leyendo. El permiso se
+   cerró enseguida. Después la ONU apareció otra vez esperando en 3/3/15: la
+   borró el usuario, como se acordó.
+
+**En producción, además de lo de antes:** `argumentos_fijos: {onu_mode:
+Routing}` en `autorizar_onu_en_smartolt` (por el editor, sin pisar lo que solo
+tiene la base). `EFECTOS_EXTERNOS_PERMITIDOS` no existe en producción ni hace
+falta: allá no hay `SIN_EFECTOS_EXTERNOS`.
+
 **Una falla que no es de esto:** `test_la_accion_relee_la_asignacion` (b y b2)
 falla en el entorno local con o sin estos cambios («database table is
 locked»): son carreras entre dos transacciones y las pruebas corren sobre
@@ -1009,3 +1052,5 @@ SQLite. CLAUDE.md §6 pide Postgres para eso.
 | 25/11/2026 | **El formato de instalación como plantilla (v2 y v3 en local) y los documentos «solo en la plataforma».** Las órdenes de prueba OT-12..20 pasaron a v3 (OT-11 quedó en v1: ya estaba en sitio) | El teléfono de Dilan recibe los 4 pasos y las 10 fotos (leído por la ruta de la app). `test_fotos_solo_en_la_plataforma.py` **7**, y quitar el filtro de cualquiera de los dos caminos las pone en rojo (2 y 1). `test_fotos_al_ticket`, `test_las_fotos_van_al_isp`, `test_plantillas_editables` en verde. El editor web abre v3 con la casilla marcada en las 3 fotos de documentos y desmarcada en las otras 7 | commit del 26/11/2026 |
 | 25/11/2026 | **La pantalla de rangos de IP, y la lectura de ocupación conectada por primera vez.** La app no podía ofrecer ninguna IP libre: la lectura no estaba declarada para Rapilink ni la disparaba ninguna pantalla. **Abierto:** qué son los 51 prefijos `168.x` | Motor: `tests/test_rangos_de_ip.py` **49**, `test_ocupacion_ip` 59, `test_alta_de_cliente` y `test_nucleo_sin_tenants` en verde. Web: `rangos-de-ip.test.js` + Programación + contrato + Instalaciones, **63 pasan**. En vivo en un navegador: leer la ocupación (7.711 clientes, completa), usar los sugeridos, guardar, volver a abrir; 0 errores de página. Después: 20 IP libres por servidor en la app y las tres respuestas del alta descritas arriba | commit del 26/11/2026 |
 | 26/11/2026 | **La instalación, entera desde la app (1.0.20 a 1.0.25).** Contrato rediseñado, botones por paso en la plantilla, IP que pone el servidor, coordenadas en un mapa, material precargado (la fibra y la serie de la ONU salen de sus campos), puntos de TV, la IP para copiar y «Activar ONU» en SmartOLT construido APAGADO. **No probado contra SmartOLT ni WispHub de verdad**; PRD §8.34 | Backend 319, motor 8 archivos en verde, web 71, app 1.491; en vivo sin escribir: la ONU real encontrada en OLT 3 · placa 3 · puerto 6 y el pedido frenado por la guarda en el último paso | commit del 26/11/2026 |
+| 26/11/2026 | **El contrato a nombre de otra persona (1.0.26).** Modo explícito en la pantalla del contrato; la persona nueva acepta sus autorizaciones al firmar, el PDF y la oficina lo dicen, el alta sale con ella. PRD §8.35 | Backend 247 (16 nuevas), web 19, app 1.496 | sin commit |
+| 26/11/2026 | **La primera ONU activada de verdad, en prueba vigilada (1.0.27).** SmartOLT exige `onu_mode` (Routing, 112 de 112 medidas); el motivo de un rechazo queda a la vista; la app busca sola la ONU recién conectada; permiso angosto `EFECTOS_EXTERNOS_PERMITIDOS`, abierto y cerrado. PRD §8.36 | La ONU de prueba (3/3/15) quedó «activada» confirmada leyendo y el usuario la borró; `test_activar_onu`, `test_entorno_sin_efectos` y la guarda de arquitectura en verde; app `activar_onu_test` 6 | sin commit |

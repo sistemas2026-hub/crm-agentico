@@ -271,13 +271,33 @@ def _contratos_de(solicitudes) -> dict:
     salida = {}
     for c in (ContratoDeServicio.objects.filter(solicitud_id__in=ids)
               .exclude(estado=ContratoDeServicio.ANULADO).order_by("firmado_en")):
+        datos = c.datos or {}
         salida[c.solicitud_id] = {
             "id": str(c.id), "numero": c.numero, "estado": c.estado,
             "estado_etiqueta": c.get_estado_display(),
             "servicio_isp": c.servicio_isp or None,
             "alta": c.como_dict()["alta"],
+            #  A NOMBRE DE OTRA PERSONA (26/11/2026). La fila muestra los datos
+            #  de quien hizo la solicitud; si el contrato es de otra persona, la
+            #  oficina tiene que ver A NOMBRE DE QUIEN quedo, porque con eso se
+            #  crea el cliente en el proveedor. Solo en ese caso viaja el
+            #  titular: en los demas es el mismo de la fila.
+            "otro_titular": bool(datos.get("otro_titular")),
+            "titular": (_titular_del_contrato(datos) if datos.get("otro_titular") else None),
+            "documento_cambiado": bool(datos.get("documento_cambiado")),
         }
     return salida
+
+
+def _titular_del_contrato(datos: dict) -> dict:
+    """Nombre y documento de la persona a cuyo nombre quedo el contrato."""
+    cl = datos.get("cliente") or {}
+    return {
+        "nombre": " ".join(x for x in (str(cl.get("nombre") or "").strip(),
+                                       str(cl.get("apellido") or "").strip()) if x),
+        "documento": " ".join(x for x in (str(cl.get("tipo_documento") or "").strip(),
+                                          str(cl.get("numero_documento") or "").strip()) if x),
+    }
 
 
 class BandejaView(APIView):

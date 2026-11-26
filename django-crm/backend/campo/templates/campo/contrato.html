@@ -64,7 +64,7 @@ contrato con clausulas inventadas.
 </div>
 
 <div class="caja">
-  <div class="titulo">1 · El suscriptor <span class="origen o-cliente">de la solicitud del cliente, revisado por el técnico</span></div>
+  <div class="titulo">1 · El suscriptor <span class="origen o-cliente">{% if otro_titular %}no es quien hizo la solicitud: datos tomados en sitio por el técnico{% else %}de la solicitud del cliente, revisado por el técnico{% endif %}</span></div>
   <table class="rejilla"><tr>
     <td style="width:50%"><div class="rotulo">Nombre</div><div class="valor">{{ c.nombre }} {{ c.apellido }}</div></td>
     <td><div class="rotulo">Documento</div><div class="valor">{{ c.tipo_documento }} {{ c.numero_documento }}</div></td>
@@ -99,7 +99,7 @@ contrato con clausulas inventadas.
 </div>
 
 <div class="caja">
-  <div class="titulo">4 · Autorizaciones <span class="origen o-cliente">aceptadas en la solicitud</span></div>
+  <div class="titulo">4 · Autorizaciones <span class="origen o-cliente">{% if al_firmar %}aceptadas por el suscriptor al firmar{% else %}aceptadas en la solicitud{% endif %}</span></div>
   {% if autorizaciones %}
     <div>{% if autorizaciones.habeas_data %}☑{% else %}☐{% endif %} Tratamiento de datos personales (habeas data){% if aceptadas_en %} — aceptada el {{ aceptadas_en }}{% endif %}</div>
     <div>{% if autorizaciones.centrales_de_riesgo %}☑{% else %}☐{% endif %} Consulta y reporte en centrales de riesgo{% if aceptadas_en %} — aceptada el {{ aceptadas_en }}{% endif %}</div>
