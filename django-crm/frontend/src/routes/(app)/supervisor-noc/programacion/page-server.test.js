@@ -9,6 +9,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiRequest = vi.fn();
 vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }));
 vi.mock('$lib/server/v2/hoy-de-la-empresa.js', () => ({ hoyDeLaEmpresa: async () => '2026-10-28' }));
+//  De qué empresa es la sesión, para hablar con el motor (los rangos de IP).
+//  Por defecto «no se sabe»: la carga no sale a ningún lado.
+const tenant = { destinoDelAsistente: vi.fn(async () => null) };
+vi.mock('$lib/server/v2/tenant.js', () => ({ destinoDelAsistente: (...a) => tenant.destinoDelAsistente(...a) }));
+vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
 const { load, actions } = await import('./+page.server.js');
 
@@ -47,6 +52,147 @@ describe('Programación: guardar de dónde y qué carga cada cuadrilla', () => {
 
     expect(r.status).toBe(403);
     expect(apiRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('Programación: el contrato de instalación (25/11/2026)', () => {
+  /** @param {string} rol @param {Record<string, string>} campos */
+  const pedido = (rol, campos) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) f.set(k, v);
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } }
+    });
+  };
+
+  it('las costumbres de la empresa viajan al backend con los servidores', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ servidores: [{ id_zona: 20053, nombre: 'CORTE 15' }], texto_condiciones: 'x' });
+
+    const r = /** @type {any} */ (await actions.contrato(pedido('SUPERVISOR', {
+      servidor_id_0: '20053', servidor_nombre_0: 'CORTE 15', nit: '900',
+      texto_condiciones: 'x', datos_en_mayusculas: 'on', digitos_del_telefono: '10'
+    })));
+
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/contrato/configuracion/');
+    expect(apiRequest.mock.calls[0][1]).toEqual({
+      method: 'PUT',
+      body: {
+        nit: '900', servidores: [{ id_zona: 20053, nombre: 'CORTE 15' }], texto_condiciones: 'x',
+        abreviaturas_de_direccion: [],
+        //  La casilla que NO se marcó viaja como false: si no viajara, una
+        //  costumbre encendida no se podría apagar desde la pantalla.
+        datos_en_mayusculas: true, barrio_en_la_direccion: false, digitos_del_telefono: 10,
+        //  Y el interruptor de crear en el proveedor, que no se marcó: false.
+        crear_en_el_isp: false,
+        //  Y el de activar la ONU (26/11/2026), tampoco marcado: false.
+        activar_onu: false
+      }
+    });
+    expect(r.hecho).toBeTruthy();
+  });
+
+  it('quien no gestiona no cambia el contrato', async () => {
+    apiRequest.mockReset();
+
+    const r = /** @type {any} */ (await actions.contrato(pedido('USER', { datos_en_mayusculas: 'on' })));
+
+    expect(r.status).toBe(403);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('Programación: los rangos de IP de cada servidor (25/11/2026)', () => {
+  /** @param {string} rol @param {Record<string, string>} campos @param {any} fetchFalso */
+  const pedido = (rol, campos, fetchFalso) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) f.set(k, v);
+    return /** @type {any} */ ({
+      request: { formData: async () => f },
+      cookies: { get: () => 'token' },
+      locals: { profile: { role: rol } },
+      fetch: fetchFalso
+    });
+  };
+
+  /** Un motor de mentira: contesta lo guardado y anota lo que le mandan. */
+  const motor = (guardados = /** @type {any[]} */ ([])) => {
+    /** @type {Array<{ url: string, metodo: string, cuerpo: any }>} */
+    const pedidos = [];
+    const fetchFalso = vi.fn(async (/** @type {string} */ url, /** @type {any} */ opciones = {}) => {
+      const cuerpo = opciones.body ? JSON.parse(opciones.body) : null;
+      pedidos.push({ url, metodo: opciones.method ?? 'GET', cuerpo });
+      const datos = (opciones.method ?? 'GET') === 'GET' ? { pools: guardados } : { pools: cuerpo?.pools ?? [] };
+      return { ok: true, json: async () => datos };
+    });
+    return { pedidos, fetchFalso };
+  };
+
+  it('viajan al motor los del formulario, sin borrar el rango de otra zona', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const { pedidos, fetchFalso } = motor([{ zona_id: 99, zona_nombre: 'OTRA', prefijos: ['10.9.9.'] }]);
+
+    const r = /** @type {any} */ (await actions.rangos(pedido('SUPERVISOR', {
+      rango_zona_0: '20049', rango_nombre_0: 'CORTE 30', rango_prefijos_0: '172.16.9., 172.16.10.'
+    }, fetchFalso)));
+
+    const put = pedidos.find((p) => p.metodo === 'PUT');
+    expect(put?.url).toBe('http://motor/configuracion/rangos-de-ip');
+    expect(put?.cuerpo).toEqual({
+      tenant: 'empresa-uno',
+      pools: [
+        { zona_id: 20049, zona_nombre: 'CORTE 30', prefijos: ['172.16.9.', '172.16.10.'] },
+        { zona_id: 99, zona_nombre: 'OTRA', prefijos: ['10.9.9.'] }
+      ],
+      //  La casilla no se marcó: viaja como «no», para poder apagarla.
+      contar_ip_mal_escritas: false
+    });
+    expect(r.hecho).toContain('2 servidores con rangos');
+  });
+
+  it('LA CASILLA DE LAS IP MAL ESCRITAS, marcada, viaja como sí', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const { pedidos, fetchFalso } = motor([]);
+
+    await actions.rangos(pedido('ADMIN', {
+      rango_zona_0: '20049', rango_prefijos_0: '172.16.9.', contar_ip_mal_escritas: 'on'
+    }, fetchFalso));
+
+    expect(pedidos.find((p) => p.metodo === 'PUT')?.cuerpo?.contar_ip_mal_escritas).toBe(true);
+  });
+
+  it('si el motor no contesta al leer, NO se guarda nada (se podrían borrar rangos)', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const fetchFalso = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+
+    const r = /** @type {any} */ (await actions.rangos(pedido('ADMIN', { rango_zona_0: '1', rango_prefijos_0: '' }, fetchFalso)));
+
+    expect(r.status).toBe(400);
+    expect(fetchFalso.mock.calls.every((/** @type {any} */ c) => (c[1]?.method ?? 'GET') === 'GET')).toBe(true);
+  });
+
+  it('quien no gestiona no guarda ni lee el proveedor', async () => {
+    const fetchFalso = vi.fn();
+    const r1 = /** @type {any} */ (await actions.rangos(pedido('USER', { rango_zona_0: '1' }, fetchFalso)));
+    const r2 = /** @type {any} */ (await actions.leerOcupacion(pedido('USER', {}, fetchFalso)));
+    expect(r1.status).toBe(403);
+    expect(r2.status).toBe(403);
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+
+  it('leer la ocupación llama a la ruta que recorre el proveedor, y dice qué leyó', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const fetchFalso = vi.fn(async () => ({
+      ok: true, json: async () => ({ completa: true, leidos: 7711, direcciones_tomadas: 7500 })
+    }));
+
+    const r = /** @type {any} */ (await actions.leerOcupacion(pedido('OPERACIONES', {}, fetchFalso)));
+
+    expect(fetchFalso.mock.calls[0][0]).toBe('http://motor/configuracion/ocupacion-ip/sincronizar');
+    expect(JSON.parse(fetchFalso.mock.calls[0][1].body)).toEqual({ tenant: 'empresa-uno' });
+    expect(r.hecho).toContain('7711');
   });
 });
 

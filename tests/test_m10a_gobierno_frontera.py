@@ -109,6 +109,44 @@ R2_REGISTRO_EXTERNO = {
     #  clase y esta guarda las encontro.
     "guardar_coordenada_onu_smartolt",
     "guardar_coordenada_cliente_wisphub",
+    #  EL ALTA DE UN CLIENTE DESDE LA APP DE CAMPO  --  25/11/2026.
+    #
+    #  Va en R2 por el criterio de la matriz y no por su peso: crea un
+    #  REGISTRO --la ficha de un cliente-- en el sistema del proveedor, y lo
+    #  deshace otra operacion de registro del mismo sistema (borrar el
+    #  perfil, verificado en agosto contra un cliente de prueba). No toca un
+    #  equipo (R3) ni mueve la cuenta de un cliente que ya existe (R4).
+    #
+    #  CON DOS ASTERISCOS, escritos en vez de disimulados:
+    #
+    #  1. LA OPERACION QUE LO DESHACE NO ESTA EN LA PLATAFORMA. La seccion 4
+    #     de esta misma prueba prohibe que una herramienta borre, y la baja
+    #     de un cliente todavia no existe aca. Hoy, deshacer un alta es
+    #     trabajo de una persona en el panel del proveedor. Es reversible
+    #     por el sistema que lo produjo SOLO en el sentido del proveedor.
+    #  2. PESA MAS QUE SUS HERMANAS DE R2: da de alta un servicio y abre una
+    #     relacion de cobro. Por eso lleva barreras que la clase no le
+    #     exige y que estan en codigo: sale SOLO por su ruta propia y la
+    #     puerta humana, el esquema le PROHIBE ser invocable por un servicio
+    #     y estar en el catalogo de un rol, y cada empresa la tiene apagada
+    #     hasta que la enciende.
+    #
+    #  Si R2 es o no la clase correcta para «crear un cliente» es una
+    #  decision de negocio y queda abierta para el dueño del producto: aca
+    #  se deja donde el criterio escrito de la matriz la pone, con lo que
+    #  la hace distinta a la vista.
+    "crear_cliente_del_contrato",
+    #  26/11/2026: «Activar ONU» desde la app de campo. R2 por el MISMO
+    #  criterio y con los MISMOS asteriscos que el alta de arriba: registra la
+    #  ONU en el sistema del proveedor (SmartOLT), y la deshace otra operacion
+    #  del mismo sistema (eliminar la ONU). No es R3: no actua sobre el equipo
+    #  de un cliente que ya tiene servicio --la ONU nueva todavia no daba
+    #  ninguno--. Y lleva las barreras del alta en codigo: solo por su ruta y
+    #  la puerta humana, solo si el proveedor la lista ESPERANDO autorizacion,
+    #  no invocable por un servicio, fuera del catalogo de todo rol, y apagada
+    #  por empresa hasta que la enciende. Si R2 es la clase correcta queda
+    #  abierto para el dueño del producto, igual que con el alta.
+    "autorizar_onu_en_smartolt",
     #  30/09/2026. El nombre invita a leerla como R3 y no lo es: NO actua sobre
     #  la ONT/ONU en la casa del cliente. Escribe UN campo --'sn_onu'-- en la
     #  ficha del cliente de WispHub, con 'PUT /api/clientes/{id_servicio}/'. Es

@@ -157,6 +157,14 @@ class ApiEndpoints {
   static String ipsLibresDeLaOrden(String ordenId, int idZona) =>
       '$baseUrl/api/campo/trabajos/$ordenId/ips-libres/?zona=$idZona';
 
+  // Activar la ONU de una instalacion (26/11/2026): como esta y el ultimo
+  // pedido (con `serial`, ademas busca la ONU), y pedir la activacion.
+  static String onuDeLaOrden(String ordenId, {String? serial}) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/onu/'
+      '${serial == null ? '' : '?serial=${Uri.encodeQueryComponent(serial)}'}';
+  static String activarOnuDeLaOrden(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/onu/activar/';
+
   // Aliases convenientes
   static String accionTrabajo(String id, String accion) {
     if (accion == 'completar') return trabajoCompletar(id);

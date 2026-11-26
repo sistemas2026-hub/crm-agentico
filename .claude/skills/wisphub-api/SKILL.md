@@ -95,6 +95,23 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | clientes | `plan_internet`, `ciudad`, `localidad` | |
 | clientes | `router`, `tecnico` | Hallados en agosto. `router` es la via para agrupar por zona geografica: en una red WISP el router ES la zona fisica |
 | clientes | `telefono__contains` | Verificado agosto 2026 (metodo del valor imposible: `telefono__contains=9999999999` -> 0). `telefono=<valor>` (sin `__contains`) NO sirve para buscar un numero individual: el campo guarda varios numeros separados por coma (`"3242124123,3002687147"`) y el match es EXACTO contra la cadena completa, asi que un solo numero da 0. `__contains` si matchea un numero suelto dentro de la cadena. Es la via para identificar a un cliente de WhatsApp por su numero (ver `Autenticacion.patron_extraccion` en `nucleo/config/schema.py`) — probar primero con `__contains`, nunca asumir que el filtro exacto alcanza. |
+| clientes | `ip`, `ip__contains` | **Verificado el 25/11/2026**, valor imposible: `ip=203.0.113.250` -> 0 de 7.711; con la IP de un cliente real -> 1 fila, y es ese cliente. Es lo que permite saber si una IP ya esta tomada con UNA llamada, y confirmar un alta leyendo de vuelta |
+| clientes | `cedula` | Verificado el 25/11/2026 por el mismo metodo: imposible -> 0; real -> 1 fila, ese cliente |
+| clientes | `servicio` | Idem. Es el campo donde se LEE lo que se escribio en `usuario_rb` |
+
+**El campo `zona` del listado de clientes es un objeto `{id, nombre}`** con el
+id del catalogo `/api/zonas/` (medido el 25/11/2026: 300 de 300 filas, y los
+300 casan por id y por nombre). Con eso la lectura de ocupacion cuenta clientes
+por zona y prefijo, y la plataforma SUGIERE los rangos de cada servidor.
+
+**En el campo `ip` de los CANCELADOS hay una IP marcada, no la real**
+(confirmado por el usuario el 25/11/2026): al cancelar un cliente, Rapilink le
+cambia la IP (`172.16.x.y` -> `168.x.x.y` o `100.x.x.y`) para liberar la
+verdadera. Medido: 2.360 clientes con IP fuera de red privada, **2.356
+cancelados**. No son errores. Al principio se los tomo por IP mal escritas y se
+construyo una proteccion (`contar_ip_mal_escritas`) que quedo APAGADA al
+saberlo. Para contar ocupacion o sugerir rangos, esas IP no son de ningun
+pool.
 | facturas | `estado` | 1 pendiente, 2 pagada, 3 cancelada, 4 en revision, 5 transferida |
 | facturas | `zona` | Las 5 zonas suman exacto el total |
 | tickets | `estado` | 1 nuevo, 2 en progreso, 4 cerrado |
@@ -106,6 +123,7 @@ los campos que vienen anidados (`{"id": 12, "nombre": "..."}`): se prueba con el
 | clientes | `zona` | Usar `router`. Las **facturas** si se pueden contar por zona |
 | clientes | `estado_facturas` | Contar facturas en estado `pendiente` (cuenta facturas, no clientes) |
 | clientes | `saldo` | — |
+| clientes | `usuario_rb`, `search` | Verificado el 25/11/2026: con un valor imposible devuelven los 7.711. `usuario_rb` es nombre de ESCRITURA; para buscar por ese dato el filtro es `servicio` |
 | clientes | fechas (cualquier forma) | No se pueden contar altas de un mes |
 | facturas | `facturadas` | — |
 | facturas | `id_servicio` (el cliente) | Verificado 15/09/2026: devuelve las MISMAS 5.249 facturas para cualquier id_servicio -- se probo con dos clientes distintos y la lista salio identica, misma primera factura y mismo `count`. Para el estado de cobranza de UN cliente hay que leer su registro en `/api/clientes/?id_servicio=`, que trae `estado_facturas`, `saldo` y `fecha_corte` |
@@ -309,6 +327,37 @@ Ademas WispHub genera solo un `usuario` interno con formato
 `slug-del-texto@rapilink-sas`. Es la misma dualidad escritura/lectura que ya se
 veia en otros campos — nunca asumir que el nombre de un campo de escritura es
 el mismo al leer.
+
+**Con que se llena `usuario_rb` en esta instancia: el nombre completo del
+cliente.** Medido el 25/11/2026, solo lectura: de los 300 clientes mas
+recientes (`GET /api/clientes/?limit=300&ordering=-id_servicio`), en **297** el
+`servicio` contiene el nombre del cliente; **292** son solo letras (lo mas comun,
+203, son cuatro palabras), 8 mezclan letras y numeros, **ninguno** es solo
+numeros y **ninguno** viene vacio. No se imprimio ningun dato personal: se
+conto la FORMA del valor (palabras y numeros). Es una
+costumbre de esta empresa, no una regla de la API: la API solo exige que no
+vaya vacio. Decision del usuario el mismo dia: en el alta desde la app,
+`usuario_rb` = nombre completo; usuario del router wifi = `admin`; la clave del
+router wifi es un secreto de la empresa y va en Configuracion → Credenciales,
+nunca escrita aca.
+
+**EL ALTA YA ESTA CONSTRUIDA EN LA PLATAFORMA (25/11/2026), Y NO ESTA PROBADA
+CONTRA ESTA API.** `crear_cliente_del_contrato` (en la config del tenant) la
+usa `nucleo/seguimiento/alta_de_cliente.py` cuando un tecnico firma un contrato.
+Que hay detras de cada cosa que manda:
+
+| Lo que hace | En que se apoya |
+|---|---|
+| `POST /api/clientes/agregar-cliente/{id_zona}/` con `usuario_rb`, `ip`, `plan_internet` | **verificado** (documentacion + `POST` vacio + la creacion de prueba de agosto) |
+| Los otros campos del cuerpo (`nombre`, `apellidos`, `cedula`, `email`, `telefono`, `direccion`, `localidad`, `coordenadas`, `comentarios`, `usuario_router_wifi`, `password_router_wifi`) | **solo la documentacion.** Nadie midio como los guarda |
+| Antes de crear, `GET /api/clientes/?ip=` para ver si la IP esta tomada | **verificado** el 25/11 (valor imposible) |
+| Despues de crear, la misma lectura para confirmar y sacar el `id_servicio` | la lectura esta verificada; que el cliente aparezca ahi con `servicio` == lo enviado en `usuario_rb` sale de la prueba de agosto |
+| `GET /api/tasks/{task_id}/` -> `status` | `SUCCESS` verificado; `FAILURE`/`REVOKED` **supuestos** (nombres habituales de ese sistema de tareas). Con un id inexistente la lectura falla y el alta lo trata como «no se sabe» |
+
+**Lo que hay que medir en la primera alta de verdad** (prueba vigilada, con
+autorizacion explicita, creando y borrando un cliente de prueba): que devuelve
+la tarea al terminar bien y al terminar mal; si `cedula` y `coordenadas` quedan
+guardadas como se mandaron; cuanto tarda el cliente en aparecer por `?ip=`.
 
 **La zona debe corresponder a la red real de la IP, o el alta puede fallar.**
 No hay forma de saberlo de antemano sin conocer la topologia: el catalogo de

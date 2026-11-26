@@ -24,6 +24,10 @@ import 'origen_de_la_imagen.dart';
 import 'pasos_del_trabajo.dart';
 import 'resumen_para_finalizar.dart';
 import 'widgets/consumo_de_material.dart';
+import 'widgets/activar_onu.dart';
+import 'widgets/ip_asignada.dart';
+import 'widgets/material_precargado.dart';
+import 'widgets/puntos_de_tv_tarjeta.dart';
 import 'widgets/firma_del_cliente.dart';
 import 'widgets/foto_con_marca_de_evidencia.dart';
 import '../contrato/contrato_screen.dart';
@@ -67,7 +71,16 @@ class EjecucionScreen extends StatefulWidget {
     this.fuente,
     this.resumenDeSync,
     this.acciones,
+    this.apiDelContrato = const ApiDelContrato(),
+    this.apiDeLaOnu = const ApiDeLaOnu(),
   });
+
+  /// De dónde se busca y se activa la ONU (26/11/2026). Reemplazable en pruebas.
+  final ApiDeLaOnu apiDeLaOnu;
+
+  /// De dónde se lee el contrato firmado, para mostrar la IP que asignó el
+  /// sistema (26/11/2026). Reemplazable en pruebas.
+  final ApiDelContrato apiDelContrato;
 
   /// Medir la señal, el ping y volver a pedir la ficha, para el bloque
   /// «Comprobar conexión» (17/10/2026). Nulo en una prueba que no los usa: el
@@ -98,6 +111,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// Se lee de la cola y no de un contador propio: la cola es la que sube, y
   /// un numero aparte se desincronizaria en cuanto algo se reintente.
   List<Map<String, dynamic>> _materialesUsados = <Map<String, dynamic>>[];
+  //  EL MATERIAL QUE SE PRECARGA (26/11/2026) y el kit del técnico, para
+  //  decir cuánto tiene y ofrecer las series de los equipos.
+  List<dynamic> _materialHabitual = <dynamic>[];
+  Map<String, dynamic>? _puntosDeTv;
+  List<Map<String, dynamic>> _kit = <Map<String, dynamic>>[];
   bool _isLoading = true;
 
   // ------------------------------------------------------------------
@@ -208,7 +226,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _pasosDelProtocolo = datos.pasos;
     _valoresFormulario = Map<String, dynamic>.from(datos.valores);
     _materialesUsados = datos.materialesUsados;
+    _materialHabitual = datos.materialHabitual;
+    _puntosDeTv = datos.puntosDeTv;
     _evidenciasCapturadas = datos.evidenciasCapturadas;
+    if (_materialHabitual.isNotEmpty || _puntosDeTv != null) _cargarKit();
 
     // Un controlador por campo, con lo que ya estaba respondido.
     //
@@ -793,6 +814,88 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     });
   }
 
+  Future<void> _cargarKit() async {
+    if (_orgId == null || _profileId == null) return;
+    final List<Map<String, dynamic>> kit =
+        await _fuente.kit(orgId: _orgId!, profileId: _profileId!);
+    if (mounted) setState(() => _kit = kit);
+  }
+
+  /// Lo escrito en los campos de ESE paso que se leen con la cámara, en orden:
+  /// de ahí sale el serial que se busca en la red.
+  List<String> _escaneadosDelPaso(PasoDeEjecucion paso) => <String>[
+        for (final dynamic c in paso.campos)
+          if (c is Map && c['escaneable'] == true)
+            if ((_valoresFormulario[c['id']] ?? '').toString().trim().isNotEmpty)
+              (_valoresFormulario[c['id']] ?? '').toString().trim(),
+      ];
+
+  /// Lo que el técnico ya escribió en los campos que se leen con la cámara
+  /// (el serial de la ONU, el precinto): con eso se marca la serie del equipo.
+  Set<String> get _seriesEscritas => <String>{
+        for (final dynamic c in _campos)
+          if (c is Map && c['escaneable'] == true)
+            if ((_valoresFormulario[c['id']] ?? '').toString().trim().isNotEmpty)
+              (_valoresFormulario[c['id']] ?? '').toString().trim().toUpperCase(),
+      };
+
+  /// La cantidad de cada material que sale de un campo de la plantilla: los
+  /// metros de fibra que el técnico escribió (26/11/2026). Por el TÍTULO del
+  /// campo, que es como lo configuró la empresa. Nula si no lo escribió.
+  Map<String, double?> get _cantidadesDeCampos {
+    final Map<String, double?> salida = <String, double?>{};
+    for (final dynamic l in _materialHabitual) {
+      if (l is! Map) continue;
+      final String campo = (l['campo'] ?? '').toString().trim().toLowerCase();
+      if (campo.isEmpty) continue;
+      final dynamic c = _campos.where((dynamic x) =>
+          x is Map && (x['titulo'] ?? '').toString().trim().toLowerCase() == campo).firstOrNull;
+      final String valor =
+          c is Map ? (_valoresFormulario[c['id']] ?? '').toString().trim().replaceAll(',', '.') : '';
+      salida[(l['codigo'] ?? '').toString()] = double.tryParse(valor);
+    }
+    return salida;
+  }
+
+  /// Lo escrito en el campo de donde sale la SERIE de un equipo (el serial de
+  /// la ONU), por código del material. Por el TÍTULO del campo, como la
+  /// cantidad de arriba.
+  Map<String, String?> get _textosDeCampos {
+    final Map<String, String?> salida = <String, String?>{};
+    for (final dynamic l in _materialHabitual) {
+      if (l is! Map) continue;
+      final String campo = (l['campo'] ?? '').toString().trim().toLowerCase();
+      if (campo.isEmpty) continue;
+      final dynamic c = _campos.where((dynamic x) =>
+          x is Map && (x['titulo'] ?? '').toString().trim().toLowerCase() == campo).firstOrNull;
+      final String valor = c is Map ? (_valoresFormulario[c['id']] ?? '').toString().trim() : '';
+      salida[(l['codigo'] ?? '').toString()] = valor.isEmpty ? null : valor;
+    }
+    return salida;
+  }
+
+  /// Registra de una vez lo precargado: un consumo por material, cada uno con
+  /// su clave, igual que si se hubieran agregado de a uno.
+  Future<void> _registrarPrecargado(List<LineaDeConsumo> lineas) async {
+    if (_orgId == null || _profileId == null) return;
+    for (final LineaDeConsumo l in lineas) {
+      await _fuente.encolarConsumo(
+        id: const Uuid().v4(),
+        orgId: _orgId!,
+        profileId: _profileId!,
+        codigo: l.codigo,
+        nombre: l.nombre,
+        cantidad: l.cantidad,
+        serie: l.serie,
+        ordenId: widget.ordenId,
+        ordenNumero: _numeroDeLaOrden,
+      );
+    }
+    final usados = await _materialesDeEstaOrden();
+    if (!mounted) return;
+    setState(() => _materialesUsados = usados);
+  }
+
   /// Lo registrado en esta orden, de la cola local.
   Future<List<Map<String, dynamic>>> _materialesDeEstaOrden() async {
     if (_orgId == null || _profileId == null) return <Map<String, dynamic>>[];
@@ -1092,12 +1195,35 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     }
   }
 
+  /// Si ya se registró el material de TV (el conector coaxial).
+  bool get _tvRegistrada {
+    final String conector =
+        ((_puntosDeTv?['conector'] as Map?)?['codigo'] ?? '').toString();
+    return conector.isNotEmpty &&
+        _materialesUsados.any((Map<String, dynamic> m) => m['material_codigo'] == conector);
+  }
+
+  /// Las líneas precargadas de las que todavía no se registró nada.
+  List<Map<String, dynamic>> get _precargadoPendiente {
+    final Set<String> registrados = <String>{
+      for (final Map<String, dynamic> m in _materialesUsados)
+        (m['material_codigo'] ?? '').toString(),
+    };
+    return <Map<String, dynamic>>[
+      for (final dynamic l in _materialHabitual)
+        if (l is Map && !registrados.contains((l['codigo'] ?? '').toString()))
+          Map<String, dynamic>.from(l),
+    ];
+  }
+
   Widget _bloqueDeMateriales() {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16),
       child: DexterBloque(
-        titulo: 'Materiales en esta orden',
+        //  «Material utilizado» (el usuario, 26/11/2026: «como sale el
+        //  material en esta orden debería ir material utilizado»).
+        titulo: 'Material utilizado',
         icono: Icons.inventory_2,
         insignia: DexterPastilla.neutra(texto: '${_materialesUsados.length}'),
         separacion: AppSpacing.sm,
@@ -1106,7 +1232,28 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             'Se descuenta de tu kit y sube cuando haya señal',
             style: AppTypography.cuerpoChico,
           ),
-          if (_materialesUsados.isEmpty)
+          //  LO PRECARGADO QUE FALTA REGISTRAR: lo que ya se registró de un
+          //  material sale de la lista (no se ofrece dos veces).
+          if (_precargadoPendiente.isNotEmpty)
+            MaterialPrecargado(
+              key: ValueKey<String>(
+                  _precargadoPendiente.map((Map<String, dynamic> l) => l['codigo']).join('|')),
+              lineas: _precargadoPendiente,
+              kit: _kit,
+              seriesEscritas: _seriesEscritas,
+              cantidadesDeCampos: _cantidadesDeCampos,
+              textosDeCampos: _textosDeCampos,
+              alRegistrar: _registrarPrecargado,
+            ),
+          //  LOS PUNTOS DE TV (26/11/2026). Se ofrecen hasta que se registra
+          //  el conector: después ya está en la lista de abajo.
+          if (_puntosDeTv != null && !_tvRegistrada)
+            PuntosDeTvTarjeta(
+              config: _puntosDeTv!,
+              kit: _kit,
+              alRegistrar: _registrarPrecargado,
+            ),
+          if (_materialesUsados.isEmpty && _precargadoPendiente.isEmpty)
             Text(
               'Todavía no registraste material en este trabajo.',
               style: AppTypography.cuerpoChico.copyWith(
@@ -1453,6 +1600,18 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     }
 
     final numero = _orden?['numero'] ?? '---';
+    //  Una instalación lleva contrato, y su pantalla se ordena distinto: ver
+    //  `_reportes` y `_accesoAlContrato`.
+    final bool esInstalacion = llevaContrato(_orden);
+    //  LOS BOTONES DE CADA PASO (26/11/2026). Si la plantilla dice en qué paso
+    //  va «Ver el contrato» y en cuál «Reportar», salen SOLO en ese paso (el
+    //  usuario: «en cada paso al último siempre sale ver contrato y
+    //  reportar»). Si no lo dice, donde siempre.
+    final List<PasoDeEjecucion> pasos = _pasos;
+    final bool botonesPorPaso = pasos.any((PasoDeEjecucion p) => p.botones.isNotEmpty);
+    final List<String> botonesDelPaso = botonesPorPaso
+        ? pasos[_pasoActual.clamp(0, pasos.length - 1)].botones
+        : const <String>[];
 
     final LecturaDePasos pasoActual = LecturaDePasos.de(
       EstadoTrabajo.desde(_orden?['estado']?.toString()),
@@ -1489,9 +1648,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             // serial, IP y la señal de la ficha. Ver `FranjaDelServicio`.
             if (_orden != null)
               FranjaDelServicio(trabajo: TrabajoVista.desdeOrden(_orden!)),
-            // EL CONTRATO DEL CLIENTE (13/11/2026): en las instalaciones, el
-            // técnico lo crea aquí en vez de llenarlo a mano en WispHub.
-            if (llevaContrato(_orden)) _accesoAlContrato(),
+            // EL CONTRATO DEL CLIENTE: su botón ya no va acá arriba sino al
+            // final, donde estaba «Cierre de trabajo» (el usuario, 26/11/2026).
+            // Ver `_accesoAlContrato`.
             _franjaDelFormulario(),
             // LO QUE FALTA, ARRIBA Y FIJO
             // ---------------------------
@@ -1516,42 +1675,12 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // REPORTAR, DONDE OCURRE LO QUE SE REPORTA
-                    // ----------------------------------------
-                    // Sin la historia y sin el bloqueo abierto: los dos viven en
-                    // la ficha. Aca van solo los gestos --inicio, avance,
-                    // bloqueo, cierre-- porque es donde el tecnico esta cuando
-                    // pasa lo que hay que reportar.
-                    SeguimientoDeLaIntervencion(
-                      seguimiento: _seguimiento,
-                      cargando: _cargandoSeguimiento,
-                      mostrarHistoria: false,
-                      mostrarBloqueoAbierto: false,
-                      pendientesDeSubir: _reportesSinSubir,
-                      // El cierre sale de «Finalizar» (17/10/2026).
-                      cierreEnFinalizar: true,
-                      alTomarFoto: _tomarFotoDelReporte,
-                      fotosTomadas: _fotosDelBorrador,
-                      alAbrirHoja: _contarFotos,
-                      alDescartarBorrador: _descartarBorrador,
-                      alReportar:
-                          (
-                            String momento,
-                            Map<String, dynamic> respuestas, {
-                            bool requiereNoc = false,
-                            bool detener = true,
-                          }) {
-                            // No se espera: la pantalla no se bloquea mientras el
-                            // telefono busca señal.
-                            _reportar(
-                              momento,
-                              respuestas,
-                              requiereNoc: requiereNoc,
-                              detener: detener,
-                            );
-                          },
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
+                    // REPORTAR (inicio, avance, bloqueo). En una instalación
+                    // va al final: ver `_reportes`.
+                    if (!esInstalacion && !botonesPorPaso) ...<Widget>[
+                      _reportes(),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
                     // POR PASOS, CUANDO LA PLANTILLA LOS TIENE (17/10/2026).
                     // Cada paso junta su instrucción, sus datos y sus fotos: el
                     // técnico registra lo que está haciendo donde lo está
@@ -1560,6 +1689,31 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                       _selectorDePasos(),
                       const SizedBox(height: AppSpacing.sm),
                       _pasoEnCurso(),
+                      //  Los botones de ESTE paso, al final del paso.
+                      if (botonesDelPaso.contains('contrato')) ...<Widget>[
+                        const SizedBox(height: AppSpacing.md),
+                        _accesoAlContrato(),
+                      ],
+                      if (botonesDelPaso.contains('reportar')) ...<Widget>[
+                        const SizedBox(height: AppSpacing.md),
+                        _reportes(),
+                      ],
+                      //  La IP que asignó el sistema, para copiarla al
+                      //  configurar el equipo (el usuario, 26/11/2026).
+                      //  Activar la ONU en la red, con el serial escrito en
+                      //  este paso (el usuario, 26/11/2026).
+                      if (botonesDelPaso.contains('onu')) ...<Widget>[
+                        const SizedBox(height: AppSpacing.md),
+                        ActivarOnu(
+                          ordenId: widget.ordenId,
+                          seriales: _escaneadosDelPaso(pasos[_pasoActual.clamp(0, pasos.length - 1)]),
+                          api: widget.apiDeLaOnu,
+                        ),
+                      ],
+                      if (botonesDelPaso.contains('ip')) ...<Widget>[
+                        const SizedBox(height: AppSpacing.md),
+                        IpAsignada(ordenId: widget.ordenId, api: widget.apiDelContrato),
+                      ],
                       const SizedBox(height: AppSpacing.lg),
                     ] else ...<Widget>[
                       // LOS DATOS DEL TRABAJO, CON SU NOMBRE. Antes empezaban
@@ -1608,7 +1762,20 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                       _bloqueDeMateriales(),
                     ],
                     if (_pasos.isEmpty) _evidencias(),
-                    _checklistDeCierre(),
+                    // EN UNA INSTALACIÓN NO VA «CIERRE DE TRABAJO» (el usuario,
+                    // 26/11/2026: «quitar el letrero de cierre de trabajo y un
+                    // botón para ver el contrato donde está»). Lo que falta para
+                    // cerrar no se pierde: lo dice `_loQueFalta`, arriba y fijo,
+                    // con el mismo veredicto, y «Finalizar» no deja cerrar sin
+                    // eso.
+                    if (esInstalacion) ...<Widget>[
+                      if (!botonesPorPaso) ...<Widget>[
+                        _accesoAlContrato(),
+                        const SizedBox(height: AppSpacing.lg),
+                        _reportes(),
+                      ],
+                    ] else
+                      _checklistDeCierre(),
                     if (widget.mostrarDatosFuturos) ...[
                       const SizedBox(height: AppSpacing.lg),
                       const BloqueAcademia(),
@@ -1652,49 +1819,6 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     return !faltaDato && !faltaFoto;
   }
 
-  /// El resumen de un paso: lo que ya tiene adentro, en una línea.
-  ///
-  /// Pedido del usuario el 14/11/2026, con la pantalla de una instalación
-  /// delante: «es muy confuso para el técnico; tiene que [ser] un tipo
-  /// formulario para que sea más fácil y que muestre lo que está llenado».
-  ///
-  /// La regla de qué se escribe vive en `pasos_del_trabajo.dart`, que se
-  /// prueba sin emulador. Acá solo se junta lo que el paso tiene.
-  String _resumenDe(PasoDeEjecucion paso) {
-    final List<CampoDelFormulario> campos = CampoDelFormulario.normalizar(
-      paso.campos,
-      _valoresFormulario,
-    );
-    final List<String> etiquetas = <String>[];
-    final List<String> valores = <String>[];
-    int vacios = 0;
-    for (final CampoDelFormulario c in campos) {
-      final String v = (_valoresFormulario[c.id] ?? '').toString().trim();
-      if (v.isEmpty) {
-        //  Solo cuenta como «falta» lo que de verdad traba el cierre: un campo
-        //  opcional sin llenar no es una deuda.
-        if (c.bloqueaCierre) vacios++;
-        continue;
-      }
-      etiquetas.add(c.titulo);
-      valores.add(v);
-    }
-    final List<Map<String, dynamic>> faltan = requisitosPendientes(
-      requisitos: paso.evidencias,
-      capturadas: _evidenciasCapturadas,
-    );
-    final int obligatoriasQueFaltan =
-        faltan.where((Map<String, dynamic> r) => r['obligatorio'] == true).length;
-    final int puestas = paso.evidencias.length - faltan.length;
-    return resumenDelPaso(
-      etiquetas: etiquetas,
-      valores: valores,
-      camposVacios: vacios,
-      fotosPuestas: puestas < 0 ? 0 : puestas,
-      fotosQueFaltan: obligatoriasQueFaltan,
-    );
-  }
-
   /// La línea de pasos (09/11/2026, el usuario: «hacer que la interfaz sea
   /// más creativa»).
   ///
@@ -1709,6 +1833,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   ///
   /// Cada círculo sigue siendo tocable, con su objetivo táctil completo: el
   /// técnico salta al paso que quiera, como antes.
+  ///
+  /// UN SOLO CONTEO  --  26/11/2026
+  /// ------------------------------
+  /// El usuario, probando una instalación en el teléfono: «sale un conteo de
+  /// paso hacia la derecha y sale otro conteo de paso hacia abajo». Eran la
+  /// línea de círculos y, debajo, la lista de los otros pasos con su resumen
+  /// (14/11/2026); además el bloque del paso repetía «Paso 1 de 4». Quedan
+  /// SOLO los círculos, con ✓ en el paso completo, y el número y el nombre del
+  /// paso van en el título de su bloque, justo debajo.
   Widget _selectorDePasos() {
     final List<PasoDeEjecucion> pasos = _pasos;
     final int actual = _pasoActual.clamp(0, pasos.length - 1);
@@ -1749,42 +1882,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               ],
             ],
           ),
-          const SizedBox(height: AppSpacing.xs),
-          //  El nombre del paso donde está parado. Los otros no se escriben:
-          //  con cuatro pasos los títulos no entran en un renglón, y cortarlos
-          //  --«Diagn… Soluc… Otros…»-- no dice nada.
-          Text(
-            '${actual + 1}. ${pasos[actual].titulo}',
-            style: AppTypography.tituloChico,
-          ),
-          if (pasos[actual].descripcion.isNotEmpty)
-            Text(
-              pasos[actual].descripcion,
-              style: AppTypography.cuerpoChico.copyWith(
-                color: AppColors.onSurfaceVariant,
-              ),
-            ),
-          //  LOS OTROS PASOS, CON LO QUE YA TIENEN ADENTRO (14/11/2026).
-          //
-          //  Hasta hoy un paso cerrado era un círculo con un número: el
-          //  técnico sabía que había pasado por ahí y no qué había dejado.
-          //  Para comprobar «¿ya puse el serial?» tenía que volver a entrar,
-          //  y con cinco pasos eso son cinco viajes.
-          //
-          //  El actual NO se repite acá: ya está abierto justo debajo.
-          for (int i = 0; i < pasos.length; i++)
-            if (i != actual)
-              _FilaDeOtroPaso(
-                numero: i + 1,
-                titulo: pasos[i].titulo,
-                resumen: _resumenDe(pasos[i]),
-                completo: _pasoCompleto(pasos[i]),
-                alTocar: () => setState(() => _pasoActual = i),
-              ),
         ],
       ),
     );
   }
+
   Widget _pasoEnCurso() {
     final List<PasoDeEjecucion> pasos = _pasos;
     final int actual = _pasoActual.clamp(0, pasos.length - 1);
@@ -1794,11 +1896,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       _valoresFormulario,
     );
     return DexterBloque(
-      titulo: paso.titulo,
+      //  El número va en el título y no en una pastilla «Paso 1 de 4»: la
+      //  línea de círculos de arriba ya es el conteo (26/11/2026).
+      titulo: '${actual + 1}. ${paso.titulo}',
       icono: Icons.construction,
-      insignia: DexterPastilla.neutra(
-        texto: 'Paso ${actual + 1} de ${pasos.length}',
-      ),
       separacion: AppSpacing.md,
       children: <Widget>[
         if (paso.descripcion.isNotEmpty)
@@ -2391,34 +2492,133 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     );
   }
 
+  /// El botón del contrato de una instalación.
+  ///
+  /// Hasta el 26/11/2026 era una franja arriba de todo («Contrato del
+  /// cliente: créalo aquí con la firma»). El usuario lo pidió donde estaba
+  /// «Cierre de trabajo», que en una instalación ya no va.
   Widget _accesoAlContrato() {
     final String titulo = 'OT #${_orden?['numero'] ?? ''}';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, 0),
+    void abrir() => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => ContratoScreen(ordenId: widget.ordenId, titulo: titulo),
+        ));
+    //  UNA TARJETA COMO LAS DEMÁS, NO UNA FRANJA (el usuario, 26/11/2026:
+    //  «con diseño bien, que no se vea genérico»). El mismo fondo, borde y
+    //  sombra de `DexterBloque`, y toda la tarjeta se toca: es un blanco
+    //  grande para un dedo con guante.
+    return Semantics(
+      button: true,
+      label: 'Ver el contrato del cliente',
+      excludeSemantics: true,
       child: Material(
-        color: AppColors.infoFondo,
-        borderRadius: AppRadius.brTarjeta,
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: AppRadius.brCompleto,
         child: InkWell(
-          borderRadius: AppRadius.brTarjeta,
-          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-            builder: (_) => ContratoScreen(ordenId: widget.ordenId, titulo: titulo),
-          )),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(children: <Widget>[
-              const Icon(Icons.assignment_outlined, color: AppColors.azulAccion),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text('Contrato del cliente: créalo aquí con la firma',
-                    style: AppTypography.etiqueta.copyWith(color: AppColors.azulAccion)),
+          onTap: abrir,
+          borderRadius: AppRadius.brCompleto,
+          child: Ink(
+            decoration: const BoxDecoration(
+              //  El color va acá y no solo en el Material: sin él la sombra
+              //  se ve a través de la tarjeta y la pinta de gris.
+              color: AppColors.surfaceContainerLowest,
+              borderRadius: AppRadius.brCompleto,
+              border: Border.fromBorderSide(
+                BorderSide(color: AppColors.surfaceContainerHigh),
               ),
-              const Icon(Icons.chevron_right, color: AppColors.azulAccion),
-            ]),
+              boxShadow: AppTheme.sombraNivel1,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Row(children: <Widget>[
+                Container(
+                  width: 48,
+                  height: 48,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    color: AppColors.infoFondo,
+                    borderRadius: AppRadius.brTarjeta,
+                  ),
+                  child: const Icon(Icons.description_outlined,
+                      size: 26, color: AppColors.secondary),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text('Ver el contrato', style: AppTypography.tituloChico),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Datos del cliente, plan, servidor y la firma',
+                        style: AppTypography.cuerpoChico.copyWith(
+                          color: AppColors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    color: AppColors.secondary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.arrow_forward,
+                      size: 20, color: AppColors.onSecondary),
+                ),
+              ]),
+            ),
           ),
         ),
       ),
     );
   }
+
+  /// Los reportes del trabajo: inicio, avance y bloqueo.
+  ///
+  /// EN UNA INSTALACIÓN VAN AL FINAL (26/11/2026). El usuario, probándola en
+  /// el teléfono: «la pantalla de reportar no debería salir en instalación, o
+  /// por lo menos mejor abajo». No se quita: «no hay puerto» se reporta como
+  /// un bloqueo con el NOC marcado, y sin este bloque la instalación no
+  /// tendría cómo pedirlo. En los demás trabajos sigue arriba.
+  ///
+  /// Sin la historia y sin el bloqueo abierto: los dos viven en la ficha. Acá
+  /// van solo los gestos, porque es donde el técnico está cuando pasa lo que
+  /// hay que reportar.
+  Widget _reportes() => SeguimientoDeLaIntervencion(
+        //  En la instalación, sin «Inicio» (el usuario, 26/11/2026).
+        sinInicio: llevaContrato(_orden),
+        seguimiento: _seguimiento,
+        cargando: _cargandoSeguimiento,
+        mostrarHistoria: false,
+        mostrarBloqueoAbierto: false,
+        pendientesDeSubir: _reportesSinSubir,
+        // El cierre sale de «Finalizar» (17/10/2026).
+        cierreEnFinalizar: true,
+        alTomarFoto: _tomarFotoDelReporte,
+        fotosTomadas: _fotosDelBorrador,
+        alAbrirHoja: _contarFotos,
+        alDescartarBorrador: _descartarBorrador,
+        alReportar: (
+          String momento,
+          Map<String, dynamic> respuestas, {
+          bool requiereNoc = false,
+          bool detener = true,
+        }) {
+          // No se espera: la pantalla no se bloquea mientras el teléfono
+          // busca señal.
+          _reportar(
+            momento,
+            respuestas,
+            requiereNoc: requiereNoc,
+            detener: detener,
+          );
+        },
+      );
 
   Widget _buildEvidenciaRequisito(Map<String, dynamic> req) {
     final reqId = req['id'] as String;
@@ -2611,75 +2811,6 @@ class _CirculoDePaso extends StatelessWidget {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Un paso que NO es el que se está llenando: su número, su nombre y lo que
-/// ya tiene adentro. Tocarlo lleva ahí.
-///
-/// POR QUÉ UNA FILA Y NO SOLO EL CÍRculo  --  14/11/2026
-/// -----------------------------------------------------
-/// La línea de círculos dice en cuál está parado el técnico. No dice qué
-/// quedó en los otros, y eso es justo lo que hay que comprobar antes de
-/// cerrar: «¿ya puse el serial?», «¿faltaba una foto en el paso 2?».
-class _FilaDeOtroPaso extends StatelessWidget {
-  const _FilaDeOtroPaso({
-    required this.numero,
-    required this.titulo,
-    required this.resumen,
-    required this.completo,
-    required this.alTocar,
-  });
-
-  final int numero;
-  final String titulo;
-  final String resumen;
-  final bool completo;
-  final VoidCallback alTocar;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color =
-        completo ? AppColors.exitoTexto : AppColors.onSurfaceVariant;
-    return InkWell(
-      onTap: alTocar,
-      borderRadius: AppRadius.brChico,
-      child: Padding(
-        //  44 de alto mínimo: es un blanco para un dedo, no una etiqueta.
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Icon(
-              completo ? Icons.check_circle : Icons.radio_button_unchecked,
-              size: 18,
-              color: color,
-            ),
-            const SizedBox(width: 8),
-            //  Expanded y no Spacer: con letra grande el resumen desborda la
-            //  fila. Ya pasó con el título de la firma (11/11/2026).
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    '$numero. $titulo',
-                    style: AppTypography.cuerpoChico.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (resumen.isNotEmpty)
-                    Text(
-                      resumen,
-                      style: AppTypography.etiquetaChica.copyWith(color: color),
-                    ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );

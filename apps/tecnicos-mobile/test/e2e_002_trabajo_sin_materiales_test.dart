@@ -54,7 +54,9 @@ void main() {
       j.pantallaAlta(t);
       await t.runAsync(() async {
         await j.limpiar();
-        await j.sembrarOrden();
+        // El checklist de cierre no va en una instalación desde el
+        // 26/11/2026: se mira en un trabajo que sí lo tiene.
+        await j.sembrarOrden(tipoCodigo: 'ftth_correctivo');
         // Todo lo que la plantilla SÍ pide, cumplido.
         await j.capturarEvidencia(requisitoId: 'foto_power_meter');
         await j.capturarEvidencia(requisitoId: 'foto_roseta');

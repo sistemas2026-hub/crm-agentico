@@ -76,6 +76,8 @@ from nucleo.herramientas import cuenta as ejecutor_cuenta
 from nucleo.herramientas import localidades as sincronizador_localidades
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
+from nucleo.seguimiento import activar_onu
+from nucleo.seguimiento import alta_de_cliente
 from nucleo.seguimiento import borrador
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguimiento import cierre_por_validacion
@@ -6065,6 +6067,257 @@ def interno_guardar_ubicacion_de_orden(orden_id: str):
     return jsonify(cuerpo_resp), codigos.get(resultado.estado, 500)
 
 
+#  LOS CODIGOS DEL ALTA, Y POR QUE CADA UNO  --  25/11/2026
+#    200  el cliente esta creado (ahora, o ya estaba).
+#    202  NADIE SABE TODAVIA: se pidio y no aparece, o la IP quedo tomada por
+#         una ficha que no se reconoce. Hay que volver a mirar, y si no se
+#         resuelve lo mira una persona. NO es un fallo, y por eso es 2xx.
+#    400  la peticion esta mal: lo que trae no alcanza para un cliente.
+#    409  el sistema decidio NO crear y nada salio: la IP la tiene otro, no es
+#         de la zona, el plan no esta, el interruptor esta bajo, no se pudo
+#         comprobar. La peticion estaba bien.
+#    502  el proveedor DIJO que no: rechazo el pedido o dio el trabajo por
+#         fallido, y la IP sigue libre. No hay cliente.
+_CODIGOS_DEL_ALTA = {
+    alta_de_cliente.CREADO: 200,
+    alta_de_cliente.YA_ESTABA: 200,
+    alta_de_cliente.EN_CURSO: 202,
+    alta_de_cliente.NO_RECONOCIDO: 202,
+    alta_de_cliente.DATOS_INVALIDOS: 400,
+    alta_de_cliente.FALLO: 502,
+}
+
+#: Cuantos pedidos admite un mismo contrato. Cada numero es una clave
+#: idempotente distinta, y el numero lo pone quien llama: sin tope, un
+#: llamador podria fabricar claves sin fin.
+_PEDIDOS_POR_CONTRATO = 20
+
+#: Lo unico que estas dos rutas aceptan de un alta. Ni un campo mas: como se
+#: llama cada dato en el proveedor, y cualquier otro campo que su API acepte
+#: (cinco contrasenas, entre ellos), lo dice la configuracion, no quien llama.
+_DATOS_DEL_ALTA = {"zona", "ip", "plan", "cliente", "coordenadas", "nota"}
+_DATOS_DEL_CLIENTE = {"nombre", "apellido", "documento", "correo", "telefono",
+                      "direccion", "barrio"}
+
+
+def _datos_del_alta(cuerpo: dict):
+    """`(datos, None)` o `(None, respuesta de error)`."""
+    datos = cuerpo.get("datos")
+    if not isinstance(datos, dict):
+        return None, (jsonify({"error": "Falta 'datos': los del contrato firmado."}), 400)
+    sobra = sorted(set(datos) - _DATOS_DEL_ALTA)
+    cliente = datos.get("cliente") if isinstance(datos.get("cliente"), dict) else {}
+    sobra += sorted(f"cliente.{c}" for c in set(cliente) - _DATOS_DEL_CLIENTE)
+    if sobra:
+        return None, (jsonify({
+            "error": f"un alta no acepta {sobra}: como se llama cada dato en el "
+                     f"proveedor lo dice la configuracion del tenant."}), 400)
+    return datos, None
+
+
+@app.post("/interno/contrato/<contrato_id>/crear-cliente")
+def interno_crear_cliente_del_contrato(contrato_id: str):
+    """
+    Crea en el ISP al cliente de un contrato que se firmo en su casa.
+
+    RUTA PROPIA Y NO `/interno/herramienta/<nombre>`, por la misma razon que
+    `guardar-ubicacion` y `cerrar-ticket`: esa es la puerta AUTONOMA. Aca el
+    que decidio es un tecnico parado en la puerta, con un contrato firmado
+    como evidencia, asi que la puerta que corresponde es `humana()`.
+
+    EL CONTRATO ES ANGOSTO: los datos del alta, quien lo pidio y el numero
+    de pedido. El nombre de cada campo del proveedor NO se acepta desde
+    afuera.
+
+    EL `origen` LO ARMA EL MOTOR con el id del contrato y el numero de
+    pedido, y no se acepta del cuerpo: es la base de la clave idempotente.
+
+    QUE GARANTIZA EL NUMERO Y QUE NO (auditoria de frontera, 25/11/2026). El
+    numero lo pone quien llama, asi que la garantia «un pedido nuevo solo
+    cuando una persona lo decidio» es de ese lado y no de este: el motor no
+    sabe que paso con el pedido anterior. Lo que este lado SI garantiza, sea
+    cual sea el numero: el mismo numero no sale dos veces, lo que fallo no se
+    reejecuta (NO hay «reintentar»), y todo pedido empieza mirando quien
+    tiene la IP.
+
+    Ver nucleo/seguimiento/alta_de_cliente.py.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"actor", "datos", "intento"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({"error": f"esta ruta solo acepta {sorted(permitidos)}. "
+                                 f"No acepta {sobra}."}), 400
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "Falta 'actor': la puerta humana necesita "
+                                 "saber quien confirmo el contrato."}), 400
+    intento = cuerpo.get("intento", 1)
+    if (isinstance(intento, bool) or not isinstance(intento, int)
+            or not 1 <= intento <= _PEDIDOS_POR_CONTRATO):
+        return jsonify({"error": f"'intento' es un numero de 1 a "
+                                 f"{_PEDIDOS_POR_CONTRATO}."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+
+    resultado = alta_de_cliente.crear(
+        config, tenant, actor=actor, datos=datos,
+        origen=f"alta_de_contrato:{contrato_id}:{intento}")
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
+
+
+@app.post("/interno/contrato/<contrato_id>/comprobar-cliente")
+def interno_comprobar_cliente_del_contrato(contrato_id: str):
+    """
+    Como quedo un alta que ya se pidio. SOLO LEE: no crea ni reintenta nada.
+
+    Es para el contrato que quedo «en curso»: el proveedor crea en segundo
+    plano y lo que confirma es encontrar al cliente por su IP.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    sobra = sorted(set(cuerpo) - {"datos", "tarea"})
+    if sobra:
+        return jsonify({"error": f"esta ruta solo acepta ['datos', 'tarea']. "
+                                 f"No acepta {sobra}."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = alta_de_cliente.comprobar(config, tenant, datos=datos,
+                                          tarea=str(cuerpo.get("tarea") or ""))
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
+
+
+# =============================================================================
+#  AUTORIZAR LA ONU DE UNA INSTALACION  --  26/11/2026
+# =============================================================================
+#  Ver nucleo/seguimiento/activar_onu.py. Tres rutas: dos solo leen (buscar y
+#  comprobar) y una escribe por la puerta HUMANA (la pide un tecnico en la
+#  casa). Como se llama cada campo del proveedor NO se acepta desde afuera.
+
+_CODIGOS_DE_LA_ONU = {
+    activar_onu.ACTIVADA: 200,
+    activar_onu.YA_ESTABA: 200,
+    activar_onu.EN_CURSO: 202,
+    activar_onu.DATOS_INVALIDOS: 400,
+    activar_onu.FALLO: 502,
+}
+
+#: Cuantos pedidos admite una misma orden (cada numero es otra clave).
+_PEDIDOS_DE_ONU_POR_ORDEN = 20
+
+#: Lo unico que acepta un pedido de autorizacion.
+_DATOS_DE_LA_ONU = {"serial", "zona", "vlan", "nombre", "direccion"}
+
+
+def _cuerpo_de_la_onu(permitidos: set):
+    """`(tenant, cuerpo, None)` o `(None, None, respuesta de error)`."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return None, None, (jsonify({"error": "Falta el parametro 'tenant'."}), 400)
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return None, None, (jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400)
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return None, None, (jsonify({"error": f"esta ruta solo acepta {sorted(permitidos)}. "
+                                              f"No acepta {sobra}."}), 400)
+    return tenant, cuerpo, None
+
+
+@app.post("/interno/onu/buscar")
+def interno_buscar_onu():
+    """SOLO LEE: si la ONU de ese serial espera autorizacion, en que puerto, y
+    las zonas de la red para que el tecnico elija. No escribe nada."""
+    tenant, cuerpo, error = _cuerpo_de_la_onu({"serial"})
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    r = activar_onu.buscar(config, tenant, cuerpo.get("serial"))
+    if r.get("estado") == "esperando":
+        r["zonas"] = activar_onu.zonas(config, tenant)
+    return jsonify(r), 200
+
+
+@app.post("/interno/orden/<orden_id>/activar-onu")
+def interno_activar_onu_de_orden(orden_id: str):
+    """
+    Autoriza la ONU de una instalacion, pedida por el tecnico en la casa.
+
+    RUTA PROPIA y no `/interno/herramienta/<nombre>`: esa es la puerta
+    AUTONOMA, y aca decidio una persona. El `origen` (base de la clave
+    idempotente) lo arma el motor con la orden y el numero de pedido.
+    """
+    tenant, cuerpo, error = _cuerpo_de_la_onu({"actor", "datos", "intento"})
+    if error:
+        return error
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "Falta 'actor': la puerta humana necesita saber quien "
+                                 "lo pidio."}), 400
+    intento = cuerpo.get("intento", 1)
+    if (isinstance(intento, bool) or not isinstance(intento, int)
+            or not 1 <= intento <= _PEDIDOS_DE_ONU_POR_ORDEN):
+        return jsonify({"error": f"'intento' es un numero de 1 a "
+                                 f"{_PEDIDOS_DE_ONU_POR_ORDEN}."}), 400
+    datos = cuerpo.get("datos")
+    if not isinstance(datos, dict):
+        return jsonify({"error": "Falta 'datos'."}), 400
+    sobra = sorted(set(datos) - _DATOS_DE_LA_ONU)
+    if sobra:
+        return jsonify({"error": f"una autorizacion no acepta {sobra}: como se llama cada "
+                                 f"dato en el proveedor lo dice la configuracion."}), 400
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = activar_onu.activar(config, tenant, actor=actor, datos=datos,
+                                    origen=f"activar_onu:{orden_id}:{intento}")
+    return jsonify(resultado.como_dict()), _CODIGOS_DE_LA_ONU.get(resultado.estado, 409)
+
+
+@app.post("/interno/onu/comprobar")
+def interno_comprobar_onu():
+    """Como quedo una autorizacion ya pedida. SOLO LEE."""
+    tenant, cuerpo, error = _cuerpo_de_la_onu({"serial"})
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    r = activar_onu.comprobar(config, tenant, cuerpo.get("serial"))
+    return jsonify(r.como_dict()), 200
+
+
 @app.post("/interno/orden/<orden_id>/cerrar-ticket")
 def interno_cerrar_ticket_de_orden(orden_id: str):
     """
@@ -6317,10 +6570,15 @@ def interno_red_ips_libres():
     #  SE RECORREN LOS PREFIJOS EN EL ORDEN DECLARADO y se corta al llegar a
     #  `cuantas`: el primero de la lista es el que la empresa quiere llenar
     #  primero, y repartir entre varios dejaria todos a medias.
+    #  LAS IP MAL ESCRITAS EN EL PROVEEDOR, si la empresa lo encendio: la
+    #  direccion que podria ser la de ese cliente no se ofrece
+    #  (`ocupacion_ip.sombra_de_mal_escritas`).
+    sombra = (oip.sombra_de_mal_escritas(config.ocupacion_ip)
+              if getattr(config, "contar_ip_mal_escritas", False) else None)
     for pref in pool.prefijos:
         if len(libres) >= cuantas:
             break
-        ocupados = config.ocupacion_ip.get(pref) or []
+        ocupados = oip.tomadas_en(pref, config.ocupacion_ip, sombra)
         libres.extend(oip.libres_de(pref, ocupados, cuantas - len(libres)))
 
     return jsonify({
@@ -7009,7 +7267,8 @@ def configuracion_ocupacion_ip_sincronizar():
 
     try:
         nuevo = editor.guardar_ocupacion_ip(
-            tenant, leido["ocupacion"], leido["completo"])
+            tenant, leido["ocupacion"], leido["completo"],
+            leido.get("por_zona"))
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(
             e, "No se pudo completar la operacion.")}), 400
@@ -7026,6 +7285,103 @@ def configuracion_ocupacion_ip_sincronizar():
         "completa": nuevo.ocupacion_ip_completa,
         "actualizado_en": nuevo.ocupacion_ip_actualizado_en,
     })
+
+
+@app.get("/configuracion/rangos-de-ip")
+def configuracion_rangos_de_ip_leer():
+    """
+    Los rangos de IP de cada servidor, con lo que hace falta para decidirlos
+    (25/11/2026). Para la pantalla de Programacion -> El contrato de
+    instalacion.
+
+    Devuelve, y nada mas:
+      * `pools`: los rangos que la empresa guardo.
+      * `uso`: por cada prefijo que aparece en la pantalla (guardado o
+        sugerido), cuantas direcciones estan tomadas. Conteos, nunca cuales.
+      * `sugeridos`: por zona, los prefijos donde ya hay clientes de esa zona
+        (`ocupacion_ip.sugeridos_por_zona`). Sale de la ultima lectura.
+      * `ocupacion`: de cuando es esa lectura, si se completo, y si esta
+        empresa tiene declarado de donde leerla.
+
+    NO LE PEGA AL PROVEEDOR: lee lo guardado. Leer de nuevo es otra ruta
+    (`/configuracion/ocupacion-ip/sincronizar`), porque tarda un minuto.
+    """
+    from nucleo.herramientas import ocupacion_ip as oip
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+
+    pools = [p.model_dump(mode="json") for p in (config.pools_de_ip or [])]
+    sugeridos = oip.sugeridos_por_zona(getattr(config, "ocupacion_ip_por_zona", None) or {})
+    a_la_vista = {pref for p in pools for pref in p.get("prefijos") or []}
+    a_la_vista |= {s["prefijo"] for filas in sugeridos.values() for s in filas}
+    ocupacion = config.ocupacion_ip or {}
+    prudente = bool(getattr(config, "contar_ip_mal_escritas", False))
+    sombra_total = oip.sombra_de_mal_escritas(ocupacion)
+    sombra = sombra_total if prudente else None
+    uso = {}
+    for pref in sorted(a_la_vista):
+        tomadas = len(ocupacion.get(pref) or [])
+        #  253 son las que se pueden ofrecer: fuera la red, la puerta de
+        #  enlace y el broadcast (`ocupacion_ip.libres_de`). Con la empresa
+        #  prudente, tampoco las que podria tener un cliente mal escrito.
+        uso[pref] = {"tomadas": tomadas,
+                     "libres": len(oip.libres_de(pref, oip.tomadas_en(pref, ocupacion, sombra)))}
+    import ipaddress as _ip
+
+    mal_escritas = 0
+    for pref, octetos in ocupacion.items():
+        try:
+            if not _ip.ip_address(f"{pref}1").is_private:
+                mal_escritas += len(octetos or [])
+        except ValueError:
+            continue
+    return jsonify({
+        "pools": pools,
+        "sugeridos": sugeridos,
+        "uso": uso,
+        #  Cuantos clientes tienen una IP fuera de red privada, y si la empresa
+        #  decidio no ofrecer las direcciones que podrian ser las de ellos.
+        "mal_escritas": mal_escritas,
+        "contar_ip_mal_escritas": prudente,
+        "ocupacion": {
+            "actualizado_en": config.ocupacion_ip_actualizado_en,
+            "completa": bool(config.ocupacion_ip_completa),
+            "leida": bool(ocupacion),
+            "se_puede_leer": any(getattr(h, "sincroniza_ocupacion_ip", False)
+                                 for h in config.herramientas),
+        },
+    })
+
+
+@app.put("/configuracion/rangos-de-ip")
+def configuracion_rangos_de_ip_guardar():
+    """Reemplaza ENTERA la lista de rangos (ver editor.guardar_rangos_de_ip,
+    que valida y normaliza: un /24 por prefijo, nada reservado, sin
+    repetidos)."""
+    cuerpo = request.get_json(force=True, silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    tenant = cuerpo.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el campo 'tenant'"}), 400
+    prudente = cuerpo.get("contar_ip_mal_escritas")
+    if prudente is not None and not isinstance(prudente, bool):
+        return jsonify({"error": "'contar_ip_mal_escritas' es si o no."}), 400
+    try:
+        config = editor.guardar_rangos_de_ip(tenant, cuerpo.get("pools"), prudente)
+    except editor.ErrorEdicion as e:
+        return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
+    except Exception as e:
+        return _error_al_guardar(e)
+    olvidar_config(tenant)
+    return jsonify({"pools": [p.model_dump(mode="json") for p in config.pools_de_ip],
+                    "contar_ip_mal_escritas": bool(config.contar_ip_mal_escritas)})
 
 
 @app.post("/configuracion/precios/sincronizar")

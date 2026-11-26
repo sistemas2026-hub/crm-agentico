@@ -28,6 +28,8 @@ class DatosDeEjecucion {
     required this.campos,
     required this.requisitosDeEvidencia,
     this.pasos = const <dynamic>[],
+    this.materialHabitual = const <dynamic>[],
+    this.puntosDeTv,
     required this.valores,
     required this.evidenciasCapturadas,
     required this.materialesUsados,
@@ -57,6 +59,14 @@ class DatosDeEjecucion {
   /// meter» y «Fotografía de la medición» son lo mismo, y vivían en dos
   /// pantallas sin nada que las relacionara.
   final List<dynamic> pasos;
+
+  /// El material que se precarga en este tipo de trabajo (26/11/2026):
+  /// `[{codigo, nombre, unidad, clase, cantidad}]`, `cantidad` nula = la
+  /// escribe el técnico. Vacío si la empresa no cargó ninguno.
+  final List<dynamic> materialHabitual;
+
+  /// Los puntos de TV del tipo de trabajo (26/11/2026), o nulo si no lleva.
+  final Map<String, dynamic>? puntosDeTv;
 
   /// Lo que ya se respondió, mezclando lo del servidor con lo escrito acá.
   final Map<String, dynamic> valores;
@@ -153,6 +163,10 @@ class DatosDeEjecucion {
         orden: orden,
         campos: campos,
         requisitosDeEvidencia: requisitosDeEvidencia,
+        //  Sin estas dos, una copia perdía los pasos y la lista precargada.
+        pasos: pasos,
+        materialHabitual: materialHabitual,
+        puntosDeTv: puntosDeTv,
         valores: valores ?? this.valores,
         evidenciasCapturadas: evidenciasCapturadas ?? this.evidenciasCapturadas,
         materialesUsados: materialesUsados ?? this.materialesUsados,
@@ -204,6 +218,27 @@ abstract class FuenteDeEjecucion {
     required String orgId,
     required String profileId,
     required String ordenId,
+  });
+
+  /// Lo que el técnico tiene a cargo: disponible y series de cada material.
+  Future<List<Map<String, dynamic>>> kit({
+    required String orgId,
+    required String profileId,
+  });
+
+  /// Encola un consumo de material en esta orden (26/11/2026, para registrar
+  /// de una vez la lista precargada). `id` es la clave de idempotencia y la
+  /// pone quien llama, UNA vez.
+  Future<void> encolarConsumo({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String codigo,
+    required String nombre,
+    required String cantidad,
+    String serie = '',
+    required String ordenId,
+    int? ordenNumero,
   });
 
   /// Marca la orden como terminada en el teléfono y encola el aviso.
@@ -298,6 +333,11 @@ class FuenteLocalDeEjecucion implements FuenteDeEjecucion {
       campos: jsonDecode(camposStr) as List<dynamic>,
       requisitosDeEvidencia: jsonDecode(evidenciasStr) as List<dynamic>,
       pasos: jsonDecode(orden['pasos_json'] as String? ?? '[]') as List<dynamic>,
+      materialHabitual:
+          jsonDecode(orden['material_habitual_json'] as String? ?? '[]') as List<dynamic>,
+      puntosDeTv: orden['puntos_de_tv_json'] == null
+          ? null
+          : Map<String, dynamic>.from(jsonDecode(orden['puntos_de_tv_json'] as String) as Map),
       valores: await _db.getMergedDatosOrden(
         orgId: orgId,
         profileId: profileId,
@@ -386,6 +426,38 @@ class FuenteLocalDeEjecucion implements FuenteDeEjecucion {
         orgId: orgId,
         profileId: profileId,
         ordenId: ordenId,
+      );
+
+  @override
+  Future<List<Map<String, dynamic>>> kit({
+    required String orgId,
+    required String profileId,
+  }) =>
+      _db.getKit(orgId: orgId, profileId: profileId);
+
+  @override
+  Future<void> encolarConsumo({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String codigo,
+    required String nombre,
+    required String cantidad,
+    String serie = '',
+    required String ordenId,
+    int? ordenNumero,
+  }) =>
+      _db.encolarMovimientoMaterial(
+        id: id,
+        orgId: orgId,
+        profileId: profileId,
+        materialCodigo: codigo,
+        materialNombre: nombre,
+        tipo: 'consumo',
+        cantidad: cantidad,
+        serie: serie,
+        ordenId: ordenId,
+        ordenNumero: ordenNumero,
       );
 
   @override
@@ -549,7 +621,13 @@ class PasoDeEjecucion {
     required this.campos,
     required this.evidencias,
     this.descripcion = '',
+    this.botones = const <String>[],
   });
+
+  /// Los botones que la plantilla pone en este paso: `contrato` y/o
+  /// `reportar` (26/11/2026). Vacío en todos los pasos = la pantalla los
+  /// pone donde siempre.
+  final List<String> botones;
 
   /// El id del paso en la plantilla, o vacío para «Otros datos».
   final String id;
@@ -616,6 +694,9 @@ List<PasoDeEjecucion> pasosDeEjecucion({
       id: id,
       titulo: (paso['titulo'] ?? '').toString(),
       descripcion: (paso['descripcion'] ?? paso['instrucciones'] ?? '').toString(),
+      botones: <String>[
+        for (final dynamic b in (paso['botones'] as List? ?? const <dynamic>[])) b.toString(),
+      ],
       campos: susCampos,
       evidencias: susFotos,
     ));

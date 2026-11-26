@@ -326,8 +326,9 @@ def sincronizar_por_http(cfg, *, sincronizador=None, guardar=None):
             "ocupacion": {"172.16.9.": [2, 3]}, "leidos": 2, "sin_ip": 0,
             "ilegibles": [], "completo": True}))()
 
-    def _guardar(tenant, ocupacion, completa):
+    def _guardar(tenant, ocupacion, completa, por_zona=None):
         llamadas["guardado"] = (ocupacion, completa)
+        llamadas["por_zona"] = por_zona
         return types.SimpleNamespace(
             ocupacion_ip=ocupacion, ocupacion_ip_completa=completa,
             ocupacion_ip_actualizado_en="2026-11-14T12:00:00+00:00")

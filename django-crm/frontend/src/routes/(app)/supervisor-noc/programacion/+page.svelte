@@ -89,6 +89,11 @@
   let vivoDe = $state('');
   //  EL FILTRO DE LAS ÓRDENES (24/11/2026). Ver filas-de-ordenes.js.
   let filtroOrdenes = $state('todas');
+  //  Los rangos de IP que se están escribiendo, por zona (25/11/2026). Sirve
+  //  para que «Usar los sugeridos» llene la casilla sin guardar nada.
+  /** @type {Record<string, string>} */
+  let rangosEscritos = $state({});
+  let leyendoOcupacion = $state(false);
   let buscarOrden = $state('');
   //  Cuando la pantalla verifico las ubicaciones por ultima vez, con exito.
   //  Lo lee el mapa para decirlo abajo. Ver el comentario en 'refrescar'.
@@ -313,12 +318,70 @@
                     <input class="snoc-campo" style="flex:1; min-width:12rem;" name={`servidor_nombre_${i}`}
                            placeholder="Nombre que ve el técnico" aria-label={`Nombre del servidor ${i + 1}`}
                            maxlength="80" value={data.contrato.servidores?.[i]?.nombre ?? ''} />
+                    <input class="snoc-campo" style="width:6rem;" inputmode="numeric" name={`servidor_vlan_${i}`}
+                           placeholder="VLAN" aria-label={`VLAN del servidor ${i + 1} en SmartOLT`}
+                           value={data.contrato.servidores?.[i]?.vlan ?? ''} />
                   </div>
                 {/each}
+                <span class="snoc-body-sm snoc-secundario">La VLAN es la de SmartOLT con la que queda la ONU de los clientes de ese servidor (por ejemplo 300 para el servidor 1).</span>
                 <label class="snoc-body-sm snoc-pila-xs">
                   NIT de la empresa
                   <input class="snoc-campo" name="nit" maxlength="80" value={data.contrato.nit ?? ''} />
                 </label>
+                <!-- CÓMO ESCRIBE LA EMPRESA LOS DATOS DEL CLIENTE (25/11/2026).
+                     Son costumbres de cada empresa, no reglas del producto: por
+                     eso están aquí y no fijas en el código. Lo que no varía —la
+                     cédula solo con números, el correo en minúsculas— se hace
+                     siempre y no se pregunta. -->
+                <span class="snoc-label">Cómo llegan escritos los datos del cliente</span>
+                <span class="snoc-body-sm">
+                  El técnico no los teclea: los revisa contra la cédula y confirma. La cédula llega siempre
+                  solo con números y el correo en minúsculas.
+                </span>
+                <label class="snoc-body-sm">
+                  <input type="checkbox" name="datos_en_mayusculas" checked={data.contrato.datos_en_mayusculas} />
+                  Nombre, dirección y barrio en MAYÚSCULAS
+                </label>
+                <label class="snoc-body-sm">
+                  <input type="checkbox" name="barrio_en_la_direccion" checked={data.contrato.barrio_en_la_direccion} />
+                  El barrio pegado al final de la dirección (además de ir solo en su campo)
+                </label>
+                <label class="snoc-body-sm snoc-pila-xs">
+                  Cómo se escribe la dirección — un renglón por palabra: las formas en que la escriben, un «=» y
+                  cómo debe quedar. Por ejemplo «CLL, CL = CALLE» o «KRA, KR, CR = CRA».
+                  <textarea class="snoc-campo" name="abreviaturas_de_direccion" rows="4"
+                            placeholder="CLL, CL, CALL = CALLE&#10;KRA, KR, CR, CARRERA = CRA">{(data.contrato.abreviaturas_de_direccion ?? []).map((/** @type {any} */ r) => `${(r.como_lo_escriben ?? []).join(', ')} = ${r.como_queda}`).join('\n')}</textarea>
+                </label>
+                <label class="snoc-body-sm snoc-pila-xs">
+                  Dígitos del teléfono — con 10, «+57 300 555 0101» queda «3005550101». Con 0 no se recorta.
+                  <input class="snoc-campo" style="width:7rem;" inputmode="numeric" name="digitos_del_telefono"
+                         value={data.contrato.digitos_del_telefono ?? 0} />
+                </label>
+                <!-- CREAR AL CLIENTE EN EL PROVEEDOR AL FIRMAR (25/11/2026).
+                     Viene APAGADO: crear un cliente en el sistema del proveedor
+                     no se deshace solo. Lo enciende la empresa cuando ya cargó
+                     sus servidores y los rangos de IP de cada uno. -->
+                <!-- ACTIVAR LA ONU DESDE LA APP (26/11/2026). Apagado de fábrica:
+                     escribe en SmartOLT. Necesita la VLAN de cada servidor. -->
+                <span class="snoc-label">Activar la ONU desde la app</span>
+                <label class="snoc-body-sm">
+                  <input type="checkbox" name="activar_onu" checked={data.contrato.activar_onu} />
+                  El técnico puede activar la ONU en SmartOLT después de poner el serial
+                </label>
+                <span class="snoc-body-sm snoc-secundario">
+                  Solo se activa si SmartOLT la muestra esperando autorización, con la zona que confirma el
+                  técnico, la VLAN del servidor del contrato y el nombre del cliente.
+                </span>
+                <span class="snoc-label">Crear al cliente en el sistema del proveedor</span>
+                <label class="snoc-body-sm">
+                  <input type="checkbox" name="crear_en_el_isp" checked={data.contrato.crear_en_el_isp} />
+                  Al firmar el contrato, crear al cliente en el proveedor (WispHub) con esos datos
+                </label>
+                <span class="snoc-body-sm snoc-secundario">
+                  Apagado, el contrato queda firmado y la oficina crea al cliente como hasta ahora.
+                  Encendido, se crea solo después de comprobar que la IP elegida está libre y es de los
+                  rangos de ese servidor; si algo no cuadra no se crea, y el contrato dice por qué.
+                </span>
                 <label class="snoc-body-sm snoc-pila-xs">
                   Condiciones del servicio (el texto de su contrato, tal cual va en el PDF)
                   <textarea class="snoc-campo" name="texto_condiciones" rows="8" maxlength="20000">{data.contrato.texto_condiciones ?? ''}</textarea>
@@ -329,6 +392,111 @@
                 </div>
               </form>
             
+          </section>
+
+          <!-- LOS RANGOS DE IP DE CADA SERVIDOR (25/11/2026). De aquí salen las IP
+               libres que el técnico ve en el contrato, y los rangos que el alta
+               comprueba antes de crear un cliente. Sin rangos, ni una cosa ni la
+               otra. Los sugeridos salen de los clientes que ya existen en cada
+               zona: se revisan y se guardan, no se aplican solos. -->
+          <section class="snoc-panel" style="gap:var(--snoc-sm);">
+            <h2 class="snoc-h2">Los rangos de IP de cada servidor</h2>
+            {#if !data.rangos}
+              <p class="snoc-body-sm snoc-error-txt" style="margin:0;">
+                El asistente no contestó: no se pueden mostrar ni guardar los rangos ahora.
+              </p>
+            {:else if !(data.contrato?.servidores ?? []).length}
+              <p class="snoc-body-sm" style="margin:0;">Primero carga los servidores del contrato, arriba.</p>
+            {:else}
+              <p class="snoc-body-sm" style="margin:0;">
+                Escribe los rangos /24 de cada servidor, así: <b>172.16.9.</b> (varios, separados por coma).
+                De ahí salen las IP libres que el técnico elige en el contrato, y el cliente solo se crea
+                en el proveedor si su IP es de estos rangos.
+              </p>
+              <p class="snoc-body-sm" style="margin:0;">
+                {#if data.rangos.ocupacion?.leida}
+                  Direcciones tomadas leídas del proveedor el
+                  {new Date(data.rangos.ocupacion.actualizado_en).toLocaleString('es-CO', { timeZone: 'America/Bogota' })}{#if !data.rangos.ocupacion.completa}<b> — la lectura quedó incompleta</b>{/if}.
+                {:else}
+                  <b>Todavía no se ha leído qué direcciones están tomadas</b>: sin eso no hay sugeridos ni IP libres.
+                {/if}
+              </p>
+              <form method="POST" action="?/rangos" use:enhance class="snoc-pila-xs">
+                {#each data.contrato.servidores as s, i}
+                  {@const guardado = (data.rangos.pools ?? []).find((/** @type {any} */ p) => p.zona_id === s.id_zona)}
+                  {@const sugeridos = (data.rangos.sugeridos?.[String(s.id_zona)] ?? []).filter((/** @type {any} */ x) => x.privado)}
+                  {@const otros = (data.rangos.sugeridos?.[String(s.id_zona)] ?? []).filter((/** @type {any} */ x) => !x.privado)}
+                  <div class="snoc-pila-xs" style="padding:var(--snoc-xs) 0; border-top:1px solid var(--snoc-borde, #e5e7eb);">
+                    <input type="hidden" name={`rango_zona_${i}`} value={s.id_zona} />
+                    <input type="hidden" name={`rango_nombre_${i}`} value={s.nombre} />
+                    <label class="snoc-body-sm snoc-pila-xs">
+                      <span><b>{s.nombre}</b> <span class="snoc-secundario">(zona {s.id_zona})</span></span>
+                      <input class="snoc-campo" id={`rango_prefijos_${i}`} name={`rango_prefijos_${i}`}
+                             placeholder="172.16.9., 172.16.10."
+                             value={(rangosEscritos[s.id_zona] ?? (guardado?.prefijos ?? []).join(', '))}
+                             oninput={(e) => (rangosEscritos[s.id_zona] = /** @type {HTMLInputElement} */ (e.currentTarget).value)} />
+                    </label>
+                    {#each guardado?.prefijos ?? [] as pref}
+                      {@const uso = data.rangos.uso?.[pref]}
+                      <span class="snoc-body-sm snoc-secundario">
+                        {pref} — {#if uso && data.rangos.ocupacion?.leida}{uso.tomadas} tomada{uso.tomadas === 1 ? '' : 's'}, {uso.libres} libre{uso.libres === 1 ? '' : 's'}{#if uso.libres === 0}<b> — lleno</b>{/if}{:else}sin leer{/if}
+                      </span>
+                    {/each}
+                    {#if sugeridos.length}
+                      <span class="snoc-body-sm">
+                        Sugeridos por los clientes de esta zona:
+                        {sugeridos.map((/** @type {any} */ x) => `${x.prefijo} (${x.clientes} clientes)`).join(', ')}
+                        <button class="snoc-btn" type="button" style="margin-left:var(--snoc-xs);"
+                                onclick={() => (rangosEscritos[s.id_zona] = sugeridos.map((/** @type {any} */ x) => x.prefijo).join(', '))}>
+                          Usar los sugeridos
+                        </button>
+                      </span>
+                    {/if}
+                    {#if otros.length}
+                      <!-- No son de red privada. Pueden ser una red de verdad o IP mal
+                           escritas: el sistema no lo sabe y no los llena solo. -->
+                      <span class="snoc-body-sm snoc-secundario">
+                        Otros prefijos con clientes de esta zona, que <b>no son de red privada</b>
+                        (por ejemplo, la IP que se les pone al cancelarlos): no se sugieren.
+                        {otros.map((/** @type {any} */ x) => `${x.prefijo} (${x.clientes})`).join(', ')}
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
+                {#if data.rangos.mal_escritas}
+                  <!-- LAS IP FUERA DE RED PRIVADA (25/11/2026). Pueden ser la que se
+                       les pone a los clientes al cancelarlos --en la primera empresa
+                       es eso, y la opción queda sin marcar-- o errores de digitación;
+                       en ese caso la IP real del cliente no está en ningún lado que la
+                       plataforma pueda leer, y una dirección del rango puede verse
+                       libre y estar en uso. -->
+                  <label class="snoc-body-sm">
+                    <input type="checkbox" name="contar_ip_mal_escritas" checked={data.rangos.contar_ip_mal_escritas} />
+                    No ofrecer las IP que podrían ser de un cliente con su IP mal escrita en el proveedor
+                  </label>
+                  <span class="snoc-body-sm snoc-secundario">
+                    Hay {data.rangos.mal_escritas} clientes con una IP que no es de red privada. Si es la IP que se
+                    les pone al cancelarlos, deja esto sin marcar. Si son errores de digitación, márcalo: no se
+                    ofrecerá la IP del rango que termina en los mismos dos números que la de ellos (se pierden
+                    direcciones libres, pero no se le da a un cliente nuevo la IP de uno que ya existe).
+                  </span>
+                {/if}
+                <div class="snoc-fila" style="gap:var(--snoc-sm); align-items:center; flex-wrap:wrap;">
+                  <button class="snoc-btn" type="submit">Guardar los rangos</button>
+                  {#if form?.de === 'rangos'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
+                </div>
+              </form>
+              {#if data.rangos.ocupacion?.se_puede_leer}
+                <form method="POST" action="?/leerOcupacion" use:enhance={() => {
+                  leyendoOcupacion = true;
+                  return async ({ update }) => { await update({ reset: false }); leyendoOcupacion = false; };
+                }}>
+                  <button class="snoc-btn" type="submit" disabled={leyendoOcupacion}>
+                    {leyendoOcupacion ? 'Leyendo el proveedor… (tarda un minuto)' : 'Leer del proveedor qué IP están tomadas'}
+                  </button>
+                </form>
+              {/if}
+            {/if}
           </section>
         {/if}
 

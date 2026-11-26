@@ -165,20 +165,19 @@ void main() {
       await t.pumpAndSettle();
       await t.enterText(find.byType(TextField).first, 'Cambié la roseta');
       await t.pumpAndSettle();
-      await t.tap(find.text('1. Diagnóstico'));
+      await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')));
       await t.pumpAndSettle();
 
-      expect(find.textContaining('Cambié la roseta'), findsWidgets);
-      expect(find.textContaining('falta'), findsNothing,
-          reason: 'el opcional en blanco no es una deuda');
+      expect(find.bySemanticsLabel('Paso 2, completo'), findsOneWidget,
+          reason: 'el opcional en blanco no es una deuda: el paso 2 queda completo');
     });
 
-    testWidgets('UN PASO CERRADO MUESTRA LO QUE YA TIENE ADENTRO',
+    testWidgets('UN SOLO CONTEO: los círculos, sin la lista de pasos de abajo',
         (WidgetTester t) async {
-      //  El pedido del 14/11/2026: «que muestre lo que esta llenado». Antes un
-      //  paso cerrado era un circulo con un numero, asi que para comprobar
-      //  «¿ya puse el serial?» habia que volver a entrar -- con cinco pasos,
-      //  cinco viajes.
+      //  El usuario, probando una instalacion (26/11/2026): «sale un conteo
+      //  de paso hacia la derecha y otro conteo de paso hacia abajo». La
+      //  lista de los otros pasos con su resumen (14/11/2026) se quito; el
+      //  paso completo se ve en su circulo, con ✓.
       _pantallaAlta(t);
       await t.pumpWidget(_app(porPasos()));
       await t.pumpAndSettle();
@@ -191,18 +190,18 @@ void main() {
       //  encuentra. Es el mismo patron de `ejecucion_formulario_test`.
       await t.enterText(find.byType(TextField).last, 'Cambié la roseta');
       await t.pumpAndSettle();
-      //  Se vuelve TOCANDO LA FILA del paso 1, que es lo que esta lista
-      //  agrega: antes, para volver, habia que usar el boton de abajo.
-      await t.tap(find.text('1. Diagnóstico'));
+      await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')));
       await t.pumpAndSettle();
 
-      expect(find.text('2. Solución'), findsOneWidget);
-      expect(find.textContaining('Cambié la roseta'), findsWidgets,
-          reason: 'el valor se lee sin tener que entrar al paso');
-
-      //  Y EL CONTROL: el paso donde SÍ está parado no se repite en la lista,
-      //  porque su formulario ya está abierto justo debajo.
-      expect(find.text('1. Diagnóstico'), findsOneWidget);
+      expect(find.bySemanticsLabel('Paso 2, completo'), findsOneWidget,
+          reason: 'el paso hecho se ve en su círculo');
+      expect(find.text('2. Solución'), findsNothing, reason: 'sin la lista de abajo');
+      expect(find.textContaining('Cambié la roseta'), findsNothing,
+          reason: 'el resumen de los otros pasos era la lista que se quitó');
+      expect(find.textContaining(RegExp(r'Paso \d de \d')), findsNothing,
+          reason: 'ni la pastilla «Paso 1 de 2»: el conteo son los círculos');
+      expect(find.text('1. Diagnóstico'), findsOneWidget,
+          reason: 'el número y el nombre del paso abierto, en el título de su bloque');
     });
 
     testWidgets('un paso a la vez, con siguiente y anterior; Finalizar en el último',
@@ -227,8 +226,9 @@ void main() {
       expect(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp(r'^Paso 2(, completo)?$')), findsOneWidget);
       expect(find.text('1. Diagnóstico'), findsOneWidget);
-      expect(find.text('2. Solución'), findsOneWidget,
-          reason: 'el paso cerrado se nombra, para poder comprobar que tiene');
+      //  26/11/2026: la lista vertical se quito (salian dos conteos).
+      expect(find.text('2. Solución'), findsNothing,
+          reason: 'el paso que no está abierto es solo su círculo');
       expect(find.textContaining('Medición al llegar'), findsWidgets);
       expect(find.textContaining('Qué se cambió'), findsNothing);
       expect(find.text('Finalizar'), findsNothing);
@@ -266,13 +266,13 @@ void main() {
 
       //  Paso 1: solo lo del paso 1.
       expect(find.text('1. Diagnóstico'), findsOneWidget);
-      expect(find.text('Materiales en esta orden'), findsNothing);
+      expect(find.text('Material utilizado'), findsNothing);
       expect(find.text('Comprobar conexión'), findsNothing);
 
       //  Y en el ultimo si: es cuando se sabe que material se uso.
       await t.tap(find.text('Siguiente paso'));
       await t.pumpAndSettle();
-      expect(find.text('Materiales en esta orden'), findsOneWidget);
+      expect(find.text('Material utilizado'), findsOneWidget);
     });
 
     testWidgets('sin pasos en la plantilla, la pantalla de siempre', (WidgetTester t) async {

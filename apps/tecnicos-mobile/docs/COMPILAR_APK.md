@@ -32,6 +32,7 @@ archivo siempre existe y casi nunca es el correcto.
 |---|---|---|
 | La de Docker (la primera) | En el volumen `dexter-adb-keys`, montado en `/root/.android` | Dentro del contenedor es la buena |
 | La segunda (compiló la 1.0.16, 1.0.17 y 1.0.19) | Un archivo aparte que se le llevó a mano; el 21/11/2026 estaba en `Descargas\debug.keystore` | **Es otra llave** (su firma empieza `1FF3D3FA…`): con ella Android pediría desinstalar |
+| La tercera (la PC con el entorno local; compiló la 1.0.20 el 26/11/2026) | `C:\Users\Usuario\.android\debug.keystore`, copiada a mano antes de compilar | Es la buena: se comprobó con `keytool` antes de compilar (SHA-1 `6E:D4:B6:00…79:CF`). Ojo: si no está cuando se compila, Gradle crea ahí una llave NUEVA y la compilación sale con otra firma |
 
 En la segunda máquina hay que firmar con el archivo que se le llevó, no con
 el que Flutter usa por omisión. *Cómo se le indicó esa llave a la
@@ -40,6 +41,35 @@ la próxima vez, que lo anote en este párrafo.*
 
 La única prueba de que se usó la llave correcta es la del paso 4. Una llave
 se reconoce por la firma que produce, no por dónde está guardada.
+
+**Cómo se le dice a la compilación qué llave usar (la tercera máquina, 26/11/2026).**
+La compilación de `release` firma con la llave de depuración, y Gradle la busca
+en `%USERPROFILE%\.android\debug.keystore`. Basta con poner ahí el archivo
+correcto ANTES de compilar por primera vez, y comprobarlo:
+
+```
+keytool -list -v -keystore %USERPROFILE%\.android\debug.keystore -storepass android
+```
+
+**Instalar el Android SDK sin Android Studio cambió.** Desde las
+`commandlinetools` 16111833, `sdkmanager` está deprecado y delega en la
+«Android CLI», que con varios paquetes juntos instaló solo el primero. Lo que
+funcionó, sin mandar métricas a Google:
+
+```
+android --no-metrics --sdk=<ruta del SDK> sdk install platforms/android-37.0 build-tools/37.0.0 ndk/28.2.13676358
+```
+
+La plataforma 37 se llama ahora `android-37.0`, y **el AGP 9.1 del proyecto
+busca `android-37`**: la compilación falla con «Failed to find target with
+hash string 'android-37'». Las máquinas anteriores la instalaron cuando todavía
+tenía ese nombre. En la tercera se resolvió SIN tocar el proyecto: una copia de
+`platforms/android-37.0` llamada `platforms/android-37`, con `path` y
+`api-level` cambiados a `37` en su `package.xml` y `ApiLevel=37` en
+`source.properties` (el `android.jar` es el mismo byte a byte). Cambiar
+`compileSdk` en el repo arreglaría esta máquina y rompería las otras. Apagar también la telemetría de
+Flutter y Dart antes de cualquier otro comando: `flutter --disable-analytics` y
+`dart --disable-analytics`.
 
 `android/gradle.properties` le pide 8 GB a Gradle. En una máquina con menos,
 **no editar ese archivo**: escribir `org.gradle.jvmargs=-Xmx1536m` en el

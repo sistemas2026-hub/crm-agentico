@@ -932,6 +932,28 @@ reintentos hasta 5 días y después se apaga).
 
 Lo que cambió en Dexter por esto: ver PRD §8.19.
 
+## Autorizar una ONU nueva — lo que se midió el 26/11/2026 (SOLO GET, 20 llamadas)
+
+Para «Activar ONU» desde la app de campo. El contrato salió del OpenAPI
+público (`https://www.smartolt.com/openapi.json`, 137 rutas — la página
+`api.smartolt.com` lo referencia), que es la hipótesis; esto es lo medido:
+
+| Qué | Resultado medido |
+|---|---|
+| `GET /api/onu/unconfigured_onus_for_olt/{olt_id}` | 200. Filas con `pon_type`, `board`, `port`, `onu`, `sn`, `onu_type_name`, `onu_type_id`, `olt_id`, `is_disabled`, `actions` (`['authorize']`), `first_seen_at`, `last_seen_at`, `external_id`, `pon_description`. Ese día: 2 esperando en la OLT 3, 0 en la 4 |
+| `?sn=` en esa ruta | **Filtra** (CONTAINS según la doc): un serial imposible → 200 y 0 filas, en las dos OLT |
+| `GET /api/onu/get_authorization_presets?olt_id=` | 200 y `{"authorization_presets": []}` en las dos: **Rapilink no usa presets**, así que autorizar exige mandar cada dato |
+| `GET /api/system/get_zones` | 60 zonas: son barrios/sectores, no los «CORTE 15/30» de WispHub |
+| `GET /api/system/get_odbs[/{zona}]` | 4.522 cajas; **1.052 nombres repetidos entre zonas** («CTO 1», «CTO 2»…): el número de caja solo no dice la zona |
+| `GET /api/olt/get_vlans/{olt}` | OLT 3: 7 (300 `CLIENTES_SERVIDOR1`, 301 `CLIENTES_SERVIDOR2`, 302, 27 PBX, 10, 20 TR069, 200). OLT 4: 20, sin descripción |
+| Autorizaciones de la última semana (últimas páginas de `get_all_onus_details`) | OLT 3: 60 → VLAN 300 en 50 y 301 en 10; zona SIEMPRE; caja, dirección y `onu_external_id` NUNCA; nombre del cliente en mayúsculas. OLT 4: 22 → VLAN 302 en 21. `onu_mode` y perfiles de velocidad sin poner; `wan_mode` = «Setup via ONU webpage» |
+| `sort=authorization_date&order=desc` en `get_all_onus_details` | **Se ignora en silencio**: la página 1 trae las de 2021. Lo reciente está en las ÚLTIMAS páginas |
+
+`POST /api/onu/authorize_onu` (form-urlencoded; obligatorios `olt_id`,
+`pon_type`, `sn`; con `board` y `port` se configura en el acto y tarda
+«decenas de segundos») **NO se llamó**: es una escritura que da servicio. Ver
+SPEC/objetivos/agente-de-campo-para-instalaciones.md → «Activar ONU».
+
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 
 - Si hay dirección/contacto poblados en algún registro real (el que se leyó

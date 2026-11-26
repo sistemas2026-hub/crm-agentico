@@ -52,6 +52,53 @@ CLAVE = "fotos_al_ticket"
 MAX_POR_VUELTA = 8
 
 
+#: La marca de una foto de la plantilla que NO sale de la plataforma.
+SOLO_EN_LA_PLATAFORMA = "solo_en_la_plataforma"
+
+
+def requisitos_que_no_salen(orden) -> set[str] | None:
+    """Los ids de las fotos de esta orden que no viajan a ningun ticket.
+
+    DECISION DEL USUARIO, 25/11/2026: la cedula y el recibo publico que el
+    tecnico fotografia en una instalacion quedan *«solo en la plataforma, no al
+    ticket»*. Son documentos de una persona, y un ticket --el del CRM o el del
+    ISP-- lo lee cualquiera con acceso a esa cola.
+
+    NO SE RECONOCEN POR EL NOMBRE. Buscar «cedula» en el titulo andaria hasta
+    que una empresa la llame «documento de identidad». La plantilla marca cada
+    foto (`solo_en_la_plataforma`), la empresa lo elige en el editor, y aca se
+    lee esa marca. Se mira la version de la plantilla CON LA QUE se trabajo la
+    orden: es la que dijo que pedir.
+
+    `None` cuando no se pudo leer la plantilla. QUIEN LLAMA NO MANDA NINGUNA
+    FOTO en ese caso: sin saber cuales son privadas, mandar «todas» es mandar
+    tambien las que no debian salir.
+    """
+    try:
+        version = getattr(orden, "tipo_trabajo_version", None)
+        esquema = (getattr(version, "esquema", None) or {}) if version else {}
+        if not isinstance(esquema, dict):
+            return None
+        listas = [esquema.get("evidencias") or []]
+        seguimiento = esquema.get("seguimiento") or {}
+        if isinstance(seguimiento, dict):
+            for momento in seguimiento.values():
+                if isinstance(momento, dict):
+                    listas.append(momento.get("evidencias") or [])
+        privados = set()
+        for lista in listas:
+            if not isinstance(lista, list):
+                return None
+            for e in lista:
+                if isinstance(e, dict) and e.get(SOLO_EN_LA_PLATAFORMA) is True:
+                    privados.add(str(e.get("id") or ""))
+        return privados - {""}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("fotos privadas: no se pudo leer la plantilla (%s)",
+                       type(e).__name__)
+        return None
+
+
 def _clave_de(vuelta) -> str:
     """LA VUELTA ENTRA, por lo mismo que en las notas: una orden devuelta y
     rehecha trae fotos NUEVAS, y son las que hay que mostrar."""
@@ -92,6 +139,12 @@ def adjuntar(orden, profile=None) -> dict:
     #  diferencia entre "no habia a quien atribuirlo" y "fallo ocho veces".
     if profile is None or getattr(profile, "org_id", None) is None:
         return {"hecho": False, "cuantas": 0, "motivo": "sin_profile"}
+
+    #  ANTES DE RECLAMAR LA MARCA: si no se sabe cuales fotos son privadas no
+    #  se adjunta ninguna, y la vuelta queda sin marcar para otro intento.
+    privados = requisitos_que_no_salen(orden)
+    if privados is None:
+        return {"hecho": False, "cuantas": 0, "motivo": "plantilla_ilegible"}
 
     try:
         from campo.models import OrdenTrabajo
@@ -134,8 +187,12 @@ def adjuntar(orden, profile=None) -> dict:
         #  foto de menos se ve; ocho repetidas, tambien, pero no se pueden
         #  sacar desde la pantalla.
         cuantas = 0
+        #  LAS PRIVADAS SE SACAN ANTES DEL TOPE: si se sacaran despues, una
+        #  cedula subida primero ocuparia un lugar de los ocho y dejaria
+        #  afuera una foto que si tenia que viajar.
         evidencias = list(orden.evidencias
                           .filter(vuelta=orden.vuelta, evento__isnull=True)
+                          .exclude(requisito_id__in=privados)
                           .order_by("recibida_en_servidor")[:MAX_POR_VUELTA])
         for i, ev in enumerate(evidencias, start=1):
             try:

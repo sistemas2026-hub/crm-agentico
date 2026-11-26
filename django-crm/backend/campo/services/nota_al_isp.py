@@ -299,17 +299,26 @@ def fotos_de_la_vuelta(orden) -> list[dict]:
     import os
 
     try:
-        from campo.fotos_al_ticket import MAX_POR_VUELTA, _nombre
+        from campo.fotos_al_ticket import (MAX_POR_VUELTA, _nombre,
+                                           requisitos_que_no_salen)
         from campo.services.storage import CampoStorage
     except Exception as e:                                       # noqa: BLE001
         logger.warning("nota_al_isp: no se pudieron preparar las fotos (%s)",
                        type(e).__name__)
         return []
 
+    #  LAS QUE SON SOLO DE LA PLATAFORMA NO VIAJAN (25/11/2026): la cedula y
+    #  el recibo de una instalacion, por decision del usuario. Si no se sabe
+    #  cuales son, no viaja ninguna: el reporte se escribe igual sin fotos.
+    privados = requisitos_que_no_salen(orden)
+    if privados is None:
+        return []
+
     salida = []
     try:
         evidencias = list(orden.evidencias
                           .filter(vuelta=orden.vuelta, evento__isnull=True)
+                          .exclude(requisito_id__in=privados)
                           .order_by("recibida_en_servidor")[:MAX_POR_VUELTA])
     except Exception as e:                                       # noqa: BLE001
         logger.warning("nota_al_isp: no se pudieron listar las fotos (%s)",

@@ -705,7 +705,14 @@ def catalogo_herramientas(config: TenantConfig) -> list[dict]:
 #: llame cuando no corresponde.
 _BANDERAS_DE_SISTEMA = ("invocable_por_servicio", "responde_ticket_operativo",
                         "cierra_ticket_operativo", "cierra_ticket_estado",
-                        "adjunta_archivo_ticket")
+                        "adjunta_archivo_ticket",
+                        #  Las del alta (25/11/2026): las dispara el backend
+                        #  por su ruta, y el esquema les PROHIBE ser
+                        #  invocables por un servicio.
+                        "crea_cliente", "busca_cliente_por_ip", "lee_tarea",
+                        #  Las de autorizar una ONU (26/11/2026), por lo mismo.
+                        "busca_onu_sin_autorizar", "autoriza_onu", "lee_onu",
+                        "lista_zonas_de_red")
 
 
 def _es_de_sistema(h) -> bool:
@@ -1983,7 +1990,8 @@ def guardar_localidades(tenant: str, localidades: list[dict]) -> TenantConfig:
     return _editar(tenant, lambda doc: _mutar_localidades(doc, localidades))
 
 
-def _mutar_ocupacion_ip(doc: dict, ocupacion: dict, completa: bool) -> None:
+def _mutar_ocupacion_ip(doc: dict, ocupacion: dict, completa: bool,
+                        por_zona: dict | None = None) -> None:
     """
     Reemplaza ENTERA la ocupacion de direcciones IP -- ver
     TenantConfig.ocupacion_ip. Mismo criterio que localidades y precios: lo
@@ -1999,12 +2007,84 @@ def _mutar_ocupacion_ip(doc: dict, ocupacion: dict, completa: bool) -> None:
     doc["ocupacion_ip"] = ocupacion
     doc["ocupacion_ip_completa"] = bool(completa)
     doc["ocupacion_ip_actualizado_en"] = datetime.now(timezone.utc).isoformat()
+    if por_zona is not None:
+        doc["ocupacion_ip_por_zona"] = por_zona
 
 
 def guardar_ocupacion_ip(tenant: str, ocupacion: dict,
-                         completa: bool) -> TenantConfig:
+                         completa: bool, por_zona: dict | None = None) -> TenantConfig:
     return _editar(tenant,
-                   lambda doc: _mutar_ocupacion_ip(doc, ocupacion, completa))
+                   lambda doc: _mutar_ocupacion_ip(doc, ocupacion, completa, por_zona))
+
+
+#: Cuantos servidores y cuantos prefijos por servidor. Son los de un ISP, no
+#: miles: un tope evita que un formulario roto escriba una lista sin fin.
+MAXIMO_DE_ZONAS_CON_RANGO = 50
+MAXIMO_DE_PREFIJOS_POR_ZONA = 64
+
+
+def rangos_validos(pools) -> list[dict]:
+    """Los rangos de cada servidor, limpios, o `ErrorEdicion` con el porque.
+
+    LA VALIDACION VA ACA Y NO EN EL ESQUEMA, a proposito (25/11/2026). Un
+    validador nuevo en `PoolDeIp` haria que el motor rechace la configuracion
+    ENTERA de una empresa que ya tenga un rango mal escrito guardado --y un
+    motor que no puede leer su configuracion no atiende a nadie, que es lo que
+    paso el 03/09/2026--. Aca se frena lo que se GUARDA de ahora en adelante;
+    lo que ya estaba lo lee estricto quien lo usa (`alta_de_cliente` compara
+    por /24 exacto).
+    """
+    from nucleo.herramientas.ocupacion_ip import normalizar_prefijo
+
+    if not isinstance(pools, list) or len(pools) > MAXIMO_DE_ZONAS_CON_RANGO:
+        raise ErrorEdicion(
+            f"Los rangos son una lista de hasta {MAXIMO_DE_ZONAS_CON_RANGO} servidores.")
+    limpios, zonas = [], set()
+    for p in pools:
+        if not isinstance(p, dict):
+            raise ErrorEdicion("Cada servidor lleva su número de zona y sus rangos.")
+        zona = p.get("zona_id")
+        if isinstance(zona, bool) or not isinstance(zona, int) or zona <= 0:
+            raise ErrorEdicion("El número de zona es un entero positivo.")
+        if zona in zonas:
+            raise ErrorEdicion(f"La zona {zona} aparece dos veces.")
+        zonas.add(zona)
+        crudos = p.get("prefijos")
+        if not isinstance(crudos, list) or len(crudos) > MAXIMO_DE_PREFIJOS_POR_ZONA:
+            raise ErrorEdicion(
+                f"Los rangos de la zona {zona} son una lista de hasta "
+                f"{MAXIMO_DE_PREFIJOS_POR_ZONA}.")
+        prefijos = []
+        for crudo in crudos:
+            pref = normalizar_prefijo(crudo)
+            if not pref:
+                raise ErrorEdicion(
+                    f"«{str(crudo)[:30]}» no es un rango /24. Se escribe así: 172.16.9.")
+            if pref.startswith("169.254.") or pref.startswith("0.") \
+                    or pref.startswith("127.") or int(pref.split(".")[0]) >= 224:
+                raise ErrorEdicion(
+                    f"«{pref}» no puede ser un rango de clientes (es de uso reservado).")
+            if pref not in prefijos:
+                prefijos.append(pref)
+        nombre = str(p.get("zona_nombre") or "").strip()[:80]
+        limpios.append({"zona_id": zona, "zona_nombre": nombre, "prefijos": prefijos})
+    return limpios
+
+
+def _mutar_rangos_de_ip(doc: dict, pools: list[dict], prudente: bool | None) -> None:
+    """Reemplaza ENTERA la lista de rangos: la pantalla manda la de todos los
+    servidores en cada guardado, como los planes de venta. La opcion de las IP
+    mal escritas solo se toca si llega."""
+    doc["pools_de_ip"] = pools
+    if prudente is not None:
+        doc["contar_ip_mal_escritas"] = bool(prudente)
+
+
+def guardar_rangos_de_ip(tenant: str, pools, prudente: bool | None = None) -> TenantConfig:
+    limpios = rangos_validos(pools)
+    if prudente is not None and not isinstance(prudente, bool):
+        raise ErrorEdicion("La opción de las IP mal escritas es sí o no.")
+    return _editar(tenant, lambda doc: _mutar_rangos_de_ip(doc, limpios, prudente))
 
 
 def _mutar_precios(doc: dict, precios: list[dict]) -> None:

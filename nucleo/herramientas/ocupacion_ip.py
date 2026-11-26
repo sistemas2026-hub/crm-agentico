@@ -111,6 +111,7 @@ def sincronizar(herramienta, tenant: str | None = None,
     """Recorre TODO el listado y devuelve que esta ocupado, por prefijo.
 
         {"ocupacion": {"172.16.9.": [2, 3, 7, ...]},
+         "por_zona": {"20049": {"172.16.9.": 211, ...}},
          "leidos": 7679,
          "sin_ip": 12,
          "ilegibles": ["no-es-una-ip", ...],
@@ -136,6 +137,11 @@ def sincronizar(herramienta, tenant: str | None = None,
     url = url_de(herramienta, variables_tenant=variables_tenant)
 
     ocupacion: dict[str, set] = {}
+    #  CUANTOS CLIENTES DE CADA ZONA EN CADA PREFIJO (25/11/2026). No cambia
+    #  lo de arriba --la ocupacion sigue siendo global por prefijo--: sirve
+    #  para SUGERIR los rangos de cada servidor. Solo conteos.
+    por_zona: dict[str, dict[str, int]] = {}
+    campo_zona = getattr(herramienta, "campo_zona_sync", "") or ""
     leidos = sin_ip = 0
     ilegibles: list[str] = []
     completo = False
@@ -190,6 +196,10 @@ def sincronizar(herramienta, tenant: str | None = None,
                     ilegibles.append(redactar(crudo[:40]))
                 continue
             ocupacion.setdefault(pref, set()).add(ultimo)
+            zona = _zona_de(fila.get(campo_zona)) if campo_zona else ""
+            if zona:
+                cuenta = por_zona.setdefault(zona, {})
+                cuenta[pref] = cuenta.get(pref, 0) + 1
 
         if not filas or len(filas) < TAMANIO_PAGINA:
             completo = True
@@ -201,11 +211,141 @@ def sincronizar(herramienta, tenant: str | None = None,
 
     return {
         "ocupacion": {p: sorted(o) for p, o in sorted(ocupacion.items())},
+        "por_zona": {z: dict(sorted(c.items())) for z, c in sorted(por_zona.items())},
         "leidos": leidos,
         "sin_ip": sin_ip,
         "ilegibles": ilegibles,
         "completo": completo,
     }
+
+
+def _zona_de(valor) -> str:
+    """El id de la zona de una fila, como texto, o vacio.
+
+    El proveedor la manda como objeto `{id, nombre}` (medido el 25/11/2026: 300
+    de 300 filas). Se acepta tambien el id suelto. Un nombre suelto NO: casarlo
+    con el catalogo seria adivinar, y esto es para sugerir, no para inventar.
+    """
+    if isinstance(valor, dict):
+        valor = valor.get("id")
+    if isinstance(valor, bool):
+        return ""
+    if isinstance(valor, int):
+        return str(valor) if valor > 0 else ""
+    texto = str(valor or "").strip()
+    return texto if texto.isdigit() and int(texto) > 0 else ""
+
+
+#: Cuantos clientes de una zona tiene que haber en un prefijo para SUGERIRLO
+#: como rango de esa zona. Medido el 14/11/2026: los pools de verdad tienen
+#: cientos; decenas de prefijos tienen UNO (equipos mal cargados, link-local,
+#: LANs privadas metidas en el campo de la IP). Diez deja afuera el ruido y no
+#: esconde un pool nuevo que se este empezando a llenar.
+MINIMO_PARA_SUGERIR = 10
+
+
+def sugeridos_por_zona(por_zona: dict) -> dict[str, list[dict]]:
+    """Los prefijos que conviene SUGERIR para cada zona, de mas a menos usado.
+
+        {"20049": [{"prefijo": "172.16.9.", "clientes": 211}, ...]}
+
+    Fuera siempre `169.254.x` (link-local: la direccion que un equipo se da
+    solo cuando no hay DHCP) aunque tenga clientes. Es una sugerencia: la
+    empresa la revisa y la guarda, o no.
+
+    CADA UNO DICE SI ES DE RED PRIVADA (`privado`), y la pantalla solo llena
+    sola los privados. Medido el 25/11/2026 en la primera empresa: junto a sus
+    25 pools `172.16.x` aparecian 51 prefijos `168.0.x`/`168.16.x` --con el
+    mismo tercer numero que los `172.16.x`-- con decenas de clientes cada uno.
+    Que son (una red publica de verdad, o direcciones mal tecleadas) no lo
+    sabe el codigo: se muestran aparte y lo decide una persona.
+    """
+    import ipaddress as _ip
+
+    def _privado(pref: str) -> bool:
+        try:
+            return _ip.ip_address(f"{pref}1").is_private
+        except ValueError:
+            return False
+
+    salida: dict[str, list[dict]] = {}
+    for zona, conteos in (por_zona or {}).items():
+        filas = [{"prefijo": p, "clientes": int(n), "privado": _privado(p)}
+                 for p, n in (conteos or {}).items()
+                 if int(n) >= MINIMO_PARA_SUGERIR and not str(p).startswith("169.254.")]
+        if filas:
+            salida[str(zona)] = sorted(filas, key=lambda f: (-f["clientes"], f["prefijo"]))
+    return salida
+
+
+def sombra_de_mal_escritas(ocupacion: dict) -> dict[str, set[int]]:
+    """Por TERCER numero del prefijo, los ultimos octetos que tienen clientes
+    cuya IP NO es de red privada.
+
+        {"4": {25, 31, ...}}   <- hay un 168.16.4.25 y un 168.0.4.31
+
+    POR QUE EXISTE  --  25/11/2026. Para la empresa cuyos clientes tengan IP
+    MAL ESCRITAS en el proveedor: la IP real de esos clientes no esta en
+    ningun lado que la plataforma pueda leer, asi que una direccion del rango
+    puede aparecer libre y estar en uso. Es una opcion de la empresa
+    (`contar_ip_mal_escritas`), apagada de fabrica.
+
+    LA PRIMERA EMPRESA LA TIENE APAGADA, y la historia vale: se construyo
+    creyendo que sus 2.360 IP `168.x`/`100.x` eran errores, y al sacar la
+    lista resulto que 2.356 eran de clientes CANCELADOS --el usuario confirmo
+    que al cancelar se les cambia la IP para liberar la verdadera--. No hay
+    nada que proteger ahi. Medir antes de tratar un dato raro como error.
+
+    La regla, generica y declarada: una IP fuera de red privada se toma como
+    un posible error de digitacion en los PRIMEROS numeros, y la direccion de
+    cualquier rango con los mismos dos ultimos numeros no se ofrece. Es
+    conservadora a proposito: pierde direcciones libres (medido: de 951, 1.398
+    y 359 libres por servidor quedan 299, 693 y 330), y a cambio no le da a un
+    cliente nuevo la IP de uno que ya existe.
+
+    No arregla nada en el proveedor: el arreglo de verdad es corregir esas
+    fichas. Esto evita que el error se reparta mientras tanto.
+    """
+    import ipaddress as _ip
+
+    sombra: dict[str, set[int]] = {}
+    for pref, octetos in (ocupacion or {}).items():
+        try:
+            if _ip.ip_address(f"{pref}1").is_private:
+                continue
+        except ValueError:
+            continue
+        partes = str(pref).rstrip(".").split(".")
+        if len(partes) != 3:
+            continue
+        sombra.setdefault(partes[2], set()).update(int(o) for o in (octetos or []))
+    return sombra
+
+
+def tomadas_en(prefijo: str, ocupacion: dict, sombra: dict | None = None) -> set[int]:
+    """Los ultimos octetos de ese /24 que NO se ofrecen: los que tiene un
+    cliente, y --si se pasa la sombra-- los que podria tener uno con la IP mal
+    escrita."""
+    tomadas = set(int(o) for o in ((ocupacion or {}).get(prefijo) or []))
+    if sombra:
+        partes = str(prefijo).rstrip(".").split(".")
+        if len(partes) == 3:
+            tomadas |= sombra.get(partes[2], set())
+    return tomadas
+
+
+def normalizar_prefijo(texto) -> str:
+    """'172.16.9', '172.16.9.' o '172.16.9.0/24' -> '172.16.9.'. Vacio si no es
+    un /24 de IPv4. Lo que la persona escribe pasa por aca antes de guardarse."""
+    t = str(texto or "").strip()
+    if t.endswith("/24"):
+        t = t[:-3]
+    partes = t.rstrip(".").split(".")
+    if len(partes) == 4 and partes[3] == "0":
+        partes = partes[:3]
+    if len(partes) != 3 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in partes):
+        return ""
+    return ".".join(str(int(p)) for p in partes) + "."
 
 
 def libres_de(prefijo: str, ocupados, cuantas: int | None = None) -> list[str]:

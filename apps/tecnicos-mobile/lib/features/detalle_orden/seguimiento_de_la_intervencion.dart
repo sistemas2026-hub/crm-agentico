@@ -42,6 +42,7 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
     this.mostrarBloqueoAbierto = true,
     this.pendientesDeSubir = 0,
     this.cierreEnFinalizar = false,
+    this.sinInicio = false,
   });
 
   /// Lo que devolvió el backend, o `null` si **nunca se descargó** en este
@@ -139,6 +140,12 @@ class SeguimientoDeLaIntervencion extends StatefulWidget {
   /// terminar lo mismo. Con esto encendido el botón no se ofrece, y bloquear
   /// —lo que hay que poder hacer siempre— va primero.
   final bool cierreEnFinalizar;
+
+  /// Sin el botón «Inicio» (el usuario, 26/11/2026, en la instalación:
+  /// «la pantalla de reporte, quita inicio»). Para cerrar no hace falta: el
+  /// servidor da por iniciada la intervención en la que el técnico llegó al
+  /// sitio (`seguimiento_campo.registrar`, `_llego_al_sitio`).
+  final bool sinInicio;
 
   @override
   State<SeguimientoDeLaIntervencion> createState() =>
@@ -531,7 +538,7 @@ class _SeguimientoDeLaIntervencionState
         continue;
       }
       // El INICIO solo antes del primer INICIO.
-      if (momento == 'inicio' && huboInicio) {
+      if (momento == 'inicio' && (huboInicio || widget.sinInicio)) {
         continue;
       }
       botones.add(

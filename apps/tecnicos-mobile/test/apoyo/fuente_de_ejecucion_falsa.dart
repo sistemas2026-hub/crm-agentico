@@ -31,6 +31,10 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     this.sinOrden = false,
     this.sinContexto = false,
     this.correccionJson,
+    this.tipoCodigo = 'ftth_instalacion',
+    this.materialHabitual = const <Map<String, dynamic>>[],
+    this.kitDado = const <Map<String, dynamic>>[],
+    this.puntosDeTv,
   })  : campos = campos ?? camposTipicos,
         requisitos = requisitos ?? requisitosTipicos,
         valores = valores ?? <String, dynamic>{},
@@ -47,6 +51,22 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
   /// Lo que el supervisor devolvio para rehacer, como lo guarda la base
   /// (JSON en texto). Nulo = la orden no viene devuelta.
   final String? correccionJson;
+
+  /// El tipo de trabajo. Uno que diga «instalacion» lleva contrato y ordena
+  /// la pantalla distinto (26/11/2026).
+  final String tipoCodigo;
+
+  /// El material que se precarga en este tipo de trabajo (26/11/2026).
+  final List<Map<String, dynamic>> materialHabitual;
+
+  /// El kit del técnico, como lo guarda el teléfono.
+  final List<Map<String, dynamic>> kitDado;
+
+  /// Los puntos de TV del tipo de trabajo, o nulo.
+  final Map<String, dynamic>? puntosDeTv;
+
+  /// Los consumos que la pantalla encoló.
+  final List<Map<String, dynamic>> consumos = <Map<String, dynamic>>[];
 
   /// Los pasos del protocolo de la plantilla. Vacío es una plantilla sin pasos.
   final List<Map<String, dynamic>> pasos;
@@ -198,7 +218,7 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
         'cliente_nombre': 'Carlos Gómez Rincón',
         'direccion': 'Cra 45 #12-88, Barrio San José',
         'tipo_nombre': 'Instalación FTTH',
-        'tipo_codigo': 'ftth_instalacion',
+        'tipo_codigo': tipoCodigo,
         'schema_version': 1,
         'correccion_json': correccionJson,
         // La ficha que el motor congeló al despachar. Los valores son los
@@ -226,6 +246,8 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
       evidenciasCapturadas: evidencias,
       materialesUsados: materiales,
       pasos: pasos,
+      materialHabitual: materialHabitual,
+      puntosDeTv: puntosDeTv,
     );
   }
 
@@ -285,7 +307,36 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     required String profileId,
     required String ordenId,
   }) async =>
-      materiales;
+      <Map<String, dynamic>>[...materiales, ...consumos];
+
+  @override
+  Future<List<Map<String, dynamic>>> kit({
+    required String orgId,
+    required String profileId,
+  }) async =>
+      kitDado;
+
+  @override
+  Future<void> encolarConsumo({
+    required String id,
+    required String orgId,
+    required String profileId,
+    required String codigo,
+    required String nombre,
+    required String cantidad,
+    String serie = '',
+    required String ordenId,
+    int? ordenNumero,
+  }) async {
+    consumos.add(<String, dynamic>{
+      'id': id,
+      'material_codigo': codigo,
+      'material_nombre': nombre,
+      'cantidad': cantidad,
+      'serie': serie,
+      'estado': 'pendiente',
+    });
+  }
 
   @override
   Future<void> transicionar({

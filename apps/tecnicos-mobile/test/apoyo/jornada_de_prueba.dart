@@ -104,6 +104,7 @@ class JornadaDePrueba {
     String perfilDe = perfil,
     List<Map<String, dynamic>>? campos,
     List<Map<String, dynamic>>? evidencias,
+    String tipoCodigo = 'ftth_instalacion',
   }) =>
       db.upsertOrden(
         orgId: org,
@@ -119,7 +120,7 @@ class JornadaDePrueba {
           'resumen': 'Diagnóstico en domicilio',
           'tipo': <String, dynamic>{
             'nombre': 'Instalación FTTH',
-            'codigo': 'ftth_instalacion',
+            'codigo': tipoCodigo,
             'schema_version': 1,
           },
           'schema': <String, dynamic>{

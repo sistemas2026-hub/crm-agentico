@@ -125,6 +125,33 @@ export async function guardarAjustes(cookies, valores) {
  * @param {any} cookies
  * @param {string} id
  */
+/**
+ * Pide (otra vez) que el cliente de un contrato firmado se cree en el sistema
+ * del proveedor (25/11/2026). No crea nada en esta llamada: el backend lo
+ * encola y el contrato dice cómo va. Ver campo/contrato_views.py.
+ * @param {any} cookies
+ * @param {string} contratoId
+ */
+export async function crearEnElIsp(cookies, contratoId) {
+  return apiRequest(`/campo/contratos/${contratoId}/crear-en-el-isp/`, { method: 'POST', body: {} }, cookies);
+}
+
+/**
+ * Gestión dice, después de mirar en el proveedor, si el cliente de un contrato
+ * quedó creado (25/11/2026). Es la única salida de un alta «por revisar»: el
+ * sistema ya dijo que no sabe, y no adivina.
+ * @param {any} cookies
+ * @param {string} contratoId
+ * @param {boolean} quedoCreado
+ * @param {string} idCliente el número del cliente en el proveedor, si quedó
+ */
+export async function resolverAlta(cookies, contratoId, quedoCreado, idCliente = '') {
+  /** @type {Record<string, any>} */
+  const body = { quedo_creado: quedoCreado };
+  if (quedoCreado) body.id_cliente = idCliente;
+  return apiRequest(`/campo/contratos/${contratoId}/resolver-alta/`, { method: 'POST', body }, cookies);
+}
+
 export async function reintentar(cookies, id) {
   // Reintenta lo que quedó pendiente con un sistema externo (mover o cerrar
   // el ticket del ISP, el aviso al cliente). El backend decide qué falta y no

@@ -5265,6 +5265,13 @@ herramientas:
     # base_url/endpoint/auth -- no llama a la API distinto, solo la
     # recorre entera en vez de contar con un filtro puntual.
     sincroniza_localidades: true
+    # Y la FUENTE de que direcciones IP estan tomadas (25/11/2026): el mismo
+    # listado, recorrido por otro job (`nucleo/herramientas/ocupacion_ip.py`).
+    # Sin esta marca la app no podia ofrecerle al tecnico ninguna IP libre:
+    # nadie la habia declarado y la lectura no corria nunca. Lee `ip` y, para
+    # sugerir los rangos de cada servidor, `zona` (un objeto {id, nombre} en
+    # las 300 filas medidas ese dia). Solo cuenta: no guarda nada del cliente.
+    sincroniza_ocupacion_ip: true
     base_url: https://api.wisphub.io
     endpoint: /api/clientes/
     auth_ref: WISPHUB_API_KEY
@@ -6440,6 +6447,233 @@ herramientas:
     filtros_verificados:
       id_servicio: {param: id_servicio, tipo: texto, verificado_el: 2026-11-10}
       coordenadas: {param: coordenadas, tipo: texto, verificado_el: 2026-11-10}
+
+  # --- EL ALTA DE UN CLIENTE DESDE LA APP DE CAMPO (25/11/2026) --------------
+  # Tres herramientas, una por cada cosa que el motor necesita de WispHub para
+  # crear un cliente: crearlo, preguntar que cliente tiene una IP y leer una
+  # tarea. NINGUNA es del modelo --no estan en el 'puede_consultar' de ningun
+  # rol, y el esquema rechaza que la primera lo este--: las llama el backend
+  # cuando un tecnico confirma un contrato, por la ruta
+  # /interno/contrato/<id>/crear-cliente y por la puerta humana. Ver
+  # nucleo/seguimiento/alta_de_cliente.py y la ficha
+  # SPEC/objetivos/agente-de-campo-para-instalaciones.md.
+  - nombre: crear_cliente_del_contrato
+    tipo: http
+    descripcion: >
+      Crea en WispHub al cliente de un contrato que se firmo desde la app de
+      campo. NO la llama el modelo: la llama el backend cuando el tecnico
+      confirma el contrato.
+    solo_lectura: false
+    requiere_confirmacion: true
+    # SIN 'invocable_por_servicio', y el esquema lo rechaza si alguien lo
+    # pone: por la ruta generica entraria por la puerta autonoma, sin la
+    # persona que el alta exige. Sale SOLO por su ruta propia.
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    # La zona va en la RUTA. SIN `?instalacion`: Rapilink no usa el modulo de
+    # instalaciones (medido el 12/11/2026).
+    endpoint: /api/clientes/agregar-cliente/{id_zona}/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    crea_cliente: true
+    # Decision del usuario, 25/11/2026: el usuario del router wifi es `admin`
+    # en todos los equipos. La CLAVE no va aca: es un secreto (ver `secretos`).
+    argumentos_fijos:
+      usuario_router_wifi: admin
+    parametros_de_alta:
+      zona: id_zona
+      # El nombre del cliente en el router de red es su nombre completo: asi
+      # estan 297 de los 300 clientes mas recientes (medido el 25/11/2026). La
+      # API solo exige que no vaya vacio.
+      nombre_en_router: "{nombre} {apellido}"
+      # La respuesta es `202` + una tarea: el cliente se crea en segundo plano.
+      campo_tarea: task_id
+      # dato de la plataforma -> campo de WispHub. Los TRES primeros son los
+      # unicos cuya obligatoriedad esta verificada en vivo; los demas salen
+      # de la documentacion y de una creacion de prueba de agosto. Lo que no
+      # esta en esta lista NO se manda -- cuatro contrasenas entre ello.
+      campos:
+        nombre_en_router: usuario_rb
+        ip: ip
+        plan: plan_internet
+        nombre: nombre
+        apellido: apellidos
+        documento: cedula
+        correo: email
+        telefono: telefono
+        direccion: direccion
+        barrio: localidad
+        coordenadas: coordenadas
+        nota: comentarios
+      # campo de WispHub -> NOMBRE del secreto de la empresa (Configuracion ->
+      # Credenciales). Si no esta cargado, el campo no se manda y el resultado
+      # del alta lo dice.
+      secretos:
+        password_router_wifi: CLAVE_ROUTER_WIFI
+    # SIN 'requeridos' NI 'filtros_verificados': esos dos describen lo que el
+    # MODELO puede proponer, y esta herramienta no la propone ningun modelo.
+    # Sus argumentos los arma el motor con 'parametros_de_alta'.
+
+  - nombre: buscar_cliente_por_ip
+    tipo: http
+    descripcion: >
+      Dice que cliente de WispHub tiene una direccion IP. La usa el alta, antes
+      de crear (para no pisar una IP tomada) y despues (para confirmar leyendo
+      que el cliente quedo creado). No la llama el modelo.
+    solo_lectura: true
+    # SIN 'invocable_por_servicio' y SIN 'filtros_verificados': con las dos,
+    # la ruta generica devolvia la ficha cruda del cliente que tuviera una IP
+    # a cualquier servicio (revision de PII, 25/11/2026). El alta arma sus
+    # argumentos sola.
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/clientes/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    busca_cliente_por_ip: true
+    parametros_de_busqueda_por_ip:
+      # VERIFICADO el 25/11/2026 con el valor imposible: `ip=203.0.113.250`
+      # devuelve 0 de 7.711, y con la IP de un cliente real devuelve 1 fila,
+      # ese cliente.
+      ip: ip
+      campo_id: id_servicio
+      # LO QUE SE ESCRIBE EN `usuario_rb` SE LEE EN `servicio` (verificado en
+      # agosto creando un cliente de prueba). Por eso son dos nombres.
+      campo_nombre_en_router: servicio
+      campo_documento: cedula
+
+  - nombre: leer_tarea_de_wisphub
+    tipo: http
+    descripcion: >
+      Lee el estado de un trabajo que WispHub hace en segundo plano. La usa el
+      alta para saber por que un cliente NO quedo creado; que SI quedo lo dice
+      buscar_cliente_por_ip, nunca esto. No la llama el modelo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/tasks/{task_id}/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    lee_tarea: true
+    parametros_de_tarea:
+      identificador: task_id
+      campo_estado: status
+      # `SUCCESS` esta verificado (agosto). OJO: una tarea puede decir SUCCESS
+      # con un error de texto adentro, y por eso «termino» no es «sirvio».
+      estados_terminada: [SUCCESS]
+      # `FAILURE` y `REVOKED` NO estan medidos: son los nombres habituales de
+      # ese sistema de tareas. Si WispHub usa otros, el alta sigue funcionando
+      # --confirma leyendo al cliente--, solo tarda mas en decir que fallo.
+      estados_fallida: [FAILURE, REVOKED]
+
+  # --- AUTORIZAR LA ONU DE UNA INSTALACION DESDE LA APP (26/11/2026) ----------
+  # Cuatro herramientas de SmartOLT: buscar la ONU que espera autorizacion,
+  # autorizarla, leerla para confirmar y listar las zonas. NINGUNA es del
+  # modelo (no estan en ningun 'puede_consultar' y el esquema lo rechaza): las
+  # llama el backend cuando un tecnico toca «Activar ONU», por la ruta
+  # /interno/orden/<id>/activar-onu y la puerta humana. Medido en vivo, solo
+  # GET, el 26/11/2026: skill smartolt-api → «Autorizar una ONU nueva». Ver
+  # nucleo/seguimiento/activar_onu.py.
+  - nombre: buscar_onu_sin_autorizar
+    tipo: http
+    descripcion: >
+      Las ONU que esperan autorizacion en SmartOLT, filtradas por serial. La usa
+      «Activar ONU» antes de autorizar: solo se autoriza la que aparece aca. No
+      la llama el modelo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    # Sin OLT en la ruta: busca en todas. `sn` filtra (CONTAINS; verificado
+    # con un serial imposible → 0 filas, 26/11/2026).
+    endpoint: /api/onu/unconfigured_onus
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: response
+    busca_onu_sin_autorizar: true
+
+  - nombre: autorizar_onu_en_smartolt
+    tipo: http
+    descripcion: >
+      Autoriza en SmartOLT la ONU de una instalacion, en el puerto donde la ve el
+      equipo central. NO la llama el modelo: la pide el tecnico desde la app.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/authorize_onu
+    metodo: POST
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    # Formulario y no JSON: lo pide el OpenAPI del proveedor. Y «tarda decenas
+    # de segundos» con placa y puerto: el tope general de 15 s no alcanza.
+    form_urlencoded: true
+    timeout_segundos: 90
+    autoriza_onu: true
+    parametros_de_onu:
+      # Como autoriza hoy Rapilink (medido en las 82 de la ultima semana): con
+      # zona, VLAN y el nombre del cliente; sin caja, sin direccion, sin modo
+      # ni perfiles de velocidad (la WAN se configura en la pagina de la ONU).
+      campos:
+        olt: olt_id
+        tipo_pon: pon_type
+        serial: sn
+        placa: board
+        puerto: port
+        tipo: onu_type
+        zona: zone
+        vlan: vlan
+        nombre: name
+      fila:
+        olt: olt_id
+        tipo_pon: pon_type
+        serial: sn
+        placa: board
+        puerto: port
+        tipo: onu_type_name
+      serial_en_la_lectura: sn
+      campo_serial_autorizada: sn
+      campo_nombre_de_zona: name
+
+  - nombre: leer_onu_autorizada
+    tipo: http
+    descripcion: >
+      La ficha de una ONU ya autorizada en SmartOLT. La usa «Activar ONU» para
+      saber si ya estaba y para confirmar que quedo. No la llama el modelo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/onu/get_onu_details/{sn}
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: onu_details
+    lee_onu: true
+
+  - nombre: listar_zonas_de_smartolt
+    tipo: http
+    descripcion: >
+      Las zonas de la red en SmartOLT (barrios o sectores), para que el tecnico
+      confirme la de la ONU. No la llama el modelo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/system/get_zones
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    extraer_de: response
+    lista_zonas_de_red: true
 
   - nombre: reiniciar_ont
     resumen: "Reinicia en remoto el equipo del cliente."

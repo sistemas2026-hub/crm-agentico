@@ -6,7 +6,7 @@
  * porque el cliente va a preguntar y alguien va a tener que contestarle.
  */
 import { fail } from '@sveltejs/kit';
-import { decidir, leerBandeja, reintentar } from '$lib/server/v2/solicitudes.js';
+import { crearEnElIsp, decidir, leerBandeja, reintentar, resolverAlta } from '$lib/server/v2/solicitudes.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, url }) {
@@ -69,6 +69,51 @@ export const actions = {
     } catch (/** @type {any} */ err) {
       return fail(err?.status === 403 ? 403 : 400, {
         error: err?.message || 'No se pudo reintentar.',
+        id
+      });
+    }
+  },
+
+  //  EL CLIENTE NO QUEDÓ CREADO EN EL PROVEEDOR, y una persona pide que se
+  //  intente otra vez (25/11/2026). El backend no lo crea en esta llamada: lo
+  //  encola, y la fila dice cómo va al recargar.
+  async crearEnElIsp({ request, cookies }) {
+    const form = await request.formData();
+    const id = form.get('id')?.toString();
+    const contrato = form.get('contrato')?.toString();
+    if (!contrato) return fail(400, { error: 'Falta el contrato.', id });
+    try {
+      const r = await crearEnElIsp(cookies, contrato);
+      return { altaPedida: true, id, alta: r?.contrato?.alta ?? null, estado: r?.contrato?.estado ?? '' };
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        error: err?.message || 'No se pudo pedir que se cree al cliente.',
+        id
+      });
+    }
+  },
+
+  //  NADIE SABE SI EL CLIENTE QUEDÓ CREADO, y gestión lo dice después de mirar
+  //  en el proveedor (25/11/2026). `quedo` llega como 'si' o 'no' del botón
+  //  que se tocó: cualquier otra cosa no se manda, para que un formulario a
+  //  medias no se lea como «no quedó».
+  async resolverAlta({ request, cookies }) {
+    const form = await request.formData();
+    const id = form.get('id')?.toString();
+    const contrato = form.get('contrato')?.toString();
+    const quedo = form.get('quedo')?.toString();
+    const numero = (form.get('id_cliente')?.toString() ?? '').trim();
+    if (!contrato) return fail(400, { error: 'Falta el contrato.', id });
+    if (quedo !== 'si' && quedo !== 'no') return fail(400, { error: 'Di si el cliente quedó creado o no.', id });
+    if (quedo === 'si' && !numero) {
+      return fail(400, { error: 'Escribe el número del cliente tal como aparece en el proveedor.', id });
+    }
+    try {
+      const r = await resolverAlta(cookies, contrato, quedo === 'si', numero);
+      return { altaResuelta: true, id, estado: r?.contrato?.estado ?? '' };
+    } catch (/** @type {any} */ err) {
+      return fail(err?.status === 403 ? 403 : 400, {
+        error: err?.message || 'No se pudo guardar la revisión.',
         id
       });
     }

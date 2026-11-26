@@ -250,6 +250,36 @@ class AjustesDecisionView(APIView):
         return self._respuesta(org)
 
 
+def _contratos_de(solicitudes) -> dict:
+    """{id de la solicitud: como va su contrato y su alta en el ISP}  --  25/11/2026
+
+    POR QUE ESTA ACA. Esta bandeja es donde la oficina mira las instalaciones,
+    y hoy es el UNICO lugar donde se puede ver que un cliente no quedo creado
+    en el proveedor: la app que los tecnicos tienen instalada no lo muestra.
+    Sin esto, un alta que fallo seria un fallo en silencio -- el contrato
+    firmado, el cliente sin crear, y nadie enterado.
+
+    UNA consulta para todas las filas. SIN datos del cliente: el numero del
+    contrato, su estado, el numero del cliente en el proveedor y como va el
+    alta. El vigente de cada solicitud: los anulados no cuentan.
+    """
+    from campo.contrato import ContratoDeServicio
+
+    ids = [s.id for s in solicitudes]
+    if not ids:
+        return {}
+    salida = {}
+    for c in (ContratoDeServicio.objects.filter(solicitud_id__in=ids)
+              .exclude(estado=ContratoDeServicio.ANULADO).order_by("firmado_en")):
+        salida[c.solicitud_id] = {
+            "id": str(c.id), "numero": c.numero, "estado": c.estado,
+            "estado_etiqueta": c.get_estado_display(),
+            "servicio_isp": c.servicio_isp or None,
+            "alta": c.como_dict()["alta"],
+        }
+    return salida
+
+
 class BandejaView(APIView):
     """Las solicitudes que llegaron, para decidir sobre ellas."""
 
@@ -273,6 +303,13 @@ class BandejaView(APIView):
         # juntas, con el motivo (12/11/2026).
         if request.query_params.get("automatica") in ("1", "true"):
             qs = qs.filter(decision_automatica=True)
+
+        #  SE LEEN PRIMERO Y SE ARMAN DESPUES (25/11/2026): hace falta saber
+        #  cuales son para traer el contrato de todas en UNA consulta, y no
+        #  una por fila.
+        filas = list(qs.select_related("revisada_por__user")
+                       .order_by("-enviada_en")[:200])
+        contratos = _contratos_de(filas)
 
         return Response({"solicitudes": [{
             "id": str(s.id),
@@ -349,8 +386,11 @@ class BandejaView(APIView):
             # persona o Dexter) y el motivo de la pre-factibilidad. Pisa el
             # 'revisada_por' de arriba con la misma regla mas el autor Dexter.
             **decision.para_pantalla(s),
-        } for s in qs.select_related("revisada_por__user")
-                     .order_by("-enviada_en")[:200]]})
+
+            #  COMO VA SU CONTRATO, Y SI EL CLIENTE QUEDO CREADO EN EL ISP.
+            #  `None` si todavia nadie lo firmo.
+            "contrato": contratos.get(s.id),
+        } for s in filas]})
 
 
 class DecidirView(APIView):

@@ -242,7 +242,9 @@ void main() {
     testWidgets('Un obligatorio vacio impide cerrar, y se dice cual',
         (WidgetTester t) async {
       pantallaAlta(t);
-      await t.pumpWidget(app(FuenteDeEjecucionFalsa()));
+      // El checklist de cierre no va en una instalación desde el 26/11/2026:
+      // estas pruebas lo miran en un trabajo que sí lo tiene.
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(tipoCodigo: 'ftth_correctivo')));
       await t.pumpAndSettle();
 
       // Se afirma sobre el texto DEL CHECKLIST, no sobre la etiqueta del
@@ -275,8 +277,11 @@ void main() {
 
   group('5. Finalizar y el checklist dicen lo mismo', () {
     /// Un kit de datos donde lo único que cambia es la respuesta.
+    // El checklist de cierre no va en una instalación desde el 26/11/2026:
+    // estas pruebas lo miran en un trabajo que sí lo tiene.
     FuenteDeEjecucionFalsa conValores(Map<String, dynamic> valores) =>
         FuenteDeEjecucionFalsa(
+          tipoCodigo: 'ftth_correctivo',
           valores: valores,
           evidencias: <Map<String, dynamic>>[
             FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_power_meter'),
@@ -722,7 +727,9 @@ void main() {
       List<Map<String, dynamic>> campos,
     ) async {
       pantallaAlta(t);
-      await t.pumpWidget(app(FuenteDeEjecucionFalsa(campos: campos)));
+      // El checklist de cierre no va en una instalación desde el 26/11/2026:
+      // estas pruebas lo miran en un trabajo que sí lo tiene.
+      await t.pumpWidget(app(FuenteDeEjecucionFalsa(campos: campos, tipoCodigo: 'ftth_correctivo')));
       await t.pumpAndSettle();
     }
 
@@ -823,7 +830,8 @@ void main() {
       //  EL CONTROL, PRIMERO: si el paso no se dibuja, lo de abajo no mide
       //  nada --el botón viejo tampoco estaría--. Es lo que pasó en la
       //  primera versión de esta prueba, y lo descubrió la mutación.
-      expect(find.text('Diagnóstico'), findsWidgets);
+      //  El paso se titula con su número desde el 26/11/2026.
+      expect(find.text('1. Diagnóstico'), findsWidgets);
       expect(find.text('Foto de la ONT'), findsWidgets);
 
       //  EL DEFECTO: este botón vivía dentro del paso, debajo de las fotos,
@@ -831,7 +839,7 @@ void main() {
       expect(find.text('Registrar material usado'), findsNothing);
 
       //  Y la que queda es la que además muestra lo registrado.
-      expect(find.text('Materiales en esta orden'), findsOneWidget);
+      expect(find.text('Material utilizado'), findsOneWidget);
       expect(find.text('Agregar material'), findsOneWidget);
     });
 

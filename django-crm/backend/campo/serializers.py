@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from campo import material_habitual, puntos_de_tv
 from campo.models import AsignacionTrabajo, EvidenciaTrabajo, OrdenTrabajo, WorkType, WorkTypeVersion
 from campo.services.validador import devolucion_vigente
 
@@ -309,6 +310,13 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             # Los pasos del procedimiento ya venian con la plantilla y nadie
             # los entregaba: la aplicacion los dibujaba de ejemplo.
             "pasos": v.esquema.get("pasos", []),
+            # EL MATERIAL QUE SE PRECARGA (26/11/2026): la app lo trae puesto
+            # en «Material utilizado» y el tecnico lo ajusta. Es de la empresa
+            # para este tipo de trabajo, no de la version.
+            "material_habitual": material_habitual.de_tipo(obj.org, v.work_type),
+            # LOS PUNTOS DE TV (26/11/2026): con esto la app calcula, sin señal,
+            # los conectores, el spliter y el cable. Nulo si no aplica.
+            "puntos_de_tv": puntos_de_tv.de_tipo(obj.org, v.work_type),
         }
 
     def get_cliente(self, obj: OrdenTrabajo) -> dict:

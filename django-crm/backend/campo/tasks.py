@@ -1218,3 +1218,120 @@ def avisar_visita_al_cliente(orden_id, org_id, fecha_iso, vuelta=0):
         avisar_visita_al_cliente.apply_async(
             args=[orden_id, org_id, fecha_iso, vuelta + 1], countdown=espera)
     return datos
+
+
+# =============================================================================
+#  EL ALTA DEL CLIENTE EN EL ISP  --  25/11/2026
+# =============================================================================
+#: Cada cuanto se vuelve a mirar un alta que no termino, y cuantas veces. Doce
+#: vueltas de medio minuto son seis minutos: mas que lo que el proveedor tarda
+#: en crear, y menos que lo que un tecnico espera parado en una casa.
+ESPERA_DEL_ALTA = 30
+VUELTAS_DEL_ALTA = 12
+
+#: Activar la ONU (26/11/2026): cada cuanto se vuelve a mirar y hasta cuando.
+ESPERA_DE_LA_ONU = 20
+VUELTAS_DE_LA_ONU = 9
+
+
+@shared_task(name="campo.tasks.activar_onu_en_la_red")
+def activar_onu_en_la_red(org_id: str, activacion_id: str, vuelta: int = 0) -> dict:
+    """Pide la activacion de la ONU y sigue hasta saber (26/11/2026).
+
+    Igual que el alta: una vuelta hace UNA cosa --pedir si esta `pedida`,
+    mirar si esta `en_curso`-- y se encola de nuevo hasta el tope; ahi queda
+    `por_revisar`, nunca «fallida» por no saber. NUNCA LEVANTA.
+    """
+    from campo import activacion_onu as A
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        set_rls_context(org_id)
+        a = (A.ActivacionDeOnu.objects.select_related("orden", "pedida_por__user")
+             .filter(pk=activacion_id, org_id=org_id).first())
+        if a is None:
+            return {"resultado": "", "por_que": "la activacion ya no esta"}
+        if a.estado == A.ActivacionDeOnu.PEDIDA:
+            A.ejecutar(a)
+        elif a.estado == A.ActivacionDeOnu.EN_CURSO:
+            A.comprobar(a)
+        if a.estado == A.ActivacionDeOnu.EN_CURSO:
+            if int(vuelta or 0) >= VUELTAS_DE_LA_ONU:
+                A.rendirse(a)
+            else:
+                try:
+                    activar_onu_en_la_red.apply_async(
+                        args=[org_id, activacion_id, int(vuelta or 0) + 1],
+                        countdown=ESPERA_DE_LA_ONU)
+                except Exception as e:                           # noqa: BLE001
+                    logger.warning("onu: no se pudo volver a encolar (%s)", type(e).__name__)
+                    A.rendirse(a)
+        return {"resultado": a.estado}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("activar la onu: fallo (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        clear_rls_context()
+
+
+@shared_task(name="campo.tasks.crear_cliente_en_el_isp")
+def crear_cliente_en_el_isp(org_id: str, contrato_id: str, vuelta: int = 0) -> dict:
+    """Crea en el ISP al cliente de un contrato firmado, y sigue hasta saber.
+
+    POR QUE UNA TAREA Y NO DENTRO DE LA FIRMA. La app espera 20 segundos una
+    respuesta y el proveedor crea en segundo plano; y CLAUDE.md 12 no deja una
+    transaccion abierta mientras se espera una operacion externa. La firma ya
+    quedo guardada (un hecho); el alta es otro.
+
+    UNA VUELTA HACE UNA SOLA COSA: si el alta esta `pedida`, la pide; si esta
+    `en_curso`, mira si el cliente ya aparecio. Si despues de eso sigue sin
+    resolverse, se encola a si misma para dentro de medio minuto. Al llegar al
+    tope se rinde y queda `por_revisar`, para que una persona de gestion la
+    mire en el proveedor: un alta colgada en silencio es un cliente que nadie
+    sabe si existe, y darla por fallida invitaria a crear otro.
+
+    NINGUNA VUELTA «REINTENTA»: todas mandan el mismo numero de pedido, y el
+    motor no saca dos veces el mismo ni reejecuta uno que fallo.
+
+    NUNCA LEVANTA: lo que pase queda escrito en el contrato.
+    """
+    from campo.contrato import ContratoDeServicio
+    from campo.services import alta_en_el_isp
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        #  EL CONTEXTO ANTES DE LEER: estas tablas tienen RLS, y sin esto el
+        #  `get` no encuentra nada.
+        set_rls_context(org_id)
+        try:
+            contrato = (ContratoDeServicio.objects
+                        .select_related("firmado_por__user")
+                        .get(pk=contrato_id, org_id=org_id))
+        except ContratoDeServicio.DoesNotExist:
+            return {"resultado": "", "por_que": "el contrato ya no esta"}
+
+        if contrato.alta_estado == ContratoDeServicio.ALTA_PEDIDA:
+            alta_en_el_isp.pedir(contrato)
+        elif contrato.alta_estado == ContratoDeServicio.ALTA_EN_CURSO:
+            alta_en_el_isp.comprobar(contrato)
+
+        if (contrato.estado == ContratoDeServicio.FIRMADO
+                and contrato.alta_estado in ContratoDeServicio.ALTA_EN_VUELO):
+            if int(vuelta or 0) >= VUELTAS_DEL_ALTA:
+                alta_en_el_isp.rendirse(contrato)
+            else:
+                try:
+                    crear_cliente_en_el_isp.apply_async(
+                        args=[org_id, contrato_id, int(vuelta or 0) + 1],
+                        countdown=ESPERA_DEL_ALTA)
+                except Exception as e:                           # noqa: BLE001
+                    logger.warning("alta: no se pudo volver a encolar (%s)",
+                                   type(e).__name__)
+                    alta_en_el_isp.rendirse(contrato)
+        return {"resultado": contrato.estado, "alta": contrato.alta_estado,
+                "codigo": contrato.alta_codigo}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("alta del cliente: fallo (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        clear_rls_context()

@@ -5,8 +5,13 @@ import {
   crearPlantilla,
   publicarPlantilla,
   activarPlantilla,
+  guardarMaterialHabitual,
+  lineasDeMaterial,
+  guardarPuntosDeTv,
+  puntosDeTvDel,
   mensajeDePlantilla
 } from '$lib/server/v2/plantillas.js';
+import { leerCatalogo } from '$lib/server/v2/inventario.js';
 import { leerNiveles, guardarNiveles, ponerNivelDeAsunto } from '$lib/server/v2/niveles.js';
 
 /** Los códigos de los tres niveles: los del backend (`campo/niveles.py`). */
@@ -39,14 +44,20 @@ export async function load({ url, cookies }) {
 
   let edicion = null;
   let edicionError = null;
+  //  El catálogo de materiales, para elegir el que se precarga (26/11/2026).
+  //  Solo al editar: la lista de plantillas no lo necesita.
+  let materiales = /** @type {any[]} */ ([]);
   if (editar) {
     try {
-      edicion = await leerPlantilla({ cookies }, editar);
+      [edicion, { materiales }] = await Promise.all([
+        leerPlantilla({ cookies }, editar),
+        leerCatalogo({ cookies })
+      ]);
     } catch (e) {
       edicionError = mensajeDePlantilla(e, 'No se pudo abrir esa plantilla.');
     }
   }
-  return { ...lista, edicion, edicionError, niveles };
+  return { ...lista, edicion, edicionError, niveles, materiales };
 }
 
 /** @param {FormData} f */
@@ -80,6 +91,37 @@ function asuntosYPlazoDel(f) {
 
 /** @type {import('./$types').Actions} */
 export const actions = {
+  //  LOS PUNTOS DE TV (26/11/2026). Aparte de publicar, como el material.
+  puntosDeTv: async ({ request, cookies }) => {
+    const f = await request.formData();
+    try {
+      const r = await guardarPuntosDeTv({ cookies }, String(f.get('id') ?? ''), puntosDeTvDel(f));
+      return {
+        hecho: r.puntos_de_tv.activo
+          ? 'Puntos de TV guardados. Llegan a las órdenes que el teléfono lea desde ahora.'
+          : 'Puntos de TV apagados para este trabajo.'
+      };
+    } catch (e) {
+      return fail(e?.status ?? 502, { error: mensajeDePlantilla(e, 'No se pudo guardar.') });
+    }
+  },
+  //  EL MATERIAL QUE SE PRECARGA (26/11/2026). Se guarda aparte de publicar:
+  //  es de la empresa para ese tipo de trabajo, no de una versión.
+  materialHabitual: async ({ request, cookies }) => {
+    const f = await request.formData();
+    try {
+      const r = await guardarMaterialHabitual(
+        { cookies }, String(f.get('id') ?? ''), lineasDeMaterial(f));
+      return {
+        hecho: `Material guardado: ${r.material_habitual.length} en la lista. ` +
+          'Llega a las órdenes que el teléfono lea desde ahora.'
+      };
+    } catch (e) {
+      return fail(e?.status ?? 502, {
+        error: mensajeDePlantilla(e, 'No se pudo guardar el material.')
+      });
+    }
+  },
   /** Adoptar una del catálogo: queda publicada como v1 de la empresa. */
   adoptar: async ({ request, cookies }) => {
     const f = await request.formData();

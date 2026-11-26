@@ -89,6 +89,8 @@
     return `No se pudo avisar al cliente: ${a.texto || a.motivo || 'motivo desconocido'}.`;
   };
   let reintentando = $state('');
+  //  El contrato cuya alta en el proveedor se está volviendo a pedir.
+  let pidiendoAlta = $state('');
   // Qué tarjeta tiene abierta la advertencia del mapa (ver «Ver en el mapa…»).
   let mapaAbierto = $state('');
   const fecha = (s) => (s ? new Date(s).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '—');
@@ -148,6 +150,26 @@
         {#if form.estado === 'sin_factibilidad' && form.aviso}
           {textoAviso(form.aviso)}
         {/if}
+      </span>
+    </div>
+  {/if}
+  {#if form?.altaResuelta}
+    <div class="ok">
+      <CheckCircle2 size={16} />
+      <span>
+        {form.estado === 'en_el_isp'
+          ? 'Guardado: el contrato quedó con el número del cliente en el proveedor.'
+          : 'Guardado: el cliente no quedó creado. Ya se puede volver a intentar o anular el contrato.'}
+      </span>
+    </div>
+  {/if}
+  {#if form?.altaPedida}
+    <div class="ok">
+      <CheckCircle2 size={16} />
+      <span>
+        {form.estado === 'en_el_isp'
+          ? 'El cliente ya está creado en el proveedor.'
+          : 'Pedido. El cliente se está creando en el proveedor: recarga en un momento para ver cómo quedó.'}
       </span>
     </div>
   {/if}
@@ -300,6 +322,74 @@
           <span><strong>Lo que falló con un sistema externo:</strong> {s.fallo_integracion}</span>
         </p>
       {/if}
+
+      <!-- SI EL CLIENTE QUEDÓ CREADO EN EL PROVEEDOR (25/11/2026). Lo dice
+           el backend (`contrato.alta`); aquí solo se dibuja. Es el único
+           lugar donde hoy se ve un alta que FALLÓ: la app instalada no lo
+           muestra, y un cliente sin crear que nadie ve es un fallo en
+           silencio. -->
+      {#if s.contrato?.estado === 'en_el_isp'}
+        <p class="origen">
+          <span>Contrato {s.contrato.numero} · cliente creado en el proveedor{#if s.contrato.servicio_isp}{' '}(N.º {s.contrato.servicio_isp}){/if}.</span>
+        </p>
+      {:else if s.contrato?.alta?.por_revisar}
+        <!-- NADIE SABE SI QUEDÓ CREADO. No es un fallo, y no se ofrece
+             reintentar ni anular: eso, con el cliente quizá ya creado, es
+             crear dos. Lo resuelve una persona mirando en el proveedor. -->
+        <div class="pendiente">
+          <p class="fallo">
+            <AlertTriangle size={14} />
+            <span>
+              <strong>No se sabe si el cliente quedó creado en el proveedor</strong> (contrato {s.contrato.numero}).
+              {s.contrato.alta.detalle ?? ''}
+              Búscalo en el proveedor y di qué encontraste.
+            </span>
+          </p>
+          <form method="POST" action="?/resolverAlta" use:enhance={() => {
+            pidiendoAlta = s.contrato.id;
+            return async ({ update }) => { await update({ reset: false }); pidiendoAlta = ''; };
+          }}>
+            <input type="hidden" name="id" value={s.id} />
+            <input type="hidden" name="contrato" value={s.contrato.id} />
+            <input class="v2-input" name="id_cliente" inputmode="numeric" maxlength="64"
+                   placeholder="N.º del cliente en el proveedor"
+                   aria-label="Número del cliente en el proveedor" />
+            <button type="submit" name="quedo" value="si" class="decidir"
+                    disabled={pidiendoAlta === s.contrato.id}>Sí quedó: es este número</button>
+            <button type="submit" name="quedo" value="no" class="decidir"
+                    disabled={pidiendoAlta === s.contrato.id}>No quedó creado</button>
+          </form>
+        </div>
+      {:else if s.contrato?.alta?.estado === 'fallida'}
+        <div class="pendiente">
+          <p class="fallo">
+            <AlertTriangle size={14} />
+            <span>
+              <strong>El cliente NO quedó creado en el proveedor</strong> (contrato {s.contrato.numero}).
+              {s.contrato.alta.detalle ?? ''}
+            </span>
+          </p>
+          {#if s.contrato.alta.se_puede_pedir}
+            <form method="POST" action="?/crearEnElIsp" use:enhance={() => {
+              pidiendoAlta = s.contrato.id;
+              return async ({ update }) => { await update({ reset: false }); pidiendoAlta = ''; };
+            }}>
+              <input type="hidden" name="id" value={s.id} />
+              <input type="hidden" name="contrato" value={s.contrato.id} />
+              <button type="submit" class="decidir" disabled={pidiendoAlta === s.contrato.id}>
+                {pidiendoAlta === s.contrato.id ? 'Pidiendo…' : 'Volver a intentar'}
+              </button>
+            </form>
+          {/if}
+        </div>
+      {:else if s.contrato?.alta?.estado}
+        <p class="origen"><span>Contrato {s.contrato.numero} · creando al cliente en el proveedor…</span></p>
+      {:else if s.contrato}
+        <p class="origen"><span>Contrato {s.contrato.numero} firmado.</span></p>
+      {/if}
+      {#each s.contrato?.alta?.avisos ?? [] as aviso}
+        <p class="origen"><span>Aviso del alta: {aviso}</span></p>
+      {/each}
 
       <!-- DE DÓNDE VINO (12/11/2026): el prospecto se abre en Prospectos; la
            conversación no, porque la solicitud no la guarda (el asistente no

@@ -86,6 +86,16 @@ def validar_esquema_plantilla(esquema: dict) -> None:
     ids_de_paso = {
         p.get("id") for p in pasos if isinstance(p, dict) and p.get("id")
     }
+    #  Los botones de un paso (26/11/2026): solo los que la app sabe dibujar.
+    #  Ver `plantillas.BOTONES_DE_PASO`.
+    for p in pasos:
+        botones = p.get("botones") if isinstance(p, dict) else None
+        if botones is None:
+            continue
+        if not isinstance(botones, list) or any(
+                b not in ("contrato", "reportar", "ip", "onu") for b in botones):
+            raise ValidationError(
+                f"El paso '{p.get('id')}' tiene botones que la aplicacion no conoce.")
 
     ids_evidencias = set()
     for ev in evidencias:

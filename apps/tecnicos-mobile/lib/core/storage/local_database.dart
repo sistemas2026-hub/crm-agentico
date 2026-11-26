@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 29,
+      version: 31,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -169,6 +169,28 @@ class LocalDatabase {
       final colsOr = infoOr.map((c) => c['name'] as String).toSet();
       if (infoOr.isNotEmpty && !colsOr.contains('labor')) {
         await db.execute('ALTER TABLE local_ordenes ADD COLUMN labor TEXT;');
+      }
+    }
+
+    // v30 (26/11/2026): el MATERIAL QUE SE PRECARGA en el tipo de trabajo. El
+    // usuario: «material utilizado, que sea precargado». Viene en el `tipo`
+    // del detalle. Aditiva y con la misma guarda que v29.
+    if (oldVersion < 30) {
+      final infoOr = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOr = infoOr.map((c) => c['name'] as String).toSet();
+      if (infoOr.isNotEmpty && !colsOr.contains('material_habitual_json')) {
+        await db.execute(
+            'ALTER TABLE local_ordenes ADD COLUMN material_habitual_json TEXT;');
+      }
+    }
+
+    // v31 (26/11/2026): los PUNTOS DE TV del tipo de trabajo (conector,
+    // spliters, cable). Viene en el `tipo` del detalle. Aditiva.
+    if (oldVersion < 31) {
+      final infoOr = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOr = infoOr.map((c) => c['name'] as String).toSet();
+      if (infoOr.isNotEmpty && !colsOr.contains('puntos_de_tv_json')) {
+        await db.execute('ALTER TABLE local_ordenes ADD COLUMN puntos_de_tv_json TEXT;');
       }
     }
 
@@ -1228,6 +1250,8 @@ class LocalDatabase {
         tipo_nombre TEXT NOT NULL,
         tipo_codigo TEXT NOT NULL,
         labor TEXT,
+        material_habitual_json TEXT,
+        puntos_de_tv_json TEXT,
         work_type_version_id TEXT,
         schema_version INTEGER NOT NULL DEFAULT 1,
         formulario_campos_json TEXT,
@@ -1454,6 +1478,9 @@ class LocalDatabase {
                   'requisitos_seguridad_json',
                   // La labor viene en el `tipo` del detalle (13/11/2026).
                   'labor',
+                  // Y el material que se precarga, y los puntos de TV (26/11/2026).
+                  'material_habitual_json',
+                  'puntos_de_tv_json',
                 ],
                 where: 'id = ? AND org_id = ? AND profile_id = ?',
                 whereArgs: <Object?>[id, orgId, profileId],
@@ -1532,6 +1559,20 @@ class LocalDatabase {
       'tipo_nombre': tipoNombre,
       'tipo_codigo': tipoCodigo,
       'labor': soloDetalle('labor', tipoObj['labor']?.toString()),
+      'material_habitual_json': soloDetalle(
+        'material_habitual_json',
+        tipoObj['material_habitual'] == null
+            ? null
+            : jsonEncode(tipoObj['material_habitual']),
+      ),
+      //  Nulo es «este trabajo no lleva TV», y así se guarda: no se deja el
+      //  de antes por no venir.
+      'puntos_de_tv_json': soloDetalle(
+        'puntos_de_tv_json',
+        tipoObj.containsKey('puntos_de_tv') && tipoObj['puntos_de_tv'] != null
+            ? jsonEncode(tipoObj['puntos_de_tv'])
+            : null,
+      ),
       'work_type_version_id': ordenData['work_type_version_id']?.toString(),
       // La version del esquema decide si la orden se puede trabajar con esta
       // version de la aplicacion. El listado no la trae, y caer al 1 por

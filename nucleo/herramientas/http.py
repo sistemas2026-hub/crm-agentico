@@ -277,9 +277,16 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
         # que un segundo intento con el mismo dict ya no las encontraria.
         args = dict(args)
         url = url_de(herramienta, args, variables_tenant)
+        espera = getattr(herramienta, "timeout_segundos", None) or TIMEOUT_SEGUNDOS
         if herramienta.metodo == "GET":
             return requests.get(url, headers=headers, params=args,
-                                timeout=TIMEOUT_SEGUNDOS)
+                                timeout=espera)
+        if getattr(herramienta, "form_urlencoded", False):
+            # FORMULARIO Y NO JSON (26/11/2026): la autorizacion de una ONU
+            # en SmartOLT lo exige. `data=` con un dict es exactamente eso.
+            return requests.request(herramienta.metodo, url, headers=headers,
+                                    data={c: str(v) for c, v in args.items()},
+                                    timeout=espera)
         if herramienta.multipart:
             # requests solo arma multipart/form-data cuando hay un 'files=' --
             # con (None, valor) se manda cada campo como parte de formulario
@@ -325,9 +332,9 @@ def ejecutar(herramienta, argumentos: dict, tenant: str | None = None,
                     else:
                         partes.append((c, (None, str(uno))))
             return requests.request(herramienta.metodo, url, headers=headers,
-                                    files=partes, timeout=TIMEOUT_SEGUNDOS)
+                                    files=partes, timeout=espera)
         return requests.request(herramienta.metodo, url, headers=headers,
-                                json=args, timeout=TIMEOUT_SEGUNDOS)
+                                json=args, timeout=espera)
 
     r = _pedir(argumentos)
     _vigilar_cupo(herramienta, r)

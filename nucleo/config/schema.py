@@ -895,6 +895,196 @@ class ParametrosDeCoordenada(Base):
         return self
 
 
+#: LOS DATOS DE UN ALTA QUE LA PLATAFORMA SABE DAR. Lista CERRADA, a proposito:
+#: lo que no esta aca no se le manda al proveedor aunque su API lo acepte. Con
+#: lista negra, el campo que el proveedor agrega manana queda expuesto por
+#: defecto (asi aparecio una quinta contrasena el 14/11/2026).
+DATOS_DEL_ALTA = ("nombre_en_router", "ip", "plan", "nombre", "apellido",
+                  "documento", "correo", "telefono", "direccion", "barrio",
+                  "coordenadas", "nota")
+
+#: Sin estos tres no hay cliente que crear.
+DATOS_OBLIGATORIOS_DEL_ALTA = ("nombre_en_router", "ip", "plan")
+
+#: Con que datos del cliente se puede armar el nombre que lleva en el router.
+DATOS_PARA_EL_NOMBRE_EN_ROUTER = ("nombre", "apellido", "documento")
+
+#: AUTORIZAR UNA ONU DESDE LA APP DE CAMPO  --  26/11/2026. Lo que el motor
+#: sabe de una autorizacion: en que equipo central y en que puerto espera la
+#: ONU, de que tipo es, y con que zona, VLAN y nombre queda. Como le dice el
+#: proveedor a cada cosa lo declara la empresa (`ParametrosDeOnu`).
+DATOS_DE_LA_ONU = ("olt", "tipo_pon", "serial", "placa", "puerto", "tipo",
+                   "zona", "vlan", "nombre", "direccion")
+DATOS_OBLIGATORIOS_DE_LA_ONU = ("olt", "tipo_pon", "serial")
+#: Lo que el motor lee de una ONU que espera autorizacion.
+DATOS_DE_LA_FILA_ONU = ("olt", "tipo_pon", "serial", "placa", "puerto", "tipo")
+
+
+class ParametrosDeOnu(Base):
+    """Como se autoriza una ONU en ESTE proveedor  --  26/11/2026.
+
+    El motor sabe QUE es autorizar una ONU: tomar la que espera en un puerto
+    y darla de alta con una zona, una VLAN y el nombre del cliente. No sabe
+    como se llama cada campo en cada proveedor: se declara aca.
+    """
+
+    #: dato de la plataforma -> campo del PEDIDO de autorizacion. Las claves
+    #: son de `DATOS_DE_LA_ONU`. Un dato que no se nombra aca no se manda.
+    campos: dict[str, str]
+    #: dato -> campo en la FILA de una ONU que espera autorizacion.
+    fila: dict[str, str]
+    #: El parametro de la herramienta que LEE una ONU donde va su serial
+    #: (en la ruta o en la consulta).
+    serial_en_la_lectura: str
+    #: En la lectura de una ONU ya autorizada, el campo con su serial.
+    campo_serial_autorizada: str = "sn"
+    #: En el listado de zonas, el campo con el nombre.
+    campo_nombre_de_zona: str = "name"
+
+    @model_validator(mode="after")
+    def _coherente(self):
+        ajenos = sorted(set(self.campos) - set(DATOS_DE_LA_ONU))
+        if ajenos:
+            raise ValueError(f"'campos' nombra datos que la plataforma no conoce: {ajenos}. "
+                             f"Los que hay son {list(DATOS_DE_LA_ONU)}")
+        faltan = [d for d in DATOS_OBLIGATORIOS_DE_LA_ONU if not self.campos.get(d)]
+        if faltan:
+            raise ValueError(f"'campos' no dice como se llaman {faltan} en el pedido: "
+                             f"sin eso no hay ONU que autorizar.")
+        ajenos = sorted(set(self.fila) - set(DATOS_DE_LA_FILA_ONU))
+        if ajenos:
+            raise ValueError(f"'fila' nombra datos que la plataforma no conoce: {ajenos}. "
+                             f"Los que hay son {list(DATOS_DE_LA_FILA_ONU)}")
+        faltan = [d for d in ("olt", "tipo_pon", "serial", "placa", "puerto")
+                  if not self.fila.get(d)]
+        if faltan:
+            raise ValueError(f"'fila' no dice donde vienen {faltan}: sin eso no se sabe "
+                             f"en que puerto espera la ONU.")
+        return self
+
+
+class ParametrosDeAlta(Base):
+    """Como se crea un cliente en ESTE proveedor  --  25/11/2026.
+
+    El motor sabe QUE es un alta (una zona, una direccion IP, un plan, una
+    persona). No sabe como le dice cada proveedor a cada cosa, ni con que
+    costumbre nombra esta empresa al cliente en su router: eso se declara aca
+    (CLAUDE.md 3.1 y 3.3).
+    """
+
+    #: El parametro de la URL donde va la zona.
+    zona: str
+    #: dato de la plataforma -> campo del proveedor. Las claves son de
+    #: `DATOS_DEL_ALTA`. Un dato que no se nombra aca no se manda.
+    campos: dict[str, str]
+    #: Como se arma el nombre del cliente en el router. Es una COSTUMBRE de la
+    #: empresa (medido el 25/11/2026 en la primera: el nombre completo en 297
+    #: de 300 clientes), no una regla del proveedor, que solo exige que no
+    #: vaya vacio. Admite `{nombre}`, `{apellido}` y `{documento}`.
+    nombre_en_router: str = "{nombre} {apellido}"
+    #: En que campo de la respuesta viene el id de la tarea, cuando el
+    #: proveedor crea en segundo plano. Vacio = contesta con el cliente creado.
+    campo_tarea: str = ""
+    #: En el listado de planes del proveedor, donde vienen su id y su nombre.
+    campo_id_del_plan: str = "id"
+    campo_nombre_del_plan: str = "nombre"
+    #: campo del proveedor -> NOMBRE de un secreto de la empresa. El valor se
+    #: lee de sus credenciales cifradas en el momento de crear y no pasa por
+    #: la configuracion, ni por un log, ni por la clave de idempotencia. Si el
+    #: secreto no esta cargado, el campo NO se manda y el resultado lo dice.
+    secretos: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _coherente(self):
+        if not self.zona.strip():
+            raise ValueError("falta 'zona': el parametro donde va la zona del alta")
+        ajenos = sorted(set(self.campos) - set(DATOS_DEL_ALTA))
+        if ajenos:
+            raise ValueError(
+                f"'campos' nombra datos que la plataforma no conoce: {ajenos}. "
+                f"Los que hay son {list(DATOS_DEL_ALTA)}")
+        faltan = [d for d in DATOS_OBLIGATORIOS_DEL_ALTA
+                  if not str(self.campos.get(d) or "").strip()]
+        if faltan:
+            raise ValueError(
+                f"'campos' no dice como se llaman {faltan}: sin eso no hay "
+                f"cliente que crear")
+        destinos = [v for v in self.campos.values() if str(v or "").strip()]
+        if len(destinos) != len(set(destinos)):
+            raise ValueError(
+                "dos datos van al MISMO campo del proveedor: el segundo "
+                "pisaria al primero sin que nadie lo note")
+        pisados = sorted(set(self.secretos) & set(destinos))
+        if pisados:
+            raise ValueError(
+                f"{pisados} esta en 'campos' y en 'secretos': o es un dato del "
+                f"contrato o es un secreto de la empresa, no los dos")
+        if any(not str(n or "").strip() for n in self.secretos.values()):
+            raise ValueError("un secreto se declara por su NOMBRE, y hay uno vacio")
+        import string
+        usados = [nombre for _, nombre, _, _ in
+                  string.Formatter().parse(self.nombre_en_router) if nombre]
+        raros = sorted(set(usados) - set(DATOS_PARA_EL_NOMBRE_EN_ROUTER))
+        if raros or not usados:
+            raise ValueError(
+                "'nombre_en_router' se arma con "
+                f"{['{' + d + '}' for d in DATOS_PARA_EL_NOMBRE_EN_ROUTER]}"
+                + (f", y usa {raros}" if raros else ", y no usa ninguno"))
+        return self
+
+
+class ParametrosDeBusquedaPorIp(Base):
+    """Como se le pregunta a ESTE proveedor que cliente tiene una IP.
+
+    Es lo que deja comprobar, justo antes de crear, que la direccion sigue
+    libre, y confirmar despues que el cliente quedo creado LEYENDOLO, en vez
+    de creerle a una respuesta que puede decir que si sin haberlo hecho.
+    """
+
+    #: El nombre del filtro.
+    ip: str
+    #: En cada fila de la respuesta, donde viene el id del cliente.
+    campo_id: str
+    #: Donde se LEE lo que se escribio como nombre en el router. No siempre es
+    #: el mismo nombre con que se escribe: en la primera empresa se escribe en
+    #: un campo y se lee en otro. Vacio = no se puede comparar.
+    campo_nombre_en_router: str = ""
+    #: Donde se lee el documento del cliente. Vacio = no se puede comparar.
+    campo_documento: str = ""
+
+    @model_validator(mode="after")
+    def _con_nombre(self):
+        if not self.ip.strip() or not self.campo_id.strip():
+            raise ValueError("faltan 'ip' (el filtro) o 'campo_id' (el id del cliente)")
+        return self
+
+
+class ParametrosDeTarea(Base):
+    """Como se lee el estado de un trabajo que ESTE proveedor hace en segundo
+    plano. Sirve para saber por que NO se creo algo; que SI se creo lo dice la
+    lectura del propio recurso, nunca esto."""
+
+    #: El parametro (de la URL) donde va el id de la tarea.
+    identificador: str
+    #: En la respuesta, donde viene el estado.
+    campo_estado: str
+    #: Los estados que significan «termino». OJO: terminar no es haber servido
+    #: (medido: una tarea dice que termino bien con un error adentro).
+    estados_terminada: list[str] = Field(default_factory=list)
+    #: Los estados que significan «fallo, y no va a cambiar».
+    estados_fallida: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _con_nombre(self):
+        if not self.identificador.strip() or not self.campo_estado.strip():
+            raise ValueError("faltan 'identificador' o 'campo_estado'")
+        if not self.estados_terminada and not self.estados_fallida:
+            raise ValueError(
+                "sin 'estados_terminada' ni 'estados_fallida' esta lectura "
+                "nunca podria decir nada")
+        return self
+
+
 class Verificacion(Base):
     """
     Que medir despues de una accion, cuando, y que cuenta como confirmado.
@@ -1425,6 +1615,22 @@ class Herramienta(Base):
     #: Obligatorio cuando la herramienta declara una de las dos marcas de
     #: arriba: sin esto el motor tendria que adivinar los nombres.
     parametros_de_coordenada: ParametrosDeCoordenada | None = None
+    #: EL ALTA DE UN CLIENTE DESDE LA APP DE CAMPO  --  25/11/2026
+    #: Tres marcas, una por cada cosa que el motor necesita del proveedor para
+    #: crear un cliente sin conocerlo: crearlo, preguntar que cliente tiene
+    #: una IP, y leer el estado de un trabajo en segundo plano. Las tres se
+    #: buscan POR SU MARCA (`nucleo/seguimiento/alta_de_cliente.py`).
+    #:
+    #: NINGUNA es una herramienta del modelo: los datos de un alta son los de
+    #: una persona (documento, domicilio) y los pone el contrato que firmo,
+    #: no una conversacion. La llama el backend, por una ruta propia y por la
+    #: puerta humana.
+    crea_cliente: bool = False
+    parametros_de_alta: ParametrosDeAlta | None = None
+    busca_cliente_por_ip: bool = False
+    parametros_de_busqueda_por_ip: ParametrosDeBusquedaPorIp | None = None
+    lee_tarea: bool = False
+    parametros_de_tarea: ParametrosDeTarea | None = None
     #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
     #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
     #: para poder recuperarlo si el id se pierde (Q2.1).
@@ -1445,6 +1651,23 @@ class Herramienta(Base):
     # sistema del ISP -- el documento de "Nuevo ticket" (27/10/2026). Sin ella
     # el ticket se crea igual y el archivo queda solo en el CRM.
     adjunta_archivo_ticket: bool = False
+    #: AUTORIZAR UNA ONU DESDE LA APP DE CAMPO  --  26/11/2026. Cuatro marcas:
+    #: buscar la ONU que espera (por su serial), autorizarla, leerla para
+    #: confirmar, y listar las zonas de la red. Se buscan POR SU MARCA
+    #: (`nucleo/seguimiento/activar_onu.py`). Ninguna es del modelo: la
+    #: dispara un tecnico, por la ruta propia y la puerta humana.
+    busca_onu_sin_autorizar: bool = False
+    autoriza_onu: bool = False
+    parametros_de_onu: ParametrosDeOnu | None = None
+    lee_onu: bool = False
+    lista_zonas_de_red: bool = False
+    #: El pedido va como formulario (`application/x-www-form-urlencoded`) y
+    #: no como JSON: lo exige, por ejemplo, la autorizacion de una ONU en
+    #: SmartOLT (su OpenAPI, 26/11/2026). Excluye `multipart`.
+    form_urlencoded: bool = False
+    #: Cuanto esperar la respuesta, si no alcanza el tope general (15 s).
+    #: Autorizar una ONU «tarda decenas de segundos», segun el proveedor.
+    timeout_segundos: int | None = Field(default=None, ge=1, le=180)
     # La que lee el catalogo COMPLETO de asuntos de ticket del ISP, para que
     # "Nuevo ticket" ofrezca todos y no solo los de 'tickets_desde_dexter'
     # (28/10/2026). Se recorre la respuesta y vale toda cadena que venga en
@@ -2182,6 +2405,70 @@ class Herramienta(Base):
                 raise ValueError(
                     f"'{self.nombre}' declara 'parametros_de_coordenada' sin "
                     f"ninguna marca que diga que escribe una ubicacion.")
+
+        #  LAS TRES MARCAS DEL ALTA, CADA UNA CON SUS PARAMETROS (25/11/2026).
+        #  Mismo motivo que arriba: una marca sin sus parametros se encuentra
+        #  y no se sabe usar, y eso falla tarde --con un tecnico en la casa de
+        #  un cliente--. Se rechaza al cargar la configuracion.
+        for marca, parametros, que in (
+                ("crea_cliente", "parametros_de_alta", "crea un cliente"),
+                ("busca_cliente_por_ip", "parametros_de_busqueda_por_ip",
+                 "busca un cliente por su IP"),
+                ("lee_tarea", "parametros_de_tarea", "lee una tarea")):
+            if getattr(self, marca) != (getattr(self, parametros) is not None):
+                raise ValueError(
+                    f"'{self.nombre}': '{marca}' y '{parametros}' van juntos. "
+                    f"Una herramienta que {que} sin decir como se llaman sus "
+                    f"campos no se puede usar, y los parametros sin la marca no "
+                    f"los lee nadie.")
+        if self.crea_cliente and self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}' crea un cliente y se declara de solo lectura: "
+                f"asi saldria sin pasar por la frontera.")
+        #  NINGUNA DE LAS TRES ES INVOCABLE POR UN SERVICIO  --  auditoria de
+        #  frontera y revision de PII, 25/11/2026. Con esa bandera, la ruta
+        #  generica de herramientas las admite: la que crea, por la puerta
+        #  AUTONOMA --sin la persona que este flujo exige--, y la que busca
+        #  por IP devolveria la ficha cruda de un cliente a cualquier
+        #  servicio. El alta no la necesita: llama al ejecutor directo, desde
+        #  su propia ruta.
+        if ((self.crea_cliente or self.busca_cliente_por_ip or self.lee_tarea)
+                and self.invocable_por_servicio):
+            raise ValueError(
+                f"'{self.nombre}' es una herramienta del alta y no puede ser "
+                f"'invocable_por_servicio': por la ruta generica saldria sin "
+                f"la persona que el alta exige.")
+        if (self.busca_cliente_por_ip or self.lee_tarea) and not self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}' es una lectura del alta y no se declara de "
+                f"solo lectura.")
+
+        #  AUTORIZAR UNA ONU (26/11/2026): las mismas reglas que el alta. La
+        #  que escribe, con sus parametros y nunca de solo lectura; las que
+        #  leen, de solo lectura; y ninguna invocable por un servicio, que
+        #  la sacaria por la puerta autonoma sin la persona que la pidio.
+        if self.autoriza_onu != (self.parametros_de_onu is not None):
+            raise ValueError(
+                f"'{self.nombre}': 'autoriza_onu' y 'parametros_de_onu' van juntos.")
+        if self.autoriza_onu and self.solo_lectura:
+            raise ValueError(
+                f"'{self.nombre}' autoriza una ONU y se declara de solo lectura: "
+                f"asi saldria sin pasar por la frontera.")
+        de_la_onu = (self.busca_onu_sin_autorizar or self.autoriza_onu or self.lee_onu
+                     or self.lista_zonas_de_red)
+        if de_la_onu and self.invocable_por_servicio:
+            raise ValueError(
+                f"'{self.nombre}' es una herramienta de la autorizacion de ONU y no "
+                f"puede ser 'invocable_por_servicio'.")
+        if ((self.busca_onu_sin_autorizar or self.lee_onu or self.lista_zonas_de_red)
+                and not self.solo_lectura):
+            raise ValueError(
+                f"'{self.nombre}' es una lectura de la autorizacion de ONU y no se "
+                f"declara de solo lectura.")
+        if self.form_urlencoded and self.multipart:
+            raise ValueError(
+                f"'{self.nombre}': el cuerpo va como formulario o como multipart, "
+                f"no los dos.")
 
         if self.entrega_medios_de_pago:
             nombres = [k for k in ("link_de_pago", "medios_de_pago") if (self.cuenta or {}).get(k)]
@@ -4183,7 +4470,7 @@ class TenantConfig(Base):
         #  POOLS no estan aca a proposito: son una decision de la empresa
         #  y tiene sentido leerlos en un diff.
         "ocupacion_ip", "ocupacion_ip_actualizado_en",
-        "ocupacion_ip_completa")
+        "ocupacion_ip_completa", "ocupacion_ip_por_zona")
 
     version: int = 1
     identidad: Identidad
@@ -4324,6 +4611,12 @@ class TenantConfig(Base):
     # empresa (ver PoolDeIp), no un dato sincronizado: por eso NO esta en
     # SINCRONIZADOS y si baja al archivo.
     pools_de_ip: list[PoolDeIp] = Field(default_factory=list)
+    # LAS IP MAL ESCRITAS EN EL PROVEEDOR CUENTAN COMO TOMADAS  --  25/11/2026.
+    # Una DECISION de la empresa, como los rangos: baja al archivo. Ver
+    # `ocupacion_ip.sombra_de_mal_escritas`. Apagado de fabrica. La primera
+    # empresa la tiene APAGADA: sus IP fuera de red privada no son errores, son
+    # las que les pone a los clientes al cancelarlos.
+    contar_ip_mal_escritas: bool = False
     # QUE DIRECCIONES ESTAN TOMADAS: prefijo ('172.16.9.') -> ultimos octetos.
     # Lo PRODUCE un job (`ocupacion_ip.sincronizar`), se reemplaza entero y no
     # baja al archivo. Vacio = no se sincronizo nunca, y entonces no se puede
@@ -4335,6 +4628,13 @@ class TenantConfig(Base):
     # lo que falto leer es justo lo que haria que una direccion pareciera
     # libre.
     ocupacion_ip_completa: bool = False
+    # CUANTOS CLIENTES DE CADA ZONA HAY EN CADA PREFIJO  --  25/11/2026.
+    # zona ('20049') -> prefijo ('172.16.9.') -> clientes. Sale de la misma
+    # lectura que `ocupacion_ip` y sirve para UNA cosa: SUGERIR los rangos de
+    # cada servidor en la pantalla, para que la empresa no los escriba de
+    # memoria. NO decide nada: lo que vale es `pools_de_ip`, que guarda una
+    # persona. Mismo criterio que la ocupacion: lo produce un job.
+    ocupacion_ip_por_zona: dict[str, dict[str, int]] = Field(default_factory=dict)
     # Que cuesta cada plan. Mismo criterio que 'localidades': lo produce un
     # job entero, nunca una persona, y se reemplaza completo en cada corrida.
     precios_de_planes: list[PrecioDePlan] = Field(default_factory=list)
@@ -4874,6 +5174,25 @@ class TenantConfig(Base):
                         f"rol '{nombre_rol}' esta orientado a un cliente y no puede usar "
                         f"{prohibidas}: la cuenta de colaborador recibe el id del modelo, "
                         f"y con eso un cliente pediria la cuenta de otro.")
+            # CREAR UN CLIENTE NO ES DEL MODELO (25/11/2026). Los datos de un alta
+            # son los de una persona --documento, domicilio-- y los pone un
+            # contrato que esa persona firmo. En el catalogo de un rol, un
+            # agente podria proponer crear un cliente desde una conversacion,
+            # con los datos que alguien le dicto. La llama el backend, por su
+            # ruta propia y por la puerta humana.
+            #
+            # Y LAS DOS LECTURAS TAMPOCO (revision de PII, 25/11/2026): la que
+            # busca por IP devuelve la ficha de un cliente cualquiera, sin
+            # identidad verificada, a quien elija la IP.
+            del_alta = sorted(h.nombre for h in self.herramientas
+                              if (h.crea_cliente or h.busca_cliente_por_ip or h.lee_tarea
+                                  or h.busca_onu_sin_autorizar or h.autoriza_onu
+                                  or h.lee_onu or h.lista_zonas_de_red)
+                              and h.nombre in rol.puede_consultar)
+            if del_alta:
+                raise ValueError(
+                    f"rol '{nombre_rol}' no puede usar {del_alta}: las "
+                    f"herramientas del alta no son de ningun agente.")
             # Un rol no puede usar una herramienta que no existe.
             faltantes = set(rol.puede_consultar) - nombres_herr
             if faltantes:

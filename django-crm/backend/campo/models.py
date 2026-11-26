@@ -1059,6 +1059,24 @@ class ReglaDeConsumo(BaseModel):
             "borra el registro en vez de devolver el material."
         ),
     )
+    #  EL MATERIAL QUE SE PRECARGA (26/11/2026). Ver `campo/material_habitual.py`.
+    precargar = models.BooleanField(
+        default=False,
+        help_text=(
+            "Va en la lista que la app trae puesta en las ordenes de este tipo "
+            "de trabajo, con `cantidad_habitual` (vacia: la escribe el tecnico)."
+        ),
+    )
+    orden_en_la_lista = models.PositiveSmallIntegerField(
+        default=0, help_text="Donde va en esa lista.")
+    #  LA CANTIDAD SALE DE UN CAMPO (26/11/2026). El usuario: «cuando se pone
+    #  la fibra utilizada y se pone la cantidad, que lo marque en material
+    #  utilizado». El TITULO del campo de la plantilla («Metros de fibra
+    #  usados»): por titulo y no por id, porque la regla es de la empresa y
+    #  dura mas que una version de la plantilla.
+    cantidad_de_campo = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text="Titulo del campo de la plantilla de donde sale la cantidad.")
 
     class Meta:
         db_table = "campo_regla_consumo"
@@ -1072,6 +1090,43 @@ class ReglaDeConsumo(BaseModel):
     def __str__(self) -> str:
         alcance = self.work_type.codigo if self.work_type else "cualquier trabajo"
         return f"{self.material.codigo} en {alcance}"
+
+
+class PuntosDeTv(BaseModel):
+    """Cuanto material de TV lleva una instalacion, segun los puntos.
+
+    El usuario, el 26/11/2026: «para saber cuanto gastaron en material para
+    TV, unos botones preguntando cuantos puntos de TV; cada uno ya tendria el
+    material: 1 punto lleva 2 conectores coaxiales; 2 puntos, 6 conectores y un
+    spliter de dos -- teniendo en cuenta que material tiene asignado el tecnico
+    para ver que spliter utilizar --; preguntar si utilizo el cable de la
+    empresa y cuantos metros; como maximo 5». Y eligio la regla para 3 a 5: 2
+    por punto + 2 de entrada.
+
+    LOS NUMEROS Y LOS MATERIALES SON DE LA EMPRESA (CLAUDE.md §3.3): otra usa
+    otro conector, otros spliters u otra cuenta. La app hace la cuenta con
+    esto, sin señal; ver `campo/puntos_de_tv.py`.
+    """
+
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, related_name="puntos_de_tv")
+    work_type = models.OneToOneField(
+        WorkType, on_delete=models.CASCADE, related_name="puntos_de_tv")
+    activo = models.BooleanField(default=True)
+    #  Codigos del catalogo de la empresa (`MaterialCatalogo.codigo`).
+    conector = models.CharField(max_length=64, blank=True, default="")
+    conectores_por_punto = models.PositiveSmallIntegerField(default=2)
+    #  Los del cable que entra al spliter: solo cuando hay spliter (2 puntos o mas).
+    conectores_de_entrada = models.PositiveSmallIntegerField(default=2)
+    maximo_de_puntos = models.PositiveSmallIntegerField(default=5)
+    cable = models.CharField(max_length=64, blank=True, default="")
+    #  `[{"codigo": "SPL2", "salidas": 2}, ...]`
+    spliters = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = "campo_puntos_de_tv"
+
+    def __str__(self) -> str:
+        return f"TV en {self.work_type.codigo}"
 
 
 class MovimientoDeMaterial(BaseModel):
@@ -1530,6 +1585,7 @@ from campo.contrato import (  # noqa: E402,F401
     ConfiguracionDeContrato,
     ContratoDeServicio,
 )
+from campo.activacion_onu import ActivacionDeOnu  # noqa: E402,F401
 from campo.inventario_operacion import (  # noqa: E402,F401
     Compra,
     ConteoFisico,

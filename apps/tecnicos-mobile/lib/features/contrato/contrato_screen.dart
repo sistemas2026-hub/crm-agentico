@@ -24,7 +24,10 @@ import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
 import '../../core/storage/ubicacion_de_captura.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/dexter_bloques.dart';
+import '../detalle_orden/mapa_del_cliente.dart';
 import '../ejecucion/widgets/firma_del_cliente.dart';
+import 'elegir_ubicacion.dart';
 
 /// Si esta orden es de las que llevan contrato.
 ///
@@ -35,6 +38,21 @@ bool llevaContrato(Map<String, dynamic>? orden) {
   if (orden == null) return false;
   if ((orden['labor'] ?? '').toString() == 'instalacion') return true;
   return (orden['tipo_codigo'] ?? '').toString().contains('instalacion');
+}
+
+/// Las coordenadas como se muestran: «lat, lng», o vacío si no hay.
+///
+/// Llegan como número o como texto según de dónde salieron (el ticket, la
+/// solicitud, el teléfono); las dos formas se muestran igual.
+String textoDeCoordenadas(dynamic gps) {
+  if (gps is! Map) return '';
+  final dynamic lat = gps['lat'];
+  final dynamic lng = gps['lng'];
+  if (lat == null || lng == null) return '';
+  String uno(dynamic v) => v is num ? v.toStringAsFixed(6) : v.toString().trim();
+  final String a = uno(lat);
+  final String b = uno(lng);
+  return a.isEmpty || b.isEmpty ? '' : '$a, $b';
 }
 
 /// Lo que el servidor contestó, traducido a lo que la pantalla necesita.
@@ -143,16 +161,22 @@ class _EstadoContrato extends State<ContratoScreen> {
   Map<String, dynamic>? _contrato;
   Map<String, dynamic>? _borrador;
   List<Map<String, dynamic>> _servidores = <Map<String, dynamic>>[];
+  //  LOS PLANES DE LA EMPRESA, cada uno con sus servidores y el del corte
+  //  (26/11/2026). Vacia cuando el servidor no los manda: entonces el plan se
+  //  escribe, como antes.
+  List<Map<String, dynamic>> _planes = <Map<String, dynamic>>[];
   int? _idZona;
-  //  LAS IP DE LA ZONA ELEGIDA. Se piden recien cuando el tecnico elige el
-  //  servidor, porque el servidor es lo que decide de que rango salen: es el
-  //  mismo orden que el panel del ISP y el que la API del alta exige.
-  List<String> _ips = <String>[];
-  String? _ip;
-  bool _cargandoIps = false;
-  String _motivoSinIps = '';
-  String _advertenciaIps = '';
-  int _zonaDeLasIps = -1;
+  //  LA IP LA ASIGNA EL SISTEMA AL FIRMAR (el usuario, 26/11/2026: «sería
+  //  mejor si el sistema le indica la IP al contrato sin que tenga que elegir
+  //  el técnico»). La app ya no pide la lista ni manda una: la elige el
+  //  servidor (`contrato._ip_automatica`) y sale en el contrato firmado.
+  //
+  //  LAS COORDENADAS DE LA CASA. Llegan del ticket; el técnico las puede
+  //  corregir en el mapa o con el GPS (el usuario, 26/11/2026: «que permita
+  //  editar, y si sale un mapa para que seleccione la ubicación correcta»).
+  //  Solo viajan si las corrigió: si no, mandan las del ticket.
+  ({double lat, double lng})? _coordenadas;
+  bool _coordenadasCorregidas = false;
   bool _enviando = false;
   String? _errorDeEnvio;
   final TrazoDeFirma _trazo = TrazoDeFirma();
@@ -205,7 +229,26 @@ class _EstadoContrato extends State<ContratoScreen> {
         for (final dynamic s in (d['servidores'] as List? ?? const <dynamic>[]))
           if (s is Map) Map<String, dynamic>.from(s),
       ];
-      if (_servidores.length == 1) _idZona = _servidores.first['id_zona'] as int?;
+      //  EL DEL CORTE DEL TICKET, YA MARCADO; los demás del plan, a la mano
+      //  para cambiarlo (el usuario, 26/11/2026: «en la parte de corte no
+      //  deja escoger»).
+      final dynamic sugerido = _borrador?['servidor_sugerido'];
+      if (_servidores.length == 1) {
+        _idZona = _servidores.first['id_zona'] as int?;
+      } else if (_servidores.any((Map<String, dynamic> s) => s['id_zona'] == sugerido)) {
+        _idZona = sugerido as int;
+      }
+      _coordenadas = _punto(_borrador?['gps']);
+      //  Un nombre, una vez: el menú exige valores únicos y se cae con dos
+      //  planes que se llamen igual.
+      final Set<String> vistos = <String>{};
+      _planes = <Map<String, dynamic>>[
+        for (final dynamic p in (d['planes'] as List? ?? const <dynamic>[]))
+          if (p is Map &&
+              (p['nombre'] ?? '').toString().isNotEmpty &&
+              vistos.add(p['nombre'].toString()))
+            Map<String, dynamic>.from(p),
+      ];
       final Map<String, dynamic> cliente =
           Map<String, dynamic>.from((_borrador?['cliente'] as Map?) ?? const <String, dynamic>{});
       for (final List<String> c in _camposDelCliente) {
@@ -213,36 +256,81 @@ class _EstadoContrato extends State<ContratoScreen> {
       }
       _tipoDocumento = (cliente['tipo_documento'] ?? 'CC').toString();
       _plan.text = (_borrador?['plan'] ?? '').toString();
+      //  EL PLAN SE ELIGE DE LA LISTA (el usuario, 26/11/2026: «un menú
+      //  desplegable con los planes disponibles, así se evita el error al
+      //  escoger»). Si lo que dice el ticket no es ninguno, queda sin elegir:
+      //  el texto del ticket se muestra al lado, para saber qué pidió.
+      if (_planes.isNotEmpty &&
+          !_planes.any((Map<String, dynamic> p) => p['nombre'] == _plan.text)) {
+        _plan.text = '';
+      }
     });
-    //  CON UN SOLO SERVIDOR LA ZONA SE ELIGE SOLA, y entonces nadie dispara
-    //  `_pedirIps`: el `onChanged` del radio no corre. Es el caso mas comun
-    //  --una empresa con un servidor-- y sin esto la pantalla quedaba con el
-    //  servidor puesto y sin ninguna direccion que ofrecer.
-    final int? zona = _idZona;
-    if (zona != null && _contrato == null) await _pedirIps(zona);
   }
 
-  /// Pide las libres de esa zona. No bloquea nada: si no hay, se dice.
-  Future<void> _pedirIps(int idZona) async {
+  /// El técnico eligió un plan del menú.
+  ///
+  /// Quedan los servidores DE ESE PLAN, con el del corte del ticket primero y
+  /// marcado si el plan lo tiene (`servidor_sugerido`, lo decide el servidor).
+  /// El técnico lo puede cambiar.
+  void _elegirPlan(String nombre) {
+    final Map<String, dynamic>? plan = _planes
+        .where((Map<String, dynamic> p) => p['nombre'] == nombre)
+        .firstOrNull;
+    if (plan == null) return;
+    final dynamic sugerido = plan['servidor_sugerido'];
+    final List<Map<String, dynamic>> servidores = <Map<String, dynamic>>[
+      for (final dynamic s in (plan['servidores'] as List? ?? const <dynamic>[]))
+        if (s is Map) Map<String, dynamic>.from(s),
+    ]..sort((Map<String, dynamic> a, Map<String, dynamic> b) =>
+        (a['id_zona'] == sugerido ? 0 : 1).compareTo(b['id_zona'] == sugerido ? 0 : 1));
+    bool esta(dynamic id) => servidores.any((Map<String, dynamic> s) => s['id_zona'] == id);
+    final int? zona = servidores.length == 1
+        ? servidores.first['id_zona'] as int?
+        : esta(sugerido)
+            ? sugerido as int
+            : (esta(_idZona) ? _idZona : null);
     setState(() {
-      _cargandoIps = true;
-      _zonaDeLasIps = idZona;
+      _plan.text = nombre;
+      _servidores = servidores;
+      _idZona = zona;
     });
-    final Map<String, dynamic> d = await widget.api.ipsLibres(widget.ordenId, idZona);
+  }
+
+  /// Las coordenadas como las manda el servidor (número o texto), o nulo.
+  static ({double lat, double lng})? _punto(dynamic gps) {
+    if (gps is! Map) return null;
+    final double? lat = double.tryParse('${gps['lat'] ?? ''}');
+    final double? lng = double.tryParse('${gps['lng'] ?? ''}');
+    if (lat == null || lng == null || (lat == 0 && lng == 0)) return null;
+    return (lat: lat, lng: lng);
+  }
+
+  void _ponerCoordenadas(double lat, double lng) => setState(() {
+        _coordenadas = (lat: lat, lng: lng);
+        _coordenadasCorregidas = true;
+      });
+
+  Future<void> _elegirEnElMapa() async {
+    final ({double lat, double lng})? actual = _coordenadas;
+    final ({double lat, double lng})? elegida =
+        await Navigator.of(context).push<({double lat, double lng})>(
+      MaterialPageRoute<({double lat, double lng})>(
+        builder: (_) => ElegirUbicacion(lat: actual?.lat, lng: actual?.lng),
+      ),
+    );
+    if (elegida != null && mounted) _ponerCoordenadas(elegida.lat, elegida.lng);
+  }
+
+  Future<void> _usarDondeEstoy() async {
+    final Map<String, dynamic> u = await UbicacionDeCaptura.tomar();
     if (!mounted) return;
-    //  LLEGO TARDE Y LA ZONA YA CAMBIO: se descarta. Sin esto, la respuesta
-    //  de la zona vieja pisaria la lista de la nueva, y el tecnico elegiria
-    //  una direccion de otro rango creyendo que es de la que marco.
-    if (_zonaDeLasIps != idZona) return;
-    setState(() {
-      _cargandoIps = false;
-      _ips = <String>[
-        for (final dynamic x in (d['libres'] as List? ?? const <dynamic>[]))
-          if (x.toString().trim().isNotEmpty) x.toString(),
-      ];
-      _motivoSinIps = _ips.isEmpty ? (d['motivo'] ?? '').toString() : '';
-      _advertenciaIps = (d['advertencia'] ?? '').toString();
-    });
+    final ({double lat, double lng})? p = _punto(u);
+    if (p == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('El teléfono no pudo decir dónde estás. Elige el punto en el mapa.')));
+      return;
+    }
+    _ponerCoordenadas(p.lat, p.lng);
   }
 
   bool get _listo =>
@@ -269,9 +357,13 @@ class _EstadoContrato extends State<ContratoScreen> {
       },
       'plan': _plan.text.trim(),
       'id_zona': _idZona,
-      //  Si no eligio ninguna, no viaja: el servidor acepta vacio porque
-      //  una empresa sin pools declarados tiene que poder firmar igual.
-      if (_ip != null) 'ip': _ip,
+      //  Sin `ip`: la asigna el servidor al firmar.
+      //  Las coordenadas de la casa, SOLO si el técnico las corrigió.
+      if (_coordenadasCorregidas && _coordenadas != null)
+        'coordenadas': <String, dynamic>{
+          'lat': _coordenadas!.lat,
+          'lng': _coordenadas!.lng,
+        },
       'firma_png_base64': base64Encode(firma),
       if (ubicacion.containsKey('lat') && ubicacion.containsKey('lng'))
         'gps': <String, dynamic>{
@@ -321,30 +413,228 @@ class _EstadoContrato extends State<ContratoScreen> {
         Map<String, dynamic>.from((c['cliente'] as Map?) ?? const <String, dynamic>{});
     final Map<String, dynamic> servidor =
         Map<String, dynamic>.from((c['servidor'] as Map?) ?? const <String, dynamic>{});
+    final String coordenadas = textoDeCoordenadas(c['gps']);
+    final String documento =
+        '${cliente['tipo_documento'] ?? ''} ${cliente['numero_documento'] ?? ''}'.trim();
+    final String ip = (c['ip_elegida'] ?? '').toString();
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.margen, AppSpacing.md, AppSpacing.margen, AppSpacing.xl),
       children: <Widget>[
-        _Tarjeta(children: <Widget>[
-          const Icon(Icons.check_circle, color: AppColors.exito, size: 44),
-          const SizedBox(height: 8),
-          Text('Contrato firmado', style: AppTypography.tituloGrande),
-          Text('N.º ${c['numero']}', style: AppTypography.cuerpo),
-          const Divider(height: 24),
-          _Fila('Cliente', '${cliente['nombre'] ?? ''} ${cliente['apellido'] ?? ''}'.trim()),
-          _Fila('Documento',
-              '${cliente['tipo_documento'] ?? ''} ${cliente['numero_documento'] ?? ''}'.trim()),
-          _Fila('Plan', (c['plan'] ?? '').toString()),
-          _Fila('Servidor', (servidor['nombre'] ?? '').toString()),
-          const SizedBox(height: 10),
-          Text('El PDF con la firma quedó en la plataforma.',
-              style: AppTypography.cuerpoChico),
-        ]),
-        if (c['estado'] != 'en_el_isp')
+        DexterBloque(
+          titulo: 'Contrato firmado',
+          icono: Icons.verified_outlined,
+          insignia: const DexterPastilla.enRegla(texto: 'Firmado'),
+          separacion: AppSpacing.sm,
+          children: <Widget>[
+            Text('N.º ${c['numero']}',
+                style: AppTypography.labelTelemetry.copyWith(color: AppColors.secondary)),
+            DexterFilaDeDato(
+              icono: Icons.person_outline,
+              texto: '${cliente['nombre'] ?? ''} ${cliente['apellido'] ?? ''}'.trim(),
+              estilo: AppTypography.cuerpo,
+            ),
+            if (documento.isNotEmpty)
+              DexterFilaDeDato(icono: Icons.badge_outlined, texto: documento),
+            DexterFilaDeDato(icono: Icons.speed, texto: (c['plan'] ?? '').toString()),
+            DexterFilaDeDato(
+              icono: Icons.dns_outlined,
+              texto: [(servidor['nombre'] ?? '').toString(), if (ip.isNotEmpty) ip].join(' · '),
+            ),
+            if (coordenadas.isNotEmpty)
+              DexterFilaDeDato(
+                icono: Icons.place_outlined,
+                texto: coordenadas,
+                estilo: AppTypography.labelTelemetry,
+              ),
+            DexterHundido(
+              child: DexterFilaDeDato(
+                icono: Icons.picture_as_pdf_outlined,
+                texto: 'El PDF con la firma quedó en la plataforma.',
+                estilo: AppTypography.cuerpoChico,
+                colorDelIcono: AppColors.outline,
+              ),
+            ),
+          ],
+        ),
+        if (c['estado'] != 'en_el_isp') ...<Widget>[
+          const SizedBox(height: AppSpacing.sm),
           const _Aviso(
             icono: Icons.schedule,
             texto: 'El cliente todavía no se crea en WispHub desde aquí. '
                 'Esa parte se está terminando; mientras tanto la oficina lo da '
                 'de alta con estos datos.',
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Un dato del cliente. La etiqueta va DENTRO del campo (`labelText`): es la
+  /// que lee el lector de pantalla, y la que encuentran las pruebas.
+  Widget _campo(String clave) {
+    final String etiqueta =
+        _camposDelCliente.firstWhere((List<String> c) => c[0] == clave)[1];
+    return TextField(
+      controller: _campos[clave],
+      onChanged: (_) => setState(() {}),
+      keyboardType: clave == 'telefono' || clave == 'numero_documento'
+          ? TextInputType.number
+          : (clave == 'correo' ? TextInputType.emailAddress : TextInputType.text),
+      style: clave == 'numero_documento' || clave == 'telefono'
+          ? AppTypography.dato
+          : AppTypography.cuerpo,
+      decoration: InputDecoration(labelText: etiqueta),
+    );
+  }
+
+  /// Dos datos cortos lado a lado: nombre y apellido, documento y teléfono.
+  /// Cada uno con su mitad: con letra grande el texto se corre adentro del
+  /// campo, no lo desborda.
+  Widget _dosCampos(String a, String b) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(child: _campo(a)),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: _campo(b)),
+        ],
+      );
+
+  /// El técnico tocó un servidor de la lista.
+  void _elegirServidor(int v) {
+    if (v != _idZona) setState(() => _idZona = v);
+  }
+
+  /// El servidor: si hay uno solo --el del corte del ticket, casi siempre--
+  /// se MUESTRA ya asignado; si hay varios, se elige tocando uno.
+  Widget _servidor() {
+    if (_servidores.isEmpty) {
+      return const _Aviso(
+        icono: Icons.info_outline,
+        texto: 'Tu empresa no ha cargado sus servidores en la plataforma '
+            '(Programación → El contrato de instalación).',
+      );
+    }
+    if (_servidores.length == 1) {
+      return DexterBaldosaConIcono(
+        icono: Icons.dns_outlined,
+        rotulo: 'Servidor asignado',
+        valor: (_servidores.first['nombre'] ?? '').toString(),
+      );
+    }
+    final bool delCorte = _idZona != null && _idZona == _borrador?['servidor_sugerido'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _Rotulo(delCorte ? 'Servidor · marcado por el corte del ticket' : 'Elige el servidor'),
+        for (final Map<String, dynamic> s in _servidores)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: _OpcionDeServidor(
+              nombre: (s['nombre'] ?? '').toString(),
+              elegido: _idZona == s['id_zona'],
+              alTocar: () => _elegirServidor(s['id_zona'] as int),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Las coordenadas de la casa: el mapa con el punto, y cómo cambiarlo.
+  Widget _ubicacion() {
+    final ({double lat, double lng})? c = _coordenadas;
+    final String texto = c == null
+        ? ''
+        : '${c.lat.toStringAsFixed(6)}, ${c.lng.toStringAsFixed(6)}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _Rotulo(c == null
+            ? 'Coordenadas de la instalación'
+            : (_coordenadasCorregidas
+                ? 'Coordenadas · corregidas por ti'
+                : 'Coordenadas · del ticket')),
+        const SizedBox(height: AppSpacing.xs),
+        if (c == null)
+          const DexterBaldosaConIcono(
+            icono: Icons.place_outlined,
+            rotulo: 'Sin coordenadas en el ticket',
+            valor: 'Del teléfono, al firmar',
+          )
+        else
+          MapaDelCliente(
+            latitud: c.lat,
+            longitud: c.lng,
+            alto: 170,
+            etiqueta: texto,
+            alCorregir: _elegirEnElMapa,
+          ),
+        const SizedBox(height: AppSpacing.sm),
+        Row(children: <Widget>[
+          Expanded(
+            child: DexterAccionRapida(
+              icono: Icons.map_outlined,
+              texto: 'Elegir en el mapa',
+              alTocar: _elegirEnElMapa,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: DexterAccionRapida(
+              icono: Icons.my_location,
+              texto: 'Donde estoy',
+              alTocar: _usarDondeEstoy,
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _selectorDePlan(String planDelTicket) {
+    if (_planes.isEmpty) {
+      return TextField(
+        controller: _plan,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(labelText: 'Plan'),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        DropdownButtonFormField<String>(
+          initialValue: _plan.text.isEmpty ? null : _plan.text,
+          isExpanded: true,
+          hint: const Text('Elige el plan'),
+          icon: const Icon(Icons.expand_more, color: AppColors.secondary),
+          borderRadius: AppRadius.brTarjeta,
+          style: AppTypography.cuerpo.copyWith(fontWeight: FontWeight.w600),
+          decoration: const InputDecoration(
+            labelText: 'Plan',
+            prefixIcon: Icon(Icons.speed, color: AppColors.secondary),
+          ),
+          items: <DropdownMenuItem<String>>[
+            for (final Map<String, dynamic> p in _planes)
+              DropdownMenuItem<String>(
+                value: p['nombre'].toString(),
+                child: Text(p['nombre'].toString(), overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          onChanged: (String? v) {
+            if (v != null) _elegirPlan(v);
+          },
+        ),
+        //  Lo que pidió el cliente, a la vista: con eso se elige si el
+        //  ticket no dice un plan de la lista.
+        if (planDelTicket.isNotEmpty && planDelTicket != _plan.text)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs, left: 2),
+            child: DexterFilaDeDato(
+              icono: Icons.receipt_long_outlined,
+              texto: 'En el ticket dice: «$planDelTicket»',
+              estilo: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
+              colorDelIcono: AppColors.outline,
+            ),
           ),
       ],
     );
@@ -352,176 +642,112 @@ class _EstadoContrato extends State<ContratoScreen> {
 
   Widget _formulario() {
     final bool deSolicitud = _borrador?['origen'] == 'solicitud';
-    final Map<String, dynamic>? aut = _borrador?['autorizaciones'] is Map
-        ? Map<String, dynamic>.from(_borrador!['autorizaciones'] as Map)
-        : null;
+    final String planDelTicket = (_borrador?['plan_del_ticket'] ?? '').toString().trim();
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.margen, AppSpacing.md, AppSpacing.margen, AppSpacing.xl),
       children: <Widget>[
-        _Tarjeta(children: <Widget>[
-          Text('El cliente', style: AppTypography.tituloChico),
-          _Sello(
-            texto: deSolicitud
-                ? 'Lo llenó el cliente en la solicitud. Revísalo con el documento.'
-                : 'Sin solicitud: llénalo con el documento a la vista.',
-            ok: deSolicitud,
-          ),
-          for (final List<String> c in _camposDelCliente)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: TextField(
-                controller: _campos[c[0]],
-                onChanged: (_) => setState(() {}),
-                keyboardType: c[0] == 'telefono' || c[0] == 'numero_documento'
-                    ? TextInputType.number
-                    : (c[0] == 'correo' ? TextInputType.emailAddress : TextInputType.text),
-                decoration: InputDecoration(
-                  labelText: c[1],
-                  prefixText: c[0] == 'numero_documento' ? '$_tipoDocumento ' : null,
-                  isDense: true,
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ),
-          if (aut != null)
+        DexterBloque(
+          titulo: 'El cliente',
+          icono: Icons.person_outline,
+          insignia: deSolicitud
+              ? const DexterPastilla.enRegla(texto: 'De la solicitud')
+              : const DexterPastilla.alerta(texto: 'Sin solicitud'),
+          separacion: AppSpacing.sm,
+          children: <Widget>[
             Text(
-              '${aut['habeas_data'] == true ? '☑' : '☐'} Habeas data   '
-              '${aut['centrales_de_riesgo'] == true ? '☑' : '☐'} Centrales de riesgo',
-              style: AppTypography.cuerpoChico,
+              deSolicitud
+                  ? 'Lo llenó el cliente en la solicitud. Revísalo con el documento.'
+                  : 'Sin solicitud: llénalo con el documento a la vista.',
+              style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
             ),
-        ]),
-        _Tarjeta(children: <Widget>[
-          Text('El servicio', style: AppTypography.tituloChico),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _plan,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-                labelText: 'Plan', isDense: true, border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 12),
-          Text('Servidor', style: AppTypography.etiqueta),
-          if (_servidores.isEmpty)
-            const _Aviso(
-              icono: Icons.info_outline,
-              texto: 'Tu empresa no ha cargado sus servidores en la plataforma '
-                  '(Programación → El contrato de instalación).',
-            ),
-          RadioGroup<int>(
-            groupValue: _idZona,
-            onChanged: (int? v) {
-              setState(() {
-                _idZona = v;
-                //  La IP de la zona anterior no sirve para la nueva: se
-                //  suelta. Dejarla puesta seria ofrecer una direccion de
-                //  otro rango sin que nadie lo note.
-                _ip = null;
-                _ips = <String>[];
-                _motivoSinIps = '';
-              });
-              if (v != null) _pedirIps(v);
-            },
-            //  Material transparente: sin él, la tarjeta de color tapa el
-            //  efecto del toque y el técnico no ve que eligió.
-            child: Material(
-              type: MaterialType.transparency,
-              child: Column(children: <Widget>[
-                for (final Map<String, dynamic> s in _servidores)
-                  RadioListTile<int>(
-                    contentPadding: EdgeInsets.zero,
-                    value: s['id_zona'] as int,
-                    title: Text((s['nombre'] ?? '').toString()),
-                  ),
-              ]),
-            ),
-          ),
-          //  LA IP, DESPUES DEL SERVIDOR  --  14/11/2026
-          //
-          //  Se OFRECE y no se teclea, que es el motivo de todo esto: el
-          //  usuario reporto que al digitar los datos «hay muchos errores».
-          //  Una IP mal tecleada no es un error de ortografia: es un cliente
-          //  sin servicio, o dos clientes con la misma IP.
-          if (_idZona != null) ...<Widget>[
-            const SizedBox(height: 12),
-            Text('Dirección IP', style: AppTypography.etiqueta),
-            if (_cargandoIps)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Row(children: <Widget>[
-                  SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2)),
-                  SizedBox(width: 8),
-                  Text('Buscando las disponibles...'),
-                ]),
-              )
-            else if (_ips.isEmpty)
-              _Aviso(
-                icono: Icons.info_outline,
-                texto: _motivoSinIps.isEmpty
-                    ? 'No hay direcciones para ofrecer en este servidor.'
-                    : _motivoSinIps,
-              )
-            else ...<Widget>[
-              //  Un Wrap y no un RadioGroup: son veinte opciones cortas y en
-              //  columna no caben en una pantalla de telefono.
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  for (final String ip in _ips)
-                    ChoiceChip(
-                      label: Text(ip),
-                      selected: _ip == ip,
-                      onSelected: (bool sel) => setState(() => _ip = sel ? ip : null),
-                    ),
-                ],
-              ),
-              if (_advertenciaIps.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  //  LA ADVERTENCIA SE MUESTRA, no se guarda en el codigo: una
-                  //  direccion libre aqui es una que ningun CLIENTE tiene. Las
-                  //  antenas y los switches no son clientes.
-                  child: _Aviso(icono: Icons.warning_amber_outlined,
-                      texto: _advertenciaIps),
-                ),
-            ],
+            //  Uno debajo del otro, a todo el ancho (el usuario, 26/11/2026:
+            //  «que salga nombre arriba y apellido abajo, completo»).
+            _campo('nombre'),
+            _campo('apellido'),
+            _dosCampos('numero_documento', 'telefono'),
+            _campo('correo'),
+            _campo('direccion'),
+            _campo('barrio'),
+            //  SIN «HABEAS DATA» NI «CENTRALES DE RIESGO» (el usuario,
+            //  26/11/2026: «ya no es necesario»). Siguen en el contrato: el
+            //  servidor las toma de la solicitud, que es donde el cliente las
+            //  aceptó, y no de esta pantalla.
+            //
+            //  LAS COORDENADAS (el usuario: «no veo las coordenadas»). Mandan
+            //  las del ticket; si no trae, el servidor guarda las de este
+            //  teléfono al firmar.
+            _ubicacion(),
           ],
-        ]),
-        _Tarjeta(children: <Widget>[
-          Row(children: <Widget>[
-            //  Expanded y no Spacer: con letra grande, el título y «Borrar»
-            //  no cabían juntos y la fila se desbordaba (lo vio la prueba).
-            Expanded(child: Text('Firma del cliente', style: AppTypography.tituloChico)),
-            if (!_trazo.vacio)
-              TextButton(
-                style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
-                onPressed: _trazo.limpiar,
-                child: const Text('Borrar'),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        DexterBloque(
+          titulo: 'El servicio',
+          icono: Icons.router_outlined,
+          separacion: AppSpacing.md,
+          children: <Widget>[
+            _selectorDePlan(planDelTicket),
+            _servidor(),
+            //  LA IP: la asigna el sistema al firmar. Se dice, para que nadie
+            //  la busque para elegirla.
+            const DexterBaldosaConIcono(
+              icono: Icons.lan_outlined,
+              rotulo: 'Dirección IP · automática',
+              valor: 'Se asigna al firmar',
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        DexterBloque(
+          titulo: 'Firma del cliente',
+          icono: Icons.draw_outlined,
+          insignia: _trazo.vacio
+              ? null
+              : TextButton(
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
+                  onPressed: _trazo.limpiar,
+                  child: const Text('Borrar'),
+                ),
+          separacion: AppSpacing.sm,
+          children: <Widget>[
+            Text('Acepta el contrato y la instalación recibida.',
+                style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant)),
+            Container(
+              height: 190,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainerLow,
+                borderRadius: AppRadius.brTarjeta,
+                border: Border.all(
+                  color: _trazo.vacio ? AppColors.surfaceContainerHigh : AppColors.secondary,
+                  width: 1.5,
+                ),
               ),
-          ]),
-          Text('Acepta el contrato y la instalación recibida.',
-              style: AppTypography.cuerpoChico),
-          const SizedBox(height: 8),
-          Container(
-            height: 180,
-            decoration: BoxDecoration(
-              color: AppColors.fondoHundido,
-              borderRadius: AppRadius.brCampo,
-              border: Border.all(color: AppColors.bordeFuerte),
+              child: ClipRRect(
+                borderRadius: AppRadius.brTarjeta,
+                child: Stack(children: <Widget>[
+                  //  La línea de firma, como en el papel.
+                  Positioned(
+                    left: AppSpacing.lg,
+                    right: AppSpacing.lg,
+                    bottom: 44,
+                    child: Container(height: 1, color: AppColors.outline.withValues(alpha: 0.4)),
+                  ),
+                  if (_trazo.vacio)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 18,
+                      child: Text('Firme aquí con el dedo',
+                          textAlign: TextAlign.center,
+                          style: AppTypography.cuerpoChico.copyWith(color: AppColors.outline)),
+                    ),
+                  Positioned.fill(child: LienzoDeFirma(trazo: _trazo)),
+                ]),
+              ),
             ),
-            child: ClipRRect(
-              borderRadius: AppRadius.brCampo,
-              child: Stack(children: <Widget>[
-                if (_trazo.vacio)
-                  Center(child: Text('Firme aquí con el dedo', style: AppTypography.cuerpoChico)),
-                Positioned.fill(child: LienzoDeFirma(trazo: _trazo)),
-              ]),
-            ),
-          ),
-        ]),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
         if (_errorDeEnvio != null)
           _Aviso(icono: Icons.error_outline, texto: _errorDeEnvio!),
         SizedBox(
@@ -547,9 +773,9 @@ class _EstadoContrato extends State<ContratoScreen> {
         ),
         if (!_listo && !_enviando)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
             child: Text(_queFalta(), textAlign: TextAlign.center,
-                style: AppTypography.cuerpoChico),
+                style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant)),
           ),
       ],
     );
@@ -571,54 +797,65 @@ class _EstadoContrato extends State<ContratoScreen> {
 // ==========================================================================
 //  PIEZAS
 // ==========================================================================
-class _Tarjeta extends StatelessWidget {
-  const _Tarjeta({required this.children});
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.superficie,
-          borderRadius: AppRadius.brTarjeta,
-          border: Border.all(color: AppColors.borde),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
-      );
-}
-
-class _Sello extends StatelessWidget {
-  const _Sello({required this.texto, required this.ok});
+/// Un rótulo de sección dentro de una tarjeta: chico, en mayúsculas y gris,
+/// como los de las baldosas de la ficha.
+class _Rotulo extends StatelessWidget {
+  const _Rotulo(this.texto);
   final String texto;
-  final bool ok;
 
   @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(top: 4, bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: ok ? AppColors.exitoFondo : AppColors.precaucionFondo,
-          borderRadius: AppRadius.brChico,
-        ),
-        child: Text(texto,
-            style: AppTypography.etiquetaChica
-                .copyWith(color: ok ? AppColors.exitoTexto : AppColors.precaucion)),
+  Widget build(BuildContext context) => Text(
+        texto.toUpperCase(),
+        style: AppTypography.labelCaption.copyWith(color: AppColors.outline),
       );
 }
 
-class _Fila extends StatelessWidget {
-  const _Fila(this.rotulo, this.valor);
-  final String rotulo;
-  final String valor;
+/// Un servidor para elegir. El elegido se marca con el azul de acción y un
+/// borde: con guante y al sol, un punto de radio no se ve.
+class _OpcionDeServidor extends StatelessWidget {
+  const _OpcionDeServidor({
+    required this.nombre,
+    required this.elegido,
+    required this.alTocar,
+  });
+  final String nombre;
+  final bool elegido;
+  final VoidCallback alTocar;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-          SizedBox(width: 100, child: Text(rotulo, style: AppTypography.cuerpoChico)),
-          Expanded(child: Text(valor, style: AppTypography.cuerpo)),
-        ]),
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        selected: elegido,
+        child: Material(
+          color: elegido ? AppColors.infoFondo : AppColors.surfaceContainerLow,
+          borderRadius: AppRadius.brTarjeta,
+          child: InkWell(
+            onTap: alTocar,
+            borderRadius: AppRadius.brTarjeta,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: AppSpacing.objetivoTactil),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+              decoration: BoxDecoration(
+                borderRadius: AppRadius.brTarjeta,
+                border: Border.all(
+                  color: elegido ? AppColors.secondary : AppColors.surfaceContainerHigh,
+                  width: 1.5,
+                ),
+              ),
+              child: Row(children: <Widget>[
+                Icon(elegido ? Icons.check_circle : Icons.circle_outlined,
+                    size: 22, color: elegido ? AppColors.secondary : AppColors.outline),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(nombre,
+                      style: AppTypography.etiquetaGrande.copyWith(
+                          color: elegido ? AppColors.secondary : AppColors.onSurface)),
+                ),
+              ]),
+            ),
+          ),
+        ),
       );
 }
 

@@ -114,6 +114,19 @@ CLAVES_RAIZ_CONOCIDAS = {"pasos", "campos", "evidencias", "seguimiento",
 #: el trabajo andando, no son el checklist.
 MAX_FOTOS_POR_REPORTE = 5
 
+#: LOS BOTONES QUE UN PASO PUEDE LLEVAR (26/11/2026). El usuario, probando
+#: una instalacion: «en cada paso al ultimo siempre sale ver contrato y
+#: reportar», y eligio el contrato en «Contrato y documentos» y reportar en
+#: «Puerto y acceso». Que paso es cual lo dice cada empresa en SU plantilla,
+#: no el codigo: otra empresa los llamara distinto. Un paso sin botones no
+#: los muestra; una plantilla donde NINGUN paso los declara, los muestra al
+#: final de todos, como hasta hoy.
+BOTONES_DE_PASO = ("contrato", "reportar", "ip", "onu")
+#  `onu` (26/11/2026): «Activar ONU» en la red, con el serial del paso.
+#  `ip` (26/11/2026): el usuario, «en el paso 4 debe salir la IP que asigno el
+#  sistema, y que deje copiar pero no modificar». No es un boton sino un
+#  recuadro, pero va por el mismo camino: lo pone la plantilla en su paso.
+
 
 # ---------------------------------------------------------------------------
 #  El catalogo de partida
@@ -591,8 +604,15 @@ def componer(definicion: dict) -> dict:
         #  el mismo dia: lo que `componer` no nombra, no existe.
         if bool(e.get("es_captura")):
             salida["es_captura"] = True
+        #  SOLO EN LA PLATAFORMA (25/11/2026): la foto queda en la orden y no
+        #  viaja a ningun ticket. Para los documentos del cliente. Ver
+        #  `fotos_al_ticket.requisitos_que_no_salen`. Se escribe solo si esta
+        #  marcada: sin la clave, la foto viaja como siempre.
+        if bool(e.get("solo_en_la_plataforma")):
+            salida["solo_en_la_plataforma"] = True
         evidencias.append(salida)
 
+    _poner_botones(definicion.get("botones_por_paso"), pasos)
     esquema = {"pasos": pasos, "campos": campos, "evidencias": evidencias}
 
     #  LAS FOTOS DE CADA REPORTE (15/10/2026). Van en `seguimiento.<momento>.
@@ -656,6 +676,40 @@ def componer(definicion: dict) -> dict:
     except ValidationError as e:
         raise ErrorPlantilla("ESQUEMA_INVALIDO", "; ".join(e.messages))
     return esquema
+
+
+def _poner_botones(botones_por_paso, pasos: list[dict]) -> None:
+    """`{"<nombre del paso>": ["contrato", "reportar"]}` -> `pasos[i].botones`.
+
+    Un paso que no existe o un boton que no se conoce se RECHAZAN: guardar
+    en silencio una marca que la app no va a mostrar es dejar a quien edita
+    creyendo que el boton esta donde no esta.
+    """
+    if not botones_por_paso:
+        return
+    if not isinstance(botones_por_paso, dict):
+        raise ErrorPlantilla("DEFINICION_INVALIDA",
+                             "Los botones de cada paso no se entienden.")
+    por_titulo = {p["titulo"].lower(): p for p in pasos}
+    for titulo, botones in botones_por_paso.items():
+        paso = por_titulo.get(str(titulo or "").strip().lower())
+        if paso is None:
+            raise ErrorPlantilla("PASO_INEXISTENTE",
+                                 f"El paso «{titulo}» no existe en esta plantilla.")
+        if not isinstance(botones, list):
+            raise ErrorPlantilla("DEFINICION_INVALIDA",
+                                 f"Los botones del paso «{titulo}» no se entienden.")
+        limpios = []
+        for b in botones:
+            if b not in BOTONES_DE_PASO:
+                raise ErrorPlantilla(
+                    "BOTON_DESCONOCIDO",
+                    f"«{b}» no es un botón que un paso pueda llevar "
+                    f"({', '.join(BOTONES_DE_PASO)}).")
+            if b not in limpios:
+                limpios.append(b)
+        if limpios:
+            paso["botones"] = limpios
 
 
 def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
@@ -751,6 +805,10 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
                            #  la plantilla la tenga, y el primer guardado la
                            #  borra de verdad. Las dos puntas o ninguna.
                            "es_captura": bool(e.get("es_captura", False)),
+                           #  Igual que la de arriba: sin leerla, el primer
+                           #  guardado desde el editor la borraria, y la
+                           #  cedula volveria a viajar al ticket.
+                           "solo_en_la_plataforma": bool(e.get("solo_en_la_plataforma", False)),
                            "paso": titulos_paso.get(e.get("paso"), "")})
 
     #  Las fotos de cada reporte. Un momento sin declarar se muestra con la
@@ -784,6 +842,11 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
         return None, motivos
     definicion = {"campos": campos, "evidencias": evidencias,
                   "fotos_de_reportes": fotos_de_reportes}
+    botones = {p.get("titulo", ""): list(p["botones"])
+               for p in esquema.get("pasos") or []
+               if isinstance(p, dict) and p.get("botones")}
+    if botones:
+        definicion["botones_por_paso"] = botones
     if esquema.get("duracion_estimada_minutos"):
         definicion["duracion_estimada_minutos"] = esquema["duracion_estimada_minutos"]
     return definicion, []

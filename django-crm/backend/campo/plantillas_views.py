@@ -27,6 +27,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from campo import material_habitual as MH
+from campo import puntos_de_tv as TV
 from campo import plantillas as P
 from campo.cuadrillas import labores_de
 from campo.cuadrillas_views import _exigir_gestion
@@ -140,6 +142,12 @@ class PlantillaView(APIView):
         return Response({
             **_resumen(tipo),
             "definicion": definicion,
+            #  El material que se precarga en sus ordenes (26/11/2026). No va
+            #  en la definicion: no es de una version, es de la empresa para
+            #  ese tipo de trabajo, y cambiarlo no pide publicar.
+            "material_habitual": MH.de_tipo(tipo.org, tipo),
+            #  Los puntos de TV (26/11/2026): igual, de la empresa por tipo.
+            "puntos_de_tv": TV.para_el_editor(tipo.org, tipo),
             "ordenes_vivas": _ordenes_vivas(tipo),
             "versiones": [
                 {"version": x.version, "estado": x.estado,
@@ -163,6 +171,60 @@ class PlantillaView(APIView):
         tipo.activo = activo
         tipo.save(update_fields=["activo"])
         return Response(_resumen(tipo))
+
+
+class MaterialHabitualView(APIView):
+    """`PUT /campo/plantillas/<id>/material-habitual/` — el material que se
+    precarga en las ordenes de ese tipo de trabajo. Ver `material_habitual.py`.
+
+    Escribe gestion, como el resto de la plantilla. Rige para las ordenes que
+    el telefono lea DESPUES: no hace falta publicar una version.
+    """
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        tipo = _tipo_o_404(request, pk)
+        if tipo is None:
+            return Response({"detail": "No existe."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"material_habitual": MH.de_tipo(tipo.org, tipo)})
+
+    def put(self, request, pk):
+        _exigir_gestion(request)
+        tipo = _tipo_o_404(request, pk)
+        if tipo is None:
+            return Response({"detail": "No existe."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            lista = MH.guardar(tipo.org, tipo, request.data.get("lineas"))
+        except MH.MaterialHabitualInvalido as e:
+            return Response({"error": "MATERIAL_INVALIDO", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response({"material_habitual": lista})
+
+
+class PuntosDeTvView(APIView):
+    """`PUT /campo/plantillas/<id>/puntos-de-tv/` — cuanto material de TV lleva
+    cada punto en ese tipo de trabajo. Ver `campo/puntos_de_tv.py`."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def get(self, request, pk):
+        tipo = _tipo_o_404(request, pk)
+        if tipo is None:
+            return Response({"detail": "No existe."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"puntos_de_tv": TV.para_el_editor(tipo.org, tipo)})
+
+    def put(self, request, pk):
+        _exigir_gestion(request)
+        tipo = _tipo_o_404(request, pk)
+        if tipo is None:
+            return Response({"detail": "No existe."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            datos = TV.guardar(tipo.org, tipo, request.data)
+        except TV.PuntosDeTvInvalido as e:
+            return Response({"error": "TV_INVALIDA", "detalle": str(e)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response({"puntos_de_tv": datos})
 
 
 class PublicarPlantillaView(APIView):

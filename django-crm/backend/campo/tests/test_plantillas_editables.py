@@ -528,3 +528,56 @@ def test_k3_la_vuelta_no_marca_la_plantilla_como_no_editable():
 
     assert definicion is not None
     assert motivos == [], f"la plantilla dejo de ser editable por: {motivos}"
+
+
+# =========================================================================== #
+#  LOS BOTONES DE CADA PASO  --  26/11/2026
+#
+#  El usuario: «en cada paso al ultimo siempre sale ver contrato y reportar».
+#  En que paso va cada uno lo dice la plantilla de cada empresa.
+# =========================================================================== #
+_DOS_PASOS = [{"titulo": "¿Hay puerto?", "paso": "Puerto y acceso"},
+              {"titulo": "Contrato firmado", "tipo": "checklist", "paso": "Contrato y documentos"}]
+
+
+def test_z1_los_BOTONES_DE_CADA_PASO_van_al_esquema_y_vuelven_al_editor():
+    esquema = P.componer({"campos": _DOS_PASOS, "botones_por_paso": {
+        "puerto y acceso": ["reportar"],                      # sin importar mayusculas
+        "Contrato y documentos": ["contrato", "contrato"]}})  # repetido, una vez
+    assert [p.get("botones") for p in esquema["pasos"]] == [["reportar"], ["contrato"]]
+    definicion, motivos = P.leer_definicion(esquema)
+    assert motivos == []
+    assert definicion["botones_por_paso"] == {"Puerto y acceso": ["reportar"],
+                                              "Contrato y documentos": ["contrato"]}
+
+
+def test_z1b_el_recuadro_de_la_IP_va_como_un_boton_mas():
+    esquema = P.componer({"campos": _DOS_PASOS, "botones_por_paso": {
+        "Contrato y documentos": ["contrato", "ip"]}})
+    assert esquema["pasos"][1]["botones"] == ["contrato", "ip"]
+
+
+def test_z2_sin_botones_la_plantilla_queda_como_siempre():
+    esquema = P.componer({"campos": _DOS_PASOS})
+    assert all("botones" not in p for p in esquema["pasos"])
+    assert "botones_por_paso" not in P.leer_definicion(esquema)[0]
+
+
+@pytest.mark.parametrize("botones,codigo", [
+    ({"No existe": ["contrato"]}, "PASO_INEXISTENTE"),
+    ({"Puerto y acceso": ["llamar"]}, "BOTON_DESCONOCIDO"),
+    ({"Puerto y acceso": "reportar"}, "DEFINICION_INVALIDA"),
+    (["reportar"], "DEFINICION_INVALIDA"),
+])
+def test_z3_una_marca_que_la_app_no_mostraria_SE_RECHAZA(botones, codigo):
+    with pytest.raises(P.ErrorPlantilla) as e:
+        P.componer({"campos": _DOS_PASOS, "botones_por_paso": botones})
+    assert e.value.codigo == codigo
+
+
+def test_z4_el_validador_de_siempre_tampoco_deja_pasar_un_boton_desconocido():
+    from campo.services.validador import ValidationError as VE, validar_esquema_plantilla
+    esquema = P.componer({"campos": _DOS_PASOS})
+    esquema["pasos"][0]["botones"] = ["borrar_todo"]
+    with pytest.raises(VE, match="botones"):
+        validar_esquema_plantilla(esquema)

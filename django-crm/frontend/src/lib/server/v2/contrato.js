@@ -36,18 +36,56 @@ export async function leerContrato(ctx) {
  * @param {FormData} f
  */
 export function cuerpoDeContrato(f) {
-  /** @type {{ id_zona: number | string, nombre: string }[]} */
+  /** @type {{ id_zona: number | string, nombre: string, vlan?: number | string }[]} */
   const servidores = [];
   for (let i = 0; i < FILAS_DE_SERVIDOR; i++) {
     const id = String(f.get(`servidor_id_${i}`) ?? '').trim();
     const nombre = String(f.get(`servidor_nombre_${i}`) ?? '').trim();
+    //  LA VLAN DEL SERVIDOR (26/11/2026), para activar la ONU. Vacía no viaja;
+    //  con letras viaja como texto para que el backend diga qué está mal.
+    const vlan = String(f.get(`servidor_vlan_${i}`) ?? '').trim();
     if (!id && !nombre) continue;
-    servidores.push({ id_zona: /^\d+$/.test(id) ? Number(id) : id, nombre });
+    servidores.push({
+      id_zona: /^\d+$/.test(id) ? Number(id) : id, nombre,
+      ...(vlan ? { vlan: /^\d+$/.test(vlan) ? Number(vlan) : vlan } : {})
+    });
   }
+  //  CÓMO ESCRIBE LA EMPRESA LOS DATOS DEL CLIENTE (25/11/2026).
+  //
+  //  Una casilla sin marcar NO VIAJA en un formulario: «no está» es «apagada».
+  //  Por eso se mandan siempre las dos como sí/no de verdad; mandarlas solo
+  //  cuando están marcadas dejaría una costumbre imposible de apagar.
+  //
+  //  Los dígitos, igual que el número de zona: uno con letras viaja como texto
+  //  para que el backend diga qué está mal, en vez de volverse NaN o 0.
+  const digitos = String(f.get('digitos_del_telefono') ?? '').trim();
+  //  LAS ABREVIATURAS DE LA DIRECCIÓN (25/11/2026): un renglón por regla,
+  //  «CLL, CL, CALL = CALLE». Un renglón sin «=» se manda igual, sin cómo
+  //  queda, para que el backend diga qué falta en vez de perderlo callado.
+  const abreviaturas = String(f.get('abreviaturas_de_direccion') ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [formas, queda = ''] = l.split('=');
+      return {
+        como_lo_escriben: formas.split(/[,;]/).map((x) => x.trim()).filter(Boolean),
+        como_queda: queda.trim()
+      };
+    });
   return {
     nit: String(f.get('nit') ?? '').trim(),
     servidores,
-    texto_condiciones: String(f.get('texto_condiciones') ?? '')
+    texto_condiciones: String(f.get('texto_condiciones') ?? ''),
+    abreviaturas_de_direccion: abreviaturas,
+    datos_en_mayusculas: f.get('datos_en_mayusculas') != null,
+    barrio_en_la_direccion: f.get('barrio_en_la_direccion') != null,
+    //  Igual que las dos de arriba, y acá importa más: es el interruptor de
+    //  crear clientes en el proveedor. Si desmarcarlo no viajara como `false`,
+    //  no habría forma de apagarlo desde la pantalla.
+    crear_en_el_isp: f.get('crear_en_el_isp') != null,
+    activar_onu: f.get('activar_onu') != null,
+    digitos_del_telefono: digitos === '' ? 0 : /^\d+$/.test(digitos) ? Number(digitos) : digitos
   };
 }
 

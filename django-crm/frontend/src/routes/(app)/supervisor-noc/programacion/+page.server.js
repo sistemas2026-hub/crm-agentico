@@ -24,6 +24,7 @@ import {
   leerMarcaDeAgua
 } from '$lib/server/v2/marca-de-agua.js';
 import { cuerpoDeContrato, guardarContrato, leerContrato } from '$lib/server/v2/contrato.js';
+import { cuerpoDeRangos, guardarRangos, leerOcupacion, leerRangos } from '$lib/server/v2/rangos-de-ip.js';
 import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 
 /**
@@ -51,7 +52,7 @@ import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 const ROLES_GESTION = new Set(['ADMIN', 'SUPERVISOR', 'OPERACIONES']);
 
 /** @type {import('./$types').PageServerLoad} */
-export async function load({ url, cookies, locals }) {
+export async function load({ url, cookies, locals, fetch }) {
   const rol = /** @type {any} */ (locals).profile?.role ?? null;
   if (!ROLES_GESTION.has(rol)) {
     return {
@@ -91,13 +92,17 @@ export async function load({ url, cookies, locals }) {
   //  después, uno detrás del otro: la pantalla esperaba dos viajes más al
   //  backend, en fila, antes de dibujar nada. El usuario: «cuando se recarga
   //  demora en salir». Ninguno depende de otro.
-  const [dp, mat, conf, seg, marca, contrato] = await Promise.all([
+  //  Y LOS RANGOS DE IP (25/11/2026), del motor y no del backend: viven en la
+  //  configuración del asistente. Van en la misma tanda y no tocan al
+  //  proveedor: leen lo guardado.
+  const [dp, mat, conf, seg, marca, contrato, rangos] = await Promise.all([
     leerDiaPublicado({ cookies }, dia),
     leerMaterialDelDia({ cookies }, dia),
     leerConfiguracionDeMaterial({ cookies }),
     leerConfiguracionDeSeguimiento({ cookies }),
     leerMarcaDeAgua({ cookies }),
-    leerContrato({ cookies })
+    leerContrato({ cookies }),
+    leerRangos(locals, fetch)
   ]);
   return {
     puedeVer: true,
@@ -114,6 +119,9 @@ export async function load({ url, cookies, locals }) {
     marcaDeAgua: marca.configuracion,
     //  Los servidores, el NIT y las condiciones del contrato (13/11/2026).
     contrato: contrato.configuracion,
+    //  De qué rangos saca IP cada servidor (25/11/2026). `null` = el motor
+    //  no contestó, y la pantalla lo dice.
+    rangos,
     vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
   };
 }
@@ -131,6 +139,46 @@ export const actions = {
     }
   },
 
+  //  LOS RANGOS DE IP DE CADA SERVIDOR (25/11/2026). Se leen los guardados
+  //  antes de escribir para no borrar los de una zona que la pantalla no
+  //  muestra (ver `cuerpoDeRangos`).
+  rangos: async ({ request, locals, fetch }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'rangos', error: 'Esto es para quien gestiona.' });
+    try {
+      const actuales = await leerRangos(locals, fetch);
+      if (!actuales) return fail(400, { de: 'rangos', error: 'El asistente no contestó: no se guardó nada.' });
+      const f = await request.formData();
+      //  La casilla de las IP mal escritas viaja SIEMPRE como sí o no: una
+      //  casilla sin marcar no llega en el formulario, y sin esto no se podría
+      //  apagar.
+      const r = await guardarRangos(locals, fetch, cuerpoDeRangos(f, actuales.pools ?? []),
+        f.get('contar_ip_mal_escritas') != null);
+      const conRango = (r?.pools ?? []).filter((/** @type {any} */ p) => (p.prefijos ?? []).length).length;
+      const hecho = conRango
+        ? `Guardado. ${conRango} servidor${conRango === 1 ? '' : 'es'} con rangos.`
+        : 'Guardado, pero ningún servidor tiene rangos: el técnico no verá IP libres y el alta no podrá crear clientes.';
+      return { de: 'rangos', hecho };
+    } catch (e) {
+      return fail(400, { de: 'rangos', error: mensajeDeError(e) });
+    }
+  },
+
+  //  Vuelve a leer del proveedor qué direcciones están tomadas. Tarda.
+  leerOcupacion: async ({ locals, fetch }) => {
+    const rol = /** @type {any} */ (locals).profile?.role ?? null;
+    if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'rangos', error: 'Esto es para quien gestiona.' });
+    try {
+      const r = await leerOcupacion(locals, fetch);
+      const hecho = r?.completa
+        ? `Leídos ${r.leidos ?? 0} clientes: ${r.direcciones_tomadas ?? 0} direcciones tomadas.`
+        : 'La lectura quedó incompleta: hasta que se complete, al técnico no se le ofrecen IP.';
+      return { de: 'rangos', hecho };
+    } catch (e) {
+      return fail(400, { de: 'rangos', error: mensajeDeError(e) });
+    }
+  },
+
   //  EL CONTRATO DE INSTALACIÓN (13/11/2026): entre qué servidores elige el
   //  técnico, el NIT y el texto de las condiciones que va en el PDF.
   contrato: async ({ request, cookies, locals }) => {
@@ -143,7 +191,10 @@ export const actions = {
       const hecho = n === 0
         ? 'Guardado, pero sin servidores: el técnico no podrá crear contratos hasta cargar al menos uno.'
         : `Guardado. El técnico elige entre ${n} servidor${n === 1 ? '' : 'es'}.`
-          + (r?.texto_condiciones ? '' : ' Falta el texto de las condiciones: el PDF lo dirá.');
+          + (r?.texto_condiciones ? '' : ' Falta el texto de las condiciones: el PDF lo dirá.')
+          //  Que quede dicho al guardar: es el interruptor que crea clientes
+          //  en el sistema del proveedor (25/11/2026).
+          + (r?.crear_en_el_isp ? ' Al firmar, el cliente se crea en el proveedor.' : '');
       return { de: 'contrato', hecho };
     } catch (e) {
       return fail(400, { de: 'contrato', error: mensajeDeError(e) });

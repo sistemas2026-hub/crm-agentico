@@ -73,8 +73,11 @@ contrato con clausulas inventadas.
     <td><div class="rotulo">Correo</div><div class="valor">{{ c.correo|default:"—" }}</div></td>
   </tr><tr>
     <td colspan="2"><div class="rotulo">Dirección de instalación</div>
-      <div class="valor">{{ c.direccion }}{% if c.barrio %}, {{ c.barrio }}{% endif %}</div></td>
-  </tr></table>
+      <div class="valor">{{ direccion }}</div></td>
+  </tr>{% if c.barrio or coordenadas %}<tr>
+    <td><div class="rotulo">Barrio</div><div class="valor">{{ c.barrio|default:"—" }}</div></td>
+    <td><div class="rotulo">Coordenadas de la instalación</div><div class="valor">{{ coordenadas|default:"—" }}</div></td>
+  </tr>{% endif %}</table>
 </div>
 
 <div class="caja">

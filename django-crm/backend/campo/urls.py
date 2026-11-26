@@ -10,6 +10,7 @@ from campo import (
     configuracion_de_seguimiento_views,
     marca_de_agua_views,
     contrato_views,
+    activacion_onu_views,
     ips_libres_views,
     cuadrillas_views,
     despacho_pantalla_views,
@@ -89,6 +90,10 @@ urlpatterns = [
     path("plantillas/", plantillas_views.PlantillasView.as_view(), name="plantillas"),
     path("plantillas/<uid:pk>/", plantillas_views.PlantillaView.as_view(), name="plantilla"),
     path("plantillas/<uid:pk>/publicar/", plantillas_views.PublicarPlantillaView.as_view(), name="plantilla_publicar"),
+    path("plantillas/<uid:pk>/material-habitual/", plantillas_views.MaterialHabitualView.as_view(),
+         name="plantilla_material_habitual"),
+    path("plantillas/<uid:pk>/puntos-de-tv/", plantillas_views.PuntosDeTvView.as_view(),
+         name="plantilla_puntos_de_tv"),
     #  Los niveles de respuesta (24/10/2026): plazo y prioridad por asunto.
     #  Ver campo/niveles.py.
     path("niveles-de-respuesta/", niveles_views.NivelesDeRespuestaView.as_view(), name="niveles_de_respuesta"),
@@ -126,8 +131,19 @@ urlpatterns = [
          contrato_views.ContratoDeLaOrdenView.as_view(), name="contrato_de_la_orden"),
     path("contratos/<uuid:pk>/pdf/",
          contrato_views.PdfDelContratoView.as_view(), name="pdf_del_contrato"),
+    path("contratos/<uuid:pk>/anular/",
+         contrato_views.AnularContratoView.as_view(), name="anular_contrato"),
+    path("contratos/<uuid:pk>/crear-en-el-isp/",
+         contrato_views.CrearEnElIspView.as_view(), name="crear_contrato_en_el_isp"),
+    path("contratos/<uuid:pk>/resolver-alta/",
+         contrato_views.ResolverAltaView.as_view(), name="resolver_alta_del_contrato"),
     #  Las IP que se le ofrecen al tecnico, en la misma pantalla y despues
     #  de que elija la zona (14/11/2026). Ver `ips_libres_views`.
+    #  Activar la ONU de una instalacion (26/11/2026). Ver campo/activacion_onu.py.
+    path("trabajos/<uuid:pk>/onu/", activacion_onu_views.OnuDeLaOrdenView.as_view(),
+         name="onu_de_la_orden"),
+    path("trabajos/<uuid:pk>/onu/activar/", activacion_onu_views.ActivarOnuView.as_view(),
+         name="activar_onu_de_la_orden"),
     path("trabajos/<uuid:pk>/ips-libres/",
          ips_libres_views.IpsLibresDeLaOrdenView.as_view(), name="ips_libres_de_la_orden"),
     path("contrato/configuracion/",
