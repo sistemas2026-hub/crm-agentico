@@ -74,6 +74,7 @@ from nucleo.habilidades import analista
 from nucleo.herramientas import http as ejecutor_http
 from nucleo.herramientas import cuenta as ejecutor_cuenta
 from nucleo.herramientas import localidades as sincronizador_localidades
+from nucleo.herramientas import onu_por_mac
 from nucleo.ingesta import corpus as ingesta
 from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import borrador
@@ -7675,6 +7676,10 @@ SIN_ONU_VINCULADA = "onu_no_vinculada"
 # fallaban: los cuatro clientes estaban en la OLT con OTRO serial, y a dos de
 # ellos les habian cambiado la ONU ese mismo dia y el anterior.
 SERIAL_DESACTUALIZADO = "serial_desactualizado"
+# El serial no estaba en el sistema del ISP y se encontro por la MAC del router
+# (26/11/2026, ver nucleo/herramientas/onu_por_mac.py). Viaja como dato para
+# que nadie lo confunda con un serial cargado: lo dijo la OLT, no el ISP.
+ORIGEN_SERIAL_MAC = "mac"
 
 # Cuanto vale el inventario de ONU antes de volver a pedirlo. La consulta trae
 # 4.909 equipos en 11,7 MB y tarda 2 s: cara para hacerla al abrir cada ticket.
@@ -7798,6 +7803,20 @@ def contexto_tecnico(config, tenant: str, identidad: dict) -> dict:
     # (ver identidad_del_contexto).
     sn_onu = str(ficha.get("sn_onu") or identidad.get("sn_onu_respaldo") or "").strip()
 
+    #  SIN SERIAL, LA MAC DEL ROUTER (26/11/2026). La OLT dice detras de que
+    #  ONU vio la MAC que el ISP tiene cargada: 10 de 10 correctas medido el
+    #  10/11/2026. La consulta va en segundo plano por el cupo del proveedor;
+    #  la primera vez sale 'pendiente' y la siguiente lectura ya trae el serial.
+    por_mac: dict = {}
+    if olt and not sn_onu:
+        por_mac = _serial_por_mac(config, tenant, ficha)
+        if por_mac.get("sn"):
+            sn_onu = por_mac["sn"]
+            enlaces["sn_onu_origen"] = ORIGEN_SERIAL_MAC
+            enlaces["equipo_por_mac"] = {
+                "nombre_coincide": _nombre_de_la_onu_coincide(
+                    tenant, sn_onu, ficha.get("nombre") or "")}
+
     if panel and usuario:
         enlaces["wisphub_perfil"] = f"{panel}/clientes/ver/{usuario}/"
         if id_cliente:
@@ -7837,13 +7856,17 @@ def contexto_tecnico(config, tenant: str, identidad: dict) -> dict:
         # nadie cargo el serial, no que el cliente no tenga equipo: por eso el
         # texto de la pantalla no culpa al asistente.
         enlaces["equipo_no_disponible"] = SIN_ONU_VINCULADA
+        #  Por que la MAC tampoco lo resolvio: no es lo mismo «todavia se esta
+        #  buscando» que «la OLT no la ve» (equipo apagado) o «no hay MAC».
+        if por_mac.get("como"):
+            enlaces["busqueda_por_mac"] = por_mac["como"]
 
     # La ficha del cliente va aparte de los enlaces: son datos, no destinos.
     # 'sn_onu' se saca de aca porque ya viaja arriba junto a su enlace;
     # repetirlo en la tarjeta del cliente seria el mismo dato dos veces.
     if ficha:
         enlaces["cliente"] = {k: v for k, v in ficha.items()
-                              if k not in ("usuario", "sn_onu")}
+                              if k not in ("usuario", "sn_onu", "mac_cpe")}
 
     # Con que servicio se resolvio todo esto, y si los dos origenes se
     # contradecian. La discrepancia viaja como DATO y no como log: quien abre
@@ -8109,7 +8132,10 @@ def _con_zona_declarada(equipo: dict, config) -> dict:
 # -- ver 'campo/coordenadas_del_cliente.py'. Una sola representacion, y donde
 # el comando de anonimizacion ya la alcanza.
 _CAMPOS_FICHA = ("usuario", "ip", "estado", "nombre", "cedula", "sn_onu",
-                 "telefono", "direccion", "localidad", "coordenadas")
+                 "telefono", "direccion", "localidad", "coordenadas",
+                 #  La MAC del router (26/11/2026): con ella se busca la ONU de
+                 #  un servicio sin serial. No sale en la tarjeta del cliente.
+                 "mac_cpe")
 
 
 def _inventario_onu(config, tenant: str) -> list:
@@ -8157,6 +8183,82 @@ def _inventario_onu(config, tenant: str) -> list:
 
 
 TIMEOUT_INVENTARIO = 60
+
+
+def _olts_del_inventario(onus: list) -> list:
+    """En que OLT preguntar, sacado del inventario y no escrito a mano: el
+    script de backfill tiene '[3, 4]' fijo, que es Rapilink y no otra empresa."""
+    vistas = {str(o.get("olt_id")).strip() for o in onus or []
+              if isinstance(o, dict) and str(o.get("olt_id") or "").strip()}
+    return sorted(vistas, key=lambda x: (len(x), x))
+
+
+def _consultor_por_mac(config, tenant: str):
+    """La llamada a 'search_by_mac' de ESTA empresa, o None si no hay con que.
+
+    Con la misma credencial que el inventario. La clave se lee en cada llamada,
+    no se guarda en la cola: el pedido puede esperar minutos."""
+    herr = next((h for h in config.herramientas
+                 if h.nombre in _HERRAMIENTAS_EQUIPO), None)
+    base = ((config.variables_tenant or {}).get("SMARTOLT_SUBDOMINIO") or "").rstrip("/")
+    if herr is None or not base:
+        return None
+
+    def consultar(mac: str, olt_id: str) -> dict:
+        clave = secretos.obtener(tenant, herr.auth_ref)
+        if not clave:
+            raise RuntimeError("sin credencial de SmartOLT")
+        r = requests.get(f"{base}/api/onu/search_by_mac",
+                         headers={herr.auth_header: clave},
+                         params={"mac_address": mac, "olt_id": olt_id},
+                         timeout=60)
+        r.raise_for_status()
+        return r.json() or {}
+
+    return consultar
+
+
+def _serial_por_mac(config, tenant: str, ficha: dict) -> dict:
+    """{'sn': serial o '', 'como': ...} para un servicio sin serial en el ISP.
+
+    Nunca espera a la OLT: devuelve lo que ya se sabe y, si no hay nada
+    vigente, deja pedida la busqueda (ver nucleo/herramientas/onu_por_mac.py).
+    """
+    mac = onu_por_mac.mac_normalizada((ficha or {}).get("mac_cpe"))
+    if not mac:
+        return {"sn": "", "como": onu_por_mac.SIN_MAC}
+    try:
+        buscador = onu_por_mac.buscador()
+        serial, como = buscador.resultado(tenant, mac)
+        if como == onu_por_mac.PENDIENTE:
+            consultar = _consultor_por_mac(config, tenant)
+            olts = _olts_del_inventario(_inventario_onu(config, tenant)) if consultar else []
+            if not olts:
+                return {"sn": "", "como": onu_por_mac.SIN_OLT}
+            buscador.pedir(tenant, mac, olts, consultar)
+        return {"sn": serial, "como": como}
+    except Exception as e:                                  # noqa: BLE001
+        registrar("enlaces", "no se pudo buscar la ONU por la MAC", error=e)
+        return {"sn": "", "como": onu_por_mac.SIN_RESPUESTA}
+
+
+def _nombre_de_la_onu_coincide(tenant: str, sn: str, nombre: str):
+    """Si el nombre de esa ONU en la OLT es el del cliente. None si no se sabe.
+
+    Es una SEGUNDA señal, no una condicion: medido el 18/08/2026, el nombre en
+    SmartOLT no se parece al de WispHub en muchos clientes reales, asi que un
+    'False' no anula lo que dijo la MAC. Se lee del inventario ya guardado; no
+    se sale a pedirlo para esto."""
+    entrada = _onus_por_olt.get(tenant)
+    buscadas = _palabras(nombre)
+    if not entrada or not entrada[1] or not buscadas or not sn:
+        return None
+    for o in entrada[1]:
+        if sn.upper() in (str(o.get("sn") or "").upper(),
+                          str(o.get("unique_external_id") or "").upper()):
+            tiene = _palabras(o.get("name"))
+            return bool(tiene) and len(buscadas & tiene) / len(buscadas) >= UMBRAL_NOMBRE
+    return None
 
 
 def _palabras(nombre: str) -> set:

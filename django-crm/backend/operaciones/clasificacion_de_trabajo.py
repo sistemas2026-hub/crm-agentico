@@ -319,7 +319,7 @@ def clasificar(contexto: dict, *, texto: str = "", mapa_de_texto=None,
     #  3 · LA PRUEBA.
     prueba = _de_la_prueba(contexto.get("equipo") or {})
     if prueba:
-        return prueba
+        return _con_origen_del_serial(prueba, contexto)
 
     #  4 · EL TEXTO, y queda marcado como no verificado.
     por_texto = _del_texto(texto, mapa_de_texto)
@@ -332,6 +332,8 @@ def clasificar(contexto: dict, *, texto: str = "", mapa_de_texto=None,
     if not contexto.get("contexto_disponible"):
         motivo = ("no se pudo traer la ficha tecnica del caso, asi que no hubo "
                   "nada que medir")
+    elif sin_equipo == "onu_no_vinculada" and contexto.get("busqueda_por_mac"):
+        motivo = _sin_serial(contexto["busqueda_por_mac"])
     elif sin_equipo:
         motivo = f"no se pudo leer el equipo ({sin_equipo})"
     elif contexto.get("equipo"):
@@ -341,4 +343,41 @@ def clasificar(contexto: dict, *, texto: str = "", mapa_de_texto=None,
     else:
         motivo = "no hay datos del equipo ni texto declarado para este caso"
 
-    return _veredicto(SIN_CONCLUIR, motivo, "", verificada=False)
+    return _con_origen_del_serial(
+        _veredicto(SIN_CONCLUIR, motivo, "", verificada=False), contexto)
+
+
+#: Por que un servicio sin serial en el ISP sigue sin equipo despues de
+#: buscarlo por la MAC del router (26/11/2026, nucleo/herramientas/onu_por_mac.py).
+#: Dicho para quien despacha: cada uno se resuelve distinto.
+_SIN_SERIAL = {
+    "pendiente": ("WispHub no tiene el serial del equipo; se esta buscando por "
+                  "la MAC del router y en la proxima lectura deberia estar"),
+    "ninguna": ("WispHub no tiene el serial del equipo y la OLT no ve la MAC del "
+                "router: el equipo puede estar apagado o la MAC cargada no es la "
+                "de ese router"),
+    "varias": ("WispHub no tiene el serial del equipo y la MAC del router "
+               "aparece detras de mas de una ONU: no se elige ninguna"),
+    "sin_mac": ("WispHub no tiene ni el serial del equipo ni la MAC del router: "
+                "no hay con que buscarlo"),
+}
+
+
+def _sin_serial(como: str) -> str:
+    return _SIN_SERIAL.get(str(como or ""),
+                           f"no se pudo leer el equipo (onu_no_vinculada, {como})")
+
+
+def _con_origen_del_serial(veredicto: dict, contexto: dict) -> dict:
+    """Si el equipo se encontro por la MAC del router, el motivo lo dice.
+
+    Una medicion sobre una ONU que WispHub no tiene asociada al cliente es buena
+    (10 de 10 medido) pero no es lo mismo que un serial cargado, y quien
+    despacha tiene que poder verlo antes de mandar a alguien."""
+    if contexto.get("sn_onu_origen") != "mac" or not isinstance(veredicto, dict):
+        return veredicto
+    nota = "equipo encontrado por la MAC del router (WispHub no tiene su serial)"
+    if (contexto.get("equipo_por_mac") or {}).get("nombre_coincide") is True:
+        nota += "; el nombre en la OLT coincide con el del cliente"
+    porque = str(veredicto.get("porque") or "").strip()
+    return {**veredicto, "porque": f"{porque} · {nota}" if porque else nota}

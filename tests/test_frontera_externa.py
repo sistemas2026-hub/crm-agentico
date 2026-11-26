@@ -87,6 +87,11 @@ PERMITIDAS = {
     # puede dejar ciego al que atiende.
     "nucleo/canales/api.py::diagnostico_smartolt",
     "nucleo/canales/api.py::_inventario_onu",
+    # 26/11/2026: la ONU detras de la MAC del router, para un servicio sin
+    # serial. Solo lectura ('search_by_mac'); el closure 'consultar' es la
+    # llamada y '_consultor_por_mac' quien lo arma.
+    "nucleo/canales/api.py::_consultor_por_mac",
+    "nucleo/canales/api.py::consultar",
     "nucleo/herramientas/agregado.py::_contar",
     "nucleo/herramientas/estabilidad.py::resumir",
     # Desde el 10/11/2026 la lectura del puerto vive en su propia funcion
