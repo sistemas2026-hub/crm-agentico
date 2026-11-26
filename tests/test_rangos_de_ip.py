@@ -322,6 +322,45 @@ finally:
 afirmar(si.status_code == 200 and guardados == [True], f"se guarda el si: {guardados}")
 afirmar(raro.status_code == 400, f"un si que no es un si se rechaza: {raro.status_code}")
 
+seccion("9. la IP se pregunta EN VIVO antes de ponerla en un contrato (26/11/2026)")
+from nucleo.seguimiento import alta_de_cliente as alta              # noqa: E402
+
+viejos9 = (api._config_de, alta._quien_tiene)
+api._config_de = lambda t: types.SimpleNamespace(herramientas=[types.SimpleNamespace(
+    nombre="buscar", busca_cliente_por_ip=True)], variables_tenant={})
+preguntas = []
+
+
+def _quien(h, config, tenant, ip):
+    preguntas.append(ip)
+    if ip == "172.16.9.7":
+        raise alta._NoSePudoLeer("ConnectionError")
+    return [{"id_servicio": 1, "nombre": "NO-DEBE-SALIR"}] if ip == "172.16.9.5" else []
+
+
+alta._quien_tiene = _quien
+try:
+    with silencio():
+        tomada = cliente.get(f"/interno/red/ip-libre?tenant={TENANT}&ip=172.16.9.5")
+        libre = cliente.get(f"/interno/red/ip-libre?tenant={TENANT}&ip=172.16.9.6")
+        caida = cliente.get(f"/interno/red/ip-libre?tenant={TENANT}&ip=172.16.9.7")
+        mala = cliente.get(f"/interno/red/ip-libre?tenant={TENANT}&ip=172.16.9.300")
+        sin = cliente.get("/interno/red/ip-libre?ip=172.16.9.6")
+    api._config_de = lambda t: types.SimpleNamespace(herramientas=[], variables_tenant={})
+    with silencio():
+        sin_herr = cliente.get(f"/interno/red/ip-libre?tenant={TENANT}&ip=172.16.9.6")
+finally:
+    api._config_de, alta._quien_tiene = viejos9
+afirmar(tomada.status_code == 200 and tomada.get_json() == {"libre": False},
+        f"la que tiene un cliente: libre=false, y NADA de su ficha ({tomada.get_json()})")
+afirmar(libre.get_json() == {"libre": True}, f"la que nadie tiene: libre=true ({libre.get_json()})")
+afirmar(caida.status_code == 502, f"si no se pudo preguntar: 502, no «libre» ({caida.status_code})")
+afirmar(sin_herr.status_code == 502, f"sin herramienta para preguntar: 502 ({sin_herr.status_code})")
+afirmar(mala.status_code == 400 and sin.status_code == 400,
+        f"una IP que no es IP, o sin empresa: 400 ({mala.status_code}, {sin.status_code})")
+afirmar(preguntas == ["172.16.9.5", "172.16.9.6", "172.16.9.7"],
+        f"se pregunta por la IP pedida, una vez: {preguntas}")
+
 # ---------------------------------------------------------------------------
 print()
 if _fallos:

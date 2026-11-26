@@ -17,6 +17,17 @@
    *   - Los resultados de guardar salen en un aviso a la vista.
    */
   import { enhance } from '$app/forms';
+
+  //  GUARDAR NO VACÍA EL FORMULARIO (26/11/2026). `use:enhance` sin opciones
+  //  reinicia el formulario después de un guardado bueno, y en una pestaña que
+  //  se dibuja en el navegador eso deja las casillas en blanco: los datos
+  //  siguen guardados, pero el siguiente «Guardar» manda el blanco. Así se
+  //  borró la configuración del contrato ese día. Estos formularios muestran
+  //  lo guardado: después de guardar, se quedan como están.
+  /** @type {import('@sveltejs/kit').SubmitFunction} */
+  const sinVaciar = () => async ({ update }) => {
+    await update({ reset: false });
+  };
   import { goto } from '$app/navigation';
   import EsperanCuadrilla from '$lib/supervisor/EsperanCuadrilla.svelte';
   import FaltantesDelDia from '$lib/supervisor/FaltantesDelDia.svelte';
@@ -303,7 +314,7 @@
         {#if data.contrato}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
                           <h2 class="snoc-h2">El contrato de instalación</h2>
-              <form method="POST" action="?/contrato" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+              <form method="POST" action="?/contrato" use:enhance={sinVaciar} class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                 <p class="snoc-body-sm" style="margin:0;">
                   El técnico crea el contrato del cliente desde la app: los datos salen de la solicitud,
                   él elige el servidor y el cliente firma. Aquí se decide entre qué servidores elige y qué dice el contrato.
@@ -421,7 +432,7 @@
                   <b>Todavía no se ha leído qué direcciones están tomadas</b>: sin eso no hay sugeridos ni IP libres.
                 {/if}
               </p>
-              <form method="POST" action="?/rangos" use:enhance class="snoc-pila-xs">
+              <form method="POST" action="?/rangos" use:enhance={sinVaciar} class="snoc-pila-xs">
                 {#each data.contrato.servidores as s, i}
                   {@const guardado = (data.rangos.pools ?? []).find((/** @type {any} */ p) => p.zona_id === s.id_zona)}
                   {@const sugeridos = (data.rangos.sugeridos?.[String(s.id_zona)] ?? []).filter((/** @type {any} */ x) => x.privado)}
@@ -508,7 +519,7 @@
                    varias veces. El costo de esa decisión, dicho acá abajo: la
                    copia que queda EN el teléfono sale sin marca. -->
                               <h2 class="snoc-h2">La marca de agua de las fotos</h2>
-                <form method="POST" action="?/marcaDeAgua" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                <form method="POST" action="?/marcaDeAgua" use:enhance={sinVaciar} class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                   <label class="snoc-body-sm">
                     <input type="checkbox" name="activa" checked={data.marcaDeAgua.activa} />
                     Las fotos de campo salen con marca de agua
@@ -585,7 +596,7 @@
                    NO se enciende acá: se le delega desde su chat, con el nivel
                    3 y el interruptor de emergencia, como las otras tareas. -->
                               <h2 class="snoc-h2">Lo que el Supervisor hace solo en campo</h2>
-                <form method="POST" action="?/seguimiento" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                <form method="POST" action="?/seguimiento" use:enhance={sinVaciar} class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                   <label class="snoc-body-sm">
                     <input type="checkbox" name="recordar_al_tecnico" checked={data.seguimiento.recordar_al_tecnico} />
                     Le recuerda al técnico, en su teléfono, la orden que pasa la ventana sin reporte
@@ -632,7 +643,7 @@
                 <section class="snoc-panel" style="gap:var(--snoc-sm);">
                   <h2 class="snoc-h2">Material: kit de cada labor y bodega de cada cuadrilla</h2>
                   <p class="snoc-body-sm snoc-secundario" style="margin:0;">Para corregir lo que eligió el Supervisor: lo que queda en «Que elija el Supervisor» lo deduce él.</p>
-                  <form method="POST" action="?/material" use:enhance class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+                  <form method="POST" action="?/material" use:enhance={sinVaciar} class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                     <span class="snoc-label">Kit de cada labor</span>
                     {#each conf.labores as l (l.codigo)}
                       <label class="snoc-pila-xs">

@@ -94,6 +94,40 @@ describe('Programación: el contrato de instalación (25/11/2026)', () => {
     expect(r.hecho).toBeTruthy();
   });
 
+  it('UN FORMULARIO VACÍO NO BORRA LOS SERVIDORES QUE HAY (26/11/2026)', async () => {
+    //  Ese día la pantalla quedó en blanco después de guardar y el siguiente
+    //  guardado se llevó los servidores, las VLAN y las reglas.
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ servidores: [{ id_zona: 1 }, { id_zona: 2 }, { id_zona: 3 }] });
+
+    const r = /** @type {any} */ (await actions.contrato(pedido('ADMIN', { nit: '', texto_condiciones: '' })));
+
+    expect(r.status).toBe(400);
+    expect(r.data.error).toContain('hay 3 cargados');
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(apiRequest.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
+  });
+
+  it('una empresa SIN servidores todavía sí puede guardar sin servidores', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValueOnce({ servidores: [] }).mockResolvedValueOnce({ servidores: [] });
+
+    const r = /** @type {any} */ (await actions.contrato(pedido('ADMIN', { nit: '900' })));
+
+    expect(apiRequest.mock.calls[1][1]?.method).toBe('PUT');
+    expect(r.hecho).toContain('sin servidores');
+  });
+
+  it('si no se puede leer lo guardado, un formulario sin servidores no se guarda', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockRejectedValueOnce(Object.assign(new Error('x'), { status: 500 }));
+
+    const r = /** @type {any} */ (await actions.contrato(pedido('ADMIN', { nit: '900' })));
+
+    expect(r.status).toBe(400);
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('quien no gestiona no cambia el contrato', async () => {
     apiRequest.mockReset();
 
@@ -171,6 +205,39 @@ describe('Programación: los rangos de IP de cada servidor (25/11/2026)', () => 
 
     expect(r.status).toBe(400);
     expect(fetchFalso.mock.calls.every((/** @type {any} */ c) => (c[1]?.method ?? 'GET') === 'GET')).toBe(true);
+  });
+
+  it('UN FORMULARIO VACÍO NO BORRA LOS RANGOS QUE HAY (26/11/2026)', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const { pedidos, fetchFalso } = motor([
+      { zona_id: 20049, zona_nombre: 'CORTE 30', prefijos: ['172.16.9.'] },
+      { zona_id: 20053, zona_nombre: 'CORTE 15', prefijos: ['172.16.7.'] }
+    ]);
+
+    const r = /** @type {any} */ (await actions.rangos(pedido('ADMIN', {
+      rango_zona_0: '20049', rango_prefijos_0: '', rango_zona_1: '20053', rango_prefijos_1: ''
+    }, fetchFalso)));
+
+    expect(r.status).toBe(400);
+    expect(r.data.error).toContain('sin ningún rango');
+    expect(pedidos.some((p) => p.metodo === 'PUT')).toBe(false);
+  });
+
+  it('vaciar el rango de UN servidor, con los otros escritos, sí se guarda', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const { pedidos, fetchFalso } = motor([
+      { zona_id: 20049, zona_nombre: 'CORTE 30', prefijos: ['172.16.9.'] },
+      { zona_id: 20053, zona_nombre: 'CORTE 15', prefijos: ['172.16.7.'] }
+    ]);
+
+    await actions.rangos(pedido('ADMIN', {
+      rango_zona_0: '20049', rango_prefijos_0: '', rango_zona_1: '20053', rango_prefijos_1: '172.16.7.'
+    }, fetchFalso));
+
+    expect(pedidos.find((p) => p.metodo === 'PUT')?.cuerpo?.pools).toEqual([
+      { zona_id: 20049, zona_nombre: '', prefijos: [] },
+      { zona_id: 20053, zona_nombre: '', prefijos: ['172.16.7.'] }
+    ]);
   });
 
   it('quien no gestiona no guarda ni lee el proveedor', async () => {

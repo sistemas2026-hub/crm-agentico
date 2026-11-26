@@ -343,6 +343,25 @@ def _quien_tiene(h: dict, config, tenant: str, ip: str) -> list[dict]:
     return _filas(crudo)
 
 
+def ip_libre_en_el_proveedor(config, tenant: str, ip: str) -> bool:
+    """Si NINGUN cliente del proveedor tiene esa IP, preguntado AHORA.
+
+    LA FOTO DE OCUPACION ENVEJECE  --  26/11/2026, la primera prueba real del
+    alta. Al firmar, el contrato tomo la primera IP libre segun la foto de la
+    noche anterior; la oficina se la habia dado a un cliente nuevo esa misma
+    tarde, y el alta la freno («esa IP ya la tiene otro cliente»). La defensa
+    funciono, pero el contrato ya estaba firmado con esa IP. Por eso quien
+    asigna la IP pregunta aca antes, con la misma herramienta y la misma
+    lectura que usa el alta.
+
+    Lanza `_NoSePudoLeer` si no se pudo preguntar: «no se» no es «libre».
+    """
+    h = _herramientas(config)
+    if h["buscar"] is None:
+        raise _NoSePudoLeer("SinHerramienta")
+    return not _quien_tiene(h, config, tenant, ip)
+
+
 def _id_del_plan(h: dict, config, tenant: str, plan: str, pa) -> tuple[object, str]:
     """`(id, "")`, o `(None, por que no)`. Igualdad de nombre, no parecido: a
     esta altura el nombre ya es el del catalogo de la empresa."""

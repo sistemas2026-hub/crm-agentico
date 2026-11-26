@@ -149,6 +149,21 @@ export const actions = {
       const actuales = await leerRangos(locals, fetch);
       if (!actuales) return fail(400, { de: 'rangos', error: 'El asistente no contestó: no se guardó nada.' });
       const f = await request.formData();
+      //  UN FORMULARIO VACÍO NO BORRA LOS RANGOS (26/11/2026): la misma trampa
+      //  que se llevó la configuración del contrato. Si TODOS los servidores
+      //  del formulario llegan sin rangos y antes alguno tenía, no se guarda.
+      const zonas = new Set([...f.keys()]
+        .filter((k) => /^rango_zona_\d+$/.test(k))
+        .map((k) => String(f.get(k) ?? '').trim()));
+      const escritos = cuerpoDeRangos(f, []).filter((p) => p.prefijos.length).length;
+      const tenian = (actuales.pools ?? []).filter((/** @type {any} */ p) =>
+        zonas.has(String(p.zona_id)) && (p.prefijos ?? []).length).length;
+      if (zonas.size && !escritos && tenian) {
+        return fail(400, {
+          de: 'rangos',
+          error: 'No se guardó nada: el formulario llegó sin ningún rango y había rangos cargados (así se habrían borrado). Recarga la página e intenta de nuevo.'
+        });
+      }
       //  La casilla de las IP mal escritas viaja SIEMPRE como sí o no: una
       //  casilla sin marcar no llega en el formulario, y sin esto no se podría
       //  apagar.
@@ -185,7 +200,27 @@ export const actions = {
     const rol = /** @type {any} */ (locals).profile?.role ?? null;
     if (!ROLES_GESTION.has(rol)) return fail(403, { de: 'contrato', error: 'Esto es para quien gestiona.' });
     try {
-      const r = await guardarContrato({ cookies }, cuerpoDeContrato(await request.formData()));
+      const cuerpo = cuerpoDeContrato(await request.formData());
+      //  UN FORMULARIO VACÍO NO BORRA LA CONFIGURACIÓN (26/11/2026). Este
+      //  formulario guarda TODO junto (servidores, NIT, condiciones, reglas).
+      //  Ese día la pantalla vació sus casillas después de un guardado bueno y
+      //  el siguiente guardado borró los servidores, las VLAN y las reglas de
+      //  la empresa. Llegar sin ningún servidor cuando hay servidores cargados
+      //  es eso, no una decisión: no se guarda nada.
+      if (!cuerpo.servidores.length) {
+        const actual = await leerContrato({ cookies });
+        if (actual.error) {
+          return fail(400, { de: 'contrato', error: 'No se pudo comprobar lo que hay guardado: no se guardó nada.' });
+        }
+        const n = actual.configuracion?.servidores?.length ?? 0;
+        if (n > 0) {
+          return fail(400, {
+            de: 'contrato',
+            error: `No se guardó nada: el formulario llegó sin ningún servidor y hay ${n} cargado${n === 1 ? '' : 's'} (así se habrían borrado). Recarga la página e intenta de nuevo.`
+          });
+        }
+      }
+      const r = await guardarContrato({ cookies }, cuerpo);
       const n = r?.servidores?.length ?? 0;
       //  Dice lo que quedó: sin servidores, el técnico no puede firmar.
       const hecho = n === 0

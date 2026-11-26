@@ -59,6 +59,28 @@ def _motor():
     return base, cabeceras
 
 
+def libre_en_el_proveedor(org, ip: str):
+    """Si ningun cliente del proveedor tiene esa IP AHORA: True o False, y
+    None si no se pudo saber. Ver `/interno/red/ip-libre` en el motor."""
+    from operaciones.areas_del_tenant import tenant_de
+
+    tenant = tenant_de(org)
+    if not tenant:
+        return None
+    base, cabeceras = _motor()
+    try:
+        r = requests.get(f"{base}/interno/red/ip-libre", headers=cabeceras,
+                         params={"tenant": tenant, "ip": ip}, timeout=ESPERA_MAXIMA)
+        if not r.ok:
+            logger.info("IP en vivo: el motor respondio %s", r.status_code)
+            return None
+        libre = (r.json() or {}).get("libre")
+    except Exception as e:                                   # noqa: BLE001
+        logger.info("IP en vivo: no se pudo preguntar al motor (%s)", type(e).__name__)
+        return None
+    return libre if isinstance(libre, bool) else None
+
+
 def _vacio(motivo: str) -> dict:
     return {"libres": [], "motivo": motivo, "advertencia": "",
             "actualizado_en": None, "zona_nombre": "", "prefijos": []}

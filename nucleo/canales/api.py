@@ -6497,6 +6497,38 @@ def interno_anotar_en_el_ticket(orden_id: str):
     return jsonify(resultado.como_dict()), codigo_http
 
 
+@app.get("/interno/red/ip-libre")
+def interno_red_ip_libre():
+    """Si ningun cliente del proveedor tiene esa IP, preguntado AHORA.
+
+        GET /interno/red/ip-libre?tenant=<slug>&ip=<a.b.c.d>
+        200 {"libre": true|false}   502 si no se pudo preguntar
+
+    La foto de ocupacion (`ips-libres`) envejece: el 26/11/2026 la primera IP
+    libre segun la foto de la noche anterior se la habian dado a un cliente esa
+    tarde. Quien asigna la IP de un contrato pregunta aca antes. Devuelve solo
+    si/no: ni quien la tiene ni ningun dato de esa ficha.
+    """
+    import ipaddress
+
+    from nucleo.seguimiento import alta_de_cliente as alta
+
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    crudo = (request.args.get("ip") or "").strip()
+    try:
+        ip = str(ipaddress.IPv4Address(crudo))
+    except ValueError:
+        return jsonify({"error": "'ip' tiene que ser una direccion IPv4."}), 400
+    try:
+        config = _config_de(tenant)
+        return jsonify({"libre": alta.ip_libre_en_el_proveedor(config, tenant, ip)})
+    except Exception as e:                                    # noqa: BLE001
+        registrar("red", "no se pudo preguntar si la IP esta libre", tenant=tenant, error=e)
+        return jsonify({"error": "no se pudo preguntar al proveedor"}), 502
+
+
 @app.get("/interno/red/ips-libres")
 def interno_red_ips_libres():
     """Que direcciones IP puede ofrecerle la pantalla al tecnico, en una zona.

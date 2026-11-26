@@ -827,6 +827,44 @@ def test_j1_LA_IP_LA_ASIGNA_EL_SISTEMA_la_primera_libre_que_no_tenga_otro_contra
     assert datos["ip_origen"] == "sistema"
 
 
+def test_j1b_LA_IP_SE_PREGUNTA_EN_VIVO_y_la_que_ya_tomo_otro_cliente_se_salta(
+        user_client, orden, config_rapida, org_a, monkeypatch):
+    """26/11/2026, la primera prueba real del alta: la primera libre de la foto
+    de la noche anterior se la habian dado a un cliente esa tarde."""
+    from campo import contrato as C
+    from campo.services import ips_libres
+
+    monkeypatch.setattr(C, "_ip_automatica", _IP_REAL)
+    monkeypatch.setattr(ips_libres, "para_la_zona", lambda org, zona, cuantas: {
+        "libres": ["172.16.30.12", "172.16.30.13", "172.16.30.14"]})
+    preguntadas = []
+    monkeypatch.setattr(ips_libres, "libre_en_el_proveedor", lambda org, ip: (
+        preguntadas.append(ip) or ip != "172.16.30.12"))
+    _solicitud_del_formulario(org_a)
+    r = user_client.post(_url(orden), _cuerpo(plan="PLAN FAMILIA", id_zona=20053), format="json")
+    assert r.status_code == 201, r.content
+    assert ContratoDeServicio.objects.get(orden=orden).datos["ip_elegida"] == "172.16.30.13"
+    assert preguntadas == ["172.16.30.12", "172.16.30.13"], "pregunta hasta dar con una libre, y para"
+
+
+def test_j1c_si_NO_SE_PUEDE_PREGUNTAR_se_usa_la_de_la_foto_y_si_TODAS_estan_tomadas_ninguna(
+        user_client, orden, config_rapida, org_a, monkeypatch):
+    from campo import contrato as C
+    from campo.services import ips_libres
+
+    monkeypatch.setattr(C, "_ip_automatica", _IP_REAL)
+    monkeypatch.setattr(ips_libres, "para_la_zona", lambda org, zona, cuantas: {
+        "libres": [f"172.16.30.{n}" for n in range(10, 30)]})
+    #  Sin respuesta del proveedor: la primera de la foto (el alta la vuelve a mirar).
+    assert C._ip_automatica(org_a, 20053) == "172.16.30.10"
+    #  Todas tomadas: pregunta solo COMPROBACIONES_DE_IP y no pone ninguna.
+    preguntadas = []
+    monkeypatch.setattr(ips_libres, "libre_en_el_proveedor",
+                        lambda org, ip: (preguntadas.append(ip), False)[1])
+    assert C._ip_automatica(org_a, 20053) == ""
+    assert len(preguntadas) == C.COMPROBACIONES_DE_IP, "con tope: el teléfono espera la firma"
+
+
 def test_j2_SIN_IP_LIBRE_se_firma_igual_y_la_que_mande_una_app_vieja_se_respeta(
         user_client, orden, config_rapida, org_a, monkeypatch):
     from campo import contrato as C

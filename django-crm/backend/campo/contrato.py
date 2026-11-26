@@ -637,6 +637,11 @@ def _ip_de(cuerpo: dict) -> str:
     return str(direccion)
 
 
+#: Cuantas candidatas se le preguntan al proveedor al firmar. Cada una es una
+#: lectura (~1 s); el telefono espera 40 s la firma entera.
+COMPROBACIONES_DE_IP = 5
+
+
 def _ip_automatica(org, id_zona) -> str:
     """La IP que el sistema le asigna al contrato: la primera libre del
     servidor que no tenga otro contrato vigente.
@@ -651,6 +656,14 @@ def _ip_automatica(org, id_zona) -> str:
     tecnico tiene al cliente delante y la firma hecha, y una falla de red que
     no es suya no puede impedirle firmar. La IP se comprueba de verdad en el
     alta, contra la ocupacion viva.
+
+    Y SE PREGUNTA EN VIVO ANTES DE PONERLA  --  26/11/2026. La lista sale de
+    una foto que envejece: en la primera prueba real del alta, la primera
+    libre de la foto se la habian dado a un cliente esa misma tarde, y el
+    contrato quedo firmado con una IP ajena. Ahora cada candidata se le
+    pregunta al proveedor (hasta `COMPROBACIONES_DE_IP`): la tomada se salta.
+    Si no se puede preguntar, se usa la candidata como antes: el alta la
+    vuelve a mirar antes de crear, y una lectura caida no impide firmar.
     """
     from campo.services import ips_libres
 
@@ -662,13 +675,24 @@ def _ip_automatica(org, id_zona) -> str:
     tomadas = set(ContratoDeServicio.objects.filter(org=org)
                   .exclude(estado=ContratoDeServicio.ANULADO)
                   .values_list("datos__ip_elegida", flat=True))
+    preguntadas = 0
     for crudo in libres:
         try:
             ip = _ip_de({"ip": crudo})
         except ContratoInvalido:
             continue
-        if ip and ip not in tomadas:
-            return ip
+        if not ip or ip in tomadas:
+            continue
+        if preguntadas >= COMPROBACIONES_DE_IP:
+            logger.warning("contrato.ip_automatica_todas_tomadas_en_vivo")
+            return ""
+        preguntadas += 1
+        libre = ips_libres.libre_en_el_proveedor(org, ip)
+        if libre is False:
+            continue
+        if libre is None:
+            logger.warning("contrato.ip_automatica_sin_comprobar_en_vivo")
+        return ip
     return ""
 
 
