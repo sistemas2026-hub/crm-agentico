@@ -669,3 +669,48 @@ def test_e2_un_si_que_no_es_un_si_no_lo_enciende(admin_client):
     assert admin_client.put(URL_CONFIG, {"crear_en_el_isp": "true"},
                             format="json").status_code == 400
     assert admin_client.get(URL_CONFIG).json()["crear_en_el_isp"] is False
+
+
+# =========================================================================== #
+#  I. UN RECHAZO DE ENTRADA DEL MOTOR ES «NO SALIO» (27/11/2026)
+#     OT-502: el motor contesto 400 «un alta no acepta [...]» 13 veces y el
+#     contrato quedo «por revisar», como si hubiera podido salir. Un 4xx sin
+#     «estado» es su validacion: no le pidio nada al proveedor.
+# =========================================================================== #
+def test_i1_el_400_de_entrada_deja_el_alta_FALLIDA_con_el_motivo_y_sin_reintentos(
+        firmar, encendida, cola, motor):
+    motor(_Respuesta({"error": "un alta no acepta ['marca_de_la_caja']: como se llama cada "
+                               "dato en el proveedor lo dice la configuracion del tenant."}, 400))
+    c = firmar()
+    _correr(cola[0])
+
+    fila = _fila(c["id"])
+    assert fila.alta_estado == "fallida" and fila.alta_codigo == "rechazado_por_el_motor"
+    assert "no se creó nada" in fila.alta_detalle and "marca_de_la_caja" in fila.alta_detalle
+    assert fila.alta_emitida is False, "se sabe que no salió"
+    assert len(cola) == 1, "y no se repite: el mismo pedido se rechazaría igual"
+
+
+@pytest.mark.parametrize("respuesta", [
+    _Respuesta({"error": "algo"}, 500),        # el motor se cayó: no se sabe
+    _Respuesta({"error": "algo"}, 408),        # se cortó esperando: no se sabe
+])
+def test_i2_un_5xx_o_un_408_siguen_siendo_NO_SE_SABE(firmar, encendida, cola, motor, respuesta):
+    motor(respuesta)
+    c = firmar()
+    _correr(cola[0])
+
+    fila = _fila(c["id"])
+    assert fila.alta_estado == "pedida" and fila.alta_codigo == "sin_respuesta"
+    assert fila.alta_emitida is True
+
+
+def test_i3_si_YA_HABIA_SALIDO_antes_un_400_no_lo_da_por_fallido(firmar, encendida, cola, motor):
+    motor(ConnectionError("cortado"), _Respuesta({"error": "un alta no acepta ['x']"}, 400))
+    c = firmar()
+    _correr(cola[0])                       # el primero pudo haber salido
+    _correr(cola[1])
+
+    fila = _fila(c["id"])
+    assert fila.alta_estado == "pedida" and fila.alta_emitida is True, \
+        "un pedido anterior pudo haber salido: eso no lo borra un 400 posterior"

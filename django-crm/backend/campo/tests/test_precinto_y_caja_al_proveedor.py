@@ -141,3 +141,38 @@ def test_d1_por_activar_muestra_al_cliente_del_contrato(admin_client, orden, use
     assert r.status_code == 200
     fila = r.json()["instalaciones"][0]
     assert fila["cliente"] == "LAURA GOMEZ", fila["cliente"]
+
+
+# --------------------------------------------------------------------------- #
+#  E. EL ALTA COMO INSTALACION NO LLEVA EL PRECINTO NI LA CAJA (27/11/2026)
+#     Llevarlos hizo que el motor rechazara con 400 TODA alta: su ruta acepta
+#     una lista cerrada (`_DATOS_DEL_ALTA` en nucleo/canales/api.py). La
+#     lista se repite aca a proposito: si alguien la cambia en un lado, esta
+#     prueba lo obliga a mirar el otro.
+# --------------------------------------------------------------------------- #
+DATOS_QUE_ACEPTA_LA_RUTA_DEL_ALTA = {"zona", "ip", "plan", "cliente", "coordenadas", "nota",
+                                     "costo_instalacion", "serial_onu"}
+DATOS_DEL_CLIENTE_QUE_ACEPTA = {"nombre", "apellido", "documento", "correo", "telefono",
+                                "direccion", "barrio"}
+
+
+def test_e1_el_alta_como_instalacion_solo_lleva_lo_que_la_ruta_acepta(orden, user_profile, config):
+    from campo.models import OrdenTrabajo, WorkTypeVersion
+    from campo.services.alta_en_el_isp import datos_del_alta
+
+    v = orden.tipo_trabajo_version
+    nueva = WorkTypeVersion.objects.create(
+        work_type=v.work_type, version=v.version + 1, schema_version=v.schema_version,
+        estado=WorkTypeVersion.PUBLICADA,
+        esquema={**(v.esquema or {}), "campos": P.componer(_definicion())["campos"]})
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(tipo_trabajo_version=nueva, datos={
+        "la_caja_esta_marcada": "Sí", "numero_de_la_caja": "CTO 3", "precinto_del_cliente": "9308"})
+    orden.refresh_from_db()
+    c = _contrato(orden, user_profile, alta_como_instalacion=True)
+
+    d = datos_del_alta(c)
+    assert set(d) <= DATOS_QUE_ACEPTA_LA_RUTA_DEL_ALTA, set(d) - DATOS_QUE_ACEPTA_LA_RUTA_DEL_ALTA
+    assert set(d["cliente"]) <= DATOS_DEL_CLIENTE_QUE_ACEPTA
+    #  Y el completar SÍ los lleva: es donde van.
+    assert instalacion.valores_para_completar(orden) == {
+        "precinto_del_cliente": "9308", "marca_de_la_caja": "CTO 3"}

@@ -92,6 +92,10 @@ SIN_EFECTO = frozenset({IP_OCUPADA, "ip_fuera_del_rango", "plan_desconocido",
                         "no_se_pudo_comprobar"})
 
 #: Lo que este lado agrega.
+#: EL MOTOR RECHAZO EL PEDIDO EN LA ENTRADA (27/11/2026): un 4xx sin «estado»
+#: es su validacion, ANTES de pedirle nada al proveedor. Con eso se sabe que
+#: no salio nada: no es «pudo haber salido».
+RECHAZADO_POR_EL_MOTOR = "rechazado_por_el_motor"
 SIN_RESPUESTA = "sin_respuesta"
 SIN_EMPRESA = "sin_empresa"
 SIN_ACTOR = "sin_actor"
@@ -121,6 +125,8 @@ EXPLICACION = {
                             "antes de crear. No se creó nada.",
     FALLO: "El proveedor rechazó el pedido: el cliente no quedó creado.",
     SIN_RESPUESTA: "No se pudo poner el pedido en marcha. No se creó nada.",
+    RECHAZADO_POR_EL_MOTOR: "El sistema no aceptó el pedido y no se le envió nada al "
+                            "proveedor: no se creó nada. Avisa a soporte de Dexter.",
     SIN_EMPRESA: "No se sabe de qué empresa es este contrato.",
     SIN_ACTOR: "No se pudo determinar quién pidió crear al cliente.",
     DEMASIADOS_PEDIDOS: "Este contrato ya se pidió demasiadas veces.",
@@ -321,6 +327,12 @@ def _llamar(contrato, ruta: str, cuerpo: dict, espera: int):
         return None, {}
     if not isinstance(datos, dict) or not datos.get("estado"):
         logger.warning("alta_en_el_isp: el motor respondio %s sin estado", r.status_code)
+        #  UN RECHAZO DE ENTRADA (4xx, salvo 408): el motor no le pidio nada al
+        #  proveedor. Se devuelve el motivo para quien quiera usarlo; para los
+        #  demas sigue siendo «no se sabe» (`None`).
+        if 400 <= r.status_code < 500 and r.status_code != 408:
+            motivo = datos.get("error") if isinstance(datos, dict) else ""
+            return None, {"rechazo": str(motivo or f"HTTP {r.status_code}")[:200]}
         return None, {}
     return str(datos["estado"]), datos
 
@@ -355,6 +367,12 @@ def pedir(contrato):
     estado, cuerpo = _llamar(contrato, "crear-cliente", {
         "actor": actor, "datos": datos,
         "intento": int(contrato.alta_intento or 1)}, ESPERA_DEL_PEDIDO)
+    if estado is None and cuerpo.get("rechazo") and not contrato.alta_emitida:
+        #  EL MOTOR LO RECHAZO EN LA ENTRADA y nunca antes habia salido: no hay
+        #  cliente, y queda dicho por que (27/11/2026: 13 reintentos iguales y
+        #  «por revisar» por un pedido que el motor no iba a aceptar nunca).
+        _fallida(contrato, RECHAZADO_POR_EL_MOTOR, cuerpo["rechazo"])
+        return contrato
     if estado is None:
         #  NO SE SABE SI SALIO. Sigue `pedida`: la tarea lo vuelve a pedir con
         #  el MISMO numero, y el motor no lo saca dos veces. Y desde ahora se

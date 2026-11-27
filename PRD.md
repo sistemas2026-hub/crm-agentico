@@ -2090,6 +2090,23 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 
 **NO VERIFICADO:** la escritura real en WispHub de `usuario_cpe` y `password_cpe`. El cliente de prueba se borró; se mide con la próxima instalación vigilada.
 
+**CORREGIDO EL MISMO DÍA (27/11/2026, tarde) — esta sección rompió la creación de instalaciones.**
+- **Qué pasó.** El precinto y la caja se agregaron a `instalacion.costo_y_serial`, que también usa el **alta como instalación**. La ruta del motor que crea al cliente acepta una lista cerrada de datos y rechazó el pedido entero con 400.
+- **Alcance.** «¿La caja está marcada?» se responde antes del contrato, así que **toda instalación nueva fallaba al confirmar el contrato**.
+- **Cómo se vio.** En la prueba vigilada de la OT-502:
+  - 13 rechazos iguales en 6 minutos;
+  - el contrato quedó «por revisar» como si el pedido hubiera podido salir;
+  - el motor no anotó ninguna escritura y no se creó nada en WispHub.
+- **Por qué no se vio antes.** La prueba de la sección C cubría solo el completar.
+- **Arreglo:**
+  - `costo_y_serial` vuelve a dar solo el costo y el serial; el precinto y la caja van solo al completar (`valores_para_completar`);
+  - un 4xx sin «estado» del motor (su validación de entrada) deja el alta **fallida** con el motivo, sin reintentos, porque se sabe que no salió nada;
+  - un 5xx, un 408 o un pedido que ya pudo haber salido siguen siendo «no se sabe».
+- **Pruebas:**
+  - `test_precinto_y_caja_al_proveedor` E1: el alta como instalación solo lleva lo que acepta la ruta del motor. Volver a poner el precinto en `costo_y_serial` la pone en rojo.
+  - `test_alta_en_el_isp` sección I: el 400 queda fallido; el 5xx y el 408 siguen como antes; un 400 después de un pedido que pudo salir no lo da por fallido.
+  - 117 en verde entre alta, precinto, costo y serial, instalación validada y contrato del proveedor.
+
 ### 8.48 DECISIÓN — «Enviar a validación» y «Finalizar trabajo»: el servidor dice qué orden revisa una persona (27/11/2026)
 
 **El origen.** En la OT-501, la primera instalación vigilada en producción, todo salió bien hasta la aprobación: la orden quedó aprobada y el cliente activo. Pero **la orden nunca se cerró y el ticket de WispHub tampoco**. La causa: la app mostraba el recuadro para entregar solo si el **código** de la plantilla contenía «instalacion», y en Rapilink la plantilla de instalaciones se llama `traslado_servicio`. El técnico nunca vio el botón. Además, el usuario pidió nombrar los dos pasos:

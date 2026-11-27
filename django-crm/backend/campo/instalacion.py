@@ -92,8 +92,20 @@ def costo_y_serial(orden) -> dict:
         ultima = None
     if ultima is not None and getattr(ultima, "estado", "") in ("activada", "ya_estaba"):
         salida["serial_onu"] = str(ultima.serial or "")
-    salida.update(lo_que_va_al_proveedor(esquema, datos))
+    #  SOLO EL COSTO Y EL SERIAL (corregido el 27/11/2026). El precinto y la
+    #  caja se habian agregado aca, y esta funcion la usa tambien el ALTA como
+    #  instalacion: la ruta del motor que crea al cliente acepta una lista
+    #  cerrada, rechazo el pedido entero con 400 y NINGUNA instalacion se
+    #  pudo crear al confirmar el contrato (OT-502). El precinto y la caja
+    #  van solo al completar (`valores_para_completar`).
     return salida
+
+
+def valores_para_completar(orden) -> dict:
+    """Lo que se escribe en la ficha del cliente activado: el costo, el serial,
+    y el precinto y la marca de la caja (27/11/2026)."""
+    esquema = getattr(orden.tipo_trabajo_version, "esquema", None) or {}
+    return {**costo_y_serial(orden), **lo_que_va_al_proveedor(esquema, orden.datos or {})}
 
 
 #: Lo que viaja al motor para completar al cliente activado (la ruta del motor
@@ -437,7 +449,7 @@ def completar(contrato) -> None:
                           completar_detalle="No se sabe quién aprobó: sin eso no se escribe.")
         return
     try:
-        valores = costo_y_serial(contrato.orden)
+        valores = valores_para_completar(contrato.orden)
     except Exception:                                            # noqa: BLE001
         valores = {}
     estado, cuerpo = alta_en_el_isp._llamar(contrato, "completar-cliente", {
