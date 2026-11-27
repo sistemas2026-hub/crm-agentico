@@ -260,7 +260,16 @@ def ejecutar(a: ActivacionDeOnu) -> None:
     contrato, _, _ = _contrato_y_vlan(a.orden)
     cliente = (contrato.datos or {}).get("cliente", {})
     nombre = f"{cliente.get('nombre', '')} {cliente.get('apellido', '')}".strip()
-    actor = (a.pedida_por.user.email if a.pedida_por and a.pedida_por.user_id else "tecnico")
+    #  EL NOMBRE, NUNCA EL CORREO, Y SIN ACTOR NO SALE (revisiones de frontera y
+    #  PII, 27/11/2026): con "tecnico" fijo la puerta humana registraba a nadie,
+    #  y el correo terminaba en la bitacora del motor.
+    from campo.services.ubicacion_al_isp import _nombre_de
+
+    actor = _nombre_de(a.pedida_por)
+    if not actor:
+        a.estado, a.detalle = ActivacionDeOnu.NO_SALIO, "No se sabe quién la pidió: sin eso no sale."
+        a.save(update_fields=["estado", "detalle", "updated_at"])
+        return
     datos = _llamar(a.org_id, f"/interno/orden/{a.orden_id}/activar-onu",
                     {"actor": actor, "intento": a.intento,
                      "datos": {"serial": a.serial, "zona": a.zona, "vlan": a.vlan,

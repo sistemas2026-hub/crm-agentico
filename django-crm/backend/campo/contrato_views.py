@@ -521,7 +521,7 @@ class SubirFotosDelTrabajoView(APIView):
                     {"detail": "No se sabe si las fotos quedaron en el proveedor: antes de "
                                "subirlas otra vez lo revisa alguien de la oficina."},
                     status=status.HTTP_403_FORBIDDEN)
-        if not pedir_fotos(contrato, revisado=revisado):
+        if not pedir_fotos(contrato, por=request.profile, revisado=revisado):
             contrato.refresh_from_db()
             return Response({"detail": "No se pudieron pedir. Revisa cómo quedó.",
                              "contrato": contrato.como_dict()}, status=status.HTTP_409_CONFLICT)

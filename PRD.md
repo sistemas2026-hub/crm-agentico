@@ -1939,3 +1939,42 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - Base local v22.
 
 **NO VERIFICADO:** el nombre del estado de una tarea que FALLA en WispHub (`FAILURE`/`REVOKED` son los habituales de ese sistema de tareas; no se ha visto uno).
+
+### 8.44 DECISIÓN — Lo que cerraron las revisiones de seguridad antes del despliegue del contrato de WispHub (27/11/2026)
+
+**El error que lo originó.** Antes de subir a producción los 15 commits de la instalación con el contrato de WispHub (§8.40–§8.43), se pasaron la auditoría de frontera y la revisión de privacidad (CLAUDE.md §11.2). Ninguna encontró un bloqueo, pero sí siete puntos importantes. El más serio: **la foto de la cédula y la del recibo se mandaban a la visión de la IA**, y su descripción (nombre, número, fecha de nacimiento) quedaba guardada en claro en la base, contra la marca «solo en la plataforma» que la empresa puso a esas fotos (§8.41). El usuario pidió arreglarlo todo, lo importante y lo menor; que esas fotos salgan de la visión, y que el enlace de firma se abra dentro de la app.
+
+**Qué se decidió.**
+1. **Privacidad.**
+   - Una foto marcada «solo en la plataforma» **no se manda a la visión de la IA**: no deja análisis ni fila. Si la plantilla no se puede leer, no se manda ninguna.
+   - **El enlace de firma se abre dentro de la app** («Firma en WispHub»), en una vista que borra cookies, caché y almacenamiento al abrirse y al cerrarse. Ya no queda en el historial ni en la sincronización del navegador del teléfono, desde donde cualquiera podía volver a entrar al portal del cliente sin clave.
+   - **El enlace va siempre por https**: el motor cambia `http://` por `https://`, y la app no abre otra cosa. Medido: el portal del cliente responde por https con certificado válido, y por http redirige a https (301).
+   - **La casilla «visible» de los documentos nunca se manda.** Campo nuevo de la configuración, `bloque_de_archivos.campos_que_no_van`: el motor nunca manda esos campos de cada fila, y una casilla que no se manda queda sin marcar. Rapilink declara `visible` en el contrato y en las fotos. Antes, que la cédula quedara a la vista en el portal del cliente dependía de cómo viniera marcada la fila vacía del panel, y eso nunca se midió.
+   - **El motivo de un rechazo de SmartOLT se guarda tapado**: correos fuera, números largos fuera.
+   - **El actor que llega a la bitácora del motor es el nombre de la persona, no su correo.** Una activación de ONU sin saber quién la pidió no sale.
+   - **Al activar y al pedir el enlace viajan solo los datos para reconocer al cliente** (IP, nombre, documento), no la ficha entera.
+   - **El campo de una clave nueva en Credenciales vuelve a ser de contraseña** (`type="password"` con `autocomplete="new-password"`). El truco de puntos por estilo no tapaba nada en un navegador sin esa propiedad.
+2. **Frontera.**
+   - **Un «no se sabe» del contrato o de las fotos ya no termina como «falló».** Si un pedido anterior con el mismo número quedó a medias o cambió, el motor responde «no se sabe» y Django lo manda a «por revisar». Antes el técnico podía reenviar, y la cédula o las fotos subían dos veces.
+   - **Las escrituras por el panel web ya no pueden ejecutarse dos veces por vencimiento.** Se dan por vencidas a los 30 minutos (antes 5, y el peor caso medía 6). La sesión ocupada se espera con tope (2 minutos) y, si no se libera, nada sale. Y el interruptor se vuelve a leer ya con la sesión tomada, justo antes de la primera petición.
+   - **El actor de las fotos es quien finalizó o quien las reenvió**, no quien firmó.
+   - **Una herramienta web «de solo lectura» que reenvía un formulario no carga**, y si llegara igual, el motor no la deja salir.
+   - **El enlace de firma está atado al contrato.** El motor verifica que el servicio exista, sea de la empresa y tenga ese usuario antes de pedir nada al panel. Nuevo `campo_usuario` en la búsqueda de clientes por IP.
+   - **`/agentes` ya no ofrece como asignables** las herramientas de activar, completar ni las cuatro del panel web. El esquema ya las rechazaba al guardar.
+
+**Lo que queda abierto, a propósito.**
+- El tapado de los avisos del panel y del mensaje de una tarea es por patrón: no reconoce un nombre ni una dirección.
+- `EFECTOS_EXTERNOS_PERMITIDOS` no vence sola. Solo existe en el entorno local, y se cierra a mano después de cada prueba vigilada.
+- Cuánto dura el enlace de firma sigue sin medir.
+
+**VERIFICADO:**
+- motor: `test_panel_web`, `test_contrato_del_proveedor`, `test_activar_onu`, `test_alta_de_cliente`, `test_editor_config` y la guarda de arquitectura en verde. Las pruebas nuevas matan sus mutaciones (quitar el filtro de `campos_que_no_van`, entre otras).
+- backend: `test_revision_de_seguridad` (11) y `test_contrato_del_proveedor` (34) en verde. En la batería vecina (828 pruebas, SQLite), los 123 fallos son **los mismos** con el código del commit anterior: 94 son `contains lookup is not supported` de SQLite y el resto vienen en cascada de esas mismas pruebas de revisión. Ninguno lo trae este cambio; piden Postgres (CLAUDE.md §6).
+- web: credenciales e instalaciones (20) en verde, y `svelte-check` sin errores en la página.
+- app: 26 pruebas del contrato en verde (el enlace que no es https no se abre) y `flutter analyze` limpio.
+- `test_registro_sin_pii`: la falla de «marcar leído» la provoca `SIN_EFECTOS_EXTERNOS=1` del entorno local. Sin la variable pasa entera (la red está simulada).
+- Base local v24: `diferencias_config` dice que la base tiene todo lo que el repo declara.
+
+**NO VERIFICADO:**
+- La vista dentro de la app contra el portal real: falta firmar una prueba con la app 1.0.33.
+- Que WispHub deje los documentos sin marcar como visibles cuando la casilla no viaja. Es la conducta estándar de un formulario, pero no se ha medido en el portal del cliente.

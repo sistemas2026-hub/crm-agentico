@@ -36,7 +36,6 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
@@ -46,6 +45,7 @@ import '../../core/widgets/dexter_bloques.dart';
 import '../detalle_orden/mapa_del_cliente.dart';
 import '../ejecucion/widgets/firma_del_cliente.dart';
 import 'elegir_ubicacion.dart';
+import 'firma_en_wisphub.dart';
 
 /// Si esta orden es de las que llevan contrato.
 ///
@@ -202,14 +202,6 @@ class ApiDelContrato {
     }
   }
 
-  /// Abre el enlace en el navegador del teléfono, fuera de la app.
-  Future<bool> abrir(String enlace) async {
-    try {
-      return await launchUrl(Uri.parse(enlace), mode: LaunchMode.externalApplication);
-    } catch (_) {
-      return false;
-    }
-  }
 }
 
 /// Cada cuánto y cuántas veces se vuelve a leer el contrato mientras se crea
@@ -226,11 +218,16 @@ class ContratoScreen extends StatefulWidget {
     required this.ordenId,
     required this.titulo,
     this.api = const ApiDelContrato(),
+    this.abrirFirma = abrirFirmaDentroDeLaApp,
   });
 
   final String ordenId;
   final String titulo;
   final ApiDelContrato api;
+
+  /// Cómo se abre el enlace de firma: DENTRO de la app y sin dejar rastro
+  /// (27/11/2026). Reemplazable en pruebas.
+  final Future<bool> Function(BuildContext context, String enlace) abrirFirma;
 
   @override
   State<ContratoScreen> createState() => _EstadoContrato();
@@ -444,13 +441,13 @@ class _EstadoContrato extends State<ContratoScreen> {
       });
       return;
     }
-    final bool abrio = await widget.api.abrir(r.enlace!);
+    final bool abrio = await widget.abrirFirma(context, r.enlace!);
     if (!mounted) return;
     setState(() {
       _pidiendoEnlace = false;
       _avisoDeFirma = abrio
-          ? 'Cuando el cliente termine de firmar, vuelve y toca «Ya firmó: comprobar».'
-          : 'No se pudo abrir el navegador del teléfono. Intenta de nuevo.';
+          ? 'Si el cliente ya firmó, toca «Ya firmó: comprobar».'
+          : 'No se pudo abrir el contrato de WispHub. Intenta de nuevo.';
     });
   }
 

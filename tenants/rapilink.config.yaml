@@ -6554,6 +6554,9 @@ herramientas:
       # agosto creando un cliente de prueba). Por eso son dos nombres.
       campo_nombre_en_router: servicio
       campo_documento: cedula
+      # El usuario del cliente (nombre-slug@empresa): ata el enlace de firma
+      # al contrato cuando la instalacion ya es cliente (27/11/2026).
+      campo_usuario: usuario
 
   - nombre: buscar_instalacion_por_ip
     tipo: http
@@ -6660,8 +6663,12 @@ herramientas:
         #  repetible 'form-N-*' deja el archivo en la pestaña «Subir Archivos»
         #  del cliente, con su titulo; el campo multiple 'archivo' no dejo nada
         #  visible. Y WispHub rechaza un archivo de menos de 1 KB.
+        #  La casilla «visible» de cada fila NO se manda nunca (revision de
+        #  privacidad, 27/11/2026): la cedula y el recibo no quedan a la vista en
+        #  el portal del cliente, venga como venga marcada la fila vacia.
         bloque_de_archivos: {argumento: archivos, prefijo: form, campo_archivo: archivo,
-                             campo_titulo: titulo}
+                             campo_titulo: titulo,
+                             campos_que_no_van: [visible]}
         archivo_minimo_bytes: 1024
         boton: guardar_contrato
         exito: redirige
@@ -6727,7 +6734,8 @@ herramientas:
         id_formulario: form_archivos
         archivos: {archivo: archivos}
         bloque_de_archivos: {argumento: archivos, prefijo: form, campo_archivo: archivo,
-                             campo_titulo: titulo}
+                             campo_titulo: titulo,
+                             campos_que_no_van: [visible]}
         archivo_minimo_bytes: 1024
         exito: redirige
 

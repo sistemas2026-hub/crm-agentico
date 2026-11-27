@@ -712,7 +712,13 @@ _BANDERAS_DE_SISTEMA = ("invocable_por_servicio", "responde_ticket_operativo",
                         "crea_cliente", "busca_cliente_por_ip", "lee_tarea",
                         #  Las de autorizar una ONU (26/11/2026), por lo mismo.
                         "busca_onu_sin_autorizar", "autoriza_onu", "lee_onu",
-                        "lista_zonas_de_red")
+                        "lista_zonas_de_red",
+                        #  Las de activar, completar y el panel web (auditoria
+                        #  de frontera, 27/11/2026): /agentes las ofrecia y el
+                        #  esquema las rechazaba al guardar.
+                        "activa_servicio", "completa_cliente_activado",
+                        "prepara_contrato_del_proveedor", "da_enlace_de_firma",
+                        "lee_firma_del_contrato", "sube_documentos_del_cliente")
 
 
 def _es_de_sistema(h) -> bool:

@@ -253,7 +253,11 @@ def _aplicar(contrato, estado: str, cuerpo: dict) -> None:
                 usuario_proveedor=str(cuerpo.get("usuario") or "")[:200])
     elif estado in ("en_curso", "no_se_pudo_comprobar"):
         return                       # sigue pedida: la vuelta siguiente lo intenta otra vez
-    elif estado == "no_se_sabe":
+    elif estado == "no_se_sabe" or (estado == "bloqueado" and cuerpo.get("emitido") is True):
+        #  UN «BLOQUEADO» QUE PUDO HABER SALIDO (auditoria de frontera,
+        #  27/11/2026): el motor no dejo salir ESTA pasada, pero el pedido ya
+        #  habia corrido antes. Como «fallida» se podia reenviar y duplicar
+        #  los documentos; queda para que lo mire una persona.
         _anotar(contrato, firma_proveedor_estado=ContratoDeServicio.FIRMA_PROVEEDOR_POR_REVISAR,
                 firma_proveedor_detalle=_NO_SE_SABE, firma_proveedor_avisos=avisos)
     else:
@@ -328,9 +332,12 @@ def enlace(contrato) -> str:
         raise SinEnlace("El cliente ya firmó el contrato.")
     if contrato.firma_proveedor_estado != ContratoDeServicio.FIRMA_PROVEEDOR_LISTA:
         raise SinEnlace("El contrato del proveedor todavía no está listo para firmar.")
+    #  CON LOS DATOS PARA RECONOCER AL CLIENTE (auditoria de frontera,
+    #  27/11/2026): el motor solo da el enlace si el usuario es el de ESTE
+    #  contrato.
     estado, cuerpo = alta_en_el_isp._llamar(contrato, "enlace-de-firma", {
-        "usuario": contrato.usuario_proveedor, "id_servicio": contrato.servicio_isp},
-        ESPERA_DE_LECTURA)
+        "usuario": contrato.usuario_proveedor, "id_servicio": contrato.servicio_isp,
+        "datos": alta_en_el_isp.datos_para_reconocer(contrato)}, ESPERA_DE_LECTURA)
     valor = str((cuerpo or {}).get("enlace") or "")
     if estado != "listo" or not valor.startswith(("http://", "https://")):
         raise SinEnlace("El proveedor no dio el enlace. Intenta de nuevo en un momento.")
@@ -416,7 +423,7 @@ def _anotar_fotos(contrato, **campos) -> None:
     contrato.refresh_from_db()
 
 
-def pedir_fotos(contrato, *, revisado: bool = False) -> bool:
+def pedir_fotos(contrato, *, por=None, revisado: bool = False) -> bool:
     """Marca las fotos como pedidas y encola la tarea, DESPUES del commit. Solo
     si el contrato se preparo en el proveedor (tiene el usuario y el numero
     del cliente) y desde «nunca» o `fallidas`. Cada pedido, un numero nuevo."""
@@ -438,7 +445,9 @@ def pedir_fotos(contrato, *, revisado: bool = False) -> bool:
                        + ([ContratoDeServicio.FOTOS_POR_REVISAR] if revisado else []))
                .update(fotos_proveedor_estado=ContratoDeServicio.FOTOS_PEDIDAS,
                        fotos_proveedor_detalle="", fotos_proveedor_intento=intento,
-                       updated_at=ahora))
+                       #  QUIEN LO DECIDIO (auditoria de frontera, 27/11/2026):
+                       #  quien finalizo, o quien de gestion las reenvio.
+                       fotos_proveedor_pedida_por=por, updated_at=ahora))
     contrato.refresh_from_db()
     if not tocadas:
         return False
@@ -483,7 +492,7 @@ def subir_fotos(contrato) -> None:
 
     if contrato.fotos_proveedor_estado != ContratoDeServicio.FOTOS_PEDIDAS:
         return
-    actor = _nombre_de(contrato.firmado_por)
+    actor = _nombre_de(contrato.fotos_proveedor_pedida_por or contrato.firmado_por)
     fotos = fotos_del_trabajo(contrato.orden)
     if not actor or fotos is None:
         _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_FALLIDAS,
@@ -503,7 +512,7 @@ def subir_fotos(contrato) -> None:
     if estado == "subido":
         _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_SUBIDAS,
                       fotos_proveedor_detalle="")
-    elif estado == "no_se_sabe":
+    elif estado == "no_se_sabe" or (estado == "bloqueado" and (cuerpo or {}).get("emitido") is True):
         _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_POR_REVISAR,
                       fotos_proveedor_detalle="Se mandaron y no se pudo confirmar: míralo en los "
                                               "archivos del cliente en el proveedor.")

@@ -26,7 +26,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 #  fotos y movimientos de material encolados. Por eso el numero se sube en el
 #  commit que hace falta publicar, y la version que dice el repo es la que
 #  corre en la calle.
-version: 1.0.32+32
+version: 1.0.33+33
 
 environment:
   sdk: ^3.13.2
@@ -74,6 +74,7 @@ dependencies:
   url_launcher: ^6.3.3
   mobile_scanner: ^7.4.2
   package_info_plus: ^10.2.2
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:

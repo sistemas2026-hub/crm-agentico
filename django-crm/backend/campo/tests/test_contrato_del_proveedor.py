@@ -420,8 +420,12 @@ def test_d1_con_el_contrato_listo_da_el_enlace_sin_guardarlo(
     r = user_client.post(f"/api/campo/trabajos/{orden.id}/contrato/enlace-de-firma/")
     assert r.status_code == 200 and r.json() == {"enlace": ENLACE}
     assert r["Cache-Control"] == "no-store"
+    #  Desde el 27/11/2026 viajan también los datos mínimos para reconocer al
+    #  cliente: el motor solo da el enlace si el servicio es de ESE cliente.
+    from campo.services.alta_en_el_isp import datos_para_reconocer
     assert motor.llamadas[-1] == ("enlace-de-firma",
-                                  {"usuario": "laura-gomez@empresa", "id_servicio": "8039"})
+                                  {"usuario": "laura-gomez@empresa", "id_servicio": "8039",
+                                   "datos": datos_para_reconocer(c)})
     c.refresh_from_db()
     guardado = str({f.name: getattr(c, f.name) for f in c._meta.fields})
     assert "AAAA" not in guardado, "el enlace no queda en el contrato"

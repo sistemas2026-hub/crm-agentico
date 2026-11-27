@@ -6406,7 +6406,10 @@ def interno_enlace_de_firma(contrato_id: str):
     portal del cliente SIN clave: esta ruta no lo guarda ni lo registra, y la
     respuesta va directo al telefono del tecnico. Solo lee.
     """
-    tenant, cuerpo, error = _cuerpo_de({"usuario", "id_servicio"})
+    tenant, cuerpo, error = _cuerpo_de({"usuario", "id_servicio", "datos"})
+    if error:
+        return error
+    datos, error = _datos_del_alta(cuerpo)
     if error:
         return error
     try:
@@ -6415,7 +6418,8 @@ def interno_enlace_de_firma(contrato_id: str):
         return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
                      componente="interno", e=e)
     resultado = contrato_del_proveedor.enlace(
-        config, tenant, usuario=cuerpo.get("usuario"), id_servicio=cuerpo.get("id_servicio"))
+        config, tenant, usuario=cuerpo.get("usuario"), id_servicio=cuerpo.get("id_servicio"),
+        datos=datos)
     return (jsonify(resultado.como_dict()),
             _CODIGOS_DEL_CONTRATO.get(resultado.estado, 409))
 

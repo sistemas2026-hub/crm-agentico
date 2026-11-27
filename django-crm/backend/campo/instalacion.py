@@ -110,7 +110,7 @@ def al_finalizar(orden, profile) -> bool:
 
         hecho = vigente_de(orden)
         if hecho is not None:
-            pedir_fotos(hecho)
+            pedir_fotos(hecho, por=profile)
     except Exception as e:                                       # noqa: BLE001
         logger.warning("instalacion: no se pudieron pedir las fotos (%s)", type(e).__name__)
     try:
@@ -277,7 +277,9 @@ def pedir(contrato) -> None:
                 activacion_detalle="No se sabe quién aprobó: sin eso no se activa.")
         return
     estado, cuerpo = alta_en_el_isp._llamar(contrato, "activar-cliente", {
-        "actor": actor, "datos": alta_en_el_isp.datos_del_alta(contrato),
+        #  LO MINIMO PARA RECONOCERLO (revision de PII, 27/11/2026): el motor
+        #  solo usa la IP, el nombre y el documento; la ficha entera viajaba.
+        "actor": actor, "datos": alta_en_el_isp.datos_para_reconocer(contrato),
         "id_servicio": contrato.servicio_isp,
         "intento": int(contrato.activacion_intento or 1)}, ESPERA_DEL_PEDIDO)
     if estado is None:

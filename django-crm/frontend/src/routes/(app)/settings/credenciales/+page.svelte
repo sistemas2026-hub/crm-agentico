@@ -279,17 +279,20 @@
             }}
           />
           <label class="v2-label" for="nueva-valor">Valor</label>
-          <!-- NO ES type="password" A PROPÓSITO (26/11/2026): con un campo de
-               contraseña el navegador da el formulario por un inicio de sesión
-               y llena el nombre con el usuario guardado. Se oculta con puntos
-               igual. -->
+          <!-- type="password" CON autocomplete="new-password" (27/11/2026). El
+               26/11 se probó type="text" con -webkit-text-security para que el
+               navegador no llenara el nombre con el usuario guardado; la
+               revisión de privacidad mostró que en un navegador sin esa
+               propiedad (Firefox) la clave del panel se veía en claro. Con
+               "new-password" el navegador la trata como una clave NUEVA y no
+               ofrece la guardada; y si aun así llenara el nombre, el servidor
+               lo explica y la pantalla lo pasa a MAYÚSCULAS. -->
           <input
             id="nueva-valor"
             name="valor"
-            type="text"
-            style="-webkit-text-security: disc; text-security: disc;"
+            type="password"
             class="v2-input"
-            autocomplete="off"
+            autocomplete="new-password"
             data-lpignore="true"
             data-1p-ignore
             data-form-type="other"

@@ -53,6 +53,47 @@ LISTO = "listo"                       # enlace o firma leidos
 #: son tres; el tope deja lugar y frena un envio desbordado.
 MAX_ARCHIVOS = 10
 
+#: Cuanto puede durar un pedido al panel antes de que el registro de
+#: operaciones lo de por muerto (auditoria de frontera, 27/11/2026): con el
+#: de siempre (300 s) un guardado largo --entrada, varias paginas, archivos--
+#: se podia volver a ejecutar mientras el primero seguia. Mas que el peor caso.
+SEGUNDOS_VENCIDA_WEB = 1800
+
+
+class _Detenido(Exception):
+    """El interruptor se bajo (o no se pudo leer) mientras se esperaba."""
+
+
+def _sigue_abierto(tenant: str, actor: str, recurso: str):
+    """Para `web.ejecutar(antes_de_salir=...)`: el interruptor, otra vez, ya
+    con la sesion tomada y justo antes de la primera peticion."""
+    def _mirar():
+        from nucleo.seguridad import interruptor
+
+        try:
+            veredicto = interruptor.veredicto(tenant)
+        except Exception:                                    # noqa: BLE001
+            raise _Detenido("no se pudo leer el interruptor") from None
+        if not veredicto.permitido:
+            interruptor.anotar_bloqueo(tenant, actor=actor, recurso=recurso,
+                                       motivo=f"{veredicto.estado}: {veredicto.motivo}")
+            raise _Detenido("el interruptor de la empresa esta detenido")
+    return _mirar
+
+
+def _cliente(config, tenant: str, d: dict, numero: str):
+    """La fila del CLIENTE de este contrato y su forma de busqueda, o (None, None)."""
+    from nucleo.seguimiento import alta_de_cliente as alta
+
+    h = alta._herramientas(config)
+    if h["buscar"] is None:
+        return None, None
+    pb = h["buscar"].parametros_de_busqueda_por_ip
+    for fila in alta._filas_de(h["buscar"], pb, config, tenant, d["ip"]):
+        if alta._el_numero(fila.get(pb.campo_id)) == numero and alta._es_el_nuestro(fila, pb, d):
+            return fila, pb
+    return None, None
+
 
 @dataclass
 class ResultadoContrato:
@@ -195,13 +236,17 @@ def preparar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio
 
     def _hacer():
         leido = web.ejecutar(herr, {"id_servicio": int(numero), "archivos": docs}, tenant,
-                             config.variables_tenant)
+                             config.variables_tenant,
+                             antes_de_salir=_sigue_abierto(tenant, actor, "contrato_del_proveedor"))
         return {"contrato_id": str(leido.get("contrato_id") or "")}
 
     try:
         with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
             res = idempotencia.ejecutar(tenant, herr.nombre, huella, origen, _hacer,
-                                        clave=f"{origen}|{herr.nombre}")
+                                        clave=f"{origen}|{herr.nombre}",
+                                        segundos_vencida=SEGUNDOS_VENCIDA_WEB)
+    except _Detenido as e:
+        return _fin(BLOQUEADO, str(e), usuario=usuario)
     except ejecutor_http.ErrorHerramientaHttp as e:
         registrar("contrato_proveedor", "el ejecutor no dejo salir el contrato", error=e)
         return _fin(BLOQUEADO, "el contrato no salio: el ejecutor lo freno antes de llegar "
@@ -221,9 +266,15 @@ def preparar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio
                     emitido=True)
     if res.decision == "en_curso":
         return _fin(EN_CURSO, "ese pedido ya esta corriendo", usuario=usuario, emitido=True)
+    #  «NO SE SABE» NO ES «FALLO» (auditoria de frontera, 27/11/2026): este
+    #  numero de pedido ya corrio y no termino bien, o corrio con otros
+    #  documentos. Pudo haber quedado guardado: lo mira una persona.
+    if not res.ejecutada and res.decision in ("fallida", "rechazada"):
+        return _fin(NO_SE_SABE, "un pedido anterior con este numero no termino bien: no se "
+                                "sabe si el contrato quedo", usuario=usuario, emitido=True)
     if not res.ejecutada and res.decision != "repetida":
         return _fin(BLOQUEADO, "el registro de operaciones no dejo salir este pedido "
-                               f"({res.decision})", usuario=usuario, emitido=True)
+                               f"({res.decision})", usuario=usuario)
     contrato_id = str((res.respuesta or {}).get("contrato_id") or "")
     if not contrato_id:
         return _fin(NO_SE_SABE, "el panel guardo y no devolvio el numero del contrato",
@@ -232,18 +283,36 @@ def preparar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio
     return _fin(PREPARADO, contrato_id=contrato_id, usuario=usuario, emitido=True)
 
 
-def enlace(config, tenant: str, *, usuario: str, id_servicio) -> ResultadoContrato:
-    """El enlace de firma. NO se registra: ver el encabezado."""
+def enlace(config, tenant: str, *, usuario: str, id_servicio, datos=None) -> ResultadoContrato:
+    """El enlace de firma. NO se registra: ver el encabezado.
+
+    ATADO AL CONTRATO (auditoria de frontera, 27/11/2026): el enlace entra al
+    portal del cliente sin clave, asi que solo se pide si el usuario es el de
+    la instalacion --o el cliente-- de ESTE contrato, con ese numero."""
     from nucleo.herramientas import web
     from nucleo.seguimiento import alta_de_cliente as alta
 
     herr = _herramientas(config)["enlace"]
-    if herr is None:
+    ha = alta._herramientas(config)
+    if herr is None or ha["crear"] is None:
         return ResultadoContrato(SIN_HERRAMIENTA, "la empresa no declara el enlace de firma")
     numero = alta._el_numero(id_servicio)
     usuario = str(usuario or "").strip()
     if not numero or not usuario or len(usuario) > 200:
         return ResultadoContrato(DATOS_INVALIDOS, "faltan el usuario o el numero de servicio")
+    d, por_que = alta.leer_datos(datos, ha["crear"].parametros_de_alta)
+    if d is None:
+        return ResultadoContrato(DATOS_INVALIDOS, por_que)
+    try:
+        fila, pb = _instalacion(config, tenant, d, numero)
+        if fila is None:
+            fila, pb = _cliente(config, tenant, d, numero)
+    except alta._NoSePudoLeer as e:
+        return ResultadoContrato(NO_SE_PUDO_COMPROBAR, f"no se pudo leer el proveedor ({e})")
+    suyo = str(fila.get(pb.campo_usuario) or "").strip() if fila is not None and getattr(
+        pb, "campo_usuario", "") else ""
+    if not suyo or suyo != usuario:
+        return ResultadoContrato(NO_ENCONTRADA, "el usuario no es el de este contrato")
     try:
         leido = web.ejecutar(herr, {"usuario": usuario, "id_servicio": int(numero)}, tenant,
                              config.variables_tenant)
@@ -253,7 +322,15 @@ def enlace(config, tenant: str, *, usuario: str, id_servicio) -> ResultadoContra
         registrar("contrato_proveedor", "pedir el enlace fallo", error=e)
         return ResultadoContrato(NO_SE_PUDO_COMPROBAR, "no se pudo pedir el enlace")
     valor = str(leido.get("enlace") or "")
-    if not valor.startswith(("http://", "https://")):
+    #  SIEMPRE POR HTTPS (revision de PII, 27/11/2026). El enlace lleva la
+    #  llave para entrar al portal del cliente. Medido ese dia: el primer
+    #  proveedor lo da como http://, y su portal atiende por https con un
+    #  certificado valido (por http redirige a https) -- o sea que el primer
+    #  pedido viajaba sin cifrar, con la llave adentro. Se entrega por https,
+    #  y uno que no se pueda dar por https no sale.
+    if valor.startswith("http://"):
+        valor = "https://" + valor[len("http://"):]
+    if not valor.startswith("https://"):
         return ResultadoContrato(NO_SE_PUDO_COMPROBAR, "el panel no devolvio un enlace")
     return ResultadoContrato(LISTO, enlace=valor)
 
@@ -350,13 +427,17 @@ def subir_fotos(config, tenant: str, *, actor: str, origen: str, datos, id_servi
 
     def _hacer():
         web.ejecutar(herr, {"usuario": usuario, "archivos": fotos}, tenant,
-                     config.variables_tenant)
+                     config.variables_tenant,
+                     antes_de_salir=_sigue_abierto(tenant, actor, "fotos_al_proveedor"))
         return {"subidas": len(fotos)}
 
     try:
         with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
             res = idempotencia.ejecutar(tenant, herr.nombre, huella, origen, _hacer,
-                                        clave=f"{origen}|{herr.nombre}")
+                                        clave=f"{origen}|{herr.nombre}",
+                                        segundos_vencida=SEGUNDOS_VENCIDA_WEB)
+    except _Detenido as e:
+        return _fin(BLOQUEADO, str(e))
     except ejecutor_http.ErrorHerramientaHttp as e:
         registrar("fotos_al_proveedor", "el ejecutor no dejo salir las fotos", error=e)
         return _fin(BLOQUEADO, "las fotos no salieron: el ejecutor las freno antes de llegar "
@@ -375,8 +456,11 @@ def subir_fotos(config, tenant: str, *, actor: str, origen: str, datos, id_servi
         return _fin(NO_SE_SABE, "no se sabe si las fotos quedaron", emitido=True)
     if res.decision == "en_curso":
         return _fin(EN_CURSO, "ese pedido ya esta corriendo", emitido=True)
+    if not res.ejecutada and res.decision in ("fallida", "rechazada"):
+        return _fin(NO_SE_SABE, "un pedido anterior con este numero no termino bien: no se "
+                                "sabe si las fotos quedaron", emitido=True)
     if not res.ejecutada and res.decision != "repetida":
         return _fin(BLOQUEADO, f"el registro de operaciones no dejo salir este pedido "
-                               f"({res.decision})", emitido=True)
+                               f"({res.decision})")
     registrar("fotos_al_proveedor", "fotos del trabajo subidas al cliente")
     return _fin(SUBIDO, emitido=True)

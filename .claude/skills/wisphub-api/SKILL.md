@@ -1398,6 +1398,20 @@ prueba creada desde la app):
   respuesta); un segundo, si, en ~5 s. El estado de una tarea que FALLA no se
   ha visto (FAILURE/REVOKED son los nombres habituales).
 
+**REVISION DE SEGURIDAD, 27/11/2026:**
+
+* El portal del cliente (`clientes.portalinternet.io`) **responde por https con
+  certificado valido, y por http redirige a https (301)**. El panel entrega el
+  enlace de firma con `http://`: el motor lo pasa a `https://` y no entrega
+  otra cosa. La app lo abre en una vista propia que borra cookies, cache y
+  almacenamiento (el enlace entra al portal SIN clave: no puede quedar en el
+  historial del navegador del telefono).
+* La casilla `form-N-visible` de las filas de archivos **no se manda nunca**
+  (`bloque_de_archivos.campos_que_no_van: [visible]`). El motor solo manda una
+  casilla si la pagina la trae marcada, y como viene la fila vacia **no se
+  midio**: asi no depende de eso. Sin medir: que en el portal del cliente el
+  documento quede efectivamente oculto.
+
 **SIN MEDIR:** cuanto duran el enlace y la sesion.
 
 ## Antes de dar por buena una integracion

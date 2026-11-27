@@ -257,7 +257,9 @@ def _creado(contrato, id_cliente: str, codigo: str, avisos=None, **mas) -> None:
         try:
             from campo.contrato_del_proveedor import pedir as pedir_contrato
 
-            pedir_contrato(contrato)
+            #  Si lo resolvio una persona de gestion, el contrato sale a su
+            #  nombre (auditoria de frontera, 27/11/2026).
+            pedir_contrato(contrato, por=contrato.alta_resuelta_por)
         except Exception as e:                                   # noqa: BLE001
             logger.warning("alta_en_el_isp: no se pudo pedir el contrato del proveedor (%s)",
                            type(e).__name__)

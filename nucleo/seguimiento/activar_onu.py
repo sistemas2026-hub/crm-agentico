@@ -159,7 +159,11 @@ def motivo_del_rechazo(e: BaseException) -> str:
             break
     else:
         return ""
-    return " ".join(str(texto).split())[:_LARGO_DEL_MOTIVO]
+    #  TAPADO (revision de PII, 27/11/2026): el error del proveedor puede
+    #  repetir lo que le mandamos. Numeros largos y correos fuera, como los
+    #  avisos del panel.
+    texto = re.sub(r"[\w.+-]+@[\w.-]+", "<correo>", " ".join(str(texto).split()))
+    return re.sub(r"\d{5,}", "<n>", texto)[:_LARGO_DEL_MOTIVO]
 
 
 def _ejecutar(herr, args: dict, config, tenant: str):

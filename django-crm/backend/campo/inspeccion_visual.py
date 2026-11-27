@@ -79,6 +79,24 @@ ESTADO_APAGADO = "apagado"
 #: funcion APAGADA --que es el default y lo que va a produccion-- eso habria
 #: frenado el cierre autonomo del Supervisor en toda orden con evidencia.
 MOTIVO_APAGADO = "esta empresa no tiene habilitado que se miren las fotos"
+#: LOS DOCUMENTOS NO SE MIRAN (revision de PII, 27/11/2026). La cedula y el
+#: recibo --las fotos marcadas «solo en la plataforma»-- iban al analisis como
+#: cualquier otra, y su descripcion (nombre, numero, fecha de nacimiento) quedaba
+#: escrita en la base. No se mandan, y no dejan fila. La revision «cedula =
+#: contrato» se hara con un proposito que conteste si/no, sin transcribir.
+MOTIVO_DOCUMENTO = "es un documento del cliente: no se analiza"
+
+
+def es_documento_privado(evidencia) -> bool:
+    """Si esta evidencia es de un requisito «solo en la plataforma». Si la
+    plantilla no se puede leer, SI: sin saber cuales son, no sale ninguna."""
+    from campo.fotos_al_ticket import requisitos_que_no_salen
+
+    try:
+        privados = requisitos_que_no_salen(evidencia.orden_trabajo)
+    except Exception:                                            # noqa: BLE001
+        return True
+    return privados is None or evidencia.requisito_id in privados
 
 #: Los formatos que el analizador del motor mira hoy. Se comprueba de ESTE
 #: lado para no pagar un viaje HTTP por una foto que va a rechazar igual, y
@@ -372,6 +390,8 @@ def analizar(evidencia, instrucciones_propias: str = "") -> dict:
     analisis es otro. Que el segundo falle no puede convertir la subida en un
     500 -- mismo criterio que `cierre_en_isp.cerrar_ticket_al_validar`.
     """
+    if es_documento_privado(evidencia):
+        return _no(MOTIVO_DOCUMENTO)
     #  LA EMPRESA SALE DE LA ORDEN, NUNCA DEL ENTORNO (revisor de PII,
     #  31/10/2026). La primera version leia `MOTOR_TENANT`, que es UNA por
     #  instalacion: con dos empresas en la misma, la foto tomada dentro de la

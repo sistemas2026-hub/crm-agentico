@@ -188,7 +188,12 @@ class Proveedor:
             return {"results": [f for f in self.instalaciones if f["ip"] == argumentos["ip"]]}
         return {"results": []}
 
-    def ejecutar_web(self, herramienta, argumentos, tenant, variables_tenant=None):
+    def ejecutar_web(self, herramienta, argumentos, tenant, variables_tenant=None,
+                     antes_de_salir=None):
+        #  Como el de verdad: lo de «antes de salir» corre antes de cualquier
+        #  peticion, ya con la sesion tomada.
+        if antes_de_salir is not None:
+            antes_de_salir()
         self.web.append((herramienta.nombre, dict(argumentos), frontera.permiso_vigente()))
         if self.error_web is not None:
             raise self.error_web
@@ -287,8 +292,9 @@ with escenario(reg, prov):
     afirmar(r.estado == cp.NO_SE_SABE and r.emitido, f"salio y no se sabe: no_se_sabe ({r.estado})")
     prov.error_web = None
     r2 = preparar()
-    afirmar(r2.estado == cp.BLOQUEADO and len(prov.web) == 1,
-            "el mismo pedido NO se vuelve a mandar despues de un «no se»")
+    afirmar(r2.estado == cp.NO_SE_SABE and len(prov.web) == 1,
+            "el mismo pedido NO se vuelve a mandar despues de un «no se», y sigue «no se sabe» "
+            "(no «bloqueado», que dejaria reenviar)")
 prov = Proveedor(error_web=web.ErrorWeb("paso 2", "no redirigio", envio=True,
                                         avisos=["El archivo es muy pequeño."]))
 with escenario(Registro(), prov):
@@ -329,17 +335,60 @@ seccion("6. el enlace no queda en el registro; la firma es si/no")
 prov = Proveedor()
 salida = StringIO()
 with escenario(Registro(), prov), redirect_stdout(salida):
-    r = cp.enlace(Config(), TENANT, usuario="laura-pineda@empresa", id_servicio="8039")
-afirmar(r.estado == cp.LISTO and r.enlace == ENLACE, "devuelve el enlace")
+    r = cp.enlace(Config(), TENANT, usuario="laura-pineda@empresa", id_servicio="8039",
+                  datos=DATOS)
+afirmar(r.estado == cp.LISTO and r.enlace == ENLACE.replace("http://", "https://"),
+        "devuelve el enlace, SIEMPRE por https (el proveedor lo da por http y su portal atiende https)")
 afirmar(prov.web[0][1] == {"usuario": "laura-pineda@empresa", "id_servicio": 8039},
         "lo pide con el usuario y el numero")
 afirmar("AAAA" not in salida.getvalue(), "el enlace NO aparece en el registro")
 with escenario(Registro(), Proveedor(enlace="javascript:alert(1)")), redirect_stdout(StringIO()):
-    r = cp.enlace(Config(), TENANT, usuario="u@e", id_servicio=1)
+    r = cp.enlace(Config(), TENANT, usuario="laura-pineda@empresa", id_servicio=8039, datos=DATOS)
 afirmar(r.estado == cp.NO_SE_PUDO_COMPROBAR and not r.enlace, "algo que no es un enlace web: no sale")
 with escenario(Registro(), Proveedor()), redirect_stdout(StringIO()):
-    r = cp.enlace(Config(), TENANT, usuario="", id_servicio=1)
+    r = cp.enlace(Config(), TENANT, usuario="", id_servicio=1, datos=DATOS)
 afirmar(r.estado == cp.DATOS_INVALIDOS, "sin usuario: datos_invalidos")
+#  ATADO AL CONTRATO (auditoria de frontera, 27/11/2026)
+prov = Proveedor()
+with escenario(Registro(), prov), redirect_stdout(StringIO()):
+    r = cp.enlace(Config(), TENANT, usuario="otra-persona@empresa", id_servicio=8039, datos=DATOS)
+afirmar(r.estado == cp.NO_ENCONTRADA and prov.web == [],
+        "un usuario que NO es el de este contrato: no hay enlace, y no se toca el panel")
+prov = Proveedor()
+with escenario(Registro(), prov), redirect_stdout(StringIO()):
+    r = cp.enlace(Config(), TENANT, usuario="laura-pineda@empresa", id_servicio=9999, datos=DATOS)
+afirmar(r.estado == cp.NO_ENCONTRADA and prov.web == [], "otro numero de servicio: tampoco")
+prov = Proveedor()
+with escenario(Registro(), prov), redirect_stdout(StringIO()):
+    r = cp.enlace(Config(), TENANT, usuario="laura-pineda@empresa", id_servicio=8039, datos=None)
+afirmar(r.estado == cp.DATOS_INVALIDOS and prov.web == [], "sin los datos del contrato: no sale")
+
+# --------------------------------------------------------------------------- #
+seccion("6c. el interruptor se vuelve a leer con la sesion del panel tomada")
+
+
+@contextlib.contextmanager
+def interruptor_que_cambia():
+    """Abierto en la primera lectura; detenido de ahi en adelante."""
+    lecturas = {"n": 0}
+    viejo = interruptor.veredicto
+
+    def _v(t):
+        lecturas["n"] += 1
+        return Veredicto(lecturas["n"] == 1)
+
+    try:
+        yield _v
+    finally:
+        interruptor.veredicto = viejo
+
+
+prov = Proveedor()
+with escenario(Registro(), prov), interruptor_que_cambia() as v:
+    interruptor.veredicto = v
+    r = preparar()
+afirmar(r.estado == cp.BLOQUEADO and prov.web == [],
+        f"se bajo mientras esperaba la sesion: no sale nada ({r.estado})")
 for valor in (True, False):
     with escenario(Registro(), Proveedor(firmado=valor)), redirect_stdout(StringIO()):
         r = cp.firmado(Config(), TENANT, contrato_id="4928")
@@ -424,7 +473,8 @@ try:
     afirmar(r.status_code == 400, "intento fuera de rango: 400")
     r = cliente.post(base + "preparar-contrato-proveedor", json=cuerpo)
     afirmar(r.status_code == 400, "sin tenant: 400")
-    r = cliente.post(base + "enlace-de-firma?tenant=t", json={"usuario": "u@e", "id_servicio": 1})
+    r = cliente.post(base + "enlace-de-firma?tenant=t",
+                     json={"usuario": "u@e", "id_servicio": 1, "datos": DATOS})
     afirmar(r.status_code == 200 and r.get_json().get("enlace") == ENLACE, "enlace: 200")
     r = cliente.post(base + "firma-en-el-proveedor?tenant=t", json={"contrato_id": "4928"})
     afirmar(r.status_code == 200 and r.get_json().get("firmado") is True, "firma: 200, si/no")

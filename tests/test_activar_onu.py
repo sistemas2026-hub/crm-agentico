@@ -334,6 +334,9 @@ for cuerpo, esperado in (({"message": "bad zone"}, "bad zone"),
                          ({"status": False}, ""), (["x"], ""), ("texto", "")):
     afirmar(onu.motivo_del_rechazo(ErrorHttp(400, cuerpo)) == esperado,
             f"motivo de {cuerpo!r} -> {esperado!r}")
+afirmar(onu.motivo_del_rechazo(ErrorHttp(400, {"error": "ONU 1234567 de ana@x.com ya existe"}))
+        == "ONU <n> de <correo> ya existe",
+        "el motivo va TAPADO: numeros largos y correos fuera (revision de PII, 27/11/2026)")
 prov = Proveedor(aparece_tras=2)
 with escenario(Registro(), prov):
     r = onu.activar(Config(), TENANT, actor="x", origen=ORIGEN, datos={"serial": SERIAL},

@@ -76,6 +76,10 @@ AGENTE = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 #: Tras una entrada fallida, cuanto se espera antes de volver a intentar.
 ESPERA_TRAS_FRENO_S = 15 * 60          # el panel freno por demasiados intentos
 ESPERA_TRAS_RECHAZO_S = 5 * 60         # el panel no acepto usuario y clave
+#: Cuanto se espera la sesion del panel si otra llamada la esta usando
+#: (auditoria de frontera, 27/11/2026): sin tope, la espera podia pasar el
+#: vencimiento del registro de operaciones y el pedido salir DOS veces.
+ESPERA_DEL_CANDADO_S = 120
 _HUECO = re.compile(r"\{(\w+)\}")
 _SIN_VALOR = ("submit", "button", "image", "reset", "file")
 
@@ -371,6 +375,10 @@ def _con_el_bloque(paso, form: _Formulario, campos: list, partes: list, argument
     las vacias que la pagina trae para llenar se quitan, y sus otros campos
     sirven de molde para cada fila nueva (descripcion vacia, casilla sin
     marcar...). El total se cuenta de nuevo.
+
+    Los `campos_que_no_van` se quitan del molde SIEMPRE (27/11/2026): asi una
+    casilla como «visible para el cliente» sale sin marcar aunque la pagina la
+    traiga marcada.
     """
     b = paso.bloque_de_archivos
     lista = _archivos(argumentos.get(b.argumento), etapa)
@@ -392,6 +400,7 @@ def _con_el_bloque(paso, form: _Formulario, campos: list, partes: list, argument
     if desde + len(lista) > tope:
         raise ErrorWeb(etapa, "son mas archivos de los que el bloque acepta")
     fila = re.compile(rf"^{re.escape(b.prefijo)}-(\d+)-(.+)$")
+    fuera = set(b.campos_que_no_van or ())
     molde: dict[str, str] = {}
     salida = []
     for c, v in campos:
@@ -408,7 +417,7 @@ def _con_el_bloque(paso, form: _Formulario, campos: list, partes: list, argument
         _pesa_lo_minimo(paso, contenido, k + 1, b.argumento, etapa)
         n = desde + k
         for sufijo, v in molde.items():
-            if sufijo not in (b.campo_archivo, b.campo_titulo):
+            if sufijo not in (b.campo_archivo, b.campo_titulo) and sufijo not in fuera:
                 salida.append((f"{b.prefijo}-{n}-{sufijo}", v))
         if b.campo_titulo:
             salida.append((f"{b.prefijo}-{n}-{b.campo_titulo}", titulo))
@@ -441,9 +450,13 @@ def _capturar(paso, url: str, pagina: _Pagina, etapa: str) -> dict:
 
 
 def ejecutar(herramienta, argumentos: dict, tenant: str,
-             variables_tenant: dict | None = None) -> dict:
+             variables_tenant: dict | None = None, *, antes_de_salir=None) -> dict:
     """Entra al panel (o reusa la sesion), da los pasos y devuelve lo que las
     capturas leyeron.
+
+    `antes_de_salir`, si viene, se llama YA CON LA SESION TOMADA y antes de la
+    primera peticion: quien escribe vuelve a leer ahi el interruptor, que pudo
+    cambiar mientras se esperaba la sesion (auditoria de frontera, 27/11/2026).
 
     Lanza `ejecutor_http.ErrorHerramientaHttp` si el ultimo metro no la deja
     salir (antes de cualquier peticion) y `ErrorWeb` si algo del panel falla.
@@ -451,6 +464,13 @@ def ejecutar(herramienta, argumentos: dict, tenant: str,
     sw = getattr(herramienta, "sesion_web", None)
     if getattr(herramienta, "tipo", None) != "web" or sw is None:
         raise ErrorWeb("configuracion", "no es una herramienta del panel web")
+    #  UNA «LECTURA» NO ENVIA FORMULARIOS (auditoria de frontera, 27/11/2026):
+    #  la frontera solo se exige a lo que escribe, asi que una herramienta de
+    #  solo lectura con un paso de formulario mandaria un POST sin control. El
+    #  esquema ya la rechaza; esto es el ultimo metro.
+    if getattr(herramienta, "solo_lectura", True) and any(
+            getattr(p, "formulario", "") for p in herramienta.pasos_web):
+        raise ErrorWeb("configuracion", "una herramienta de solo lectura no envia formularios")
     argumentos = dict(argumentos or {})
 
     #  1. EL ULTIMO METRO, antes de la primera peticion (ver el encabezado).
@@ -460,7 +480,11 @@ def ejecutar(herramienta, argumentos: dict, tenant: str,
     espera = float(getattr(herramienta, "timeout_segundos", None) or TIMEOUT_SEGUNDOS)
     usuario, clave = _credenciales(tenant, sw)
     abierta = _sesion_de(tenant, base, sw, usuario, clave)
-    with abierta.candado:
+    if not abierta.candado.acquire(timeout=ESPERA_DEL_CANDADO_S):
+        raise ErrorWeb("sesion", "el panel esta ocupado con otro pedido; nada salio")
+    try:
+        if antes_de_salir is not None:
+            antes_de_salir()
         try:
             for intento in (1, 2):
                 if not abierta.dentro:
@@ -482,6 +506,8 @@ def ejecutar(herramienta, argumentos: dict, tenant: str,
                       herramienta=herramienta.nombre, etapa=e.etapa,
                       http_status=e.http_status, envio=e.envio)
             raise
+    finally:
+        abierta.candado.release()
     raise ErrorWeb("configuracion", "no se completo ningun intento")    # no se llega
 
 

@@ -370,6 +370,9 @@ class ContratoDeServicio(BaseModel):
     fotos_proveedor_estado = models.CharField(max_length=20, blank=True, default="")
     fotos_proveedor_detalle = models.CharField(max_length=300, blank=True, default="")
     fotos_proveedor_intento = models.PositiveSmallIntegerField(default=0)
+    fotos_proveedor_pedida_por = models.ForeignKey(
+        "common.Profile", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="fotos_al_proveedor_pedidas")
 
     class Meta:
         db_table = "campo_contrato_de_servicio"

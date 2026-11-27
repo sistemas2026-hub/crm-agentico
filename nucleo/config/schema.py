@@ -1096,12 +1096,23 @@ class BloqueDeArchivos(Base):
     #: Dentro de cada fila: el campo del archivo y, si hay, el del titulo.
     campo_archivo: str
     campo_titulo: str = ""
+    #: Campos de cada fila que NUNCA se mandan, venga como venga la pagina. Una
+    #: casilla que no se manda queda SIN MARCAR. Revision de privacidad,
+    #: 27/11/2026: que un documento del cliente (su cedula) no quede a la vista
+    #: en el portal del cliente no puede depender de como venga marcada la fila
+    #: vacia del panel, que nadie midio. Se declara aqui: la casilla tiene otro
+    #: nombre en cada proveedor.
+    campos_que_no_van: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _completo(self):
         for campo in ("argumento", "prefijo", "campo_archivo"):
             if not str(getattr(self, campo) or "").strip():
                 raise ValueError(f"bloque_de_archivos: falta '{campo}'")
+        fijos = {self.campo_archivo, self.campo_titulo}
+        if any((not str(c).strip()) or c in fijos for c in self.campos_que_no_van):
+            raise ValueError("bloque_de_archivos: 'campos_que_no_van' no puede estar vacio "
+                             "ni nombrar el campo del archivo o del titulo")
         return self
 
 
@@ -2525,6 +2536,13 @@ class Herramienta(Base):
                 raise ValueError(
                     f"'{self.nombre}': una herramienta 'web' entra al panel con el "
                     f"usuario de la empresa; no puede ser 'invocable_por_servicio'.")
+            #  Auditoria de frontera, 27/11/2026: la frontera solo se exige a lo
+            #  que escribe. Un formulario es un POST: si la herramienta dice ser
+            #  de solo lectura, saldria sin control.
+            if self.solo_lectura and any(p.formulario for p in self.pasos_web):
+                raise ValueError(
+                    f"'{self.nombre}': reenvia un formulario y se declara de solo "
+                    f"lectura: asi saldria sin pasar por la frontera.")
             conocidos = set(self.argumentos_web)
             for n, paso in enumerate(self.pasos_web, 1):
                 faltan = sorted(paso.huecos() - conocidos)

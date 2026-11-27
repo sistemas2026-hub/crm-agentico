@@ -874,7 +874,7 @@ def _mirar_y_anotar(evidencia) -> dict:
     #
     #  Un FALLO si se guarda, y la diferencia importa: un fallo hay que
     #  poder verlo; "esta empresa no lo pidio" no es nada que haya pasado.
-    if r["motivo"] == IV.MOTIVO_APAGADO:
+    if r["motivo"] in (IV.MOTIVO_APAGADO, IV.MOTIVO_DOCUMENTO):
         return {"estado": "", "motivo": r["motivo"]}
 
     #  'pide_atencion' LO ESCRIBE EL CODIGO, no el modelo: es la unica
@@ -965,6 +965,10 @@ def mirar_las_que_faltan(orden) -> dict:
                        estado_archivo=EvidenciaTrabajo.RECIBIDO)
                .order_by("vuelta", "recibida_en_servidor")):
         ultima[ev.requisito_id] = ev
+    #  Los documentos del cliente no se miran (inspeccion_visual): tampoco
+    #  cuentan como «faltan por mirar».
+    from campo import inspeccion_visual as _IV
+    ultima = {k: v for k, v in ultima.items() if not _IV.es_documento_privado(v)}
 
     if not ultima:
         return {"miradas": 0, "faltaban": 0}

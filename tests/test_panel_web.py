@@ -85,6 +85,7 @@ class Panel:
         self.envios: list[dict] = []
         self.contratos: dict[str, int] = {}
         self.firmado = False
+        self.visible_marcada = False        # la fila vacia trae «visible» marcada
         self.rechaza_formulario = False     # re-muestra el formulario, sin redirigir
         self.error_al_guardar = None        # codigo HTTP al guardar
         self.sesiones: set[str] = set()
@@ -130,7 +131,8 @@ def _pagina_contrato(n: int, error: str = "") -> str:
         "<select name='contrato-plan'><option value='a'>A</option>"
         "<option value='b' selected>B</option></select>"
         "<input type='checkbox' name='contrato-acepta' checked>"
-        "<input type='checkbox' name='form-0-visible'>"
+        "<input type='checkbox' name='form-0-visible'"
+        + (" checked" if PANEL.visible_marcada else "") + ">"
         "<input type='file' name='archivo' multiple>"
         "<input type='hidden' name='form-TOTAL_FORMS' value='1' />"
         "<input type='hidden' name='form-INITIAL_FORMS' value='0' />"
@@ -610,6 +612,75 @@ envio = PANEL.envios[-1]
 afirmar(e is None and [a[0] for a in envio["archivos"]] == [
     "archivo", "archivo", "form-0-archivo", "form-1-archivo"],
     "COMO EL NAVEGADOR: todos en el campo multiple y ademas uno por fila")
+#  LA CASILLA «VISIBLE» NO VA NUNCA (revision de privacidad, 27/11/2026): si
+#  la fila vacia la trae MARCADA, sin declararla viajaria marcada en cada fila
+#  -- la cedula quedaria a la vista en el portal del cliente --; declarada en
+#  'campos_que_no_van', no viaja en ninguna.
+reiniciar()
+PANEL.visible_marcada = True
+with redirect_stdout(StringIO()):
+    e = falla(lambda: con_permiso(con_bloque, {"id_servicio": 4900, "documentos": DOCS[:2]}))
+afirmar(e is None and [n for n, _ in PANEL.envios[-1]["campos"] if n.endswith("-visible")]
+        == ["form-0-visible", "form-1-visible"],
+        "sin declararla, una casilla marcada en la pagina viaja marcada en cada fila")
+reiniciar()
+PANEL.visible_marcada = True
+sin_visible = herramienta(argumentos_web=["id_servicio", "documentos"], pasos_web=[
+    dict(formulario="/instalaciones/editar-contrato/{id_servicio}/",
+         id_formulario="generarContrato", boton="guardar_contrato", archivo_minimo_bytes=1024,
+         bloque_de_archivos=dict(argumento="documentos", prefijo="form",
+                                 campo_archivo="archivo", campo_titulo="titulo",
+                                 campos_que_no_van=["visible"]))])
+with redirect_stdout(StringIO()):
+    e = falla(lambda: con_permiso(sin_visible, {"id_servicio": 4900, "documentos": DOCS[:2]}))
+c = PANEL.envios[-1]["campos"]
+afirmar(e is None and not any(n.endswith("-visible") for n, _ in c)
+        and [n for n, _ in c if n.endswith("-titulo")] == ["form-0-titulo", "form-1-titulo"],
+        "declarada en 'campos_que_no_van', no viaja en ninguna fila (y lo demas si)")
+#  Iguales a la de arriba (que SI carga) salvo 'campos_que_no_van'.
+for malo in ([""], ["archivo"], ["titulo"]):
+    no_carga(f"'campos_que_no_van' = {malo}", argumentos_web=["id_servicio", "documentos"],
+             pasos_web=[dict(
+                 formulario="/instalaciones/editar-contrato/{id_servicio}/",
+                 id_formulario="generarContrato", boton="guardar_contrato",
+                 archivo_minimo_bytes=1024,
+                 bloque_de_archivos=dict(argumento="documentos", prefijo="form",
+                                         campo_archivo="archivo", campo_titulo="titulo",
+                                         campos_que_no_van=malo))])
+
+no_carga("una «lectura» que reenvia un formulario (saldria sin frontera)",
+         solo_lectura=True, requiere_confirmacion=False)
+reiniciar()
+sin_control = schema.Herramienta.model_construct(**{**herramienta().__dict__, "solo_lectura": True})
+with redirect_stdout(StringIO()):
+    e = falla(lambda: web.ejecutar(sin_control, {"id_servicio": 8039, "archivos": ARCHIVOS}, TENANT))
+afirmar(isinstance(e, web.ErrorWeb) and PANEL.peticiones == [],
+        "y si llegara igual (sin pasar por el esquema), el motor no la deja salir")
+
+#  LA SESION OCUPADA TIENE TOPE, y «antes de salir» corre con ella tomada
+reiniciar()
+web.ejecutar(FIRMA, {"contrato_id": "1"}, TENANT)            # abre la sesion
+abierta = next(iter(web._SESIONES.values()))
+abierta.candado.acquire()
+viejo_tope = web.ESPERA_DEL_CANDADO_S
+web.ESPERA_DEL_CANDADO_S = 0.2
+antes = len(PANEL.peticiones)
+try:
+    with redirect_stdout(StringIO()):
+        e = falla(lambda: web.ejecutar(FIRMA, {"contrato_id": "1"}, TENANT))
+finally:
+    web.ESPERA_DEL_CANDADO_S = viejo_tope
+    abierta.candado.release()
+afirmar(isinstance(e, web.ErrorWeb) and not e.envio and len(PANEL.peticiones) == antes,
+        "con la sesion ocupada, espera con tope y falla sin tocar el panel")
+llamadas = []
+with redirect_stdout(StringIO()):
+    e = falla(lambda: web.ejecutar(FIRMA, {"contrato_id": "1"}, TENANT,
+                                   antes_de_salir=lambda: (_ for _ in ()).throw(RuntimeError("detenido"))))
+afirmar(isinstance(e, RuntimeError) and len(PANEL.peticiones) == antes,
+        "si «antes de salir» dice que no, no sale ninguna peticion")
+afirmar(abierta.candado.acquire(timeout=0.1), "y la sesion queda libre despues")
+abierta.candado.release()
 no_carga("un bloque cuyo argumento no llega",
          argumentos_web=["id_servicio"], pasos_web=[
              dict(formulario="/x/{id_servicio}/", id_formulario="f",

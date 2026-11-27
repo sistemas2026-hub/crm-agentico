@@ -7,6 +7,7 @@
 // fuera de la app; «Ya firmó: comprobar» lo lee y, firmado, lo dice.
 import 'package:campo/core/storage/ubicacion_de_captura.dart';
 import 'package:campo/features/contrato/contrato_screen.dart';
+import 'package:campo/features/contrato/firma_en_wisphub.dart';
 import 'package:campo/features/ejecucion/widgets/firma_del_cliente.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,11 +66,6 @@ class _Api extends ApiDelContrato {
     return (enlace: _enlace, error: null);
   }
 
-  @override
-  Future<bool> abrir(String enlace) async {
-    abiertos.add(enlace);
-    return true;
-  }
 
   @override
   Future<RespuestaDelServidor> volverAPreparar(String contratoId) async {
@@ -108,8 +104,17 @@ void _telefonoAlto(WidgetTester t) {
   addTearDown(t.view.reset);
 }
 
-Widget _montar(ApiDelContrato api) => MaterialApp(
-      home: ContratoScreen(ordenId: 'o-1', titulo: 'OT #611', api: api),
+Widget _montar(_Api api) => MaterialApp(
+      home: ContratoScreen(
+        ordenId: 'o-1',
+        titulo: 'OT #611',
+        api: api,
+        //  Dentro de la app: aquí solo se anota qué se abrió.
+        abrirFirma: (BuildContext context, String enlace) async {
+          api.abiertos.add(enlace);
+          return true;
+        },
+      ),
     );
 
 Future<void> _confirmar(WidgetTester t) async {
@@ -169,7 +174,7 @@ void main() {
     await t.pump();
     expect(api.enlacesPedidos, 1);
     expect(api.abiertos, <String>[_enlace]);
-    expect(find.textContaining('vuelve y toca «Ya firmó: comprobar»'), findsOneWidget);
+    expect(find.textContaining('toca «Ya firmó: comprobar»'), findsOneWidget);
   });
 
   testWidgets('YA FIRMÓ: sin la firma lo dice; con la firma queda «Firmado»', (WidgetTester t) async {
@@ -223,6 +228,16 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('Volver a intentar'), findsNothing);
     expect(find.textContaining('Avísale a la oficina'), findsOneWidget);
+  });
+
+  testWidgets('DENTRO DE LA APP: un enlace que no es https no se abre', (WidgetTester t) async {
+    late BuildContext ctx;
+    await t.pumpWidget(MaterialApp(home: Builder(builder: (BuildContext c) {
+      ctx = c;
+      return const SizedBox();
+    })));
+    expect(await abrirFirmaDentroDeLaApp(ctx, 'http://portal.example/login-panel/x/'), isFalse);
+    expect(await abrirFirmaDentroDeLaApp(ctx, 'javascript:alert(1)'), isFalse);
   });
 
   testWidgets('MIENTRAS SE PREPARA lo dice, y se vuelve a leer solo hasta que queda listo',
