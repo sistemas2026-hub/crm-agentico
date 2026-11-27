@@ -2168,6 +2168,15 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - web: `perfiles-de-velocidad.test.js`, `contrato.test.js` y `page-server.test.js` (70). Ningún error de tipos en los archivos tocados; los 256 que hay están en otros 73 archivos.
 - **De punta a punta en local, contra SmartOLT y WispHub de verdad (solo lectura):** la ruta nueva leyó 19 perfiles de bajada y 18 de subida. Después de sincronizar los precios (51 planes, todos con subida), sugirió exactamente la tabla aprobada para los 6 planes.
 
+**Corregido el mismo día, al cargarla en producción.** La tabla quedó guardada con ELITE subiendo con `PLAN_300MB` (el sugerido era `PLAN_1000MB`). Después, un cambio a `PLAN_1000MB` no se guardó: la hora del último guardado no cambió.
+- Causas probables:
+  - el «Guardar» del formulario queda debajo de las condiciones, con otros «Guardar» de otras secciones en medio;
+  - al recargar, el navegador volvía a poner en las listas lo que tenían antes.
+- Arreglo:
+  - un «Guardar» justo debajo de la tabla (el mismo formulario);
+  - `autocomplete="off"` en el formulario del contrato;
+  - el mensaje al guardar dice cuántos planes quedaron con perfil (`page-server.test.js`).
+
 **NO VERIFICADO:**
 - Una autorización real con perfiles: que SmartOLT los aplique. Se mira en la ficha de la ONU después de la próxima instalación vigilada.
 - En producción falta, después del despliegue:

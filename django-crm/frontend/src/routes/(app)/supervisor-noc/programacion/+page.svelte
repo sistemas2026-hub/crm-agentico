@@ -314,7 +314,10 @@
         {#if data.contrato}
           <section class="snoc-panel" style="gap:var(--snoc-sm);">
                           <h2 class="snoc-h2">El contrato de instalación</h2>
-              <form method="POST" action="?/contrato" use:enhance={sinVaciar} class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
+              <!-- autocomplete="off" (27/11/2026): al recargar, el navegador volvía a poner
+                   en las listas lo que tenían antes, y se guardó un perfil que nadie
+                   eligió (ELITE con PLAN_300MB en vez del sugerido PLAN_1000MB). -->
+              <form method="POST" action="?/contrato" use:enhance={sinVaciar} autocomplete="off" class="snoc-pila-xs" style="padding-top:var(--snoc-xs);">
                 <p class="snoc-body-sm" style="margin:0;">
                   El técnico crea el contrato del cliente desde la app: los datos salen de la solicitud,
                   él elige el servidor y el cliente firma. Aquí se decide entre qué servidores elige y qué dice el contrato.
@@ -381,6 +384,14 @@
                     Con la tabla guardada, un plan sin perfil no se activa: quedaría con el perfil por defecto.
                     Sin ninguna fila, la ONU se activa sin perfil, como hasta ahora.
                   </span>
+                  <!-- UN GUARDAR AQUÍ MISMO (27/11/2026). El del final queda debajo de las
+                       condiciones y entre medio hay otros «Guardar» de otras secciones: un
+                       cambio en la tabla se perdió por tocar el que no era. Es el mismo
+                       formulario: guarda todo el contrato, igual que el de abajo. -->
+                  <div class="snoc-fila" style="gap:var(--snoc-sm); align-items:center; flex-wrap:wrap;">
+                    <button class="snoc-btn" type="submit">Guardar</button>
+                    {#if form?.de === 'contrato'}<span class="snoc-body-sm" class:snoc-error-txt={!!form?.error}>{form?.hecho ?? form?.error}</span>{/if}
+                  </div>
                 {:else if data.perfiles?.disponible === false}
                   <span class="snoc-body-sm snoc-secundario">
                     Tu empresa todavía no tiene conectada la lista de perfiles de velocidad de SmartOLT.

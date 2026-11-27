@@ -874,3 +874,35 @@ describe('Programación: el ancho de banda de cada plan (27/11/2026)', () => {
     tenant.destinoDelAsistente.mockResolvedValue(null);
   });
 });
+
+//  AL GUARDAR SE VE SI ENTRÓ LA TABLA (27/11/2026): un cambio en ELITE se
+//  perdió por tocar el «Guardar» de otra sección, y nada lo decía.
+describe('Programación: el mensaje dice cuántos planes quedaron con ancho de banda', () => {
+  /** @param {Record<string, string>} campos */
+  const pedido = (campos) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) f.set(k, v);
+    return /** @type {any} */ ({ request: { formData: async () => f }, cookies: { get: () => 'token' },
+                                 locals: { profile: { role: 'ADMIN' } } });
+  };
+  const SERVIDOR = { servidor_id_0: '20053', servidor_nombre_0: 'CORTE 15' };
+
+  it('con la tabla en el formulario, lo dice', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ servidores: [{ id_zona: 20053, nombre: 'CORTE 15' }], texto_condiciones: 'x',
+                                   perfiles_de_velocidad: [{ plan: 'PLAN ELITE', bajada: 'PLAN_700MB', subida: 'PLAN_1000MB' }] });
+    const r = /** @type {any} */ (await actions.contrato(pedido({
+      ...SERVIDOR, perfiles_en_el_formulario: '1',
+      perfil_plan_0: 'PLAN ELITE', perfil_bajada_0: 'PLAN_700MB', perfil_subida_0: 'PLAN_1000MB' })));
+    expect(apiRequest.mock.calls[0][1].body.perfiles_de_velocidad).toEqual(
+      [{ plan: 'PLAN ELITE', bajada: 'PLAN_700MB', subida: 'PLAN_1000MB' }]);
+    expect(r.hecho).toContain('Ancho de banda: 1 plan con perfil.');
+  });
+
+  it('sin la tabla en el formulario, no dice nada del ancho de banda', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ servidores: [{ id_zona: 20053, nombre: 'CORTE 15' }], texto_condiciones: 'x' });
+    const r = /** @type {any} */ (await actions.contrato(pedido(SERVIDOR)));
+    expect(r.hecho).not.toContain('Ancho de banda');
+  });
+});

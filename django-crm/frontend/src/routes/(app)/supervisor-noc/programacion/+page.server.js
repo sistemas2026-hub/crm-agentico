@@ -256,7 +256,12 @@ export const actions = {
           + (r?.texto_condiciones ? '' : ' Falta el texto de las condiciones: el PDF lo dirá.')
           //  Que quede dicho al guardar: es el interruptor que crea clientes
           //  en el sistema del proveedor (25/11/2026).
-          + (r?.crear_en_el_isp ? ' Al firmar, el cliente se crea en el proveedor.' : '');
+          + (r?.crear_en_el_isp ? ' Al firmar, el cliente se crea en el proveedor.' : '')
+          //  Lo que quedó del ancho de banda (27/11/2026), solo si la tabla
+          //  viajó: así se ve al guardar si el cambio entró.
+          + ('perfiles_de_velocidad' in cuerpo
+            ? ` Ancho de banda: ${(r?.perfiles_de_velocidad ?? []).length} plan${(r?.perfiles_de_velocidad ?? []).length === 1 ? '' : 'es'} con perfil.`
+            : '');
       return { de: 'contrato', hecho };
     } catch (e) {
       return fail(400, { de: 'contrato', error: mensajeDeError(e) });
