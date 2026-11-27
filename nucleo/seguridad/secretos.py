@@ -187,6 +187,27 @@ def guardar(tenant: str, nombre: str, valor: str,
     mostrar "...a3f9" y el operador confirme que cargo el correcto sin tener que
     descifrar ni mostrar el secreto entero.
     """
+    #  EL NOMBRE, ANTES DE LA BASE (26/11/2026). La base solo acepta la forma
+    #  de una variable de entorno y respondia con un error de restriccion que
+    #  la pantalla mostraba como «no se pudo guardar», sin decir por que. El
+    #  nombre NO se repite en el mensaje: si alguien escribio ahi la clave, no
+    #  debe volver a la pantalla.
+    import re
+
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,99}", nombre or ""):
+        #  QUE TIENE DE RARO, sin repetirlo: lo mas comun es que el navegador
+        #  haya llenado la casilla con el usuario guardado (un correo).
+        n = nombre or ""
+        pista = (" Tiene una @: parece un correo, y el correo va en el valor."
+                 if "@" in n else
+                 " Tiene un punto." if "." in n else
+                 " Tiene letras con tilde o símbolos." if re.search(r"[^A-Za-z0-9_\s-]", n) else
+                 " Empieza con un número." if n[:1].isdigit() else
+                 " Está vacío." if not n else "")
+        raise ErrorSecreto(
+            "Ese nombre no sirve: solo MAYÚSCULAS, números y guion bajo, empezando "
+            "por una letra (por ejemplo WISPHUB_WEB_USUARIO). El usuario o la clave "
+            "van en el campo del valor, no en el nombre." + pista)
     if not valor:
         raise ErrorSecreto(f"El valor de '{nombre}' esta vacio.")
 

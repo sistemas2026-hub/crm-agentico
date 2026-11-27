@@ -257,22 +257,42 @@
           }}
         >
           <label class="v2-label" for="nueva-nombre">Nombre</label>
+          <!-- EL NAVEGADOR NO LO LLENA (26/11/2026). Un texto seguido de una
+               contraseña se ve como un inicio de sesión, y el navegador ponía
+               aquí el usuario guardado (un correo): el nombre llegaba mal y la
+               base lo rechazaba. Se escribe en MAYÚSCULAS y con guion bajo
+               mientras se teclea, que es la única forma que acepta. -->
           <input
             id="nueva-nombre"
-            name="nombre"
+            name="nombre_de_la_credencial"
             class="v2-input"
-            placeholder="ej. IMPORTACION_API_TOKEN"
+            placeholder="ej. WISPHUB_WEB_USUARIO"
             autocomplete="off"
+            data-lpignore="true"
+            data-1p-ignore
+            data-form-type="other"
             spellcheck="false"
             required
+            oninput={(e) => {
+              const c = /** @type {HTMLInputElement} */ (e.currentTarget);
+              c.value = c.value.toUpperCase().replace(/[\s-]+/g, '_');
+            }}
           />
           <label class="v2-label" for="nueva-valor">Valor</label>
+          <!-- NO ES type="password" A PROPÓSITO (26/11/2026): con un campo de
+               contraseña el navegador da el formulario por un inicio de sesión
+               y llena el nombre con el usuario guardado. Se oculta con puntos
+               igual. -->
           <input
             id="nueva-valor"
             name="valor"
-            type="password"
+            type="text"
+            style="-webkit-text-security: disc; text-security: disc;"
             class="v2-input"
             autocomplete="off"
+            data-lpignore="true"
+            data-1p-ignore
+            data-form-type="other"
             spellcheck="false"
             placeholder="Pegá la clave acá"
             required
