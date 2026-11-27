@@ -171,6 +171,21 @@ R2_REGISTRO_EXTERNO = {
     #  (nucleo/herramientas/web.py) y reenvia el formulario TAL COMO VIENE:
     #  no vacia nada que no nombre --tampoco una firma ya puesta--.
     "preparar_contrato_en_wisphub",
+    #  26/11/2026: el costo de instalacion y el serial de la ONU en el cliente
+    #  recien activado (PUT parcial a su ficha). R2 como `actualizar_sn_onu`:
+    #  un REGISTRO que el mismo sistema corrige con otro PUT. Con un asterisco:
+    #  el costo de instalacion toca la ficha de cobro del cliente. Barreras en
+    #  codigo: solo por su ruta y la puerta humana de quien aprobo, solo si es
+    #  cliente con ese numero y de ese contrato, confirmado leyendo, no
+    #  invocable por un servicio, fuera del catalogo de todo rol.
+    "completar_cliente_activado_en_wisphub",
+    #  26/11/2026: las fotos del trabajo a los archivos del cliente, por el
+    #  panel web. R2 como el contrato: crea REGISTROS (documentos) que el mismo
+    #  sistema borra. Asterisco: entra con el usuario web de la empresa.
+    #  Barreras: puerta humana de quien finalizo, solo si la instalacion es de
+    #  ese contrato Y el usuario de la ruta es el suyo, no invocable por un
+    #  servicio, fuera de todo rol, mismo ultimo metro que la API.
+    "subir_fotos_al_cliente_en_wisphub",
     #  30/09/2026. El nombre invita a leerla como R3 y no lo es: NO actua sobre
     #  la ONT/ONU en la casa del cliente. Escribe UN campo --'sn_onu'-- en la
     #  ficha del cliente de WispHub, con 'PUT /api/clientes/{id_servicio}/'. Es

@@ -1367,6 +1367,25 @@ prueba creada desde la app):
 * La firma que el cliente hace en el portal (el enlace de `#auto-login`) **queda en
   `contrato-firma`** del formulario: leerla como si/no alcanza para saber si firmo.
 
+**EL PASO 4, MEDIDO EL 26/11/2026** (con permiso, OT-22):
+
+* **El PUT parcial a `/api/clientes/{id}/` IGNORA `costo_instalacion` en
+  silencio**: 200, y el cliente sigue con el costo vacio. El `sn_onu` del
+  mismo PUT SI quedo y se lee igual. El costo solo se toma al CREAR
+  (`agregar-cliente/{zona}/?instalacion`, probado con la OT-21).
+* Una INSTALACION no se edita por la API (`GET /api/clientes/<id>/` = 404). Su
+  formulario web, `/Instalaciones/editar/<usuario>/<servicio>/` (form
+  `agregar-cliente`, ~70 campos, boton `btn_guardar_editar`), trae valores que
+  la API dice vacios (la clave del WiFi): **reenviarlo cambia datos**. No usar.
+* Archivos del cliente: `/clientes/agregar-multiple-documento/<usuario>/`, form
+  `form_archivos`, multipart, sin boton con nombre. Su pagina deja TODOS los
+  archivos en `archivo` (obligatorio) y ademas uno por fila `form-N-archivo`
+  con `form-N-titulo`; reenviado asi, quedaron las siete fotos con su titulo
+  en «Subir Archivos» y el panel redirigio (exito).
+* Otras rutas vistas en la lista de instalaciones (solo leyendo):
+  `/Instalaciones/<usuario>/<n>/activar/`, `/instalaciones/agregar-firma/<usuario>/<n>/`,
+  `/clientes/ver/<usuario>/` (pestaña 6 = Subir Archivos).
+
 **SIN MEDIR:** cuanto duran el enlace y la sesion.
 
 ## Antes de dar por buena una integracion

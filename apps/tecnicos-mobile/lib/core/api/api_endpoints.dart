@@ -162,6 +162,9 @@ class ApiEndpoints {
       '$baseUrl/api/campo/trabajos/$ordenId/contrato/enlace-de-firma/';
   static String comprobarFirma(String ordenId) =>
       '$baseUrl/api/campo/trabajos/$ordenId/contrato/comprobar-firma/';
+  // Volver a preparar el contrato del proveedor cuando el proveedor dijo que no.
+  static String prepararContratoProveedor(String contratoId) =>
+      '$baseUrl/api/campo/contratos/$contratoId/preparar-contrato-proveedor/';
 
   // Las IP libres de una zona, para ofrecerselas al tecnico en vez de
   // pedirle que las teclee (14/11/2026).

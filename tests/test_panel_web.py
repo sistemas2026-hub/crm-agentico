@@ -597,6 +597,19 @@ with redirect_stdout(StringIO()):
 d = dict(PANEL.envios[-1]["campos"])
 afirmar(e is None and d.get("form-TOTAL_FORMS") == "1" and d.get("form-0-titulo") == "",
         "sin archivos, el bloque va como vino")
+reiniciar()
+como_el_navegador = herramienta(argumentos_web=["id_servicio", "documentos"], pasos_web=[
+    dict(formulario="/instalaciones/editar-contrato/{id_servicio}/",
+         id_formulario="generarContrato", archivo_minimo_bytes=1024,
+         archivos={"archivo": "documentos"},
+         bloque_de_archivos=dict(argumento="documentos", prefijo="form",
+                                 campo_archivo="archivo", campo_titulo="titulo"))])
+with redirect_stdout(StringIO()):
+    e = falla(lambda: con_permiso(como_el_navegador, {"id_servicio": 4900, "documentos": DOCS[:2]}))
+envio = PANEL.envios[-1]
+afirmar(e is None and [a[0] for a in envio["archivos"]] == [
+    "archivo", "archivo", "form-0-archivo", "form-1-archivo"],
+    "COMO EL NAVEGADOR: todos en el campo multiple y ademas uno por fila")
 no_carga("un bloque cuyo argumento no llega",
          argumentos_web=["id_servicio"], pasos_web=[
              dict(formulario="/x/{id_servicio}/", id_formulario="f",

@@ -162,6 +162,21 @@ describe('Instalaciones: Por activar (26/11/2026)', () => {
     expect(apiRequest).not.toHaveBeenCalled();
   });
 
+  it('VOLVER A SUBIR LAS FOTOS le llega a ESE contrato; un 403 se dice tal cual (26/11/2026)', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ contrato: {} });
+    const r = /** @type {any} */ (await actions.subirFotosDelTrabajo(pedido({ contrato: 'con-7', orden: 'o-1' })));
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/contratos/con-7/subir-fotos/');
+    expect(apiRequest.mock.calls[0][1]).toEqual({ method: 'POST', body: {} });
+    expect(r.hecho).toContain('subiendo');
+    apiRequest.mockReset();
+    apiRequest.mockRejectedValue(Object.assign(new Error('x'), {
+      status: 403, body: { detail: 'No se sabe si las fotos quedaron en el proveedor.' } }));
+    const no = /** @type {any} */ (await actions.subirFotosDelTrabajo(pedido({ contrato: 'con-7', orden: 'o-1' })));
+    expect(no.status).toBe(403);
+    expect(no.data.error).toContain('No se sabe');
+  });
+
   it('DEVOLVER pide qué rehacer y por qué, y va por la validación de siempre', async () => {
     apiRequest.mockReset();
     apiRequest.mockResolvedValue({});

@@ -70,6 +70,9 @@ class ActivacionDeOnu(BaseModel):
     olt = models.CharField(max_length=20, blank=True, default="")
     placa = models.CharField(max_length=20, blank=True, default="")
     puerto = models.CharField(max_length=20, blank=True, default="")
+    #  LA UBICACION EN SMARTOLT (26/11/2026): con la ONU activada, se le
+    #  escriben las coordenadas del contrato. «guardada» / «no_guardada».
+    ubicacion_en_smartolt = models.CharField(max_length=20, blank=True, default="")
     pedida_por = models.ForeignKey(Profile, null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name="activaciones_de_onu_pedidas")
 
@@ -247,6 +250,8 @@ def _anotar(a: ActivacionDeOnu, datos: dict) -> None:
         if datos.get(campo):
             setattr(a, campo, str(datos[campo])[:20])
     a.save(update_fields=["estado", "detalle", "olt", "placa", "puerto", "updated_at"])
+    if a.estado == ActivacionDeOnu.ACTIVADA:
+        ubicacion_en_smartolt(a)
 
 
 def ejecutar(a: ActivacionDeOnu) -> None:
@@ -273,6 +278,7 @@ def comprobar(a: ActivacionDeOnu) -> None:
     if datos and datos.get("estado") == "activada":
         a.estado, a.detalle = ActivacionDeOnu.ACTIVADA, ""
         a.save(update_fields=["estado", "detalle", "updated_at"])
+        ubicacion_en_smartolt(a)
 
 
 def rendirse(a: ActivacionDeOnu) -> None:
@@ -280,3 +286,36 @@ def rendirse(a: ActivacionDeOnu) -> None:
     a.detalle = ("No se pudo confirmar si la ONU quedó activada. Que la oficina la mire en "
                  "SmartOLT antes de volver a pedirla.")
     a.save(update_fields=["estado", "detalle", "updated_at"])
+
+
+def ubicacion_en_smartolt(a: "ActivacionDeOnu") -> str:
+    """Con la ONU ACTIVADA, sus coordenadas en SmartOLT: las del contrato --las
+    que el tecnico confirmo o corrigio en el mapa-- (el usuario, 26/11/2026:
+    «que las mismas coordenadas tambien las ponga en SmartOLT»).
+
+    Va por el camino ya medido de «guardar ubicacion» (`ubicacion_al_isp`),
+    identificando la ONU SOLO por su serial: escribe en SmartOLT y no en el
+    proveedor de clientes, que ya las recibio al crear la instalacion. Puerta
+    humana de quien activo la ONU. Nunca levanta: activar la ONU no se rompe
+    por esto. Devuelve como quedo («guardada», «no_guardada» o «»).
+    """
+    try:
+        from campo.contrato import vigente_de
+        from campo.services import ubicacion_al_isp
+
+        if a.estado != ActivacionDeOnu.ACTIVADA or a.ubicacion_en_smartolt == "guardada":
+            return a.ubicacion_en_smartolt
+        contrato = vigente_de(a.orden)
+        gps = (contrato.datos or {}).get("gps") if contrato is not None else None
+        if not isinstance(gps, dict) or gps.get("lat") in (None, "") or gps.get("lng") in (None, ""):
+            return ""
+        r = ubicacion_al_isp.guardar_ubicacion(
+            a.orden, latitud=gps.get("lat"), longitud=gps.get("lng"), profile=a.pedida_por,
+            identificadores={"sn_onu": a.serial})
+        a.ubicacion_en_smartolt = "guardada" if r.get("guardada") else "no_guardada"
+        a.save(update_fields=["ubicacion_en_smartolt", "updated_at"])
+        return a.ubicacion_en_smartolt
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("activar_onu: no se pudo guardar la ubicacion en SmartOLT (%s)",
+                       type(e).__name__)
+        return ""

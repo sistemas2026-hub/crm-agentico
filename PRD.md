@@ -1874,3 +1874,44 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 **NO VERIFICADO / PENDIENTE:** en la app, un «Volver a intentar» para cuando el proveedor dijo que no (hoy la oficina no lo ve en «Por activar» hasta que la orden se finaliza); **paso 4**: el costo y el serial al finalizar, y las fotos del trabajo en «Subir Archivos».
 
 **En producción:** la migración 0062, las marcas y `campo_usuario` en la configuración, y encender el interruptor.
+
+### 8.42 DECISIÓN — Al finalizar, las fotos del trabajo a los archivos del cliente; al aprobar, el serial; el costo se anota antes de confirmar; la ubicación de la ONU a SmartOLT (26/11/2026)
+
+**El error que lo originó.** Con el cliente firmando en el proveedor (§8.41), la instalación se crea al confirmar el contrato, antes de que se conozcan el costo de instalación, el serial de la ONU y las fotos del trabajo, que antes viajaban al crear la instalación al finalizar.
+
+**Lo que se midió** (26/11, con la OT-22, prueba vigilada con permiso):
+- La API **no deja editar una instalación**: son otra lista, y `GET /api/clientes/<id>/` de una instalación da 404.
+- El formulario web de editarla trae unos 70 campos, y algunos vienen **rellenados con valores que el proveedor no tiene guardados** (la clave del WiFi): reenviarlo cambiaría datos del cliente. Se descartó.
+- Los archivos del cliente tienen un formulario propio (`/clientes/agregar-multiple-documento/<usuario>/`). Su página deja todos los archivos en `archivo` y además uno por fila con título, y así se reenvía.
+- Sobre el cliente ya activado, el `PUT` parcial **escribió el serial y leyó igual**, pero **ignoró `costo_instalacion` en silencio** (200, y el costo siguió vacío).
+- La ubicación por serial en SmartOLT quedó guardada.
+
+**Qué se decidió** (las opciones las eligió el usuario):
+1. **Al «Finalizar trabajo»**, las fotos del trabajo (no la cédula ni el recibo, que ya subieron con el contrato) van a «Subir Archivos» del cliente, con el título de la plantilla.
+   - Pasa por la puerta humana, una vez por pedido.
+   - Antes comprueba que la instalación sea de ese contrato **y que el usuario de la ruta sea el suyo**: ese usuario decide en los archivos de quién quedan.
+   - Depende de que el contrato se haya preparado en el proveedor, no de cómo estén los interruptores ese día.
+   - Si fallan, «Volver a subir las fotos» en «Por activar»: lo puede pedir quien ve la orden cuando el proveedor dijo que no, y solo gestión cuando no se sabe si quedaron.
+2. **Al aprobar**, cuando la instalación ya es cliente, el **serial de la ONU** se escribe en el cliente.
+   - Puerta humana de quien aprobó.
+   - Solo si es cliente con ese número y de ese contrato.
+   - Se confirma leyendo.
+3. **El costo de instalación se anota ANTES de confirmar** (el proveedor solo lo toma al crear la instalación).
+   - El servidor no deja confirmar sin él, igual que con la cédula y el recibo, y viaja en el alta.
+   - En la plantilla «Valor de la instalación» pasó al paso «Contrato y documentos» (local: versión 11).
+4. **Con la ONU activada, sus coordenadas en SmartOLT** (el usuario: *«que las mismas coordenadas también las ponga en SmartOLT»*).
+   - Son las del contrato, por el camino ya medido de «guardar ubicación», identificando la ONU solo por su serial: WispHub ya las recibió al crear la instalación.
+   - La revisión del cierre dice si quedó.
+5. **En la app, «Volver a intentar»** el contrato del proveedor cuando el proveedor dijo que no; si no se sabe si quedó, lo decide la oficina. App 1.0.32.
+
+**VERIFICADO CONTRA WISPHUB Y SMARTOLT REALES** (OT-22, con permiso): ONU activada y su ubicación guardada en SmartOLT; las siete fotos del trabajo en «Subir Archivos» con su título (el usuario lo vio en pantalla), junto a la cédula y el recibo; «Aprobar y activar» la pasó a cliente; el serial quedó escrito y leído igual; el costo no (de ahí el punto 3).
+
+**VERIFICADO** (local):
+- motor `test_completar_cliente` (mata dos mutaciones), `test_contrato_del_proveedor` (fotos solo al usuario de esa instalación), `test_panel_web` (todos en el campo múltiple y además uno por fila), `test_m10a_gobierno_frontera` (las dos herramientas nuevas en R2) y la guarda de arquitectura;
+- backend: `test_costo_y_serial_al_activar` 10, `test_ubicacion_de_la_onu` 6, `test_contrato_del_proveedor` 34 y 173 de las suites vecinas;
+- web Instalaciones 16; app 25 de la pantalla del contrato.
+- Migraciones 0063–0065 aplicadas en local; base de configuración v21.
+
+**NO VERIFICADO:** el costo viajando en el alta al confirmar con la plantilla nueva (la OT-21 probó que el alta lo toma; falta la corrida con la confirmación nueva).
+
+**En producción:** migraciones 0062–0065, las herramientas nuevas en la configuración (sin pisar lo que solo tiene la base), mover «Valor de la instalación» al paso del contrato en la plantilla y encender los interruptores.

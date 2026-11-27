@@ -108,13 +108,19 @@ class HerrFirma:
     lee_firma_del_contrato = True
 
 
+class HerrFotos:
+    nombre = "subir_fotos"
+    sube_documentos_del_cliente = True
+    solo_lectura = False
+
+
 class Config:
     variables_tenant: dict = {}
     pools_de_ip: list = []
 
     def __init__(self, herramientas=None):
         self.herramientas = ([HerrCrear(), HerrBuscar(), HerrInst(), HerrPreparar(),
-                              HerrEnlace(), HerrFirma()] if herramientas is None
+                              HerrEnlace(), HerrFirma(), HerrFotos()] if herramientas is None
                              else herramientas)
 
 
@@ -190,6 +196,8 @@ class Proveedor:
             return {"contrato_id": self.contrato_id}
         if herramienta.nombre == "enlace_de_firma":
             return {"enlace": self.enlace}
+        if herramienta.nombre == "subir_fotos":
+            return {}
         return {"firmado": self.firmado}
 
 
@@ -343,12 +351,50 @@ afirmar(r.estado == cp.NO_SE_PUDO_COMPROBAR and r.firmado is None,
         "si no se pudo leer, no dice ni si ni no")
 
 # --------------------------------------------------------------------------- #
+seccion("6b. las fotos del trabajo: solo a los archivos del cliente de ESTE contrato")
+FOTOS = [{"nombre": "fachada-1.jpg", "tipo": "image/jpeg", "titulo": "Fachada",
+          "base64": base64.b64encode(b"F" * 3000).decode()}]
+
+
+def fotos(usuario="laura-pineda@empresa", archivos=FOTOS, origen="fotos_del_trabajo:c-1:1"):
+    with redirect_stdout(StringIO()):
+        return cp.subir_fotos(Config(), TENANT, actor="Tecnico Dilan", origen=origen, datos=DATOS,
+                              id_servicio=8039, usuario=usuario, archivos=archivos)
+
+
+reg, prov = Registro(), Proveedor()
+with escenario(reg, prov):
+    r = fotos()
+    afirmar(r.estado == cp.SUBIDO and len(prov.web) == 1, f"subidas, una vez ({r.estado})")
+    nombre, args, permiso = prov.web[0]
+    afirmar(nombre == "subir_fotos" and args["usuario"] == "laura-pineda@empresa"
+            and [a["titulo"] for a in args["archivos"]] == ["Fachada"],
+            "a los archivos de ESE usuario, con su titulo")
+    afirmar(permiso is not None and permiso.clase == "humana" and permiso.actor == "Tecnico Dilan",
+            "con el permiso HUMANO de quien finalizo")
+    r2 = fotos()
+    afirmar(r2.estado == cp.SUBIDO and len(prov.web) == 1, "el MISMO pedido no las sube dos veces")
+prov = Proveedor()
+with escenario(Registro(), prov):
+    r = fotos(usuario="otra-persona@empresa")
+afirmar(r.estado == cp.NO_ENCONTRADA and prov.web == [],
+        "un usuario que NO es el de la instalacion: no sube nada")
+prov = Proveedor()
+with escenario(Registro(), prov):
+    r = fotos(archivos=[])
+afirmar(r.estado == cp.DATOS_INVALIDOS and prov.web == [], "sin fotos: datos_invalidos")
+prov = Proveedor(error_web=web.ErrorWeb("paso 1", "no redirigio", envio=True))
+with escenario(Registro(), prov):
+    r = fotos()
+afirmar(r.estado == cp.NO_SE_SABE, "salio y no se sabe: no_se_sabe")
+
+# --------------------------------------------------------------------------- #
 seccion("7. las rutas: contrato angosto, origen del motor, codigos")
 from nucleo.canales import api                                       # noqa: E402
 
 cliente = api.app.test_client()
 vistos: list[dict] = []
-viejos = (api._config_de, cp.preparar, cp.enlace, cp.firmado)
+viejos = (api._config_de, cp.preparar, cp.enlace, cp.firmado, cp.subir_fotos)
 api._config_de = lambda t: object()
 
 
@@ -360,6 +406,7 @@ def _preparar(config, tenant, **kw):
 cp.preparar = _preparar
 cp.enlace = lambda config, tenant, **kw: cp.ResultadoContrato(cp.LISTO, enlace=ENLACE)
 cp.firmado = lambda config, tenant, **kw: cp.ResultadoContrato(cp.LISTO, firmado=True)
+cp.subir_fotos = lambda config, tenant, **kw: vistos.append(kw) or cp.ResultadoContrato(cp.SUBIDO)
 try:
     base = "/interno/contrato/c-9/"
     cuerpo = {"actor": "Dilan Moreno", "datos": DATOS, "intento": 2, "id_servicio": 8039,
@@ -383,6 +430,11 @@ try:
     afirmar(r.status_code == 200 and r.get_json().get("firmado") is True, "firma: 200, si/no")
     r = cliente.post(base + "firma-en-el-proveedor?tenant=t", json={"contrato_id": "1", "x": 1})
     afirmar(r.status_code == 400, "un campo de mas: 400")
+    r = cliente.post(base + "subir-fotos-del-trabajo?tenant=t", json={
+        "actor": "Tecnico Dilan", "datos": DATOS, "intento": 3, "id_servicio": 8039,
+        "usuario": "u@e", "archivos": FOTOS})
+    afirmar(r.status_code == 200 and vistos[-1]["origen"] == "fotos_del_trabajo:c-9:3",
+            "fotos: 200, y el origen lo arma el motor")
     cp.preparar = lambda config, tenant, **kw: cp.ResultadoContrato(cp.NO_SE_SABE)
     r = cliente.post(base + "preparar-contrato-proveedor?tenant=t", json=cuerpo)
     afirmar(r.status_code == 202, "no se sabe: 202")
@@ -390,7 +442,7 @@ try:
     r = cliente.post(base + "preparar-contrato-proveedor?tenant=t", json=cuerpo)
     afirmar(r.status_code == 409, "no encontrada: 409")
 finally:
-    api._config_de, cp.preparar, cp.enlace, cp.firmado = viejos
+    api._config_de, cp.preparar, cp.enlace, cp.firmado, cp.subir_fotos = viejos
 
 # ---------------------------------------------------------------------------
 print()

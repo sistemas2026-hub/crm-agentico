@@ -6087,6 +6087,8 @@ _CODIGOS_DEL_ALTA = {
     alta_de_cliente.DATOS_INVALIDOS: 400,
     alta_de_cliente.FALLO: 502,
     alta_de_cliente.ACTIVADO: 200,
+    alta_de_cliente.COMPLETADO: 200,
+    alta_de_cliente.NADA_QUE_COMPLETAR: 200,
     alta_de_cliente.NO_ENCONTRADA: 409,
 }
 
@@ -6226,6 +6228,51 @@ def interno_activar_cliente_del_contrato(contrato_id: str):
             _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
 
 
+@app.post("/interno/contrato/<contrato_id>/completar-cliente")
+def interno_completar_cliente_del_contrato(contrato_id: str):
+    """
+    Escribe el costo de instalacion y el serial de la ONU en el cliente recien
+    activado (26/11/2026). Mismo contrato angosto y misma puerta humana que
+    `activar-cliente`: el `actor` es quien aprobo, el `origen` lo arma el
+    motor. Solo acepta esos dos valores. Ver alta_de_cliente.completar.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"actor", "datos", "intento", "id_servicio", "valores"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({"error": f"esta ruta solo acepta {sorted(permitidos)}. "
+                                 f"No acepta {sobra}."}), 400
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "Falta 'actor': quien aprobo la instalacion."}), 400
+    intento = cuerpo.get("intento", 1)
+    if (isinstance(intento, bool) or not isinstance(intento, int)
+            or not 1 <= intento <= _PEDIDOS_POR_CONTRATO):
+        return jsonify({"error": f"'intento' es un numero de 1 a "
+                                 f"{_PEDIDOS_POR_CONTRATO}."}), 400
+    valores = cuerpo.get("valores")
+    if not isinstance(valores, dict) or set(valores) - {"costo_instalacion", "serial_onu"}:
+        return jsonify({"error": "'valores' lleva solo costo_instalacion y serial_onu."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = alta_de_cliente.completar(
+        config, tenant, actor=actor, datos=datos, id_servicio=cuerpo.get("id_servicio"),
+        valores=valores, origen=f"completar_cliente:{contrato_id}:{intento}")
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
+
+
 @app.post("/interno/contrato/<contrato_id>/comprobar-activacion")
 def interno_comprobar_activacion_del_contrato(contrato_id: str):
     """Si la instalacion de un contrato ya es cliente. SOLO LEE."""
@@ -6257,6 +6304,7 @@ def interno_comprobar_activacion_del_contrato(contrato_id: str):
 #  proveedor. Ver nucleo/seguimiento/contrato_del_proveedor.py.
 _CODIGOS_DEL_CONTRATO = {
     contrato_del_proveedor.PREPARADO: 200, contrato_del_proveedor.LISTO: 200,
+    contrato_del_proveedor.SUBIDO: 200,
     contrato_del_proveedor.NO_SE_SABE: 202, contrato_del_proveedor.EN_CURSO: 202,
     contrato_del_proveedor.DATOS_INVALIDOS: 400,
     contrato_del_proveedor.NO_SE_PUDO_COMPROBAR: 502,
@@ -6311,6 +6359,42 @@ def interno_preparar_contrato_del_proveedor(contrato_id: str):
         config, tenant, actor=actor, datos=datos, id_servicio=cuerpo.get("id_servicio"),
         archivos=cuerpo.get("archivos"),
         origen=f"contrato_del_proveedor:{contrato_id}:{intento}")
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_CONTRATO.get(resultado.estado, 409))
+
+
+@app.post("/interno/contrato/<contrato_id>/subir-fotos-del-trabajo")
+def interno_subir_fotos_del_trabajo(contrato_id: str):
+    """
+    Sube las fotos del trabajo a los archivos del cliente en el proveedor, al
+    finalizar (26/11/2026). ESCRIBE: puerta HUMANA de quien finalizo, `origen`
+    armado aca, y solo si la instalacion es de ESE contrato y el usuario es
+    el suyo. Ver contrato_del_proveedor.subir_fotos.
+    """
+    tenant, cuerpo, error = _cuerpo_de({"actor", "datos", "intento", "id_servicio",
+                                        "usuario", "archivos"})
+    if error:
+        return error
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "Falta 'actor': quien finalizo el trabajo."}), 400
+    intento = cuerpo.get("intento", 1)
+    if (isinstance(intento, bool) or not isinstance(intento, int)
+            or not 1 <= intento <= _PEDIDOS_POR_CONTRATO):
+        return jsonify({"error": f"'intento' es un numero de 1 a "
+                                 f"{_PEDIDOS_POR_CONTRATO}."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = contrato_del_proveedor.subir_fotos(
+        config, tenant, actor=actor, datos=datos, id_servicio=cuerpo.get("id_servicio"),
+        usuario=cuerpo.get("usuario"), archivos=cuerpo.get("archivos"),
+        origen=f"fotos_del_trabajo:{contrato_id}:{intento}")
     return (jsonify(resultado.como_dict()),
             _CODIGOS_DEL_CONTRATO.get(resultado.estado, 409))
 

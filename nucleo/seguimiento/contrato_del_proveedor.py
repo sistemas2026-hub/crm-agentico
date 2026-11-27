@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from nucleo.observabilidad.registro import registrar
 
 PREPARADO = "preparado"
+SUBIDO = "subido"                     # las fotos quedaron en los archivos del cliente
 NO_ENCONTRADA = "no_encontrada"       # no hay una instalacion de este contrato
 SIN_USUARIO = "sin_usuario"           # la instalacion no trae el usuario del cliente
 SIN_HERRAMIENTA = "sin_herramienta"
@@ -87,6 +88,7 @@ def _herramientas(config) -> dict:
                          None),
         "enlace": next((h for h in hs if getattr(h, "da_enlace_de_firma", False)), None),
         "firma": next((h for h in hs if getattr(h, "lee_firma_del_contrato", False)), None),
+        "fotos": next((h for h in hs if getattr(h, "sube_documentos_del_cliente", False)), None),
     }
 
 
@@ -275,3 +277,106 @@ def firmado(config, tenant: str, *, contrato_id) -> ResultadoContrato:
         registrar("contrato_proveedor", "leer la firma fallo", error=e)
         return ResultadoContrato(NO_SE_PUDO_COMPROBAR, "no se pudo leer la firma")
     return ResultadoContrato(LISTO, contrato_id=numero, firmado=bool(leido.get("firmado")))
+
+
+# =============================================================================
+#  LAS FOTOS DEL TRABAJO, A LOS ARCHIVOS DEL CLIENTE  --  26/11/2026
+# =============================================================================
+#  Decision del usuario: al «Finalizar trabajo» las fotos de la instalacion
+#  (fachada, caja, ONU, potencia...) van a los archivos del cliente en el
+#  proveedor, por su formulario PROPIO de varios documentos -- no reenviando el
+#  contrato ya firmado. ESCRIBE: puerta humana de quien finalizo, una vez por
+#  pedido, y solo si la instalacion es de ESTE contrato Y el usuario de la
+#  ruta es el de esa instalacion: ese usuario decide en los archivos de QUIEN
+#  quedan las fotos.
+MAX_FOTOS = 12
+
+
+def subir_fotos(config, tenant: str, *, actor: str, origen: str, datos, id_servicio,
+                usuario: str, archivos) -> ResultadoContrato:
+    """Sube las fotos del trabajo a los archivos del cliente. Ver arriba."""
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.herramientas import web
+    from nucleo.seguimiento import alta_de_cliente as alta
+    from nucleo.seguridad import frontera, idempotencia, interruptor
+
+    def _fin(estado, motivo="", **kw) -> ResultadoContrato:
+        return ResultadoContrato(estado, motivo, referencia=origen, **kw)
+
+    herr = _herramientas(config)["fotos"]
+    ha = alta._herramientas(config)
+    if herr is None or not ha["buscar_instalaciones"] or ha["crear"] is None:
+        return _fin(SIN_HERRAMIENTA, "la empresa no declara como se suben las fotos")
+    numero = alta._el_numero(id_servicio)
+    usuario = str(usuario or "").strip()
+    if not numero or not usuario or len(usuario) > 200:
+        return _fin(DATOS_INVALIDOS, "faltan el numero de servicio o el usuario del cliente")
+    d, por_que = alta.leer_datos(datos, ha["crear"].parametros_de_alta)
+    if d is None:
+        return _fin(DATOS_INVALIDOS, por_que)
+    if not isinstance(archivos, list) or not archivos:
+        return _fin(DATOS_INVALIDOS, "no hay fotos que subir")
+    if len(archivos) > MAX_FOTOS:
+        return _fin(DATOS_INVALIDOS, f"son mas de {MAX_FOTOS} fotos")
+    fotos, por_que = _archivos(archivos)
+    if fotos is None:
+        return _fin(DATOS_INVALIDOS, por_que)
+
+    #  1. LA INSTALACION DE ESTE CONTRATO, y el usuario de la ruta es el suyo.
+    try:
+        fila, pb = _instalacion(config, tenant, d, numero)
+    except alta._NoSePudoLeer as e:
+        return _fin(NO_SE_PUDO_COMPROBAR, f"no se pudo leer el proveedor ({e})")
+    if fila is None:
+        return _fin(NO_ENCONTRADA, "no hay en el proveedor una instalacion de este contrato "
+                                   "con ese numero")
+    suyo = str(fila.get(pb.campo_usuario) or "").strip() if pb.campo_usuario else ""
+    if not suyo or suyo != usuario:
+        return _fin(NO_ENCONTRADA, "el usuario no es el de la instalacion de este contrato")
+
+    #  2. EL INTERRUPTOR, sin cache y pegado a la escritura.
+    try:
+        veredicto = interruptor.veredicto(tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("fotos_al_proveedor", "no se pudo leer el interruptor: NO se escribe", error=e)
+        return _fin(BLOQUEADO, "no se pudo comprobar el interruptor")
+    if not veredicto.permitido:
+        interruptor.anotar_bloqueo(tenant, actor=actor, recurso="fotos_al_proveedor",
+                                   motivo=f"{veredicto.estado}: {veredicto.motivo}")
+        return _fin(BLOQUEADO, "el interruptor de la empresa esta detenido")
+
+    #  3. UNA VEZ, POR LA PUERTA HUMANA.
+    huella = {"usuario": usuario, "archivos": _huella_de(fotos)}
+
+    def _hacer():
+        web.ejecutar(herr, {"usuario": usuario, "archivos": fotos}, tenant,
+                     config.variables_tenant)
+        return {"subidas": len(fotos)}
+
+    try:
+        with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
+            res = idempotencia.ejecutar(tenant, herr.nombre, huella, origen, _hacer,
+                                        clave=f"{origen}|{herr.nombre}")
+    except ejecutor_http.ErrorHerramientaHttp as e:
+        registrar("fotos_al_proveedor", "el ejecutor no dejo salir las fotos", error=e)
+        return _fin(BLOQUEADO, "las fotos no salieron: el ejecutor las freno antes de llegar "
+                               "al proveedor")
+    except frontera.AccionExternaNoAutorizada as e:
+        registrar("fotos_al_proveedor", "la frontera no autorizo las fotos", error=e)
+        return _fin(BLOQUEADO, "la frontera no autorizo las fotos")
+    except web.ErrorWeb as e:
+        if e.envio and not e.avisos:
+            return _fin(NO_SE_SABE, f"el formulario salio y no se sabe si quedo ({e.etapa})",
+                        emitido=True)
+        return _fin(FALLO, f"el panel no guardo las fotos ({e.etapa}: {e.motivo})",
+                    avisos=e.avisos, emitido=True)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("fotos_al_proveedor", "las fotos volvieron con un error inesperado", error=e)
+        return _fin(NO_SE_SABE, "no se sabe si las fotos quedaron", emitido=True)
+    if res.decision == "en_curso":
+        return _fin(EN_CURSO, "ese pedido ya esta corriendo", emitido=True)
+    if not res.ejecutada and res.decision != "repetida":
+        return _fin(BLOQUEADO, f"el registro de operaciones no dejo salir este pedido "
+                               f"({res.decision})", emitido=True)
+    registrar("fotos_al_proveedor", "fotos del trabajo subidas al cliente")
+    return _fin(SUBIDO, emitido=True)

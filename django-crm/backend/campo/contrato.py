@@ -349,6 +349,28 @@ class ContratoDeServicio(BaseModel):
     usuario_proveedor = models.CharField(max_length=200, blank=True, default="")
     firmado_en_el_proveedor_en = models.DateTimeField(null=True, blank=True)
 
+    #  EL COSTO Y EL SERIAL, AL ACTIVAR (26/11/2026): se escriben en el cliente
+    #  cuando la oficina aprueba y la instalacion pasa a cliente. Ver
+    #  campo/instalacion.py → completar.
+    COMPLETAR_PEDIDO = "pedido"
+    COMPLETAR_HECHO = "hecho"
+    COMPLETAR_NADA = "nada"            # no habia costo ni serial que escribir
+    COMPLETAR_FALLIDO = "fallido"
+    COMPLETAR_POR_REVISAR = "por_revisar"
+    completar_estado = models.CharField(max_length=20, blank=True, default="")
+    completar_detalle = models.CharField(max_length=300, blank=True, default="")
+    completar_intento = models.PositiveSmallIntegerField(default=0)
+
+    #  LAS FOTOS DEL TRABAJO A LOS ARCHIVOS DEL CLIENTE, AL FINALIZAR
+    #  (26/11/2026). Ver campo/contrato_del_proveedor.py → subir_fotos.
+    FOTOS_PEDIDAS = "pedidas"
+    FOTOS_SUBIDAS = "subidas"
+    FOTOS_FALLIDAS = "fallidas"
+    FOTOS_POR_REVISAR = "por_revisar"
+    fotos_proveedor_estado = models.CharField(max_length=20, blank=True, default="")
+    fotos_proveedor_detalle = models.CharField(max_length=300, blank=True, default="")
+    fotos_proveedor_intento = models.PositiveSmallIntegerField(default=0)
+
     class Meta:
         db_table = "campo_contrato_de_servicio"
         verbose_name = "Contrato de servicio"
@@ -412,6 +434,9 @@ class ContratoDeServicio(BaseModel):
                 "activada_en": self.activado_en.isoformat() if self.activado_en else None,
                 "se_puede_activar": (self.estado == self.INSTALACION
                                      and self.activacion_estado not in self.ACTIVACION_SIN_RESOLVER),
+                #  El costo y el serial, escritos en el cliente al activar.
+                "costo_y_serial": self.completar_estado or None,
+                "costo_y_serial_detalle": self.completar_detalle or None,
             },
             #  EL CONTRATO DEL PROVEEDOR (26/11/2026). Ni el usuario del cliente
             #  ni el enlace viajan aca: el enlace se pide aparte, cada vez.
@@ -425,6 +450,9 @@ class ContratoDeServicio(BaseModel):
                 "firmado": self.firma_proveedor_estado == self.FIRMA_PROVEEDOR_FIRMADA,
                 "firmado_en": (self.firmado_en_el_proveedor_en.isoformat()
                                if self.firmado_en_el_proveedor_en else None),
+                #  Las fotos del trabajo, en los archivos del cliente.
+                "fotos": self.fotos_proveedor_estado or None,
+                "fotos_detalle": self.fotos_proveedor_detalle or None,
                 "se_puede_pedir": (self.firma_en_el_proveedor
                                    and self.estado in (self.INSTALACION, self.EN_EL_ISP)
                                    and self.firma_proveedor_estado in (
@@ -914,16 +942,21 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
     #  proveedor apenas se crea la instalacion, antes de que el cliente firme.
     sin_firma = bool(config.get("firma_en_el_proveedor"))
     if sin_firma:
-        from campo.contrato_del_proveedor import faltan_documentos
+        from campo.contrato_del_proveedor import falta_el_costo, faltan_documentos
 
         faltan = faltan_documentos(orden)
         if faltan is None:
             raise ContratoInvalido("No se pudo saber qué documentos pide la plantilla. "
                                    "Avisa a la oficina.")
+        #  EL VALOR DE LA INSTALACION TAMBIEN (26/11/2026): viaja al crear la
+        #  instalacion, que es ahora; despues el proveedor ya no lo toma.
+        costo = falta_el_costo(orden)
+        if costo:
+            faltan = [*faltan, f"«{costo}» anotado"]
         if faltan:
             raise ContratoInvalido(
-                "Antes de confirmar tienen que estar subidas: " + ", ".join(faltan)
-                + ". Si ya las tomaste, espera a que suban (necesitas señal) y vuelve a "
+                "Antes de confirmar falta: " + ", ".join(faltan)
+                + ". Si ya lo hiciste, espera a que suba (necesitas señal) y vuelve a "
                   "tocar «Confirmar contrato».")
         firma = b""
     else:

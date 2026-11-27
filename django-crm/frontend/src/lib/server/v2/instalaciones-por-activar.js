@@ -39,6 +39,16 @@ export async function aprobarInstalacion(cookies, ordenId) {
  * @param {any} cookies
  * @param {string} contratoId
  */
+export async function subirFotosDelTrabajo(cookies, contratoId) {
+  return apiRequest(`/campo/contratos/${encodeURIComponent(contratoId)}/subir-fotos/`,
+    { method: 'POST', body: {} }, cookies);
+}
+
+/**
+ * Pedir otra vez que se prepare el contrato del proveedor.
+ * @param {any} cookies
+ * @param {string} contratoId
+ */
 export async function prepararContratoProveedor(cookies, contratoId) {
   return apiRequest(`/campo/contratos/${encodeURIComponent(contratoId)}/preparar-contrato-proveedor/`,
     { method: 'POST', body: {} }, cookies);

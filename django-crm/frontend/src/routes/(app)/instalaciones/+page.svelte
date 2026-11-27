@@ -45,6 +45,17 @@
     (data.estado || '') === p.estado && Boolean(data.automatica) === Boolean(p.automatica);
   import { CheckCircle2, AlertTriangle, MapPin, FileText, Inbox, BadgeCheck } from '@lucide/svelte';
 
+  //  EL COSTO Y EL SERIAL, escritos en el cliente al activar (26/11/2026).
+  const TEXTO_COSTO = /** @type {Record<string, string>} */ ({
+    pedido: 'Escribiendo en WispHub el costo de instalación y el serial de la ONU…',
+    hecho: 'Costo de instalación y serial de la ONU escritos en WispHub.',
+    nada: 'No había costo ni serial que escribir en WispHub.'
+  });
+  //  LAS FOTOS DEL TRABAJO en los archivos del cliente (26/11/2026).
+  const TEXTO_FOTOS = /** @type {Record<string, string>} */ ({
+    pedidas: 'Subiendo las fotos del trabajo a los archivos del cliente en WispHub…',
+    subidas: 'Fotos del trabajo subidas a los archivos del cliente en WispHub.'
+  });
   //  EL CONTRATO DEL PROVEEDOR (26/11/2026), en palabras.
   const TEXTO_FIRMA = /** @type {Record<string, string>} */ ({
     pedida: 'Contrato del proveedor: preparándose con la cédula y el recibo.',
@@ -243,6 +254,13 @@
           <span class="cuando">{fecha(i.finalizada_en)}</span>
         </div>
         <p class="origen"><span>{queEspera(i)}</span></p>
+        {#if c?.instalacion?.costo_y_serial}
+          {#if TEXTO_COSTO[c.instalacion.costo_y_serial]}
+            <p class="origen"><span class="tenue">{TEXTO_COSTO[c.instalacion.costo_y_serial]}</span></p>
+          {:else}
+            <p class="fallo"><AlertTriangle size={14} /><span>No se pudieron escribir el costo y el serial en WispHub: {c.instalacion.costo_y_serial_detalle ?? 'revísalo allá.'}</span></p>
+          {/if}
+        {/if}
         {#if c?.instalacion?.detalle}
           <p class="fallo"><AlertTriangle size={14} /><span>{c.instalacion.detalle}</span></p>
         {/if}
@@ -253,6 +271,24 @@
         {#if c?.firma_proveedor?.activa}
           {@const fp = c.firma_proveedor}
           <p class="origen"><span>{TEXTO_FIRMA[fp.estado ?? ''] ?? 'Contrato del proveedor: sin pedir.'}{#if fp.contrato}{' · '}N.º {fp.contrato}{/if}</span></p>
+          {#if fp.fotos}
+            {#if TEXTO_FOTOS[fp.fotos]}
+              <p class="origen"><span class="tenue">{TEXTO_FOTOS[fp.fotos]}</span></p>
+            {:else}
+              <p class="fallo"><AlertTriangle size={14} /><span>Las fotos del trabajo no quedaron en WispHub: {fp.fotos_detalle ?? 'revísalo allá.'}</span></p>
+              <form method="POST" action="?/subirFotosDelTrabajo" use:enhance={() => {
+                enviando = i.orden_id;
+                return async ({ update }) => { await update({ reset: false }); enviando = ''; };
+              }}>
+                <input type="hidden" name="contrato" value={c.id} />
+                <input type="hidden" name="orden" value={i.orden_id} />
+                <button type="submit" class="cancelar" disabled={enviando === i.orden_id}
+                        title={fp.fotos === 'por_revisar' ? 'Antes, mira en los archivos del cliente si quedaron: pedirlas otra vez las sube otra vez.' : ''}>
+                  Volver a subir las fotos
+                </button>
+              </form>
+            {/if}
+          {/if}
           {#if fp.detalle}
             <p class="fallo"><AlertTriangle size={14} /><span>{fp.detalle}{#if (fp.avisos ?? []).length}{' '}(el proveedor dijo: {fp.avisos.join(' · ')}){/if}</span></p>
           {/if}

@@ -102,6 +102,17 @@ def al_finalizar(orden, profile) -> bool:
     from campo.contrato import ContratoDeServicio, vigente_de
     from campo.services import alta_en_el_isp
 
+    #  LAS FOTOS DEL TRABAJO (26/11/2026): si el contrato se preparo en el
+    #  proveedor, sus fotos van a los archivos del cliente. Depende de ESE
+    #  contrato, no de como esten hoy los interruptores. Nunca rompe finalizar.
+    try:
+        from campo.contrato_del_proveedor import pedir_fotos
+
+        hecho = vigente_de(orden)
+        if hecho is not None:
+            pedir_fotos(hecho)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("instalacion: no se pudieron pedir las fotos (%s)", type(e).__name__)
     try:
         config = _config(orden.org)
         if not (config.get("crear_en_el_isp") and config.get("validar_antes_de_activar")):
@@ -231,6 +242,9 @@ def _activada(contrato) -> None:
                         observacion="Instalación validada y activada en el proveedor.")
         guardar_foto(orden, foto, contrato.activado_por)
         avisar_instalacion_aprobada(orden)
+        #  YA ES CLIENTE: ahora si se le escriben el costo y el serial (el
+        #  proveedor no deja escribirlos en una instalacion).
+        pedir_completar(contrato)
 
 
 def _aplicar(contrato, estado: str, cuerpo: dict) -> None:
@@ -294,3 +308,124 @@ def rendirse(contrato) -> None:
     _anotar(contrato, activacion_estado=ContratoDeServicio.ACTIVACION_POR_REVISAR,
             activacion_detalle="Se pidió y no se pudo confirmar a tiempo. Míralo en el "
                                "proveedor: si quedó como cliente, vuelve a tocar «Aprobar».")
+
+
+# =============================================================================
+#  EL COSTO Y EL SERIAL, AL ACTIVAR  --  26/11/2026
+# =============================================================================
+#  Decision del usuario: el costo de instalacion que cobro el tecnico y el
+#  serial de la ONU se escriben CUANDO LA OFICINA APRUEBA y la instalacion pasa
+#  a cliente. El proveedor no deja editar una instalacion por su API, y su
+#  formulario web cambiaria otros datos (ver alta_de_cliente.completar en el
+#  motor). Sale por la puerta humana de QUIEN APROBO, una vez por pedido, y se
+#  confirma leyendo. Si no se pudo, la oficina lo ve en «Por activar» y lo
+#  escribe a mano: no hay reintento solo de un «no se sabe».
+VUELTAS_DE_COMPLETAR = 6
+ESPERA_DE_COMPLETAR = 20
+
+_POR_QUE_COMPLETAR = {
+    "fallo": "El proveedor rechazó escribir el costo y el serial.",
+    "no_encontrada": "No se encontró el cliente de este contrato en el proveedor.",
+    "bloqueado": "No salió: el sistema lo frenó antes de llegar al proveedor.",
+    "datos_invalidos": "El costo o el serial no son válidos.",
+    "sin_herramienta": "La empresa no tiene configurado cómo escribir el costo y el serial.",
+}
+
+
+def _anotar_completar(contrato, **campos) -> None:
+    from campo.contrato import ContratoDeServicio
+
+    ahora = timezone.now()
+    if "completar_detalle" in campos:
+        campos["completar_detalle"] = str(campos["completar_detalle"] or "")[:300]
+    (ContratoDeServicio.objects.filter(pk=contrato.pk, estado=ContratoDeServicio.EN_EL_ISP)
+     .update(updated_at=ahora, **campos))
+    contrato.refresh_from_db()
+
+
+def pedir_completar(contrato) -> bool:
+    """Marca el pedido y encola la tarea, DESPUES del commit. Solo sobre un
+    cliente recien activado, una vez (cada pedido, un numero nuevo)."""
+    from campo.contrato import ContratoDeServicio
+
+    if contrato.estado != ContratoDeServicio.EN_EL_ISP or contrato.completar_estado not in (
+            "", ContratoDeServicio.COMPLETAR_FALLIDO):
+        return False
+    intento = int(contrato.completar_intento or 0) + 1
+    if intento > PEDIDOS_POR_CONTRATO:
+        return False
+    ahora = timezone.now()
+    tocadas = (ContratoDeServicio.objects
+               .filter(pk=contrato.pk, estado=ContratoDeServicio.EN_EL_ISP,
+                       completar_intento=int(contrato.completar_intento or 0))
+               .update(completar_estado=ContratoDeServicio.COMPLETAR_PEDIDO,
+                       completar_detalle="", completar_intento=intento, updated_at=ahora))
+    contrato.refresh_from_db()
+    if not tocadas:
+        return False
+    org_id, contrato_id = str(contrato.org_id), str(contrato.id)
+
+    def _encolar():
+        from campo.tasks import completar_cliente_en_el_isp
+
+        try:
+            completar_cliente_en_el_isp.delay(org_id, contrato_id)
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("instalacion: no se pudo encolar completar (%s)", type(e).__name__)
+            try:
+                _anotar_completar(ContratoDeServicio.objects.get(pk=contrato_id),
+                                  completar_estado=ContratoDeServicio.COMPLETAR_FALLIDO,
+                                  completar_detalle="No se pudo poner en marcha.")
+            except Exception:                                    # noqa: BLE001
+                pass
+
+    transaction.on_commit(_encolar)
+    return True
+
+
+def completar(contrato) -> None:
+    """Le pide al motor que escriba el costo y el serial. Solo sobre un
+    `pedido`. Si el motor no contesta o no pudo leer, sigue `pedido` y la
+    tarea lo vuelve a pedir con EL MISMO numero."""
+    from campo.contrato import ContratoDeServicio
+    from campo.services import alta_en_el_isp
+    from campo.services.ubicacion_al_isp import _nombre_de
+
+    if (contrato.estado != ContratoDeServicio.EN_EL_ISP
+            or contrato.completar_estado != ContratoDeServicio.COMPLETAR_PEDIDO):
+        return
+    actor = _nombre_de(contrato.activado_por)
+    if not actor:
+        _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_FALLIDO,
+                          completar_detalle="No se sabe quién aprobó: sin eso no se escribe.")
+        return
+    try:
+        valores = costo_y_serial(contrato.orden)
+    except Exception:                                            # noqa: BLE001
+        valores = {}
+    estado, cuerpo = alta_en_el_isp._llamar(contrato, "completar-cliente", {
+        "actor": actor, "datos": alta_en_el_isp.datos_para_reconocer(contrato),
+        "id_servicio": contrato.servicio_isp,
+        "valores": {k: v for k, v in valores.items() if k in ("costo_instalacion", "serial_onu")},
+        "intento": int(contrato.completar_intento or 1)}, ESPERA_DEL_PEDIDO)
+    if estado is None or estado in ("en_curso", "no_se_pudo_comprobar"):
+        return
+    if estado in ("completado", "ya_estaba"):
+        _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_HECHO,
+                          completar_detalle="")
+    elif estado == "nada_que_completar":
+        _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_NADA,
+                          completar_detalle="El técnico no anotó el costo ni hay ONU activada.")
+    else:
+        _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_FALLIDO,
+                          completar_detalle=_POR_QUE_COMPLETAR.get(
+                              estado, "No se pudieron escribir el costo y el serial."))
+
+
+def rendirse_completar(contrato) -> None:
+    from campo.contrato import ContratoDeServicio
+
+    if contrato.completar_estado == ContratoDeServicio.COMPLETAR_PEDIDO:
+        _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_POR_REVISAR,
+                          completar_detalle="Se pidió y no se pudo confirmar: revisa en el "
+                                            "proveedor el costo de instalación y el serial.")

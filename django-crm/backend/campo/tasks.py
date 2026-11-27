@@ -1416,3 +1416,72 @@ def preparar_contrato_del_proveedor(org_id: str, contrato_id: str, vuelta: int =
         return {"resultado": "", "por_que": type(e).__name__}
     finally:
         clear_rls_context()
+
+
+@shared_task(name="campo.tasks.completar_cliente_en_el_isp")
+def completar_cliente_en_el_isp(org_id: str, contrato_id: str, vuelta: int = 0) -> dict:
+    """Escribe el costo y el serial en el cliente recien activado (26/11/2026).
+    Mismo patron que la activacion. NUNCA LEVANTA. Ver campo/instalacion.py."""
+    from campo import instalacion
+    from campo.contrato import ContratoDeServicio
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        set_rls_context(org_id)
+        try:
+            contrato = (ContratoDeServicio.objects
+                        .select_related("activado_por__user", "orden")
+                        .get(pk=contrato_id, org_id=org_id))
+        except ContratoDeServicio.DoesNotExist:
+            return {"resultado": "", "por_que": "el contrato ya no esta"}
+        instalacion.completar(contrato)
+        if contrato.completar_estado == ContratoDeServicio.COMPLETAR_PEDIDO:
+            if int(vuelta or 0) >= instalacion.VUELTAS_DE_COMPLETAR:
+                instalacion.rendirse_completar(contrato)
+            else:
+                try:
+                    completar_cliente_en_el_isp.apply_async(
+                        args=[org_id, contrato_id, int(vuelta or 0) + 1],
+                        countdown=instalacion.ESPERA_DE_COMPLETAR)
+                except Exception as e:                           # noqa: BLE001
+                    logger.warning("completar: no se pudo volver a encolar (%s)", type(e).__name__)
+        return {"resultado": contrato.completar_estado}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("completar: fallo la vuelta (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        clear_rls_context()
+
+
+@shared_task(name="campo.tasks.subir_fotos_del_trabajo")
+def subir_fotos_del_trabajo(org_id: str, contrato_id: str, vuelta: int = 0) -> dict:
+    """Sube las fotos del trabajo a los archivos del cliente en el proveedor
+    (26/11/2026). Mismo patron que el contrato. NUNCA LEVANTA."""
+    from campo import contrato_del_proveedor
+    from campo.contrato import ContratoDeServicio
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        set_rls_context(org_id)
+        try:
+            contrato = (ContratoDeServicio.objects.select_related("firmado_por__user", "orden")
+                        .get(pk=contrato_id, org_id=org_id))
+        except ContratoDeServicio.DoesNotExist:
+            return {"resultado": "", "por_que": "el contrato ya no esta"}
+        contrato_del_proveedor.subir_fotos(contrato)
+        if contrato.fotos_proveedor_estado == ContratoDeServicio.FOTOS_PEDIDAS:
+            if int(vuelta or 0) >= contrato_del_proveedor.VUELTAS_DE_FOTOS:
+                contrato_del_proveedor.rendirse_fotos(contrato)
+            else:
+                try:
+                    subir_fotos_del_trabajo.apply_async(
+                        args=[org_id, contrato_id, int(vuelta or 0) + 1],
+                        countdown=contrato_del_proveedor.ESPERA_ENTRE_VUELTAS)
+                except Exception as e:                           # noqa: BLE001
+                    logger.warning("fotos: no se pudo volver a encolar (%s)", type(e).__name__)
+        return {"resultado": contrato.fotos_proveedor_estado}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("fotos: fallo la vuelta (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        clear_rls_context()

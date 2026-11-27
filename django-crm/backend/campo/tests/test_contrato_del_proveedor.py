@@ -144,6 +144,27 @@ def test_a5_si_la_instalacion_fallo_el_REINTENTO_tambien_la_pide_como_instalacio
     assert pedidos == [{"como_instalacion": True}], "si no, crearía un cliente activo sin validar"
 
 
+def test_a6_SIN_el_valor_de_la_instalacion_no_se_confirma_y_CON_el_viaja_al_crearla(
+        user_client, orden, config, con_documentos, pedidos, monkeypatch):
+    """Medido con la OT-22: el proveedor ignora el costo si se escribe despues
+    de creado el cliente. Se anota antes de confirmar y viaja en el alta."""
+    from campo.models import OrdenTrabajo
+    from campo.tests.test_fotos_solo_en_la_plataforma import ESQUEMA
+
+    _con_esquema(orden, {**ESQUEMA, "campos": [
+        {"id": "valor_de_la_instalacion", "tipo": "decimal", "titulo": "Valor de la instalación",
+         "dinero": True, "costo_de_instalacion": True}]})
+    r = _confirmar(user_client, orden, monkeypatch)
+    assert r.status_code == 400 and "Valor de la instalación" in r.json()["detail"], r.content
+    assert pedidos == []
+    OrdenTrabajo.objects.filter(pk=orden.pk).update(datos={"valor_de_la_instalacion": "50000"})
+    r = _confirmar(user_client, orden, monkeypatch)
+    assert r.status_code == 201, r.content
+    c = ContratoDeServicio.objects.get(orden=orden)
+    c.alta_como_instalacion = True
+    assert alta_en_el_isp.datos_del_alta(c).get("costo_instalacion") == 50000
+
+
 def test_a4_la_pantalla_sabe_que_se_firma_en_el_proveedor(user_client, orden, config):
     r = user_client.get(f"/api/campo/trabajos/{orden.id}/contrato/")
     assert r.status_code == 200 and r.json()["firma_en_el_proveedor"] is True
@@ -265,6 +286,124 @@ def test_c6_una_lectura_que_no_se_pudo_hacer_sigue_pedida(
     CP.preparar(c)
     c.refresh_from_db()
     assert c.firma_proveedor_estado == "pedida"
+
+
+def test_c7_el_TECNICO_vuelve_a_intentar_lo_que_el_proveedor_rechazo(
+        user_client, orden, user_profile, config, monkeypatch, django_capture_on_commit_callbacks):
+    from campo import tasks
+
+    encolados = []
+    monkeypatch.setattr(tasks.preparar_contrato_del_proveedor, "delay",
+                        lambda org, cid: encolados.append(cid))
+    c = _contrato(orden, user_profile, firma_proveedor_estado="fallida", firma_proveedor_intento=1)
+    with django_capture_on_commit_callbacks(execute=True):
+        r = user_client.post(f"/api/campo/contratos/{c.id}/preparar-contrato-proveedor/")
+    assert r.status_code == 202, r.content
+    c.refresh_from_db()
+    assert c.firma_proveedor_estado == "pedida" and c.firma_proveedor_intento == 2
+    assert encolados == [str(c.id)]
+
+
+def test_c8_lo_que_NO_SE_SABE_no_lo_reintenta_el_tecnico_si_la_oficina(
+        user_client, admin_client, orden, user_profile, config, monkeypatch):
+    from campo import tasks
+
+    monkeypatch.setattr(tasks.preparar_contrato_del_proveedor, "delay", lambda org, cid: None)
+    c = _contrato(orden, user_profile, firma_proveedor_estado="por_revisar", firma_proveedor_intento=1)
+    r = user_client.post(f"/api/campo/contratos/{c.id}/preparar-contrato-proveedor/")
+    assert r.status_code == 403 and "oficina" in r.json()["detail"], r.content
+    c.refresh_from_db()
+    assert c.firma_proveedor_estado == "por_revisar"
+    r = admin_client.post(f"/api/campo/contratos/{c.id}/preparar-contrato-proveedor/")
+    assert r.status_code == 202, r.content
+
+
+# =========================================================================== #
+#  H. LAS FOTOS DEL TRABAJO, AL FINALIZAR
+# =========================================================================== #
+def _preparado(orden, user_profile, **kw):
+    return _contrato(orden, user_profile, firma_proveedor_estado="firmada",
+                     contrato_proveedor="4928", usuario_proveedor="laura-gomez@empresa", **kw)
+
+
+def test_h1_al_finalizar_se_piden_las_fotos_aunque_crear_este_apagado(
+        orden, user_profile, config, monkeypatch, django_capture_on_commit_callbacks):
+    from campo import instalacion, tasks
+
+    config.crear_en_el_isp = False
+    config.save()
+    encolados = []
+    monkeypatch.setattr(tasks.subir_fotos_del_trabajo, "delay", lambda org, cid: encolados.append(cid))
+    c = _preparado(orden, user_profile)
+    with django_capture_on_commit_callbacks(execute=True):
+        instalacion.al_finalizar(orden, user_profile)
+    c.refresh_from_db()
+    assert c.fotos_proveedor_estado == "pedidas" and encolados == [str(c.id)]
+
+
+def test_h2_sin_contrato_preparado_no_se_piden(orden, user_profile, config):
+    c = _contrato(orden, user_profile)          # sin usuario del proveedor
+    assert CP.pedir_fotos(c) is False and c.fotos_proveedor_estado == ""
+
+
+def test_h3_viajan_SOLO_las_del_trabajo_con_su_titulo_y_al_usuario_de_ese_contrato(
+        orden, user_profile, config, motor, tmp_path):
+    for r in ("cedula_por_delante", "recibo_publico", "onu_instalada", "medicion_de_potencia"):
+        _evidencia(orden, r, tmp_path)
+    motor.respuesta = ("subido", {"estado": "subido"})
+    c = _preparado(orden, user_profile, fotos_proveedor_estado="pedidas", fotos_proveedor_intento=1)
+    CP.subir_fotos(c)
+    ruta, cuerpo = motor.llamadas[0]
+    assert ruta == "subir-fotos-del-trabajo"
+    assert [a["titulo"] for a in cuerpo["archivos"]] == ["ONU instalada", "Medición"], \
+        "la cédula y el recibo ya subieron con el contrato"
+    assert cuerpo["usuario"] == "laura-gomez@empresa" and cuerpo["id_servicio"] == "8039"
+    c.refresh_from_db()
+    assert c.fotos_proveedor_estado == "subidas"
+    assert c.como_dict()["firma_proveedor"]["fotos"] == "subidas"
+
+
+@pytest.mark.parametrize("respuesta,esperado", [
+    (("no_se_sabe", {"estado": "no_se_sabe"}), "por_revisar"),
+    (("fallo", {"estado": "fallo", "motivo": "paso 1: no redirigio"}), "fallidas"),
+    ((None, {}), "pedidas"),
+    (("no_se_pudo_comprobar", {"estado": "no_se_pudo_comprobar"}), "pedidas"),
+])
+def test_h4_como_quedan_segun_el_motor(orden, user_profile, config, motor, tmp_path,
+                                       respuesta, esperado):
+    _evidencia(orden, "onu_instalada", tmp_path)
+    motor.respuesta = respuesta
+    c = _preparado(orden, user_profile, fotos_proveedor_estado="pedidas", fotos_proveedor_intento=1)
+    CP.subir_fotos(c)
+    c.refresh_from_db()
+    assert c.fotos_proveedor_estado == esperado
+    if esperado == "fallidas":
+        assert "(paso 1: no redirigio)" in c.fotos_proveedor_detalle
+
+
+def test_h5_VOLVER_A_SUBIR_las_fotos_el_tecnico_si_fallaron_la_oficina_si_no_se_sabe(
+        user_client, admin_client, orden, user_profile, config, monkeypatch,
+        django_capture_on_commit_callbacks):
+    from campo import tasks
+
+    encolados = []
+    monkeypatch.setattr(tasks.subir_fotos_del_trabajo, "delay", lambda org, cid: encolados.append(cid))
+    c = _preparado(orden, user_profile, fotos_proveedor_estado="fallidas", fotos_proveedor_intento=1)
+    with django_capture_on_commit_callbacks(execute=True):
+        r = user_client.post(f"/api/campo/contratos/{c.id}/subir-fotos/")
+    assert r.status_code == 202, r.content
+    c.refresh_from_db()
+    assert c.fotos_proveedor_estado == "pedidas" and c.fotos_proveedor_intento == 2
+    assert encolados == [str(c.id)]
+    ContratoDeServicio.objects.filter(pk=c.pk).update(fotos_proveedor_estado="por_revisar")
+    r = user_client.post(f"/api/campo/contratos/{c.id}/subir-fotos/")
+    assert r.status_code == 403, r.content
+    with django_capture_on_commit_callbacks(execute=True):
+        r = admin_client.post(f"/api/campo/contratos/{c.id}/subir-fotos/")
+    assert r.status_code == 202, r.content
+    ContratoDeServicio.objects.filter(pk=c.pk).update(fotos_proveedor_estado="subidas")
+    r = admin_client.post(f"/api/campo/contratos/{c.id}/subir-fotos/")
+    assert r.status_code == 409
 
 
 # =========================================================================== #

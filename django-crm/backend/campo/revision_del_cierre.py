@@ -626,8 +626,11 @@ def _de_la_instalacion(orden) -> list:
                 lugar = " · ".join(x for x in (f"OLT {u.olt}" if u.olt else "",
                                                f"placa {u.placa}" if u.placa else "",
                                                f"puerto {u.puerto}" if u.puerto else "") if x)
+                ubicacion = {"guardada": " Ubicación guardada en SmartOLT.",
+                             "no_guardada": " La ubicación NO quedó en SmartOLT: ponla allá."
+                             }.get(getattr(u, "ubicacion_en_smartolt", "") or "", "")
                 puntos.append(_punto("onu", True, "ONU activada en la red"
-                                     + (f" ({lugar})." if lugar else ".")))
+                                     + (f" ({lugar})." if lugar else ".") + ubicacion))
             elif estado in ("pedida", "en_curso"):
                 puntos.append(_punto("onu", None, "La ONU se está activando en la red."))
             else:

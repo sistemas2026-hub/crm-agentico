@@ -187,6 +187,21 @@ class ApiDelContrato {
     }
   }
 
+  /// Vuelve a pedir que se prepare el contrato del proveedor, cuando el
+  /// proveedor dijo que no (`fallida`). Devuelve el contrato.
+  Future<RespuestaDelServidor> volverAPreparar(String contratoId) async {
+    try {
+      final Response<dynamic> r = await ApiClient()
+          .post<dynamic>(ApiEndpoints.prepararContratoProveedor(contratoId),
+              data: <String, dynamic>{})
+          .timeout(const Duration(seconds: 30));
+      final dynamic d = r.data is String ? jsonDecode(r.data as String) : r.data;
+      return RespuestaDelServidor(cuerpo: Map<String, dynamic>.from(d as Map));
+    } catch (e) {
+      return RespuestaDelServidor(error: _mensajeDeFirma(e));
+    }
+  }
+
   /// Abre el enlace en el navegador del teléfono, fuera de la app.
   Future<bool> abrir(String enlace) async {
     try {
@@ -273,6 +288,7 @@ class _EstadoContrato extends State<ContratoScreen> {
   bool _firmaEnElProveedor = false;
   bool _pidiendoEnlace = false;
   bool _comprobando = false;
+  bool _reintentando = false;
   String? _avisoDeFirma;
   Timer? _releer;
   int _relecturas = 0;
@@ -436,6 +452,29 @@ class _EstadoContrato extends State<ContratoScreen> {
           ? 'Cuando el cliente termine de firmar, vuelve y toca «Ya firmó: comprobar».'
           : 'No se pudo abrir el navegador del teléfono. Intenta de nuevo.';
     });
+  }
+
+  /// «Volver a intentar»: solo cuando el proveedor DIJO que no. Si no se
+  /// sabe si quedó, lo decide la oficina (el servidor lo frena).
+  Future<void> _volverAPreparar() async {
+    final String id = (_contrato?['id'] ?? '').toString();
+    if (id.isEmpty) return;
+    setState(() {
+      _reintentando = true;
+      _avisoDeFirma = null;
+    });
+    final RespuestaDelServidor r = await widget.api.volverAPreparar(id);
+    if (!mounted) return;
+    setState(() {
+      _reintentando = false;
+      if (r.error != null) {
+        _avisoDeFirma = r.error;
+      } else if (r.cuerpo?['contrato'] is Map) {
+        _contrato = Map<String, dynamic>.from(r.cuerpo!['contrato'] as Map);
+        _relecturas = 0;
+      }
+    });
+    _seguirSiEspera();
   }
 
   Future<void> _comprobarFirma() async {
@@ -1052,8 +1091,8 @@ class _EstadoContrato extends State<ContratoScreen> {
             children: <Widget>[
               Text(
                 'El cliente firma el contrato de WispHub después de confirmar. Antes de '
-                'confirmar toma la cédula por delante y por detrás y el recibo, y espera a '
-                'que suban.',
+                'confirmar toma la cédula por delante y por detrás y el recibo, anota el '
+                'valor de la instalación, y espera a que suban.',
                 style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
               ),
             ],
@@ -1170,9 +1209,13 @@ class _EstadoContrato extends State<ContratoScreen> {
       texto = 'El contrato de WispHub está listo, con la cédula y el recibo. Pásale el '
           'teléfono al cliente para que lo firme.';
       puedeFirmar = true;
-    } else if (f == 'fallida' || f == 'por_revisar') {
+    } else if (f == 'fallida') {
+      insignia = const DexterPastilla.alerta(texto: 'No quedó');
+      texto = '${fp['detalle'] ?? 'WispHub no guardó el contrato.'} Puedes volver a '
+          'intentarlo; si vuelve a fallar, avísale a la oficina.';
+    } else if (f == 'por_revisar') {
       insignia = const DexterPastilla.alerta(texto: 'Revisar');
-      texto = '${fp['detalle'] ?? 'El contrato de WispHub no quedó listo.'} '
+      texto = '${fp['detalle'] ?? 'No se sabe si el contrato quedó en WispHub.'} '
           'Avísale a la oficina: lo revisan en Instalaciones.';
     } else {
       texto = 'Guardando el contrato en WispHub con la cédula y el recibo…';
@@ -1210,6 +1253,19 @@ class _EstadoContrato extends State<ContratoScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.fact_check_outlined),
           label: Text(_comprobando ? 'Comprobando…' : 'Ya firmó: comprobar',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ));
+    } else if (f == 'fallida' && fp['se_puede_pedir'] == true) {
+      hijos.add(SizedBox(
+        height: AppSpacing.objetivoTactilAmplio,
+        child: OutlinedButton.icon(
+          onPressed: _reintentando ? null : _volverAPreparar,
+          icon: _reintentando
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh),
+          label: Text(_reintentando ? 'Pidiendo…' : 'Volver a intentar',
               maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ));

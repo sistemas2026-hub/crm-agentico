@@ -147,6 +147,8 @@ urlpatterns = [
     path("contratos/<uuid:pk>/preparar-contrato-proveedor/",
          contrato_views.PrepararContratoProveedorView.as_view(),
          name="preparar_contrato_proveedor"),
+    path("contratos/<uuid:pk>/subir-fotos/",
+         contrato_views.SubirFotosDelTrabajoView.as_view(), name="subir_fotos_del_trabajo"),
     #  Las IP que se le ofrecen al tecnico, en la misma pantalla y despues
     #  de que elija la zona (14/11/2026). Ver `ips_libres_views`.
     #  Activar la ONU de una instalacion (26/11/2026). Ver campo/activacion_onu.py.

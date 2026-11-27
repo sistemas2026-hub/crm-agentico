@@ -467,9 +467,62 @@ class PrepararContratoProveedorView(APIView):
                                        "instalación creada.",
                              "contrato": contrato.como_dict()},
                             status=status.HTTP_409_CONFLICT)
+        #  «NO SE SABE SI QUEDO» LO DECIDE GESTION (26/11/2026): pedirlo otra vez
+        #  sube los documentos otra vez, y antes alguien tiene que mirar en el
+        #  proveedor. Cuando el proveedor DIJO que no (`fallida`), el tecnico
+        #  lo puede volver a intentar desde la app.
+        if contrato.firma_proveedor_estado == ContratoDeServicio.FIRMA_PROVEEDOR_POR_REVISAR:
+            rol = (getattr(request.profile, "role", "") or "").upper()
+            from campo.permissions import ROLES_GESTION
+
+            if rol not in ROLES_GESTION and not request.user.is_superuser:
+                return Response(
+                    {"detail": "No se sabe si el contrato quedó en el proveedor: antes de "
+                               "pedirlo otra vez lo revisa alguien de la oficina "
+                               "(Instalaciones).", "contrato": contrato.como_dict()},
+                    status=status.HTTP_403_FORBIDDEN)
         if not pedir(contrato, por=request.profile):
             contrato.refresh_from_db()
             return Response({"detail": "No se pudo pedir. Revisa cómo quedó.",
                              "contrato": contrato.como_dict()},
                             status=status.HTTP_409_CONFLICT)
+        return Response({"contrato": contrato.como_dict()}, status=status.HTTP_202_ACCEPTED)
+
+
+class SubirFotosDelTrabajoView(APIView):
+    """«Volver a subir las fotos» (26/11/2026): cuando no quedaron en los
+    archivos del cliente. Si el proveedor dijo que no (`fallidas`), lo puede
+    pedir quien ve la orden; si no se sabe si quedaron (`por_revisar`), solo
+    gestion, despues de mirar: pedirlas otra vez las sube otra vez. Encola y
+    contesta 202."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.contrato import ContratoDeServicio
+        from campo.contrato_del_proveedor import pedir_fotos
+        from campo.permissions import ROLES_GESTION
+
+        org = getattr(request, "org", None)
+        contrato = (ContratoDeServicio.objects.filter(pk=pk, org=org)
+                    .select_related("orden").first()) if org else None
+        if contrato is None:
+            raise Http404
+        _orden(request, contrato.orden_id)
+        estado = contrato.fotos_proveedor_estado
+        if estado not in (ContratoDeServicio.FOTOS_FALLIDAS, ContratoDeServicio.FOTOS_POR_REVISAR):
+            return Response({"detail": "Las fotos no están para volver a subir.",
+                             "contrato": contrato.como_dict()}, status=status.HTTP_409_CONFLICT)
+        revisado = estado == ContratoDeServicio.FOTOS_POR_REVISAR
+        if revisado:
+            rol = (getattr(request.profile, "role", "") or "").upper()
+            if rol not in ROLES_GESTION and not request.user.is_superuser:
+                return Response(
+                    {"detail": "No se sabe si las fotos quedaron en el proveedor: antes de "
+                               "subirlas otra vez lo revisa alguien de la oficina."},
+                    status=status.HTTP_403_FORBIDDEN)
+        if not pedir_fotos(contrato, revisado=revisado):
+            contrato.refresh_from_db()
+            return Response({"detail": "No se pudieron pedir. Revisa cómo quedó.",
+                             "contrato": contrato.como_dict()}, status=status.HTTP_409_CONFLICT)
         return Response({"contrato": contrato.como_dict()}, status=status.HTTP_202_ACCEPTED)

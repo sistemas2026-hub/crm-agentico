@@ -1153,6 +1153,28 @@ class PasoWeb(Base):
         return {h for t in textos for h in re.findall(PATRON_DE_HUECO, t or "")}
 
 
+class ParametrosDeCompletar(Base):
+    """Como se completa en ESTE proveedor la ficha de un cliente recien
+    activado (26/11/2026): el costo de instalacion que cobro el tecnico y el
+    serial de la ONU, que se conocen al finalizar y que el proveedor no deja
+    escribir en una instalacion. El motor sabe QUE son; como se llaman alla,
+    y en que hueco de la ruta va el numero, va aca."""
+
+    #: El hueco de la ruta con el numero de servicio (p. ej. 'id_servicio').
+    campo_servicio: str
+    #: Nombre del motor -> campo del proveedor. Solo estos dos.
+    campos: dict[str, str]
+
+    @model_validator(mode="after")
+    def _con_nombres(self):
+        if not self.campo_servicio.strip():
+            raise ValueError("falta 'campo_servicio': el hueco de la ruta con el numero")
+        sobra = sorted(set(self.campos) - {"costo_instalacion", "serial_onu"})
+        if sobra or not self.campos:
+            raise ValueError(f"'campos' completa solo costo_instalacion y serial_onu; sobra {sobra}")
+        return self
+
+
 class ParametrosDeAlta(Base):
     """Como se crea un cliente en ESTE proveedor  --  25/11/2026.
 
@@ -1836,6 +1858,10 @@ class Herramienta(Base):
     #: servicio: solo por la puerta humana, la de quien valido.
     activa_servicio: bool = False
     parametros_de_activacion: ParametrosDeActivacion | None = None
+    #: Completa al cliente recien activado con el costo y el serial
+    #: (26/11/2026). Escribe: solo por la puerta humana de quien aprobo.
+    completa_cliente_activado: bool = False
+    parametros_de_completar: ParametrosDeCompletar | None = None
     #: EL PANEL WEB (26/11/2026), solo con tipo 'web': como se entra, que pasos
     #: se dan y que argumentos llegan desde el codigo (los {huecos} de las
     #: rutas y los archivos). Ver SesionWeb.
@@ -1855,6 +1881,9 @@ class Herramienta(Base):
     prepara_contrato_del_proveedor: bool = False
     da_enlace_de_firma: bool = False
     lee_firma_del_contrato: bool = False
+    #:   sube_documentos_del_cliente: argumentos usuario y archivos. Escribe:
+    #:     las fotos del trabajo en los archivos del cliente (26/11/2026).
+    sube_documentos_del_cliente: bool = False
     #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
     #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
     #: para poder recuperarlo si el id se pierde (Q2.1).
@@ -2514,7 +2543,8 @@ class Herramienta(Base):
                 ("prepara_contrato_del_proveedor", True, {"id_servicio", "archivos"},
                  "contrato_id"),
                 ("da_enlace_de_firma", False, {"usuario", "id_servicio"}, "enlace"),
-                ("lee_firma_del_contrato", False, {"contrato_id"}, "firmado")):
+                ("lee_firma_del_contrato", False, {"contrato_id"}, "firmado"),
+                ("sube_documentos_del_cliente", True, {"usuario", "archivos"}, None)):
             if not getattr(self, marca):
                 continue
             if not es_web:
@@ -2529,6 +2559,8 @@ class Herramienta(Base):
                 raise ValueError(f"'{self.nombre}': '{marca}' recibe {sorted(args)}; "
                                  f"faltan en 'argumentos_web': {faltan}")
             capturas = {n: c for p in self.pasos_web for n, c in p.capturar.items()}
+            if lee is None:
+                continue
             if lee not in capturas:
                 raise ValueError(f"'{self.nombre}': '{marca}' tiene que leer '{lee}' "
                                  f"en algun paso")
@@ -2537,7 +2569,8 @@ class Herramienta(Base):
                                  f"si/no, nunca la firma")
         if sum(bool(getattr(self, m)) for m in ("prepara_contrato_del_proveedor",
                                                 "da_enlace_de_firma",
-                                                "lee_firma_del_contrato")) > 1:
+                                                "lee_firma_del_contrato",
+                                                "sube_documentos_del_cliente")) > 1:
             raise ValueError(f"'{self.nombre}': una herramienta, una marca del contrato")
 
         if self.base_url and self.base_url_ref:
@@ -2711,14 +2744,17 @@ class Herramienta(Base):
                  "busca un cliente por su IP"),
                 ("lee_tarea", "parametros_de_tarea", "lee una tarea"),
                 ("activa_servicio", "parametros_de_activacion",
-                 "pasa una instalacion a cliente")):
+                 "pasa una instalacion a cliente"),
+                ("completa_cliente_activado", "parametros_de_completar",
+                 "completa al cliente activado")):
             if getattr(self, marca) != (getattr(self, parametros) is not None):
                 raise ValueError(
                     f"'{self.nombre}': '{marca}' y '{parametros}' van juntos. "
                     f"Una herramienta que {que} sin decir como se llaman sus "
                     f"campos no se puede usar, y los parametros sin la marca no "
                     f"los lee nadie.")
-        if (self.crea_cliente or self.activa_servicio) and self.solo_lectura:
+        if (self.crea_cliente or self.activa_servicio
+                or self.completa_cliente_activado) and self.solo_lectura:
             raise ValueError(
                 f"'{self.nombre}' crea o activa un cliente y se declara de solo "
                 f"lectura: asi saldria sin pasar por la frontera.")
@@ -2730,7 +2766,7 @@ class Herramienta(Base):
         #  servicio. El alta no la necesita: llama al ejecutor directo, desde
         #  su propia ruta.
         if ((self.crea_cliente or self.busca_cliente_por_ip or self.lee_tarea
-             or self.activa_servicio)
+             or self.activa_servicio or self.completa_cliente_activado)
                 and self.invocable_por_servicio):
             raise ValueError(
                 f"'{self.nombre}' es una herramienta del alta y no puede ser "
@@ -5493,7 +5529,7 @@ class TenantConfig(Base):
             # identidad verificada, a quien elija la IP.
             del_alta = sorted(h.nombre for h in self.herramientas
                               if (h.crea_cliente or h.busca_cliente_por_ip or h.lee_tarea
-                                  or h.activa_servicio
+                                  or h.activa_servicio or h.completa_cliente_activado
                                   or h.busca_onu_sin_autorizar or h.autoriza_onu
                                   or h.lee_onu or h.lista_zonas_de_red)
                               and h.nombre in rol.puede_consultar)

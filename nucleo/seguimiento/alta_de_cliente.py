@@ -95,6 +95,9 @@ BLOQUEADO = "bloqueado"                 # el sistema decidio no escribir
 #  LA ACTIVACION (26/11/2026): una INSTALACION que una persona valido pasa a
 #  ser cliente.
 ACTIVADO = "activado"                   # se activo en esta pasada, y se leyo
+#  COMPLETAR (26/11/2026): el costo y el serial, en el cliente ya activado.
+COMPLETADO = "completado"               # se escribio y se leyo igual
+NADA_QUE_COMPLETAR = "nada_que_completar"
 NO_ENCONTRADA = "no_encontrada"         # no hay una instalacion de este contrato
 NO_SE_PUDO_COMPROBAR = "no_se_pudo_comprobar"
 
@@ -160,6 +163,8 @@ def _herramientas(config) -> dict:
         "buscar": next((h for h in busca if not _de_instalaciones(h)), None),
         "buscar_instalaciones": [h for h in busca if _de_instalaciones(h)],
         "activar": next((h for h in hs if getattr(h, "activa_servicio", False)), None),
+        "completar": next((h for h in hs if getattr(h, "completa_cliente_activado", False)),
+                          None),
         "tarea": next((h for h in hs if getattr(h, "lee_tarea", False)), None),
         "planes": next((h for h in hs
                         if getattr(h, "sincroniza_precio_plan", "") == "listado"), None),
@@ -876,3 +881,150 @@ def comprobar_activacion(config, tenant: str, *, datos, id_servicio) -> Resultad
         return ResultadoAlta(ACTIVADO, id_cliente=numero)
     return ResultadoAlta(EN_CURSO, "todavia no aparece como cliente", id_cliente=numero)
 
+
+# =============================================================================
+#  COMPLETAR AL CLIENTE ACTIVADO  --  26/11/2026
+# =============================================================================
+#  Decision del usuario: el costo de instalacion que cobro el tecnico y el
+#  serial de la ONU se escriben CUANDO LA OFICINA APRUEBA y la instalacion pasa
+#  a cliente. Medido ese dia: el proveedor no deja editar una instalacion por
+#  su API (las instalaciones son otra lista; `GET /api/clientes/<id>/` da 404),
+#  y el formulario web de editarla trae ~70 campos, algunos rellenados con
+#  valores que el proveedor no tiene guardados: reenviarlo cambiaria datos.
+#  Sobre el CLIENTE, el PUT parcial esta medido (aplica y no pisa lo demas).
+#
+#  Las mismas reglas que activar: puerta HUMANA de quien aprobo, solo si es
+#  cliente con ese numero y de ESTE contrato, una vez por pedido, y se confirma
+#  LEYENDO que quedaron los valores.
+def _costo(valor) -> str | None:
+    """El costo como texto con dos decimales, o None si no es un numero >= 0."""
+    try:
+        n = float(str(valor).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return f"{n:.2f}" if n >= 0 else None
+
+
+def _serial(valor) -> str:
+    return re.sub(r"[^A-Z0-9:-]", "", str(valor or "").upper())[:40]
+
+
+def _mismo_costo(a, b) -> bool:
+    x, y = _costo(a), _costo(b)
+    return x is not None and x == y
+
+
+def completar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio,
+              valores) -> ResultadoAlta:
+    """Escribe el costo y el serial en el cliente recien activado. Ver arriba."""
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.seguridad import frontera, idempotencia, interruptor
+
+    h = _herramientas(config)
+    herr = h["completar"]
+    if herr is None or h["buscar"] is None or h["crear"] is None:
+        return ResultadoAlta(SIN_HERRAMIENTA, "la empresa no declara como se completa un "
+                                              "cliente", referencia=origen)
+    numero = _el_numero(id_servicio)
+    d, por_que = leer_datos(datos, h["crear"].parametros_de_alta)
+    if not numero or d is None:
+        return ResultadoAlta(DATOS_INVALIDOS, por_que or "falta el numero de servicio",
+                             referencia=origen)
+    valores = valores if isinstance(valores, dict) else {}
+    pc = herr.parametros_de_completar
+    quiero: dict[str, str] = {}
+    if valores.get("costo_instalacion") not in (None, "") and "costo_instalacion" in pc.campos:
+        costo = _costo(valores["costo_instalacion"])
+        if costo is None:
+            return ResultadoAlta(DATOS_INVALIDOS, "el costo de instalacion no es un numero",
+                                 referencia=origen)
+        quiero["costo_instalacion"] = costo
+    if valores.get("serial_onu") and "serial_onu" in pc.campos:
+        serial = _serial(valores["serial_onu"])
+        if not serial:
+            return ResultadoAlta(DATOS_INVALIDOS, "el serial de la ONU no es valido",
+                                 referencia=origen)
+        quiero["serial_onu"] = serial
+    if not quiero:
+        return ResultadoAlta(NADA_QUE_COMPLETAR, "no hay costo ni serial que escribir",
+                             referencia=origen, id_cliente=numero)
+    comun = h["buscar"].parametros_de_busqueda_por_ip
+
+    def _fila():
+        for f in _filas_de(h["buscar"], comun, config, tenant, d["ip"]):
+            if _el_numero(f.get(comun.campo_id)) == numero and _es_el_nuestro(f, comun, d):
+                return f
+        return None
+
+    def _ya_estan(f) -> bool:
+        return all((_mismo_costo(f.get(pc.campos[k]), v) if k == "costo_instalacion"
+                    else _serial(f.get(pc.campos[k])) == v) for k, v in quiero.items())
+
+    #  1. TIENE QUE SER CLIENTE, con ese numero y de ESTE contrato.
+    try:
+        fila = _fila()
+    except _NoSePudoLeer as e:
+        return ResultadoAlta(NO_SE_PUDO_COMPROBAR, f"no se pudo leer el proveedor ({e})",
+                             referencia=origen)
+    if fila is None:
+        return ResultadoAlta(NO_ENCONTRADA, "no hay en el proveedor un cliente de este contrato "
+                                            "con ese numero", referencia=origen)
+    if _ya_estan(fila):
+        return ResultadoAlta(YA_ESTABA, "el cliente ya tiene esos valores", referencia=origen,
+                             id_cliente=numero)
+
+    #  2. EL INTERRUPTOR, sin cache y pegado a la escritura.
+    try:
+        veredicto = interruptor.veredicto(tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("completar_cliente", "no se pudo leer el interruptor: NO se escribe", error=e)
+        return ResultadoAlta(BLOQUEADO, "no se pudo comprobar el interruptor", referencia=origen)
+    if not veredicto.permitido:
+        interruptor.anotar_bloqueo(tenant, actor=actor, recurso="completar_cliente",
+                                   motivo=f"{veredicto.estado}: {veredicto.motivo}")
+        return ResultadoAlta(BLOQUEADO, "el interruptor de la empresa esta detenido",
+                             referencia=origen)
+
+    #  3. UNA VEZ, POR LA PUERTA HUMANA.
+    args = dict(getattr(herr, "argumentos_fijos", None) or {})
+    args[pc.campo_servicio] = numero
+    for k, v in quiero.items():
+        args[pc.campos[k]] = v
+
+    def _fin(estado: str, motivo: str = "") -> ResultadoAlta:
+        return ResultadoAlta(estado, motivo, referencia=origen, id_cliente=numero, emitido=True)
+
+    def _hacer():
+        ejecutor_http.ejecutar(herr, dict(args), tenant, variables_tenant=config.variables_tenant)
+        return {"pedido": True}
+
+    try:
+        with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
+            res = idempotencia.ejecutar(tenant, herr.nombre, args, origen, _hacer,
+                                        clave=f"{origen}|{herr.nombre}")
+    except ejecutor_http.ErrorHerramientaHttp as e:
+        registrar("completar_cliente", "el ejecutor no dejo salir el pedido", error=e)
+        return ResultadoAlta(BLOQUEADO, "no salio: el ejecutor lo freno antes de llegar al "
+                                        "proveedor", referencia=origen, id_cliente=numero)
+    except frontera.AccionExternaNoAutorizada as e:
+        registrar("completar_cliente", "la frontera no autorizo el pedido", error=e)
+        return ResultadoAlta(BLOQUEADO, "la frontera no autorizo el pedido", referencia=origen,
+                             id_cliente=numero)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("completar_cliente", "el pedido volvio con error", error=e)
+        if _lo_rechazo(e):
+            return _fin(FALLO, "el proveedor rechazo el pedido")
+        res = None                     # salio y no se sabe si llego: se mira
+    if res is not None and not res.ejecutada and res.decision not in (
+            "repetida", "en_curso", "fallida"):
+        return _fin(BLOQUEADO, "el registro de operaciones no dejo salir este pedido")
+
+    #  4. CONFIRMAR LEYENDO que quedaron los valores.
+    try:
+        fila = _fila()
+    except _NoSePudoLeer:
+        fila = None
+    if fila is not None and _ya_estan(fila):
+        registrar("completar_cliente", "el cliente quedo con el costo y el serial")
+        return _fin(COMPLETADO)
+    return _fin(EN_CURSO, "se pidio y todavia no se leen los valores")

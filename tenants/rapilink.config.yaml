@@ -6700,6 +6700,64 @@ herramientas:
         capturar:
           firmado: {de: campo, nombre: contrato-firma, solo_si_tiene: true}
 
+  #  LAS FOTOS DEL TRABAJO, AL FINALIZAR  --  26/11/2026. Van a los archivos
+  #  del cliente por el formulario PROPIO de varios documentos (medido ese dia,
+  #  solo leyendo): /clientes/agregar-multiple-documento/<usuario>/, form
+  #  'form_archivos'. Su pagina, al elegir archivos, los deja TODOS en
+  #  'archivo' (obligatorio) y ademas uno por fila 'form-N-archivo' con su
+  #  titulo: se reenvia igual que el navegador. Sin boton con nombre.
+  - nombre: subir_fotos_al_cliente_en_wisphub
+    tipo: web
+    descripcion: >
+      Sube las fotos del trabajo a los archivos del cliente en WispHub, al
+      finalizar. Escribe: sale solo por la puerta humana de quien finalizo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: https://wisphub.io
+    timeout_segundos: 90
+    sube_documentos_del_cliente: true
+    sesion_web: *panel_wisphub
+    argumentos_web: [usuario, archivos]
+    pasos_web:
+      - formulario: /clientes/agregar-multiple-documento/{usuario}/
+        id_formulario: form_archivos
+        archivos: {archivo: archivos}
+        bloque_de_archivos: {argumento: archivos, prefijo: form, campo_archivo: archivo,
+                             campo_titulo: titulo}
+        archivo_minimo_bytes: 1024
+        exito: redirige
+
+  #  EL COSTO Y EL SERIAL, AL ACTIVAR  --  26/11/2026. Decision del usuario:
+  #  se escriben cuando la oficina aprueba y la instalacion pasa a cliente. La
+  #  API no deja editar una INSTALACION (son otra lista: GET /api/clientes/<id>/
+  #  de una instalacion da 404), y sobre el CLIENTE el PUT parcial esta medido
+  #  (aplica y no pisa lo demas; sn_onu el 28/09).
+  #  MEDIDO EL 26/11/2026 (prueba vigilada, OT-22 ya activada): el PUT dejo el
+  #  sn_onu escrito y leido igual, y IGNORO costo_instalacion en silencio
+  #  (200, y el cliente sigue con el costo vacio). Por eso aca va SOLO el
+  #  serial; el costo viaja al CREAR la instalacion, donde si se aplica.
+  - nombre: completar_cliente_activado_en_wisphub
+    tipo: http
+    descripcion: >
+      Escribe el costo de instalacion y el serial de la ONU en el cliente
+      recien activado. Sale solo por la puerta humana de quien aprobo. No la
+      llama el modelo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/clientes/{id_servicio}/
+    metodo: PUT
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    timeout_segundos: 60
+    completa_cliente_activado: true
+    parametros_de_completar:
+      campo_servicio: id_servicio
+      campos: {serial_onu: sn_onu}
+
   - nombre: leer_tarea_de_wisphub
     tipo: http
     descripcion: >

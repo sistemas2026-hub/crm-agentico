@@ -97,7 +97,7 @@ def es_una_coordenada(latitud, longitud) -> bool:
     return True
 
 
-def guardar_ubicacion(orden, *, latitud, longitud, profile) -> dict:
+def guardar_ubicacion(orden, *, latitud, longitud, profile, identificadores=None) -> dict:
     """Deja la ubicacion escrita en los sistemas del ISP.
 
     Responde siempre un dict con `guardada`, `codigo` y `detalle`, y nunca
@@ -122,8 +122,11 @@ def guardar_ubicacion(orden, *, latitud, longitud, profile) -> dict:
     try:
         tenant = _tenant_de(orden)
         actor = _nombre_de(profile)
-        serial = telemetria.serial_de(orden)
-        servicio = telemetria.servicio_de(orden)
+        #  `identificadores` DADOS (26/11/2026): la ONU que se acaba de activar
+        #  en una instalacion todavia no estaba en la ficha congelada al
+        #  despachar. Quien llama dice con que se la identifica.
+        serial = "" if identificadores is not None else telemetria.serial_de(orden)
+        servicio = "" if identificadores is not None else telemetria.servicio_de(orden)
     except Exception as e:                                      # noqa: BLE001
         logger.warning("ubicacion_al_isp: no se pudo leer la orden (%s)",
                        type(e).__name__)
@@ -146,11 +149,15 @@ def guardar_ubicacion(orden, *, latitud, longitud, profile) -> dict:
     #  en `telemetria`: volver a resolverlos ahora podria dar otro equipo --un
     #  cliente puede tener mas de uno-- y la ubicacion terminaria escrita en
     #  el equipo equivocado sin que nadie se entere.
-    identificadores = {}
-    if serial:
-        identificadores["sn_onu"] = serial
-    if servicio:
-        identificadores["id_servicio"] = servicio
+    if identificadores is not None:
+        identificadores = {str(k): str(v).strip() for k, v in identificadores.items()
+                           if str(v or "").strip()}
+    else:
+        identificadores = {}
+        if serial:
+            identificadores["sn_onu"] = serial
+        if servicio:
+            identificadores["id_servicio"] = servicio
     if not identificadores:
         return {"guardada": False, "codigo": "sin_identificador",
                 "detalle": "la orden no trae con que identificar al cliente "

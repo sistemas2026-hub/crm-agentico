@@ -112,6 +112,24 @@ def faltan_documentos(orden) -> list[str] | None:
         return None
 
 
+def falta_el_costo(orden) -> str | None:
+    """El titulo del dato «costo de instalacion» de la plantilla si todavia no
+    esta anotado en el servidor; None si esta, o si la plantilla no lo pide.
+
+    DECISION DEL USUARIO (26/11/2026): el proveedor IGNORA el costo si se
+    escribe despues de creado el cliente (medido con la OT-22) y solo lo toma
+    al crear la instalacion -- que, firmando en el proveedor, se crea al
+    confirmar. Por eso se anota ANTES de confirmar, y viaja en el alta.
+    """
+    esquema = getattr(getattr(orden, "tipo_trabajo_version", None), "esquema", None) or {}
+    for c in (esquema.get("campos") or []):
+        if isinstance(c, dict) and c.get("costo_de_instalacion"):
+            valor = (orden.datos or {}).get(c.get("id"))
+            return None if valor not in (None, "") else str(c.get("titulo") or "el valor de la "
+                                                                                "instalación")
+    return None
+
+
 def documentos_de(orden) -> list[dict] | None:
     """`[{"nombre", "tipo", "titulo", "base64"}]` de la cedula y el recibo de
     esta vuelta, o None si no se pudieron leer TODOS: un contrato no se guarda
@@ -335,3 +353,171 @@ def comprobar_firma(contrato):
         _anotar(contrato, firma_proveedor_estado=ContratoDeServicio.FIRMA_PROVEEDOR_FIRMADA,
                 firma_proveedor_detalle="", firmado_en_el_proveedor_en=ahora)
     return contrato
+
+
+# =============================================================================
+#  LAS FOTOS DEL TRABAJO, A LOS ARCHIVOS DEL CLIENTE  --  26/11/2026
+# =============================================================================
+#  Decision del usuario: al «Finalizar trabajo». Van las fotos de ESTA vuelta
+#  que NO son documentos (la cedula y el recibo ya subieron con el contrato),
+#  con el titulo de la plantilla, por el formulario propio de varios
+#  documentos del cliente. Puerta humana de quien confirmo el contrato.
+MAX_FOTOS = 12
+VUELTAS_DE_FOTOS = 6
+
+
+def fotos_del_trabajo(orden) -> list[dict] | None:
+    """`[{"nombre", "tipo", "titulo", "base64"}]` de las fotos de esta vuelta
+    que no son documentos, o None si no se pudo leer la plantilla."""
+    import base64
+    import os
+
+    from campo.fotos_al_ticket import _nombre
+    from campo.services.storage import CampoStorage
+
+    privados = _privados(orden)
+    if privados is None:
+        return None
+    esquema = getattr(getattr(orden, "tipo_trabajo_version", None), "esquema", None) or {}
+    titulos = {e["id"]: str(e.get("titulo") or e["id"]) for e in (esquema.get("evidencias") or [])
+               if isinstance(e, dict) and e.get("id")}
+    salida, vistos = [], {}
+    evidencias = (orden.evidencias.filter(vuelta=orden.vuelta, evento__isnull=True)
+                  .exclude(requisito_id__in=list(privados)).order_by("recibida_en_servidor"))
+    for i, ev in enumerate(evidencias[:MAX_FOTOS], start=1):
+        try:
+            ruta = CampoStorage.ruta_absoluta(ev.storage_key)
+            if not ruta or not os.path.exists(ruta):
+                continue
+            with open(ruta, "rb") as f:
+                crudo = f.read()
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("contrato_del_proveedor: una foto no se pudo leer (%s)",
+                           type(e).__name__)
+            continue
+        vistos[ev.requisito_id] = vistos.get(ev.requisito_id, 0) + 1
+        titulo = titulos.get(ev.requisito_id, ev.requisito_id or "Foto")
+        if vistos[ev.requisito_id] > 1:
+            titulo += f" ({vistos[ev.requisito_id]})"
+        salida.append({"nombre": _nombre(ev, i), "titulo": titulo,
+                       "tipo": (ev.mime_type or "image/jpeg").lower().strip(),
+                       "base64": base64.b64encode(crudo).decode()})
+    return salida
+
+
+def _anotar_fotos(contrato, **campos) -> None:
+    from campo.contrato import ContratoDeServicio
+
+    ahora = timezone.now()
+    if "fotos_proveedor_detalle" in campos:
+        campos["fotos_proveedor_detalle"] = str(campos["fotos_proveedor_detalle"] or "")[:300]
+    (ContratoDeServicio.objects.filter(pk=contrato.pk, firma_en_el_proveedor=True)
+     .exclude(estado=ContratoDeServicio.ANULADO).update(updated_at=ahora, **campos))
+    contrato.refresh_from_db()
+
+
+def pedir_fotos(contrato, *, revisado: bool = False) -> bool:
+    """Marca las fotos como pedidas y encola la tarea, DESPUES del commit. Solo
+    si el contrato se preparo en el proveedor (tiene el usuario y el numero
+    del cliente) y desde «nunca» o `fallidas`. Cada pedido, un numero nuevo."""
+    from campo.contrato import ContratoDeServicio
+
+    if not (contrato.firma_en_el_proveedor and contrato.usuario_proveedor
+            and contrato.servicio_isp):
+        return False
+    if contrato.estado not in (ContratoDeServicio.INSTALACION, ContratoDeServicio.EN_EL_ISP):
+        return False
+    intento = int(contrato.fotos_proveedor_intento or 0) + 1
+    if intento > PEDIDOS_POR_CONTRATO:
+        return False
+    ahora = timezone.now()
+    tocadas = (ContratoDeServicio.objects
+               .filter(pk=contrato.pk, fotos_proveedor_intento=int(contrato.fotos_proveedor_intento or 0),
+                       #  «Por revisar» solo si una persona ya miro (`revisado`).
+                       fotos_proveedor_estado__in=["", ContratoDeServicio.FOTOS_FALLIDAS]
+                       + ([ContratoDeServicio.FOTOS_POR_REVISAR] if revisado else []))
+               .update(fotos_proveedor_estado=ContratoDeServicio.FOTOS_PEDIDAS,
+                       fotos_proveedor_detalle="", fotos_proveedor_intento=intento,
+                       updated_at=ahora))
+    contrato.refresh_from_db()
+    if not tocadas:
+        return False
+    org_id, contrato_id = str(contrato.org_id), str(contrato.id)
+
+    def _encolar():
+        from campo.tasks import subir_fotos_del_trabajo
+
+        try:
+            subir_fotos_del_trabajo.delay(org_id, contrato_id)
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("contrato_del_proveedor: no se pudieron encolar las fotos (%s)",
+                           type(e).__name__)
+            try:
+                _anotar_fotos(ContratoDeServicio.objects.get(pk=contrato_id),
+                              fotos_proveedor_estado=ContratoDeServicio.FOTOS_FALLIDAS,
+                              fotos_proveedor_detalle="No se pudo poner en marcha.")
+            except Exception:                                    # noqa: BLE001
+                pass
+
+    transaction.on_commit(_encolar)
+    return True
+
+
+_POR_QUE_FOTOS = {
+    "fallo": "El proveedor no guardó las fotos.",
+    "no_encontrada": "No se encontró en el proveedor la instalación (o el usuario) de este "
+                     "contrato.",
+    "bloqueado": "Las fotos no salieron: el sistema las frenó antes de llegar al proveedor.",
+    "datos_invalidos": "Las fotos o los datos del contrato no son válidos.",
+    "sin_herramienta": "La empresa no tiene configurado cómo subir las fotos.",
+}
+
+
+def subir_fotos(contrato) -> None:
+    """Le pide al motor que suba las fotos. Solo sobre unas `pedidas`. Si el
+    motor no contesta o no pudo leer, siguen `pedidas` y la tarea las vuelve a
+    pedir con EL MISMO numero."""
+    from campo.contrato import ContratoDeServicio
+    from campo.services import alta_en_el_isp
+    from campo.services.ubicacion_al_isp import _nombre_de
+
+    if contrato.fotos_proveedor_estado != ContratoDeServicio.FOTOS_PEDIDAS:
+        return
+    actor = _nombre_de(contrato.firmado_por)
+    fotos = fotos_del_trabajo(contrato.orden)
+    if not actor or fotos is None:
+        _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_FALLIDAS,
+                      fotos_proveedor_detalle="No se pudieron leer las fotos o quién confirmó.")
+        return
+    if not fotos:
+        _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_SUBIDAS,
+                      fotos_proveedor_detalle="No había fotos del trabajo que subir.")
+        return
+    estado, cuerpo = alta_en_el_isp._llamar(contrato, "subir-fotos-del-trabajo", {
+        "actor": actor, "datos": alta_en_el_isp.datos_para_reconocer(contrato),
+        "id_servicio": contrato.servicio_isp, "usuario": contrato.usuario_proveedor,
+        "archivos": fotos, "intento": int(contrato.fotos_proveedor_intento or 1)},
+        ESPERA_DEL_PEDIDO)
+    if estado is None or estado in ("en_curso", "no_se_pudo_comprobar"):
+        return
+    if estado == "subido":
+        _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_SUBIDAS,
+                      fotos_proveedor_detalle="")
+    elif estado == "no_se_sabe":
+        _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_POR_REVISAR,
+                      fotos_proveedor_detalle="Se mandaron y no se pudo confirmar: míralo en los "
+                                              "archivos del cliente en el proveedor.")
+    else:
+        motivo = str((cuerpo or {}).get("motivo") or "")[:160]
+        _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_FALLIDAS,
+                      fotos_proveedor_detalle=_POR_QUE_FOTOS.get(estado, "No se subieron las fotos.")
+                      + (f" ({motivo})" if motivo else ""))
+
+
+def rendirse_fotos(contrato) -> None:
+    from campo.contrato import ContratoDeServicio
+
+    if contrato.fotos_proveedor_estado == ContratoDeServicio.FOTOS_PEDIDAS:
+        _anotar_fotos(contrato, fotos_proveedor_estado=ContratoDeServicio.FOTOS_POR_REVISAR,
+                      fotos_proveedor_detalle="Se pidieron y no se pudo confirmar: míralo en los "
+                                              "archivos del cliente en el proveedor.")

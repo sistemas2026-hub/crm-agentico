@@ -24,9 +24,12 @@ class _Api extends ApiDelContrato {
   final List<String> abiertos = <String>[];
   int enlacesPedidos = 0;
   bool firmadoEnWispHub = false;
+  final List<String> reintentos = <String>[];
 
-  static Map<String, dynamic> contrato(String estadoFirma, {bool firmado = false}) =>
+  static Map<String, dynamic> contrato(String estadoFirma,
+          {bool firmado = false, bool sePuedePedir = false}) =>
       <String, dynamic>{
+        'id': 'c-611',
         'numero': 'C-2026-000611',
         'estado': 'instalacion',
         'cliente': <String, dynamic>{'nombre': 'Laura', 'apellido': 'Gómez'},
@@ -38,6 +41,8 @@ class _Api extends ApiDelContrato {
           'estado': firmado ? 'firmada' : estadoFirma,
           'puede_firmar': !firmado && estadoFirma == 'lista',
           'firmado': firmado,
+          'se_puede_pedir': sePuedePedir,
+          'detalle': estadoFirma == 'fallida' ? 'El proveedor no guardó el contrato.' : null,
         },
       };
 
@@ -64,6 +69,12 @@ class _Api extends ApiDelContrato {
   Future<bool> abrir(String enlace) async {
     abiertos.add(enlace);
     return true;
+  }
+
+  @override
+  Future<RespuestaDelServidor> volverAPreparar(String contratoId) async {
+    reintentos.add(contratoId);
+    return RespuestaDelServidor(cuerpo: <String, dynamic>{'contrato': contrato('pedida')});
   }
 
   @override
@@ -138,11 +149,11 @@ void main() {
     _telefonoAlto(t);
     final _Api api = _Api(
         lectura: _borrador(),
-        errorAlConfirmar: 'Antes de confirmar tienen que estar subidas: Recibo público.');
+        errorAlConfirmar: 'Antes de confirmar falta: Recibo público, «Valor de la instalación» anotado.');
     await t.pumpWidget(_montar(api));
     await t.pumpAndSettle();
     await _confirmar(t);
-    expect(find.textContaining('tienen que estar subidas: Recibo público'), findsOneWidget);
+    expect(find.textContaining('falta: Recibo público, «Valor de la instalación»'), findsOneWidget);
     expect(find.text('Confirmar contrato'), findsOneWidget);
   });
 
@@ -180,6 +191,38 @@ void main() {
     expect(find.text('El cliente firmó el contrato en WispHub.'), findsOneWidget);
     expect(find.text('Firmar en WispHub'), findsNothing);
     expect(find.text('Contrato firmado'), findsOneWidget);
+  });
+
+  testWidgets('SI WISPHUB DIJO QUE NO: «Volver a intentar» lo pide otra vez y vuelve a esperar',
+      (WidgetTester t) async {
+    _telefonoAlto(t);
+    final _Api api = _Api(lectura: <String, dynamic>{
+      'contrato': _Api.contrato('fallida', sePuedePedir: true),
+      'firma_en_el_proveedor': true,
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+    expect(find.textContaining('Puedes volver a intentarlo'), findsOneWidget);
+
+    await t.tap(find.text('Volver a intentar'));
+    await t.pump();
+    await t.pump();
+    expect(api.reintentos, <String>['c-611']);
+    expect(find.textContaining('Guardando el contrato en WispHub'), findsOneWidget);
+    expect(find.text('Volver a intentar'), findsNothing);
+  });
+
+  testWidgets('SI NO SE SABE SI QUEDÓ: no hay «Volver a intentar», se avisa a la oficina',
+      (WidgetTester t) async {
+    _telefonoAlto(t);
+    final _Api api = _Api(lectura: <String, dynamic>{
+      'contrato': _Api.contrato('por_revisar', sePuedePedir: true),
+      'firma_en_el_proveedor': true,
+    });
+    await t.pumpWidget(_montar(api));
+    await t.pumpAndSettle();
+    expect(find.text('Volver a intentar'), findsNothing);
+    expect(find.textContaining('Avísale a la oficina'), findsOneWidget);
   });
 
   testWidgets('MIENTRAS SE PREPARA lo dice, y se vuelve a leer solo hasta que queda listo',
