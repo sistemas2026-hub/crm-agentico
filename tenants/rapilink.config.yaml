@@ -6604,6 +6604,89 @@ herramientas:
     parametros_de_activacion:
       campo_servicios: servicios
 
+  #  EL CONTRATO DE WISPHUB, POR SU PANEL WEB  --  26/11/2026
+  #
+  #  La API no tiene contratos, firmas ni archivos de un cliente (58 rutas
+  #  medidas), y el usuario decidio que el cliente firme SOLO el contrato de
+  #  WispHub. Medido ese dia en vivo, solo leyendo, con el usuario web de la
+  #  empresa: la entrada es un formulario con un campo oculto de seguridad;
+  #  /instalaciones/agregar-contrato/<servicio>/ redirige a
+  #  /instalaciones/editar-contrato/<contrato>/ (ese GET CREA el contrato si
+  #  no existe: por eso va en la herramienta que escribe); el formulario
+  #  'generarContrato' ya trae el texto del contrato lleno desde la plantilla y
+  #  la firma vacia; y el enlace para firmar sale en el href de #auto-login.
+  #  OJO: ese enlace entra al portal del cliente SIN clave. No se guarda en
+  #  ningun lado: se pide cuando el tecnico lo va a abrir.
+  #  Ninguna la llama el modelo (el esquema lo prohibe).
+  - nombre: preparar_contrato_en_wisphub
+    tipo: web
+    descripcion: >
+      Guarda el contrato de WispHub de una instalacion, TAL COMO VIENE de la
+      plantilla y sin firma, con los documentos en «Subir Archivos» del
+      cliente (uno por fila, con su titulo), y devuelve su numero.
+      Escribe en el proveedor: sale solo por la puerta humana.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: https://wisphub.io
+    timeout_segundos: 60
+    sesion_web: &panel_wisphub
+      entrada: /accounts/login/
+      usuario_ref: WISPHUB_WEB_USUARIO
+      clave_ref: WISPHUB_WEB_CLAVE
+      campo_usuario: login
+      campo_clave: password
+      campo_csrf: csrfmiddlewaretoken
+      campos_fijos: {token_device: "", name_device: "", type_device: "", remember: "1"}
+    argumentos_web: [id_servicio, archivos]
+    pasos_web:
+      - abrir: /instalaciones/agregar-contrato/{id_servicio}/
+        capturar:
+          contrato_id: {de: url, patron: "/editar-contrato/(\\d+)/"}
+      - formulario: /instalaciones/editar-contrato/{contrato_id}/
+        id_formulario: generarContrato
+        #  Medido el 26/11/2026 (prueba vigilada, contrato 4928): solo la fila
+        #  repetible 'form-N-*' deja el archivo en la pestaña «Subir Archivos»
+        #  del cliente, con su titulo; el campo multiple 'archivo' no dejo nada
+        #  visible. Y WispHub rechaza un archivo de menos de 1 KB.
+        bloque_de_archivos: {argumento: archivos, prefijo: form, campo_archivo: archivo,
+                             campo_titulo: titulo}
+        archivo_minimo_bytes: 1024
+        boton: guardar_contrato
+        exito: redirige
+
+  - nombre: enlace_de_firma_en_wisphub
+    tipo: web
+    descripcion: >
+      Pide a WispHub el enlace para que el cliente firme su contrato. El enlace
+      entra al portal del cliente sin clave: no se guarda ni se registra.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://wisphub.io
+    timeout_segundos: 60
+    sesion_web: *panel_wisphub
+    argumentos_web: [usuario, id_servicio]
+    pasos_web:
+      - abrir: /clientes/generar-link-contrato/{usuario}/{id_servicio}/
+        capturar:
+          enlace: {de: atributo, id: auto-login, atributo: href}
+
+  - nombre: firma_del_contrato_en_wisphub
+    tipo: web
+    descripcion: >
+      Dice si el contrato de WispHub ya tiene la firma del cliente. Devuelve
+      si o no, nunca la firma.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://wisphub.io
+    timeout_segundos: 60
+    sesion_web: *panel_wisphub
+    argumentos_web: [contrato_id]
+    pasos_web:
+      - abrir: /instalaciones/editar-contrato/{contrato_id}/
+        capturar:
+          firmado: {de: campo, nombre: contrato-firma, solo_si_tiene: true}
+
   - nombre: leer_tarea_de_wisphub
     tipo: http
     descripcion: >

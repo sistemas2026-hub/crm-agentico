@@ -41,7 +41,8 @@ nucleo/                    EL MOTOR — genérico, sin clientes
   seguridad/               listas blancas, frontera de autorización, techo,
                             interruptor, aprobación, idempotencia, redacción,
                             guardia de salida, verificación de identidad
-  herramientas/            tipos genéricos: http · agregado · sql · batch · interno
+  herramientas/            tipos genéricos: http · agregado · sql · batch · interno ·
+                            web (el panel del proveedor cuando su API no alcanza)
   ingesta/                 fragmentación, contextualización, versionado
   recuperacion/            búsqueda híbrida, ensamblado del prompt
   modelo/                  cliente LLM, selección por canal/rol, bucle de tool calling

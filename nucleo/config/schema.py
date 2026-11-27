@@ -985,6 +985,174 @@ class ParametrosDeActivacion(Base):
         return self
 
 
+#  EL PANEL WEB DE UN PROVEEDOR, CUANDO SU API NO ALCANZA  --  26/11/2026
+#
+#  El error que lo origino: la API del primer proveedor no tiene contratos,
+#  firmas ni archivos de un cliente (58 rutas medidas), y el usuario decidio
+#  que el cliente firme el contrato DEL PROVEEDOR, el que vive en su panel.
+#  Medido ese dia en vivo, solo leyendo: el panel entra con un formulario
+#  (usuario, clave y un campo oculto de seguridad), el formulario del contrato
+#  ya trae el texto lleno y la firma vacia, y el enlace para firmar sale en un
+#  atributo de una pagina. Nada de eso es de un proveedor en particular: es
+#  como funciona un panel web. El motor sabe QUE es entrar, abrir, reenviar un
+#  formulario y leer un dato; las rutas, los nombres de los campos y los
+#  secretos son de cada empresa y van aca (CLAUDE.md 3.1 y 3.3).
+
+PATRON_DE_HUECO = r"\{(\w+)\}"
+
+
+class SesionWeb(Base):
+    """Como se entra al panel web del proveedor."""
+
+    #: Ruta de la pagina con el formulario de entrada.
+    entrada: str
+    #: NOMBRES de los secretos de la empresa con el usuario y la clave del
+    #: panel (Configuracion -> Credenciales). Nunca el valor.
+    usuario_ref: str
+    clave_ref: str
+    #: Como se llaman, en ESE formulario, los campos del usuario y la clave.
+    campo_usuario: str
+    campo_clave: str
+    #: El campo oculto de seguridad que el formulario trae y hay que devolver.
+    #: Vacio si el panel no usa uno.
+    campo_csrf: str = ""
+    #: Otros campos que el formulario de entrada manda siempre igual.
+    campos_fijos: dict[str, str] = Field(default_factory=dict)
+    #  Sin ruta de salida A PROPOSITO: la sesion se reusa entre llamadas,
+    #  porque el panel medido frena la entrada a la quinta en una hora (ver
+    #  nucleo/herramientas/web.py, «se entra una vez»).
+
+    @model_validator(mode="after")
+    def _completa(self):
+        for campo in ("entrada", "usuario_ref", "clave_ref", "campo_usuario", "campo_clave"):
+            if not str(getattr(self, campo) or "").strip():
+                raise ValueError(f"sesion_web: falta '{campo}'")
+        for ref in (self.usuario_ref, self.clave_ref):
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]*", ref):
+                raise ValueError(
+                    f"sesion_web: '{ref}' tiene que ser el NOMBRE de un secreto, en "
+                    f"MAYUSCULAS (ej. PANEL_WEB_USUARIO). El valor se carga en "
+                    f"Configuracion -> Credenciales, nunca en este archivo.")
+        if not self.entrada.startswith("/"):
+            raise ValueError(f"sesion_web: la ruta '{self.entrada}' tiene que empezar con /")
+        return self
+
+
+class CapturaWeb(Base):
+    """Un dato que se lee de la pagina a la que llego un paso."""
+
+    #: De donde: de la direccion final (tras las redirecciones), del valor de
+    #: un campo de formulario, o de un atributo de un elemento con id.
+    de: Literal["url", "campo", "atributo"]
+    #: url: expresion regular; se toma el grupo 1 (o todo, si no tiene grupos).
+    patron: str = ""
+    #: campo: el 'name' del input o textarea.
+    nombre: str = ""
+    #: atributo: el 'id' del elemento y cual de sus atributos.
+    id: str = ""
+    atributo: str = ""
+    #: Devuelve SOLO si el dato tiene algo (si/no), nunca el valor. Para lo que
+    #: no hace falta conocer -- p. ej. que una firma este puesta.
+    solo_si_tiene: bool = False
+    #: Si falta, el paso falla. Con False, vuelve como None.
+    obligatoria: bool = True
+
+    @model_validator(mode="after")
+    def _completa(self):
+        if self.de == "url":
+            if not self.patron:
+                raise ValueError("captura de 'url' sin 'patron'")
+            try:
+                re.compile(self.patron)
+            except re.error as e:
+                raise ValueError(f"captura de 'url': el patron no compila ({e})") from None
+        if self.de == "campo" and not self.nombre:
+            raise ValueError("captura de 'campo' sin 'nombre'")
+        if self.de == "atributo" and not (self.id and self.atributo):
+            raise ValueError("captura de 'atributo' sin 'id' o sin 'atributo'")
+        return self
+
+
+class BloqueDeArchivos(Base):
+    """Un formulario que recibe los archivos DE A UNO POR FILA, en filas que se
+    repiten (un 'formset': `<prefijo>-TOTAL_FORMS` y `<prefijo>-<n>-<campo>`).
+
+    Medido el 26/11/2026 en el primer panel: de los dos campos de archivo del
+    formulario del contrato, solo el de la fila repetible deja el archivo donde
+    la oficina lo ve (la pestaña «Subir Archivos» del cliente, con su titulo);
+    el campo multiple no dejo nada visible. Para subir varios en un guardado se
+    agrega una fila por archivo, cada una con su titulo.
+    """
+
+    #: El argumento con la LISTA de archivos ({"nombre", "base64", "tipo",
+    #: "titulo"}); el titulo, si falta, es el nombre.
+    argumento: str
+    #: El prefijo de las filas ('form' -> form-TOTAL_FORMS, form-0-archivo).
+    prefijo: str
+    #: Dentro de cada fila: el campo del archivo y, si hay, el del titulo.
+    campo_archivo: str
+    campo_titulo: str = ""
+
+    @model_validator(mode="after")
+    def _completo(self):
+        for campo in ("argumento", "prefijo", "campo_archivo"):
+            if not str(getattr(self, campo) or "").strip():
+                raise ValueError(f"bloque_de_archivos: falta '{campo}'")
+        return self
+
+
+class PasoWeb(Base):
+    """Un paso dentro del panel: ABRIR una pagina, o REENVIAR un formulario."""
+
+    #: Abrir esta ruta (GET). Puede llevar {huecos}.
+    abrir: str = ""
+    #: Abrir esta ruta, tomar el formulario 'id_formulario' TAL COMO VIENE
+    #: --todos sus campos con su valor--, cambiar solo 'valores', agregar
+    #: 'archivos' y enviarlo con el boton 'boton'. Lo que el formulario ya
+    #: traia vuelve igual: no se vacia nada que no se nombre.
+    formulario: str = ""
+    id_formulario: str = ""
+    #: Campo del formulario -> texto que lleva. "" lo vacia. Puede llevar {huecos}.
+    valores: dict[str, str] = Field(default_factory=dict)
+    #: Campo de archivo del formulario -> argumento con la LISTA de archivos
+    #: ({"nombre", "base64", "tipo"}). Varios archivos, el mismo campo.
+    archivos: dict[str, str] = Field(default_factory=dict)
+    #: Archivos de a uno por fila repetible, cada uno con su titulo. Ver
+    #: BloqueDeArchivos.
+    bloque_de_archivos: BloqueDeArchivos | None = None
+    #: Lo minimo que el panel acepta por archivo, en bytes (el primero medido
+    #: rechaza menos de 1 KB, y lo dice dentro de la pagina). Se frena antes.
+    archivo_minimo_bytes: int = Field(default=0, ge=0)
+    #: El 'name' del boton con que se envia (algunos paneles distinguen por el).
+    boton: str = ""
+    #: Como se sabe que el envio quedo: el proveedor respondio sin error
+    #: ('estado') o, ademas, redirigio a otra pagina ('redirige').
+    exito: Literal["estado", "redirige"] = "estado"
+    #: Datos que se leen de la pagina a la que se llego.
+    capturar: dict[str, CapturaWeb] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _uno_solo(self):
+        if bool(self.abrir) == bool(self.formulario):
+            raise ValueError("cada paso web abre UNA pagina ('abrir') o reenvia UN "
+                             "formulario ('formulario'), no las dos ni ninguna")
+        if self.formulario and not self.id_formulario:
+            raise ValueError("un paso con 'formulario' exige 'id_formulario'")
+        if self.abrir and (self.valores or self.archivos or self.boton
+                           or self.bloque_de_archivos):
+            raise ValueError("'valores', 'archivos', 'bloque_de_archivos' y 'boton' son de "
+                             "un paso con 'formulario', no de uno que solo abre")
+        ruta = self.abrir or self.formulario
+        if not ruta.startswith("/"):
+            raise ValueError(f"la ruta '{ruta}' tiene que empezar con /")
+        return self
+
+    def huecos(self) -> set[str]:
+        """Los {huecos} que este paso necesita llenos."""
+        textos = [self.abrir, self.formulario, *self.valores.values()]
+        return {h for t in textos for h in re.findall(PATRON_DE_HUECO, t or "")}
+
+
 class ParametrosDeAlta(Base):
     """Como se crea un cliente en ESTE proveedor  --  25/11/2026.
 
@@ -1223,7 +1391,9 @@ class Herramienta(Base):
     # 'interno': no llama a ninguna API -- el motor la resuelve el mismo
     # (hoy, solo confirma_identidad). Sin endpoint/base_url a proposito, ver
     # el validador mas abajo.
-    tipo: Literal["http", "agregado", "sql", "webhook", "batch", "interno"]
+    # 'web': entra al panel web del proveedor cuando su API no alcanza
+    # (26/11/2026). Ver SesionWeb y PasoWeb, y nucleo/herramientas/web.py.
+    tipo: Literal["http", "agregado", "sql", "webhook", "batch", "interno", "web"]
     descripcion: str = ""
     # QUE HACE, PARA UNA PERSONA  --  13/11/2026. 'descripcion' le habla al
     # MODELO ("LLAMA A ESTA HERRAMIENTA apenas consultar_senal_ont...") y la
@@ -1663,6 +1833,12 @@ class Herramienta(Base):
     #: servicio: solo por la puerta humana, la de quien valido.
     activa_servicio: bool = False
     parametros_de_activacion: ParametrosDeActivacion | None = None
+    #: EL PANEL WEB (26/11/2026), solo con tipo 'web': como se entra, que pasos
+    #: se dan y que argumentos llegan desde el codigo (los {huecos} de las
+    #: rutas y los archivos). Ver SesionWeb.
+    sesion_web: SesionWeb | None = None
+    pasos_web: list[PasoWeb] = Field(default_factory=list)
+    argumentos_web: list[str] = Field(default_factory=list)
     #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
     #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
     #: para poder recuperarlo si el id se pierde (Q2.1).
@@ -2276,6 +2452,46 @@ class Herramienta(Base):
                 f"igual para cualquier empresa) o 'base_url_ref' (varia por "
                 f"empresa, ej. un subdominio -- ver el comentario del campo "
                 f"en schema.py)")
+
+        #  EL PANEL WEB (26/11/2026). Todo se comprueba al cargar: un hueco que
+        #  nadie llena o un archivo que no llega fallan aca, no con un tecnico
+        #  en la casa de un cliente.
+        es_web = self.tipo == "web"
+        if es_web != (self.sesion_web is not None) or es_web != bool(self.pasos_web):
+            raise ValueError(
+                f"'{self.nombre}': el tipo 'web' va con 'sesion_web' y al menos un "
+                f"paso en 'pasos_web', y esos dos solo con el tipo 'web'.")
+        if self.argumentos_web and not es_web:
+            raise ValueError(f"'{self.nombre}': 'argumentos_web' es solo del tipo 'web'")
+        if es_web:
+            if not (self.base_url or self.base_url_ref):
+                raise ValueError(f"'{self.nombre}': el tipo 'web' exige 'base_url' o "
+                                 f"'base_url_ref': la direccion del panel")
+            if self.invocable_por_servicio:
+                raise ValueError(
+                    f"'{self.nombre}': una herramienta 'web' entra al panel con el "
+                    f"usuario de la empresa; no puede ser 'invocable_por_servicio'.")
+            conocidos = set(self.argumentos_web)
+            for n, paso in enumerate(self.pasos_web, 1):
+                faltan = sorted(paso.huecos() - conocidos)
+                if faltan:
+                    raise ValueError(
+                        f"'{self.nombre}', paso {n}: {faltan} no es un argumento "
+                        f"('argumentos_web') ni un dato que lea un paso anterior.")
+                llegan = set(paso.archivos.values())
+                if paso.bloque_de_archivos:
+                    llegan.add(paso.bloque_de_archivos.argumento)
+                sin_llegar = sorted(llegan - set(self.argumentos_web))
+                if sin_llegar:
+                    raise ValueError(
+                        f"'{self.nombre}', paso {n}: los archivos de {sin_llegar} no "
+                        f"llegan: declaralo en 'argumentos_web'.")
+                repetidas = sorted(set(paso.capturar) & conocidos)
+                if repetidas:
+                    raise ValueError(
+                        f"'{self.nombre}', paso {n}: {repetidas} ya es un argumento o "
+                        f"un dato leido antes; ponele otro nombre.")
+                conocidos |= set(paso.capturar)
 
         if self.base_url and self.base_url_ref:
             raise ValueError(
@@ -5209,6 +5425,15 @@ class TenantConfig(Base):
                         f"rol '{nombre_rol}' esta orientado a un cliente y no puede usar "
                         f"{prohibidas}: la cuenta de colaborador recibe el id del modelo, "
                         f"y con eso un cliente pediria la cuenta de otro.")
+            # EL PANEL WEB NO ES DEL MODELO (26/11/2026): entra con el usuario
+            # de la empresa a un panel donde se ve todo. La llama el backend,
+            # por su ruta propia.
+            web = sorted(h.nombre for h in self.herramientas
+                         if h.tipo == "web" and h.nombre in rol.puede_consultar)
+            if web:
+                raise ValueError(
+                    f"rol '{nombre_rol}' no puede usar {web}: una herramienta del "
+                    f"panel web no es de ningun agente.")
             # CREAR UN CLIENTE NO ES DEL MODELO (25/11/2026). Los datos de un alta
             # son los de una persona --documento, domicilio-- y los pone un
             # contrato que esa persona firmo. En el catalogo de un rol, un

@@ -1307,6 +1307,53 @@ PRE-instalacion y exige `front_dni_proof`, `back_dni_proof` y
 `proof_of_address` (archivos binarios), ademas de nombre, apellido, direccion y
 telefono. Es un flujo de ventas, no de campo.
 
+## El PANEL WEB (no la API): lo medido el 26/11/2026
+
+La API no tiene contratos, firmas ni archivos de un cliente. El panel si. Se
+midio en vivo, solo leyendo, con el usuario web de la empresa (secretos
+`WISPHUB_WEB_USUARIO` / `WISPHUB_WEB_CLAVE`) y la instalacion de PRUEBA 8039.
+Lo usa `nucleo/herramientas/web.py` (herramientas de tipo `web`).
+
+| Que | Medido |
+|---|---|
+| Entrada | `GET /accounts/login/`: formulario con `csrfmiddlewaretoken` (**comillas SIMPLES** en el HTML: un buscador que espera dobles no lo encuentra y el POST da 403), `login`, `password`, `token_device`, `name_device`, `type_device` (vacios) y `remember` (casilla marcada, valor `1`). **Sin captcha.** `POST` con `Referer` → 302 a `/panel/` |
+| **Freno** | **HTTP 429 a la QUINTA entrada en menos de una hora** (las cuatro anteriores entraron bien). Ventana y criterio (IP o usuario) sin medir. Por eso el motor reusa la sesion y espera tras un freno |
+| Contrato | `GET /instalaciones/agregar-contrato/<id_servicio>/` redirige a `/instalaciones/editar-contrato/<contrato_id>/` (8039 → 4928). Sospecha sin medir: ese GET CREA el contrato si el servicio no tenia |
+| Formulario | id `generarContrato`, POST a la misma URL, `multipart/form-data`. Campos: `contrato-fecha_inicio`, `contrato-fecha_final`, `contrato-contenido` (CKEditor, ya lleno desde la plantilla, ~47 mil caracteres), `contrato-firma` (textarea, vacia), `archivo` (varios archivos), formset `form-TOTAL_FORMS`/`INITIAL_FORMS`/`MIN_NUM_FORMS`/`MAX_NUM_FORMS` + `form-0-archivo`/`titulo`/`descripcion`/`visible`. Botones `guardar_contrato` y `guardar_contrato_pdf` |
+| Enlace de firma | `GET /clientes/generar-link-contrato/<usuario>/<id_servicio>/` → pagina «Generar Auto-Login Portal del Cliente»; el enlace esta en `href` de `<a id='auto-login'>` (y un boton «Copiar link del contrato»): `http://clientes.portalinternet.io/login-panel/<token de 3 partes>/`. **Entra al portal del cliente SIN clave, y por http.** No se guarda ni se registra |
+| `usuario` | Formato `nombre-slug@empresa`. Sale en la **lista** de `/api/instalaciones/` (campo `usuario`), igual que en la de clientes; para 8039 coincide con el del enlace |
+
+**GUARDAR, MEDIDO EL 26/11/2026** (prueba vigilada con permiso, contrato 4928):
+dos envios de `guardar_contrato` reenviando el formulario tal como viene. Los
+dos volvieron **HTTP 200 SIN redireccion**, con el formulario de nuevo y la
+razon DENTRO de la pagina, en `<ul class="errorlist">`: **«El tamaño del
+archivo es muy pequeño. El tamaño de archivo minimo permitido es 1.0 KB.»**
+(las imagenes de prueba pesaban menos). Nada quedo a medias: el texto del
+contrato tuvo el mismo largo y la misma huella antes y despues, la firma siguio
+vacia y no aparecio ningun archivo. Gestion del bloque de archivos:
+`TOTAL_FORMS=1`, `INITIAL_FORMS=0`, `MIN_NUM_FORMS=0`, `MAX_NUM_FORMS=1000`.
+
+**El tercer envio, con dos imagenes de ~70 KB, SI guardo** (mismo dia, con
+permiso): **redirigio** despues de guardar (la señal de exito del motor),
+el texto del contrato quedo con el mismo largo y la misma huella, y la firma
+vacia. De los dos campos de archivo:
+
+* **el bloque `form-0-archivo` + `form-0-titulo`** dejo el archivo en la
+  pestaña **«Subir Archivos» del cliente**, con su titulo, la fecha y como
+  «Subido por» el usuario web de la empresa; queda en S3 bajo
+  `media/documentos/<empresa>/<usuario del cliente>/<nombre>` y se enlaza
+  tambien desde la pagina del contrato (con firma temporal de S3 en el enlace:
+  no imprimirlo entero);
+* **el campo multiple `archivo` no dejo nada visible** en ningun lado.
+
+Por eso la herramienta usa el bloque (`bloque_de_archivos`): una fila por
+archivo, `form-TOTAL_FORMS` = cuantas. Varias filas en un solo guardado:
+**sin medir todavia** (se probo una).
+
+**SIN MEDIR** (no escribir sin permiso explicito): varias filas del bloque en
+un guardado; que la firma hecha por el portal quede en `contrato-firma`;
+cuanto duran el enlace y la sesion.
+
 ## Antes de dar por buena una integracion
 
 - [ ] Cada filtro del catalogo tiene `verificado_el`

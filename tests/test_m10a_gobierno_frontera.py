@@ -157,6 +157,20 @@ R2_REGISTRO_EXTERNO = {
     #  catalogo de todo rol. Si R2 es la clase correcta queda abierto para el
     #  dueño del producto, igual que con el alta.
     "activar_servicio_en_wisphub",
+    #  26/11/2026: guardar el contrato de WispHub de una instalacion, con los
+    #  documentos, por el PANEL WEB (la API no tiene contratos). R2 por el
+    #  criterio de la matriz: crea un REGISTRO --el contrato y sus adjuntos--
+    #  en el sistema del proveedor, y lo corrige otra operacion del mismo
+    #  sistema (editar el contrato en el panel). No toca un equipo ni dinero.
+    #
+    #  CON UN ASTERISCO, escrito en vez de disimulado: entra con el usuario
+    #  web de la empresa, que en el panel ve y puede todo. Por eso las
+    #  barreras en codigo: sale solo por su ruta y la puerta humana, el
+    #  esquema le prohibe ser invocable por un servicio y estar en el
+    #  catalogo de un rol, pasa por el mismo ultimo metro que la API
+    #  (nucleo/herramientas/web.py) y reenvia el formulario TAL COMO VIENE:
+    #  no vacia nada que no nombre --tampoco una firma ya puesta--.
+    "preparar_contrato_en_wisphub",
     #  30/09/2026. El nombre invita a leerla como R3 y no lo es: NO actua sobre
     #  la ONT/ONU en la casa del cliente. Escribe UN campo --'sn_onu'-- en la
     #  ficha del cliente de WispHub, con 'PUT /api/clientes/{id_servicio}/'. Es
