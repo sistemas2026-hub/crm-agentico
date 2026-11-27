@@ -1853,3 +1853,22 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 **NO VERIFICADO:** varias filas del bloque en un solo guardado (se probó una); que la firma hecha por el portal aparezca en `contrato-firma`; cuánto duran el enlace y la sesión.
 
 **En producción:** las credenciales web en Configuración → Credenciales y las tres herramientas en la configuración (sin pisar lo que solo tiene la base).
+
+### 8.41 DECISIÓN — El cliente firma el contrato del proveedor: al confirmar se crea la instalación y Dexter guarda ese contrato con la cédula y el recibo (26/11/2026)
+
+**El error que lo originó.** El cliente firmaba un contrato de Dexter y en WispHub no quedaba ni el contrato ni los documentos: alguien tenía que subirlos a mano en «Subir Archivos». El usuario decidió: *el cliente firma SOLO el contrato de WispHub*, *la instalación se crea al confirmar el contrato*, la cédula y el recibo van a «Subir Archivos» del cliente (*«Sí, a Subir Archivos»*; al ticket siguen sin ir, §8.34) y la app **no deja confirmar hasta que esas fotos estén subidas** (*«Exigirlas antes de confirmar»*). El motor ya sabía manejar el panel (§8.40).
+
+**Qué se decidió.**
+
+1. **Interruptor de la empresa** `firma_en_el_proveedor` (Programación → contrato; exige «Crear al cliente en el proveedor» y «Una persona valida la instalación», que desde hoy también se ven y se cambian ahí). Queda fijo en cada contrato al confirmarlo.
+2. **Confirmar sin firma.** La app no muestra la firma de Dexter: «Confirmar contrato». El servidor exige las fotos marcadas «solo en la plataforma» de esta vuelta (cédula por delante y por detrás, recibo) y, si falta alguna, dice cuáles. El PDF de Dexter se arma igual, con «Firma en el contrato del proveedor de servicio» en vez del recuadro.
+3. **La instalación se pide al confirmar**, como instalación. Creada (`alta_en_el_isp._creado`), se pide **preparar el contrato del proveedor**: el motor comprueba que la instalación existe con ese número y es de ese contrato, saca de esa fila el usuario del cliente, y guarda el contrato tal como viene de la plantilla, sin firma, con los documentos en «Subir Archivos» (uno por fila, con su título), por la **puerta humana de quien confirmó**, una vez por pedido. Queda `lista` con el número del contrato del proveedor.
+4. **«Firmar en WispHub»** pide el enlace cada vez (entra al portal del cliente sin clave: **no se guarda, no se registra, `no-store`**) y lo abre en el navegador del teléfono. **«Ya firmó: comprobar»** lo lee en el proveedor (sí/no) y deja el contrato `firmada`.
+5. **«No se sabe» no se reintenta solo**: si el contrato salió y no se supo si quedó, va `por_revisar` (pedirlo otra vez sube los documentos otra vez); lo vuelve a pedir una persona desde «Por activar», después de mirar. `fallida` (el proveedor dijo que no, o nada salió) se puede volver a pedir.
+6. **La revisión del cierre** dice cómo está la firma: firmada ✔, lista o preparándose en duda, fallida o por revisar ✖. Y en «Por activar» ya no sale «la revisión no se pudo calcular» en una instalación aprobada: la revisión solo aplica a lo que nadie validó.
+
+**VERIFICADO** (local, con la guarda `SIN_EFECTOS_EXTERNOS`): motor `test_contrato_del_proveedor` (preparar una vez por la puerta humana con el usuario de su instalación, cero escrituras si no es suya, interruptor, «no se sabe», documentos, enlace fuera del registro, firma sí/no, rutas) y mata tres mutaciones; guarda de arquitectura y `test_panel_web` en verde; backend `test_contrato_del_proveedor` **23** (incluido que el reintento de la oficina, si la instalación falló, la vuelva a pedir COMO INSTALACIÓN y no como cliente activo) y 164 de las suites vecinas; web 74 (Instalaciones, Programación, contrato); app 23 de la pantalla del contrato. Base local v17 y migración 0062 aplicada.
+
+**NO VERIFICADO:** la corrida completa contra WispHub real (confirmar → instalación → contrato con documentos → enlace → firma), que pide una prueba vigilada con permiso; que la firma hecha por el portal quede en `contrato-firma`; varias filas del bloque de archivos en un guardado. **Pendiente (paso 4):** el costo y el serial al finalizar, y las fotos del trabajo en «Subir Archivos».
+
+**En producción:** la migración 0062, las marcas y `campo_usuario` en la configuración, y encender el interruptor.

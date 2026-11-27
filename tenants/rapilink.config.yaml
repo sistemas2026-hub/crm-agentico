@@ -6580,6 +6580,9 @@ herramientas:
       campo_nombre_en_router: servicio
       campo_documento: cedula
       son_instalaciones: true
+      # El usuario del cliente (nombre-slug@empresa): lo pide el enlace de
+      # firma. Esta en la LISTA de instalaciones (medido el 26/11/2026).
+      campo_usuario: usuario
 
   - nombre: activar_servicio_en_wisphub
     tipo: http
@@ -6630,6 +6633,7 @@ herramientas:
     roles_permitidos: [administracion]
     base_url: https://wisphub.io
     timeout_segundos: 60
+    prepara_contrato_del_proveedor: true
     sesion_web: &panel_wisphub
       entrada: /accounts/login/
       usuario_ref: WISPHUB_WEB_USUARIO
@@ -6664,6 +6668,7 @@ herramientas:
     roles_permitidos: [administracion]
     base_url: https://wisphub.io
     timeout_segundos: 60
+    da_enlace_de_firma: true
     sesion_web: *panel_wisphub
     argumentos_web: [usuario, id_servicio]
     pasos_web:
@@ -6680,6 +6685,7 @@ herramientas:
     roles_permitidos: [administracion]
     base_url: https://wisphub.io
     timeout_segundos: 60
+    lee_firma_del_contrato: true
     sesion_web: *panel_wisphub
     argumentos_web: [contrato_id]
     pasos_web:

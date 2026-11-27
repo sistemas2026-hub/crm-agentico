@@ -45,6 +45,14 @@
     (data.estado || '') === p.estado && Boolean(data.automatica) === Boolean(p.automatica);
   import { CheckCircle2, AlertTriangle, MapPin, FileText, Inbox, BadgeCheck } from '@lucide/svelte';
 
+  //  EL CONTRATO DEL PROVEEDOR (26/11/2026), en palabras.
+  const TEXTO_FIRMA = /** @type {Record<string, string>} */ ({
+    pedida: 'Contrato del proveedor: preparándose con la cédula y el recibo.',
+    lista: 'Contrato del proveedor: listo, esperando la firma del cliente.',
+    firmada: 'Contrato del proveedor: firmado por el cliente.',
+    fallida: 'Contrato del proveedor: no quedó listo.',
+    por_revisar: 'Contrato del proveedor: no se sabe si quedó.'
+  });
   //  POR ACTIVAR (26/11/2026): cual tarjeta tiene abierto el «Devolver».
   let devolviendo = $state('');
   const MARCA = /** @type {Record<string, string>} */ ({ true: '✔', false: '✖', null: '?' });
@@ -241,6 +249,27 @@
         {#if c?.alta?.estado === 'fallida' || c?.alta?.por_revisar}
           <p class="fallo"><AlertTriangle size={14} /><span>La instalación no quedó creada en el proveedor. {c.alta.detalle ?? ''}</span></p>
         {/if}
+        <!-- EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026). -->
+        {#if c?.firma_proveedor?.activa}
+          {@const fp = c.firma_proveedor}
+          <p class="origen"><span>{TEXTO_FIRMA[fp.estado ?? ''] ?? 'Contrato del proveedor: sin pedir.'}{#if fp.contrato}{' · '}N.º {fp.contrato}{/if}</span></p>
+          {#if fp.detalle}
+            <p class="fallo"><AlertTriangle size={14} /><span>{fp.detalle}{#if (fp.avisos ?? []).length}{' '}(el proveedor dijo: {fp.avisos.join(' · ')}){/if}</span></p>
+          {/if}
+          {#if fp.se_puede_pedir && (fp.estado === 'fallida' || fp.estado === 'por_revisar')}
+            <form method="POST" action="?/prepararContratoProveedor" use:enhance={() => {
+              enviando = i.orden_id;
+              return async ({ update }) => { await update({ reset: false }); enviando = ''; };
+            }}>
+              <input type="hidden" name="contrato" value={c.id} />
+              <input type="hidden" name="orden" value={i.orden_id} />
+              <button type="submit" class="cancelar" disabled={enviando === i.orden_id}
+                      title={fp.estado === 'por_revisar' ? 'Antes, mira en el proveedor si el contrato quedó: pedirlo otra vez sube los documentos otra vez.' : ''}>
+                Volver a preparar el contrato del proveedor
+              </button>
+            </form>
+          {/if}
+        {/if}
 
         {#if r}
           <div class="revision">
@@ -270,7 +299,9 @@
               </div>
             {/if}
           </div>
-        {:else}
+        {:else if i.espera === 'validacion'}
+          <!-- Aprobada, la revisión ya no corre (solo aplica a lo que nadie
+               validó): no es un error y no se dice como tal. -->
           <p class="origen"><span class="tenue">La revisión automática no se pudo calcular: revisa las fotos en la orden.</span></p>
         {/if}
 

@@ -31,3 +31,15 @@ export async function aprobarInstalacion(cookies, ordenId) {
   return apiRequest(`/campo/trabajos/${encodeURIComponent(ordenId)}/aprobar-instalacion/`,
     { method: 'POST', body: {} }, cookies);
 }
+
+/**
+ * EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026): pedir otra vez que
+ * se prepare, cuando falló o quedó «por revisar» y alguien ya miró en el
+ * proveedor. 202: se encoló; 409 con el porqué si no se puede.
+ * @param {any} cookies
+ * @param {string} contratoId
+ */
+export async function prepararContratoProveedor(cookies, contratoId) {
+  return apiRequest(`/campo/contratos/${encodeURIComponent(contratoId)}/preparar-contrato-proveedor/`,
+    { method: 'POST', body: {} }, cookies);
+}

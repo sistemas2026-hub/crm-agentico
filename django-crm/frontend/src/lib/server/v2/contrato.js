@@ -85,6 +85,10 @@ export function cuerpoDeContrato(f) {
     //  no habría forma de apagarlo desde la pantalla.
     crear_en_el_isp: f.get('crear_en_el_isp') != null,
     activar_onu: f.get('activar_onu') != null,
+    //  26/11/2026: la instalación la valida una persona, y el cliente firma el
+    //  contrato del proveedor. Casilla sin marcar = false, como las de arriba.
+    validar_antes_de_activar: f.get('validar_antes_de_activar') != null,
+    firma_en_el_proveedor: f.get('firma_en_el_proveedor') != null,
     digitos_del_telefono: digitos === '' ? 0 : /^\d+$/.test(digitos) ? Number(digitos) : digitos
   };
 }

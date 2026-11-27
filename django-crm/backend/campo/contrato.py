@@ -160,6 +160,12 @@ class ConfiguracionDeContrato(BaseModel):
     #  Encendido: el alta se pide al «Finalizar trabajo» y COMO INSTALACION, y
     #  una persona la aprueba en Dexter, que la activa. Ver campo/instalacion.py.
     validar_antes_de_activar = models.BooleanField(default=False)
+    #  EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR, NO UNO DE DEXTER (26/11/2026).
+    #  Encendido: el tecnico confirma los datos sin firma, la instalacion se
+    #  crea en ese momento y Dexter guarda el contrato del proveedor con la
+    #  cedula y el recibo; el cliente firma ahi. Exige `crear_en_el_isp` y
+    #  `validar_antes_de_activar`. Ver campo/contrato_del_proveedor.py.
+    firma_en_el_proveedor = models.BooleanField(default=False)
 
     class Meta:
         db_table = "campo_configuracion_contrato"
@@ -174,14 +180,15 @@ class ConfiguracionDeContrato(BaseModel):
                 "abreviaturas_de_direccion": list(self.abreviaturas_de_direccion or []),
                 "crear_en_el_isp": self.crear_en_el_isp,
                 "activar_onu": self.activar_onu,
-                "validar_antes_de_activar": self.validar_antes_de_activar}
+                "validar_antes_de_activar": self.validar_antes_de_activar,
+                "firma_en_el_proveedor": self.firma_en_el_proveedor}
 
 
 VACIA = {"nit": "", "servidores": [], "texto_condiciones": "",
          "datos_en_mayusculas": False, "barrio_en_la_direccion": False,
          "digitos_del_telefono": 0, "abreviaturas_de_direccion": [],
          "crear_en_el_isp": False, "activar_onu": False,
-         "validar_antes_de_activar": False}
+         "validar_antes_de_activar": False, "firma_en_el_proveedor": False}
 
 #: Tope de `digitos_del_telefono`: ningun pais pasa de 15 (E.164).
 MAXIMO_DIGITOS_DE_TELEFONO = 15
@@ -318,6 +325,30 @@ class ContratoDeServicio(BaseModel):
                                           related_name="altas_resueltas")
     alta_resuelta_en = models.DateTimeField(null=True, blank=True)
 
+    #  EL CONTRATO DEL PROVEEDOR (26/11/2026): el cliente firma el contrato
+    #  del proveedor. `firma_en_el_proveedor` queda fijo al confirmar (lo que
+    #  la empresa tenia en ese momento). Ver campo/contrato_del_proveedor.py.
+    firma_en_el_proveedor = models.BooleanField(default=False)
+    FIRMA_PROVEEDOR_PEDIDA = "pedida"          # se esta preparando
+    FIRMA_PROVEEDOR_LISTA = "lista"            # guardado: el cliente puede firmar
+    FIRMA_PROVEEDOR_FIRMADA = "firmada"        # el proveedor ya tiene la firma
+    FIRMA_PROVEEDOR_FALLIDA = "fallida"        # no quedo: se sabe que no
+    FIRMA_PROVEEDOR_POR_REVISAR = "por_revisar"  # salio y nadie sabe si quedo
+    firma_proveedor_estado = models.CharField(max_length=20, blank=True, default="")
+    firma_proveedor_detalle = models.CharField(max_length=300, blank=True, default="")
+    firma_proveedor_avisos = models.JSONField(default=list, blank=True)
+    firma_proveedor_intento = models.PositiveSmallIntegerField(default=0)
+    firma_proveedor_actualizada_en = models.DateTimeField(null=True, blank=True)
+    firma_proveedor_pedida_por = models.ForeignKey(
+        "common.Profile", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="contratos_del_proveedor_pedidos")
+    #: El numero del contrato en el proveedor y el usuario del cliente alli
+    #: (el que pide el enlace de firma). El ENLACE no se guarda: entra al
+    #: portal del cliente sin clave, y se pide cada vez.
+    contrato_proveedor = models.CharField(max_length=64, blank=True, default="")
+    usuario_proveedor = models.CharField(max_length=200, blank=True, default="")
+    firmado_en_el_proveedor_en = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         db_table = "campo_contrato_de_servicio"
         verbose_name = "Contrato de servicio"
@@ -381,6 +412,24 @@ class ContratoDeServicio(BaseModel):
                 "activada_en": self.activado_en.isoformat() if self.activado_en else None,
                 "se_puede_activar": (self.estado == self.INSTALACION
                                      and self.activacion_estado not in self.ACTIVACION_SIN_RESOLVER),
+            },
+            #  EL CONTRATO DEL PROVEEDOR (26/11/2026). Ni el usuario del cliente
+            #  ni el enlace viajan aca: el enlace se pide aparte, cada vez.
+            "firma_proveedor": {
+                "activa": bool(self.firma_en_el_proveedor),
+                "estado": self.firma_proveedor_estado or None,
+                "detalle": self.firma_proveedor_detalle or None,
+                "avisos": list(self.firma_proveedor_avisos or []),
+                "contrato": self.contrato_proveedor or None,
+                "puede_firmar": self.firma_proveedor_estado == self.FIRMA_PROVEEDOR_LISTA,
+                "firmado": self.firma_proveedor_estado == self.FIRMA_PROVEEDOR_FIRMADA,
+                "firmado_en": (self.firmado_en_el_proveedor_en.isoformat()
+                               if self.firmado_en_el_proveedor_en else None),
+                "se_puede_pedir": (self.firma_en_el_proveedor
+                                   and self.estado in (self.INSTALACION, self.EN_EL_ISP)
+                                   and self.firma_proveedor_estado in (
+                                       "", self.FIRMA_PROVEEDOR_FALLIDA,
+                                       self.FIRMA_PROVEEDOR_POR_REVISAR)),
             },
             "anulado_en": self.anulado_en.isoformat() if self.anulado_en else None,
             "motivo_anulacion": self.motivo_anulacion or None,
@@ -859,7 +908,26 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
         raise ContratoInvalido(
             "Esa dirección IP ya la eligió otro contrato. Elige otra.")
 
-    firma = _firma_de(cuerpo)
+    #  EL CLIENTE FIRMA EN EL PROVEEDOR (26/11/2026): aca no hay firma, y la
+    #  cedula y el recibo TIENEN que estar subidos (decision del usuario:
+    #  «exigirlas antes de confirmar»): se guardan con el contrato del
+    #  proveedor apenas se crea la instalacion, antes de que el cliente firme.
+    sin_firma = bool(config.get("firma_en_el_proveedor"))
+    if sin_firma:
+        from campo.contrato_del_proveedor import faltan_documentos
+
+        faltan = faltan_documentos(orden)
+        if faltan is None:
+            raise ContratoInvalido("No se pudo saber qué documentos pide la plantilla. "
+                                   "Avisa a la oficina.")
+        if faltan:
+            raise ContratoInvalido(
+                "Antes de confirmar tienen que estar subidas: " + ", ".join(faltan)
+                + ". Si ya las tomaste, espera a que suban (necesitas señal) y vuelve a "
+                  "tocar «Confirmar contrato».")
+        firma = b""
+    else:
+        firma = _firma_de(cuerpo)
     #  LA IP LA ASIGNA EL SISTEMA (el usuario, 26/11/2026: «seria mejor si el
     #  sistema le indica la IP al contrato sin que tenga que elegir el
     #  tecnico»). Si el telefono no manda una, se toma la primera libre del
@@ -929,6 +997,7 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
         solicitud_id=base.get("solicitud_id"),
         numero=numero, datos=datos, huella=huella,
         firmado_por=profile, firmado_en=ahora,
+        firma_en_el_proveedor=sin_firma,
     )
     pdf = armar_pdf(contrato, firma, config)
     contrato.pdf.save(f"{numero}.pdf", pdf, save=False)
@@ -1080,7 +1149,9 @@ def armar_pdf(contrato: "ContratoDeServicio", firma: bytes, config: dict):
         "condiciones": config.get("texto_condiciones", ""),
         "coordenadas": _punto(d.get("gps")),
         "gps": _punto(d.get("gps_del_telefono")),
-        "firma": _data_uri(firma, "image/png"),
+        #  Sin firma (el cliente firma el contrato del proveedor): el papel
+        #  lo dice en vez de mostrar un recuadro vacio.
+        "firma": _data_uri(firma, "image/png") if firma else "",
         "huella": contrato.huella,
     }
     html = render_to_string("campo/contrato.html", contexto)

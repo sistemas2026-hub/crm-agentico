@@ -79,6 +79,7 @@ from nucleo.ingesta.docx import procesar
 from nucleo.seguimiento import activar_onu
 from nucleo.seguimiento import alta_de_cliente
 from nucleo.seguimiento import borrador
+from nucleo.seguimiento import contrato_del_proveedor
 from nucleo.seguimiento import cierre_por_propuesta
 from nucleo.seguimiento import cierre_por_validacion
 from nucleo.seguimiento import coordenada_del_cliente
@@ -6250,6 +6251,107 @@ def interno_comprobar_activacion_del_contrato(contrato_id: str):
         config, tenant, datos=datos, id_servicio=cuerpo.get("id_servicio"))
     return (jsonify(resultado.como_dict()),
             _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
+
+
+#  EL CONTRATO DEL PROVEEDOR (26/11/2026): el cliente firma el contrato del
+#  proveedor. Ver nucleo/seguimiento/contrato_del_proveedor.py.
+_CODIGOS_DEL_CONTRATO = {
+    contrato_del_proveedor.PREPARADO: 200, contrato_del_proveedor.LISTO: 200,
+    contrato_del_proveedor.NO_SE_SABE: 202, contrato_del_proveedor.EN_CURSO: 202,
+    contrato_del_proveedor.DATOS_INVALIDOS: 400,
+    contrato_del_proveedor.NO_SE_PUDO_COMPROBAR: 502,
+}
+
+
+def _cuerpo_de(permitidos: set):
+    """`(tenant, cuerpo, None)` o `(None, None, respuesta de error)`."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return None, None, (jsonify({"error": "Falta el parametro 'tenant'."}), 400)
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return None, None, (jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400)
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return None, None, (jsonify({"error": f"esta ruta solo acepta {sorted(permitidos)}. "
+                                              f"No acepta {sobra}."}), 400)
+    return tenant, cuerpo, None
+
+
+@app.post("/interno/contrato/<contrato_id>/preparar-contrato-proveedor")
+def interno_preparar_contrato_del_proveedor(contrato_id: str):
+    """
+    Guarda el contrato del proveedor de la instalacion de un contrato, sin
+    firma y con los documentos. ESCRIBE: puerta HUMANA de quien confirmo el
+    contrato, `origen` armado aca con el contrato y el numero de pedido (base
+    de la clave idempotente), y solo si la instalacion es de ESE contrato.
+    """
+    tenant, cuerpo, error = _cuerpo_de({"actor", "datos", "intento", "id_servicio",
+                                        "archivos"})
+    if error:
+        return error
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "Falta 'actor': la puerta humana necesita saber "
+                                 "quien confirmo el contrato."}), 400
+    intento = cuerpo.get("intento", 1)
+    if (isinstance(intento, bool) or not isinstance(intento, int)
+            or not 1 <= intento <= _PEDIDOS_POR_CONTRATO):
+        return jsonify({"error": f"'intento' es un numero de 1 a "
+                                 f"{_PEDIDOS_POR_CONTRATO}."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = contrato_del_proveedor.preparar(
+        config, tenant, actor=actor, datos=datos, id_servicio=cuerpo.get("id_servicio"),
+        archivos=cuerpo.get("archivos"),
+        origen=f"contrato_del_proveedor:{contrato_id}:{intento}")
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_CONTRATO.get(resultado.estado, 409))
+
+
+@app.post("/interno/contrato/<contrato_id>/enlace-de-firma")
+def interno_enlace_de_firma(contrato_id: str):
+    """
+    El enlace para que el cliente firme el contrato del proveedor. Entra al
+    portal del cliente SIN clave: esta ruta no lo guarda ni lo registra, y la
+    respuesta va directo al telefono del tecnico. Solo lee.
+    """
+    tenant, cuerpo, error = _cuerpo_de({"usuario", "id_servicio"})
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = contrato_del_proveedor.enlace(
+        config, tenant, usuario=cuerpo.get("usuario"), id_servicio=cuerpo.get("id_servicio"))
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_CONTRATO.get(resultado.estado, 409))
+
+
+@app.post("/interno/contrato/<contrato_id>/firma-en-el-proveedor")
+def interno_firma_en_el_proveedor(contrato_id: str):
+    """Si el contrato del proveedor ya tiene la firma del cliente. Si/no.
+    Solo lee."""
+    tenant, cuerpo, error = _cuerpo_de({"contrato_id"})
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = contrato_del_proveedor.firmado(config, tenant,
+                                               contrato_id=cuerpo.get("contrato_id"))
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_CONTRATO.get(resultado.estado, 409))
 
 
 @app.post("/interno/contrato/<contrato_id>/comprobar-cliente")

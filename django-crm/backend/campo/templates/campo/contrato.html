@@ -111,7 +111,7 @@ contrato con clausulas inventadas.
 <div class="firmas">
   <div class="firma">
     <div class="rotulo">Firma del suscriptor</div>
-    <img src="{{ firma }}" alt="">
+    {% if firma %}<img src="{{ firma }}" alt="">{% else %}<div style="height:70px;display:flex;align-items:center;color:#5b6b7a;font-size:9pt">Firma en el contrato del proveedor de servicio</div>{% endif %}
     <div class="linea">{{ c.nombre }} {{ c.apellido }} · {{ c.tipo_documento }} {{ c.numero_documento }}</div>
   </div>
   <div class="firma">

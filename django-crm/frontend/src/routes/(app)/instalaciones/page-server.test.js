@@ -138,6 +138,30 @@ describe('Instalaciones: Por activar (26/11/2026)', () => {
     expect(r.data.error).toContain('Todavía no hay una instalación');
   });
 
+  it('VOLVER A PREPARAR el contrato del proveedor le llega a ESE contrato (26/11/2026)', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ contrato: { firma_proveedor: { estado: 'pedida' } } });
+    const r = /** @type {any} */ (await actions.prepararContratoProveedor(
+      pedido({ contrato: 'con-7', orden: 'o-1' })));
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/contratos/con-7/preparar-contrato-proveedor/');
+    expect(apiRequest.mock.calls[0][1]).toEqual({ method: 'POST', body: {} });
+    expect(r.hecho).toContain('preparando');
+  });
+
+  it('...y si no se puede (409), lo dice tal cual; sin contrato no llama', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockRejectedValue(Object.assign(new Error('x'), {
+      status: 409, body: { detail: 'Ahora no se puede pedir: o se está preparando, o ya está listo.' } }));
+    const r = /** @type {any} */ (await actions.prepararContratoProveedor(
+      pedido({ contrato: 'con-7', orden: 'o-1' })));
+    expect(r.status).toBe(409);
+    expect(r.data.error).toContain('Ahora no se puede pedir');
+    apiRequest.mockReset();
+    const sin = /** @type {any} */ (await actions.prepararContratoProveedor(pedido({ orden: 'o-1' })));
+    expect(sin.status).toBe(400);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
   it('DEVOLVER pide qué rehacer y por qué, y va por la validación de siempre', async () => {
     apiRequest.mockReset();
     apiRequest.mockResolvedValue({});

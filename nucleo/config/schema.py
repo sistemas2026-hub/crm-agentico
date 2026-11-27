@@ -1247,6 +1247,9 @@ class ParametrosDeBusquedaPorIp(Base):
     #: la instalacion recien creada se confirma aca. Que una ya es CLIENTE lo
     #: dice solo la lista que no lleva esta marca.
     son_instalaciones: bool = False
+    #: Donde se lee el USUARIO del cliente en el proveedor (26/11/2026): el que
+    #: pide el enlace para que firme su contrato. Vacio = no se lee.
+    campo_usuario: str = ""
 
     @model_validator(mode="after")
     def _con_nombre(self):
@@ -1839,6 +1842,19 @@ class Herramienta(Base):
     sesion_web: SesionWeb | None = None
     pasos_web: list[PasoWeb] = Field(default_factory=list)
     argumentos_web: list[str] = Field(default_factory=list)
+    #: EL CONTRATO DEL PROVEEDOR (26/11/2026): el cliente firma el contrato del
+    #: proveedor, no uno de Dexter. Tres herramientas 'web', cada una con su
+    #: marca; el motor las encuentra por la marca (nucleo/seguimiento/
+    #: contrato_del_proveedor.py). Los NOMBRES de sus argumentos y de lo que
+    #: leen son el vocabulario del motor -- como se llama cada cosa en el panel
+    #: va en sus pasos:
+    #:   prepara_contrato_del_proveedor: argumentos id_servicio y archivos,
+    #:     lee contrato_id. Escribe.
+    #:   da_enlace_de_firma: argumentos usuario e id_servicio, lee enlace.
+    #:   lee_firma_del_contrato: argumento contrato_id, lee firmado (si/no).
+    prepara_contrato_del_proveedor: bool = False
+    da_enlace_de_firma: bool = False
+    lee_firma_del_contrato: bool = False
     #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
     #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
     #: para poder recuperarlo si el id se pierde (Q2.1).
@@ -2492,6 +2508,37 @@ class Herramienta(Base):
                         f"'{self.nombre}', paso {n}: {repetidas} ya es un argumento o "
                         f"un dato leido antes; ponele otro nombre.")
                 conocidos |= set(paso.capturar)
+
+        #  LAS MARCAS DEL CONTRATO DEL PROVEEDOR: cada una con su vocabulario.
+        for marca, escribe, args, lee in (
+                ("prepara_contrato_del_proveedor", True, {"id_servicio", "archivos"},
+                 "contrato_id"),
+                ("da_enlace_de_firma", False, {"usuario", "id_servicio"}, "enlace"),
+                ("lee_firma_del_contrato", False, {"contrato_id"}, "firmado")):
+            if not getattr(self, marca):
+                continue
+            if not es_web:
+                raise ValueError(f"'{self.nombre}': '{marca}' es de una herramienta 'web'")
+            if escribe == self.solo_lectura:
+                raise ValueError(
+                    f"'{self.nombre}': '{marca}' " + ("escribe en el proveedor y no puede "
+                                                      "ser de solo lectura" if escribe else
+                                                      "solo lee y tiene que ser de solo lectura"))
+            faltan = sorted(args - set(self.argumentos_web))
+            if faltan:
+                raise ValueError(f"'{self.nombre}': '{marca}' recibe {sorted(args)}; "
+                                 f"faltan en 'argumentos_web': {faltan}")
+            capturas = {n: c for p in self.pasos_web for n, c in p.capturar.items()}
+            if lee not in capturas:
+                raise ValueError(f"'{self.nombre}': '{marca}' tiene que leer '{lee}' "
+                                 f"en algun paso")
+            if lee == "firmado" and not capturas[lee].solo_si_tiene:
+                raise ValueError(f"'{self.nombre}': 'firmado' se lee con 'solo_si_tiene': "
+                                 f"si/no, nunca la firma")
+        if sum(bool(getattr(self, m)) for m in ("prepara_contrato_del_proveedor",
+                                                "da_enlace_de_firma",
+                                                "lee_firma_del_contrato")) > 1:
+            raise ValueError(f"'{self.nombre}': una herramienta, una marca del contrato")
 
         if self.base_url and self.base_url_ref:
             raise ValueError(

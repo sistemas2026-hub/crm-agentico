@@ -6,6 +6,10 @@
     POST /api/campo/contratos/<id>/anular/    {motivo}: deja el contrato sin efecto (25/11/2026)
     POST /api/campo/contratos/<id>/crear-en-el-isp/   pide (otra vez) crear al cliente en el ISP
     POST /api/campo/contratos/<id>/resolver-alta/     gestion dice si el cliente quedo creado
+    POST /api/campo/trabajos/<id>/contrato/enlace-de-firma/   el enlace para firmar en el
+                                               proveedor (26/11/2026). NO se guarda
+    POST /api/campo/trabajos/<id>/contrato/comprobar-firma/   lee si el cliente ya firmo
+    POST /api/campo/contratos/<id>/preparar-contrato-proveedor/  pide (otra vez) prepararlo
     GET  /api/campo/contrato/configuracion/   lo que la empresa pone en su contrato (gestion)
     PUT  /api/campo/contrato/configuracion/   {nit, servidores:[{id_zona,nombre}], texto_condiciones,
                                                datos_en_mayusculas, barrio_en_la_direccion,
@@ -56,6 +60,9 @@ class ContratoDeLaOrdenView(APIView):
             "contrato": firmado.como_dict() if firmado else None,
             **pantalla,
             "condiciones_cargadas": bool(config["texto_condiciones"].strip()),
+            #  EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026): la app no
+            #  muestra la firma de Dexter, confirma los datos.
+            "firma_en_el_proveedor": bool(config.get("firma_en_el_proveedor")),
             "empresa": getattr(orden.org, "name", "") or "",
             #  Cuantos contratos de esta orden se anularon antes: la pantalla
             #  lo dice para que un borrador en blanco no parezca «nunca firmo».
@@ -82,8 +89,13 @@ class ContratoDeLaOrdenView(APIView):
 
             #  Si una persona valida la instalacion (26/11/2026), el alta NO
             #  sale al firmar: sale al «Finalizar trabajo» (campo/instalacion.py).
+            #  SALVO si el cliente firma el contrato del proveedor: ese contrato
+            #  necesita la instalacion, asi que se pide AHORA, como instalacion
+            #  (campo/contrato_del_proveedor.py).
             config = configuracion_de(orden.org)
-            if config["crear_en_el_isp"] and not config["validar_antes_de_activar"]:
+            if contrato.firma_en_el_proveedor and config["crear_en_el_isp"]:
+                alta_en_el_isp.pedir_alta(contrato, como_instalacion=True)
+            elif config["crear_en_el_isp"] and not config["validar_antes_de_activar"]:
                 alta_en_el_isp.pedir_alta(contrato)
         return Response({"contrato": contrato.como_dict()},
                         status=status.HTTP_201_CREATED if creado else status.HTTP_200_OK)
@@ -186,7 +198,14 @@ class CrearEnElIspView(APIView):
                            "revisarlo en el proveedor (Instalaciones).",
                  "contrato": contrato.como_dict()},
                 status=status.HTTP_409_CONFLICT)
-        if not alta_en_el_isp.pedir_alta(contrato, por=request.profile):
+        #  SI EL CONTRATO PASA POR INSTALACION (26/11/2026) --se firma en el
+        #  proveedor, o una persona valida antes de activar--, el reintento
+        #  tambien la pide COMO INSTALACION: si no, crearia un cliente activo
+        #  que nadie valido.
+        como_instalacion = bool(contrato.alta_como_instalacion or contrato.firma_en_el_proveedor
+                                or configuracion_de(contrato.org).get("validar_antes_de_activar"))
+        if not alta_en_el_isp.pedir_alta(contrato, por=request.profile,
+                                         como_instalacion=como_instalacion):
             contrato.refresh_from_db()
             return Response({"detail": "El cliente ya se está creando. Espera a que termine.",
                              "contrato": contrato.como_dict()},
@@ -340,7 +359,9 @@ class ConfiguracionDeContratoView(APIView):
                               ("crear_en_el_isp", "Crear al cliente en el proveedor al firmar"),
                               ("activar_onu", "Activar la ONU desde la app"),
                               ("validar_antes_de_activar",
-                               "Una persona valida la instalación antes de activarla")):
+                               "Una persona valida la instalación antes de activarla"),
+                              ("firma_en_el_proveedor",
+                               "El cliente firma el contrato del proveedor")):
             if campo in datos:
                 if not isinstance(datos[campo], bool):
                     return Response({"detail": f"«{nombre}» es sí o no."},
@@ -363,6 +384,92 @@ class ConfiguracionDeContratoView(APIView):
         fila, _ = ConfiguracionDeContrato.objects.get_or_create(org=request.profile.org)
         for campo, valor in cambios.items():
             setattr(fila, campo, valor)
+        #  FIRMAR EN EL PROVEEDOR NECESITA LA INSTALACION CREADA DESDE AQUI, Y
+        #  LA VALIDACION DE UNA PERSONA (26/11/2026): sin eso no hay contrato
+        #  del proveedor que preparar.
+        if fila.firma_en_el_proveedor and not (fila.crear_en_el_isp
+                                               and fila.validar_antes_de_activar):
+            return Response(
+                {"detail": "Para que el cliente firme el contrato del proveedor tienen que "
+                           "estar encendidos «Crear al cliente en el proveedor» y «Una "
+                           "persona valida la instalación antes de activarla»."},
+                status=status.HTTP_400_BAD_REQUEST)
         if cambios:
             fila.save(update_fields=list(cambios) + ["updated_at"])
         return Response(fila.como_dict())
+
+
+# =============================================================================
+#  EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR  --  26/11/2026
+# =============================================================================
+def _vigente_de_la_orden(request, pk):
+    from campo.contrato import vigente_de
+
+    orden = _orden(request, pk)
+    contrato = vigente_de(orden)
+    if contrato is None:
+        raise Http404
+    return contrato
+
+
+class EnlaceDeFirmaView(APIView):
+    """El enlace para que el cliente firme el contrato del proveedor. Entra al
+    portal del cliente SIN clave: no se guarda, no se registra y no se cachea.
+    Se pide cada vez que el tecnico toca «Firmar en WispHub»."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.contrato_del_proveedor import SinEnlace, enlace
+
+        contrato = _vigente_de_la_orden(request, pk)
+        try:
+            valor = enlace(contrato)
+        except SinEnlace as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        r = Response({"enlace": valor})
+        r["Cache-Control"] = "no-store"
+        return r
+
+
+class ComprobarFirmaView(APIView):
+    """Lee en el proveedor si el cliente ya firmo. Solo lee."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.contrato_del_proveedor import comprobar_firma
+
+        contrato = comprobar_firma(_vigente_de_la_orden(request, pk))
+        return Response({"contrato": contrato.como_dict()})
+
+
+class PrepararContratoProveedorView(APIView):
+    """Pide (otra vez) preparar el contrato del proveedor: cuando fallo, o
+    cuando quedo «por revisar» y una persona ya miro en el proveedor. No
+    escribe en esta peticion: lo encola y contesta 202."""
+
+    permission_classes = [IsCampoAuthenticated]
+
+    def post(self, request, pk):
+        from campo.contrato import ContratoDeServicio
+        from campo.contrato_del_proveedor import pedir
+
+        org = getattr(request, "org", None)
+        contrato = (ContratoDeServicio.objects.filter(pk=pk, org=org)
+                    .select_related("orden").first()) if org else None
+        if contrato is None:
+            raise Http404
+        _orden(request, contrato.orden_id)
+        if not contrato.como_dict()["firma_proveedor"]["se_puede_pedir"]:
+            return Response({"detail": "Ahora no se puede pedir: o se está preparando, o ya "
+                                       "está listo, o el contrato todavía no tiene la "
+                                       "instalación creada.",
+                             "contrato": contrato.como_dict()},
+                            status=status.HTTP_409_CONFLICT)
+        if not pedir(contrato, por=request.profile):
+            contrato.refresh_from_db()
+            return Response({"detail": "No se pudo pedir. Revisa cómo quedó.",
+                             "contrato": contrato.como_dict()},
+                            status=status.HTTP_409_CONFLICT)
+        return Response({"contrato": contrato.como_dict()}, status=status.HTTP_202_ACCEPTED)

@@ -251,6 +251,16 @@ def _creado(contrato, id_cliente: str, codigo: str, avisos=None, **mas) -> None:
              alta_avisos=list(avisos or []), alta_actualizada_en=ahora,
              updated_at=ahora, **mas))
     contrato.refresh_from_db()
+    #  EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026): con la
+    #  instalacion creada, se prepara ese contrato con la cedula y el recibo.
+    if contrato.firma_en_el_proveedor and contrato.estado == ContratoDeServicio.INSTALACION:
+        try:
+            from campo.contrato_del_proveedor import pedir as pedir_contrato
+
+            pedir_contrato(contrato)
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning("alta_en_el_isp: no se pudo pedir el contrato del proveedor (%s)",
+                           type(e).__name__)
 
 
 def _aplicar(contrato, estado: str, cuerpo: dict) -> None:

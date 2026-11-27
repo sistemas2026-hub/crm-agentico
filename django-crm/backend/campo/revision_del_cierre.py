@@ -592,6 +592,21 @@ def _de_la_instalacion(orden) -> list:
         contrato = vigente_de(orden)
         if contrato is None:
             puntos.append(_punto("contrato", False, "No hay un contrato firmado."))
+        elif contrato.firma_en_el_proveedor:
+            #  EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026).
+            e = contrato.firma_proveedor_estado
+            if e == contrato.FIRMA_PROVEEDOR_FIRMADA:
+                puntos.append(_punto("contrato", True, "El cliente firmó el contrato en el "
+                                     f"proveedor (N.º {contrato.contrato_proveedor})."))
+            elif e == contrato.FIRMA_PROVEEDOR_LISTA:
+                puntos.append(_punto("contrato", None, "El contrato del proveedor está listo y "
+                                     "el cliente todavía no aparece firmando."))
+            elif e in (contrato.FIRMA_PROVEEDOR_FALLIDA, contrato.FIRMA_PROVEEDOR_POR_REVISAR):
+                puntos.append(_punto("contrato", False, "El contrato del proveedor no quedó "
+                                     "listo: " + (contrato.firma_proveedor_detalle or "revísalo.")))
+            else:
+                puntos.append(_punto("contrato", None, "El contrato del proveedor se está "
+                                     "preparando."))
         else:
             d = contrato.datos or {}
             if d.get("documento_cambiado"):

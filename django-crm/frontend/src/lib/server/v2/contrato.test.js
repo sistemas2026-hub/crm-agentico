@@ -103,6 +103,10 @@ describe('cuerpoDeContrato · las costumbres de la empresa', () => {
     ]);
     expect(cuerpoDeContrato(formulario({ activar_onu: 'on' })).activar_onu).toBe(true);
     expect(cuerpoDeContrato(formulario({ nit: '900' }))).toHaveProperty('activar_onu', false);
+    expect(cuerpoDeContrato(formulario({ firma_en_el_proveedor: 'on' })).firma_en_el_proveedor).toBe(true);
+    expect(cuerpoDeContrato(formulario({ nit: '900' }))).toHaveProperty('firma_en_el_proveedor', false);
+    expect(cuerpoDeContrato(formulario({ validar_antes_de_activar: 'on' })).validar_antes_de_activar).toBe(true);
+    expect(cuerpoDeContrato(formulario({ nit: '900' }))).toHaveProperty('validar_antes_de_activar', false);
   });
 
   it('los dígitos vacíos son 0: no recortar', () => {

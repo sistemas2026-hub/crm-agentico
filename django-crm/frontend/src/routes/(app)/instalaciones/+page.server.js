@@ -7,7 +7,7 @@
  */
 import { fail } from '@sveltejs/kit';
 import { crearEnElIsp, decidir, leerBandeja, reintentar, resolverAlta } from '$lib/server/v2/solicitudes.js';
-import { aprobarInstalacion, leerPorActivar } from '$lib/server/v2/instalaciones-por-activar.js';
+import { aprobarInstalacion, leerPorActivar, prepararContratoProveedor } from '$lib/server/v2/instalaciones-por-activar.js';
 import { devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
 import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 
@@ -39,6 +39,21 @@ export const actions = {
     try {
       await aprobarInstalacion(cookies, orden);
       return { de: 'instalacion', orden, hecho: 'Aprobada. Se está activando en el proveedor: al quedar activa, al técnico le llega que valide el servicio y la entregue.' };
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return fail(err?.status === 409 ? 409 : 400, { de: 'instalacion', orden, error: mensajeDeError(err) });
+    }
+  },
+
+  //  EL CONTRATO DEL PROVEEDOR (26/11/2026): pedir otra vez que se prepare.
+  async prepararContratoProveedor({ request, cookies }) {
+    const form = await request.formData();
+    const contrato = form.get('contrato')?.toString() ?? '';
+    const orden = form.get('orden')?.toString() ?? '';
+    if (!contrato) return fail(400, { de: 'instalacion', orden, error: 'Falta el contrato.' });
+    try {
+      await prepararContratoProveedor(cookies, contrato);
+      return { de: 'instalacion', orden, hecho: 'Pedido. El contrato del proveedor se está preparando otra vez.' };
     } catch (e) {
       const err = /** @type {any} */ (e);
       return fail(err?.status === 409 ? 409 : 400, { de: 'instalacion', orden, error: mensajeDeError(err) });

@@ -156,6 +156,13 @@ class ApiEndpoints {
   static String contratoDeLaOrden(String ordenId) =>
       '$baseUrl/api/campo/trabajos/$ordenId/contrato/';
 
+  // El cliente firma el contrato del proveedor (26/11/2026): el enlace (no se
+  // guarda: se pide cada vez) y comprobar si ya firmo.
+  static String enlaceDeFirma(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/contrato/enlace-de-firma/';
+  static String comprobarFirma(String ordenId) =>
+      '$baseUrl/api/campo/trabajos/$ordenId/contrato/comprobar-firma/';
+
   // Las IP libres de una zona, para ofrecerselas al tecnico en vez de
   // pedirle que las teclee (14/11/2026).
   static String ipsLibresDeLaOrden(String ordenId, int idZona) =>

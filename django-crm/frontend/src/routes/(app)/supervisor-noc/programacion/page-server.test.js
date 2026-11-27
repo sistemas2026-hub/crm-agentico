@@ -88,7 +88,10 @@ describe('Programación: el contrato de instalación (25/11/2026)', () => {
         //  Y el interruptor de crear en el proveedor, que no se marcó: false.
         crear_en_el_isp: false,
         //  Y el de activar la ONU (26/11/2026), tampoco marcado: false.
-        activar_onu: false
+        activar_onu: false,
+        //  Y los de validar la instalación y firmar en el proveedor (26/11/2026).
+        validar_antes_de_activar: false,
+        firma_en_el_proveedor: false
       }
     });
     expect(r.hecho).toBeTruthy();

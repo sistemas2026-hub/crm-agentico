@@ -1378,3 +1378,41 @@ def activar_cliente_en_el_isp(org_id: str, contrato_id: str, vuelta: int = 0) ->
     finally:
         clear_rls_context()
 
+
+@shared_task(name="campo.tasks.preparar_contrato_del_proveedor")
+def preparar_contrato_del_proveedor(org_id: str, contrato_id: str, vuelta: int = 0) -> dict:
+    """Guarda el contrato del proveedor de un contrato confirmado sin firma
+    (26/11/2026). Mismo patron que la activacion: una vuelta hace una cosa, se
+    vuelve a encolar mientras siga `pedida`, y al tope queda «por revisar».
+    NUNCA LEVANTA. Ver campo/contrato_del_proveedor.py."""
+    from campo import contrato_del_proveedor
+    from campo.contrato import ContratoDeServicio
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        set_rls_context(org_id)
+        try:
+            contrato = (ContratoDeServicio.objects
+                        .select_related("firmado_por__user", "firma_proveedor_pedida_por__user",
+                                        "orden")
+                        .get(pk=contrato_id, org_id=org_id))
+        except ContratoDeServicio.DoesNotExist:
+            return {"resultado": "", "por_que": "el contrato ya no esta"}
+        contrato_del_proveedor.preparar(contrato)
+        if contrato.firma_proveedor_estado == ContratoDeServicio.FIRMA_PROVEEDOR_PEDIDA:
+            if int(vuelta or 0) >= contrato_del_proveedor.VUELTAS:
+                contrato_del_proveedor.rendirse(contrato)
+            else:
+                try:
+                    preparar_contrato_del_proveedor.apply_async(
+                        args=[org_id, contrato_id, int(vuelta or 0) + 1],
+                        countdown=contrato_del_proveedor.ESPERA_ENTRE_VUELTAS)
+                except Exception as e:                           # noqa: BLE001
+                    logger.warning("contrato_del_proveedor: no se pudo volver a encolar (%s)",
+                                   type(e).__name__)
+        return {"resultado": contrato.firma_proveedor_estado}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("contrato_del_proveedor: fallo la vuelta (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        clear_rls_context()

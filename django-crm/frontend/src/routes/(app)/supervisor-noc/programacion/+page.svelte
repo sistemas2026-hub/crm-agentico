@@ -393,6 +393,24 @@
                   Encendido, se crea solo después de comprobar que la IP elegida está libre y es de los
                   rangos de ese servidor; si algo no cuadra no se crea, y el contrato dice por qué.
                 </span>
+                <!-- LA INSTALACIÓN LA VALIDA UNA PERSONA (26/11/2026). Ya existía en
+                     el servidor; desde hoy también se ve y se cambia aquí. -->
+                <span class="snoc-label">Una persona valida la instalación</span>
+                <label class="snoc-body-sm">
+                  <input type="checkbox" name="validar_antes_de_activar" checked={data.contrato.validar_antes_de_activar} />
+                  Se crea como instalación y pasa a cliente cuando alguien la aprueba en Instalaciones → «Por activar»
+                </label>
+                <!-- EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026). -->
+                <span class="snoc-label">El cliente firma el contrato del proveedor</span>
+                <label class="snoc-body-sm">
+                  <input type="checkbox" name="firma_en_el_proveedor" checked={data.contrato.firma_en_el_proveedor} />
+                  En vez de firmar en Dexter, el cliente firma el contrato de WispHub desde el teléfono del técnico
+                </label>
+                <span class="snoc-body-sm snoc-secundario">
+                  El técnico confirma los datos sin firma; antes tienen que estar subidas la cédula y el recibo.
+                  Al confirmar se crea la instalación y Dexter guarda el contrato de WispHub con esos documentos
+                  en «Subir Archivos». Necesita encendidas las dos de arriba.
+                </span>
                 <label class="snoc-body-sm snoc-pila-xs">
                   Condiciones del servicio (el texto de su contrato, tal cual va en el PDF)
                   <textarea class="snoc-campo" name="texto_condiciones" rows="8" maxlength="20000">{data.contrato.texto_condiciones ?? ''}</textarea>

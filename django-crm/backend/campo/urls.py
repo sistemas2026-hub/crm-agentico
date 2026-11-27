@@ -139,6 +139,14 @@ urlpatterns = [
          contrato_views.CrearEnElIspView.as_view(), name="crear_contrato_en_el_isp"),
     path("contratos/<uuid:pk>/resolver-alta/",
          contrato_views.ResolverAltaView.as_view(), name="resolver_alta_del_contrato"),
+    #  El cliente firma el contrato del proveedor (26/11/2026).
+    path("trabajos/<uuid:pk>/contrato/enlace-de-firma/",
+         contrato_views.EnlaceDeFirmaView.as_view(), name="enlace_de_firma"),
+    path("trabajos/<uuid:pk>/contrato/comprobar-firma/",
+         contrato_views.ComprobarFirmaView.as_view(), name="comprobar_firma"),
+    path("contratos/<uuid:pk>/preparar-contrato-proveedor/",
+         contrato_views.PrepararContratoProveedorView.as_view(),
+         name="preparar_contrato_proveedor"),
     #  Las IP que se le ofrecen al tecnico, en la misma pantalla y despues
     #  de que elija la zona (14/11/2026). Ver `ips_libres_views`.
     #  Activar la ONU de una instalacion (26/11/2026). Ver campo/activacion_onu.py.

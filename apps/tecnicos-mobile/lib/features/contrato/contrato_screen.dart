@@ -20,6 +20,15 @@
 /// el tratamiento de sus datos, porque las autorizaciones de la solicitud las
 /// aceptó otra. Lo que puede elegir y aceptar lo manda el servidor
 /// (`otro_titular`); un servidor viejo no lo manda y el botón no sale.
+///
+/// EL CLIENTE FIRMA EL CONTRATO DEL PROVEEDOR (26/11/2026). Decisión del
+/// usuario: el cliente firma SOLO el contrato de WispHub. Con la empresa en
+/// ese modo (`firma_en_el_proveedor`), aquí no hay firma: el técnico confirma
+/// los datos —antes tienen que estar subidas la cédula y el recibo, lo exige el
+/// servidor—, se crea la instalación y Dexter guarda el contrato de WispHub.
+/// Listo, «Firmar en WispHub» abre el enlace en el navegador del teléfono (el
+/// enlace entra al portal del cliente sin clave: no se guarda, se pide cada
+/// vez) y «Ya firmó: comprobar» lo lee en WispHub.
 library;
 
 import 'dart:async';
@@ -27,6 +36,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
@@ -134,6 +144,65 @@ class ApiDelContrato {
       return RespuestaDelServidor(error: _mensaje(e));
     }
   }
+
+  static String _mensajeDeFirma(Object e) {
+    if (e is DioException) {
+      final dynamic d = e.response?.data;
+      if (d is Map && d['detail'] is String) return d['detail'] as String;
+      if (e.response == null) return 'Sin señal. Toca otra vez cuando tengas señal.';
+      return 'El servidor no respondió bien (${e.response?.statusCode}). Intenta de nuevo.';
+    }
+    if (e is TimeoutException) return 'Sin señal. Toca otra vez cuando tengas señal.';
+    return 'No se pudo completar. Intenta de nuevo.';
+  }
+
+  /// El enlace para que el cliente firme en el proveedor (26/11/2026). Se pide
+  /// cada vez y NO se guarda: entra al portal del cliente sin clave.
+  Future<({String? enlace, String? error})> enlaceDeFirma(String ordenId) async {
+    try {
+      final Response<dynamic> r = await ApiClient()
+          .post<dynamic>(ApiEndpoints.enlaceDeFirma(ordenId), data: <String, dynamic>{})
+          .timeout(const Duration(seconds: 70));
+      final dynamic d = r.data is String ? jsonDecode(r.data as String) : r.data;
+      final String enlace = d is Map ? (d['enlace'] ?? '').toString() : '';
+      if (!enlace.startsWith('http://') && !enlace.startsWith('https://')) {
+        return (enlace: null, error: 'El servidor no dio un enlace. Intenta de nuevo.');
+      }
+      return (enlace: enlace, error: null);
+    } catch (e) {
+      return (enlace: null, error: _mensajeDeFirma(e));
+    }
+  }
+
+  /// Lee en el proveedor si el cliente ya firmó. Devuelve el contrato.
+  Future<RespuestaDelServidor> comprobarFirma(String ordenId) async {
+    try {
+      final Response<dynamic> r = await ApiClient()
+          .post<dynamic>(ApiEndpoints.comprobarFirma(ordenId), data: <String, dynamic>{})
+          .timeout(const Duration(seconds: 70));
+      final dynamic d = r.data is String ? jsonDecode(r.data as String) : r.data;
+      return RespuestaDelServidor(cuerpo: Map<String, dynamic>.from(d as Map));
+    } catch (e) {
+      return RespuestaDelServidor(error: _mensajeDeFirma(e));
+    }
+  }
+
+  /// Abre el enlace en el navegador del teléfono, fuera de la app.
+  Future<bool> abrir(String enlace) async {
+    try {
+      return await launchUrl(Uri.parse(enlace), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+/// Cada cuánto y cuántas veces se vuelve a leer el contrato mientras se crea
+/// la instalación o se prepara el contrato del proveedor (26/11/2026).
+/// Público para que las pruebas lo acorten.
+class ContratoScreenRelectura {
+  static Duration intervalo = const Duration(seconds: 8);
+  static const int maximas = 40;
 }
 
 class ContratoScreen extends StatefulWidget {
@@ -199,6 +268,14 @@ class _EstadoContrato extends State<ContratoScreen> {
   bool _enviando = false;
   String? _errorDeEnvio;
   final TrazoDeFirma _trazo = TrazoDeFirma();
+  //  EL CLIENTE FIRMA EN EL PROVEEDOR (26/11/2026): sin firma aquí; después de
+  //  confirmar, el recuadro de WispHub. Se vuelve a leer solo mientras espera.
+  bool _firmaEnElProveedor = false;
+  bool _pidiendoEnlace = false;
+  bool _comprobando = false;
+  String? _avisoDeFirma;
+  Timer? _releer;
+  int _relecturas = 0;
   final Map<String, TextEditingController> _campos = <String, TextEditingController>{};
   final TextEditingController _plan = TextEditingController();
   String _tipoDocumento = 'CC';
@@ -225,6 +302,7 @@ class _EstadoContrato extends State<ContratoScreen> {
 
   @override
   void dispose() {
+    _releer?.cancel();
     _trazo.removeListener(_redibujar);
     _trazo.dispose();
     for (final TextEditingController c in _campos.values) {
@@ -253,6 +331,7 @@ class _EstadoContrato extends State<ContratoScreen> {
       _cargando = false;
       _contrato = d['contrato'] is Map ? Map<String, dynamic>.from(d['contrato'] as Map) : null;
       _borrador = d['borrador'] is Map ? Map<String, dynamic>.from(d['borrador'] as Map) : null;
+      _firmaEnElProveedor = d['firma_en_el_proveedor'] == true;
       _servidores = <Map<String, dynamic>>[
         for (final dynamic s in (d['servidores'] as List? ?? const <dynamic>[]))
           if (s is Map) Map<String, dynamic>.from(s),
@@ -294,6 +373,88 @@ class _EstadoContrato extends State<ContratoScreen> {
       if (_planes.isNotEmpty &&
           !_planes.any((Map<String, dynamic> p) => p['nombre'] == _plan.text)) {
         _plan.text = '';
+      }
+    });
+    _seguirSiEspera();
+  }
+
+  // ------------------------------------------------------------------------
+  //  EL CONTRATO DEL PROVEEDOR (26/11/2026)
+  // ------------------------------------------------------------------------
+  Map<String, dynamic> get _firmaProveedor =>
+      Map<String, dynamic>.from((_contrato?['firma_proveedor'] as Map?) ?? const <String, dynamic>{});
+
+  /// Si el contrato está esperando algo que pasa en el servidor: la
+  /// instalación creándose o el contrato del proveedor preparándose.
+  bool get _esperandoAlServidor {
+    final Map<String, dynamic> fp = _firmaProveedor;
+    if (_contrato == null || fp['activa'] != true) return false;
+    final String alta = ((_contrato!['alta'] as Map?)?['estado'] ?? '').toString();
+    final String estado = (_contrato!['estado'] ?? '').toString();
+    if (estado == 'firmado') return alta == 'pedida' || alta == 'en_curso';
+    final String f = (fp['estado'] ?? '').toString();
+    return f.isEmpty || f == 'pedida';
+  }
+
+  void _seguirSiEspera() {
+    _releer?.cancel();
+    if (!_esperandoAlServidor || _relecturas >= ContratoScreenRelectura.maximas) return;
+    _releer = Timer(ContratoScreenRelectura.intervalo, () async {
+      _relecturas++;
+      await _releerElContrato();
+    });
+  }
+
+  Future<void> _releerElContrato() async {
+    final RespuestaDelServidor r = await widget.api.leer(widget.ordenId);
+    if (!mounted) return;
+    if (r.cuerpo?['contrato'] is Map) {
+      setState(() => _contrato = Map<String, dynamic>.from(r.cuerpo!['contrato'] as Map));
+    }
+    _seguirSiEspera();
+  }
+
+  Future<void> _firmarEnElProveedor() async {
+    setState(() {
+      _pidiendoEnlace = true;
+      _avisoDeFirma = null;
+    });
+    final ({String? enlace, String? error}) r = await widget.api.enlaceDeFirma(widget.ordenId);
+    if (!mounted) return;
+    if (r.error != null) {
+      setState(() {
+        _pidiendoEnlace = false;
+        _avisoDeFirma = r.error;
+      });
+      return;
+    }
+    final bool abrio = await widget.api.abrir(r.enlace!);
+    if (!mounted) return;
+    setState(() {
+      _pidiendoEnlace = false;
+      _avisoDeFirma = abrio
+          ? 'Cuando el cliente termine de firmar, vuelve y toca «Ya firmó: comprobar».'
+          : 'No se pudo abrir el navegador del teléfono. Intenta de nuevo.';
+    });
+  }
+
+  Future<void> _comprobarFirma() async {
+    setState(() {
+      _comprobando = true;
+      _avisoDeFirma = null;
+    });
+    final RespuestaDelServidor r = await widget.api.comprobarFirma(widget.ordenId);
+    if (!mounted) return;
+    setState(() {
+      _comprobando = false;
+      if (r.error != null) {
+        _avisoDeFirma = r.error;
+      } else if (r.cuerpo?['contrato'] is Map) {
+        _contrato = Map<String, dynamic>.from(r.cuerpo!['contrato'] as Map);
+        if (_firmaProveedor['firmado'] != true) {
+          _avisoDeFirma = 'Todavía no aparece la firma en WispHub. Si el cliente ya firmó, '
+              'espera unos segundos y vuelve a comprobar.';
+        }
       }
     });
   }
@@ -418,7 +579,7 @@ class _EstadoContrato extends State<ContratoScreen> {
   }
 
   bool get _listo =>
-      !_trazo.vacio &&
+      (_firmaEnElProveedor || !_trazo.vacio) &&
       _idZona != null &&
       (_campos['nombre']?.text.trim().isNotEmpty ?? false) &&
       (_campos['numero_documento']?.text.trim().isNotEmpty ?? false) &&
@@ -431,7 +592,9 @@ class _EstadoContrato extends State<ContratoScreen> {
       _enviando = true;
       _errorDeEnvio = null;
     });
-    final List<int> firma = await _trazo.aPng(const Size(600, 300));
+    //  En el proveedor no hay firma aquí: firma el cliente en WispHub.
+    final List<int> firma =
+        _firmaEnElProveedor ? const <int>[] : await _trazo.aPng(const Size(600, 300));
     //  Dónde se firmó: el punto real de la casa. Nunca tarda más de su plazo
     //  ni lanza (ver `UbicacionDeCaptura`).
     final Map<String, dynamic> ubicacion = await UbicacionDeCaptura.tomar();
@@ -457,7 +620,7 @@ class _EstadoContrato extends State<ContratoScreen> {
           'lat': _coordenadas!.lat,
           'lng': _coordenadas!.lng,
         },
-      'firma_png_base64': base64Encode(firma),
+      if (!_firmaEnElProveedor) 'firma_png_base64': base64Encode(firma),
       if (ubicacion.containsKey('lat') && ubicacion.containsKey('lng'))
         'gps': <String, dynamic>{
           'lat': ubicacion['lat'],
@@ -475,6 +638,7 @@ class _EstadoContrato extends State<ContratoScreen> {
         _contrato = Map<String, dynamic>.from(r.cuerpo!['contrato'] as Map);
       }
     });
+    _seguirSiEspera();
   }
 
   @override
@@ -510,14 +674,20 @@ class _EstadoContrato extends State<ContratoScreen> {
     final String documento =
         '${cliente['tipo_documento'] ?? ''} ${cliente['numero_documento'] ?? ''}'.trim();
     final String ip = (c['ip_elegida'] ?? '').toString();
+    final Map<String, dynamic> fp =
+        Map<String, dynamic>.from((c['firma_proveedor'] as Map?) ?? const <String, dynamic>{});
+    final bool enElProveedor = fp['activa'] == true;
+    final bool firmadoEnElProveedor = fp['firmado'] == true;
     return ListView(
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.margen, AppSpacing.md, AppSpacing.margen, AppSpacing.xl),
       children: <Widget>[
         DexterBloque(
-          titulo: 'Contrato firmado',
+          titulo: enElProveedor && !firmadoEnElProveedor ? 'Contrato confirmado' : 'Contrato firmado',
           icono: Icons.verified_outlined,
-          insignia: const DexterPastilla.enRegla(texto: 'Firmado'),
+          insignia: enElProveedor && !firmadoEnElProveedor
+              ? const DexterPastilla.neutra(texto: 'Por firmar')
+              : const DexterPastilla.enRegla(texto: 'Firmado'),
           separacion: AppSpacing.sm,
           children: <Widget>[
             Text('N.º ${c['numero']}',
@@ -550,14 +720,19 @@ class _EstadoContrato extends State<ContratoScreen> {
             DexterHundido(
               child: DexterFilaDeDato(
                 icono: Icons.picture_as_pdf_outlined,
-                texto: 'El PDF con la firma quedó en la plataforma.',
+                texto: enElProveedor
+                    ? 'Los datos quedaron en la plataforma; la firma va en el contrato de WispHub.'
+                    : 'El PDF con la firma quedó en la plataforma.',
                 estilo: AppTypography.cuerpoChico,
                 colorDelIcono: AppColors.outline,
               ),
             ),
           ],
         ),
-        if (c['estado'] != 'en_el_isp') ...<Widget>[
+        if (enElProveedor) ...<Widget>[
+          const SizedBox(height: AppSpacing.sm),
+          _firmaEnWispHub(c, fp),
+        ] else if (c['estado'] != 'en_el_isp') ...<Widget>[
           const SizedBox(height: AppSpacing.sm),
           const _Aviso(
             icono: Icons.schedule,
@@ -869,6 +1044,21 @@ class _EstadoContrato extends State<ContratoScreen> {
           ],
         ),
         const SizedBox(height: AppSpacing.md),
+        if (_firmaEnElProveedor)
+          DexterBloque(
+            titulo: 'La firma, en WispHub',
+            icono: Icons.draw_outlined,
+            separacion: AppSpacing.sm,
+            children: <Widget>[
+              Text(
+                'El cliente firma el contrato de WispHub después de confirmar. Antes de '
+                'confirmar toma la cédula por delante y por detrás y el recibo, y espera a '
+                'que suban.',
+                style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
+              ),
+            ],
+          )
+        else
         DexterBloque(
           titulo: 'Firma del cliente',
           icono: Icons.draw_outlined,
@@ -935,7 +1125,10 @@ class _EstadoContrato extends State<ContratoScreen> {
                 : const Icon(Icons.task_alt),
             //  Corto y con elipsis: con letra grande o pantalla angosta,
             //  «Creando el contrato…» no cabía al lado del indicador.
-            label: Text(_enviando ? 'Creando…' : 'Crear el contrato',
+            label: Text(
+                _enviando
+                    ? (_firmaEnElProveedor ? 'Confirmando…' : 'Creando…')
+                    : (_firmaEnElProveedor ? 'Confirmar contrato' : 'Crear el contrato'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 17)),
@@ -952,6 +1145,93 @@ class _EstadoContrato extends State<ContratoScreen> {
     );
   }
 
+  /// El recuadro del contrato de WispHub, según cómo va (26/11/2026).
+  Widget _firmaEnWispHub(Map<String, dynamic> c, Map<String, dynamic> fp) {
+    final Map<String, dynamic> alta =
+        Map<String, dynamic>.from((c['alta'] as Map?) ?? const <String, dynamic>{});
+    final String estado = (c['estado'] ?? '').toString();
+    final String f = (fp['estado'] ?? '').toString();
+    final List<Widget> hijos = <Widget>[];
+    DexterPastilla insignia = const DexterPastilla.neutra(texto: 'Esperando');
+    String texto;
+    bool puedeFirmar = false;
+    if (fp['firmado'] == true) {
+      insignia = const DexterPastilla.enRegla(texto: 'Firmado');
+      texto = 'El cliente firmó el contrato en WispHub.';
+    } else if (estado == 'firmado' &&
+        (alta['estado'] == 'pedida' || alta['estado'] == 'en_curso')) {
+      texto = 'Creando la instalación en WispHub…';
+    } else if (estado == 'firmado') {
+      insignia = const DexterPastilla.alerta(texto: 'Revisar');
+      texto = '${alta['detalle'] ?? 'La instalación no quedó creada en WispHub.'} '
+          'Avísale a la oficina.';
+    } else if (f == 'lista') {
+      insignia = const DexterPastilla.alerta(texto: 'Por firmar');
+      texto = 'El contrato de WispHub está listo, con la cédula y el recibo. Pásale el '
+          'teléfono al cliente para que lo firme.';
+      puedeFirmar = true;
+    } else if (f == 'fallida' || f == 'por_revisar') {
+      insignia = const DexterPastilla.alerta(texto: 'Revisar');
+      texto = '${fp['detalle'] ?? 'El contrato de WispHub no quedó listo.'} '
+          'Avísale a la oficina: lo revisan en Instalaciones.';
+    } else {
+      texto = 'Guardando el contrato en WispHub con la cédula y el recibo…';
+    }
+    hijos.add(Text(texto,
+        style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant)));
+    if (_avisoDeFirma != null) {
+      hijos.add(Text(_avisoDeFirma!,
+          style: AppTypography.cuerpoChico.copyWith(color: AppColors.precaucion)));
+    }
+    if (puedeFirmar) {
+      hijos.add(SizedBox(
+        height: AppSpacing.objetivoTactilAmplio,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.azulAccion,
+            shape: const RoundedRectangleBorder(borderRadius: AppRadius.brTarjeta),
+          ),
+          onPressed: _pidiendoEnlace || _comprobando ? null : _firmarEnElProveedor,
+          icon: _pidiendoEnlace
+              ? const SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.open_in_new),
+          label: Text(_pidiendoEnlace ? 'Abriendo…' : 'Firmar en WispHub',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ));
+      hijos.add(SizedBox(
+        height: AppSpacing.objetivoTactilAmplio,
+        child: OutlinedButton.icon(
+          onPressed: _pidiendoEnlace || _comprobando ? null : _comprobarFirma,
+          icon: _comprobando
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.fact_check_outlined),
+          label: Text(_comprobando ? 'Comprobando…' : 'Ya firmó: comprobar',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ));
+    } else if (_esperandoAlServidor) {
+      hijos.add(Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: _releerElContrato,
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('Actualizar'),
+        ),
+      ));
+    }
+    return DexterBloque(
+      titulo: 'Firma en WispHub',
+      icono: Icons.draw_outlined,
+      insignia: insignia,
+      separacion: AppSpacing.sm,
+      children: hijos,
+    );
+  }
+
   String _queFalta() {
     final List<String> f = <String>[
       if (_campos['nombre']?.text.trim().isEmpty ?? true) 'el nombre',
@@ -960,7 +1240,7 @@ class _EstadoContrato extends State<ContratoScreen> {
       if (_plan.text.trim().isEmpty) 'el plan',
       if (_idZona == null) 'el servidor',
       if (_otraPersona && !_aceptoLasObligatorias) 'que la persona autorice sus datos',
-      if (_trazo.vacio) 'la firma del cliente',
+      if (!_firmaEnElProveedor && _trazo.vacio) 'la firma del cliente',
     ];
     return f.isEmpty ? '' : 'Falta ${f.join(', ')}.';
   }
