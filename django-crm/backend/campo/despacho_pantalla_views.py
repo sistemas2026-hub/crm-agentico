@@ -434,7 +434,7 @@ class FichaDespachableView(CasosDespachablesView):
       lectura        lo que el Supervisor leyo del reclamo y recomienda, de la
                      propuesta que una persona ACEPTO. Es una lectura, no un
                      dato: la pantalla la ofrece para confirmar o corregir.
-      descripcion    el texto del ticket, TAPADO (celular, documento, correo).
+      descripcion    el texto del ticket, COMPLETO (ver `_descripcion_del_ticket`).
                      Como se entra al inmueble suele estar escrito ahi a mano;
                      no se extrae solo -- seria que un modelo adivine en un campo
                      que el tecnico lee como dato -- se muestra para copiarlo.
@@ -487,7 +487,7 @@ class FichaDespachableView(CasosDespachablesView):
             "localidad": self._localidad_de(caso),
             "sugerencia": sugerencia,
             "lectura": _lectura_de(propuesta),
-            "descripcion": _descripcion_tapada(caso),
+            "descripcion": _descripcion_del_ticket(caso),
             "plantilla_sugerida": (str(elegida["version"].id)
                                    if elegida["version"] else None),
             "plantilla_por": elegida["por"],
@@ -528,11 +528,17 @@ def _prioridad_sugerida(org, caso, elegida, propuesta) -> str:
 MAX_DESCRIPCION = 1500
 
 
-def _descripcion_tapada(caso) -> str:
-    from operaciones.lectura_de_ticket import tapar
+def _descripcion_del_ticket(caso) -> str:
+    """El texto del ticket tal cual, SIN TAPAR (25/11/2026, decision del usuario).
 
+    Hasta hoy pasaba por `lectura_de_ticket.tapar`, el filtro hecho para lo que
+    viaja AL MODELO, un tercero. Aca lo lee una persona de la empresa con rol de
+    gestion, que con «Abrir el ticket completo» ve lo mismo sin tapar. Tapado le
+    escondia el celular con el que confirma con el cliente antes de mandar a
+    alguien, y hasta el numero de ticket (seis digitos parecen una cedula).
+    Lo que va al modelo SIGUE tapado: esto no toca `tapar`.
+    """
     texto = " ".join(str(caso.description or "").split())
-    texto = tapar(texto)
     return texto if len(texto) <= MAX_DESCRIPCION else texto[:MAX_DESCRIPCION] + "…"
 
 

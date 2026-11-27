@@ -106,6 +106,79 @@ DBNAME=dexter_local ... py -3.13 cli/cargar_config.py tenants/rapilink.config.ya
 La config nace con la **autonomia DETENIDA** hasta que alguien la habilite: falla
 cerrado, tambien en local.
 
+## Preproducción: la puerta antes de subir (25/11/2026)
+
+Un push a `fix/integracion-wisphub` **es** un despliegue (§2), así que lo que no se probó antes de ese push se prueba con los clientes. La receta de arriba armaba una base local a mano; esto la convierte en un comando y le agrega lo que faltaba: el código **compilado y arrancado como en producción**.
+
+```bash
+bash scripts/preproduccion.sh arriba       # la primera vez, ~10 min: todo desde cero
+bash scripts/preproduccion.sh actualizar   # tu cambio, sobre la base que ya tiene datos
+bash scripts/preproduccion.sh estado       # dónde entrar y con qué cuentas
+bash scripts/preproduccion.sh abajo        # borra todo, base incluida
+```
+
+Se entra en `http://localhost:3300` con las cuentas de `.preproduccion/cuentas.json` (admin, oficina, supervisor y técnicos, con contraseñas al azar; esa carpeta no va al repositorio).
+
+**Por qué es el mismo compose de producción.** `docker-compose.preproduccion.yml` no es un compose aparte: va encima de `docker-compose.prod.yml` y solo le agrega una base local y puertos en `127.0.0.1`. Si alguien suma un servicio o una variable obligatoria al de producción, revienta en la PC y no en el VPS.
+
+**Qué prueba:**
+
+- que las imágenes se construyen, incluido el `pnpm build` del frontend (un error que `vite dev` no muestra y Dokploy sí);
+- que `docker-compose.prod.yml` arranca con todas sus variables;
+- que **las migraciones nuevas entran sobre una base con datos**: `actualizar` corre `cli/migrar_asistente.py --aplicar` y el backend aplica las de Django al arrancar, sobre 600 conversaciones que ya estaban. Si una migración choca con datos existentes, falla acá;
+- que la pantalla funciona con gunicorn, adapter-node y `ENV_TYPE=prod`, no con los servidores de desarrollo;
+- y la prueba de carga corre contra este mismo entorno (`pruebas-carga/laboratorio.sh`).
+
+**Qué no prueba**, y por qué no hace daño:
+
+- **WispHub**: simulado (`WISPHUB_MODO_REAL=false`). Las respuestas reales se prueban en producción con herramientas de lectura.
+- **El agente**: las claves de OpenAI y DeepSeek son falsas y no contesta. Para probarlo se ponen las claves a mano en `.preproduccion/variables.env` y se corre `actualizar`; cuesta lo mismo que en producción.
+- **WhatsApp**: la config sale del YAML del repositorio, que no trae las credenciales de Meta, así que no se le escribe a nadie.
+- **Los correos**: `FRONTEND_URL` es un dominio `.invalid` a propósito, porque el backend en modo producción no acepta `localhost`. Un enlace mandado por correo no funciona.
+- **La app de campo en un teléfono**: los puertos solo escuchan en `127.0.0.1`. Un teléfono en la misma red necesitaría publicarlos en la IP de la PC.
+
+### Idéntica a producción: el mismo código y una copia de los datos
+
+`arriba` arma la base vacía con 600 chats inventados. Para tener **el código y los datos de producción**:
+
+```bash
+git switch --detach origin/fix/integracion-wisphub        # el código que corre en producción
+bash scripts/preproduccion.sh abajo
+bash scripts/preproduccion.sh arriba                      # la estructura de ese código
+bash scripts/preproduccion.sh copiar-produccion C:/wisphub/dexter/.env
+```
+
+`copiar-produccion` recibe un `.env` que tenga las cinco `DB*` de producción. Lee solo esas cinco líneas y no las imprime. Hace un `pg_dump` de **solo datos** de `public` y `asistente` (en producción solo lee), vacía la base local y los carga. Después vuelve a agregar las cuentas de prueba a la empresa, así que también se puede entrar con las cuentas reales.
+
+- **Se niega si la preproducción no se armó con el commit de producción**: los datos de un código entran solo en la estructura de ese mismo código.
+- **No copia `asistente.tenant_secrets`** (credenciales de WhatsApp, WispHub y demás). Además están cifradas con la `SECRETOS_CLAVE_MAESTRA` de producción, que la copia no tiene. Con datos reales y sin credenciales, nada sale de la PC: el motor no puede escribirle a un cliente.
+- **Quedan datos reales de clientes en la PC.** `abajo` los borra.
+- La base local es Postgres 17, igual que el Supabase de producción.
+
+Para probar **tu cambio sobre los datos reales** (la prueba más parecida a subirlo):
+
+```bash
+git switch <tu rama>
+bash scripts/preproduccion.sh actualizar
+```
+
+Igual a producción **no** queda en una sola cosa, a propósito: las conexiones afuera. WispHub simulado, claves de modelo falsas y sin WhatsApp. Con datos reales, cualquiera de las tres le hablaría a un cliente de verdad.
+
+### El camino de un cambio
+
+1. **Rama propia**, nacida de la de despliegue: `git switch -c feat/<algo> origin/fix/integracion-wisphub`.
+2. **Desarrollar** con el compose de desarrollo (`docker compose up`), que recarga más rápido. Que el `.env` de la raíz **no** tenga las cinco líneas `DB*` que lo apuntan a la base real (§«Desarrollo local contra la base real»): con ellas, una migración a medio hacer se aplica en producción al arrancar.
+3. **Antes de subir**: `bash scripts/preproduccion.sh actualizar`, entrar en `localhost:3300` y hacer lo que hace la persona que va a usar el cambio. Correr las guardas (`tests/`, y `cli/evaluar.py` si se tocó un prompt).
+4. **Recién ahí**, fusionar en `fix/integracion-wisphub` y empujar. Ese push es el despliegue.
+
+### Lo que sigue: staging en un servidor
+
+La preproducción vive en una PC. Un **staging** es lo mismo, pero en un servidor y con dominio, para que otra persona pruebe desde el navegador o el teléfono antes de que llegue a producción. No hace falta otro compose:
+
+- **Un segundo servicio Compose en Dokploy**, con el mismo `docker-compose.prod.yml`, la rama `staging` y *Autodeploy* encendido. Un push a `staging` despliega staging, nunca producción.
+- **Las variables cambian en cinco cosas**: base propia (nunca la de producción), dominios propios (`staging.<dominio de Dexter>`), secretos propios, `WISPHUB_MODO_REAL=false` y ninguna credencial de Meta en su config.
+- **Dónde**: conviene un VPS chico aparte. En el mismo VPS, cada despliegue de staging compila el frontend con la memoria que usa producción (§1), y la prueba de carga del 24/11 mostró que lo primero que se llena es la base, que es compartida.
+
 ## Procedimiento
 
 ### 1. Antes de nada: swap

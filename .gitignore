@@ -67,3 +67,6 @@ seriales_propuestos.csv
 #  mientras corre una mutacion. Es un artefacto de sesion, nunca codigo: si se
 #  commitea, se publica una copia del fuente que puede estar MUTADA.
 django-crm/backend/operaciones/tests/_respaldo_mutaciones/
+
+# Preproducción local: secretos y contraseñas de prueba al azar (scripts/preproduccion.sh).
+.preproduccion/

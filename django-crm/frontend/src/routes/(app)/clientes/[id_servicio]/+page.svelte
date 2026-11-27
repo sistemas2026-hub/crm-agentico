@@ -193,6 +193,8 @@
             {#if equipo.odb_name}<dt>Caja</dt><dd>{equipo.odb_name}</dd>{/if}
             {#if equipo.last_status_change}<dt>Último cambio</dt><dd>{equipo.last_status_change}</dd>{/if}
           </dl>
+        {:else if data.contexto?.equipo_no_disponible === 'ficha_no_leida'}
+          <p class="cuerpo v2-sub">No se pudo leer la ficha en WispHub: no se sabe si tiene serial.</p>
         {:else if data.contexto?.equipo_no_disponible === 'onu_no_vinculada'}
           <p class="cuerpo v2-sub">El ISP todavía no tiene cargado el serial del equipo.</p>
         {:else if data.contexto?.equipo_no_disponible === 'serial_desactualizado'}

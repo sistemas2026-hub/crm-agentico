@@ -380,3 +380,43 @@ def test_w_sin_ficha_NO_se_agrega_la_sugerencia():
     r = clf.clasificar(vacio)
     assert r["labor"] == clf.SIN_CONCLUIR
     assert "no se pudo traer la ficha" in r["porque"]
+
+
+# ---------------------------------------------------------------------------
+# M · sin serial en el ISP: la MAC del router (26/11/2026)
+# ---------------------------------------------------------------------------
+
+def test_m4_ficha_sin_leer_no_dice_que_falta_el_serial():
+    """26/11/2026, servicio 3658: WispHub tenia serial y MAC, la ficha no se
+    pudo leer y la pantalla decia que no tenia ninguno de los dos."""
+    r = clf.clasificar({"contexto_disponible": True,
+                        "equipo_no_disponible": "ficha_no_leida"})
+    assert r["labor"] == clf.SIN_CONCLUIR
+    assert "no se pudo leer la ficha" in r["porque"]
+    assert "no tiene" not in r["porque"]
+
+
+def test_m_sin_serial_dice_en_que_quedo_la_busqueda_por_mac():
+    base = {"contexto_disponible": True, "equipo_no_disponible": "onu_no_vinculada"}
+    r = clf.clasificar({**base, "busqueda_por_mac": "pendiente"})
+    assert r["labor"] == clf.SIN_CONCLUIR
+    assert "se esta buscando por la MAC del router" in r["porque"]
+    assert "apagado" in clf.clasificar({**base, "busqueda_por_mac": "ninguna"})["porque"]
+    assert "ni la MAC" in clf.clasificar({**base, "busqueda_por_mac": "sin_mac"})["porque"]
+    #  Sin dato de la busqueda (un motor viejo), el motivo de siempre.
+    assert clf.clasificar(base)["porque"] == "no se pudo leer el equipo (onu_no_vinculada)"
+
+
+def test_m2_un_equipo_encontrado_por_mac_se_mide_y_lo_dice():
+    r = clf.clasificar({"contexto_disponible": True, "sn_onu_origen": "mac",
+                        "equipo_por_mac": {"nombre_coincide": True},
+                        "equipo": {"estado": "caido", "causa_caida": "fibra"}})
+    assert r["labor"] == clf.CORRECTIVO and r["verificada"] is True
+    assert "encontrado por la MAC del router" in r["porque"]
+    assert "el nombre en la OLT coincide" in r["porque"]
+
+
+def test_m3_un_serial_cargado_en_el_isp_no_lleva_la_nota():
+    r = clf.clasificar({"contexto_disponible": True,
+                        "equipo": {"estado": "caido", "causa_caida": "fibra"}})
+    assert "MAC" not in r["porque"]

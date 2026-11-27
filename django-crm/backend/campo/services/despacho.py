@@ -692,6 +692,16 @@ def depurar_contexto(crudo: dict, *, conversacion: dict | None = None,
         }
     if crudo.get("equipo_no_disponible"):
         snapshot["equipo_no_disponible"] = crudo["equipo_no_disponible"]
+    #  EL SERIAL QUE DIJO LA OLT POR LA MAC (26/11/2026). Que el equipo se
+    #  encontro asi, y no porque el ISP tuviera el serial, viaja con la
+    #  medicion: quien la lea tiene que saber de donde salio.
+    if crudo.get("sn_onu_origen"):
+        snapshot["sn_onu_origen"] = crudo["sn_onu_origen"]
+    if isinstance(crudo.get("equipo_por_mac"), dict):
+        snapshot["equipo_por_mac"] = {
+            "nombre_coincide": crudo["equipo_por_mac"].get("nombre_coincide")}
+    if crudo.get("busqueda_por_mac"):
+        snapshot["busqueda_por_mac"] = crudo["busqueda_por_mac"]
     #  El id del cliente de instalaciones del proveedor, que manda el motor.
     #  Con el, `operaciones.clasificacion_de_trabajo` puede decir si esto es
     #  una instalacion ANTES de preguntarle nada a SmartOLT -- una instalacion

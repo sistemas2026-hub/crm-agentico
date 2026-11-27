@@ -1,0 +1,12 @@
+{
+  "org_id": "",
+  "oficina": [
+    { "email": "agente1@ejemplo.test", "password": "la-de-este-servidor" }
+  ],
+  "supervisor": [
+    { "email": "supervisor@ejemplo.test", "password": "la-de-este-servidor" }
+  ],
+  "tecnico": [
+    { "email": "tecnico1@ejemplo.test", "password": "la-de-este-servidor" }
+  ]
+}
