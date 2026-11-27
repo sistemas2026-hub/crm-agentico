@@ -16,8 +16,8 @@ export async function load({ cookies, url }) {
   //  LA PESTAÑA «POR ACTIVAR» (26/11/2026): las instalaciones que finalizó el
   //  técnico y esperan a una persona. Ver campo/instalacion.py.
   if (url.searchParams.get('vista') === 'por_activar') {
-    const { instalaciones, error } = await leerPorActivar(cookies);
-    return { vista: 'por_activar', instalaciones, error, solicitudes: [], estado: '', automatica: false, sinPermiso: false };
+    const { instalaciones, trabadas, error } = await leerPorActivar(cookies);
+    return { vista: 'por_activar', instalaciones, trabadas, error, solicitudes: [], estado: '', automatica: false, sinPermiso: false };
   }
   const estado = url.searchParams.get('estado') ?? '';
   // Las aprobadas por Dexter (pre-factibilidad) son su propia pestaña.

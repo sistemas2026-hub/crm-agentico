@@ -202,3 +202,35 @@ describe('Instalaciones: Por activar (26/11/2026)', () => {
     expect(apiRequest).not.toHaveBeenCalled();
   });
 });
+
+//  LAS TRABADAS (27/11/2026): la OT-502 salió de un ticket, su contrato no tiene
+//  solicitud, y los botones vivían solo en la tarjeta de una solicitud.
+describe('Instalaciones: las que no quedaron creadas en el proveedor (27/11/2026)', () => {
+  it('Por activar trae también las trabadas', async () => {
+    apiRequest.mockReset();
+    const trabadas = [{ orden_id: 'o-2', numero: 502, cliente: 'X',
+                        contrato: { id: 'con-502', numero: 'C-2026-000502', alta: { por_revisar: true } } }];
+    apiRequest.mockResolvedValue({ instalaciones: [], trabadas });
+    const d = /** @type {any} */ (await load(/** @type {any} */ ({
+      cookies: { get: () => 'token' }, url: new URL('http://x/instalaciones?vista=por_activar')
+    })));
+    expect(d.trabadas).toEqual(trabadas);
+  });
+
+  it('«No quedó creado» funciona SIN solicitud: le llega al contrato', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ contrato: { estado: 'firmado' } });
+    const r = /** @type {any} */ (await actions.resolverAlta(pedido({ contrato: 'con-502', quedo: 'no' })));
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/contratos/con-502/resolver-alta/');
+    expect(apiRequest.mock.calls[0][1].body).toMatchObject({ quedo_creado: false });
+    expect(r.altaResuelta).toBe(true);
+  });
+
+  it('«Volver a crear» funciona SIN solicitud', async () => {
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ contrato: { estado: 'firmado', alta: { estado: 'pedida' } } });
+    const r = /** @type {any} */ (await actions.crearEnElIsp(pedido({ contrato: 'con-502' })));
+    expect(apiRequest.mock.calls[0][0]).toBe('/campo/contratos/con-502/crear-en-el-isp/');
+    expect(r.altaPedida).toBe(true);
+  });
+});

@@ -64,7 +64,35 @@ class InstalacionesPorActivarView(APIView):
                 "contrato": contrato.como_dict() if contrato else None,
                 "revision": revision,
             })
-        return Response({"instalaciones": filas, "server_time": timezone.now().isoformat()})
+        return Response({"instalaciones": filas, "trabadas": _trabadas(org),
+                         "server_time": timezone.now().isoformat()})
+
+
+def _trabadas(org) -> list[dict]:
+    """LAS INSTALACIONES QUE NO QUEDARON CREADAS EN EL PROVEEDOR (27/11/2026).
+
+    El usuario, despues de la OT-502: «que reporte este error y el encargado
+    revise, y con un boton permita volver a crear». Hasta hoy los botones
+    vivian SOLO en la tarjeta de una solicitud, y un contrato que sale del
+    ticket no tiene solicitud: trabado, no habia como destrabarlo sin un
+    comando. Aca van TODOS los contratos firmados con el alta fallida o por
+    revisar, tengan solicitud o no. Lo que se puede hacer lo dice el contrato
+    (`alta.por_revisar`, `alta.se_puede_pedir`)."""
+    from campo.contrato import ContratoDeServicio
+
+    filas = []
+    for c in (ContratoDeServicio.objects
+              .filter(org=org, estado=ContratoDeServicio.FIRMADO,
+                      alta_estado__in=(ContratoDeServicio.ALTA_POR_REVISAR,
+                                       ContratoDeServicio.ALTA_FALLIDA))
+              .select_related("orden").order_by("-alta_actualizada_en")[:100]):
+        cliente = (c.datos or {}).get("cliente") or {}
+        nombre = " ".join(x for x in (str(cliente.get("nombre") or "").strip(),
+                                     str(cliente.get("apellido") or "").strip()) if x)
+        filas.append({"orden_id": str(c.orden_id), "numero": c.orden.numero if c.orden_id else None,
+                      "cliente": nombre or (c.orden.cliente_nombre if c.orden_id else "") or "",
+                      "contrato": c.como_dict()})
+    return filas
 
 
 class AprobarInstalacionView(APIView):

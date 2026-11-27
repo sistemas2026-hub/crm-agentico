@@ -772,6 +772,35 @@ def _enviar_una(
     )
 
 
+def avisar_alta_trabada(contrato) -> None:
+    """La instalacion no quedo creada en el proveedor, o no se sabe si quedo
+    (27/11/2026). El usuario: «que reporte este error y el encargado revise, y
+    con un boton permita volver a crear». El boton esta en Instalaciones → Por
+    activar; esto es para que alguien vaya a mirarlo.
+
+    Por los canales de la oficina, como el pedido de material. **Sin datos del
+    cliente**: la OT y que paso. El porque esta en la pantalla."""
+    numero = getattr(contrato.orden, "numero", None) if contrato.orden_id else None
+    ot = f"OT #{numero}" if numero is not None else f"Contrato {contrato.numero}"
+    if contrato.alta_estado == "por_revisar":
+        texto = (f"⚠️ {ot}: no se sabe si la instalación quedó creada en el proveedor. "
+                 f"Búscala en el proveedor y dilo en Instalaciones → Por activar.")
+    else:
+        texto = (f"⚠️ {ot}: la instalación NO quedó creada en el proveedor. En "
+                 f"Instalaciones → Por activar está el motivo y el botón para volver a crearla.")
+    _despachar(
+        org=contrato.org,
+        #  El HECHO: este contrato, este pedido, este estado. Una vuelta de la
+        #  tarea que lo vuelve a anotar no avisa dos veces.
+        clave=f"alta_trabada|{contrato.id}|{contrato.alta_intento}|{contrato.alta_estado}",
+        asunto=f"{ot}: la instalación no quedó creada",
+        texto=texto,
+        enlace_a=contrato.orden_id,
+        perfiles=[],
+        enlace_interno="/instalaciones?vista=por_activar",
+    )
+
+
 def avisar_pedido_de_material(pedido) -> None:
     """Le avisa a bodega que un tecnico esta pidiendo material.
 

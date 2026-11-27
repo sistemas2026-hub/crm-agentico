@@ -2204,3 +2204,32 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
   - cargar la herramienta y los campos en la config del motor (con ensayo antes);
   - sincronizar los precios para que tengan la subida;
   - guardar la tabla en Programación.
+
+### 8.50 DECISIÓN — Una instalación que no quedó creada en el proveedor avisa, se ve en Instalaciones y se destraba con un botón (27/11/2026)
+
+**El origen.** En la prueba vigilada de la OT-502 la creación en WispHub quedó «por revisar» (ver la corrección de §8.47). Para destrabarla había que tocar «No quedó creado» y volver a pedirla. Esos botones vivían **solo en la tarjeta de una solicitud**, y la OT-502 salió de un ticket: su contrato no tiene solicitud. Sin botón, la única salida era un comando. El usuario:
+
+> «cuando se vuelva a presentar, ¿toca volver a ejecutar un comando? Que reporte este error y el encargado revise, y con un botón permita volver a crear»
+
+**Qué se decidió.**
+1. **Instalaciones → Por activar** muestra todos los contratos firmados cuya creación en el proveedor quedó **fallida** o **por revisar**, con o sin solicitud (`InstalacionesPorActivarView` → `trabadas`).
+   - **Por revisar:** «Sí quedó: es este número» o «No quedó creado».
+   - **Fallida:** el motivo y «Volver a crear».
+   - Son las mismas vistas y reglas que ya existían; cambia dónde se ven.
+2. **Aviso a la oficina** (`avisos.avisar_alta_trabada`), por sus canales, como el pedido de material.
+   - Sale al entrar a fallida o por revisar, una vez por pedido.
+   - Lleva la OT y lo que pasó, sin datos del cliente.
+   - No sale cuando una persona dice «No quedó creado».
+   - Si el aviso falla, el contrato queda igual.
+
+**VERIFICADO:**
+- backend: `test_alta_trabada` (6):
+  - un contrato sin solicitud por revisar aparece, con lo que se puede hacer;
+  - el fallido se puede volver a crear, y uno ya creado sale de la lista;
+  - un técnico no ve la lista;
+  - el aviso sale una vez, sin el nombre ni el documento, y no por el «No quedó creado» de una persona;
+  - si el aviso falla, el alta no se rompe.
+- 66 en verde, junto con `test_alta_en_el_isp` y `test_instalacion_validada`.
+- web: `page-server.test.js` (la carga trae las trabadas; los dos botones funcionan sin solicitud) y `trabadas-render.test.js` (la página dibuja la OT-502 con «No quedó creado», y la fallida con «Volver a crear»). 21 en verde y ningún error de tipos.
+
+**NO VERIFICADO:** que el aviso llegue de verdad a los canales de la oficina en producción. Depende de que la empresa tenga un canal de avisos encendido, igual que el de pedidos de material.

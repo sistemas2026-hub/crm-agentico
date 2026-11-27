@@ -233,7 +233,63 @@
     {#if form?.de === 'instalacion' && form?.error}
       <div class="alerta"><AlertTriangle size={16} /><span>{form.error}</span></div>
     {/if}
-    {#if !data.error && !(data.instalaciones ?? []).length}
+    <!-- LAS QUE NO QUEDARON CREADAS EN EL PROVEEDOR (27/11/2026). El usuario,
+         después de la OT-502: «que reporte este error y el encargado revise, y
+         con un botón permita volver a crear». Antes los botones vivían solo en
+         la tarjeta de una solicitud, y un contrato que sale del ticket no tiene:
+         trabado, no había cómo destrabarlo sin un comando. -->
+    {#each data.trabadas ?? [] as t (t.contrato.id)}
+      {@const c = t.contrato}
+      <article class="tarjeta">
+        <div class="encabezado">
+          <div>
+            <h2>OT-{t.numero ?? '—'} · {t.cliente}</h2>
+            <p class="meta">Contrato {c.numero}</p>
+          </div>
+        </div>
+        {#if c.alta?.por_revisar}
+          <div class="pendiente">
+            <p class="fallo">
+              <AlertTriangle size={14} />
+              <span>
+                <strong>No se sabe si la instalación quedó creada en el proveedor.</strong>
+                {c.alta.detalle ?? ''} Búscala en el proveedor y di qué encontraste.
+              </span>
+            </p>
+            <form method="POST" action="?/resolverAlta" use:enhance={() => {
+              pidiendoAlta = c.id;
+              return async ({ update }) => { await update({ reset: false }); pidiendoAlta = ''; };
+            }}>
+              <input type="hidden" name="contrato" value={c.id} />
+              <input class="v2-input" name="id_cliente" inputmode="numeric" maxlength="64"
+                     placeholder="N.º del cliente en el proveedor"
+                     aria-label="Número del cliente en el proveedor" />
+              <button type="submit" name="quedo" value="si" class="decidir"
+                      disabled={pidiendoAlta === c.id}>Sí quedó: es este número</button>
+              <button type="submit" name="quedo" value="no" class="decidir"
+                      disabled={pidiendoAlta === c.id}>No quedó creado</button>
+            </form>
+          </div>
+        {:else}
+          <div class="pendiente">
+            <p class="fallo">
+              <AlertTriangle size={14} />
+              <span><strong>La instalación NO quedó creada en el proveedor.</strong> {c.alta?.detalle ?? ''}</span>
+            </p>
+            {#if c.alta?.se_puede_pedir}
+              <form method="POST" action="?/crearEnElIsp" use:enhance={() => {
+                pidiendoAlta = c.id;
+                return async ({ update }) => { await update({ reset: false }); pidiendoAlta = ''; };
+              }}>
+                <input type="hidden" name="contrato" value={c.id} />
+                <button type="submit" class="decidir" disabled={pidiendoAlta === c.id}>Volver a crear</button>
+              </form>
+            {/if}
+          </div>
+        {/if}
+      </article>
+    {/each}
+    {#if !data.error && !(data.instalaciones ?? []).length && !(data.trabadas ?? []).length}
       <section class="vacio">
         <BadgeCheck size={26} />
         <h2>No hay instalaciones esperando validación</h2>

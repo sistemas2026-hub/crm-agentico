@@ -15,9 +15,11 @@ import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 export async function leerPorActivar(cookies) {
   try {
     const d = await apiRequest('/campo/instalaciones/por-activar/', {}, cookies);
-    return { instalaciones: d?.instalaciones ?? [], error: '' };
+    //  LAS TRABADAS (27/11/2026): contratos cuya instalación no quedó creada
+    //  en el proveedor, o no se sabe. Con o sin solicitud.
+    return { instalaciones: d?.instalaciones ?? [], trabadas: d?.trabadas ?? [], error: '' };
   } catch (err) {
-    return { instalaciones: [], error: mensajeDeError(err, 'No se pudieron leer las instalaciones por activar.') };
+    return { instalaciones: [], trabadas: [], error: mensajeDeError(err, 'No se pudieron leer las instalaciones por activar.') };
   }
 }
 

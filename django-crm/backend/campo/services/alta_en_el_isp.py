@@ -227,18 +227,43 @@ def _fallida(contrato, codigo: str, motivo: str = "", avisos=None, **mas) -> Non
     """NO HAY CLIENTE: el proveedor dijo que no, o nunca se le pidio."""
     from campo.contrato import ContratoDeServicio
 
+    antes = contrato.alta_estado
     _anotar(contrato, alta_estado=ContratoDeServicio.ALTA_FALLIDA,
             alta_codigo=codigo[:40], alta_detalle=_detalle(codigo, motivo),
             alta_avisos=list(avisos or []), **mas)
+    #  «No quedo creado» lo dice una persona que ya lo esta mirando: no se le
+    #  avisa de lo que acaba de decir.
+    if codigo != NO_QUEDO_CREADO:
+        _avisar_si_se_trabo(contrato, antes)
 
 
 def _por_revisar(contrato, codigo: str, motivo: str = "", avisos=None, **mas) -> None:
     """NADIE SABE si el cliente quedo creado. Lo resuelve una persona."""
     from campo.contrato import ContratoDeServicio
 
+    antes = contrato.alta_estado
     _anotar(contrato, alta_estado=ContratoDeServicio.ALTA_POR_REVISAR,
             alta_codigo=codigo[:40], alta_detalle=_detalle(codigo, motivo),
             alta_avisos=list(avisos or []), **mas)
+    _avisar_si_se_trabo(contrato, antes)
+
+
+def _avisar_si_se_trabo(contrato, antes: str) -> None:
+    """LA OFICINA SE ENTERA cuando un alta queda trabada (27/11/2026). Solo al
+    ENTRAR a fallida o por revisar, una vez por pedido. Nunca rompe el alta."""
+    from campo.contrato import ContratoDeServicio
+
+    if (contrato.estado != ContratoDeServicio.FIRMADO or contrato.alta_estado == antes
+            or contrato.alta_estado not in (ContratoDeServicio.ALTA_FALLIDA,
+                                            ContratoDeServicio.ALTA_POR_REVISAR)):
+        return
+    try:
+        from campo.services.avisos import avisar_alta_trabada
+
+        avisar_alta_trabada(contrato)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("alta_en_el_isp: no se pudo avisar del alta trabada (%s)",
+                       type(e).__name__)
 
 
 def _creado(contrato, id_cliente: str, codigo: str, avisos=None, **mas) -> None:
