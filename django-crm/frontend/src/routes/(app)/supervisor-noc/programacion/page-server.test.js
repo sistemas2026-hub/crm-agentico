@@ -11,7 +11,9 @@ vi.mock('$lib/api-helpers.js', () => ({ apiRequest: (...a) => apiRequest(...a) }
 vi.mock('$lib/server/v2/hoy-de-la-empresa.js', () => ({ hoyDeLaEmpresa: async () => '2026-10-28' }));
 //  De qué empresa es la sesión, para hablar con el motor (los rangos de IP).
 //  Por defecto «no se sabe»: la carga no sale a ningún lado.
-const tenant = { destinoDelAsistente: vi.fn(async () => null) };
+const tenant = {
+  destinoDelAsistente: vi.fn(async (/** @type {any[]} */ ..._a) => /** @type {any} */ (null))
+};
 vi.mock('$lib/server/v2/tenant.js', () => ({ destinoDelAsistente: (...a) => tenant.destinoDelAsistente(...a) }));
 vi.mock('$lib/server/v2/motor-headers.js', () => ({ headersMotor: () => ({}) }));
 
@@ -254,7 +256,7 @@ describe('Programación: los rangos de IP de cada servidor (25/11/2026)', () => 
 
   it('leer la ocupación llama a la ruta que recorre el proveedor, y dice qué leyó', async () => {
     tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
-    const fetchFalso = vi.fn(async () => ({
+    const fetchFalso = vi.fn(async (/** @type {string} */ _url, /** @type {any} */ _opciones) => ({
       ok: true, json: async () => ({ completa: true, leidos: 7711, direcciones_tomadas: 7500 })
     }));
 

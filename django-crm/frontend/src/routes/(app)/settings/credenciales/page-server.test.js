@@ -26,7 +26,7 @@ describe('Credenciales: el nombre', () => {
     ['wisphub web usuario', 'WISPHUB_WEB_USUARIO'],
     ['  Wisphub-Web-Clave ', 'WISPHUB_WEB_CLAVE']
   ])('«%s» viaja como %s, y el valor no se toca', async (escrito, esperado) => {
-    const fetchFalso = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }));
+    const fetchFalso = vi.fn(async (/** @type {string} */ _url, /** @type {any} */ _opciones) => ({ ok: true, json: async () => ({ ok: true }) }));
     const r = /** @type {any} */ (await actions.guardar(pedido({ nombre_de_la_credencial: escrito, valor: 'Clave Con Mayus' }, fetchFalso)));
     const cuerpo = JSON.parse(fetchFalso.mock.calls[0][1].body);
     expect(cuerpo.nombre).toBe(esperado);
@@ -35,7 +35,7 @@ describe('Credenciales: el nombre', () => {
   });
 
   it('el de cada fila (campo `nombre`) también se acepta', async () => {
-    const fetchFalso = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }));
+    const fetchFalso = vi.fn(async (/** @type {string} */ _url, /** @type {any} */ _opciones) => ({ ok: true, json: async () => ({ ok: true }) }));
     await actions.guardar(pedido({ nombre: 'WISPHUB_API_KEY', valor: 'x' }, fetchFalso));
     expect(JSON.parse(fetchFalso.mock.calls[0][1].body).nombre).toBe('WISPHUB_API_KEY');
   });

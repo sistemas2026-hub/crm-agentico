@@ -19,6 +19,12 @@ import { destinoDelAsistente } from './tenant.js';
  */
 
 /**
+ * Lo que se MANDA a guardar: un número de zona con letras viaja como texto, a
+ * propósito, para que el motor diga qué está mal (ver `cuerpoDeRangos`).
+ * @typedef {{ zona_id: number | string, zona_nombre: string, prefijos: string[] }} RangoAGuardar
+ */
+
+/**
  * Lo guardado, lo sugerido y el uso de cada prefijo. No le pega al proveedor.
  * `null` si el motor no contesta: la pantalla lo dice en vez de mostrar vacío.
  * @param {any} locals @param {typeof fetch} fetch
@@ -41,7 +47,7 @@ export async function leerRangos(locals, fetch) {
  * Reemplaza entera la lista de rangos. `contarMalEscritas` es la opción de la
  * empresa de no ofrecer la IP que podría ser la de un cliente con la suya mal
  * escrita en el proveedor; `undefined` la deja como está.
- * @param {any} locals @param {typeof fetch} fetch @param {Rango[]} pools
+ * @param {any} locals @param {typeof fetch} fetch @param {RangoAGuardar[]} pools
  * @param {boolean} [contarMalEscritas]
  */
 export async function guardarRangos(locals, fetch, pools, contarMalEscritas) {
@@ -95,10 +101,10 @@ export async function leerOcupacion(locals, fetch) {
  *
  * @param {FormData} f
  * @param {Rango[]} [anteriores]
- * @returns {Array<{ zona_id: number | string, zona_nombre: string, prefijos: string[] }>}
+ * @returns {RangoAGuardar[]}
  */
 export function cuerpoDeRangos(f, anteriores = []) {
-  /** @type {Array<{ zona_id: number | string, zona_nombre: string, prefijos: string[] }>} */
+  /** @type {RangoAGuardar[]} */
   const pools = [];
   const indices = [...f.keys()]
     .map((k) => /^rango_zona_(\d+)$/.exec(k)?.[1])
