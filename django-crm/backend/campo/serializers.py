@@ -28,6 +28,30 @@ class WorkTypeVersionEsquemaSerializer(serializers.ModelSerializer):
         ]
 
 
+def _valida_una_persona(obj: OrdenTrabajo) -> bool:
+    """Si esta orden, al terminarla, la revisa una PERSONA antes de cerrarse
+    (`campo/instalacion.py`): el tecnico la ENVIA A VALIDACION y, aprobada,
+    FINALIZA el trabajo entregandola al cliente (27/11/2026).
+
+    La empresa lo pide (`validar_antes_de_activar`) y la orden es de las que
+    llevan contrato: labor «instalacion» (el mismo criterio con el que la app
+    ofrece el contrato) o ya tiene uno firmado. No exige el contrato porque la
+    app lo pregunta ANTES de firmarlo, para nombrar el boton del final.
+
+    Nunca levanta: este dato no puede tumbar el detalle de la orden. Ante la
+    duda dice que no, y la entrega igual la decide el servidor al confirmarla
+    (`InstalacionEntregadaView`)."""
+    from campo.contrato import configuracion_de, vigente_de
+
+    try:
+        if not configuracion_de(obj.org).get("validar_antes_de_activar"):
+            return False
+        labor = getattr(obj.tipo_trabajo_version.work_type, "labor", "") or ""
+        return labor == "instalacion" or vigente_de(obj) is not None
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
 def _origen(obj: OrdenTrabajo) -> dict:
     """De donde salio la orden: que sistema la pidio y con que referencia."""
     return {
@@ -307,6 +331,13 @@ class OrdenTrabajoDetailSerializer(serializers.ModelSerializer):
             #  La labor (instalacion, correctivo...). La app la usa para
             #  ofrecer el contrato del cliente solo donde hay uno que firmar.
             "labor": getattr(v.work_type, "labor", "") or "",
+            #  SI ESTA ORDEN LA VALIDA UNA PERSONA ANTES DE CERRARSE (27/11/2026).
+            #  Lo decide el servidor (`instalacion.requiere_validacion_humana`).
+            #  La app lo adivinaba por el CODIGO de la plantilla («contiene
+            #  instalacion»), y en produccion la de instalaciones se llama
+            #  `traslado_servicio`: el tecnico nunca veia el boton para entregar
+            #  y el ticket no se cerraba (OT-501).
+            "valida_una_persona": _valida_una_persona(obj),
             # Los pasos del procedimiento ya venian con la plantilla y nadie
             # los entregaba: la aplicacion los dibujaba de ejemplo.
             "pasos": v.esquema.get("pasos", []),

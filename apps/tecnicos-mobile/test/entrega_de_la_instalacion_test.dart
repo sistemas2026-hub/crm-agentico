@@ -31,7 +31,7 @@ void main() {
     await t.pumpWidget(_app(EntregaDeLaInstalacion(
         ordenId: 'ot-1', validacion: EstadoValidacion.pendiente, api: api)));
     expect(find.text('En validación'), findsOneWidget);
-    expect(find.text('Servicio validado y entregado'), findsNothing);
+    expect(find.text('Finalizar trabajo'), findsNothing);
   });
 
   testWidgets('APROBADA: se confirma la entrega, y la pantalla vuelve a leer la orden', (WidgetTester t) async {
@@ -41,11 +41,11 @@ void main() {
         ordenId: 'ot-1', validacion: EstadoValidacion.aprobado, api: api,
         alEntregar: () async => releidas++)));
     expect(find.text('Aprobada y activa'), findsOneWidget);
-    await t.tap(find.text('Servicio validado y entregado'));
+    await t.tap(find.text('Finalizar trabajo'));
     await t.pumpAndSettle();
     expect(api.pedidas, <String>['ot-1']);
-    expect(find.text('Instalación entregada'), findsOneWidget);
-    expect(find.textContaining('se cerró la orden y el ticket'), findsOneWidget);
+    expect(find.text('Trabajo finalizado'), findsOneWidget);
+    expect(find.textContaining('se cerraron la orden y el ticket'), findsOneWidget);
     expect(releidas, 1);
   });
 
@@ -53,9 +53,9 @@ void main() {
     final _Api api = _Api(error: 'Todavía no está aprobada: espera el aviso de que quedó activada.');
     await t.pumpWidget(_app(EntregaDeLaInstalacion(
         ordenId: 'ot-1', validacion: EstadoValidacion.aprobado, api: api)));
-    await t.tap(find.text('Servicio validado y entregado'));
+    await t.tap(find.text('Finalizar trabajo'));
     await t.pumpAndSettle();
     expect(find.textContaining('Todavía no está aprobada'), findsOneWidget);
-    expect(find.text('Servicio validado y entregado'), findsOneWidget);
+    expect(find.text('Finalizar trabajo'), findsOneWidget);
   });
 }

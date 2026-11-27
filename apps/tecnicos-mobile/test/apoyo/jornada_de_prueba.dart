@@ -105,6 +105,9 @@ class JornadaDePrueba {
     List<Map<String, dynamic>>? campos,
     List<Map<String, dynamic>>? evidencias,
     String tipoCodigo = 'ftth_instalacion',
+    //  Lo que dice el servidor desde el 27/11/2026. Por omisión «no»: las
+    //  jornadas de prueba son de un trabajo que se finaliza.
+    bool validaUnaPersona = false,
   }) =>
       db.upsertOrden(
         orgId: org,
@@ -122,6 +125,7 @@ class JornadaDePrueba {
             'nombre': 'Instalación FTTH',
             'codigo': tipoCodigo,
             'schema_version': 1,
+            'valida_una_persona': validaUnaPersona,
           },
           'schema': <String, dynamic>{
             'campos': campos ?? FuenteDeEjecucionFalsa.camposTipicos,

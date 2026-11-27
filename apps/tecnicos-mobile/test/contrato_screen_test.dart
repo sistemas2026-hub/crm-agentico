@@ -181,6 +181,27 @@ void main() {
     expect(api.enviado!.containsKey('ip'), isFalse, reason: 'la elige el servidor al firmar');
   });
 
+  testWidgets('DEL TICKET (27/11/2026): sale «Del ticket», no «Sin solicitud»', (WidgetTester t) async {
+    //  Sin solicitud, el servidor llena el contrato con el cliente escrito en
+    //  el ticket de la instalación. La app 1.0.33 lo mostraba como «Sin
+    //  solicitud» con los datos ya puestos.
+    _telefonoAlto(t);
+    final Map<String, dynamic> l = _borrador();
+    (l['borrador'] as Map<String, dynamic>)['origen'] = 'ticket';
+    await t.pumpWidget(_montar(_ApiFalsa(lectura: l)));
+    await t.pumpAndSettle();
+    expect(find.text('DEL TICKET'), findsOneWidget, reason: 'la insignia va en mayúsculas');
+    expect(find.text('SIN SOLICITUD'), findsNothing);
+    expect(find.textContaining('Viene del ticket'), findsOneWidget);
+
+    //  El control: sin solicitud ni ticket, sigue diciéndolo.
+    (l['borrador'] as Map<String, dynamic>)['origen'] = 'orden';
+    await t.pumpWidget(const SizedBox());
+    await t.pumpWidget(_montar(_ApiFalsa(lectura: l)));
+    await t.pumpAndSettle();
+    expect(find.text('SIN SOLICITUD'), findsOneWidget);
+  });
+
   testWidgets('sin señal lo dice, y Reintentar vuelve a preguntar', (WidgetTester t) async {
     final _ApiFalsa api = _ApiFalsa(errorDeLectura: 'Sin señal: el contrato no se creó.');
     await t.pumpWidget(_montar(api));

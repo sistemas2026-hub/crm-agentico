@@ -1,6 +1,7 @@
 import 'package:campo/core/storage/local_database.dart';
 import 'package:campo/core/storage/secure_storage_service.dart';
 import 'package:campo/features/ejecucion/datos_de_ejecucion.dart';
+import 'package:campo/features/trabajo/como_se_cierra.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -193,6 +194,63 @@ void main() {
         isNot(contains('Potencia óptica en el equipo (dBm)')),
         reason: 'ese campo ya está respondido',
       );
+    });
+  });
+
+
+  // ------------------------------------------------------------------------
+  //  4. SI LA REVISA UNA PERSONA viaja del servidor a la pantalla (27/11/2026).
+  //  La OT-501 era `traslado_servicio` y la app lo adivinaba por el código: el
+  //  técnico nunca vio el botón para entregar. Se prueba la cadena entera
+  //  detalle → base (v32) → fuente → regla, no la regla sola.
+  // ------------------------------------------------------------------------
+  group('4. Si la revisa una persona llega del detalle a la pantalla', () {
+    Future<void> sembrarCon(Object? valida, {FuenteOrden fuente = FuenteOrden.detalle}) =>
+        db.upsertOrden(
+          orgId: org,
+          profileId: perfil,
+          fuente: fuente,
+          ordenData: <String, dynamic>{
+            'id': 'ot-501',
+            'numero': 501,
+            'estado': 'en_sitio',
+            'cliente_nombre': 'Cliente de prueba',
+            'direccion': 'Calle 1',
+            'revision': 1,
+            'tipo': <String, dynamic>{
+              'nombre': 'Instalación de fibra',
+              'codigo': 'traslado_servicio',
+              'schema_version': 1,
+              if (fuente == FuenteOrden.detalle) 'labor': 'instalacion',
+              'valida_una_persona': ?valida,
+            },
+            'schema': <String, dynamic>{
+              'campos': FuenteDeEjecucionFalsa.camposTipicos,
+              'evidencias': FuenteDeEjecucionFalsa.requisitosTipicos,
+            },
+          },
+        );
+
+    test('el detalle dice que sí: queda 1 y la regla lo lee', () async {
+      await sembrarCon(true);
+      final DatosDeEjecucion datos = (await fuenteReal().cargar('ot-501'))!;
+      expect(datos.orden['valida_una_persona'], 1);
+      expect(validaUnaPersona(datos.orden), isTrue,
+          reason: 'aunque el código de la plantilla no diga «instalacion»');
+    });
+
+    test('el detalle dice que no: queda 0 y se finaliza como siempre', () async {
+      await sembrarCon(false);
+      final DatosDeEjecucion datos = (await fuenteReal().cargar('ot-501'))!;
+      expect(datos.orden['valida_una_persona'], 0);
+      expect(validaUnaPersona(datos.orden), isFalse);
+    });
+
+    test('el listado no lo trae y NO lo borra', () async {
+      await sembrarCon(true);
+      await sembrarCon(null, fuente: FuenteOrden.listado);
+      final DatosDeEjecucion datos = (await fuenteReal().cargar('ot-501'))!;
+      expect(datos.orden['valida_una_persona'], 1);
     });
   });
 }

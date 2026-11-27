@@ -93,11 +93,12 @@ class _EstadoEntrega extends State<EntregaDeLaInstalacion> {
     final bool aprobada = widget.validacion == EstadoValidacion.aprobado;
     if (_entregada) {
       return const DexterBloque(
-        titulo: 'Instalación entregada',
+        titulo: 'Trabajo finalizado',
         icono: Icons.verified_outlined,
         insignia: DexterPastilla.enRegla(texto: 'Entregada'),
         children: <Widget>[
-          Text('Listo: se cerró la orden y el ticket del cliente.'),
+          Text('Listo: la instalación quedó entregada y se cerraron la orden y el '
+              'ticket del cliente.'),
         ],
       );
     }
@@ -109,7 +110,8 @@ class _EstadoEntrega extends State<EntregaDeLaInstalacion> {
         children: <Widget>[
           Text(
             'Una persona revisa la instalación y la activa. Te avisamos aquí cuando '
-            'quede activa para que valides el servicio y lo entregues.',
+            'quede activa para que valides el servicio, lo entregues y finalices '
+            'el trabajo.',
             style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
           ),
         ],
@@ -122,8 +124,8 @@ class _EstadoEntrega extends State<EntregaDeLaInstalacion> {
       separacion: AppSpacing.sm,
       children: <Widget>[
         Text(
-          'Valida que el servicio funcione, entrégalo al cliente y confírmalo. Al '
-          'confirmar se cierran la orden y el ticket.',
+          'Valida que el servicio funcione y entrégalo al cliente. Al tocar '
+          '«Finalizar trabajo» se cierran la orden y el ticket.',
           style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
         ),
         if (_error != null)
@@ -141,7 +143,10 @@ class _EstadoEntrega extends State<EntregaDeLaInstalacion> {
                     width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.handshake_outlined),
-            label: Text(_enviando ? 'Confirmando…' : 'Servicio validado y entregado',
+            //  «FINALIZAR TRABAJO» (27/11/2026). El usuario: «si confirman
+            //  que está bien finaliza el trabajo». Antes decía «Servicio
+            //  validado y entregado».
+            label: Text(_enviando ? 'Finalizando…' : 'Finalizar trabajo',
                 maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ),

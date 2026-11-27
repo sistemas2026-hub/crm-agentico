@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../core/tiempo/momento_leido.dart';
+import 'como_se_cierra.dart' as cierre;
 import 'estado_trabajo.dart';
 import 'estado_validacion.dart';
 
@@ -64,6 +65,7 @@ class TrabajoVista {
     this.contactoAlternoTelefono = '',
     this.idAbonado = '',
     this.requisitosSeguridad = const <String>[],
+    this.validaUnaPersona = false,
   });
 
   // --- Datos reales, de la orden -------------------------------------------
@@ -209,6 +211,11 @@ class TrabajoVista {
   /// Qué hace falta para ejecutar el trabajo. Se informan; no habilitan nada.
   final List<String> requisitosSeguridad;
 
+  /// Si al terminarla la revisa una PERSONA antes de cerrarse: el técnico la
+  /// envía a validación y, aprobada, finaliza el trabajo entregándola
+  /// (27/11/2026). Ver [validaUnaPersona] en `como_se_cierra.dart`.
+  final bool validaUnaPersona;
+
   factory TrabajoVista.desdeOrden(Map<String, dynamic> orden) {
     final id = orden['id']?.toString() ?? '';
     final tipoCodigo = orden['tipo_codigo']?.toString() ?? '';
@@ -263,6 +270,7 @@ class TrabajoVista {
           r.toString(),
       ],
       requiereActualizacion: _bloqueaPorEsquema(orden['schema_version'] as int?),
+      validaUnaPersona: cierre.validaUnaPersona(orden),
     );
   }
 

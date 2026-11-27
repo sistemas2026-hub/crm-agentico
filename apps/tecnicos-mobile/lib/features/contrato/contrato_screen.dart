@@ -47,16 +47,9 @@ import '../ejecucion/widgets/firma_del_cliente.dart';
 import 'elegir_ubicacion.dart';
 import 'firma_en_wisphub.dart';
 
-/// Si esta orden es de las que llevan contrato.
-///
-/// La labor llega del servidor desde la v29 de la base local; las órdenes
-/// bajadas antes no la tienen hasta que se vuelvan a leer, y por eso el código
-/// de la plantilla sirve de respaldo.
-bool llevaContrato(Map<String, dynamic>? orden) {
-  if (orden == null) return false;
-  if ((orden['labor'] ?? '').toString() == 'instalacion') return true;
-  return (orden['tipo_codigo'] ?? '').toString().contains('instalacion');
-}
+//  Qué orden lleva contrato, y cuál la revisa una persona: viven en
+//  `trabajo/como_se_cierra.dart` (los lee también el modelo de la orden).
+export '../trabajo/como_se_cierra.dart';
 
 /// Las coordenadas como se muestran: «lat, lng», o vacío si no hay.
 ///
@@ -991,6 +984,11 @@ class _EstadoContrato extends State<ContratoScreen> {
 
   Widget _formulario() {
     final bool deSolicitud = _borrador?['origen'] == 'solicitud';
+    //  DEL TICKET (27/11/2026): sin solicitud, el servidor llena el contrato
+    //  con el cliente escrito en el ticket («Instalacion Nueva - ...»). Antes
+    //  la app solo distinguía «solicitud» y lo mostraba como «Sin solicitud»,
+    //  con los datos ya puestos.
+    final bool delTicket = _borrador?['origen'] == 'ticket';
     final String planDelTicket = (_borrador?['plan_del_ticket'] ?? '').toString().trim();
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -1003,7 +1001,9 @@ class _EstadoContrato extends State<ContratoScreen> {
               ? const DexterPastilla.alerta(texto: 'Otra persona')
               : deSolicitud
                   ? const DexterPastilla.enRegla(texto: 'De la solicitud')
-                  : const DexterPastilla.alerta(texto: 'Sin solicitud'),
+                  : delTicket
+                      ? const DexterPastilla.enRegla(texto: 'Del ticket')
+                      : const DexterPastilla.alerta(texto: 'Sin solicitud'),
           separacion: AppSpacing.sm,
           children: <Widget>[
             Text(
@@ -1012,7 +1012,9 @@ class _EstadoContrato extends State<ContratoScreen> {
                       'documento a la vista. Teléfono, dirección y lo demás siguen igual.'
                   : deSolicitud
                       ? 'Lo llenó el cliente en la solicitud. Revísalo con el documento.'
-                      : 'Sin solicitud: llénalo con el documento a la vista.',
+                      : delTicket
+                          ? 'Viene del ticket de la instalación. Revísalo con el documento a la vista.'
+                          : 'Sin solicitud: llénalo con el documento a la vista.',
               style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
             ),
             //  A NOMBRE DE OTRA PERSONA (26/11/2026): solo si el servidor

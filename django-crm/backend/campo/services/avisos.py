@@ -134,7 +134,7 @@ def avisar_instalacion_aprobada(orden) -> bool:
         clave=f"instalacion_aprobada|{orden.id}|{orden.vuelta}",
         asunto=f"OT #{orden.numero}: instalación aprobada",
         texto=(f"✅ La OT #{orden.numero} quedó aprobada y activada. Valida que el "
-               f"servicio funcione, entrégalo al cliente y confirma la entrega en la app."),
+               f"servicio funcione, entrégalo al cliente y toca «Finalizar trabajo» en la app."),
         enlace_a=orden.id,
         perfiles=perfiles,
         enlace_interno=f"/ot/{orden.id}",

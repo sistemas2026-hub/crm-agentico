@@ -620,11 +620,14 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     const SizedBox(height: AppSpacing.md),
                     _loQueHayQueRehacer(trabajo, trabajo.correccion!),
                   ],
-                  //  LA INSTALACIÓN QUE VALIDA UNA PERSONA (26/11/2026): finalizada,
-                  //  espera la validación; aprobada, se valida el servicio y se
-                  //  entrega aquí, y eso cierra el ticket.
+                  //  LA INSTALACIÓN QUE VALIDA UNA PERSONA (26/11/2026): enviada a
+                  //  validación, espera; aprobada, se valida el servicio, se
+                  //  entrega y se finaliza aquí, y eso cierra el ticket. Lo dice
+                  //  el servidor, no el código de la plantilla (27/11/2026: la
+                  //  de instalaciones se llama `traslado_servicio` y la OT-501
+                  //  nunca mostró este recuadro).
                   if (trabajo.estado == EstadoTrabajo.completadaCampo &&
-                      trabajo.tipoCodigo.contains('instalacion') &&
+                      trabajo.validaUnaPersona &&
                       trabajo.correccion == null) ...<Widget>[
                     const SizedBox(height: AppSpacing.md),
                     EntregaDeLaInstalacion(

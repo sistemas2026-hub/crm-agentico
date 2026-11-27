@@ -112,7 +112,7 @@ class LocalDatabase {
 
     final db = await openDatabase(
       path,
-      version: 31,
+      version: 32,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -191,6 +191,19 @@ class LocalDatabase {
       final colsOr = infoOr.map((c) => c['name'] as String).toSet();
       if (infoOr.isNotEmpty && !colsOr.contains('puntos_de_tv_json')) {
         await db.execute('ALTER TABLE local_ordenes ADD COLUMN puntos_de_tv_json TEXT;');
+      }
+    }
+
+    // v32 (27/11/2026): si la orden la revisa una PERSONA antes de cerrarse
+    // (`tipo.valida_una_persona`). Con eso el botón del final dice «Enviar a
+    // validación» y, aprobada, sale «Finalizar trabajo». Antes se adivinaba
+    // por el código de la plantilla y en producción no coincidía (OT-501).
+    // 1/0, o nulo si el detalle todavía no lo trajo. Aditiva.
+    if (oldVersion < 32) {
+      final infoOr = await db.rawQuery('PRAGMA table_info(local_ordenes);');
+      final colsOr = infoOr.map((c) => c['name'] as String).toSet();
+      if (infoOr.isNotEmpty && !colsOr.contains('valida_una_persona')) {
+        await db.execute('ALTER TABLE local_ordenes ADD COLUMN valida_una_persona INTEGER;');
       }
     }
 
@@ -1250,6 +1263,7 @@ class LocalDatabase {
         tipo_nombre TEXT NOT NULL,
         tipo_codigo TEXT NOT NULL,
         labor TEXT,
+        valida_una_persona INTEGER,
         material_habitual_json TEXT,
         puntos_de_tv_json TEXT,
         work_type_version_id TEXT,
@@ -1478,6 +1492,8 @@ class LocalDatabase {
                   'requisitos_seguridad_json',
                   // La labor viene en el `tipo` del detalle (13/11/2026).
                   'labor',
+                  // Y si la revisa una persona antes de cerrarse (27/11/2026).
+                  'valida_una_persona',
                   // Y el material que se precarga, y los puntos de TV (26/11/2026).
                   'material_habitual_json',
                   'puntos_de_tv_json',
@@ -1559,6 +1575,13 @@ class LocalDatabase {
       'tipo_nombre': tipoNombre,
       'tipo_codigo': tipoCodigo,
       'labor': soloDetalle('labor', tipoObj['labor']?.toString()),
+      //  Un servidor de antes no lo manda: queda nulo y la app usa la labor.
+      'valida_una_persona': soloDetalle(
+        'valida_una_persona',
+        tipoObj['valida_una_persona'] is bool
+            ? (tipoObj['valida_una_persona'] == true ? 1 : 0)
+            : null,
+      ),
       'material_habitual_json': soloDetalle(
         'material_habitual_json',
         tipoObj['material_habitual'] == null

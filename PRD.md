@@ -2050,7 +2050,7 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
   - un ticket sin la línea sigue como antes.
 - Desconectar la lectura pone en rojo la prueba de punta a punta.
 
-**NO VERIFICADO:** la app 1.0.33 sigue mostrando la etiqueta «Sin solicitud» para un contrato que sale del ticket, porque solo distingue «solicitud». Los datos llegan bien; la etiqueta se ajusta con la próxima APK.
+**Resuelto en la app 1.0.34 (§8.48):** la 1.0.33 mostraba «Sin solicitud» para un contrato que sale del ticket, porque solo distinguía «solicitud». Ahora dice «Del ticket» (`contrato_screen_test`, con el control de «Sin solicitud»).
 
 ### 8.47 DECISIÓN — Al aprobar, el precinto del cliente y la marca de la caja van a la ficha del cliente en WispHub (27/11/2026)
 
@@ -2089,3 +2089,43 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - Guarda de arquitectura, editor, alta y completar en verde. Config local v27 y plantilla local v12.
 
 **NO VERIFICADO:** la escritura real en WispHub de `usuario_cpe` y `password_cpe`. El cliente de prueba se borró; se mide con la próxima instalación vigilada.
+
+### 8.48 DECISIÓN — «Enviar a validación» y «Finalizar trabajo»: el servidor dice qué orden revisa una persona (27/11/2026)
+
+**El origen.** En la OT-501, la primera instalación vigilada en producción, todo salió bien hasta la aprobación: la orden quedó aprobada y el cliente activo. Pero **la orden nunca se cerró y el ticket de WispHub tampoco**. La causa: la app mostraba el recuadro para entregar solo si el **código** de la plantilla contenía «instalacion», y en Rapilink la plantilla de instalaciones se llama `traslado_servicio`. El técnico nunca vio el botón. Además, el usuario pidió nombrar los dos pasos:
+
+> «el técnico termina y debe haber un botón de mandar a validar, pasar a validación, y si confirman que está bien finaliza el trabajo»
+
+**Qué se decidió.**
+1. **Lo decide el servidor.** El detalle de la orden trae `tipo.valida_una_persona` (`campo/serializers._valida_una_persona`).
+   - Es verdadero si la empresa tiene encendido `validar_antes_de_activar` y la orden lleva contrato: labor «instalacion», o ya tiene un contrato vigente.
+   - No exige el contrato, porque la app lo pregunta **antes** de firmar, para nombrar el botón del final.
+   - Si no se puede saber, dice que no: el dato no puede tumbar el detalle de la orden. La entrega igual la decide el servidor al confirmarla (`InstalacionEntregadaView`).
+2. **La app lo guarda** en la v32 de su base local (`valida_una_persona`, 1/0), para usarlo sin señal.
+   - Una orden bajada antes no lo trae hasta que se vuelva a leer; mientras tanto vale `llevaContrato`.
+   - El listado no lo borra.
+3. **Los botones.**
+   - **Al terminar:** «Enviar a validación», en lugar de «Finalizar». También cambian el resumen («Antes de enviar a validación, revisá» / «Está bien, enviar») y el aviso: «Enviada a validación … cuando quede activa te avisamos para que valides el servicio, lo entregues y toques «Finalizar trabajo»». La transición es la misma de siempre.
+   - **Aprobada:** «Finalizar trabajo», en lugar de «Servicio validado y entregado». Cierra la orden y el ticket, como antes.
+   - El aviso al teléfono al aprobar nombra ese botón.
+   - Una empresa sin la validación no ve ningún cambio.
+4. **De paso:** el contrato que sale del ticket dice «Del ticket» y no «Sin solicitud» (§8.46).
+
+**VERIFICADO:**
+- backend: `test_valida_una_persona` (5):
+  - el detalle con el código de producción y sin contrato todavía dice que sí;
+  - una empresa sin la validación dice que no;
+  - un correctivo dice que no, salvo que ya tenga contrato;
+  - si la lectura falla, dice que no y el detalle no se cae;
+  - el aviso nombra «Finalizar trabajo».
+- backend: `test_instalacion_validada` y `test_precinto_y_caja_al_proveedor` siguen en verde (41 en total).
+- backend, la batería completa de `campo` (SQLite): fallan las mismas 271 pruebas con y sin este cambio (se corrieron las dos veces y se compararon una por una); todas son de SQLite: la búsqueda `contains`, `hashtext` y las de concurrencia. Ninguna nueva.
+- app: 1.519 pruebas en verde (1 omitida, como antes), entre ellas:
+  - `como_se_cierra_test`: el dato del servidor manda sobre el código de la plantilla; sin el dato vale la labor.
+  - `fuente_de_ejecucion_real_test` sección 4: la cadena detalle → base local → pantalla, y el listado no lo borra.
+  - `instalacion_en_la_ejecucion_test`: «Enviar a validación» y el aviso con el botón que sigue. El control con «Finalizar». A 360 px, con la letra Inter del teléfono y al 130 %, el botón no se corta; un texto más largo puesto a propósito sí la pone en rojo.
+  - `entrega_de_la_instalacion_test`: «Finalizar trabajo».
+  - `contrato_screen_test`: «Del ticket», con el control de «Sin solicitud».
+- APK 1.0.34 compilada y firmada con la llave de siempre (SHA-1 `6ed4b600…79cf`).
+
+**NO VERIFICADO:** el recorrido completo en un teléfono con la 1.0.34: enviar a validación, aprobar en Dexter, finalizar el trabajo y ver cerrados la orden y el ticket de WispHub. Se mide en la próxima instalación vigilada.

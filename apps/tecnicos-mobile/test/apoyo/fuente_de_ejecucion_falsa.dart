@@ -35,6 +35,8 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
     this.materialHabitual = const <Map<String, dynamic>>[],
     this.kitDado = const <Map<String, dynamic>>[],
     this.puntosDeTv,
+    this.labor,
+    this.validaUnaPersona = 0,
   })  : campos = campos ?? camposTipicos,
         requisitos = requisitos ?? requisitosTipicos,
         valores = valores ?? <String, dynamic>{},
@@ -64,6 +66,12 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
 
   /// Los puntos de TV del tipo de trabajo, o nulo.
   final Map<String, dynamic>? puntosDeTv;
+
+  /// La labor y si la revisa una persona, como los guarda la base (27/11/2026):
+  /// `valida_una_persona` en 1/0, o nulo si el detalle no lo trajo. Por
+  /// omisión 0: las pruebas de siempre son de un trabajo que se finaliza.
+  final String? labor;
+  final int? validaUnaPersona;
 
   /// Los consumos que la pantalla encoló.
   final List<Map<String, dynamic>> consumos = <Map<String, dynamic>>[];
@@ -219,6 +227,8 @@ class FuenteDeEjecucionFalsa implements FuenteDeEjecucion {
         'direccion': 'Cra 45 #12-88, Barrio San José',
         'tipo_nombre': 'Instalación FTTH',
         'tipo_codigo': tipoCodigo,
+        'labor': labor,
+        'valida_una_persona': validaUnaPersona,
         'schema_version': 1,
         'correccion_json': correccionJson,
         // La ficha que el motor congeló al despachar. Los valores son los

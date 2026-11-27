@@ -13,6 +13,7 @@ import 'package:campo/core/theme/app_theme.dart';
 import 'package:campo/features/ejecucion/ejecucion_screen.dart';
 import 'package:campo/features/contrato/contrato_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -241,5 +242,82 @@ void main() {
     await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 3(, completo)?$')));
     await t.pumpAndSettle();
     expect(find.textContaining('Sin señal'), findsOneWidget);
+  });
+
+
+  // ------------------------------------------------------------------------
+  //  ENVIAR A VALIDACIÓN (27/11/2026). El usuario: «el técnico termina y debe
+  //  haber un botón de mandar a validar, y si confirman que está bien finaliza
+  //  el trabajo». Lo decide el servidor, no el código de la plantilla: en
+  //  producción la de instalaciones es `traslado_servicio` (OT-501).
+  // ------------------------------------------------------------------------
+  FuenteDeEjecucionFalsa sinNadaQueFalte({required int? valida, String tipo = 'traslado_servicio'}) =>
+      FuenteDeEjecucionFalsa(
+        tipoCodigo: tipo,
+        labor: 'instalacion',
+        validaUnaPersona: valida,
+        campos: <Map<String, dynamic>>[_campo('a', 'paso_1')],
+        requisitos: const <Map<String, dynamic>>[],
+        materiales: <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()],
+      );
+
+  testWidgets('LA REVISA UNA PERSONA: «Enviar a validación», y al enviarla dice qué sigue',
+      (WidgetTester t) async {
+    _pantallaAlta(t);
+    final FuenteDeEjecucionFalsa f = sinNadaQueFalte(valida: 1);
+    await t.pumpWidget(_app(f));
+    await t.pumpAndSettle();
+
+    expect(find.text('Finalizar'), findsNothing);
+    await t.tap(find.text('Enviar a validación'));
+    await t.pumpAndSettle();
+    expect(find.text('Antes de enviar a validación, revisá'), findsOneWidget);
+    await t.tap(find.text('Está bien, enviar'));
+    await t.pumpAndSettle();
+
+    expect(f.transiciones, hasLength(1));
+    expect(f.transiciones.first['estado'], 'completada_pendiente_sync',
+        reason: 'enviar a validación es la misma transición: la decide el servidor');
+    expect(find.text('Enviada a validación'), findsOneWidget);
+    expect(find.textContaining('«Finalizar trabajo»'), findsOneWidget);
+  });
+
+  testWidgets('EL CONTROL: si el servidor dice que no la revisa nadie, sigue «Finalizar»',
+      (WidgetTester t) async {
+    _pantallaAlta(t);
+    final FuenteDeEjecucionFalsa f = sinNadaQueFalte(valida: 0, tipo: 'ftth_instalacion');
+    await t.pumpWidget(_app(f));
+    await t.pumpAndSettle();
+
+    expect(find.text('Enviar a validación'), findsNothing);
+    await t.tap(find.text('Finalizar'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Está bien, finalizar'));
+    await t.pumpAndSettle();
+    expect(f.transiciones, hasLength(1));
+    expect(find.text('Trabajo terminado en campo'), findsOneWidget);
+  });
+
+  testWidgets('A 360 PX, con la letra del teléfono y al 130 %, «Enviar a validación» entra entero',
+      (WidgetTester t) async {
+    //  Con la letra de las pruebas (cada letra es un cuadrado) nada entra: se
+    //  mide con Inter, la que dibuja el teléfono. Y al 130 %, que es lo
+    //  primero que sube quien trabaja al sol.
+    final FontLoader inter = FontLoader(AppTypography.familiaTexto)
+      ..addFont(rootBundle.load('assets/fonts/Inter-SemiBold.ttf'));
+    await inter.load();
+    t.view.physicalSize = const Size(360, 800);
+    t.view.devicePixelRatio = 1.0;
+    t.platformDispatcher.textScaleFactorTestValue = 1.3;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    addTearDown(t.platformDispatcher.clearTextScaleFactorTestValue);
+    await t.pumpWidget(_app(sinNadaQueFalte(valida: 1)));
+    await t.pumpAndSettle();
+
+    final Finder texto = find.text('Enviar a validación');
+    expect(texto, findsOneWidget);
+    final RenderParagraph p = t.renderObject<RenderParagraph>(texto);
+    expect(p.didExceedMaxLines, isFalse, reason: 'el botón principal no se corta');
   });
 }

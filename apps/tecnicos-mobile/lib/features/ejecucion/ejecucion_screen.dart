@@ -573,6 +573,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     _fuente.procesarCola();
 
     if (mounted) {
+      //  Enviada a validación (27/11/2026): no está terminada todavía. Se
+      //  dice qué sigue, con el nombre del botón que lo hace.
+      final bool aValidacion = _vaAValidacion;
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -586,12 +589,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
             color: AppColors.secondary,
             size: 48,
           ),
-          title: const Text('Trabajo terminado en campo'),
-          content: const Text(
-            'Quedó guardado en este teléfono. Se envía solo cuando haya '
-            'señal, y después la oficina lo revisa: todavía puede volver '
-            'con observaciones.',
-          ),
+          title: Text(aValidacion ? 'Enviada a validación' : 'Trabajo terminado en campo'),
+          content: Text(aValidacion
+              ? 'Quedó guardada en este teléfono y se envía sola cuando haya '
+                  'señal. La oficina revisa la instalación y la activa; '
+                  'cuando quede activa te avisamos para que valides el '
+                  'servicio, lo entregues y toques «Finalizar trabajo».'
+              : 'Quedó guardado en este teléfono. Se envía solo cuando haya '
+                  'señal, y después la oficina lo revisa: todavía puede volver '
+                  'con observaciones.'),
           actions: [
             ElevatedButton(
               onPressed: () {
@@ -661,7 +667,10 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Text('Antes de finalizar, revisá',
+                Text(
+                    _vaAValidacion
+                        ? 'Antes de enviar a validación, revisá'
+                        : 'Antes de finalizar, revisá',
                     style: AppTypography.tituloChico),
                 const SizedBox(height: AppSpacing.sm),
                 Flexible(
@@ -730,7 +739,9 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                     Expanded(
                       child: FilledButton(
                         onPressed: () => Navigator.of(hoja).pop(true),
-                        child: const Text('Está bien, finalizar'),
+                        child: Text(_vaAValidacion
+                            ? 'Está bien, enviar'
+                            : 'Está bien, finalizar'),
                       ),
                     ),
                   ],
@@ -773,7 +784,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
       alGuardar: (Map<String, dynamic> r, {bool requiereNoc = false, bool detener = true}) {
         respuestas = r;
       },
-      textoGuardar: 'Guardar y finalizar',
+      textoGuardar:
+          _vaAValidacion ? 'Guardar y enviar a validación' : 'Guardar y finalizar',
     );
     if (guardado != true) {
       await _descartarBorrador('cierre');
@@ -2367,6 +2379,13 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   bool get _hayPasoSiguiente =>
       _pasos.isNotEmpty && _pasoActual < _pasos.length - 1;
 
+  /// Si al terminar esta orden la revisa una PERSONA (27/11/2026). Entonces no
+  /// se «finaliza»: se ENVÍA A VALIDACIÓN, y el trabajo se finaliza después,
+  /// desde la ficha, cuando la oficina la aprueba y el técnico la entrega. El
+  /// usuario: «el técnico termina y debe haber un botón de mandar a validar,
+  /// y si confirman que está bien finaliza el trabajo».
+  bool get _vaAValidacion => validaUnaPersona(_orden);
+
   Widget _barraDeAcciones() {
     return Container(
       decoration: const BoxDecoration(
@@ -2463,9 +2482,14 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                           // de la orden, en su barra de abajo-- y la palabra
                           // de mas era justo la que no entraba. Cortarla a
                           // «Finalizar ord...» habria sido peor que sacarla.
+                          //  «ENVIAR A VALIDACIÓN» cuando la revisa una persona
+                          //  (27/11/2026). Es más largo, y por eso va sin la
+                          //  flecha: el botón principal no se corta.
                           Flexible(
                             child: Text(
-                              _hayPasoSiguiente ? 'Siguiente paso' : 'Finalizar',
+                              _hayPasoSiguiente
+                                  ? 'Siguiente paso'
+                                  : (_vaAValidacion ? 'Enviar a validación' : 'Finalizar'),
                               style: AppTypography.etiquetaGrande.copyWith(
                                 color: AppColors.onPrimary,
                               ),
@@ -2473,12 +2497,14 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
-                          const Icon(
-                            Icons.arrow_forward,
-                            size: 20,
-                            color: AppColors.onPrimary,
-                          ),
+                          if (_hayPasoSiguiente || !_vaAValidacion) ...<Widget>[
+                            const SizedBox(width: AppSpacing.sm),
+                            const Icon(
+                              Icons.arrow_forward,
+                              size: 20,
+                              color: AppColors.onPrimary,
+                            ),
+                          ],
                         ],
                       ),
                     ),
