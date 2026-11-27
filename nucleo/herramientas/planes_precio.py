@@ -15,6 +15,7 @@ El precio vive en el DETALLE, uno por uno:
     GET /api/plan-internet/queue/{id}/
         precio       "199900.00"
         bajada       "700M"
+        subida       "350M"
         descripcion  "PLAN ELITE (700MB + TV + DISNEY+ + CAMARA)"
 
 O sea que saber el precio de los 50 planes son 50 llamadas. Hacerlas cuando
@@ -76,7 +77,7 @@ def a_decimal(texto) -> Decimal | None:
 
 def sincronizar(herramienta_listado, herramienta_detalle, tenant: str,
                 variables_tenant: dict | None = None) -> dict:
-    """Recorre el catalogo y devuelve {id: {nombre, precio, bajada}}.
+    """Recorre el catalogo y devuelve {id: {nombre, precio, bajada, subida}}.
 
     Las dos herramientas se pasan en vez de fijarse aca: el endpoint, el
     header de auth y el subdominio son del tenant, no de este modulo. Un ISP
@@ -133,6 +134,9 @@ def sincronizar(herramienta_listado, herramienta_detalle, tenant: str,
             # y no como "0".
             "precio": str(precio) if precio is not None else None,
             "bajada": (detalle.get("bajada") or "").strip(),
+            #  27/11/2026: con la subida se sugiere el perfil de velocidad
+            #  de la ONU (nucleo/seguimiento/activar_onu.py).
+            "subida": (detalle.get("subida") or "").strip(),
             "descripcion": (detalle.get("descripcion") or "").strip(),
         }
 

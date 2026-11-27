@@ -9,7 +9,10 @@ para que se active la ONU en SmartOLT enseguida». Decidio:
 * un boton «Activar ONU» despues del serial, construido APAGADO (la empresa lo
   enciende en Programacion) y probado una vez con su permiso;
 * la VLAN sale del SERVIDOR del contrato (se carga junto a cada servidor);
-* la zona la sugiere el barrio del contrato y el tecnico la confirma.
+* la zona la sugiere el barrio del contrato y el tecnico la confirma;
+* el ANCHO DE BANDA (27/11/2026) sale del PLAN del contrato: la empresa elige en
+  Programacion el perfil de bajada y el de subida de cada plan (el usuario: «en
+  SmartOLT tambien hay que ponerle el ancho de banda de descarga y carga»).
 
 El motor hace la parte peligrosa (`nucleo/seguimiento/activar_onu.py`): solo
 escribe si el proveedor lista la ONU esperando autorizacion, por la puerta
@@ -64,6 +67,10 @@ class ActivacionDeOnu(BaseModel):
     serial = models.CharField(max_length=32)
     zona = models.CharField(max_length=80, blank=True, default="")
     vlan = models.PositiveIntegerField(null=True, blank=True)
+    #  Con que perfiles de velocidad se pidio (27/11/2026). Vacios = sin
+    #  perfil, como antes de esa fecha.
+    perfil_bajada = models.CharField(max_length=64, blank=True, default="")
+    perfil_subida = models.CharField(max_length=64, blank=True, default="")
     intento = models.PositiveSmallIntegerField(default=1)
     estado = models.CharField(max_length=20, choices=ESTADOS, default=PEDIDA)
     detalle = models.TextField(blank=True, default="")
@@ -82,6 +89,7 @@ class ActivacionDeOnu(BaseModel):
 
     def como_dict(self) -> dict:
         return {"id": str(self.id), "serial": self.serial, "zona": self.zona, "vlan": self.vlan,
+                "perfil_bajada": self.perfil_bajada, "perfil_subida": self.perfil_subida,
                 "intento": self.intento, "estado": self.estado,
                 "estado_etiqueta": self.get_estado_display(), "detalle": self.detalle,
                 "olt": self.olt, "placa": self.placa, "puerto": self.puerto,
@@ -179,6 +187,28 @@ def _contrato_y_vlan(orden):
     return contrato, (servidor or {}).get("vlan"), (servidor or {}).get("nombre", "")
 
 
+def _llano_plan(texto) -> str:
+    return " ".join(str(texto or "").split()).casefold()
+
+
+def perfiles_del_plan(configuracion: dict, plan) -> dict | None:
+    """Los perfiles de velocidad con los que se autoriza la ONU de ese plan.
+
+    `{}` si la empresa no usa la tabla (se autoriza sin perfil, como hasta el
+    27/11/2026); `{"bajada": .., "subida": ..}` si el plan tiene su fila; y
+    `None` si la empresa USA la tabla y ese plan no esta: autorizarla sin
+    perfil la dejaria con el de por defecto, que no es el que el cliente paga.
+    """
+    tabla = [f for f in (configuracion.get("perfiles_de_velocidad") or [])
+             if isinstance(f, dict)]
+    if not tabla:
+        return {}
+    fila = next((f for f in tabla if _llano_plan(f.get("plan")) == _llano_plan(plan)), None)
+    if fila is None:
+        return None
+    return {"bajada": str(fila.get("bajada") or ""), "subida": str(fila.get("subida") or "")}
+
+
 def buscar(orden, serial) -> dict:
     """SOLO LEE: si la ONU espera, en que puerto, la zona sugerida y la VLAN."""
     s = serial_limpio(serial)
@@ -216,6 +246,12 @@ def pedir(orden, profile, *, serial, zona) -> ActivacionDeOnu:
     if not vlan:
         raise NoSePuedeActivar(f"Falta la VLAN del servidor «{servidor}» en Programación "
                                "(El contrato de instalación).")
+    plan = (contrato.datos or {}).get("plan", "")
+    perfiles = perfiles_del_plan(configuracion_de(orden.org), plan)
+    if perfiles is None:
+        raise NoSePuedeActivar(f"Falta el ancho de banda del plan «{plan}» en Programación "
+                               "(El contrato de instalación): sin eso la ONU quedaría con el "
+                               "perfil por defecto.")
     en_vuelo = (ActivacionDeOnu.objects.filter(orden=orden, estado__in=ActivacionDeOnu.EN_VUELO)
                 .order_by("-created_at").first())
     if en_vuelo is not None:
@@ -224,7 +260,9 @@ def pedir(orden, profile, *, serial, zona) -> ActivacionDeOnu:
     if intento > MAXIMO_DE_PEDIDOS:
         raise NoSePuedeActivar("Esta orden ya hizo demasiados pedidos. Que la oficina la mire.")
     a = ActivacionDeOnu.objects.create(org=orden.org, orden=orden, serial=s, zona=zona,
-                                       vlan=int(vlan), intento=intento, pedida_por=profile)
+                                       vlan=int(vlan), intento=intento, pedida_por=profile,
+                                       perfil_bajada=perfiles.get("bajada", ""),
+                                       perfil_subida=perfiles.get("subida", ""))
     from campo.tasks import activar_onu_en_la_red
 
     try:
@@ -270,10 +308,14 @@ def ejecutar(a: ActivacionDeOnu) -> None:
         a.estado, a.detalle = ActivacionDeOnu.NO_SALIO, "No se sabe quién la pidió: sin eso no sale."
         a.save(update_fields=["estado", "detalle", "updated_at"])
         return
+    #  Los perfiles con los que SE PIDIO, no los de la tabla de ahora: si la
+    #  empresa la cambia mientras tanto, sale lo que el tecnico vio.
+    perfiles = {k: v for k, v in (("perfil_bajada", a.perfil_bajada),
+                                  ("perfil_subida", a.perfil_subida)) if v}
     datos = _llamar(a.org_id, f"/interno/orden/{a.orden_id}/activar-onu",
                     {"actor": actor, "intento": a.intento,
                      "datos": {"serial": a.serial, "zona": a.zona, "vlan": a.vlan,
-                               "nombre": nombre}}, ESPERA_DEL_PEDIDO)
+                               "nombre": nombre, **perfiles}}, ESPERA_DEL_PEDIDO)
     if datos is None:
         a.estado, a.detalle = ActivacionDeOnu.EN_CURSO, "Se pidió y no se sabe todavía cómo quedó."
         a.save(update_fields=["estado", "detalle", "updated_at"])

@@ -2129,3 +2129,48 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - APK 1.0.34 compilada y firmada con la llave de siempre (SHA-1 `6ed4b600…79cf`).
 
 **NO VERIFICADO:** el recorrido completo en un teléfono con la 1.0.34: enviar a validación, aprobar en Dexter, finalizar el trabajo y ver cerrados la orden y el ticket de WispHub. Se mide en la próxima instalación vigilada.
+
+### 8.49 DECISIÓN — Al activar la ONU, SmartOLT recibe el ancho de banda del plan; la empresa elige el perfil de cada plan (27/11/2026)
+
+**El origen.** El usuario: «en SmartOLT también hay que ponerle el ancho de banda de descarga y carga». Hasta hoy «Activar ONU» autorizaba con zona, VLAN y nombre, sin perfil de velocidad, igual que lo hacía la oficina a mano.
+
+**Medido antes de construir, solo leyendo (skill `smartolt-api`):**
+- SmartOLT tiene 39 perfiles con su velocidad en kbps, por sentido y clase (internet o TV).
+- Algunos existen en un solo sentido: 500 y 700 solo de bajada, 250 solo de subida, y no hay subida de 350.
+- La autorización acepta los dos perfiles en la misma llamada (`download_speed_profile_name`, `upload_speed_profile_name`).
+- WispHub trae la velocidad de cada plan en su detalle: ELITE 700/350, ULTRA 500/250, FAMILIA 200/100, HOGAR 100/50, 200MB SV 210/114, 150MB_SB 156/78.
+
+**Qué se decidió.**
+1. **La tabla es de la empresa.** En Programación → El contrato de instalación, cada plan que se vende tiene su perfil de bajada y su perfil de subida (`ConfiguracionDeContrato.perfiles_de_velocidad`).
+   - Sugerido: el perfil más chico que alcanza la velocidad del plan. El usuario aprobó la tabla que sale de esa regla; ELITE sube con `PLAN_1000MB` porque no hay uno de 350.
+   - La tabla solo se muestra, y solo viaja al guardar, si se pudo leer la lista de SmartOLT. Así un guardado sin la tabla en pantalla no la borra.
+   - Un plan guardado que ya no se vende sigue a la vista.
+2. **Al pedir la activación** salen los perfiles del plan del contrato, y quedan anotados en el pedido.
+   - Tabla vacía: se autoriza sin perfil, como hasta hoy.
+   - Tabla cargada y el plan sin su fila: **no se activa** y lo dice. Quedaría con el perfil por defecto, que no es el que el cliente paga.
+3. **El motor comprueba antes de escribir** que cada perfil exista en SmartOLT en ese sentido y en la clase de internet.
+   - Si no existe, no sale (`datos_invalidos`). Si la lista no se puede leer, tampoco (`no_se_pudo_comprobar`).
+   - No se midió qué hace SmartOLT con un nombre que no existe, así que no se confía en que lo rechace.
+   - Marca nueva `lista_perfiles_de_velocidad` (solo lectura, de ningún agente, no invocable por un servicio) y `ParametrosDeOnu.perfiles` dice cómo se lee la lista.
+4. **La sincronización de precios guarda también la subida** de cada plan (`PrecioDePlan.subida`): de ahí sale la sugerencia.
+
+**VERIFICADO:**
+- motor: `test_activar_onu` secciones 7, 7b y 7c, con los 39 perfiles reales.
+  - Los dos perfiles viajan con los nombres del proveedor, y la lista se lee antes del interruptor.
+  - No salen: un perfil que no existe, uno que existe solo en el otro sentido, uno de TV, uno con forma rara, ni nada si la lista falla o llega rara.
+  - La sugerencia reproduce la tabla aprobada, plan por plan.
+  - Quitar la comprobación de «existe» pone 3 pruebas en rojo.
+  - `test_editor_config`, `test_precios_herramientas` y la guarda de arquitectura en verde.
+- backend: `test_ancho_de_banda_del_plan` (12), junto con `test_activacion_onu` y `test_ubicacion_de_la_onu`: 39 en verde.
+  - La tabla se valida, una fila vacía se descarta, y un guardado sin la tabla no la borra.
+  - Un plan sin su fila no se activa.
+  - Viajan los perfiles con los que se pidió, aunque la tabla cambie después.
+- web: `perfiles-de-velocidad.test.js`, `contrato.test.js` y `page-server.test.js` (70). Ningún error de tipos en los archivos tocados; los 256 que hay están en otros 73 archivos.
+- **De punta a punta en local, contra SmartOLT y WispHub de verdad (solo lectura):** la ruta nueva leyó 19 perfiles de bajada y 18 de subida. Después de sincronizar los precios (51 planes, todos con subida), sugirió exactamente la tabla aprobada para los 6 planes.
+
+**NO VERIFICADO:**
+- Una autorización real con perfiles: que SmartOLT los aplique. Se mira en la ficha de la ONU después de la próxima instalación vigilada.
+- En producción falta, después del despliegue:
+  - cargar la herramienta y los campos en la config del motor (con ensayo antes);
+  - sincronizar los precios para que tengan la subida;
+  - guardar la tabla en Programación.

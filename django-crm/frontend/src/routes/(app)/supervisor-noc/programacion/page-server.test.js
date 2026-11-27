@@ -833,3 +833,44 @@ describe('Programación: devolver al técnico una orden detenida', () => {
     expect(apiRequest).not.toHaveBeenCalled();
   });
 });
+
+//  EL ANCHO DE BANDA DE CADA PLAN (27/11/2026): la carga trae del motor los
+//  perfiles y arma la tabla con lo guardado; sin motor, no hay tabla.
+describe('Programación: el ancho de banda de cada plan (27/11/2026)', () => {
+  const PERFILES = {
+    disponible: true, error: '',
+    perfiles: { bajada: [{ nombre: 'PLAN_200MB_SV', kbps: 219136 }], subida: [{ nombre: 'PLAN_100MB', kbps: 112640 }] },
+    planes: [{ nombre: 'PLAN FAMILIA', bajada: '200M', subida: '100M',
+               sugerido: { bajada: 'PLAN_200MB_SV', subida: 'PLAN_100MB' } }]
+  };
+
+  /** @param {any} fetchFalso */
+  const ctxConMotor = (fetchFalso) => /** @type {any} */ ({
+    url: new URL('http://x/supervisor-noc/programacion'),
+    cookies: { get: () => 'token' },
+    locals: { org: { id: 'org-1' }, profile: { role: 'ADMIN' } },
+    fetch: fetchFalso
+  });
+
+  it('pide los perfiles al motor y arma las filas con lo sugerido', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const pedidos = /** @type {string[]} */ ([]);
+    const fetchFalso = vi.fn(async (/** @type {string} */ url) => {
+      pedidos.push(url);
+      return { ok: true, json: async () => (url.includes('perfiles-de-velocidad') ? PERFILES : { pools: [] }) };
+    });
+    const d = /** @type {any} */ (await load(ctxConMotor(fetchFalso)));
+    expect(pedidos).toContain('http://motor/configuracion/perfiles-de-velocidad?tenant=empresa-uno');
+    expect(d.perfiles.filas).toEqual([{ plan: 'PLAN FAMILIA', velocidad: '200M / 100M', bajada: 'PLAN_200MB_SV',
+                                        subida: 'PLAN_100MB', sugerido: true, seVende: true }]);
+    tenant.destinoDelAsistente.mockResolvedValue(null);
+  });
+
+  it('si el motor no contesta, NO hay tabla (y el guardado no la toca)', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    const fetchFalso = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+    const d = /** @type {any} */ (await load(ctxConMotor(fetchFalso)));
+    expect(d.perfiles).toBe(null);
+    tenant.destinoDelAsistente.mockResolvedValue(null);
+  });
+});

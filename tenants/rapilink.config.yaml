@@ -6874,6 +6874,23 @@ herramientas:
         zona: zone
         vlan: vlan
         nombre: name
+        # EL ANCHO DE BANDA DEL PLAN (27/11/2026). El usuario: «en SmartOLT
+        # tambien hay que ponerle el ancho de banda de descarga y carga». La
+        # autorizacion los acepta (OpenAPI del proveedor); el de cada plan lo
+        # elige la empresa en Programacion.
+        perfil_bajada: download_speed_profile_name
+        perfil_subida: upload_speed_profile_name
+      # Como lista SmartOLT sus perfiles (get_speed_profiles, medido el
+      # 27/11/2026, solo lectura): 39, `{name, direction, speed, type}`, speed
+      # en kbps. Solo los de internet: los de TV (iptv) no son del plan.
+      perfiles:
+        campo_nombre: name
+        campo_sentido: direction
+        sentido_bajada: download
+        sentido_subida: upload
+        campo_velocidad: speed
+        campo_clase: type
+        clase: internet
       fila:
         olt: olt_id
         tipo_pon: pon_type
@@ -6916,6 +6933,25 @@ herramientas:
     auth_header: X-Token
     extraer_de: response
     lista_zonas_de_red: true
+
+  - nombre: listar_perfiles_de_velocidad
+    tipo: http
+    descripcion: >
+      Los perfiles de velocidad de SmartOLT (bajada y subida). Con ellos se
+      comprueba el perfil del plan antes de autorizar una ONU, y la empresa
+      elige el de cada plan en Programacion. No la llama el modelo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url_ref: SMARTOLT_SUBDOMINIO
+    endpoint: /api/system/get_speed_profiles
+    metodo: GET
+    auth_ref: SMARTOLT_API_KEY
+    auth_esquema: ""
+    auth_header: X-Token
+    # Medido el 27/11/2026 (solo lectura): {"response": [...39 perfiles...],
+    # "response_code", "status"}. Ningun dato de clientes.
+    extraer_de: response
+    lista_perfiles_de_velocidad: true
 
   - nombre: reiniciar_ont
     resumen: "Reinicia en remoto el equipo del cliente."

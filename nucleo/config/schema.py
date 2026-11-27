@@ -917,10 +917,48 @@ DATOS_PARA_EL_NOMBRE_EN_ROUTER = ("nombre", "apellido", "documento")
 #: ONU, de que tipo es, y con que zona, VLAN y nombre queda. Como le dice el
 #: proveedor a cada cosa lo declara la empresa (`ParametrosDeOnu`).
 DATOS_DE_LA_ONU = ("olt", "tipo_pon", "serial", "placa", "puerto", "tipo",
-                   "zona", "vlan", "nombre", "direccion")
+                   "zona", "vlan", "nombre", "direccion",
+                   #  27/11/2026: el ancho de banda del plan, como lo nombra el
+                   #  proveedor (el usuario: «en SmartOLT tambien hay que
+                   #  ponerle el ancho de banda de descarga y carga»).
+                   "perfil_bajada", "perfil_subida")
+#: Los datos de la autorizacion que son un PERFIL DE VELOCIDAD del proveedor.
+DATOS_DE_PERFIL = ("perfil_bajada", "perfil_subida")
 DATOS_OBLIGATORIOS_DE_LA_ONU = ("olt", "tipo_pon", "serial")
 #: Lo que el motor lee de una ONU que espera autorizacion.
 DATOS_DE_LA_FILA_ONU = ("olt", "tipo_pon", "serial", "placa", "puerto", "tipo")
+
+
+class PerfilesDeVelocidad(Base):
+    """Como lista ESTE proveedor sus perfiles de velocidad  --  27/11/2026.
+
+    Medido en la primera empresa (SmartOLT, `get_speed_profiles`, solo
+    lectura): 39 perfiles `{name, direction, speed, type}`, con `speed` en
+    kbps, `direction` «download»/«upload» y `type` «internet»/«iptv». Hay
+    perfiles que existen en un solo sentido (uno de 500 solo de bajada, uno de
+    250 solo de subida), asi que bajada y subida se eligen por separado.
+    """
+
+    campo_nombre: str = "name"
+    campo_sentido: str = "direction"
+    sentido_bajada: str = "download"
+    sentido_subida: str = "upload"
+    #: La velocidad del perfil, en kbps. Un 0 es «sin limite».
+    campo_velocidad: str = "speed"
+    #: Solo los perfiles de esta clase (la de internet, no la de TV). Vacio en
+    #: los dos = todos.
+    campo_clase: str = ""
+    clase: str = ""
+
+    @model_validator(mode="after")
+    def _coherente(self):
+        if not (self.campo_nombre.strip() and self.campo_sentido.strip()
+                and self.sentido_bajada.strip() and self.sentido_subida.strip()):
+            raise ValueError("los perfiles de velocidad necesitan el campo del nombre, el del "
+                             "sentido y como se llama cada sentido")
+        if bool(self.campo_clase.strip()) != bool(self.clase.strip()):
+            raise ValueError("'campo_clase' y 'clase' van juntos")
+        return self
 
 
 class ParametrosDeOnu(Base):
@@ -943,9 +981,17 @@ class ParametrosDeOnu(Base):
     campo_serial_autorizada: str = "sn"
     #: En el listado de zonas, el campo con el nombre.
     campo_nombre_de_zona: str = "name"
+    #: Como lista el proveedor sus perfiles de velocidad (27/11/2026). Sin
+    #: esto no se manda ningun perfil: el motor comprueba que el perfil
+    #: EXISTA en el proveedor antes de escribir, y sin la lista no puede.
+    perfiles: PerfilesDeVelocidad | None = None
 
     @model_validator(mode="after")
     def _coherente(self):
+        con_perfil = sorted(d for d in DATOS_DE_PERFIL if self.campos.get(d))
+        if con_perfil and self.perfiles is None:
+            raise ValueError(f"'campos' manda {con_perfil} pero falta 'perfiles': sin la lista "
+                             f"del proveedor no se puede comprobar que el perfil exista.")
         ajenos = sorted(set(self.campos) - set(DATOS_DE_LA_ONU))
         if ajenos:
             raise ValueError(f"'campos' nombra datos que la plataforma no conoce: {ajenos}. "
@@ -1947,6 +1993,10 @@ class Herramienta(Base):
     parametros_de_onu: ParametrosDeOnu | None = None
     lee_onu: bool = False
     lista_zonas_de_red: bool = False
+    #: La que lista los perfiles de velocidad del proveedor (27/11/2026). Solo
+    #: lee; con ella se comprueba el perfil antes de autorizar y la empresa
+    #: elige el de cada plan en Programacion.
+    lista_perfiles_de_velocidad: bool = False
     #: El pedido va como formulario (`application/x-www-form-urlencoded`) y
     #: no como JSON: lo exige, por ejemplo, la autorizacion de una ONU en
     #: SmartOLT (su OpenAPI, 26/11/2026). Excluye `multipart`.
@@ -2829,13 +2879,13 @@ class Herramienta(Base):
                 f"'{self.nombre}' autoriza una ONU y se declara de solo lectura: "
                 f"asi saldria sin pasar por la frontera.")
         de_la_onu = (self.busca_onu_sin_autorizar or self.autoriza_onu or self.lee_onu
-                     or self.lista_zonas_de_red)
+                     or self.lista_zonas_de_red or self.lista_perfiles_de_velocidad)
         if de_la_onu and self.invocable_por_servicio:
             raise ValueError(
                 f"'{self.nombre}' es una herramienta de la autorizacion de ONU y no "
                 f"puede ser 'invocable_por_servicio'.")
-        if ((self.busca_onu_sin_autorizar or self.lee_onu or self.lista_zonas_de_red)
-                and not self.solo_lectura):
+        if ((self.busca_onu_sin_autorizar or self.lee_onu or self.lista_zonas_de_red
+                or self.lista_perfiles_de_velocidad) and not self.solo_lectura):
             raise ValueError(
                 f"'{self.nombre}' es una lectura de la autorizacion de ONU y no se "
                 f"declara de solo lectura.")
@@ -4309,6 +4359,8 @@ class PrecioDePlan(Base):
     nombre: str = ""
     precio: str | None = None          # "199900.00", o None si no se pudo leer
     bajada: str = ""                   # "700M"
+    #: 27/11/2026: la subida, para sugerir el perfil de velocidad de la ONU.
+    subida: str = ""                   # "350M"
     descripcion: str = ""
 
 
@@ -5578,7 +5630,8 @@ class TenantConfig(Base):
                               if (h.crea_cliente or h.busca_cliente_por_ip or h.lee_tarea
                                   or h.activa_servicio or h.completa_cliente_activado
                                   or h.busca_onu_sin_autorizar or h.autoriza_onu
-                                  or h.lee_onu or h.lista_zonas_de_red)
+                                  or h.lee_onu or h.lista_zonas_de_red
+                                  or h.lista_perfiles_de_velocidad)
                               and h.nombre in rol.puede_consultar)
             if del_alta:
                 raise ValueError(

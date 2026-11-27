@@ -1,5 +1,7 @@
 import { apiRequest } from '$lib/api-helpers.js';
 
+import { perfilesDelFormulario } from '$lib/supervisor/perfiles-de-velocidad.js';
+
 /**
  * Lo que cada empresa pone en el contrato que el técnico firma con el cliente
  * desde la app (13/11/2026). Ver campo/contrato_views.py.
@@ -59,6 +61,9 @@ export function cuerpoDeContrato(f) {
   //  Los dígitos, igual que el número de zona: uno con letras viaja como texto
   //  para que el backend diga qué está mal, en vez de volverse NaN o 0.
   const digitos = String(f.get('digitos_del_telefono') ?? '').trim();
+  //  EL ANCHO DE BANDA DE CADA PLAN (27/11/2026). Solo viaja si la tabla
+  //  estaba en pantalla: sin ella (el motor no contestó), no se toca lo guardado.
+  const perfiles = perfilesDelFormulario(f);
   //  LAS ABREVIATURAS DE LA DIRECCIÓN (25/11/2026): un renglón por regla,
   //  «CLL, CL, CALL = CALLE». Un renglón sin «=» se manda igual, sin cómo
   //  queda, para que el backend diga qué falta en vez de perderlo callado.
@@ -89,7 +94,8 @@ export function cuerpoDeContrato(f) {
     //  contrato del proveedor. Casilla sin marcar = false, como las de arriba.
     validar_antes_de_activar: f.get('validar_antes_de_activar') != null,
     firma_en_el_proveedor: f.get('firma_en_el_proveedor') != null,
-    digitos_del_telefono: digitos === '' ? 0 : /^\d+$/.test(digitos) ? Number(digitos) : digitos
+    digitos_del_telefono: digitos === '' ? 0 : /^\d+$/.test(digitos) ? Number(digitos) : digitos,
+    ...(perfiles === undefined ? {} : { perfiles_de_velocidad: perfiles })
   };
 }
 

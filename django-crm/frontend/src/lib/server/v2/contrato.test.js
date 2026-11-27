@@ -118,3 +118,28 @@ describe('cuerpoDeContrato · las costumbres de la empresa', () => {
     expect(cuerpoDeContrato(formulario({ digitos_del_telefono: 'diez' })).digitos_del_telefono).toBe('diez');
   });
 });
+
+//  EL ANCHO DE BANDA DE CADA PLAN (27/11/2026): la tabla solo viaja si estaba
+//  en pantalla. Sin ella (el motor no contestó) un guardado no la toca.
+describe('cuerpoDeContrato · el ancho de banda de cada plan', () => {
+  it('SIN la tabla en pantalla no viaja: lo guardado no se toca', () => {
+    expect('perfiles_de_velocidad' in cuerpoDeContrato(formulario({ nit: '900' }))).toBe(false);
+  });
+
+  it('con la tabla, cada plan con su bajada y su subida, limpias', () => {
+    const c = cuerpoDeContrato(formulario({
+      perfiles_en_el_formulario: '1',
+      perfil_plan_0: 'PLAN FAMILIA', perfil_bajada_0: ' PLAN_200MB_SV ', perfil_subida_0: 'PLAN_100MB',
+      perfil_plan_1: 'PLAN HOGAR', perfil_bajada_1: '', perfil_subida_1: ''
+    }));
+    expect(c.perfiles_de_velocidad).toEqual([
+      { plan: 'PLAN FAMILIA', bajada: 'PLAN_200MB_SV', subida: 'PLAN_100MB' },
+      //  Sin perfiles viaja igual: el backend la descarta y ese plan no se activa.
+      { plan: 'PLAN HOGAR', bajada: '', subida: '' }
+    ]);
+  });
+
+  it('con la tabla en pantalla y sin planes, viaja vacía (la empresa la vació)', () => {
+    expect(cuerpoDeContrato(formulario({ perfiles_en_el_formulario: '1' })).perfiles_de_velocidad).toEqual([]);
+  });
+});

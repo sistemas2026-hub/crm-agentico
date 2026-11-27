@@ -288,6 +288,43 @@ def _abreviaturas_validas(valor):
     return limpias, ""
 
 
+#: Cuantos planes puede llevar la tabla de perfiles de velocidad.
+MAXIMO_PERFILES = 100
+
+
+def _perfiles_validos(valor):
+    """La tabla de perfiles de velocidad por plan, limpia, o un texto de error
+    (27/11/2026). Una fila sin ningun perfil se descarta: es «este plan no
+    tiene», y con la tabla cargada ese plan no se activa (lo dice al pedir)."""
+    import re
+
+    nombre_valido = re.compile(r"^[A-Za-z0-9 _.\-]{0,64}$")
+    if not isinstance(valor, list) or len(valor) > MAXIMO_PERFILES:
+        return None, f"Los perfiles de velocidad son una lista de hasta {MAXIMO_PERFILES} planes."
+    limpias, vistos = [], set()
+    for f in valor:
+        if not isinstance(f, dict):
+            return None, "Cada fila dice el plan y sus perfiles de bajada y subida."
+        plan = " ".join(str(f.get("plan") or "").split())
+        if not plan or len(plan) > 120:
+            return None, "Cada fila necesita el nombre del plan (hasta 120 caracteres)."
+        fila = {"plan": plan}
+        for sentido in ("bajada", "subida"):
+            v = " ".join(str(f.get(sentido) or "").split())
+            if not nombre_valido.match(v):
+                return None, (f"«{plan}»: el perfil de {sentido} tiene que ser un nombre de "
+                              "perfil (letras, números, espacio, punto, guion), de hasta 64.")
+            fila[sentido] = v
+        if not (fila["bajada"] or fila["subida"]):
+            continue
+        clave = plan.casefold()
+        if clave in vistos:
+            return None, f"«{plan}» está dos veces: no se sabría cuál usar."
+        vistos.add(clave)
+        limpias.append(fila)
+    return limpias, ""
+
+
 def _servidores_validos(valor):
     """La lista tal como la guarda la base, o un texto de error."""
     if not isinstance(valor, list) or len(valor) > MAXIMO_SERVIDORES:
@@ -367,6 +404,14 @@ class ConfiguracionDeContratoView(APIView):
                     return Response({"detail": f"«{nombre}» es sí o no."},
                                     status=status.HTTP_400_BAD_REQUEST)
                 cambios[campo] = datos[campo]
+        #  EL ANCHO DE BANDA DE CADA PLAN (27/11/2026). Solo si viene: la
+        #  pantalla lo manda unicamente cuando pudo leer los perfiles, para que
+        #  un guardado sin la tabla en pantalla no la borre.
+        if "perfiles_de_velocidad" in datos:
+            filas, error = _perfiles_validos(datos["perfiles_de_velocidad"])
+            if error:
+                return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+            cambios["perfiles_de_velocidad"] = filas
         if "abreviaturas_de_direccion" in datos:
             reglas, error = _abreviaturas_validas(datos["abreviaturas_de_direccion"])
             if error:

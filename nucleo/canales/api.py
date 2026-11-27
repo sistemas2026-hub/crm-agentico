@@ -6504,7 +6504,9 @@ _CODIGOS_DE_LA_ONU = {
 _PEDIDOS_DE_ONU_POR_ORDEN = 20
 
 #: Lo unico que acepta un pedido de autorizacion.
-_DATOS_DE_LA_ONU = {"serial", "zona", "vlan", "nombre", "direccion"}
+_DATOS_DE_LA_ONU = {"serial", "zona", "vlan", "nombre", "direccion",
+                    #  27/11/2026: el ancho de banda del plan del contrato.
+                    "perfil_bajada", "perfil_subida"}
 
 
 def _cuerpo_de_la_onu(permitidos: set):
@@ -7592,6 +7594,27 @@ def configuracion_ocupacion_ip_sincronizar():
         "completa": nuevo.ocupacion_ip_completa,
         "actualizado_en": nuevo.ocupacion_ip_actualizado_en,
     })
+
+
+@app.get("/configuracion/perfiles-de-velocidad")
+def configuracion_perfiles_de_velocidad():
+    """
+    Los perfiles de velocidad del proveedor de la red y, por cada plan que la
+    empresa vende, su velocidad y el perfil sugerido (27/11/2026). Para la
+    pantalla de Programacion -> El contrato de instalacion, donde la empresa
+    elige con que bajada y subida se autoriza la ONU de cada plan.
+
+    SOLO LEE: una llamada al proveedor (la lista de perfiles, sin datos de
+    clientes). La velocidad del plan sale de los precios ya sincronizados.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    try:
+        config = _config_de(tenant)
+    except FileNotFoundError:
+        return jsonify({"error": f"El tenant '{tenant}' no existe."}), 404
+    return jsonify(activar_onu.perfiles_para_los_planes(config, tenant))
 
 
 @app.get("/configuracion/rangos-de-ip")

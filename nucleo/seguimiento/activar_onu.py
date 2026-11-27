@@ -28,6 +28,16 @@ EL CAMINO, Y POR QUE ASI
 
 El motor no sabe de SmartOLT: las cuatro herramientas se encuentran por su
 marca y los nombres de los campos los declara la empresa (`ParametrosDeOnu`).
+
+EL ANCHO DE BANDA DEL PLAN  --  27/11/2026
+-----------------------------------------
+El usuario: «en SmartOLT tambien hay que ponerle el ancho de banda de descarga
+y carga». La autorizacion lleva el perfil de bajada y el de subida que la
+empresa eligio para el plan del contrato. Antes de escribir se lee la lista de
+perfiles del proveedor y un nombre que no esta ahi NO SALE: un perfil mal
+escrito podria terminar en el perfil por defecto sin que nadie lo note.
+Para la pantalla de la empresa se sugiere, por plan, el perfil mas chico que
+alcanza su velocidad (`sugerir_perfil`): lo decidio el usuario ese dia.
 ================================================================================
 """
 from __future__ import annotations
@@ -55,6 +65,12 @@ INTERVALO_S = 5
 
 _SERIAL = re.compile(r"^[A-Z0-9:-]{6,32}$")
 _LARGO_NOMBRE = 60
+#: Como puede llamarse un perfil de velocidad: «PLAN_200MB_SV», «1G», «10M».
+_PERFIL = re.compile(r"^[A-Za-z0-9 _.\-]{1,64}$")
+#: Una velocidad escrita como la escribe el proveedor de clientes: «700M»,
+#: «215040k», «1G». Unidades de red (k = 1000).
+_VELOCIDAD = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*([kmg])\s*$", re.IGNORECASE)
+_MULTIPLO_KBPS = {"k": 1, "m": 1_000, "g": 1_000_000}
 
 
 @dataclass
@@ -90,6 +106,8 @@ def _herramientas(config) -> dict:
         "autorizar": next((h for h in hs if getattr(h, "autoriza_onu", False)), None),
         "leer": next((h for h in hs if getattr(h, "lee_onu", False)), None),
         "zonas": next((h for h in hs if getattr(h, "lista_zonas_de_red", False)), None),
+        "perfiles": next((h for h in hs if getattr(h, "lista_perfiles_de_velocidad", False)),
+                         None),
     }
 
 
@@ -205,6 +223,89 @@ def _autorizada(h: dict, config, tenant: str, serial: str) -> bool:
     raise _NoSePudoLeer("forma inesperada")
 
 
+# =============================================================================
+#  LOS PERFILES DE VELOCIDAD  --  27/11/2026
+# =============================================================================
+def velocidad_kbps(texto) -> int | None:
+    """«700M» -> 700000, «215040k» -> 215040, «1G» -> 1000000. None si no se
+    entiende: un numero sin unidad no dice si son bits o kilobits, y adivinar
+    elegiria un perfil mil veces mas chico o mas grande."""
+    m = _VELOCIDAD.match(str(texto or ""))
+    if not m:
+        return None
+    return int(round(float(m.group(1).replace(",", ".")) * _MULTIPLO_KBPS[m.group(2).lower()]))
+
+
+def _leer_perfiles(h: dict, config, tenant: str) -> dict:
+    """`{"bajada": [{"nombre", "kbps"}], "subida": [...]}`, del proveedor.
+    Estricto: una respuesta que no se entiende es `_NoSePudoLeer`, no «no hay
+    perfiles»."""
+    pp = h["autorizar"].parametros_de_onu.perfiles
+    try:
+        filas = _filas(_ejecutar(h["perfiles"], {}, config, tenant))
+    except _NoSePudoLeer:
+        raise
+    except Exception as e:                                   # noqa: BLE001
+        raise _NoSePudoLeer(type(e).__name__) from None
+    salida: dict = {"bajada": [], "subida": []}
+    sentidos = {pp.sentido_bajada: "bajada", pp.sentido_subida: "subida"}
+    for f in filas:
+        if pp.campo_clase and str(f.get(pp.campo_clase) or "") != pp.clase:
+            continue
+        sentido = sentidos.get(str(f.get(pp.campo_sentido) or ""))
+        nombre = str(f.get(pp.campo_nombre) or "").strip()
+        if not sentido or not nombre:
+            continue
+        try:
+            kbps = int(float(f.get(pp.campo_velocidad)))
+        except (TypeError, ValueError):
+            kbps = None
+        salida[sentido].append({"nombre": nombre, "kbps": kbps})
+    for lista in salida.values():
+        lista.sort(key=lambda p: (p["kbps"] is None, p["kbps"] or 0, p["nombre"]))
+    return salida
+
+
+def sugerir_perfil(kbps: int | None, perfiles: list[dict]) -> str:
+    """El perfil mas chico que alcanza esa velocidad, o "" si ninguno. Uno de
+    0 es «sin limite» y no se sugiere: eso lo decide la empresa a mano."""
+    if not kbps:
+        return ""
+    alcanzan = [p for p in perfiles if isinstance(p.get("kbps"), int) and p["kbps"] >= kbps]
+    return min(alcanzan, key=lambda p: (p["kbps"], p["nombre"]))["nombre"] if alcanzan else ""
+
+
+def _llano(texto) -> str:
+    return " ".join(str(texto or "").split()).casefold()
+
+
+def perfiles_para_los_planes(config, tenant: str) -> dict:
+    """Para la pantalla de la empresa: los perfiles del proveedor y, por cada
+    plan que vende, su velocidad y el perfil sugerido. SOLO LEE."""
+    h = _herramientas(config)
+    vacio = {"bajada": [], "subida": []}
+    if (h["perfiles"] is None or h["autorizar"] is None
+            or h["autorizar"].parametros_de_onu.perfiles is None):
+        return {"disponible": False, "error": "", "perfiles": vacio, "planes": []}
+    try:
+        perfiles = _leer_perfiles(h, config, tenant)
+    except _NoSePudoLeer as e:
+        registrar("activar_onu", "no se pudieron leer los perfiles de velocidad", error=e)
+        return {"disponible": True, "error": "no se pudieron leer los perfiles del proveedor",
+                "perfiles": vacio, "planes": []}
+    velocidades = {_llano(p.nombre): p for p in (getattr(config, "precios_de_planes", None) or [])}
+    planes = []
+    for pv in (getattr(config, "planes_venta", None) or []):
+        pr = velocidades.get(_llano(pv.nombre_wisphub))
+        bajada = (getattr(pr, "bajada", "") or "") if pr else ""
+        subida = (getattr(pr, "subida", "") or "") if pr else ""
+        planes.append({"nombre": pv.nombre_wisphub, "bajada": bajada, "subida": subida,
+                       "sugerido": {
+                           "bajada": sugerir_perfil(velocidad_kbps(bajada), perfiles["bajada"]),
+                           "subida": sugerir_perfil(velocidad_kbps(subida), perfiles["subida"])}})
+    return {"disponible": True, "error": "", "perfiles": perfiles, "planes": planes}
+
+
 def zonas(config, tenant: str) -> list[str]:
     """Los nombres de las zonas de la red, para que el tecnico elija."""
     h = _herramientas(config)
@@ -252,7 +353,8 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos: dict,
             espera_s: float = ESPERA_S, intervalo_s: float = INTERVALO_S) -> ResultadoOnu:
     """Autoriza la ONU, una sola vez, y confirma leyendola.
 
-    `datos`: `serial` (obligatorio), `zona`, `vlan`, `nombre`, `direccion`.
+    `datos`: `serial` (obligatorio), `zona`, `vlan`, `nombre`, `direccion`,
+    `perfil_bajada`, `perfil_subida`.
     `origen` identifica EL PEDIDO y es la base de la clave idempotente: lo
     arma la ruta, no quien llama.
     """
@@ -277,6 +379,20 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos: dict,
             return ResultadoOnu(DATOS_INVALIDOS, "la VLAN no es un numero", referencia=origen)
         if not 1 <= vlan <= 4094:
             return ResultadoOnu(DATOS_INVALIDOS, "la VLAN va de 1 a 4094", referencia=origen)
+    #  EL ANCHO DE BANDA (27/11/2026): un perfil pedido tiene que poder ir
+    #  (la empresa dice en que campo y como se lista) y tener forma de nombre.
+    perfiles_pedidos: dict = {}
+    for dato, sentido in (("perfil_bajada", "bajada"), ("perfil_subida", "subida")):
+        valor = " ".join(str((datos or {}).get(dato) or "").split())
+        if not valor:
+            continue
+        if not _PERFIL.match(valor):
+            return ResultadoOnu(DATOS_INVALIDOS, f"el perfil de {sentido} no tiene forma de "
+                                                 f"nombre de perfil", referencia=origen)
+        if not po.campos.get(dato) or po.perfiles is None or h["perfiles"] is None:
+            return ResultadoOnu(DATOS_INVALIDOS, "la empresa no declara como se manda el perfil "
+                                                 "de velocidad", referencia=origen)
+        perfiles_pedidos[dato] = valor
 
     #  1 y 2. ¿Ya esta? ¿Esta esperando? Antes de cualquier escritura.
     try:
@@ -293,6 +409,23 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos: dict,
     lugar = {"olt": str(fila.get(po.fila["olt"]) or ""),
              "placa": str(fila.get(po.fila["placa"]) or ""),
              "puerto": str(fila.get(po.fila["puerto"]) or "")}
+
+    #  2b. EL PERFIL EXISTE EN EL PROVEEDOR, en ese sentido. Si la lista no se
+    #      puede leer, no sale: un perfil que no existe podria terminar en el
+    #      de por defecto sin que nadie se entere.
+    if perfiles_pedidos:
+        try:
+            disponibles = _leer_perfiles(h, config, tenant)
+        except _NoSePudoLeer as e:
+            return ResultadoOnu(NO_SE_PUDO_COMPROBAR, f"no se pudieron leer los perfiles de "
+                                                      f"velocidad ({e})", referencia=origen,
+                                **lugar)
+        for dato, valor in perfiles_pedidos.items():
+            sentido = "bajada" if dato == "perfil_bajada" else "subida"
+            if valor not in {p["nombre"] for p in disponibles[sentido]}:
+                return ResultadoOnu(DATOS_INVALIDOS, f"el perfil de {sentido} «{valor}» no "
+                                                     f"existe en el proveedor",
+                                    referencia=origen, **lugar)
 
     #  3. EL INTERRUPTOR, sin cache y pegado a la escritura. Falla cerrado.
     try:
@@ -316,7 +449,8 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos: dict,
                "zona": " ".join(str((datos or {}).get("zona") or "").split()),
                "vlan": vlan,
                "nombre": nombre_para_la_red((datos or {}).get("nombre")),
-               "direccion": nombre_para_la_red((datos or {}).get("direccion"))}
+               "direccion": nombre_para_la_red((datos or {}).get("direccion")),
+               **perfiles_pedidos}
     args = {campo: valores[dato] for dato, campo in po.campos.items()
             if valores.get(dato) not in (None, "")}
 

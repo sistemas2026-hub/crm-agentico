@@ -398,6 +398,180 @@ except Exception:                                            # noqa: BLE001
 afirmar(not los_dos, "formulario y multipart a la vez no carga")
 
 # ---------------------------------------------------------------------------
+#  7. EL ANCHO DE BANDA DEL PLAN (27/11/2026). El usuario: «en SmartOLT tambien
+#  hay que ponerle el ancho de banda de descarga y carga». Los perfiles de
+#  abajo son los de la cuenta real (get_speed_profiles, solo lectura, ese dia):
+#  hay de 500 y 700 SOLO de bajada y de 250 SOLO de subida, y una clase de TV
+#  con el mismo nombre que uno de internet.
+# ---------------------------------------------------------------------------
+PERFILES_REALES = [
+    {"name": n, "direction": d, "speed": str(v), "type": "internet"}
+    for n, d, v in (
+        ("PLAN_100MB", "download", 112640), ("PLAN_100MB", "upload", 112640),
+        ("PLAN_150MB", "download", 168960), ("PLAN_150MB", "upload", 168960),
+        ("PLAN_200MB_SV", "download", 219136), ("PLAN_200MB_SV", "upload", 219136),
+        ("PLAN_300MB", "download", 315136), ("PLAN_300MB", "upload", 315136),
+        ("PLAN_500MB", "download", 512640), ("PLAN_250MB", "upload", 256320),
+        ("PLAN_700MB", "download", 766000),
+        ("PLAN_1000MB", "download", 1012640), ("PLAN_1000MB", "upload", 1012640),
+        ("1G", "download", 1048064), ("1G", "upload", 1048064),
+        ("PLAN_50MB", "download", 54784), ("PLAN_50MB", "upload", 54784),
+        ("PLAN_70MB", "download", 73472), ("PLAN_70MB", "upload", 73472),
+        ("Unlimited", "download", 0), ("Unlimited", "upload", 0))
+] + [{"name": "SOLO_TV", "direction": "download", "speed": "0", "type": "iptv"},
+     {"name": "SOLO_TV", "direction": "upload", "speed": "0", "type": "iptv"}]
+
+PARAMETROS_CON_PERFIL = schema.ParametrosDeOnu(
+    campos={**PARAMETROS.campos, "perfil_bajada": "download_speed_profile_name",
+            "perfil_subida": "upload_speed_profile_name"},
+    fila=PARAMETROS.fila, serial_en_la_lectura="sn",
+    perfiles=schema.PerfilesDeVelocidad(campo_clase="type", clase="internet"))
+
+
+class HerrPerfiles:
+    nombre = "perfiles"
+    lista_perfiles_de_velocidad = True
+    argumentos_fijos: dict = {}
+
+
+class HerrAutorizarConPerfil(HerrAutorizar):
+    parametros_de_onu = PARAMETROS_CON_PERFIL
+
+
+class ProveedorConPerfiles(Proveedor):
+    def __init__(self, perfiles=..., **kw):
+        super().__init__(**kw)
+        self.perfiles = PERFILES_REALES if perfiles is ... else perfiles
+
+    def ejecutar(self, herramienta, argumentos, tenant, variables_tenant=None):
+        if herramienta.nombre == "perfiles":
+            self.llamadas.append(("perfiles", dict(argumentos)))
+            self.orden.append("perfiles")
+            if self.rompe == "perfiles":
+                raise RuntimeError("el proveedor no contesto")
+            return self.perfiles
+        return super().ejecutar(herramienta, argumentos, tenant, variables_tenant)
+
+
+def con_perfiles():
+    return Config([HerrBuscar(), HerrAutorizarConPerfil(), HerrLeer(), HerrZonas(), HerrPerfiles()])
+
+
+seccion("7. el ancho de banda: el perfil EXISTE en el proveedor antes de escribir")
+prov = ProveedorConPerfiles()
+with escenario(Registro(), prov):
+    r = activar(con_perfiles(), perfil_bajada="PLAN_200MB_SV", perfil_subida=" PLAN_100MB ")
+afirmar(r.estado == onu.ACTIVADA, f"con los dos perfiles queda activada ({r.estado}: {r.motivo})")
+cuerpo = prov.de(AUTORIZAR)[0]
+afirmar(cuerpo.get("download_speed_profile_name") == "PLAN_200MB_SV"
+        and cuerpo.get("upload_speed_profile_name") == "PLAN_100MB",
+        f"y viajan con los nombres del proveedor, sin espacios de mas: {cuerpo}")
+afirmar(prov.orden[:5] == ["leer_onu", "buscar_onu", "perfiles", "(interruptor)", AUTORIZAR],
+        f"la lista de perfiles se lee ANTES del interruptor y de la escritura: {prov.orden[:5]}")
+
+for titulo, datos, esperado in (
+        ("un perfil que no existe", {"perfil_bajada": "PLAN_999MB"}, "no existe"),
+        ("uno que existe SOLO en el otro sentido (500 es solo de bajada)",
+         {"perfil_subida": "PLAN_500MB"}, "no existe"),
+        ("uno de TV, aunque se llame igual en los dos sentidos", {"perfil_bajada": "SOLO_TV"},
+         "no existe"),
+        ("uno con forma rara", {"perfil_bajada": "PLAN;DROP"}, "forma")):
+    prov = ProveedorConPerfiles()
+    with escenario(Registro(), prov):
+        r = activar(con_perfiles(), **datos)
+    afirmar(r.estado == onu.DATOS_INVALIDOS and esperado in r.motivo and prov.escrituras == 0,
+            f"{titulo}: NO sale ({r.estado}: {r.motivo}; {prov.escrituras} escrituras)")
+
+prov = ProveedorConPerfiles(rompe="perfiles")
+with escenario(Registro(), prov):
+    r = activar(con_perfiles(), perfil_bajada="PLAN_200MB_SV")
+afirmar(r.estado == onu.NO_SE_PUDO_COMPROBAR and prov.escrituras == 0,
+        f"si la lista no se puede leer, no sale ({r.estado}, {prov.escrituras} escrituras)")
+prov = ProveedorConPerfiles(perfiles={"raro": True})
+with escenario(Registro(), prov):
+    r = activar(con_perfiles(), perfil_bajada="PLAN_200MB_SV")
+afirmar(r.estado == onu.NO_SE_PUDO_COMPROBAR and prov.escrituras == 0,
+        f"una lista con forma rara tampoco es «no hay perfiles» ({r.estado})")
+prov = Proveedor()
+with escenario(Registro(), prov):
+    r = activar(perfil_bajada="PLAN_200MB_SV")
+afirmar(r.estado == onu.DATOS_INVALIDOS and prov.escrituras == 0,
+        f"una empresa que no declara los perfiles no los manda a ciegas ({r.estado}: {r.motivo})")
+prov = ProveedorConPerfiles()
+with escenario(Registro(), prov):
+    r = activar(con_perfiles())
+afirmar(r.estado == onu.ACTIVADA and "perfiles" not in prov.orden
+        and "download_speed_profile_name" not in prov.de(AUTORIZAR)[0],
+        "sin perfil pedido no se lee la lista ni viaja ningun perfil (como hasta hoy)")
+
+seccion("7b. la sugerencia: el perfil mas chico que alcanza la velocidad del plan")
+for texto, kbps in (("700M", 700000), ("215040k", 215040), ("1G", 1000000), ("159600k", 159600),
+                    ("0.5G", 500000), ("100", None), ("", None), ("rapido", None)):
+    afirmar(onu.velocidad_kbps(texto) == kbps, f"«{texto}» -> {kbps}")
+prov = ProveedorConPerfiles()
+with escenario(Registro(), prov):
+    disponibles = onu._leer_perfiles(onu._herramientas(con_perfiles()), con_perfiles(), TENANT)
+#  La tabla que aprobo el usuario el 27/11/2026, con las velocidades REALES de
+#  los planes en WispHub ese dia.
+for plan, bajada, subida, esperado in (
+        ("PLAN ELITE", "700M", "350M", ("PLAN_700MB", "PLAN_1000MB")),
+        ("PLAN ULTRA", "500M", "250M", ("PLAN_500MB", "PLAN_250MB")),
+        ("PLAN FAMILIA", "200M", "100M", ("PLAN_200MB_SV", "PLAN_100MB")),
+        ("PLAN HOGAR", "100M", "50M", ("PLAN_100MB", "PLAN_50MB")),
+        ("PLAN FIBRA OPTICA 200MB SV", "215040k", "117000k", ("PLAN_200MB_SV", "PLAN_150MB")),
+        ("PLAN FIBRA OPTICA 150MB_SB", "159600k", "79800k", ("PLAN_150MB", "PLAN_100MB"))):
+    sugerido = (onu.sugerir_perfil(onu.velocidad_kbps(bajada), disponibles["bajada"]),
+                onu.sugerir_perfil(onu.velocidad_kbps(subida), disponibles["subida"]))
+    afirmar(sugerido == esperado, f"{plan} {bajada}/{subida} -> {sugerido}")
+afirmar(onu.sugerir_perfil(5_000_000, disponibles["bajada"]) == "",
+        "si ninguno alcanza no se sugiere nada (y nunca el «Unlimited» de 0)")
+afirmar(onu.sugerir_perfil(None, disponibles["bajada"]) == "", "sin velocidad, sin sugerencia")
+
+
+class ConfigConPlanes(Config):
+    def __init__(self, herramientas):
+        super().__init__(herramientas)
+        self.planes_venta = [schema.PlanVenta(nombre_wisphub="PLAN FAMILIA"),
+                             schema.PlanVenta(nombre_wisphub="PLAN NUEVO")]
+        self.precios_de_planes = [schema.PrecioDePlan(plan_id="1", nombre="plan  familia",
+                                                      bajada="200M", subida="100M")]
+
+
+prov = ProveedorConPerfiles()
+with escenario(Registro(), prov):
+    pantalla = onu.perfiles_para_los_planes(ConfigConPlanes(con_perfiles().herramientas), TENANT)
+afirmar(pantalla["disponible"] and not pantalla["error"], f"la pantalla tiene perfiles: {pantalla['error']}")
+afirmar(pantalla["planes"][0] == {"nombre": "PLAN FAMILIA", "bajada": "200M", "subida": "100M",
+                                  "sugerido": {"bajada": "PLAN_200MB_SV", "subida": "PLAN_100MB"}},
+        f"cada plan con su velocidad y su sugerido: {pantalla['planes'][0]}")
+afirmar(pantalla["planes"][1]["sugerido"] == {"bajada": "", "subida": ""},
+        "un plan sin velocidad sincronizada no inventa sugerencia")
+afirmar({p["nombre"] for p in pantalla["perfiles"]["bajada"]} >= {"PLAN_500MB", "PLAN_700MB"}
+        and "PLAN_500MB" not in {p["nombre"] for p in pantalla["perfiles"]["subida"]}
+        and "SOLO_TV" not in {p["nombre"] for p in pantalla["perfiles"]["bajada"]},
+        "los perfiles van por sentido, y los de TV no aparecen")
+afirmar(prov.escrituras == 0, "y la pantalla solo leyo")
+afirmar(onu.perfiles_para_los_planes(Config(), TENANT)["disponible"] is False,
+        "una empresa sin la lista declarada: no disponible, sin llamar a nadie")
+
+seccion("7c. la configuracion de los perfiles")
+try:
+    schema.ParametrosDeOnu(campos={**PARAMETROS.campos, "perfil_bajada": "x"},
+                           fila=PARAMETROS.fila, serial_en_la_lectura="sn")
+    sin_lista = True
+except Exception:                                            # noqa: BLE001
+    sin_lista = False
+afirmar(not sin_lista, "mandar un perfil sin declarar como se listan no carga")
+for marca_extra, que in (({"invocable_por_servicio": True}, "invocable por un servicio"),
+                         ({"solo_lectura": False, "metodo": "POST"}, "una escritura")):
+    try:
+        schema.Herramienta.model_validate({**base, "lista_perfiles_de_velocidad": True, **marca_extra})
+        carga = True
+    except Exception:                                        # noqa: BLE001
+        carga = False
+    afirmar(not carga, f"la lista de perfiles no puede ser {que}")
+
+# ---------------------------------------------------------------------------
 print()
 if _fallos:
     print(f"FALLARON {len(_fallos)}:")

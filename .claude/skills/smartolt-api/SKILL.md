@@ -972,6 +972,28 @@ herramienta (`EFECTOS_EXTERNOS_PERMITIDOS`, ver `nucleo/seguridad/entorno.py`).
 | Una ONU borrada en SmartOLT | Vuelve a `unconfigured_onus`, en el mismo lugar |
 | La ONU recién conectada | A las 15:38 no estaba en `unconfigured_onus` y 23 s después sí: SmartOLT tarda en verla. La app ahora vuelve a buscar sola |
 
+## Perfiles de velocidad — medido el 27/11/2026 (SOLO GET, ~10 llamadas)
+
+Para ponerle a la ONU el ancho de banda del plan al autorizarla (el usuario:
+«en SmartOLT también hay que ponerle el ancho de banda de descarga y carga»).
+
+| Qué | Medido |
+|---|---|
+| `GET /api/system/get_speed_profiles` | 200, `{"response": [...], "response_code", "status"}`: 39 perfiles `{id, name, direction, speed, type}`. **Sin datos de clientes** |
+| `speed` | En **kbps**, como texto: `PLAN_100MB` = `"112640"`, `PLAN_200MB_SV` = `"219136"`. `Unlimited` = `"0"` |
+| `direction` / `type` | `download` / `upload`; `internet` / `iptv`. Hay un `Unlimited` de cada clase: **filtrar por `type`**, o el de TV aparece como perfil de internet |
+| Asimetría | `PLAN_500MB` y `PLAN_700MB` existen **solo de bajada**; `PLAN_250MB` **solo de subida**; no hay subida de 350. Bajada y subida se eligen por separado, nunca «el mismo nombre en los dos» |
+| El perfil de cada ONU en `get_all_onus_details` | **No viene**: solo `iptv_download_speed`/`iptv_upload_speed` (nulos en las 109 autorizadas desde el 13/11). El de internet de una ONU sale de `get_onu_speed_profiles/{external_id}` (OpenAPI, no probado) |
+| `authorize_onu` (OpenAPI) | Acepta `download_speed_profile_name` y `upload_speed_profile_name`. `custom_profile` **no** es el de velocidad («the default speed profiles will be used»). **No probado en vivo todavía** |
+| La velocidad de cada plan, del lado de WispHub | `GET /api/plan-internet/queue/{id}/` trae `bajada` y `subida`: «700M», «215040k» (unidades k/M de MikroTik) |
+
+Qué hace Dexter con esto (PRD §8.49): la empresa elige por plan el perfil de
+bajada y el de subida (sugerido: el más chico que alcanza la velocidad del
+plan), y antes de autorizar el motor comprueba que el nombre exista en esa
+lista **en ese sentido**. No se midió qué hace SmartOLT con un nombre que no
+existe (¿400 o el perfil por defecto en silencio?): por eso se comprueba antes
+y no se confía en que lo rechace.
+
 ## No verificado todavía (fuera del alcance del sondeo de hoy)
 
 - Si hay dirección/contacto poblados en algún registro real (el que se leyó

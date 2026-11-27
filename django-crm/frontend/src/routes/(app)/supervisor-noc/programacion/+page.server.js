@@ -25,6 +25,8 @@ import {
 } from '$lib/server/v2/marca-de-agua.js';
 import { cuerpoDeContrato, guardarContrato, leerContrato } from '$lib/server/v2/contrato.js';
 import { cuerpoDeRangos, guardarRangos, leerOcupacion, leerRangos } from '$lib/server/v2/rangos-de-ip.js';
+import { leerPerfiles } from '$lib/server/v2/perfiles-de-velocidad.js';
+import { filasDePerfiles } from '$lib/supervisor/perfiles-de-velocidad.js';
 import { cuerpoDeConfiguracion } from '$lib/supervisor/material-del-dia.js';
 
 /**
@@ -95,14 +97,17 @@ export async function load({ url, cookies, locals, fetch }) {
   //  Y LOS RANGOS DE IP (25/11/2026), del motor y no del backend: viven en la
   //  configuración del asistente. Van en la misma tanda y no tocan al
   //  proveedor: leen lo guardado.
-  const [dp, mat, conf, seg, marca, contrato, rangos] = await Promise.all([
+  //  Y EL ANCHO DE BANDA DE CADA PLAN (27/11/2026): del motor, que lee la
+  //  lista de perfiles del proveedor de la red (una lectura, sin clientes).
+  const [dp, mat, conf, seg, marca, contrato, rangos, perfiles] = await Promise.all([
     leerDiaPublicado({ cookies }, dia),
     leerMaterialDelDia({ cookies }, dia),
     leerConfiguracionDeMaterial({ cookies }),
     leerConfiguracionDeSeguimiento({ cookies }),
     leerMarcaDeAgua({ cookies }),
     leerContrato({ cookies }),
-    leerRangos(locals, fetch)
+    leerRangos(locals, fetch),
+    leerPerfiles(locals, fetch)
   ]);
   return {
     puedeVer: true,
@@ -122,6 +127,12 @@ export async function load({ url, cookies, locals, fetch }) {
     //  De qué rangos saca IP cada servidor (25/11/2026). `null` = el motor
     //  no contestó, y la pantalla lo dice.
     rangos,
+    //  `null` = el motor no contestó, y la pantalla lo dice sin mostrar la
+    //  tabla (un guardado sin la tabla no la toca).
+    perfiles: perfiles && {
+      ...perfiles,
+      filas: filasDePerfiles(perfiles, contrato.configuracion?.perfiles_de_velocidad)
+    },
     vista: 'hoy', rango: 'hoy', cerradas: null, errorCerradas: false
   };
 }

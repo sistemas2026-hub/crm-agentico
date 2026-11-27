@@ -166,6 +166,14 @@ class ConfiguracionDeContrato(BaseModel):
     #  cedula y el recibo; el cliente firma ahi. Exige `crear_en_el_isp` y
     #  `validar_antes_de_activar`. Ver campo/contrato_del_proveedor.py.
     firma_en_el_proveedor = models.BooleanField(default=False)
+    #  EL ANCHO DE BANDA DE CADA PLAN EN LA RED (27/11/2026). El usuario: «en
+    #  SmartOLT tambien hay que ponerle el ancho de banda de descarga y carga».
+    #  Cada fila es `{"plan": "PLAN FAMILIA", "bajada": "PLAN_200MB_SV",
+    #  "subida": "PLAN_100MB"}`, con los nombres de los perfiles del proveedor
+    #  de la red. Vacio = la ONU se autoriza sin perfil, como hasta hoy. Con
+    #  filas, un plan sin la suya NO se activa: saldria con el perfil por
+    #  defecto. Ver `activacion_onu.perfiles_del_plan`.
+    perfiles_de_velocidad = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "campo_configuracion_contrato"
@@ -181,14 +189,16 @@ class ConfiguracionDeContrato(BaseModel):
                 "crear_en_el_isp": self.crear_en_el_isp,
                 "activar_onu": self.activar_onu,
                 "validar_antes_de_activar": self.validar_antes_de_activar,
-                "firma_en_el_proveedor": self.firma_en_el_proveedor}
+                "firma_en_el_proveedor": self.firma_en_el_proveedor,
+                "perfiles_de_velocidad": list(self.perfiles_de_velocidad or [])}
 
 
 VACIA = {"nit": "", "servidores": [], "texto_condiciones": "",
          "datos_en_mayusculas": False, "barrio_en_la_direccion": False,
          "digitos_del_telefono": 0, "abreviaturas_de_direccion": [],
          "crear_en_el_isp": False, "activar_onu": False,
-         "validar_antes_de_activar": False, "firma_en_el_proveedor": False}
+         "validar_antes_de_activar": False, "firma_en_el_proveedor": False,
+         "perfiles_de_velocidad": []}
 
 #: Tope de `digitos_del_telefono`: ningun pais pasa de 15 (E.164).
 MAXIMO_DIGITOS_DE_TELEFONO = 15

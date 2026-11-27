@@ -335,6 +335,61 @@
                   </div>
                 {/each}
                 <span class="snoc-body-sm snoc-secundario">La VLAN es la de SmartOLT con la que queda la ONU de los clientes de ese servidor (por ejemplo 300 para el servidor 1).</span>
+                <!-- EL ANCHO DE BANDA DE CADA PLAN (27/11/2026). El usuario: «en SmartOLT
+                     también hay que ponerle el ancho de banda de descarga y carga». Sin
+                     la lista del proveedor la tabla NO se muestra (y entonces el guardado
+                     no la toca): una tabla vacía en pantalla borraría la guardada. -->
+                <span class="snoc-label">Ancho de banda de cada plan en SmartOLT</span>
+                {#if data.perfiles?.disponible && !data.perfiles?.error}
+                  <input type="hidden" name="perfiles_en_el_formulario" value="1" />
+                  <span class="snoc-body-sm">
+                    Al activar la ONU se le pone el perfil de bajada y el de subida del plan del contrato.
+                    Lo «sugerido» es el perfil más chico que alcanza la velocidad del plan en WispHub.
+                  </span>
+                  {#each data.perfiles.filas as fila, i}
+                    {@const bajadas = data.perfiles.perfiles.bajada.map((/** @type {any} */ p) => p.nombre)}
+                    {@const subidas = data.perfiles.perfiles.subida.map((/** @type {any} */ p) => p.nombre)}
+                    <div class="snoc-fila" style="gap:var(--snoc-xs); flex-wrap:wrap; align-items:center;">
+                      <input type="hidden" name={`perfil_plan_${i}`} value={fila.plan} />
+                      <span class="snoc-body-sm" style="flex:1; min-width:12rem;">
+                        {fila.plan}
+                        {#if fila.velocidad}<span class="snoc-secundario"> · {fila.velocidad}</span>{/if}
+                        {#if !fila.seVende}<span class="snoc-secundario"> · ya no se vende</span>{/if}
+                      </span>
+                      <select class="snoc-select" name={`perfil_bajada_${i}`} value={fila.bajada}
+                              aria-label={`Perfil de bajada del ${fila.plan}`}>
+                        <option value="">Bajada: sin perfil</option>
+                        {#if fila.bajada && !bajadas.includes(fila.bajada)}
+                          <option value={fila.bajada}>{fila.bajada} (ya no está en SmartOLT)</option>
+                        {/if}
+                        {#each bajadas as nombre}<option value={nombre}>{nombre}</option>{/each}
+                      </select>
+                      <select class="snoc-select" name={`perfil_subida_${i}`} value={fila.subida}
+                              aria-label={`Perfil de subida del ${fila.plan}`}>
+                        <option value="">Subida: sin perfil</option>
+                        {#if fila.subida && !subidas.includes(fila.subida)}
+                          <option value={fila.subida}>{fila.subida} (ya no está en SmartOLT)</option>
+                        {/if}
+                        {#each subidas as nombre}<option value={nombre}>{nombre}</option>{/each}
+                      </select>
+                      {#if fila.sugerido}<span class="snoc-body-sm snoc-secundario">sugerido</span>{/if}
+                    </div>
+                  {:else}
+                    <span class="snoc-body-sm snoc-secundario">No hay planes de venta cargados.</span>
+                  {/each}
+                  <span class="snoc-body-sm snoc-secundario">
+                    Con la tabla guardada, un plan sin perfil no se activa: quedaría con el perfil por defecto.
+                    Sin ninguna fila, la ONU se activa sin perfil, como hasta ahora.
+                  </span>
+                {:else if data.perfiles?.disponible === false}
+                  <span class="snoc-body-sm snoc-secundario">
+                    Tu empresa todavía no tiene conectada la lista de perfiles de velocidad de SmartOLT.
+                  </span>
+                {:else}
+                  <span class="snoc-body-sm snoc-error-txt">
+                    No se pudieron leer los perfiles de SmartOLT. La tabla no se muestra y lo guardado no cambia al guardar.
+                  </span>
+                {/if}
                 <label class="snoc-body-sm snoc-pila-xs">
                   NIT de la empresa
                   <input class="snoc-campo" name="nit" maxlength="80" value={data.contrato.nit ?? ''} />
