@@ -12,8 +12,48 @@
  *             perfiles: { bajada: Perfil[], subida: Perfil[] }, planes: PlanDelMotor[] }} Perfiles
  * @typedef {{ plan: string, bajada: string, subida: string }} Guardado
  * @typedef {{ plan: string, velocidad: string, bajada: string, subida: string,
- *             sugerido: boolean, seVende: boolean }} Fila
+ *             sugerido: boolean, seVende: boolean,
+ *             sugeridos: { bajada: string, subida: string },
+ *             kbps: { bajada: number | null, subida: number | null } }} Fila
  */
+
+/**
+ * «700M» -> 700000, «215040k» -> 215040, «1G» -> 1000000 (kbps, unidades de
+ * red). `null` si no se entiende: un número sin unidad no dice si son bits o
+ * kilobits. La misma regla que el motor (`activar_onu.velocidad_kbps`).
+ * @param {unknown} texto @returns {number | null}
+ */
+export function velocidadKbps(texto) {
+  const m = /^\s*(\d+(?:[.,]\d+)?)\s*([kmg])\s*$/i.exec(String(texto ?? ''));
+  if (!m) return null;
+  const factor = /** @type {Record<string, number>} */ ({ k: 1, m: 1000, g: 1000000 })[m[2].toLowerCase()];
+  return Math.round(Number(m[1].replace(',', '.')) * factor);
+}
+
+/**
+ * Cómo se lee un perfil en la lista (27/11/2026): el nombre y su velocidad, y
+ * si es el sugerido para ese plan. «PLAN_100MB» y «PLAN_1000MB» se confundían
+ * a simple vista: con la velocidad al lado no.
+ * @param {Perfil} p @param {string} [sugerido]
+ */
+export function etiquetaDePerfil(p, sugerido = '') {
+  const velocidad = p.kbps === 0 ? 'sin límite'
+    : typeof p.kbps === 'number' ? `${Math.round(p.kbps / 1000)} megas` : '';
+  return [p.nombre, velocidad].filter(Boolean).join(' — ') + (sugerido && p.nombre === sugerido ? ' · sugerido' : '');
+}
+
+/**
+ * Si el perfil elegido queda POR DEBAJO de lo que paga el cliente (27/11/2026).
+ * `null` si no se puede saber (sin perfil, sin velocidad del plan, o un perfil
+ * «sin límite»).
+ * @param {string} elegido @param {Perfil[]} perfiles @param {number | null} kbpsDelPlan
+ */
+export function quedaPorDebajo(elegido, perfiles, kbpsDelPlan) {
+  if (!elegido || !kbpsDelPlan) return null;
+  const p = perfiles.find((x) => x.nombre === elegido);
+  if (!p || typeof p.kbps !== 'number' || p.kbps === 0) return null;
+  return p.kbps < kbpsDelPlan;
+}
 
 /** @param {unknown} t */
 const llano = (t) => String(t ?? '').split(/\s+/).filter(Boolean).join(' ').toLowerCase();
@@ -40,12 +80,15 @@ export function filasDePerfiles(perfiles, guardados) {
       bajada: g ? g.bajada : p.sugerido?.bajada ?? '',
       subida: g ? g.subida : p.sugerido?.subida ?? '',
       sugerido: !g && !!(p.sugerido?.bajada || p.sugerido?.subida),
-      seVende: true
+      seVende: true,
+      sugeridos: { bajada: p.sugerido?.bajada ?? '', subida: p.sugerido?.subida ?? '' },
+      kbps: { bajada: velocidadKbps(p.bajada), subida: velocidadKbps(p.subida) }
     });
   }
   for (const g of guardados ?? []) {
     if (vistos.has(llano(g.plan))) continue;
-    filas.push({ plan: g.plan, velocidad: '', bajada: g.bajada, subida: g.subida, sugerido: false, seVende: false });
+    filas.push({ plan: g.plan, velocidad: '', bajada: g.bajada, subida: g.subida, sugerido: false, seVende: false,
+                 sugeridos: { bajada: '', subida: '' }, kbps: { bajada: null, subida: null } });
   }
   return filas;
 }

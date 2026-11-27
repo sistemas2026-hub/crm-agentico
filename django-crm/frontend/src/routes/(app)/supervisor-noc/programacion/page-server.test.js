@@ -862,7 +862,9 @@ describe('Programación: el ancho de banda de cada plan (27/11/2026)', () => {
     const d = /** @type {any} */ (await load(ctxConMotor(fetchFalso)));
     expect(pedidos).toContain('http://motor/configuracion/perfiles-de-velocidad?tenant=empresa-uno');
     expect(d.perfiles.filas).toEqual([{ plan: 'PLAN FAMILIA', velocidad: '200M / 100M', bajada: 'PLAN_200MB_SV',
-                                        subida: 'PLAN_100MB', sugerido: true, seVende: true }]);
+                                        subida: 'PLAN_100MB', sugerido: true, seVende: true,
+                                        sugeridos: { bajada: 'PLAN_200MB_SV', subida: 'PLAN_100MB' },
+                                        kbps: { bajada: 200000, subida: 100000 } }]);
     tenant.destinoDelAsistente.mockResolvedValue(null);
   });
 

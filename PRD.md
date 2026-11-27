@@ -2176,6 +2176,10 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
   - un «Guardar» justo debajo de la tabla (el mismo formulario);
   - `autocomplete="off"` en el formulario del contrato;
   - el mensaje al guardar dice cuántos planes quedaron con perfil (`page-server.test.js`).
+- Con el botón nuevo, el cambio sí se guardó, pero quedó `PLAN_100MB`: a simple vista se confunde con `PLAN_1000MB`.
+  - Se corrigió por comando, por la misma vista que la pantalla, después de probarlo en local.
+  - La lista ahora muestra cada perfil con su velocidad («PLAN_1000MB — 1013 megas») y marca el sugerido de ese plan.
+  - La fila avisa en rojo, mientras se elige, si el perfil queda por debajo de lo que paga el cliente (`TablaDeAnchoDeBanda.svelte`; `TablaDeAnchoDeBanda.test.js` dibuja la fila de ELITE con `PLAN_100MB` y ve el aviso).
 
 **NO VERIFICADO:**
 - Una autorización real con perfiles: que SmartOLT los aplique. Se mira en la ficha de la ONU después de la próxima instalación vigilada.
