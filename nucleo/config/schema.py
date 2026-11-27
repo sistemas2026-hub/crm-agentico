@@ -1175,18 +1175,31 @@ class ParametrosDeCompletar(Base):
     escribir en una instalacion. El motor sabe QUE son; como se llaman alla,
     y en que hueco de la ruta va el numero, va aca."""
 
+    #: Lo que el motor sabe completar. EL PRECINTO DEL CLIENTE Y LA MARCA DE
+    #: LA CAJA (27/11/2026): el usuario los escribe a mano en la ficha del
+    #: cliente al instalar; ahora salen de lo que el tecnico anoto en la app.
+    COMPLETABLES: ClassVar[frozenset[str]] = frozenset(
+        {"costo_instalacion", "serial_onu", "precinto_del_cliente", "marca_de_la_caja"})
+
     #: El hueco de la ruta con el numero de servicio (p. ej. 'id_servicio').
     campo_servicio: str
-    #: Nombre del motor -> campo del proveedor. Solo estos dos.
+    #: Nombre del motor -> campo del proveedor (de `COMPLETABLES`).
     campos: dict[str, str]
+    #: Lo que se escribe en el campo de la marca de la caja cuando el tecnico
+    #: dijo que la caja NO esta marcada (la costumbre de cada empresa: en la
+    #: primera, «CAJA NO MARCADA»). Vacio: en ese caso no se escribe nada.
+    texto_caja_sin_marca: str = ""
 
     @model_validator(mode="after")
     def _con_nombres(self):
         if not self.campo_servicio.strip():
             raise ValueError("falta 'campo_servicio': el hueco de la ruta con el numero")
-        sobra = sorted(set(self.campos) - {"costo_instalacion", "serial_onu"})
+        sobra = sorted(set(self.campos) - self.COMPLETABLES)
         if sobra or not self.campos:
-            raise ValueError(f"'campos' completa solo costo_instalacion y serial_onu; sobra {sobra}")
+            raise ValueError(f"'campos' completa solo {sorted(self.COMPLETABLES)}; sobra {sobra}")
+        if self.texto_caja_sin_marca.strip() and "marca_de_la_caja" not in self.campos:
+            raise ValueError("'texto_caja_sin_marca' sin 'marca_de_la_caja' en 'campos': "
+                             "no hay donde escribirlo")
         return self
 
 

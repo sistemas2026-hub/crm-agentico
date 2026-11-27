@@ -6767,7 +6767,13 @@ herramientas:
     completa_cliente_activado: true
     parametros_de_completar:
       campo_servicio: id_servicio
-      campos: {serial_onu: sn_onu}
+      #  El precinto del cliente va en «Usuario Antena» y la marca de la caja en
+      #  «Password Antena» (el usuario, 27/11/2026; medido en un cliente real:
+      #  `usuario_cpe` = 4 digitos del precinto, `password_cpe` = «CTO 3 ...»).
+      #  Sin marca, la costumbre de la empresa: «CAJA NO MARCADA».
+      campos: {serial_onu: sn_onu, precinto_del_cliente: usuario_cpe,
+               marca_de_la_caja: password_cpe}
+      texto_caja_sin_marca: CAJA NO MARCADA
 
   - nombre: leer_tarea_de_wisphub
     tipo: http

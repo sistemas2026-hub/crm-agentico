@@ -976,6 +976,26 @@ def _mismo_costo(a, b) -> bool:
     return x is not None and x == y
 
 
+#: Tope de un texto que se escribe en la ficha (un precinto, la marca de una
+#: caja: «CTO 3 VILLA VALENTINA»).
+LARGO_TEXTO_COMPLETAR = 80
+
+
+def _texto_completar(valor) -> str:
+    """Un texto de la ficha: sin saltos ni espacios de mas, con tope."""
+    return re.sub(r"\s+", " ", str(valor or "")).strip()[:LARGO_TEXTO_COMPLETAR]
+
+
+def _del_proveedor(fila: dict, campo: str):
+    """El valor de un campo de la fila del proveedor SIN importar mayusculas:
+    el mismo dato vuelve como `password_cpe` en una lectura y `PASSWORD_CPE` en
+    la respuesta de otra (medido, ver la skill de WispHub)."""
+    if campo in fila:
+        return fila.get(campo)
+    buscado = campo.lower()
+    return next((v for k, v in fila.items() if str(k).lower() == buscado), None)
+
+
 def completar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio,
               valores) -> ResultadoAlta:
     """Escribe el costo y el serial en el cliente recien activado. Ver arriba."""
@@ -1007,8 +1027,21 @@ def completar(config, tenant: str, *, actor: str, origen: str, datos, id_servici
             return ResultadoAlta(DATOS_INVALIDOS, "el serial de la ONU no es valido",
                                  referencia=origen)
         quiero["serial_onu"] = serial
+    #  EL PRECINTO DEL CLIENTE Y LA MARCA DE LA CAJA (27/11/2026). Texto como
+    #  lo anoto el tecnico. Si dijo que la caja NO esta marcada, va el texto de
+    #  la empresa para eso; sin ese texto declarado, no se escribe nada.
+    if "precinto_del_cliente" in pc.campos:
+        precinto = _texto_completar(valores.get("precinto_del_cliente"))
+        if precinto:
+            quiero["precinto_del_cliente"] = precinto
+    if "marca_de_la_caja" in pc.campos:
+        marca = _texto_completar(valores.get("marca_de_la_caja"))
+        if valores.get("caja_sin_marca") is True:
+            marca = _texto_completar(pc.texto_caja_sin_marca)
+        if marca:
+            quiero["marca_de_la_caja"] = marca
     if not quiero:
-        return ResultadoAlta(NADA_QUE_COMPLETAR, "no hay costo ni serial que escribir",
+        return ResultadoAlta(NADA_QUE_COMPLETAR, "no hay nada que escribir en el cliente",
                              referencia=origen, id_cliente=numero)
     comun = h["buscar"].parametros_de_busqueda_por_ip
 
@@ -1018,9 +1051,15 @@ def completar(config, tenant: str, *, actor: str, origen: str, datos, id_servici
                 return f
         return None
 
+    def _igual(k, leido, v) -> bool:
+        if k == "costo_instalacion":
+            return _mismo_costo(leido, v)
+        if k == "serial_onu":
+            return _serial(leido) == v
+        return _texto_completar(leido).upper() == v.upper()
+
     def _ya_estan(f) -> bool:
-        return all((_mismo_costo(f.get(pc.campos[k]), v) if k == "costo_instalacion"
-                    else _serial(f.get(pc.campos[k])) == v) for k, v in quiero.items())
+        return all(_igual(k, _del_proveedor(f, pc.campos[k]), v) for k, v in quiero.items())
 
     #  1. TIENE QUE SER CLIENTE, con ese numero y de ESTE contrato.
     try:
@@ -1087,6 +1126,6 @@ def completar(config, tenant: str, *, actor: str, origen: str, datos, id_servici
     except _NoSePudoLeer:
         fila = None
     if fila is not None and _ya_estan(fila):
-        registrar("completar_cliente", "el cliente quedo con el costo y el serial")
+        registrar("completar_cliente", "el cliente quedo completo")
         return _fin(COMPLETADO)
     return _fin(EN_CURSO, "se pidio y todavia no se leen los valores")

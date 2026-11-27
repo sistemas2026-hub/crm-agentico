@@ -6235,7 +6235,8 @@ def interno_completar_cliente_del_contrato(contrato_id: str):
     Escribe el costo de instalacion y el serial de la ONU en el cliente recien
     activado (26/11/2026). Mismo contrato angosto y misma puerta humana que
     `activar-cliente`: el `actor` es quien aprobo, el `origen` lo arma el
-    motor. Solo acepta esos dos valores. Ver alta_de_cliente.completar.
+    motor. Solo acepta esos valores (desde el 27/11/2026 tambien el precinto y
+    la caja). Ver alta_de_cliente.completar.
     """
     tenant = request.args.get("tenant")
     if not tenant:
@@ -6257,8 +6258,17 @@ def interno_completar_cliente_del_contrato(contrato_id: str):
         return jsonify({"error": f"'intento' es un numero de 1 a "
                                  f"{_PEDIDOS_POR_CONTRATO}."}), 400
     valores = cuerpo.get("valores")
-    if not isinstance(valores, dict) or set(valores) - {"costo_instalacion", "serial_onu"}:
-        return jsonify({"error": "'valores' lleva solo costo_instalacion y serial_onu."}), 400
+    #  Desde el 27/11/2026 tambien el precinto del cliente y la marca de la
+    #  caja (texto), o `caja_sin_marca` (si o no). Lo demas, igual que antes.
+    aceptados = {"costo_instalacion", "serial_onu", "precinto_del_cliente",
+                 "marca_de_la_caja", "caja_sin_marca"}
+    if not isinstance(valores, dict) or set(valores) - aceptados:
+        return jsonify({"error": f"'valores' lleva solo {sorted(aceptados)}."}), 400
+    if "caja_sin_marca" in valores and not isinstance(valores["caja_sin_marca"], bool):
+        return jsonify({"error": "'caja_sin_marca' es si o no."}), 400
+    for k in ("precinto_del_cliente", "marca_de_la_caja"):
+        if k in valores and (not isinstance(valores[k], str) or len(valores[k]) > 200):
+            return jsonify({"error": f"'{k}' es un texto corto."}), 400
     datos, error = _datos_del_alta(cuerpo)
     if error:
         return error

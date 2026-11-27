@@ -48,9 +48,15 @@ class InstalacionesPorActivarView(APIView):
             except Exception:                                    # noqa: BLE001
                 revision = None
             entregar = orden.estado_validacion == OrdenTrabajo.APROBADO
+            #  EL CLIENTE DEL CONTRATO, no el de la orden (27/11/2026): en el ISP
+            #  la instalacion se abre sobre un cliente DE PASO, y la tarjeta
+            #  decia su nombre («MARIO SABANAGRANDE») en vez del de quien firmo.
+            del_contrato = ((contrato.datos or {}).get("cliente") or {}) if contrato else {}
+            nombre = " ".join(x for x in (str(del_contrato.get("nombre") or "").strip(),
+                                         str(del_contrato.get("apellido") or "").strip()) if x)
             filas.append({
                 "orden_id": str(orden.id), "numero": orden.numero, "vuelta": orden.vuelta,
-                "cliente": orden.cliente_nombre or "",
+                "cliente": nombre or orden.cliente_nombre or "",
                 "finalizada_en": (orden.completada_campo_en.isoformat()
                                   if orden.completada_campo_en else None),
                 "validacion": orden.estado_validacion,

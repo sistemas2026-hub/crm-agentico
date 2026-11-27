@@ -252,6 +252,100 @@ try:
 finally:
     api._config_de, alta.completar = viejos
 
+# --------------------------------------------------------------------------- #
+seccion("5. el precinto del cliente y la marca de la caja (27/11/2026)")
+
+
+class HerrCompletarCaja(HerrCompletar):
+    parametros_de_completar = schema.ParametrosDeCompletar(
+        campo_servicio="id_servicio",
+        campos={"serial_onu": "sn_onu", "precinto_del_cliente": "usuario_cpe",
+                "marca_de_la_caja": "password_cpe"},
+        texto_caja_sin_marca="CAJA NO MARCADA")
+
+
+class HerrCompletarSinTexto(HerrCompletar):
+    parametros_de_completar = schema.ParametrosDeCompletar(
+        campo_servicio="id_servicio",
+        campos={"precinto_del_cliente": "usuario_cpe", "marca_de_la_caja": "password_cpe"})
+
+
+class ProveedorMayusculas(Proveedor):
+    """Devuelve la clave de la contrasena en MAYUSCULAS al leer (como la
+    respuesta del PUT de WispHub)."""
+    def ejecutar(self, herramienta, argumentos, tenant, variables_tenant=None):
+        r = super().ejecutar(herramienta, argumentos, tenant, variables_tenant)
+        if herramienta.nombre == "buscar_cliente":
+            for f in r["results"]:
+                if "password_cpe" in f:
+                    f["PASSWORD_CPE"] = f.pop("password_cpe")
+        return r
+
+
+def _cliente_8039():
+    return [{"id_servicio": 8039, "ip": IP, "servicio": NOMBRE, "cedula": "1234500001",
+             "sn_onu": "", "usuario_cpe": "", "password_cpe": ""}]
+
+
+reg, prov = Registro(), Proveedor(clientes=_cliente_8039())
+with escenario(reg, prov):
+    r = completar(config=Config([HerrCrear(), HerrBuscar(), HerrCompletarCaja()]),
+                  valores={"serial_onu": "zte-c1a2b3c4", "precinto_del_cliente": " 9308 ",
+                           "marca_de_la_caja": "  CTO 3   VILLA  VALENTINA "})
+afirmar(r.estado == alta.COMPLETADO, f"precinto y caja: completado ({r.estado} {r.motivo})")
+args = prov.escrituras[-1][0] if prov.escrituras else {}
+afirmar(args.get("usuario_cpe") == "9308" and args.get("password_cpe") == "CTO 3 VILLA VALENTINA",
+        f"el precinto va a su campo y la marca a la suya, sin espacios de mas: {args}")
+
+reg, prov = Registro(), Proveedor(clientes=_cliente_8039())
+with escenario(reg, prov):
+    r = completar(config=Config([HerrCrear(), HerrBuscar(), HerrCompletarCaja()]),
+                  valores={"precinto_del_cliente": "9308", "marca_de_la_caja": "CTO 3",
+                           "caja_sin_marca": True})
+args = prov.escrituras[-1][0] if prov.escrituras else {}
+afirmar(r.estado == alta.COMPLETADO and args.get("password_cpe") == "CAJA NO MARCADA",
+        f"caja SIN marca: va el texto de la empresa, aunque haya marca escrita: {args}")
+
+reg, prov = Registro(), Proveedor(clientes=_cliente_8039())
+with escenario(reg, prov):
+    r = completar(config=Config([HerrCrear(), HerrBuscar(), HerrCompletarSinTexto()]),
+                  valores={"caja_sin_marca": True})
+afirmar(r.estado == alta.NADA_QUE_COMPLETAR and not prov.escrituras,
+        f"sin texto declarado para la caja sin marca: no se escribe nada ({r.estado})")
+
+reg, prov = Registro(), ProveedorMayusculas(clientes=_cliente_8039())
+with escenario(reg, prov):
+    r = completar(config=Config([HerrCrear(), HerrBuscar(), HerrCompletarCaja()]),
+                  valores={"marca_de_la_caja": "CTO 3 VILLA VALENTINA"})
+afirmar(r.estado == alta.COMPLETADO,
+        f"la lectura con la clave en MAYUSCULAS igual confirma ({r.estado} {r.motivo})")
+
+for malo in ({"campos": {"precinto_del_cliente": "usuario_cpe"}, "texto_caja_sin_marca": "X"},
+             {"campos": {"color": "x"}}):
+    try:
+        schema.ParametrosDeCompletar(campo_servicio="id_servicio", **malo)
+        afirmar(False, f"no carga: {malo}")
+    except Exception:                                    # noqa: BLE001
+        afirmar(True, f"no carga: {malo}")
+
+viejos = (api._config_de, alta.completar)
+api._config_de = lambda t: object()
+alta.completar = lambda config, tenant, **kw: vistos.append(kw) or alta.ResultadoAlta(alta.COMPLETADO)
+try:
+    base = "/interno/contrato/c-9/completar-cliente?tenant=t"
+    cuerpo = {"actor": "Encargada Rosa", "datos": DATOS, "intento": 1, "id_servicio": 8039,
+              "valores": {"serial_onu": "X1", "precinto_del_cliente": "9308",
+                          "marca_de_la_caja": "CTO 3", "caja_sin_marca": False}}
+    r = cliente.post(base, json=cuerpo)
+    afirmar(r.status_code == 200 and vistos[-1]["valores"]["precinto_del_cliente"] == "9308",
+            "la ruta acepta el precinto, la marca y si la caja no tiene marca")
+    r = cliente.post(base, json={**cuerpo, "valores": {"caja_sin_marca": "si"}})
+    afirmar(r.status_code == 400, "un si que no es si: 400")
+    r = cliente.post(base, json={**cuerpo, "valores": {"marca_de_la_caja": "x" * 300}})
+    afirmar(r.status_code == 400, "un texto largo: 400")
+finally:
+    api._config_de, alta.completar = viejos
+
 print()
 if _fallos:
     print(f"FALLARON {len(_fallos)}:")

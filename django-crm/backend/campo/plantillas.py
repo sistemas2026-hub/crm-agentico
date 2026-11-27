@@ -418,6 +418,40 @@ class _Ids:
         return candidato
 
 
+#: LO QUE UN DATO DE LA PLANTILLA LE DICE AL PROVEEDOR  --  27/11/2026.
+#: El usuario: el precinto que el tecnico le pone al cliente va en «Usuario
+#: Antena» del cliente en WispHub, y la marca de la caja en «Password Antena»
+#: («CAJA NO MARCADA» si no tiene). Cada empresa marca CUAL de sus datos es
+#: cada cosa; a que campo del proveedor va lo dice la config del motor
+#: (`ParametrosDeCompletar`). Marca -> el tipo de dato que la puede llevar.
+AL_PROVEEDOR = {"precinto_del_cliente": "texto", "marca_de_la_caja": "texto",
+                "caja_marcada": "seleccion"}
+
+
+def _es_no(opcion) -> bool:
+    """«No», sin importar mayusculas ni espacios: la respuesta que dice que la
+    caja NO esta marcada."""
+    return str(opcion or "").strip().lower() == "no"
+
+
+def _marca_al_proveedor(c: dict, salida: dict, tipo: str, titulo: str, vistos: set) -> None:
+    """Valida y copia la marca `al_proveedor` de un dato: una de
+    `AL_PROVEEDOR`, en el tipo de dato que le corresponde, y una sola vez por
+    plantilla (dos «precinto del cliente» no dirian cual va al proveedor)."""
+    marca = str(c.get("al_proveedor") or "").strip()
+    if not marca:
+        return
+    if AL_PROVEEDOR.get(marca) != tipo:
+        raise ErrorPlantilla("AL_PROVEEDOR_INVALIDO",
+                             f"«{titulo}»: «{marca}» no es algo que este dato pueda mandar "
+                             f"al proveedor.")
+    if marca in vistos:
+        raise ErrorPlantilla("AL_PROVEEDOR_REPETIDO",
+                             f"«{titulo}»: otro dato ya es «{marca}».")
+    vistos.add(marca)
+    salida["al_proveedor"] = marca
+
+
 def componer(definicion: dict) -> dict:
     """La definicion que manda el editor, convertida al esquema del contrato 1.
 
@@ -458,6 +492,7 @@ def componer(definicion: dict) -> dict:
 
     ids = _Ids()
     campos = []
+    al_proveedor_vistos: set[str] = set()
     for i, c in enumerate(campos_in, 1):
         if not isinstance(c, dict):
             raise ErrorPlantilla("DEFINICION_INVALIDA", f"El dato {i} no se entiende.")
@@ -496,6 +531,7 @@ def componer(definicion: dict) -> dict:
             #  técnico la única forma rápida que tiene.
             if bool(c.get("escaneable")):
                 salida["escaneable"] = True
+            _marca_al_proveedor(c, salida, "texto", titulo, al_proveedor_vistos)
         elif tipo == NUMERO:
             salida["tipo"] = "decimal"
             mn = _numero(c.get("min"), f"El minimo de «{titulo}»")
@@ -577,6 +613,12 @@ def componer(definicion: dict) -> dict:
                 raise ErrorPlantilla("DEMASIADOS",
                                      f"«{titulo}» tiene mas de {MAX_OPCIONES} opciones.")
             reglas["options"] = opciones
+            _marca_al_proveedor(c, salida, "seleccion", titulo, al_proveedor_vistos)
+            if (salida.get("al_proveedor") == "caja_marcada"
+                    and not any(_es_no(o) for o in opciones)):
+                raise ErrorPlantilla(
+                    "CAJA_MARCADA_SIN_NO",
+                    f"«{titulo}» dice si la caja esta marcada: necesita la opcion «No».")
         else:  # CHECKLIST
             salida["tipo"] = "seleccion"
             salida["presentacion"] = CHECKLIST
@@ -781,6 +823,9 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
             #  motivo, semanas despues.
             if c.get("escaneable"):
                 fila["escaneable"] = True
+            #  Y la marca de lo que va al proveedor (27/11/2026), por lo mismo.
+            if c.get("al_proveedor"):
+                fila["al_proveedor"] = c["al_proveedor"]
         elif tipo == "decimal":
             #  EL RANGO BUENO VUELVE A SALIR POR DONDE ENTRO. Sin estas dos
             #  lineas, cualquier republicacion --y "Guardar en la plantilla"
@@ -808,6 +853,8 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
                 fila.update(tipo=SELECCION, permite_otro=permite_otro,
                             opciones=[o for o in opciones
                                       if not (permite_otro and o == "Otro")])
+                if c.get("al_proveedor"):
+                    fila["al_proveedor"] = c["al_proveedor"]
         else:
             motivos.append(f"«{titulo}» es de tipo '{tipo}', que el editor no ofrece")
         campos.append(fila)

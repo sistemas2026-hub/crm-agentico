@@ -2051,3 +2051,41 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - Desconectar la lectura pone en rojo la prueba de punta a punta.
 
 **NO VERIFICADO:** la app 1.0.33 sigue mostrando la etiqueta «Sin solicitud» para un contrato que sale del ticket, porque solo distingue «solicitud». Los datos llegan bien; la etiqueta se ajusta con la próxima APK.
+
+### 8.47 DECISIÓN — Al aprobar, el precinto del cliente y la marca de la caja van a la ficha del cliente en WispHub (27/11/2026)
+
+**El origen.** El usuario explicó una costumbre de la empresa: al instalar, escriben a mano en la ficha del cliente en WispHub el precinto que se le pone al cliente, en **«Usuario Antena»**, y la marca de la caja, en **«Password Antena»** (por ejemplo «CTO 3 VILLA VALENTINA»). Si la caja no tiene marca, escriben «CAJA NO MARCADA». En la app, el técnico ya anotaba el precinto; la caja era un «Número de la caja» opcional, sin forma de decir que no tiene marca.
+
+**Medido antes de construir, solo leyendo, en un cliente real:** `usuario_cpe` traía 4 dígitos y `password_cpe` 21 caracteres con letras. El usuario lo comparó con el panel: «9308» en «Usuario Antena» y «CTO 3 VILLA VALENTINA» en «Password Antena». Son esos campos.
+
+**Qué se decidió.**
+1. **Plantilla: una marca genérica, `al_proveedor`.**
+   - Dice qué es un dato: `precinto_del_cliente` y `marca_de_la_caja` van en datos de texto; `caja_marcada` va en una selección que tiene que incluir «No».
+   - Cada marca, una sola vez por plantilla. Se conserva al abrir y volver a publicar (`leer_definicion`), como la cámara y el costo.
+   - Cada empresa marca cuál de sus datos es cada cosa.
+2. **Al aprobar** (`instalacion.lo_que_va_al_proveedor`), junto con el serial:
+   - viajan el precinto y la marca de la caja;
+   - si el técnico respondió **«No»** a la caja marcada, viaja `caja_sin_marca` y **no** la marca: lo que dijo manda sobre una marca escrita por error.
+3. **Motor** (`ParametrosDeCompletar`):
+   - `campos` acepta además `precinto_del_cliente` y `marca_de_la_caja`, y la config dice a qué campo del proveedor va cada uno.
+   - `texto_caja_sin_marca` es la costumbre de la empresa para la caja sin marca; sin ese texto no se escribe nada.
+   - La comprobación lee el campo sin importar mayúsculas: el mismo dato vuelve como `password_cpe` o `PASSWORD_CPE` según la respuesta.
+   - Rapilink: `usuario_cpe`, `password_cpe` y «CAJA NO MARCADA».
+4. **La plantilla de Rapilink** suma «¿La caja está marcada?» (Sí/No, obligatoria) y renombra «Número de la caja» a «Marca de la caja», con su ayuda.
+5. **De paso:** la tarjeta de «Por activar» muestra el nombre del cliente del contrato y no el del cliente de paso (en la OT-501 decía «MARIO SABANAGRANDE»).
+
+**VERIFICADO:**
+- motor: `test_completar_cliente` sección 5.
+  - El precinto y la marca se escriben y se confirman leyendo, sin espacios de más.
+  - Con la caja sin marca va «CAJA NO MARCADA», aunque haya una marca escrita; sin texto declarado no se escribe nada.
+  - La lectura con la clave en mayúsculas igual confirma.
+  - El esquema y la ruta rechazan lo malo.
+  - Quitar la regla de «sin marca» o leer distinguiendo mayúsculas pone las pruebas en rojo.
+- backend: `test_precinto_y_caja_al_proveedor` (12).
+  - Las marcas se componen, vuelven al editar y rechazan lo inválido.
+  - Qué viaja en cada caso; la cadena de la orden al pedido al motor.
+  - La tarjeta de «Por activar».
+  - Quitar la regla del «No» la pone en rojo.
+- Guarda de arquitectura, editor, alta y completar en verde. Config local v27 y plantilla local v12.
+
+**NO VERIFICADO:** la escritura real en WispHub de `usuario_cpe` y `password_cpe`. El cliente de prueba se borró; se mide con la próxima instalación vigilada.

@@ -92,6 +92,41 @@ def costo_y_serial(orden) -> dict:
         ultima = None
     if ultima is not None and getattr(ultima, "estado", "") in ("activada", "ya_estaba"):
         salida["serial_onu"] = str(ultima.serial or "")
+    salida.update(lo_que_va_al_proveedor(esquema, datos))
+    return salida
+
+
+#: Lo que viaja al motor para completar al cliente activado (la ruta del motor
+#: acepta exactamente esto).
+VALORES_AL_PROVEEDOR = ("costo_instalacion", "serial_onu", "precinto_del_cliente",
+                        "marca_de_la_caja", "caja_sin_marca")
+
+
+def lo_que_va_al_proveedor(esquema: dict, datos: dict) -> dict:
+    """El precinto del cliente y la marca de la caja que anoto el tecnico, por
+    la marca `al_proveedor` de cada dato de la plantilla (27/11/2026).
+
+    * `precinto_del_cliente` y `marca_de_la_caja`: el texto, si lo escribio.
+    * Si respondio «No» a la caja marcada: `caja_sin_marca` y NO la marca (lo
+      que dijo de la caja manda sobre una marca escrita por error). El motor
+      escribe ahi el texto de la empresa («CAJA NO MARCADA»).
+    """
+    from campo.plantillas import _es_no
+
+    salida: dict = {}
+    sin_marca = False
+    for c in (esquema.get("campos") or []):
+        if not isinstance(c, dict) or not c.get("al_proveedor"):
+            continue
+        valor = datos.get(c.get("id"))
+        texto = " ".join(str(valor or "").split())
+        if c["al_proveedor"] in ("precinto_del_cliente", "marca_de_la_caja") and texto:
+            salida[c["al_proveedor"]] = texto
+        elif c["al_proveedor"] == "caja_marcada" and _es_no(valor):
+            sin_marca = True
+    if sin_marca:
+        salida.pop("marca_de_la_caja", None)
+        salida["caja_sin_marca"] = True
     return salida
 
 
@@ -408,7 +443,7 @@ def completar(contrato) -> None:
     estado, cuerpo = alta_en_el_isp._llamar(contrato, "completar-cliente", {
         "actor": actor, "datos": alta_en_el_isp.datos_para_reconocer(contrato),
         "id_servicio": contrato.servicio_isp,
-        "valores": {k: v for k, v in valores.items() if k in ("costo_instalacion", "serial_onu")},
+        "valores": {k: v for k, v in valores.items() if k in VALORES_AL_PROVEEDOR},
         "intento": int(contrato.completar_intento or 1)}, ESPERA_DEL_PEDIDO)
     if estado is None or estado in ("en_curso", "no_se_pudo_comprobar"):
         return
