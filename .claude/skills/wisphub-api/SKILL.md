@@ -1350,9 +1350,24 @@ Por eso la herramienta usa el bloque (`bloque_de_archivos`): una fila por
 archivo, `form-TOTAL_FORMS` = cuantas. Varias filas en un solo guardado:
 **sin medir todavia** (se probo una).
 
-**SIN MEDIR** (no escribir sin permiso explicito): varias filas del bloque en
-un guardado; que la firma hecha por el portal quede en `contrato-firma`;
-cuanto duran el enlace y la sesion.
+**LA PRIMERA PRUEBA COMPLETA, 26/11/2026 noche** (con permiso, instalacion de
+prueba creada desde la app):
+
+* En una instalacion **NUEVA**, `GET /instalaciones/agregar-contrato/<servicio>/`
+  **NO redirige**: muestra el mismo formulario `generarContrato`, ya lleno con la
+  plantilla, y el contrato se **crea al guardarlo**. Solo cuando el contrato ya
+  existe redirige a `editar-contrato/<contrato>/`. (La 8039 de la primera medicion
+  redirigia porque el usuario ya lo habia abierto a mano.)
+* Despues de guardar, volver a abrir `agregar-contrato/<servicio>/` redirige a
+  `editar-contrato/<contrato>/`: de ahi se lee el numero.
+* WispHub **reusa los numeros** al borrar: la instalacion nueva salio 8039 y su
+  contrato 4928, los mismos de los que el usuario habia borrado.
+* **Tres filas del bloque `form-N-*` en un solo guardado** quedaron, una por
+  archivo, con su titulo.
+* La firma que el cliente hace en el portal (el enlace de `#auto-login`) **queda en
+  `contrato-firma`** del formulario: leerla como si/no alcanza para saber si firmo.
+
+**SIN MEDIR:** cuanto duran el enlace y la sesion.
 
 ## Antes de dar por buena una integracion
 

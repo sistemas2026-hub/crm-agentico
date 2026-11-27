@@ -6644,10 +6644,14 @@ herramientas:
       campos_fijos: {token_device: "", name_device: "", type_device: "", remember: "1"}
     argumentos_web: [id_servicio, archivos]
     pasos_web:
-      - abrir: /instalaciones/agregar-contrato/{id_servicio}/
-        capturar:
-          contrato_id: {de: url, patron: "/editar-contrato/(\\d+)/"}
-      - formulario: /instalaciones/editar-contrato/{contrato_id}/
+      #  MEDIDO EN LA PRIMERA PRUEBA COMPLETA (26/11/2026, OT-22): en una
+      #  instalacion NUEVA, «agregar contrato» NO redirige: muestra el mismo
+      #  formulario 'generarContrato' ya lleno con la plantilla, y el contrato
+      #  se CREA al guardarlo. Si ya existia, redirige a «editar contrato» y el
+      #  formulario es el mismo. Por eso: primero se guarda ahi, y despues se
+      #  vuelve a abrir «agregar contrato» -- que ya redirige -- para leer el
+      #  numero del contrato.
+      - formulario: /instalaciones/agregar-contrato/{id_servicio}/
         id_formulario: generarContrato
         #  Medido el 26/11/2026 (prueba vigilada, contrato 4928): solo la fila
         #  repetible 'form-N-*' deja el archivo en la pestaña «Subir Archivos»
@@ -6658,6 +6662,9 @@ herramientas:
         archivo_minimo_bytes: 1024
         boton: guardar_contrato
         exito: redirige
+      - abrir: /instalaciones/agregar-contrato/{id_servicio}/
+        capturar:
+          contrato_id: {de: url, patron: "/editar-contrato/(\\d+)/"}
 
   - nombre: enlace_de_firma_en_wisphub
     tipo: web

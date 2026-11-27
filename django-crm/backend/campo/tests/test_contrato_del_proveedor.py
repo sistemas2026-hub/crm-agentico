@@ -224,12 +224,15 @@ def test_c2_NO_SE_SABE_queda_por_revisar_y_NO_se_vuelve_a_pedir_solo(
 
 def test_c3_FALLO_con_el_aviso_del_panel_y_se_puede_volver_a_pedir(
         orden, user_profile, config, con_documentos, motor):
-    motor.respuesta = ("fallo", {"estado": "fallo", "avisos": ["El archivo es muy pequeño."]})
+    motor.respuesta = ("fallo", {"estado": "fallo", "avisos": ["El archivo es muy pequeño."],
+                                 "motivo": "el panel no guardo el contrato (paso 1: no redirigio)"})
     c = _pedido(orden, user_profile)
     CP.preparar(c)
     c.refresh_from_db()
     assert c.firma_proveedor_estado == "fallida"
     assert c.firma_proveedor_avisos == ["El archivo es muy pequeño."]
+    assert "(el panel no guardo el contrato (paso 1: no redirigio))" in c.firma_proveedor_detalle, \
+        "la razón del motor queda dicha"
     assert CP.pedir(c) is True and c.firma_proveedor_intento == 2, "cada pedido, un número nuevo"
 
 

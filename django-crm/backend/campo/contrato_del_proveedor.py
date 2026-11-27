@@ -239,9 +239,14 @@ def _aplicar(contrato, estado: str, cuerpo: dict) -> None:
         _anotar(contrato, firma_proveedor_estado=ContratoDeServicio.FIRMA_PROVEEDOR_POR_REVISAR,
                 firma_proveedor_detalle=_NO_SE_SABE, firma_proveedor_avisos=avisos)
     else:
+        #  LA RAZON DEL MOTOR VA DESPUES, entre parentesis (medido en la primera
+        #  prueba completa, 26/11/2026: sin ella, «no guardo el contrato» no
+        #  decia en que paso del panel). Es texto fijo del motor, sin datos del
+        #  cliente.
+        motivo = str(cuerpo.get("motivo") or "")[:160]
+        explicacion = _POR_QUE.get(estado, "No se pudo preparar el contrato del proveedor.")
         _anotar(contrato, firma_proveedor_estado=ContratoDeServicio.FIRMA_PROVEEDOR_FALLIDA,
-                firma_proveedor_detalle=_POR_QUE.get(estado, "No se pudo preparar el contrato "
-                                                             "del proveedor."),
+                firma_proveedor_detalle=explicacion + (f" ({motivo})" if motivo else ""),
                 firma_proveedor_avisos=avisos)
 
 
