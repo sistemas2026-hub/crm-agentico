@@ -1489,3 +1489,93 @@ def subir_fotos_del_trabajo(org_id: str, contrato_id: str, vuelta: int = 0) -> d
         return {"resultado": "", "por_que": type(e).__name__}
     finally:
         clear_rls_context()
+
+
+# =============================================================================
+#  LAS IP LIBRES SE LEEN SOLAS  --  27/11/2026
+# =============================================================================
+#: La tarea corre cada hora; una lectura tarda alrededor de un minuto en
+#: guardarse. Sin esta holgura, «cada 1 hora» se leeria cada DOS: a la hora
+#: siguiente faltarian unos segundos para cumplirse los 60 minutos.
+HOLGURA_DE_LA_LECTURA_S = 10 * 60
+#: Lo que se espera a que el motor recorra el catalogo del proveedor
+#: (decenas de paginas seguidas, ~1 minuto medido).
+ESPERA_DE_LA_LECTURA_S = 300
+ESPERA_DE_LA_PREGUNTA_S = 30
+
+
+def _toca_leer(ocupacion: dict, ahora) -> bool:
+    """Si a esta empresa ya le toca leer de nuevo sus IP ocupadas.
+
+    Lo decide ella: `cada_horas` (0 = solo con el boton). Sin herramienta que
+    lea, nunca. Sin lectura anterior o con una fecha ilegible, ya.
+    """
+    from django.utils.dateparse import parse_datetime
+
+    try:
+        cada = int(ocupacion.get("cada_horas") or 0)
+    except (TypeError, ValueError):
+        return False
+    if cada <= 0 or not ocupacion.get("se_puede_leer"):
+        return False
+    ultima = parse_datetime(str(ocupacion.get("actualizado_en") or ""))
+    if ultima is None:
+        return True
+    if timezone.is_naive(ultima):
+        from datetime import timezone as zona
+
+        ultima = ultima.replace(tzinfo=zona.utc)
+    return (ahora - ultima).total_seconds() >= cada * 3600 - HOLGURA_DE_LA_LECTURA_S
+
+
+@shared_task(name="campo.tasks.leer_ocupacion_de_ip")
+def leer_ocupacion_de_ip() -> dict:
+    """Lee las IP ocupadas en el proveedor de cada empresa que lo pidio.
+
+    Pedido del usuario (27/11/2026): que las IP libres se actualicen solas. La
+    lista solo PROPONE candidatas: la IP de un contrato se decide al confirmar,
+    se pregunta en vivo al proveedor y la base no acepta dos contratos con la
+    misma (`una_ip_por_contrato_vigente`). Una lista de hace una hora no
+    repite IP; solo hace que el tecnico se salte alguna ya tomada.
+
+    POR QUE HORAS Y NO MINUTOS (medido el 27/11/2026): cada lectura recorre el
+    catalogo entero del proveedor y guarda una version de la config de 241 KB.
+    Cada 5 minutos serian 288 versiones al dia (~1 GB al mes).
+
+    CADA EMPRESA EN SU try/except, como `ciclo_de_la_madrugada`: una que no
+    contesta no deja sin lectura a las demas. Nada de lo que vuelve del motor
+    va al log: solo el tenant, cuantas leyo y el tipo de error.
+    """
+    import requests
+
+    from campo.services.ips_libres import _motor
+    from operaciones.areas_del_tenant import tenant_de
+
+    base, cabeceras = _motor()
+    ahora = timezone.now()
+    salida = {"leidas": [], "al_dia": 0, "errores": []}
+    for org in Org.objects.filter(is_active=True):
+        tenant = ""
+        try:
+            tenant = tenant_de(org)
+            if not tenant:
+                continue
+            r = requests.get(f"{base}/configuracion/rangos-de-ip", headers=cabeceras,
+                             params={"tenant": tenant}, timeout=ESPERA_DE_LA_PREGUNTA_S)
+            r.raise_for_status()
+            if not _toca_leer((r.json() or {}).get("ocupacion") or {}, ahora):
+                salida["al_dia"] += 1
+                continue
+            r = requests.post(f"{base}/configuracion/ocupacion-ip/sincronizar",
+                              headers=cabeceras, json={"tenant": tenant},
+                              timeout=ESPERA_DE_LA_LECTURA_S)
+            r.raise_for_status()
+            d = r.json() or {}
+            salida["leidas"].append({"tenant": tenant, "leidos": d.get("leidos"),
+                                     "completa": d.get("completa")})
+            logger.info("ip libres: leidas tenant=%s leidos=%s completa=%s",
+                        tenant, d.get("leidos"), d.get("completa"))
+        except Exception as e:                                   # noqa: BLE001
+            salida["errores"].append({"tenant": tenant, "error": type(e).__name__})
+            logger.warning("ip libres: no se pudo leer tenant=%s (%s)", tenant, type(e).__name__)
+    return salida

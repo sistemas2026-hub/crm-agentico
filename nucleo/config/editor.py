@@ -2077,20 +2077,34 @@ def rangos_validos(pools) -> list[dict]:
     return limpios
 
 
-def _mutar_rangos_de_ip(doc: dict, pools: list[dict], prudente: bool | None) -> None:
+#: Una vez por semana como maximo entre lecturas solas; 0 = solo con el boton.
+MAXIMO_HORAS_ENTRE_LECTURAS_DE_IP = 168
+
+
+def _mutar_rangos_de_ip(doc: dict, pools: list[dict], prudente: bool | None,
+                        cada_horas: int | None = None) -> None:
     """Reemplaza ENTERA la lista de rangos: la pantalla manda la de todos los
     servidores en cada guardado, como los planes de venta. La opcion de las IP
-    mal escritas solo se toca si llega."""
+    mal escritas y cada cuantas horas se lee sola la ocupacion solo se tocan
+    si llegan."""
     doc["pools_de_ip"] = pools
     if prudente is not None:
         doc["contar_ip_mal_escritas"] = bool(prudente)
+    if cada_horas is not None:
+        doc["ocupacion_ip_cada_horas"] = cada_horas
 
 
-def guardar_rangos_de_ip(tenant: str, pools, prudente: bool | None = None) -> TenantConfig:
+def guardar_rangos_de_ip(tenant: str, pools, prudente: bool | None = None,
+                         cada_horas: int | None = None) -> TenantConfig:
     limpios = rangos_validos(pools)
     if prudente is not None and not isinstance(prudente, bool):
         raise ErrorEdicion("La opción de las IP mal escritas es sí o no.")
-    return _editar(tenant, lambda doc: _mutar_rangos_de_ip(doc, limpios, prudente))
+    if cada_horas is not None and (isinstance(cada_horas, bool) or not isinstance(cada_horas, int)
+                                   or not 0 <= cada_horas <= MAXIMO_HORAS_ENTRE_LECTURAS_DE_IP):
+        raise ErrorEdicion(
+            "Cada cuántas horas se leen solas las IP es un número de 0 a "
+            f"{MAXIMO_HORAS_ENTRE_LECTURAS_DE_IP} (0 = solo con el botón).")
+    return _editar(tenant, lambda doc: _mutar_rangos_de_ip(doc, limpios, prudente, cada_horas))
 
 
 def _mutar_precios(doc: dict, precios: list[dict]) -> None:

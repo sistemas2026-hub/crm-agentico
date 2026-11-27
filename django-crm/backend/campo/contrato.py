@@ -225,6 +225,13 @@ class ContratoDeServicio(BaseModel):
     #: Los datos TAL COMO SE FIRMARON. Si despues se corrige la solicitud, el
     #: contrato no cambia: es lo que el cliente acepto ese dia.
     datos = models.JSONField(default=dict)
+    #: LA IP DEL CONTRATO, EN SU PROPIA COLUMNA  --  27/11/2026. Es la misma de
+    #: `datos["ip_elegida"]`; existe para que LA BASE no acepte dos contratos
+    #: vigentes de la empresa con la misma direccion (`una_ip_por_contrato_
+    #: vigente`). La comprobacion previa de `firmar` no alcanzaba: dos tecnicos
+    #: que confirman en los mismos segundos leen los dos «libre» antes de que
+    #: cualquiera guarde. Vacia = el contrato no tiene IP, y no cuenta.
+    ip = models.CharField(max_length=15, blank=True, default="")
     pdf = models.FileField(upload_to="contratos/%Y/%m/", null=True, blank=True)
     huella = models.CharField(max_length=64)
     estado = models.CharField(max_length=20, choices=ESTADOS, default=FIRMADO)
@@ -386,6 +393,13 @@ class ContratoDeServicio(BaseModel):
             models.UniqueConstraint(fields=["orden"],
                                     condition=~models.Q(estado="anulado"),
                                     name="un_contrato_vigente_por_orden"),
+            #  UNA IP, UN CONTRATO VIGENTE, POR EMPRESA (27/11/2026). Excluye
+            #  por CLAVE y no por una consulta previa: ahi vive la carrera de
+            #  dos confirmaciones simultaneas (CLAUDE.md 12). `firmar` atrapa
+            #  el choque y toma la siguiente libre.
+            models.UniqueConstraint(fields=["org", "ip"],
+                                    condition=~models.Q(estado="anulado") & ~models.Q(ip=""),
+                                    name="una_ip_por_contrato_vigente"),
         ]
 
     def como_dict(self) -> dict:
@@ -761,7 +775,7 @@ def _ip_de(cuerpo: dict) -> str:
 COMPROBACIONES_DE_IP = 5
 
 
-def _ip_automatica(org, id_zona) -> str:
+def _ip_automatica(org, id_zona, ademas=()) -> str:
     """La IP que el sistema le asigna al contrato: la primera libre del
     servidor que no tenga otro contrato vigente.
 
@@ -783,6 +797,10 @@ def _ip_automatica(org, id_zona) -> str:
     pregunta al proveedor (hasta `COMPROBACIONES_DE_IP`): la tomada se salta.
     Si no se puede preguntar, se usa la candidata como antes: el alta la
     vuelve a mirar antes de crear, y una lectura caida no impide firmar.
+
+    `ademas`: las que ya chocaron con la regla de la base en un intento
+    anterior de esta misma firma (27/11/2026): otro contrato las tomo en esos
+    segundos y esta consulta todavia podria no verlo.
     """
     from campo.services import ips_libres
 
@@ -791,9 +809,10 @@ def _ip_automatica(org, id_zona) -> str:
     except Exception:   # noqa: BLE001 - no poder preguntar no impide firmar
         logger.warning("contrato.ip_automatica_sin_respuesta")
         return ""
-    tomadas = set(ContratoDeServicio.objects.filter(org=org)
-                  .exclude(estado=ContratoDeServicio.ANULADO)
-                  .values_list("datos__ip_elegida", flat=True))
+    vigentes = (ContratoDeServicio.objects.filter(org=org)
+                .exclude(estado=ContratoDeServicio.ANULADO))
+    tomadas = (set(vigentes.values_list("datos__ip_elegida", flat=True))
+               | set(vigentes.values_list("ip", flat=True)) | set(ademas))
     preguntadas = 0
     for crudo in libres:
         try:
@@ -933,9 +952,7 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
     #  IP esta libre hasta que el primero termine de crearse-- y saldrian dos
     #  pedidos por la misma direccion. Aca no hace falta preguntarle a nadie:
     #  es una consulta a la propia base. Los anulados no cuentan.
-    if ip_elegida and (ContratoDeServicio.objects
-                       .filter(org=orden.org, datos__ip_elegida=ip_elegida)
-                       .exclude(estado=ContratoDeServicio.ANULADO).exists()):
+    if ip_elegida and ip_de_otro_contrato(orden.org, ip_elegida):
         raise ContratoInvalido(
             "Esa dirección IP ya la eligió otro contrato. Elige otra.")
 
@@ -1020,36 +1037,86 @@ def firmar(orden, profile, cuerpo: dict) -> tuple["ContratoDeServicio", bool]:
         "orden_numero": orden.numero,
         "origen": base["origen"],
     }
-    canonico = json.dumps(datos, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    huella = hashlib.sha256(canonico + hashlib.sha256(firma).digest()).hexdigest()
     #  EL NUMERO NO SE REPITE: el segundo contrato de una orden (el primero se
     #  anulo) lleva «-2». Dos papeles firmados con el mismo numero no se
     #  pueden distinguir cuando alguien pregunte por uno.
     anteriores = ContratoDeServicio.objects.filter(orden=orden).count()
     numero = f"C-{ahora:%Y}-{orden.numero:06d}" + (f"-{anteriores + 1}" if anteriores else "")
 
-    contrato = ContratoDeServicio(
-        org=orden.org, orden=orden,
-        solicitud_id=base.get("solicitud_id"),
-        numero=numero, datos=datos, huella=huella,
-        firmado_por=profile, firmado_en=ahora,
-        firma_en_el_proveedor=sin_firma,
-    )
-    pdf = armar_pdf(contrato, firma, config)
-    contrato.pdf.save(f"{numero}.pdf", pdf, save=False)
+    def _armar(ip: str, origen: str) -> "ContratoDeServicio":
+        """El contrato con ESA IP: sus datos firmados, su huella y su PDF. Se
+        vuelve a armar entero si la IP choca, porque la IP va en los tres."""
+        firmados = {**datos, "ip_elegida": ip, "ip_origen": origen}
+        canonico = json.dumps(firmados, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        nuevo = ContratoDeServicio(
+            org=orden.org, orden=orden,
+            solicitud_id=base.get("solicitud_id"),
+            numero=numero, datos=firmados,
+            huella=hashlib.sha256(canonico + hashlib.sha256(firma).digest()).hexdigest(),
+            ip=ip, firmado_por=profile, firmado_en=ahora,
+            firma_en_el_proveedor=sin_firma,
+        )
+        nuevo.pdf.save(f"{numero}.pdf", armar_pdf(nuevo, firma, config), save=False)
+        return nuevo
+
+    contrato = _armar(ip_elegida, ip_origen)
+    chocadas: list[str] = []
+    while True:
+        try:
+            #  En su propia transaccion: si una restriccion frena este guardado,
+            #  la de quien llama sigue sana y se puede leer quien gano.
+            with transaction.atomic():
+                contrato.save()
+            return contrato, True
+        except IntegrityError:
+            #  Otro envio del MISMO contrato gano la carrera: la restriccion
+            #  `un_contrato_vigente_por_orden` lo freno. Se devuelve el que quedo.
+            ganador = vigente_de(orden)
+            if ganador is not None:
+                _sin_pdf(contrato)
+                return ganador, False
+            #  OTRO CONTRATO TOMO ESTA IP EN ESTOS MISMOS SEGUNDOS (27/11/2026):
+            #  lo freno `una_ip_por_contrato_vigente`. La que puso el sistema
+            #  se cambia por la siguiente libre; la que eligio el tecnico (una
+            #  app vieja) se le devuelve, como la comprobacion de arriba.
+            if not (contrato.ip and ip_de_otro_contrato(orden.org, contrato.ip)):
+                raise
+            _sin_pdf(contrato)
+            if ip_origen != "sistema":
+                raise ContratoInvalido(
+                    "Esa dirección IP ya la eligió otro contrato. Elige otra.") from None
+            chocadas.append(contrato.ip)
+            if len(chocadas) > INTENTOS_DE_IP:
+                raise ContratoInvalido(
+                    "Otros contratos tomaron las IP libres en este mismo momento. "
+                    "Toca «Confirmar contrato» de nuevo.") from None
+            logger.warning("contrato.ip_tomada_por_otro_se_toma_la_siguiente")
+            nueva = _ip_automatica(orden.org, servidor["id_zona"], ademas=chocadas)
+            contrato = _armar(nueva, "sistema" if nueva else "")
+
+
+#: Cuantas veces se cambia la IP de una firma que choco con otra. Cada choque
+#: es otro contrato confirmado en los mismos segundos: tres seguidos ya no es
+#: una carrera sino algo que una persona tiene que mirar.
+INTENTOS_DE_IP = 3
+
+
+def ip_de_otro_contrato(org, ip: str) -> bool:
+    """Si otro contrato VIGENTE de la empresa ya tiene esa IP (la columna o los
+    datos firmados de uno anterior a la columna)."""
+    vigentes = ContratoDeServicio.objects.filter(org=org).exclude(estado=ContratoDeServicio.ANULADO)
+    return (vigentes.filter(ip=ip).exists()
+            or vigentes.filter(datos__ip_elegida=ip).exists())
+
+
+def _sin_pdf(contrato) -> None:
+    """Borra el PDF de un contrato que no se llego a guardar: quedaria suelto
+    en el almacenamiento, firmado y con una IP que no es la suya."""
     try:
-        #  En su propia transaccion: si la restriccion frena este guardado, la
-        #  de quien llama sigue sana y se puede leer quien gano.
-        with transaction.atomic():
-            contrato.save()
-    except IntegrityError:
-        #  Otro envio del mismo contrato gano la carrera: la restriccion
-        #  `un_contrato_vigente_por_orden` lo freno. Se devuelve el que quedo.
-        ganador = vigente_de(orden)
-        if ganador is not None:
-            return ganador, False
-        raise
-    return contrato, True
+        if contrato.pdf:
+            contrato.pdf.delete(save=False)
+    except Exception:                                            # noqa: BLE001
+        logger.warning("contrato.pdf_suelto_no_se_pudo_borrar")
 
 
 # =============================================================================

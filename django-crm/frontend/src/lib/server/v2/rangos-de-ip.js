@@ -46,21 +46,23 @@ export async function leerRangos(locals, fetch) {
 /**
  * Reemplaza entera la lista de rangos. `contarMalEscritas` es la opción de la
  * empresa de no ofrecer la IP que podría ser la de un cliente con la suya mal
- * escrita en el proveedor; `undefined` la deja como está.
+ * escrita en el proveedor; `undefined` la deja como está. `cadaHoras` (27/11/2026):
+ * cada cuántas horas se leen solas las IP tomadas, 0 = solo con el botón;
+ * `undefined` la deja como está.
  * @param {any} locals @param {typeof fetch} fetch @param {RangoAGuardar[]} pools
- * @param {boolean} [contarMalEscritas]
+ * @param {boolean} [contarMalEscritas] @param {number} [cadaHoras]
  */
-export async function guardarRangos(locals, fetch, pools, contarMalEscritas) {
+export async function guardarRangos(locals, fetch, pools, contarMalEscritas, cadaHoras) {
   const cfg = await destinoDelAsistente(locals, fetch);
   if (!cfg) throw new Error('El asistente no está configurado.');
+  /** @type {Record<string, any>} */
+  const cuerpo = { tenant: cfg.tenant, pools };
+  if (contarMalEscritas !== undefined) cuerpo.contar_ip_mal_escritas = contarMalEscritas;
+  if (cadaHoras !== undefined) cuerpo.ocupacion_cada_horas = cadaHoras;
   const r = await fetch(`${cfg.baseUrl}/configuracion/rangos-de-ip`, {
     method: 'PUT',
     headers: { ...headersMotor(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(
-      contarMalEscritas === undefined
-        ? { tenant: cfg.tenant, pools }
-        : { tenant: cfg.tenant, pools, contar_ip_mal_escritas: contarMalEscritas }
-    )
+    body: JSON.stringify(cuerpo)
   });
   const datos = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(datos?.error || 'No se pudieron guardar los rangos.');

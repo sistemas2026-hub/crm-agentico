@@ -446,6 +446,7 @@
                 {#if data.rangos.ocupacion?.leida}
                   Direcciones tomadas leídas del proveedor el
                   {new Date(data.rangos.ocupacion.actualizado_en).toLocaleString('es-CO', { timeZone: 'America/Bogota' })}{#if !data.rangos.ocupacion.completa}<b> — la lectura quedó incompleta</b>{/if}.
+                  {#if data.rangos.ocupacion.cada_horas}Se vuelve a leer sola cada {data.rangos.ocupacion.cada_horas} hora{data.rangos.ocupacion.cada_horas === 1 ? '' : 's'}.{/if}
                 {:else}
                   <b>Todavía no se ha leído qué direcciones están tomadas</b>: sin eso no hay sugeridos ni IP libres.
                 {/if}
@@ -509,6 +510,20 @@
                     ofrecerá la IP del rango que termina en los mismos dos números que la de ellos (se pierden
                     direcciones libres, pero no se le da a un cliente nuevo la IP de uno que ya existe).
                   </span>
+                {/if}
+                {#if data.rangos.ocupacion?.se_puede_leer}
+                  <!-- LAS IP TOMADAS SE LEEN SOLAS (27/11/2026). Una tarea de la
+                       plataforma mira cada hora; esto dice cada cuántas le toca a
+                       esta empresa. La lista solo propone: la IP de un contrato se
+                       pregunta en vivo al confirmar, y la base no acepta dos
+                       contratos con la misma. -->
+                  <label class="snoc-body-sm snoc-fila" style="gap:var(--snoc-xs); align-items:center; flex-wrap:wrap;">
+                    Leer solas las IP tomadas cada
+                    <input class="snoc-campo" type="number" min="0" max="168" step="1" inputmode="numeric"
+                           name="ocupacion_cada_horas" style="width:5.5rem;"
+                           value={data.rangos.ocupacion?.cada_horas ?? 0} />
+                    horas <span class="snoc-secundario">(0 = solo con el botón)</span>
+                  </label>
                 {/if}
                 <div class="snoc-fila" style="gap:var(--snoc-sm); align-items:center; flex-wrap:wrap;">
                   <button class="snoc-btn" type="submit">Guardar los rangos</button>

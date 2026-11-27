@@ -4978,6 +4978,13 @@ class TenantConfig(Base):
     # empresa la tiene APAGADA: sus IP fuera de red privada no son errores, son
     # las que les pone a los clientes al cancelarlos.
     contar_ip_mal_escritas: bool = False
+    # CADA CUANTAS HORAS SE LEE SOLA LA OCUPACION  --  27/11/2026. Una DECISION
+    # de la empresa, como los rangos: se elige en la pantalla junto al boton
+    # «Leer ocupacion». 0 = solo con el boton (de fabrica). La lectura recorre
+    # el catalogo entero del proveedor y cada una guarda una version de esta
+    # config: por eso horas y no minutos (medido: 241 KB por version). La lee
+    # la tarea `campo.tasks.leer_ocupacion_de_ip` de la plataforma, cada hora.
+    ocupacion_ip_cada_horas: int = Field(default=0, ge=0, le=168)
     # QUE DIRECCIONES ESTAN TOMADAS: prefijo ('172.16.9.') -> ultimos octetos.
     # Lo PRODUCE un job (`ocupacion_ip.sincronizar`), se reemplaza entero y no
     # baja al archivo. Vacio = no se sincronizo nunca, y entonces no se puede

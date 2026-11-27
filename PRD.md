@@ -1978,3 +1978,44 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 **NO VERIFICADO:**
 - La vista dentro de la app contra el portal real: falta firmar una prueba con la app 1.0.33.
 - Que WispHub deje los documentos sin marcar como visibles cuando la casilla no viaja. Es la conducta estándar de un formulario, pero no se ha medido en el portal del cliente.
+
+### 8.45 DECISIÓN — Una IP por contrato vigente la garantiza la base, y las IP libres se leen solas cada N horas (27/11/2026)
+
+**El error que lo originó.** El usuario pidió que las IP disponibles se actualizaran solas cada 5 minutos, y preguntó cómo se evita que, con una lista más vieja, dos técnicos reciban la misma IP. Al revisarlo en el código salieron dos cosas:
+- **La lista solo propone candidatas.** La IP se decide al tocar «Confirmar contrato»: se descartan las de otros contratos vigentes, se pregunta en vivo al proveedor (§8.34) y el alta vuelve a mirar antes de crear. Con minutos de diferencia entre dos técnicos no hay repetición: el segundo ve el contrato del primero.
+- **Pero esa exclusión era una consulta previa, no una regla.** Dos técnicos que confirman **en los mismos segundos** leen los dos «libre» antes de que cualquiera guarde. Es la carrera que CLAUDE.md §12 dice cerrar «por clave, nunca por un select previo». La frecuencia de la lista no la cambia: cada 5 minutos pasaría igual.
+
+**Medido antes de decidir la frecuencia.**
+- Cada lectura de ocupación recorre el catálogo entero del proveedor: páginas de 300, decenas de llamadas seguidas, alrededor de un minuto.
+- Cada lectura guarda una versión nueva de la config: 241 KB. El historial de producción tenía 99 versiones en tres meses. Cada 5 minutos serían 288 al día, cerca de 1 GB al mes, y el historial dejaría de servir para saber quién cambió qué.
+
+**Qué se decidió.**
+1. **Una IP, un contrato vigente, por empresa, en la base.**
+   - Columna nueva `ContratoDeServicio.ip` con la restricción `una_ip_por_contrato_vigente` sobre `(org, ip)`. No cuentan los anulados ni los contratos sin IP.
+   - Si al guardar choca, `firmar` toma la siguiente libre, la pregunta en vivo y **rehace los datos firmados, la huella y el PDF** con la IP correcta. El PDF del intento fallido se borra.
+   - Hasta 3 reintentos. Después pide «Toca Confirmar contrato de nuevo». Si ya no queda ninguna libre, se firma sin IP, como antes.
+   - La IP que manda una app vieja no se cambia sola: se le devuelve «Esa dirección IP ya la eligió otro contrato».
+   - La migración 0067 copia la IP de los contratos que ya existen. Si dos vigentes compartieran una, la conserva el más antiguo y avisa cuántos hay, sin nombrar IP. Así la regla se crea siempre y el despliegue no se cae por un dato viejo.
+2. **La ocupación se lee sola cada N horas, y lo decide cada empresa.**
+   - Campo nuevo `ocupacion_ip_cada_horas` en la config del motor, de 0 a 168. De fábrica 0, que significa solo con el botón.
+   - Se elige en Programación, junto a «Leer del proveedor qué IP están tomadas», y se guarda con los rangos.
+   - La tarea `campo.tasks.leer_ocupacion_de_ip` corre cada hora en el minuto 20. Pregunta al motor y, si toca, pide la **misma lectura del botón**.
+   - Tiene una holgura de 10 minutos, para que «cada 1 hora» no termine leyendo cada dos.
+   - Cada empresa va en su propio `try`: una que falla no deja sin lectura a las demás.
+   - Rapilink: cada 1 hora. Se pone después del despliegue, porque es un campo nuevo del esquema (DESPLIEGUE.md §2).
+3. **Horas y no minutos**, por la medición de arriba. La garantía contra IP repetidas no depende de la frecuencia: la da la regla de la base y la pregunta en vivo al confirmar.
+
+**VERIFICADO:**
+- backend:
+  - `test_contrato_de_servicio` sección L (6): la base rechaza el repetido y acepta anulado, sin IP u otra empresa; en la carrera, el segundo toma la siguiente y su PDF la dice; la IP de una app vieja se devuelve; tres choques no insisten; sin libres se firma sin IP; la migración copia las IP y un repetido viejo no la tumba. Quitar el reintento las pone en rojo.
+  - `test_ip_libres_se_leen_solas` (14): está en el calendario de Celery; cuándo toca, con la holgura (quitarla las pone en rojo); la lectura usa la ruta del botón con el token; una empresa al día no le pega al proveedor; una que falla no frena a las otras.
+  - Las 365 pruebas del contrato y la instalación siguen en verde.
+  - `test_ciclo_periodico` tiene 1 fallo de SQLite que es igual en el commit anterior.
+- motor: `test_rangos_de_ip` sección 8b (la frecuencia se lee y se guarda; el editor rechaza -1, 169, sí/no, texto y decimales sin escribir; el esquema la tiene en 0 de fábrica y con tope), `test_editor_config` y la guarda de arquitectura en verde.
+- web: Programación y rangos (58) en verde y `svelte-check` sin errores en esos archivos.
+- **Cadena real en local:** la frecuencia se guardó por la ruta del motor sin tocar los rangos. La tarea, en el backend, la leyó con el token y dijo «al día» sin llamar al proveedor. Después se dejó en 0.
+- Migración 0067 aplicada en local: 13 contratos, 13 IP copiadas, ninguna repetida.
+
+**NO VERIFICADO:**
+- La migración sobre los contratos de producción. Es defensiva ante repetidos, pero no se corrió sobre esa copia.
+- Una lectura disparada por la tarea contra el proveedor real. Usa la misma ruta del botón, que ya está probada.

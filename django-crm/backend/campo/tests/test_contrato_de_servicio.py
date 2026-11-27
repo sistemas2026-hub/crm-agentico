@@ -1167,3 +1167,152 @@ def test_k14_SIN_SOLICITUD_tambien_se_puede_y_las_autorizaciones_quedan_por_fin_
     assert r.status_code == 201, r.content
     aut = ContratoDeServicio.objects.get(orden=orden).datos["autorizaciones"]
     assert aut["habeas_data"] is True and aut["donde"] == "al_firmar"
+
+
+# =========================================================================== #
+#  L. UNA IP, UN CONTRATO VIGENTE  --  27/11/2026
+#
+#  Dos tecnicos que confirman en los MISMOS SEGUNDOS leen los dos «libre»
+#  antes de que cualquiera guarde. La comprobacion previa no puede verlo: lo
+#  frena la base (`una_ip_por_contrato_vigente`) y `firmar` toma la siguiente.
+# =========================================================================== #
+def _otro_contrato(org, version, profile, ip, numero_orden, estado="firmado"):
+    from django.utils import timezone as tz
+
+    otra = OrdenTrabajo.objects.create(
+        org=org, numero=numero_orden, tipo_trabajo_version=version,
+        cliente_nombre="OTRO", estado_operativo=OrdenTrabajo.ASIGNADA, revision=1)
+    return ContratoDeServicio.objects.create(
+        org=org, orden=otra, numero=f"C-OTRA-{numero_orden}", huella="h" * 64,
+        estado=estado, firmado_por=profile, firmado_en=tz.now(),
+        datos={"ip_elegida": ip}, ip=ip)
+
+
+def test_l1_LA_BASE_no_acepta_dos_contratos_vigentes_con_la_misma_ip(
+        org_a, org_b, user_profile, version_instalacion):
+    from django.db import IntegrityError, transaction
+
+    _otro_contrato(org_a, version_instalacion, user_profile, "172.16.30.20", 501)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        _otro_contrato(org_a, version_instalacion, user_profile, "172.16.30.20", 502)
+    #  Lo que SI se acepta: uno anulado, uno sin IP, y la misma IP en otra empresa.
+    _otro_contrato(org_a, version_instalacion, user_profile, "172.16.30.20", 503, estado="anulado")
+    _otro_contrato(org_a, version_instalacion, user_profile, "", 504)
+    _otro_contrato(org_a, version_instalacion, user_profile, "", 505)
+    wt_b = WorkType.objects.create(org=org_b, codigo="inst_b", nombre="Inst B", labor="instalacion")
+    v_b = WorkTypeVersion.objects.create(work_type=wt_b, version=1, schema_version=1,
+                                         estado=WorkTypeVersion.PUBLICADA,
+                                         esquema={"campos": [], "evidencias": []})
+    _otro_contrato(org_b, v_b, user_profile, "172.16.30.20", 506)
+
+
+def test_l2_LA_CARRERA_el_segundo_toma_la_SIGUIENTE_libre_y_su_PDF_la_dice(
+        user_client, orden, config_rapida, org_a, user_profile, monkeypatch):
+    from campo import contrato as C
+
+    pedidas, sueltos = [], []
+
+    def ip_de_la_foto(org, id_zona, ademas=()):
+        pedidas.append(list(ademas))
+        if not ademas:
+            #  El otro tecnico guarda la .20 en ESTOS segundos: despues de que
+            #  esta firma la eligio y antes de que la guarde.
+            _otro_contrato(org, orden.tipo_trabajo_version, user_profile, "172.16.30.20", 601)
+            return "172.16.30.20"
+        return "172.16.30.21"
+
+    monkeypatch.setattr(C, "_ip_automatica", ip_de_la_foto)
+    real = C._sin_pdf
+    monkeypatch.setattr(C, "_sin_pdf", lambda c: (sueltos.append(c.datos["ip_elegida"]), real(c)))
+    _solicitud_del_formulario(org_a)
+    r = user_client.post(_url(orden), _cuerpo(plan="PLAN FAMILIA", id_zona=20053), format="json")
+    assert r.status_code == 201, r.content
+    c = ContratoDeServicio.objects.get(orden=orden)
+    assert (c.ip, c.datos["ip_elegida"], c.datos["ip_origen"]) == ("172.16.30.21", "172.16.30.21", "sistema")
+    assert pedidas == [[], ["172.16.30.20"]], "la que choco no se vuelve a ofrecer"
+    assert sueltos == ["172.16.30.20"], "el PDF con la IP ajena no queda guardado"
+    assert c.pdf and c.huella != "h" * 64
+    assert ContratoDeServicio.objects.filter(org=org_a, ip="172.16.30.20").count() == 1
+
+
+def test_l3_la_IP_QUE_MANDA_UNA_APP_VIEJA_y_choca_se_le_devuelve(
+        user_client, orden, config_rapida, org_a, user_profile, monkeypatch):
+    from campo import contrato as C
+
+    real = C.armar_pdf
+    hecho = []
+
+    def pdf_y_carrera(contrato, firma, config):
+        if not hecho:
+            hecho.append(1)
+            _otro_contrato(org_a, orden.tipo_trabajo_version, user_profile, "172.16.30.40", 701)
+        return real(contrato, firma, config)
+
+    monkeypatch.setattr(C, "armar_pdf", pdf_y_carrera)
+    _solicitud_del_formulario(org_a)
+    r = user_client.post(_url(orden), _cuerpo(plan="PLAN FAMILIA", id_zona=20053, ip="172.16.30.40"),
+                         format="json")
+    assert r.status_code == 400 and "ya la eligió otro contrato" in r.json()["detail"]
+    assert not ContratoDeServicio.objects.filter(orden=orden).exists()
+
+
+def test_l4_TRES_CHOQUES_seguidos_no_insiste_y_lo_dice(
+        user_client, orden, config_rapida, org_a, user_profile, monkeypatch):
+    from campo import contrato as C
+
+    n = [800]
+
+    def siempre_la_toma_otro(org, id_zona, ademas=()):
+        n[0] += 1
+        ip = f"172.16.30.{n[0] - 750}"
+        _otro_contrato(org, orden.tipo_trabajo_version, user_profile, ip, n[0])
+        return ip
+
+    monkeypatch.setattr(C, "_ip_automatica", siempre_la_toma_otro)
+    _solicitud_del_formulario(org_a)
+    r = user_client.post(_url(orden), _cuerpo(plan="PLAN FAMILIA", id_zona=20053), format="json")
+    assert r.status_code == 400 and "Confirmar contrato" in r.json()["detail"]
+    assert n[0] - 800 == C.INTENTOS_DE_IP + 1, "uno y tres reintentos, no mas"
+    assert not ContratoDeServicio.objects.filter(orden=orden).exists()
+
+
+def test_l5_si_DESPUES_DEL_CHOQUE_no_queda_ninguna_libre_se_firma_sin_ip(
+        user_client, orden, config_rapida, org_a, user_profile, monkeypatch):
+    from campo import contrato as C
+
+    def una_y_ninguna(org, id_zona, ademas=()):
+        if ademas:
+            return ""
+        _otro_contrato(org, orden.tipo_trabajo_version, user_profile, "172.16.30.20", 901)
+        return "172.16.30.20"
+
+    monkeypatch.setattr(C, "_ip_automatica", una_y_ninguna)
+    _solicitud_del_formulario(org_a)
+    r = user_client.post(_url(orden), _cuerpo(plan="PLAN FAMILIA", id_zona=20053), format="json")
+    assert r.status_code == 201, r.content
+    c = ContratoDeServicio.objects.get(orden=orden)
+    assert (c.ip, c.datos["ip_elegida"], c.datos["ip_origen"]) == ("", "", "")
+
+
+def test_l6_LA_MIGRACION_copia_las_ip_y_un_repetido_viejo_no_la_tumba(
+        org_a, user_profile, version_instalacion, capsys):
+    import importlib
+
+    from django.apps import apps as registro
+
+    mig = importlib.import_module("campo.migrations.0067_una_ip_por_contrato_vigente")
+    viejo = _otro_contrato(org_a, version_instalacion, user_profile, "", 1001)
+    repetido = _otro_contrato(org_a, version_instalacion, user_profile, "", 1002)
+    anulado = _otro_contrato(org_a, version_instalacion, user_profile, "", 1003, estado="anulado")
+    sin_ip = _otro_contrato(org_a, version_instalacion, user_profile, "", 1004)
+    for c, ip in ((viejo, "172.16.30.50"), (repetido, "172.16.30.50"), (anulado, "172.16.30.50")):
+        ContratoDeServicio.objects.filter(pk=c.pk).update(datos={"ip_elegida": ip})
+    sin_ip.datos = {}
+    sin_ip.save(update_fields=["datos"])
+    mig.copiar_las_ip(registro, None)
+    ips = {c.pk: c.ip for c in ContratoDeServicio.objects.filter(pk__in=[viejo.pk, repetido.pk,
+                                                                          anulado.pk, sin_ip.pk])}
+    assert ips == {viejo.pk: "172.16.30.50", repetido.pk: "", anulado.pk: "172.16.30.50",
+                   sin_ip.pk: ""}
+    salida = capsys.readouterr().out
+    assert "1 contrato(s)" in salida and "172.16" not in salida, "avisa cuantos, sin nombrar IP"

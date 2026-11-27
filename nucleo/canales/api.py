@@ -7652,6 +7652,9 @@ def configuracion_rangos_de_ip_leer():
             "leida": bool(ocupacion),
             "se_puede_leer": any(getattr(h, "sincroniza_ocupacion_ip", False)
                                  for h in config.herramientas),
+            #  Cada cuantas horas se lee sola (0 = solo con el boton). La
+            #  tarea de la plataforma lo pregunta aca (27/11/2026).
+            "cada_horas": int(getattr(config, "ocupacion_ip_cada_horas", 0) or 0),
         },
     })
 
@@ -7671,14 +7674,16 @@ def configuracion_rangos_de_ip_guardar():
     if prudente is not None and not isinstance(prudente, bool):
         return jsonify({"error": "'contar_ip_mal_escritas' es si o no."}), 400
     try:
-        config = editor.guardar_rangos_de_ip(tenant, cuerpo.get("pools"), prudente)
+        config = editor.guardar_rangos_de_ip(tenant, cuerpo.get("pools"), prudente,
+                                             cuerpo.get("ocupacion_cada_horas"))
     except editor.ErrorEdicion as e:
         return jsonify({"error": mensaje_publico(e, "No se pudo completar la operacion.")}), 400
     except Exception as e:
         return _error_al_guardar(e)
     olvidar_config(tenant)
     return jsonify({"pools": [p.model_dump(mode="json") for p in config.pools_de_ip],
-                    "contar_ip_mal_escritas": bool(config.contar_ip_mal_escritas)})
+                    "contar_ip_mal_escritas": bool(config.contar_ip_mal_escritas),
+                    "ocupacion_cada_horas": int(config.ocupacion_ip_cada_horas or 0)})
 
 
 @app.post("/configuracion/precios/sincronizar")

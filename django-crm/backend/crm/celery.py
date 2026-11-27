@@ -126,6 +126,15 @@ app.conf.beat_schedule = {
         "task": "campo.tasks.ciclo_de_la_madrugada",
         "schedule": crontab(minute=5),
     },
+    # LAS IP LIBRES SE LEEN SOLAS (27/11/2026). Cada hora, en el minuto 20 --
+    # lejos del 5 y el 7, que ya son ciclos largos--, y cada empresa decide en
+    # Programacion cada cuantas horas le toca (`ocupacion_ip_cada_horas` en su
+    # config; 0 = solo con el boton). La tarea solo pregunta y, si toca, pide
+    # la lectura al motor: la misma del boton «Leer ocupacion».
+    "leer-ocupacion-de-ip": {
+        "task": "campo.tasks.leer_ocupacion_de_ip",
+        "schedule": crontab(minute=20),
+    },
     # El Supervisor le recuerda al tecnico la orden que paso la ventana sin
     # reporte (campo/recordatorio_de_reporte.py). Mirar cada 5 minutos no manda
     # un aviso cada 5 minutos: el aviso que toca lo decide

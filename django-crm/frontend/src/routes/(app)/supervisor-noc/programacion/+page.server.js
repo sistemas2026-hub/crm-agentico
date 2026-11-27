@@ -164,11 +164,27 @@ export const actions = {
           error: 'No se guardó nada: el formulario llegó sin ningún rango y había rangos cargados (así se habrían borrado). Recarga la página e intenta de nuevo.'
         });
       }
+      //  CADA CUÁNTAS HORAS SE LEEN SOLAS LAS IP TOMADAS (27/11/2026). Solo si
+      //  el campo vino (la pantalla lo muestra cuando la empresa puede leer):
+      //  si no, no se toca. Un número entero de 0 a 168; otra cosa no se manda.
+      const crudo = f.get('ocupacion_cada_horas');
+      /** @type {number | undefined} */
+      let cadaHoras;
+      if (crudo != null) {
+        const texto = String(crudo).trim();
+        if (!/^\d{1,3}$/.test(texto) || Number(texto) > 168) {
+          return fail(400, {
+            de: 'rangos',
+            error: 'Cada cuántas horas se leen solas las IP es un número de 0 a 168 (0 = solo con el botón).'
+          });
+        }
+        cadaHoras = Number(texto);
+      }
       //  La casilla de las IP mal escritas viaja SIEMPRE como sí o no: una
       //  casilla sin marcar no llega en el formulario, y sin esto no se podría
       //  apagar.
       const r = await guardarRangos(locals, fetch, cuerpoDeRangos(f, actuales.pools ?? []),
-        f.get('contar_ip_mal_escritas') != null);
+        f.get('contar_ip_mal_escritas') != null, cadaHoras);
       const conRango = (r?.pools ?? []).filter((/** @type {any} */ p) => (p.prefijos ?? []).length).length;
       const hecho = conRango
         ? `Guardado. ${conRango} servidor${conRango === 1 ? '' : 'es'} con rangos.`

@@ -202,6 +202,33 @@ describe('Programación: los rangos de IP de cada servidor (25/11/2026)', () => 
     expect(pedidos.find((p) => p.metodo === 'PUT')?.cuerpo?.contar_ip_mal_escritas).toBe(true);
   });
 
+  it('CADA CUÁNTAS HORAS se leen solas las IP: viaja como número, el 0 también, y sin el campo no se toca (27/11/2026)', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    for (const [escrito, viaja] of [['1', 1], [' 6 ', 6], ['0', 0]]) {
+      const { pedidos, fetchFalso } = motor([]);
+      await actions.rangos(pedido('ADMIN', {
+        rango_zona_0: '20049', rango_prefijos_0: '172.16.9.', ocupacion_cada_horas: String(escrito)
+      }, fetchFalso));
+      expect(pedidos.find((p) => p.metodo === 'PUT')?.cuerpo?.ocupacion_cada_horas).toBe(viaja);
+    }
+    const { pedidos, fetchFalso } = motor([]);
+    await actions.rangos(pedido('ADMIN', { rango_zona_0: '20049', rango_prefijos_0: '172.16.9.' }, fetchFalso));
+    expect(pedidos.find((p) => p.metodo === 'PUT')?.cuerpo).not.toHaveProperty('ocupacion_cada_horas');
+  });
+
+  it('un número de horas que NO es de 0 a 168 no se manda, y lo dice', async () => {
+    tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
+    for (const malo of ['una', '-1', '169', '1.5', '']) {
+      const { pedidos, fetchFalso } = motor([]);
+      const r = /** @type {any} */ (await actions.rangos(pedido('ADMIN', {
+        rango_zona_0: '20049', rango_prefijos_0: '172.16.9.', ocupacion_cada_horas: malo
+      }, fetchFalso)));
+      expect(r.status).toBe(400);
+      expect(r.data.error).toContain('0 = solo con el botón');
+      expect(pedidos.some((p) => p.metodo === 'PUT')).toBe(false);
+    }
+  });
+
   it('si el motor no contesta al leer, NO se guarda nada (se podrían borrar rangos)', async () => {
     tenant.destinoDelAsistente.mockResolvedValue({ baseUrl: 'http://motor', tenant: 'empresa-uno' });
     const fetchFalso = vi.fn(async () => ({ ok: false, json: async () => ({}) }));

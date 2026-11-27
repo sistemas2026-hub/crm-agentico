@@ -227,7 +227,8 @@ afirmar(d.get("uso") == {"172.16.9.": {"tomadas": 241, "libres": 12},
 afirmar("10.9.9." not in (d.get("uso") or {}),
         "un prefijo que no esta guardado ni sugerido no se muestra")
 afirmar(d.get("ocupacion") == {"actualizado_en": "2026-11-25T12:00:00+00:00",
-                               "completa": True, "leida": True, "se_puede_leer": True},
+                               "completa": True, "leida": True, "se_puede_leer": True,
+                               "cada_horas": 0},
         f"y de cuando es la lectura: {d.get('ocupacion')}")
 afirmar("172.16.9.5" not in repr(d) and "[2, 3" not in repr(d),
         "ninguna direccion suelta ni lista de octetos sale hacia la pantalla")
@@ -237,10 +238,11 @@ seccion("7. PUT: guarda limpio, y rechaza sin guardar")
 guardados = []
 
 
-def _guardar_rangos(tenant, pools, prudente=None):
+def _guardar_rangos(tenant, pools, prudente=None, cada_horas=None):
     guardados.append(editor.rangos_validos(pools))
     return types.SimpleNamespace(pools_de_ip=[PoolDeIp(**p) for p in guardados[-1]],
-                                 contar_ip_mal_escritas=bool(prudente))
+                                 contar_ip_mal_escritas=bool(prudente),
+                                 ocupacion_ip_cada_horas=cada_horas or 0)
 
 
 viejos3 = (editor.guardar_rangos_de_ip, api.olvidar_config)
@@ -307,9 +309,10 @@ afirmar((g_on.get_json() or {})["uso"]["172.16.4."]["libres"] == 248
         "y el conteo de libres de la pantalla dice lo mismo que la app")
 
 guardados.clear()
-editor.guardar_rangos_de_ip = lambda t, pools, prudente=None: (
+editor.guardar_rangos_de_ip = lambda t, pools, prudente=None, cada_horas=None: (
     guardados.append(prudente) or types.SimpleNamespace(pools_de_ip=[],
-                                                        contar_ip_mal_escritas=bool(prudente)))
+                                                        contar_ip_mal_escritas=bool(prudente),
+                                                        ocupacion_ip_cada_horas=0))
 api.olvidar_config = lambda t: None
 try:
     with silencio():
@@ -321,6 +324,70 @@ finally:
     editor.guardar_rangos_de_ip, api.olvidar_config = viejos3
 afirmar(si.status_code == 200 and guardados == [True], f"se guarda el si: {guardados}")
 afirmar(raro.status_code == 400, f"un si que no es un si se rechaza: {raro.status_code}")
+
+# ---------------------------------------------------------------------------
+seccion("8b. la ocupacion se lee SOLA cada N horas: lo decide la empresa (27/11/2026)")
+#  GET: la tarea de la plataforma pregunta aca cada cuanto.
+cfg.ocupacion_ip_cada_horas = 1
+api._config_de = lambda t: cfg
+try:
+    with silencio():
+        g1 = cliente.get(f"/configuracion/rangos-de-ip?tenant={TENANT}")
+finally:
+    api._config_de = viejos2[0]
+afirmar((g1.get_json() or {}).get("ocupacion", {}).get("cada_horas") == 1,
+        f"el GET dice cada cuantas horas: {(g1.get_json() or {}).get('ocupacion')}")
+#  PUT: viaja tal cual hasta el editor, y vuelve en la respuesta.
+llegadas = []
+editor.guardar_rangos_de_ip = lambda t, pools, prudente=None, cada_horas=None: (
+    llegadas.append(cada_horas) or types.SimpleNamespace(pools_de_ip=[], contar_ip_mal_escritas=False,
+                                                         ocupacion_ip_cada_horas=cada_horas or 0))
+api.olvidar_config = lambda t: None
+try:
+    with silencio():
+        con = cliente.put("/configuracion/rangos-de-ip",
+                          json={"tenant": TENANT, "pools": [], "ocupacion_cada_horas": 1})
+        sin = cliente.put("/configuracion/rangos-de-ip", json={"tenant": TENANT, "pools": []})
+finally:
+    editor.guardar_rangos_de_ip, api.olvidar_config = viejos3
+afirmar(con.status_code == 200 and (con.get_json() or {}).get("ocupacion_cada_horas") == 1,
+        f"se guarda y vuelve: {con.status_code} {con.get_json()}")
+afirmar(llegadas == [1, None], f"sin el campo no se toca (None): {llegadas}")
+#  El EDITOR rechaza lo que no es un numero de horas, SIN escribir.
+escrituras = []
+viejo_editar = editor._editar
+editor._editar = lambda t, mutar: escrituras.append(t)
+try:
+    for malo in (-1, 169, True, "1", 1.5):
+        try:
+            editor.guardar_rangos_de_ip(TENANT, [], None, malo)
+            afirmar(False, f"{malo!r} se rechaza")
+        except editor.ErrorEdicion as e:
+            afirmar("0 = solo con el botón" in str(e), f"{malo!r}: se rechaza con el porque")
+    editor.guardar_rangos_de_ip(TENANT, [], None, 168)
+    editor.guardar_rangos_de_ip(TENANT, [], None, 0)
+finally:
+    editor._editar = viejo_editar
+afirmar(escrituras == [TENANT, TENANT], f"solo 0..168 llega a escribirse: {escrituras}")
+doc = {"pools_de_ip": [], "ocupacion_ip_cada_horas": 6}
+editor._mutar_rangos_de_ip(doc, [], None, None)
+afirmar(doc["ocupacion_ip_cada_horas"] == 6, "guardar rangos sin el campo NO cambia la frecuencia")
+editor._mutar_rangos_de_ip(doc, [], None, 1)
+afirmar(doc["ocupacion_ip_cada_horas"] == 1, "con el campo, si")
+#  El ESQUEMA: 0 de fabrica (nadie le pega al proveedor sin decidirlo) y con tope.
+from nucleo.config import cargar_config  # noqa: E402
+from nucleo.config.schema import TenantConfig  # noqa: E402
+
+campo = TenantConfig.model_fields["ocupacion_ip_cada_horas"]
+afirmar(campo.default == 0, f"de fabrica, solo con el boton: {campo.default}")
+base_cfg = cargar_config(RAIZ / "tenants" / "rapilink.config.yaml").model_dump(mode="json")
+for valor, debe in ((1, True), (168, True), (169, False), (-1, False)):
+    try:
+        TenantConfig.model_validate({**base_cfg, "ocupacion_ip_cada_horas": valor})
+        paso = True
+    except Exception:                                            # noqa: BLE001
+        paso = False
+    afirmar(paso is debe, f"el esquema {'acepta' if debe else 'rechaza'} {valor}")
 
 seccion("9. la IP se pregunta EN VIVO antes de ponerla en un contrato (26/11/2026)")
 from nucleo.seguimiento import alta_de_cliente as alta              # noqa: E402

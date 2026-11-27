@@ -9,7 +9,7 @@ def sin_ip_automatica(monkeypatch):
     asignacion ponen la suya."""
     from campo import contrato
 
-    monkeypatch.setattr(contrato, "_ip_automatica", lambda org, id_zona: "")
+    monkeypatch.setattr(contrato, "_ip_automatica", lambda org, id_zona, ademas=(): "")
 
 
 @pytest.fixture(autouse=True)

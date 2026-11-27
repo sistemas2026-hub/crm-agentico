@@ -610,9 +610,11 @@ Costó 14 minutos el 02/09/2026, vigilando un número que no podía moverse. Y e
 **Desde el 12/11/2026 hay una forma directa: `/salud` dice qué código está corriendo.**
 
 ```
-curl -s localhost:5000/salud
+python -c "import urllib.request as u; print(u.urlopen('http://localhost:5000/salud').read().decode())"
 {"estado":"ok","codigo":"4d0f02cbb59e"}
 ```
+
+La imagen del motor **no trae `curl`** (medido el 27/11/2026: `bash: curl: command not found`); Python sí.
 
 Y en el árbol que creés desplegado:
 
@@ -625,7 +627,7 @@ Iguales: ese código es el que corre. Distintas: no lo es. No hay tercer resulta
 
 `codigo` es una huella del contenido de `nucleo/`, no el hash del commit — `.dockerignore` excluye `.git`, así que dentro del build no hay repositorio al que preguntarle, y además CLAUDE.md §11 ya decidió para la pregunta gemela que **se compara el contenido, no el hash**: un commit rebaseado o un cherry-pick dan la misma huella si el código es el mismo, que es lo que de verdad se quiere saber. Detalle en `nucleo/observabilidad/version.py`.
 
-⚠️ **`curl` va DESDE ADENTRO**, en Dokploy → servicio `motor` → Docker Terminal. El motor **no está publicado**: se alcanza como `http://motor:5000` dentro de la red del compose. Medido el 12/11/2026 — `motor.rapilinksas.co` devuelve el 404 de Traefik (no hay ruta) y `agent-api.rapilinksas.co` es el **CRM de Django**, no el motor: su 404 dice *"The requested resource"*, que es el de Django; el de Flask dice *"The requested URL"*. Se perdieron varios minutos confundiéndolos.
+⚠️ **La consulta va DESDE ADENTRO**, en Dokploy → servicio `motor` → Docker Terminal. El motor **no está publicado**: se alcanza como `http://motor:5000` dentro de la red del compose. Medido el 12/11/2026 — `motor.rapilinksas.co` devuelve el 404 de Traefik (no hay ruta) y `agent-api.rapilinksas.co` es el **CRM de Django**, no el motor: su 404 dice *"The requested resource"*, que es el de Django; el de Flask dice *"The requested URL"*. Se perdieron varios minutos confundiéndolos.
 
 ---
 
