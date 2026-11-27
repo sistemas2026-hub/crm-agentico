@@ -1912,6 +1912,6 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - web Instalaciones 16; app 25 de la pantalla del contrato.
 - Migraciones 0063–0065 aplicadas en local; base de configuración v21.
 
-**NO VERIFICADO:** el costo viajando en el alta al confirmar con la plantilla nueva (la OT-21 probó que el alta lo toma; falta la corrida con la confirmación nueva).
+**VERIFICADO también el costo** (OT-23, con permiso, la misma noche): el técnico anotó el valor en el paso del contrato, confirmó, y la instalación nueva quedó en WispHub con `costo_instalacion: 50000` (leído en la lista de instalaciones).
 
 **En producción:** migraciones 0062–0065, las herramientas nuevas en la configuración (sin pisar lo que solo tiene la base), mover «Valor de la instalación» al paso del contrato en la plantilla y encender los interruptores.
