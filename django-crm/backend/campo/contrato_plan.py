@@ -211,6 +211,103 @@ def dato_del_ticket(orden, etiqueta: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+#: El comienzo de la linea con los datos de una instalacion nueva, como la
+#: escriben las personas en el ISP y la plataforma (`solicitudes/entrega.py`).
+_INSTALACION_NUEVA = re.compile(r"instalaci[oó]n\s+nueva\s*[-–—:]\s*", re.I)
+_ETIQUETADO = re.compile(r"^([^\W\d_][^:]{0,24}?)\s*:\s*(.*)$")
+
+
+def _sin_tildes(texto: str) -> str:
+    t = unicodedata.normalize("NFKD", str(texto or ""))
+    return "".join(ch for ch in t if not unicodedata.combining(ch)).strip().lower()
+
+
+def _gps_escrito(valor: str) -> dict | None:
+    """«10.8820333, -74.7947109» -> {"lat", "lng"}, o None si no es un punto
+    creible (fuera de rango, 0,0)."""
+    numeros = re.findall(r"-?\d+(?:\.\d+)?", valor or "")
+    if len(numeros) != 2:
+        return None
+    lat, lng = float(numeros[0]), float(numeros[1])
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180) or (lat == 0 and lng == 0):
+        return None
+    return {"lat": lat, "lng": lng}
+
+
+def _nombre_y_apellido(completo: str) -> tuple[str, str]:
+    """Nombres y apellidos de un nombre escrito de corrido. En Colombia los dos
+    ULTIMOS son los apellidos cuando hay cuatro o mas palabras; con tres, la
+    primera es el nombre. El tecnico lo confirma contra la cedula."""
+    palabras = str(completo or "").split()
+    if len(palabras) >= 4:
+        return " ".join(palabras[:-2]), " ".join(palabras[-2:])
+    if len(palabras) == 3:
+        return palabras[0], " ".join(palabras[1:])
+    if len(palabras) == 2:
+        return palabras[0], palabras[1]
+    return " ".join(palabras), ""
+
+
+def cliente_del_ticket(orden) -> dict | None:
+    """Los datos del cliente NUEVO escritos en el ticket, o None si no estan.
+
+    POR QUE EXISTE (el usuario, 27/11/2026, primera instalacion vigilada en
+    produccion): en el ISP una instalacion nueva NO tiene todavia su cliente.
+    El ticket se abre sobre un cliente DE PASO y los datos del cliente de
+    verdad van escritos en la descripcion, en una linea con barras:
+
+        Instalacion Nueva - Nombre Apellidos | Tel: ... | correo | direccion,
+        barrio | GPS: lat, lng | Doc: CC numero | Plan: ... | Corte: ...
+
+    Sin solicitud ligada, el contrato salia con el nombre, el telefono, la
+    direccion y las coordenadas del cliente de paso. Ahora sale con estos.
+
+    Lo que viene con etiqueta se lee por su etiqueta; el correo, por la «@»; el
+    primer texto sin etiqueta es la direccion, con el barrio despues de la
+    ultima coma. Lo que no se pudo leer queda vacio: el tecnico lo escribe con
+    la cedula a la vista. Sin la linea «Instalacion Nueva», None: no se adivina.
+    """
+    caso = getattr(orden, "caso", None)
+    texto = str(getattr(caso, "description", "") or "")
+    m = _INSTALACION_NUEVA.search(texto)
+    if not m:
+        return None
+    resto = texto[m.end():].splitlines()
+    partes = [p.strip() for p in (resto[0] if resto else "").split("|")]
+    nombre, apellido = _nombre_y_apellido(partes[0] if partes else "")
+    datos = {"nombre": nombre, "apellido": apellido, "tipo_documento": "CC",
+             "numero_documento": "", "telefono": "", "correo": "",
+             "direccion": "", "barrio": "", "gps": None}
+    for parte in partes[1:]:
+        if not parte:
+            continue
+        e = _ETIQUETADO.match(parte)
+        if e:
+            etiqueta, valor = _sin_tildes(e.group(1)), e.group(2).strip()
+            if etiqueta in ("tel", "telefono", "cel", "celular", "movil"):
+                datos["telefono"] = re.sub(r"\D", "", valor)
+            elif etiqueta == "gps":
+                datos["gps"] = _gps_escrito(valor)
+            elif etiqueta in ("doc", "documento", "cedula"):
+                d = re.match(r"^([A-Za-z]{1,4})\.?\s*(.+)$", valor)
+                if d and re.search(r"\d", d.group(2)):
+                    datos["tipo_documento"] = d.group(1).upper()
+                    datos["numero_documento"] = d.group(2).strip()
+                else:
+                    datos["numero_documento"] = valor
+            #  Plan, corte y los demas los lee `dato_del_ticket` o no son del cliente.
+            continue
+        if "@" in parte and " " not in parte and not datos["correo"]:
+            datos["correo"] = parte
+        elif re.match(r"^(sin\s+gps|solicitud\b)", _sin_tildes(parte)):
+            continue
+        elif not datos["direccion"]:
+            direccion, coma, barrio = parte.rpartition(",")
+            datos["direccion"], datos["barrio"] = ((direccion.strip(), barrio.strip())
+                                                   if coma else (parte, ""))
+    return datos
+
+
 # =============================================================================
 #  LOS SERVIDORES
 # =============================================================================

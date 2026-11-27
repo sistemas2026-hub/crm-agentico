@@ -558,6 +558,19 @@ def borrador(orden, config: dict | None = None, catalogo=...) -> dict:
             "aceptadas_en": s.enviada_en.isoformat() if s.enviada_en else None,
         }
         plan_del_ticket, corte = s.plan_interesado, s.fecha_corte
+    elif (del_ticket := contrato_plan.cliente_del_ticket(orden)) is not None:
+        #  EL CLIENTE NUEVO ESCRITO EN EL TICKET (27/11/2026). En el ISP la
+        #  instalacion se abre sobre un cliente DE PASO y los datos del cliente
+        #  de verdad van en la descripcion (`contrato_plan.cliente_del_ticket`).
+        #  Ni el nombre, ni el telefono, ni la direccion, ni las coordenadas de
+        #  la orden sirven: son las del cliente de paso. Sin autorizaciones,
+        #  como sin solicitud.
+        origen, solicitud_id = "ticket", None
+        cliente = {c: del_ticket.get(c, "") for c in CAMPOS_DEL_CLIENTE}
+        gps = del_ticket.get("gps")
+        autorizaciones = None
+        plan_del_ticket = contrato_plan.dato_del_ticket(orden, "Plan")
+        corte = contrato_plan.dato_del_ticket(orden, "Corte")
     else:
         #  SIN SOLICITUD: lo que la orden ya sabe. El nombre viene entero en
         #  un solo campo; el tecnico lo separa si hace falta. Sin

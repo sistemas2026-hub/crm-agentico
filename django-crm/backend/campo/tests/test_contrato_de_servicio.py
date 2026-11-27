@@ -606,7 +606,9 @@ def test_g8_SIN_SOLICITUD_el_plan_y_el_corte_salen_de_lo_que_dice_el_ticket(
                     " | Plan: HOGAR 100MB - $59.900 | Corte: CORTE 15 | Medio: VECINO")
     orden.save(update_fields=["caso"])
     d = user_client.get(_url(orden)).json()
-    assert d["borrador"]["origen"] == "orden"
+    #  Desde el 27/11/2026 la linea «Instalacion Nueva» del ticket es el
+    #  cliente del contrato (seccion M): ya no sale «de la orden».
+    assert d["borrador"]["origen"] == "ticket"
     assert d["borrador"]["plan"] == "PLAN HOGAR"
     assert d["borrador"]["servidor_sugerido"] == 20053
     assert [s["id_zona"] for s in d["servidores"]] == [20053, 20049]
@@ -1316,3 +1318,121 @@ def test_l6_LA_MIGRACION_copia_las_ip_y_un_repetido_viejo_no_la_tumba(
                    sin_ip.pk: ""}
     salida = capsys.readouterr().out
     assert "1 contrato(s)" in salida and "172.16" not in salida, "avisa cuantos, sin nombrar IP"
+
+
+# =========================================================================== #
+#  M. EL CLIENTE NUEVO ESCRITO EN EL TICKET  --  27/11/2026
+#
+#  En el ISP la instalacion se abre sobre un cliente DE PASO y los datos del
+#  cliente de verdad van en la descripcion del ticket. Sin solicitud ligada,
+#  el contrato salia con el nombre, la direccion y las coordenadas del de paso
+#  (primera instalacion vigilada en produccion, OT #501).
+# =========================================================================== #
+TICKET_REAL = ("Instalacion Nueva - Deiver Andres Pacheco Lobo | Tel: 3005550110 | "
+               "deiver.pacheco@example.com | Cra 2 Este # 18-09, SANTA ROSA | "
+               "GPS: 10.8820333, -74.7947109 | Doc: CC 1234500010 | Plan: PLAN ULTRA | "
+               "Corte: CORTE 30 | Medio: VOLANTE | Solicitud N° 003660")
+
+
+def _orden_del_ticket(org, version, descripcion, numero=401):
+    """Una orden como las de produccion: el cliente de la orden es el DE PASO."""
+    from cases.models import Case
+
+    caso = Case.objects.create(org=org, name="Instalacion Nueva", status="New",
+                               priority="Normal", is_active=True, description=descripcion)
+    return OrdenTrabajo.objects.create(
+        org=org, numero=numero, tipo_trabajo_version=version, caso=caso,
+        cliente_nombre="MARIO SABANAGRANDE", cliente_direccion="CALLE 38 # 78-33",
+        cliente_telefono="3005380776", gps_lat=10.915066, gps_lng=-74.817648,
+        origen_sistema="wisphub", origen_tipo="ticket", origen_ref="#100591",
+        estado_operativo=OrdenTrabajo.ASIGNADA, revision=1)
+
+
+class _Orden:
+    def __init__(self, descripcion):
+        self.caso = type("C", (), {"description": descripcion})()
+
+
+def test_m1_la_linea_del_ticket_se_lee_campo_por_campo():
+    from campo.contrato_plan import cliente_del_ticket
+
+    d = cliente_del_ticket(_Orden("Atendido por ventas\n" + TICKET_REAL + "\nOtra linea"))
+    assert (d["nombre"], d["apellido"]) == ("Deiver Andres", "Pacheco Lobo")
+    assert (d["tipo_documento"], d["numero_documento"]) == ("CC", "1234500010")
+    assert d["telefono"] == "3005550110" and d["correo"] == "deiver.pacheco@example.com"
+    assert (d["direccion"], d["barrio"]) == ("Cra 2 Este # 18-09", "SANTA ROSA")
+    assert d["gps"] == {"lat": 10.8820333, "lng": -74.7947109}
+
+
+@pytest.mark.parametrize("descripcion,esperado", [
+    #  El de la plataforma (`solicitudes/entrega.py`), con tilde y otro telefono.
+    ("Instalación nueva - Andrea Leon | Tel: 311 613 8025 | correo@x.co | "
+     "Calle 37#9-11 apto 1, Manuela Beltran | GPS: 10.90, -74.77 | Doc: CC 32.691.1",
+     {"nombre": "Andrea", "apellido": "Leon", "telefono": "3116138025",
+      "direccion": "Calle 37#9-11 apto 1", "barrio": "Manuela Beltran",
+      "gps": {"lat": 10.90, "lng": -74.77}, "numero_documento": "32.691.1"}),
+    #  Sin GPS escrito, tres palabras de nombre, direccion sin barrio.
+    ("Instalacion Nueva - Laura Gomez Rios | Tel: 3000000000 | Cra 21 # 45-12 | "
+     "SIN GPS - verificar viabilidad en sitio | Doc: CE 998877",
+     {"nombre": "Laura", "apellido": "Gomez Rios", "direccion": "Cra 21 # 45-12",
+      "barrio": "", "gps": None, "tipo_documento": "CE"}),
+    #  Un punto 0,0 o fuera de rango no es una coordenada.
+    ("Instalacion Nueva - Ana Ruiz | GPS: 0, 0", {"gps": None}),
+    ("Instalacion Nueva - Ana Ruiz | GPS: 190.1, -74.7", {"gps": None}),
+])
+def test_m2_las_variantes_de_la_linea(descripcion, esperado):
+    from campo.contrato_plan import cliente_del_ticket
+
+    d = cliente_del_ticket(_Orden(descripcion))
+    assert {k: d[k] for k in esperado} == esperado
+
+
+def test_m3_SIN_la_linea_no_se_adivina_nada():
+    from campo.contrato_plan import cliente_del_ticket
+
+    assert cliente_del_ticket(_Orden("Cliente sin internet desde ayer")) is None
+    assert cliente_del_ticket(_Orden("")) is None
+
+
+def test_m4_EL_CONTRATO_sale_con_el_cliente_del_ticket_y_no_con_el_de_paso(
+        user_client, org_a, user_profile, version_instalacion, config):
+    orden = _orden_del_ticket(org_a, version_instalacion, TICKET_REAL)
+    AsignacionTrabajo.objects.create(orden=orden, profile=user_profile,
+                                     rol="tecnico_lider", es_principal=True)
+    r = user_client.get(_url(orden))
+    assert r.status_code == 200, r.content
+    b = r.json()["borrador"]
+    texto = str(b)
+    assert b["origen"] == "ticket"
+    assert "MARIO" not in texto.upper() and "3005380776" not in texto and "78-33" not in texto, \
+        "nada del cliente de paso"
+    assert b["cliente"]["numero_documento"].replace(".", "") == "1234500010"
+    assert b["gps"] == {"lat": 10.8820333, "lng": -74.7947109}
+    assert b["plan_del_ticket"] == "PLAN ULTRA" and b["corte"] == "CORTE 30"
+    #  Y al firmar con lo que manda la app (el borrador tal cual), queda ESE cliente.
+    cuerpo = {"plan": "Fibra 300 Mb", "id_zona": 20053, "firma_png_base64": _firma_png(),
+              "cliente": {**b["cliente"], "tipo_documento": b["tipo_documento"]}}
+    r = user_client.post(_url(orden), cuerpo, format="json")
+    assert r.status_code == 201, r.content
+    d = ContratoDeServicio.objects.get(orden=orden).datos
+    assert d["origen"] == "ticket" and d["gps_origen"] == "ticket"
+    assert d["gps"]["lat"] == 10.8820333 and "MARIO" not in str(d["cliente"]).upper()
+
+
+def test_m5_con_SOLICITUD_ligada_manda_la_solicitud(
+        user_client, org_a, user_profile, version_instalacion, config):
+    orden = _orden_del_ticket(org_a, version_instalacion, TICKET_REAL)
+    AsignacionTrabajo.objects.create(orden=orden, profile=user_profile,
+                                     rol="tecnico_lider", es_principal=True)
+    _solicitud(org_a, ticket="100591")
+    b = user_client.get(_url(orden)).json()["borrador"]
+    assert b["origen"] == "solicitud" and b["cliente"]["nombre"].upper().startswith("LAURA")
+
+
+def test_m6_un_ticket_SIN_la_linea_sigue_como_antes(
+        user_client, org_a, user_profile, version_instalacion, config):
+    orden = _orden_del_ticket(org_a, version_instalacion, "Revisar la conexion", numero=402)
+    AsignacionTrabajo.objects.create(orden=orden, profile=user_profile,
+                                     rol="tecnico_lider", es_principal=True)
+    b = user_client.get(_url(orden)).json()["borrador"]
+    assert b["origen"] == "orden" and "MARIO" in b["cliente"]["nombre"].upper()

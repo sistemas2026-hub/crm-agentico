@@ -2019,3 +2019,35 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 **NO VERIFICADO:**
 - La migración sobre los contratos de producción. Es defensiva ante repetidos, pero no se corrió sobre esa copia.
 - Una lectura disparada por la tarea contra el proveedor real. Usa la misma ruta del botón, que ya está probada.
+
+### 8.46 DECISIÓN — Sin solicitud, el contrato de una instalación sale con el cliente escrito en el ticket, no con el cliente de paso (27/11/2026)
+
+**El error que lo originó.** En la primera instalación vigilada en producción (OT #501), el contrato salió con los datos de «MARIO SABANAGRANDE»: el nombre, el teléfono, la dirección y las coordenadas. El usuario lo explicó: en WispHub una instalación nueva **todavía no tiene su cliente**. El ticket se abre sobre un **cliente de paso**, y los datos del cliente de verdad van escritos en la descripción, en la convención de la empresa:
+
+`Instalacion Nueva - Nombre Apellidos | Tel: … | correo | dirección, barrio | GPS: lat, lng | Doc: CC … | Plan: … | Corte: …`
+
+- Cuando la venta entra por el formulario de Dexter, la solicitud crea el ticket y guarda su número (`solicitudes/entrega.py`). La orden la encuentra y el contrato sale bien.
+- Cuando una persona abre el ticket a mano en WispHub, que es lo habitual, no había solicitud. El borrador tomaba los datos de la orden, que son los del cliente de paso. La descripción se guardaba en el caso (`Case.description`), pero nada la leía salvo el plan y el corte.
+
+**Qué se decidió.**
+1. **`contrato_plan.cliente_del_ticket(orden)`** lee esa línea.
+   - Lo que trae etiqueta, por su etiqueta: teléfono, GPS y documento con su tipo.
+   - El correo, por la «@».
+   - El primer texto sin etiqueta es la dirección, con el barrio después de la última coma.
+   - El nombre se parte en nombres y apellidos: con cuatro o más palabras, las dos últimas son apellidos; con tres, la primera es el nombre.
+   - Las coordenadas solo valen si son creíbles: dentro de rango y distintas de 0,0.
+   - **Sin la línea «Instalación Nueva», devuelve `None` y no adivina nada.**
+2. **El borrador** usa, en este orden: la solicitud ligada; si no hay, el cliente escrito en el ticket (`origen: "ticket"`, con las coordenadas del ticket); y si tampoco, la orden, como antes. **Nada del cliente de paso llega al contrato** cuando el ticket trae la línea. El técnico sigue revisando contra la cédula antes de confirmar.
+3. «Solicitud N° …» del ticket no se usa: Dexter no numera así sus solicitudes, y no hay con qué buscarla.
+
+**VERIFICADO:**
+- `test_contrato_de_servicio` sección M (9):
+  - la línea del ticket real se lee campo por campo;
+  - las variantes: la de la plataforma con tilde y teléfono con espacios, sin GPS, nombre de tres palabras, dirección sin barrio, GPS 0,0 y fuera de rango;
+  - sin la línea no se adivina;
+  - la pantalla y la firma por la API salen con el cliente del ticket y nada del de paso;
+  - con solicitud ligada manda la solicitud;
+  - un ticket sin la línea sigue como antes.
+- Desconectar la lectura pone en rojo la prueba de punta a punta.
+
+**NO VERIFICADO:** la app 1.0.33 sigue mostrando la etiqueta «Sin solicitud» para un contrato que sale del ticket, porque solo distingue «solicitud». Los datos llegan bien; la etiqueta se ajusta con la próxima APK.
