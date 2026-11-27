@@ -977,6 +977,10 @@ class ParametrosDeActivacion(Base):
 
     #: El campo del pedido que lleva la LISTA de numeros de servicio.
     campo_servicios: str
+    #: Donde trae la RESPUESTA el id de la tarea en segundo plano (27/11/2026).
+    #: Con el, mientras se espera, se lee la tarea: si el proveedor dice que
+    #: fallo, se sabe enseguida y no a los minutos. Vacio = no se lee.
+    campo_tarea: str = ""
 
     @model_validator(mode="after")
     def _con_nombre(self):
@@ -1294,6 +1298,11 @@ class ParametrosDeTarea(Base):
     estados_terminada: list[str] = Field(default_factory=list)
     #: Los estados que significan «fallo, y no va a cambiar».
     estados_fallida: list[str] = Field(default_factory=list)
+    #: Donde viene el MENSAJE de la tarea (27/11/2026), para decir por que
+    #: fallo. Vacio = no se lee. `campo_estado` y este aceptan UN nivel
+    #: ("Padre.Hijo"): medido ese dia, el primer proveedor anida todo en
+    #: `task` ({"task": {"status": ..., "result": ...}}).
+    campo_resultado: str = ""
 
     @model_validator(mode="after")
     def _con_nombre(self):

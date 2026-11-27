@@ -415,7 +415,7 @@ def completar(contrato) -> None:
                           completar_detalle="")
     elif estado == "nada_que_completar":
         _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_NADA,
-                          completar_detalle="El técnico no anotó el costo ni hay ONU activada.")
+                          completar_detalle="No había nada que escribir: la ONU no se activó desde la app.")
     else:
         _anotar_completar(contrato, completar_estado=ContratoDeServicio.COMPLETAR_FALLIDO,
                           completar_detalle=_POR_QUE_COMPLETAR.get(

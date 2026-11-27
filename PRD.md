@@ -1915,3 +1915,27 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 **VERIFICADO también el costo** (OT-23, con permiso, la misma noche): el técnico anotó el valor en el paso del contrato, confirmó, y la instalación nueva quedó en WispHub con `costo_instalacion: 50000` (leído en la lista de instalaciones).
 
 **En producción:** migraciones 0062–0065, las herramientas nuevas en la configuración (sin pisar lo que solo tiene la base), mover «Valor de la instalación» al paso del contrato en la plantilla y encender los interruptores.
+
+### 8.43 DECISIÓN — Dexter lee las tareas de WispHub donde vienen, y la activación lee la suya (27/11/2026)
+
+**El error que lo originó.** Terminando la OT-23, el primer «Aprobar y activar» no la pasó a cliente: WispHub aceptó el pedido, Dexter esperó 4 minutos sin verla en la lista de clientes y la dejó «por revisar». Un segundo pedido sí la activó. Al guardar esa vez la respuesta, se midió:
+- WispHub contesta `{"task_id": ..., "warnings": []}`.
+- Su tarea va de `PROGRESS` («Conectando al RouterBoard») a `SUCCESS` («Activación Masiva Exitosa en RBs: …»), y **anida el estado y el mensaje** en `{"task": {"status": ..., "result": ...}}`.
+- La configuración buscaba `status` arriba. **Dexter nunca había podido ver si una tarea de WispHub fallaba**; ni la del alta.
+
+**Qué se decidió.**
+1. `ParametrosDeTarea` lee el estado y, nuevo, el mensaje (`campo_resultado`) con un nivel de anidamiento.
+   - Rapilink: `task.status` y `task.result`.
+   - El mensaje del proveedor va tapado: números largos y correos fuera.
+2. La activación anota el id de la tarea que devuelve el pedido (`campo_tarea` en `ParametrosDeActivacion`) y, mientras espera ver al cliente, **lee la tarea**.
+   - Si el proveedor dice que falló, la activación queda **fallida en ese momento, con el mensaje del proveedor**, y la oficina puede volver a aprobar.
+   - Si la tarea sigue corriendo, sigue «en curso». Una tarea que terminó no reemplaza leer al cliente: lo que confirma sigue siendo la lista.
+3. El texto del serial cuando no hay nada que escribir: «la ONU no se activó desde la app» (ya no menciona el costo, que va al confirmar).
+
+**VERIFICADO:**
+- motor `test_alta_de_cliente` (sección 24b: falla con el mensaje tapado, lee la tarea que devolvió el pedido, «en curso» mientras corre, sin `campo_tarea` no se lee nada, resultado en bloque) mata las dos mutaciones probadas (leer el estado arriba, no leer la tarea);
+- `test_alta_ruta`, `test_completar_cliente`, `test_contrato_del_proveedor` y la guarda de arquitectura en verde;
+- **contra WispHub real, solo leyendo**: la tarea de la activación de la OT-23 se lee «terminada: Activación Masiva Exitosa en RBs: corte-15-servidor-1».
+- Base local v22.
+
+**NO VERIFICADO:** el nombre del estado de una tarea que FALLA en WispHub (`FAILURE`/`REVOKED` son los habituales de ese sistema de tareas; no se ha visto uno).

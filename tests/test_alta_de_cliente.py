@@ -1066,6 +1066,76 @@ afirmar(r.estado == alta.SIN_HERRAMIENTA and not prov.llamadas,
         "sin la herramienta que activa (ni la lista de instalaciones) no hay activacion")
 
 
+seccion("24b. LA TAREA DE ACTIVAR: si el proveedor dice que fallo, se sabe ya (27/11/2026)")
+
+
+class HerrTareaAnidada:
+    nombre = "leer_tarea"
+    lee_tarea = True
+    parametros_de_tarea = schema.ParametrosDeTarea(
+        identificador="task_id", campo_estado="task.status", campo_resultado="task.result",
+        estados_terminada=["SUCCESS"], estados_fallida=["FAILURE"])
+
+
+class HerrActivarConTarea(HerrActivar):
+    parametros_de_activacion = schema.ParametrosDeActivacion(campo_servicios="servicios",
+                                                             campo_tarea="task_id")
+
+
+class ProveedorConTarea(ProveedorInst):
+    """La tarea viene ANIDADA, como la mide el primer proveedor."""
+
+    def __init__(self, *a, estado_tarea="SUCCESS", resultado="Activacion exitosa", **kw):
+        super().__init__(*a, **kw)
+        self.estado_tarea, self.resultado = estado_tarea, resultado
+        self.tareas_leidas: list[str] = []
+
+    def ejecutar(self, herramienta, argumentos, tenant, variables_tenant=None):
+        if herramienta.nombre == "leer_tarea":
+            self.tareas_leidas.append(argumentos.get("task_id"))
+            return {"task": {"status": self.estado_tarea, "id": argumentos.get("task_id"),
+                             "result": self.resultado}}
+        return super().ejecutar(herramienta, argumentos, tenant, variables_tenant)
+
+
+def config_con_tarea():
+    return Config(herramientas=[HerrCrearInst(), HerrBuscar(), HerrBuscarInst(), HerrTareaAnidada(),
+                                HerrPlanes(), HerrActivarConTarea()])
+
+
+def activar_con_tarea(prov, espera_s=0.2):
+    with escenario(Registro(), prov):
+        return alta.activar(config_con_tarea(), TENANT, actor="Encargada Rosa",
+                            origen="activacion_de_contrato:c-9:1", datos=datos(),
+                            id_servicio="7000", espera_s=espera_s, intervalo_s=0)
+
+
+prov = ProveedorConTarea(instalaciones=[inst_nuestra()], activa=False, estado_tarea="FAILURE",
+                         resultado="No se pudo conectar al RouterBoard 1234567 de ana@x.com")
+r = activar_con_tarea(prov)
+afirmar(r.estado == alta.FALLO and "RouterBoard" in r.motivo,
+        f"la tarea dice que fallo: FALLO ya, con el mensaje del proveedor ({r.estado}: {r.motivo})")
+afirmar("1234567" not in r.motivo and "ana@x.com" not in r.motivo,
+        "el mensaje va tapado: ni numeros largos ni correos")
+afirmar(prov.tareas_leidas == ["t-act"], "lee LA tarea que devolvio el pedido (el estado viene anidado)")
+prov = ProveedorConTarea(instalaciones=[inst_nuestra()], estado_tarea="SUCCESS")
+r = activar_con_tarea(prov)
+afirmar(r.estado == alta.ACTIVADO, f"tarea bien y aparece como cliente: activado ({r.estado})")
+prov = ProveedorConTarea(instalaciones=[inst_nuestra()], activa=False, estado_tarea="PROGRESS")
+r = activar_con_tarea(prov, espera_s=0.05)
+afirmar(r.estado == alta.EN_CURSO and r.tarea == "t-act",
+        f"la tarea sigue corriendo: en curso, nunca «fallo» ({r.estado})")
+prov = ProveedorConTarea(instalaciones=[inst_nuestra()], estado_tarea="FAILURE")
+r = activar(prov)          # la configuracion de antes: sin 'campo_tarea'
+afirmar(prov.tareas_leidas == [], "sin 'campo_tarea' en la configuracion no se lee ninguna tarea")
+from nucleo.seguimiento.alta_de_cliente import _clasificar  # noqa: E402
+pt = HerrTareaAnidada.parametros_de_tarea
+afirmar(_clasificar(pt, {"task": {"status": "SUCCESS", "result": {"mensaje": "Conectando"}}})
+        == ("terminada", "Conectando"), "un resultado en bloque: se toman sus textos")
+afirmar(_clasificar(pt, {"status": "FAILURE"}) == ("", ""),
+        "con el estado arriba y la config anidada: no se inventa nada")
+
+
 seccion("25. la que ACTIVA: con sus parametros, nunca de solo lectura, ni de la ruta generica ni de un agente")
 ACT_OK = dict(campo_servicios="servicios")
 try:

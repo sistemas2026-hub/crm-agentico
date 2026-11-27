@@ -6606,6 +6606,9 @@ herramientas:
     activa_servicio: true
     parametros_de_activacion:
       campo_servicios: servicios
+      #  La respuesta trae {"task_id": ..., "warnings": []} (medido el
+      #  27/11/2026): con ese id se lee si la activacion fallo.
+      campo_tarea: task_id
 
   #  EL CONTRATO DE WISPHUB, POR SU PANEL WEB  --  26/11/2026
   #
@@ -6775,7 +6778,13 @@ herramientas:
     lee_tarea: true
     parametros_de_tarea:
       identificador: task_id
-      campo_estado: status
+      #  ANIDADO, medido el 27/11/2026 con la activacion de la OT-23:
+      #  {"task": {"status": "PROGRESS"|"SUCCESS", "id": ..., "result": ...}}.
+      #  Con 'status' arriba nunca se veia el estado. El result trae el
+      #  mensaje («Activacion Masiva Exitosa en RBs:...», «Conectando al
+      #  RouterBoard»).
+      campo_estado: task.status
+      campo_resultado: task.result
       # `SUCCESS` esta verificado (agosto). OJO: una tarea puede decir SUCCESS
       # con un error de texto adentro, y por eso «termino» no es «sirvio».
       estados_terminada: [SUCCESS]

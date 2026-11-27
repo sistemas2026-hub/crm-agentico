@@ -1386,6 +1386,18 @@ prueba creada desde la app):
   `/Instalaciones/<usuario>/<n>/activar/`, `/instalaciones/agregar-firma/<usuario>/<n>/`,
   `/clientes/ver/<usuario>/` (pestaña 6 = Subir Archivos).
 
+**LAS TAREAS EN SEGUNDO PLANO, MEDIDO EL 27/11/2026** (activacion de la OT-23):
+
+* `POST /api/clientes/activar/` responde `{"task_id": "<uuid>", "warnings": []}`.
+* `GET /api/tasks/<task_id>/` responde ANIDADO:
+  `{"task": {"status": "PROGRESS", "id": ..., "result": {"mensaje": "Conectando al RouterBoard"}}}`
+  y luego `{"task": {"status": "SUCCESS", ..., "result": "Activacion Masiva Exitosa en RBs:<servidor>"}}`.
+  El estado NO esta arriba: leerlo como `status` da siempre vacio. En la config:
+  `campo_estado: task.status`, `campo_resultado: task.result`.
+* Un primer `activar` de esa instalacion NO la paso a cliente (sin error en la
+  respuesta); un segundo, si, en ~5 s. El estado de una tarea que FALLA no se
+  ha visto (FAILURE/REVOKED son los nombres habituales).
+
 **SIN MEDIR:** cuanto duran el enlace y la sesion.
 
 ## Antes de dar por buena una integracion

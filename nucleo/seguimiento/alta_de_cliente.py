@@ -455,12 +455,56 @@ def _estado_de_la_tarea(h: dict, config, tenant: str, tarea: str) -> str:
     except Exception as e:                                   # noqa: BLE001
         registrar("alta_cliente", "no se pudo leer la tarea del alta", error=e)
         return ""
-    estado = str((crudo or {}).get(pt.campo_estado) or "") if isinstance(crudo, dict) else ""
+    return _clasificar(pt, crudo)[0]
+
+
+def _clasificar(pt, crudo) -> tuple[str, str]:
+    """`(terminada|fallida|"", mensaje tapado)` de lo que devolvio la tarea.
+
+    EL ESTADO SE LEE DONDE VIENE (27/11/2026). Medido ese dia: el primer
+    proveedor lo anida (`{"task": {"status": ..., "result": ...}}`) y la
+    configuracion lo buscaba arriba: nunca se veia, y el alta solo se enteraba
+    leyendo despues al cliente. Se acepta un nivel ("task.status").
+    """
+    from nucleo.herramientas.http import _leer_anidado
+
+    if not isinstance(crudo, dict):
+        return "", ""
+    estado = str(_leer_anidado(crudo, pt.campo_estado) or "")
+    mensaje = ""
+    if getattr(pt, "campo_resultado", ""):
+        valor = _leer_anidado(crudo, pt.campo_resultado)
+        if isinstance(valor, str):
+            mensaje = valor
+        elif isinstance(valor, dict):
+            #  Un resultado en bloque: sus textos, sin suponer como se llaman.
+            mensaje = " · ".join(str(v) for v in valor.values() if isinstance(v, str))
+        #  Lo que dice el proveedor, tapado: numeros largos y correos fuera.
+        mensaje = re.sub(r"[\w.+-]+@[\w.-]+", "<correo>", mensaje)
+        mensaje = re.sub(r"\d{6,}", "<n>", mensaje)[:160]
     if estado in (pt.estados_fallida or []):
-        return "fallida"
+        return "fallida", mensaje
     if estado in (pt.estados_terminada or []):
-        return "terminada"
-    return ""
+        return "terminada", mensaje
+    return "", mensaje
+
+
+def _leer_tarea(h: dict, config, tenant: str, tarea: str) -> tuple[str, str]:
+    """`(estado, mensaje)` de una tarea, o ("", "") si no se pudo leer."""
+    from nucleo.herramientas import http as ejecutor_http
+
+    herr = h["tarea"]
+    tarea = _id_de_tarea(tarea)
+    if herr is None or not tarea:
+        return "", ""
+    pt = herr.parametros_de_tarea
+    try:
+        crudo = ejecutor_http.ejecutar(herr, {pt.identificador: tarea}, tenant,
+                                       variables_tenant=config.variables_tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("activar_cliente", "no se pudo leer la tarea", error=e)
+        return "", ""
+    return _clasificar(pt, crudo)
 
 
 def _mirar(h: dict, config, tenant: str, d: dict, tarea: str) -> ResultadoAlta | None:
@@ -827,9 +871,15 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio,
     def _fin(estado: str, motivo: str = "") -> ResultadoAlta:
         return ResultadoAlta(estado, motivo, referencia=origen, id_cliente=numero, emitido=True)
 
+    campo_tarea = getattr(herr.parametros_de_activacion, "campo_tarea", "") or ""
+
     def _hacer():
-        ejecutor_http.ejecutar(herr, dict(args), tenant, variables_tenant=config.variables_tenant)
-        return {"pedido": True}
+        crudo = ejecutor_http.ejecutar(herr, dict(args), tenant,
+                                       variables_tenant=config.variables_tenant)
+        #  EL ID DE LA TAREA (27/11/2026): con el se sabe si el proveedor dice
+        #  que la activacion fallo. Es lo unico de la respuesta que se guarda.
+        tarea = _id_de_tarea(crudo.get(campo_tarea)) if campo_tarea and isinstance(crudo, dict) else ""
+        return {"pedido": True, "tarea": tarea}
 
     try:
         with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
@@ -851,15 +901,27 @@ def activar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio,
             "repetida", "en_curso", "fallida"):
         return _fin(BLOQUEADO, "el registro de operaciones no dejo salir este pedido")
 
-    #  4. CONFIRMAR LEYENDO: que aparezca en la lista de CLIENTES.
+    #  4. CONFIRMAR LEYENDO: que aparezca en la lista de CLIENTES. Y mientras,
+    #  la TAREA del proveedor (27/11/2026): medido ese dia, un «activar» que el
+    #  proveedor acepto no paso la instalacion a cliente, y Dexter solo lo supo
+    #  a los minutos. Si la tarea dice que fallo, se dice ya, con su mensaje.
+    tarea = str(((res.respuesta if res is not None else None) or {}).get("tarea") or "")
     limite = time.monotonic() + max(0.0, float(espera_s))
     while True:
         visto = comprobar_activacion(config, tenant, datos=datos, id_servicio=numero)
         if visto.estado == ACTIVADO:
             registrar("activar_cliente", "la instalacion quedo como cliente")
             return _fin(ACTIVADO)
+        if tarea:
+            estado_tarea, mensaje = _leer_tarea(h, config, tenant, tarea)
+            if estado_tarea == "fallida":
+                registrar("activar_cliente", "la tarea del proveedor fallo")
+                return _fin(FALLO, "la tarea del proveedor fallo"
+                            + (f": {mensaje}" if mensaje else ""))
         if time.monotonic() >= limite:
-            return _fin(EN_CURSO, "se pidio y todavia no aparece como cliente")
+            r = _fin(EN_CURSO, "se pidio y todavia no aparece como cliente")
+            r.tarea = tarea
+            return r
         time.sleep(max(0.0, float(intervalo_s)))
 
 
