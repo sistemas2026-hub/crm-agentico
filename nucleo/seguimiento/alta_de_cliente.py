@@ -92,6 +92,10 @@ PLAN_DESCONOCIDO = "plan_desconocido"
 DATOS_INVALIDOS = "datos_invalidos"
 SIN_HERRAMIENTA = "sin_herramienta"
 BLOQUEADO = "bloqueado"                 # el sistema decidio no escribir
+#  LA ACTIVACION (26/11/2026): una INSTALACION que una persona valido pasa a
+#  ser cliente.
+ACTIVADO = "activado"                   # se activo en esta pasada, y se leyo
+NO_ENCONTRADA = "no_encontrada"         # no hay una instalacion de este contrato
 NO_SE_PUDO_COMPROBAR = "no_se_pudo_comprobar"
 
 #: Cuanto se espera, despues de pedir, a que el cliente aparezca. La app no
@@ -149,13 +153,22 @@ def _herramientas(config) -> dict:
     3.1): un nombre aca seria el de la herramienta de un proveedor concreto
     metido en el motor."""
     hs = list(config.herramientas or [])
+    busca = [h for h in hs if getattr(h, "busca_cliente_por_ip", False)]
     return {
         "crear": next((h for h in hs if getattr(h, "crea_cliente", False)), None),
-        "buscar": next((h for h in hs if getattr(h, "busca_cliente_por_ip", False)), None),
+        #  La lista de CLIENTES; las de instalaciones van aparte (26/11/2026).
+        "buscar": next((h for h in busca if not _de_instalaciones(h)), None),
+        "buscar_instalaciones": [h for h in busca if _de_instalaciones(h)],
+        "activar": next((h for h in hs if getattr(h, "activa_servicio", False)), None),
         "tarea": next((h for h in hs if getattr(h, "lee_tarea", False)), None),
         "planes": next((h for h in hs
                         if getattr(h, "sincroniza_precio_plan", "") == "listado"), None),
     }
+
+
+def _de_instalaciones(herr) -> bool:
+    pb = getattr(herr, "parametros_de_busqueda_por_ip", None)
+    return bool(getattr(pb, "son_instalaciones", False))
 
 
 class _NoSePudoLeer(Exception):
@@ -273,10 +286,27 @@ def leer_datos(datos, parametros) -> tuple[dict | None, str]:
         return None, "la regla del nombre en el router esta mal declarada"
     if not nombre_en_router:
         return None, "no se pudo armar el nombre del cliente en el router"
+    #  LO QUE COBRO EL TECNICO Y LA ONU QUE INSTALO (26/11/2026). Opcionales:
+    #  sin ellos el alta sale igual. Un costo que no es un numero no se arregla.
+    costo = datos.get("costo_instalacion")
+    if costo in (None, ""):
+        costo = None
+    elif isinstance(costo, bool) or not isinstance(costo, (int, float, str)):
+        return None, "el costo de instalacion no es un numero"
+    else:
+        try:
+            costo = float(str(costo).strip())
+        except ValueError:
+            return None, "el costo de instalacion no es un numero"
+        if not costo >= 0 or costo != costo or costo > 1e9:
+            return None, "el costo de instalacion no es un numero valido"
+        costo = int(costo) if costo == int(costo) else round(costo, 2)
+    serial = re.sub(r"[^A-Za-z0-9]", "", str(datos.get("serial_onu") or "")).upper()[:32]
     return {"zona": zona, "ip": ip, "plan": plan, **limpio,
             "nombre_en_router": nombre_en_router,
             "coordenadas": _punto(datos.get("coordenadas")),
-            "nota": _texto(datos.get("nota"))}, ""
+            "nota": _texto(datos.get("nota")),
+            "costo_instalacion": costo, "serial_onu": serial}, ""
 
 
 def _tres_octetos(prefijo) -> str:
@@ -328,10 +358,12 @@ def _es_el_nuestro(fila: dict, pb, d: dict) -> bool:
 # =============================================================================
 #  LAS LECTURAS
 # =============================================================================
-def _quien_tiene(h: dict, config, tenant: str, ip: str) -> list[dict]:
+def _filas_de(herr, comun, config, tenant: str, ip: str) -> list[dict]:
+    """Las filas de UNA lista del proveedor con esa IP, con los campos con que
+    se reconoce a un cliente renombrados como los de la lista `comun` (la de
+    clientes): una lista de instalaciones puede llamarlos distinto."""
     from nucleo.herramientas import http as ejecutor_http
 
-    herr = h["buscar"]
     pb = herr.parametros_de_busqueda_por_ip
     args = dict(getattr(herr, "argumentos_fijos", None) or {})
     args[pb.ip] = ip
@@ -340,7 +372,24 @@ def _quien_tiene(h: dict, config, tenant: str, ip: str) -> list[dict]:
                                        variables_tenant=config.variables_tenant)
     except Exception as e:                                   # noqa: BLE001
         raise _NoSePudoLeer(type(e).__name__) from None
-    return _filas(crudo)
+    filas = _filas(crudo)
+    if comun is None or comun is pb:
+        return filas
+    pares = [(getattr(pb, c, ""), getattr(comun, c, ""))
+             for c in ("campo_id", "campo_nombre_en_router", "campo_documento")]
+    return [{**f, **{destino: f.get(origen) for origen, destino in pares
+                     if origen and destino and origen != destino}} for f in filas]
+
+
+def _quien_tiene(h: dict, config, tenant: str, ip: str) -> list[dict]:
+    """Quien tiene esa IP en el proveedor: un cliente O una instalacion
+    (26/11/2026: una instalacion recien creada no sale en la lista de
+    clientes, y su IP esta tan tomada como la de un cliente)."""
+    comun = h["buscar"].parametros_de_busqueda_por_ip
+    filas = _filas_de(h["buscar"], comun, config, tenant, ip)
+    for otra in h.get("buscar_instalaciones") or []:
+        filas += _filas_de(otra, comun, config, tenant, ip)
+    return filas
 
 
 def ip_libre_en_el_proveedor(config, tenant: str, ip: str) -> bool:
@@ -700,3 +749,130 @@ def crear(config, tenant: str, *, actor: str, origen: str, datos,
             return _fin(EN_CURSO, "se pidio y el cliente todavia no aparece",
                         tarea=tarea)
         time.sleep(max(0.0, float(intervalo_s)))
+
+
+# =============================================================================
+#  LA ACTIVACION  --  26/11/2026
+# =============================================================================
+#  El usuario: «en instalaciones se crea instalacion y despues un encargado
+#  valida si todo esta bien y activa, que pasa a cliente». El alta crea la
+#  INSTALACION; esto la pasa a cliente, cuando una persona la aprobo en
+#  Dexter. Es la escritura que DA SERVICIO, asi que sale por la puerta
+#  humana (quien valido), con clave fija por pedido, sin reintentar lo que
+#  fallo, y se confirma LEYENDO: aparecer en la lista de clientes.
+
+def _el_numero(valor) -> str:
+    s = str(valor if valor is not None else "").strip()
+    return s if s.isdigit() else ""
+
+
+def activar(config, tenant: str, *, actor: str, origen: str, datos, id_servicio,
+            espera_s: float = ESPERA_S, intervalo_s: float = INTERVALO_S) -> ResultadoAlta:
+    """Pasa a cliente la instalacion de ESTE contrato. Ver el encabezado."""
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.seguridad import frontera, idempotencia, interruptor
+
+    h = _herramientas(config)
+    if None in (h["activar"], h["buscar"], h["crear"]) or not h["buscar_instalaciones"]:
+        return ResultadoAlta(SIN_HERRAMIENTA, "la empresa no declara como se pasa una "
+                                              "instalacion a cliente", referencia=origen)
+    numero = _el_numero(id_servicio)
+    if not numero:
+        return ResultadoAlta(DATOS_INVALIDOS, "falta el numero de servicio de la instalacion",
+                             referencia=origen)
+    d, por_que = leer_datos(datos, h["crear"].parametros_de_alta)
+    if d is None:
+        return ResultadoAlta(DATOS_INVALIDOS, por_que, referencia=origen)
+    comun = h["buscar"].parametros_de_busqueda_por_ip
+
+    #  1. ¿YA ES CLIENTE? Entonces no hay nada que activar.
+    try:
+        if any(_el_numero(f.get(comun.campo_id)) == numero
+               for f in _filas_de(h["buscar"], comun, config, tenant, d["ip"])):
+            return ResultadoAlta(YA_ESTABA, "esa instalacion ya es cliente",
+                                 referencia=origen, id_cliente=numero)
+        instalaciones = []
+        for herr in h["buscar_instalaciones"]:
+            instalaciones += _filas_de(herr, comun, config, tenant, d["ip"])
+    except _NoSePudoLeer as e:
+        return ResultadoAlta(NO_SE_PUDO_COMPROBAR,
+                             f"no se pudo leer el proveedor ({e})", referencia=origen)
+    #  2. LA INSTALACION TIENE QUE ESTAR, CON ESE NUMERO Y DE ESTE CONTRATO.
+    if not any(_el_numero(f.get(comun.campo_id)) == numero and _es_el_nuestro(f, comun, d)
+               for f in instalaciones):
+        return ResultadoAlta(NO_ENCONTRADA, "no hay en el proveedor una instalacion de "
+                                            "este contrato con ese numero", referencia=origen)
+
+    #  3. EL INTERRUPTOR, sin cache y pegado a la escritura.
+    try:
+        veredicto = interruptor.veredicto(tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("activar_cliente", "no se pudo leer el interruptor: NO se activa", error=e)
+        return ResultadoAlta(BLOQUEADO, "no se pudo comprobar el interruptor", referencia=origen)
+    if not veredicto.permitido:
+        interruptor.anotar_bloqueo(tenant, actor=actor, recurso="activar_cliente",
+                                   motivo=f"{veredicto.estado}: {veredicto.motivo}")
+        return ResultadoAlta(BLOQUEADO, "el interruptor de la empresa esta detenido",
+                             referencia=origen)
+
+    herr = h["activar"]
+    args = dict(getattr(herr, "argumentos_fijos", None) or {})
+    args[herr.parametros_de_activacion.campo_servicios] = [int(numero)]
+
+    def _fin(estado: str, motivo: str = "") -> ResultadoAlta:
+        return ResultadoAlta(estado, motivo, referencia=origen, id_cliente=numero, emitido=True)
+
+    def _hacer():
+        ejecutor_http.ejecutar(herr, dict(args), tenant, variables_tenant=config.variables_tenant)
+        return {"pedido": True}
+
+    try:
+        with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
+            res = idempotencia.ejecutar(tenant, herr.nombre, args, origen, _hacer,
+                                        clave=f"{origen}|{herr.nombre}")
+    except ejecutor_http.ErrorHerramientaHttp as e:
+        registrar("activar_cliente", "el ejecutor no dejo salir la activacion", error=e)
+        return _fin(BLOQUEADO, "la activacion no salio: el ejecutor la freno antes de "
+                               "llegar al proveedor")
+    except frontera.AccionExternaNoAutorizada as e:
+        registrar("activar_cliente", "la frontera no autorizo la activacion", error=e)
+        return _fin(BLOQUEADO, "la frontera no autorizo la activacion")
+    except Exception as e:                                   # noqa: BLE001
+        registrar("activar_cliente", "el pedido de activacion volvio con error", error=e)
+        if _lo_rechazo(e):
+            return _fin(FALLO, "el proveedor rechazo la activacion")
+        res = None                     # salio y no se sabe si llego: se mira
+    if res is not None and not res.ejecutada and res.decision not in (
+            "repetida", "en_curso", "fallida"):
+        return _fin(BLOQUEADO, "el registro de operaciones no dejo salir este pedido")
+
+    #  4. CONFIRMAR LEYENDO: que aparezca en la lista de CLIENTES.
+    limite = time.monotonic() + max(0.0, float(espera_s))
+    while True:
+        visto = comprobar_activacion(config, tenant, datos=datos, id_servicio=numero)
+        if visto.estado == ACTIVADO:
+            registrar("activar_cliente", "la instalacion quedo como cliente")
+            return _fin(ACTIVADO)
+        if time.monotonic() >= limite:
+            return _fin(EN_CURSO, "se pidio y todavia no aparece como cliente")
+        time.sleep(max(0.0, float(intervalo_s)))
+
+
+def comprobar_activacion(config, tenant: str, *, datos, id_servicio) -> ResultadoAlta:
+    """Si la instalacion ya es cliente. SOLO LEE."""
+    h = _herramientas(config)
+    if h["buscar"] is None or h["crear"] is None:
+        return ResultadoAlta(SIN_HERRAMIENTA, "la empresa no declara como se lee un cliente")
+    numero = _el_numero(id_servicio)
+    d, por_que = leer_datos(datos, h["crear"].parametros_de_alta)
+    if not numero or d is None:
+        return ResultadoAlta(DATOS_INVALIDOS, por_que or "falta el numero de servicio")
+    comun = h["buscar"].parametros_de_busqueda_por_ip
+    try:
+        filas = _filas_de(h["buscar"], comun, config, tenant, d["ip"])
+    except _NoSePudoLeer as e:
+        return ResultadoAlta(NO_SE_PUDO_COMPROBAR, f"no se pudo leer el proveedor ({e})")
+    if any(_el_numero(f.get(comun.campo_id)) == numero for f in filas):
+        return ResultadoAlta(ACTIVADO, id_cliente=numero)
+    return ResultadoAlta(EN_CURSO, "todavia no aparece como cliente", id_cliente=numero)
+

@@ -1335,3 +1335,46 @@ def crear_cliente_en_el_isp(org_id: str, contrato_id: str, vuelta: int = 0) -> d
         return {"resultado": "", "por_que": type(e).__name__}
     finally:
         clear_rls_context()
+
+
+@shared_task(name="campo.tasks.activar_cliente_en_el_isp")
+def activar_cliente_en_el_isp(org_id: str, contrato_id: str, vuelta: int = 0) -> dict:
+    """Pasa a cliente la instalacion que aprobo una persona, y sigue hasta
+    saber (26/11/2026). El mismo patron que `crear_cliente_en_el_isp`: una
+    vuelta hace una cosa, se vuelve a encolar, y al tope queda «por revisar».
+    NUNCA LEVANTA. Ver campo/instalacion.py."""
+    from campo import instalacion
+    from campo.contrato import ContratoDeServicio
+    from common.tasks import clear_rls_context, set_rls_context
+
+    try:
+        set_rls_context(org_id)
+        try:
+            contrato = (ContratoDeServicio.objects
+                        .select_related("activado_por__user", "orden")
+                        .get(pk=contrato_id, org_id=org_id))
+        except ContratoDeServicio.DoesNotExist:
+            return {"resultado": "", "por_que": "el contrato ya no esta"}
+        if contrato.activacion_estado == ContratoDeServicio.ACTIVACION_PEDIDA:
+            instalacion.pedir(contrato)
+        elif contrato.activacion_estado == ContratoDeServicio.ACTIVACION_EN_CURSO:
+            instalacion.comprobar(contrato)
+        if (contrato.estado == ContratoDeServicio.INSTALACION
+                and contrato.activacion_estado in ContratoDeServicio.ACTIVACION_SIN_RESOLVER):
+            if int(vuelta or 0) >= instalacion.VUELTAS_DE_LA_ACTIVACION:
+                instalacion.rendirse(contrato)
+            else:
+                try:
+                    activar_cliente_en_el_isp.apply_async(
+                        args=[org_id, contrato_id, int(vuelta or 0) + 1],
+                        countdown=instalacion.ESPERA_DE_LA_ACTIVACION)
+                except Exception as e:                           # noqa: BLE001
+                    logger.warning("activacion: no se pudo volver a encolar (%s)",
+                                   type(e).__name__)
+        return {"resultado": contrato.estado, "activacion": contrato.activacion_estado}
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning("activacion: fallo la vuelta (%s)", type(e).__name__)
+        return {"resultado": "", "por_que": type(e).__name__}
+    finally:
+        clear_rls_context()
+

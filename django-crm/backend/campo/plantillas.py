@@ -521,6 +521,10 @@ def componer(definicion: dict) -> dict:
                 salida["dinero"] = True
                 if reglas.get("min") is None or reglas["min"] < 0:
                     reglas["min"] = 0
+                #  Y ESTE DINERO ES EL COSTO DE LA INSTALACION (26/11/2026): el
+                #  que viaja al proveedor cuando el alta es una instalacion.
+                if bool(c.get("costo_de_instalacion")):
+                    salida["costo_de_instalacion"] = True
 
             #  EL RANGO QUE SE CONSIDERA BUENO  --  07/11/2026
             #
@@ -793,6 +797,8 @@ def leer_definicion(esquema: dict) -> tuple[dict | None, list[str]]:
             #  camara, arriba).
             if c.get("dinero"):
                 fila["dinero"] = True
+            if c.get("costo_de_instalacion"):
+                fila["costo_de_instalacion"] = True
         elif tipo == "seleccion":
             opciones = list(reglas.get("options") or c.get("opciones") or [])
             if c.get("presentacion") == CHECKLIST:

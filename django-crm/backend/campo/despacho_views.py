@@ -279,6 +279,18 @@ class ValidarTrabajoView(APIView):
         #  LA FOTO DE LA REVISION (30/10/2026): lo que decia el Supervisor
         #  ANTES de aprobar; despues ya no se revisa. Ver la pestaña Cerradas.
         foto = None
+        #  UNA INSTALACION QUE VALIDA UNA PERSONA NO SE APRUEBA POR ACA
+        #  (26/11/2026): aprobarla es ACTIVARLA en el proveedor, y el ticket se
+        #  cierra cuando el tecnico entrega, no al aprobar. Devolverla, si.
+        if d["decision"] == "aprobar":
+            from campo.instalacion import requiere_validacion_humana
+
+            if requiere_validacion_humana(orden):
+                return Response(
+                    {"error": "ES_UNA_INSTALACION",
+                     "detalle": "Esta es una instalación: se aprueba en Instalaciones "
+                                "→ Por activar, que la activa en el proveedor."},
+                    status=status.HTTP_409_CONFLICT)
         if d["decision"] == "aprobar":
             from campo.revision_del_cierre import revisar
 

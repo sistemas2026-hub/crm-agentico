@@ -138,6 +138,10 @@ class ApiEndpoints {
       '$baseUrl/api/campo/trabajos/$id/evidencias/';
   static String trabajoCompletar(String id) =>
       '$baseUrl/api/campo/trabajos/$id/completar/';
+
+  /// El técnico validó el servicio y entregó la instalación (26/11/2026).
+  static String instalacionEntregada(String id) =>
+      '$baseUrl/api/campo/trabajos/$id/instalacion-entregada/';
   static String confirmarEvidencia(String trabajoId, String evidenciaId) =>
       '$baseUrl/api/campo/evidencias/$evidenciaId/confirmar/';
   static String evidenciaUrl(String id) =>

@@ -166,9 +166,21 @@ def datos_del_alta(contrato) -> dict:
         },
         "coordenadas": ({"lat": gps.get("lat"), "lng": gps.get("lng")}
                         if tiene_punto else None),
+        #  26/11/2026: lo que cobro el tecnico y la ONU que instalo, cuando el
+        #  alta es una INSTALACION (se pide al finalizar, ya con esos datos).
+        **(_de_la_orden(contrato) if contrato.alta_como_instalacion else {}),
         #  Para que quien abra la ficha en el proveedor sepa de donde salio.
         "nota": f"Contrato {contrato.numero} · OT-{d.get('orden_numero')}",
     }
+
+
+def _de_la_orden(contrato) -> dict:
+    from campo.instalacion import costo_y_serial
+
+    try:
+        return costo_y_serial(contrato.orden)
+    except Exception:                                            # noqa: BLE001
+        return {}
 
 
 def datos_para_reconocer(contrato) -> dict:
@@ -224,13 +236,16 @@ def _por_revisar(contrato, codigo: str, motivo: str = "", avisos=None, **mas) ->
 
 
 def _creado(contrato, id_cliente: str, codigo: str, avisos=None, **mas) -> None:
-    """El cliente existe en el proveedor: el contrato pasa a `en_el_isp`."""
+    """El cliente existe en el proveedor: el contrato pasa a `en_el_isp`. Si
+    se pidio como INSTALACION (26/11/2026), a `instalacion`: falta que una
+    persona la valide y la active."""
     from campo.contrato import ContratoDeServicio
 
     ahora = timezone.now()
     (ContratoDeServicio.objects
      .filter(pk=contrato.pk, estado=ContratoDeServicio.FIRMADO)
-     .update(estado=ContratoDeServicio.EN_EL_ISP,
+     .update(estado=(ContratoDeServicio.INSTALACION if contrato.alta_como_instalacion
+                     else ContratoDeServicio.EN_EL_ISP),
              servicio_isp=str(id_cliente or "")[:64],
              alta_estado="", alta_codigo=codigo[:40], alta_detalle="",
              alta_avisos=list(avisos or []), alta_actualizada_en=ahora,
@@ -382,7 +397,7 @@ def rendirse(contrato) -> None:
     _por_revisar(contrato, codigo)
 
 
-def pedir_alta(contrato, *, por=None) -> bool:
+def pedir_alta(contrato, *, por=None, como_instalacion: bool = False) -> bool:
     """Marca el alta como pedida y encola la tarea, DESPUES del commit.
 
     `por` es la persona que lo pide (None cuando sale de la firma: ahi es
@@ -410,6 +425,7 @@ def pedir_alta(contrato, *, por=None) -> bool:
                .update(alta_estado=ContratoDeServicio.ALTA_PEDIDA, alta_codigo="",
                        alta_detalle="", alta_tarea="", alta_avisos=[],
                        alta_intento=intento, alta_pedida_por=por,
+                       alta_como_instalacion=bool(como_instalacion),
                        alta_actualizada_en=ahora, updated_at=ahora))
     contrato.refresh_from_db()
     if not tocadas:

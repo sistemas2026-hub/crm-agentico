@@ -12,6 +12,7 @@ from campo import (
     contrato_views,
     activacion_onu_views,
     dinero_views,
+    instalacion_views,
     ips_libres_views,
     cuadrillas_views,
     despacho_pantalla_views,
@@ -148,6 +149,13 @@ urlpatterns = [
     #  El dinero que recibe el tecnico, para la oficina (26/11/2026). Ver campo/dinero.py.
     path("dinero/", dinero_views.DineroDeLosTecnicosView.as_view(), name="dinero_de_los_tecnicos"),
     path("dinero/recibir/", dinero_views.RecibirDineroView.as_view(), name="recibir_dinero"),
+    #  La instalacion que valida una persona (26/11/2026). Ver campo/instalacion.py.
+    path("instalaciones/por-activar/", instalacion_views.InstalacionesPorActivarView.as_view(),
+         name="instalaciones_por_activar"),
+    path("trabajos/<uuid:pk>/aprobar-instalacion/",
+         instalacion_views.AprobarInstalacionView.as_view(), name="aprobar_instalacion"),
+    path("trabajos/<uuid:pk>/instalacion-entregada/",
+         instalacion_views.InstalacionEntregadaView.as_view(), name="instalacion_entregada"),
     path("trabajos/<uuid:pk>/ips-libres/",
          ips_libres_views.IpsLibresDeLaOrdenView.as_view(), name="ips_libres_de_la_orden"),
     path("contrato/configuracion/",

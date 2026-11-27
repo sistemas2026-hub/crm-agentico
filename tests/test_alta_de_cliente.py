@@ -863,6 +863,226 @@ for marca in ("crea_cliente", "busca_cliente_por_ip", "lee_tarea"):
     afirmar(carga_sola and not en_un_rol,
             f"'{marca}': carga fuera de todo rol y NO carga en el catalogo de un agente")
 
+seccion("23. EL ALTA COMO INSTALACION: con costo y ONU, y la IP de una instalacion cuenta (26/11/2026)")
+#  El usuario: «en instalaciones se crea instalacion y despues un encargado
+#  valida si todo esta bien y activa, que pasa a cliente».
+PARAMETROS_INST = schema.ParametrosDeAlta(
+    zona="id_zona", campos={**PARAMETROS.campos, "costo_instalacion": "costo_instalacion",
+                            "serial_onu": "sn_onu"},
+    campo_tarea="task_id", secretos={"password_router_wifi": "CLAVE_ROUTER_WIFI"})
+
+
+class HerrCrearInst(HerrCrear):
+    parametros_de_alta = PARAMETROS_INST
+    argumentos_fijos = {"usuario_router_wifi": "admin", "estado_instalacion": 1}
+
+
+class HerrBuscarInst:
+    nombre = "buscar_instalacion_por_ip"
+    busca_cliente_por_ip = True
+    argumentos_fijos: dict = {}
+    #  Otros nombres de campo, a proposito: la lista de instalaciones podria
+    #  llamarlos distinto y el modulo tiene que reconocer igual.
+    parametros_de_busqueda_por_ip = schema.ParametrosDeBusquedaPorIp(
+        ip="ip", campo_id="id", campo_nombre_en_router="usuario",
+        campo_documento="documento", son_instalaciones=True)
+
+
+class HerrActivar:
+    nombre = "activar_servicio"
+    activa_servicio = True
+    argumentos_fijos: dict = {}
+    parametros_de_activacion = schema.ParametrosDeActivacion(campo_servicios="servicios")
+
+
+def config_inst(**kw):
+    return Config(herramientas=[HerrCrearInst(), HerrBuscar(), HerrBuscarInst(), HerrTarea(),
+                                HerrPlanes(), HerrActivar()], **kw)
+
+
+class ProveedorInst(Proveedor):
+    """Crea INSTALACIONES (otra lista); activar las pasa a la de clientes."""
+
+    def __init__(self, *a, instalaciones=None, activa=True, activa_tras=0,
+                 error_al_activar: BaseException | None = None, **kw):
+        super().__init__(*a, **kw)
+        self.instalaciones = list(instalaciones or [])
+        self.activa, self.activa_tras, self.error_al_activar = activa, activa_tras, error_al_activar
+        self._por_activar: list[list] = []
+
+    def ejecutar(self, herramienta, argumentos, tenant, variables_tenant=None):
+        nombre = herramienta.nombre
+        if nombre == "buscar_instalacion_por_ip":
+            self.llamadas.append((nombre, dict(argumentos)))
+            self.orden.append(nombre)
+            return {"results": [{"id": f["id_servicio"], "usuario": f["servicio"],
+                                 "documento": f["cedula"], "ip": f["ip"]}
+                                for f in self.instalaciones if f.get("ip") == argumentos.get("ip")]}
+        if nombre == "buscar_cliente_por_ip":
+            for par in self._por_activar:
+                par[0] -= 1
+            for par in [x for x in self._por_activar if x[0] < 0]:
+                self.instalaciones = [f for f in self.instalaciones if f is not par[1]]
+                self.clientes.append(par[1])
+                self._por_activar.remove(par)
+        if nombre == "activar_servicio":
+            self.llamadas.append((nombre, dict(argumentos)))
+            self.orden.append(nombre)
+            self.permisos.append(frontera.permiso_vigente())
+            if self.activa:
+                for f in [f for f in self.instalaciones
+                          if f["id_servicio"] in (argumentos.get("servicios") or [])]:
+                    self._por_activar.append([self.activa_tras, f])
+            if self.error_al_activar is not None:
+                raise self.error_al_activar
+            return {"task_id": "t-act"}
+        if nombre == CREAR:
+            self.llamadas.append((nombre, dict(argumentos)))
+            self.orden.append(nombre)
+            self.permisos.append(frontera.permiso_vigente())
+            self.instalaciones.append({"id_servicio": 7000 + len(self.instalaciones),
+                                       "ip": argumentos.get("ip"),
+                                       "servicio": argumentos.get("usuario_rb"),
+                                       "cedula": argumentos.get("cedula")})
+            return {"task_id": "t-inst"}
+        return super().ejecutar(herramienta, argumentos, tenant, variables_tenant)
+
+
+prov = ProveedorInst()
+with escenario(Registro(), prov):
+    r = alta.crear(config_inst(), TENANT, actor="Dilan Moreno", origen=ORIGEN,
+                   datos=datos(costo_instalacion="80000", serial_onu=" fhtt-1234 5678 "),
+                   espera_s=0.2, intervalo_s=0)
+cuerpo = prov.de(CREAR)[0] if prov.de(CREAR) else {}
+afirmar(r.estado == alta.CREADO and r.id_cliente == "7000",
+        f"queda creada, y se confirma en la lista de INSTALACIONES ({r.estado}, {r.id_cliente})")
+afirmar(cuerpo.get("costo_instalacion") == 80000 and cuerpo.get("sn_onu") == "FHTT12345678",
+        f"lleva el costo como numero y el serial limpio ({cuerpo.get('costo_instalacion')!r}, {cuerpo.get('sn_onu')!r})")
+afirmar(cuerpo.get("estado_instalacion") == 1, "y lo fijo de la empresa (estado de la instalacion)")
+afirmar(not prov.clientes, "no es un cliente todavia")
+
+prov = ProveedorInst(instalaciones=[{"id_servicio": 6001, "ip": IP, "servicio": "OTRA PERSONA",
+                                     "cedula": "9999"}])
+with escenario(Registro(), prov):
+    r = alta.crear(config_inst(), TENANT, actor="x", origen=ORIGEN, datos=datos(),
+                   espera_s=0.2, intervalo_s=0)
+afirmar(r.estado == alta.IP_OCUPADA and prov.escrituras == 0,
+        f"la IP que tiene una INSTALACION de otro esta tomada, y no se crea ({r.estado})")
+with escenario(Registro(), prov):
+    libre = alta.ip_libre_en_el_proveedor(config_inst(), TENANT, IP)
+afirmar(libre is False, "y la pregunta en vivo de la firma tambien la ve tomada")
+
+for costo, que in (("mucho", "con letras"), (-5, "negativo"), (True, "un si/no")):
+    prov = ProveedorInst()
+    with escenario(Registro(), prov):
+        r = alta.crear(config_inst(), TENANT, actor="x", origen=ORIGEN,
+                       datos=datos(costo_instalacion=costo), espera_s=0.2, intervalo_s=0)
+    afirmar(r.estado == alta.DATOS_INVALIDOS and not prov.llamadas,
+            f"un costo {que} no se arregla: datos invalidos y ni una llamada ({r.estado})")
+prov = ProveedorInst()
+with escenario(Registro(), prov):
+    r = alta.crear(config_inst(), TENANT, actor="x", origen=ORIGEN, datos=datos(),
+                   espera_s=0.2, intervalo_s=0)
+afirmar(r.estado == alta.CREADO and "costo_instalacion" not in prov.de(CREAR)[0]
+        and "sn_onu" not in prov.de(CREAR)[0], "sin costo ni serial, sale igual y no viajan vacios")
+
+
+seccion("24. LA ACTIVACION: la instalacion de ESTE contrato pasa a cliente, una vez y leyendo")
+
+
+def inst_nuestra(id_servicio=7000):
+    return {"id_servicio": id_servicio, "ip": IP, "servicio": NOMBRE_EN_ROUTER, "cedula": "1234500001"}
+
+
+def activar(prov, registro=None, origen="activacion_de_contrato:c-1:1", espera_s=0.2,
+            id_servicio="7000", **kw):
+    with escenario(registro or Registro(), prov, **kw):
+        return alta.activar(config_inst(), TENANT, actor="Encargada Rosa", origen=origen,
+                            datos=datos(), id_servicio=id_servicio, espera_s=espera_s,
+                            intervalo_s=0)
+
+
+prov = ProveedorInst(instalaciones=[inst_nuestra()])
+r = activar(prov)
+afirmar(r.estado == alta.ACTIVADO and r.id_cliente == "7000",
+        f"queda ACTIVADA: se pidio y se leyo en la lista de clientes ({r.estado})")
+afirmar(prov.de("activar_servicio") == [{"servicios": [7000]}],
+        f"el pedido lleva el numero, como lista ({prov.de('activar_servicio')})")
+p0 = prov.permisos[0] if prov.permisos else None
+afirmar(p0 is not None and p0.clase == "humana" and p0.actor == "Encargada Rosa",
+        "salio con el permiso HUMANO de quien valido")
+afirmar(prov.orden.index("(interruptor)") < prov.orden.index("activar_servicio"),
+        "el interruptor se lee ANTES de escribir")
+
+prov = ProveedorInst(clientes=[inst_nuestra()])
+r = activar(prov)
+afirmar(r.estado == alta.YA_ESTABA and not prov.de("activar_servicio"),
+        f"si YA es cliente, no se escribe nada ({r.estado})")
+
+for inst, que in (([], "no hay instalacion"),
+                  ([{**inst_nuestra(), "servicio": "OTRA PERSONA", "cedula": "999"}], "es de otra persona"),
+                  ([inst_nuestra(7001)], "tiene otro numero")):
+    prov = ProveedorInst(instalaciones=inst)
+    r = activar(prov)
+    afirmar(r.estado == alta.NO_ENCONTRADA and not prov.de("activar_servicio"),
+            f"si {que}: NO ENCONTRADA y ni una escritura ({r.estado})")
+
+prov = ProveedorInst(instalaciones=[inst_nuestra()])
+r = activar(prov, permitido=False)
+afirmar(r.estado == alta.BLOQUEADO and not prov.de("activar_servicio"),
+        f"con el interruptor detenido no se activa ({r.estado})")
+
+prov = ProveedorInst(instalaciones=[inst_nuestra()], activa=False, error_al_activar=ErrorHttp(400))
+r = activar(prov)
+afirmar(r.estado == alta.FALLO, f"un 4xx es el proveedor diciendo que no: FALLO ({r.estado})")
+
+prov = ProveedorInst(instalaciones=[inst_nuestra()], activa_tras=10**6)
+r = activar(prov, espera_s=0.05)
+afirmar(r.estado == alta.EN_CURSO, f"se pidio y no aparece a tiempo: EN CURSO, no fallo ({r.estado})")
+prov.activa_tras, prov._por_activar[0][0] = 0, 0
+with escenario(Registro(), prov):
+    c = alta.comprobar_activacion(config_inst(), TENANT, datos=datos(), id_servicio="7000")
+afirmar(c.estado == alta.ACTIVADO and prov.de("activar_servicio") == [{"servicios": [7000]}],
+        f"y comprobar despues SOLO LEE y la encuentra ({c.estado})")
+
+registro = Registro()
+prov = ProveedorInst(instalaciones=[inst_nuestra()], activa_tras=10**6)
+activar(prov, registro=registro, espera_s=0.02)
+activar(prov, registro=registro, espera_s=0.02)
+afirmar(len(prov.de("activar_servicio")) == 1,
+        f"el MISMO pedido dos veces escribe UNA ({len(prov.de('activar_servicio'))})")
+
+for numero in ("", "abc", None, "7000; 1"):
+    prov = ProveedorInst(instalaciones=[inst_nuestra()])
+    r = activar(prov, id_servicio=numero)
+    afirmar(r.estado == alta.DATOS_INVALIDOS and not prov.llamadas,
+            f"un numero de servicio {numero!r} no sirve: ni una llamada ({r.estado})")
+
+prov = ProveedorInst(instalaciones=[inst_nuestra()])
+with escenario(Registro(), prov):
+    r = alta.activar(Config(), TENANT, actor="x", origen="o", datos=datos(), id_servicio="7000",
+                     espera_s=0, intervalo_s=0)
+afirmar(r.estado == alta.SIN_HERRAMIENTA and not prov.llamadas,
+        "sin la herramienta que activa (ni la lista de instalaciones) no hay activacion")
+
+
+seccion("25. la que ACTIVA: con sus parametros, nunca de solo lectura, ni de la ruta generica ni de un agente")
+ACT_OK = dict(campo_servicios="servicios")
+try:
+    herramienta(nombre="activa", endpoint="/api/clientes/activar/", activa_servicio=True,
+                parametros_de_activacion=ACT_OK)
+    afirmar(True, "EL CONTROL: bien declarada, carga")
+except Exception as e:                                           # noqa: BLE001
+    afirmar(False, f"EL CONTROL: bien declarada, carga ({e})")
+no_carga("la marca de activar sin sus parametros", activa_servicio=True)
+no_carga("los parametros de activar sin la marca", parametros_de_activacion=ACT_OK)
+no_carga("la que activa, de solo lectura", activa_servicio=True, parametros_de_activacion=ACT_OK,
+         solo_lectura=True, requiere_confirmacion=False, metodo="GET")
+no_carga("la que activa, invocable por un servicio (saldria por la puerta autonoma)",
+         activa_servicio=True, parametros_de_activacion=ACT_OK, invocable_por_servicio=True)
+no_carga("una campo de servicios vacio", activa_servicio=True,
+         parametros_de_activacion=dict(campo_servicios="  "))
+
 # ---------------------------------------------------------------------------
 print()
 if _fallos:

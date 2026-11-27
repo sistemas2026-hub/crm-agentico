@@ -186,6 +186,45 @@ try:
         afirmar(codigo == 400 and llamadas == [], f"comprobar no acepta {que}: {codigo}")
     codigo, _ = pedir({"datos": {**PARA_RECONOCER, "password_cpe": "x"}}, URL_COMPROBAR)
     afirmar(codigo == 400 and llamadas == [], f"ni una contrasena entre los datos: {codigo}")
+    # -----------------------------------------------------------------------
+    seccion("9. ACTIVAR la instalacion (26/11/2026): mismo contrato angosto y la misma puerta")
+    URL_ACTIVAR = f"/interno/contrato/{CONTRATO}/activar-cliente?tenant=tenant-de-prueba"
+    URL_COMP_ACT = f"/interno/contrato/{CONTRATO}/comprobar-activacion?tenant=tenant-de-prueba"
+    _viejos_act = (alta.activar, alta.comprobar_activacion)
+
+    def _activar(config, tenant, **kw):
+        llamadas.append({"que": "activar", "tenant": tenant, **kw})
+        return alta.ResultadoAlta(alta.ACTIVADO, id_cliente="7000")
+
+    def _comprobar_act(config, tenant, **kw):
+        llamadas.append({"que": "comprobar_activacion", "tenant": tenant, **kw})
+        return alta.ResultadoAlta(alta.EN_CURSO, id_cliente="7000")
+
+    alta.activar, alta.comprobar_activacion = _activar, _comprobar_act
+    try:
+        codigo, cuerpo = pedir({"actor": "Encargada Rosa", "datos": {**DATOS, "costo_instalacion": 80000,
+                                "serial_onu": "FHTT12345678"}, "intento": 2, "id_servicio": "7000"},
+                               URL_ACTIVAR)
+        afirmar(codigo == 200 and cuerpo.get("estado") == "activado", f"200 activado: {codigo} {cuerpo}")
+        afirmar(llamadas and llamadas[0].get("origen") == f"activacion_de_contrato:{CONTRATO}:2"
+                and llamadas[0].get("actor") == "Encargada Rosa"
+                and llamadas[0].get("id_servicio") == "7000",
+                f"el ORIGEN lo arma el motor, y viajan quien valido y el numero: {llamadas[:1]}")
+        codigo, _ = pedir({"datos": DATOS, "id_servicio": "7000"}, URL_ACTIVAR)
+        afirmar(codigo == 400 and llamadas == [], f"sin quien valido no hay activacion: {codigo}")
+        codigo, _ = pedir({"actor": "x", "datos": DATOS, "id_servicio": "7000", "origen": "otro"},
+                          URL_ACTIVAR)
+        afirmar(codigo == 400 and llamadas == [], f"el origen NO se acepta de afuera: {codigo}")
+        codigo, _ = pedir({"actor": "x", "datos": {**DATOS, "password_cpe": "x"}, "id_servicio": "7000"},
+                          URL_ACTIVAR)
+        afirmar(codigo == 400 and llamadas == [], f"ni una contrasena entre los datos: {codigo}")
+        codigo, cuerpo = pedir({"datos": PARA_RECONOCER, "id_servicio": "7000"}, URL_COMP_ACT)
+        afirmar(codigo == 202 and llamadas and llamadas[0]["que"] == "comprobar_activacion",
+                f"comprobar solo lee y dice como va: {codigo} {cuerpo}")
+        codigo, _ = pedir({"datos": PARA_RECONOCER, "id_servicio": "7000", "actor": "x"}, URL_COMP_ACT)
+        afirmar(codigo == 400, f"comprobar no acepta un actor: no escribe nada: {codigo}")
+    finally:
+        alta.activar, alta.comprobar_activacion = _viejos_act
 finally:
     api._config_de, alta.crear, alta.comprobar = _viejos
 

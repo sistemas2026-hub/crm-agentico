@@ -1479,6 +1479,13 @@ class CompletarTrabajoView(APIView):
         #  llego antes, el Supervisor la revisa y decide en segundos.
         tareas_de_campo.pedir_revision_del_cierre(orden)
 
+        #  LA INSTALACION QUE VALIDA UNA PERSONA (26/11/2026): al finalizar se
+        #  crea en el proveedor COMO INSTALACION, ya con el costo y la ONU.
+        #  Nunca rompe el finalizar. Ver campo/instalacion.py.
+        from campo.instalacion import al_finalizar
+
+        al_finalizar(orden, request.profile)
+
         #  Y AL TICKET DE DEXTER TAMBIEN  --  06/11/2026
         #
         #  El usuario, mirando la OT #184: «en dexter solo registro esos

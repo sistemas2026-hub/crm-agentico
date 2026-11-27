@@ -80,7 +80,10 @@ class ContratoDeLaOrdenView(APIView):
             from campo.contrato import configuracion_de
             from campo.services import alta_en_el_isp
 
-            if configuracion_de(orden.org)["crear_en_el_isp"]:
+            #  Si una persona valida la instalacion (26/11/2026), el alta NO
+            #  sale al firmar: sale al «Finalizar trabajo» (campo/instalacion.py).
+            config = configuracion_de(orden.org)
+            if config["crear_en_el_isp"] and not config["validar_antes_de_activar"]:
                 alta_en_el_isp.pedir_alta(contrato)
         return Response({"contrato": contrato.como_dict()},
                         status=status.HTTP_201_CREATED if creado else status.HTTP_200_OK)
@@ -335,7 +338,9 @@ class ConfiguracionDeContratoView(APIView):
         for campo, nombre in (("datos_en_mayusculas", "Los datos en mayúsculas"),
                               ("barrio_en_la_direccion", "El barrio pegado a la dirección"),
                               ("crear_en_el_isp", "Crear al cliente en el proveedor al firmar"),
-                              ("activar_onu", "Activar la ONU desde la app")):
+                              ("activar_onu", "Activar la ONU desde la app"),
+                              ("validar_antes_de_activar",
+                               "Una persona valida la instalación antes de activarla")):
             if campo in datos:
                 if not isinstance(datos[campo], bool):
                     return Response({"detail": f"«{nombre}» es sí o no."},

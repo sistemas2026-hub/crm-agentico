@@ -25,6 +25,7 @@ import '../trabajo/estado_trabajo.dart';
 import '../trabajo/orden_operativo.dart';
 import '../trabajo/trabajo_vista.dart';
 import 'acciones_orden.dart';
+import 'entrega_de_la_instalacion.dart';
 import 'guardar_ubicacion_del_cliente.dart';
 import 'mapa_del_cliente.dart';
 import 'comprobar_conexion.dart';
@@ -618,6 +619,19 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   if (trabajo.correccion != null) ...<Widget>[
                     const SizedBox(height: AppSpacing.md),
                     _loQueHayQueRehacer(trabajo, trabajo.correccion!),
+                  ],
+                  //  LA INSTALACIÓN QUE VALIDA UNA PERSONA (26/11/2026): finalizada,
+                  //  espera la validación; aprobada, se valida el servicio y se
+                  //  entrega aquí, y eso cierra el ticket.
+                  if (trabajo.estado == EstadoTrabajo.completadaCampo &&
+                      trabajo.tipoCodigo.contains('instalacion') &&
+                      trabajo.correccion == null) ...<Widget>[
+                    const SizedBox(height: AppSpacing.md),
+                    EntregaDeLaInstalacion(
+                      ordenId: widget.ordenId,
+                      validacion: trabajo.estadoValidacion,
+                      alEntregar: widget.ordenes.recargar,
+                    ),
                   ],
                   const SizedBox(height: AppSpacing.md),
                   _accionesRapidas(trabajo),

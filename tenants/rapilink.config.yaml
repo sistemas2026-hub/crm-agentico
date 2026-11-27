@@ -6470,9 +6470,13 @@ herramientas:
     # persona que el alta exige. Sale SOLO por su ruta propia.
     roles_permitidos: [administracion]
     base_url: https://api.wisphub.io
-    # La zona va en la RUTA. SIN `?instalacion`: Rapilink no usa el modulo de
-    # instalaciones (medido el 12/11/2026).
-    endpoint: /api/clientes/agregar-cliente/{id_zona}/
+    # La zona va en la RUTA. CON `?instalacion` desde el 26/11/2026 (decision
+    # del usuario): «en instalaciones se crea instalacion y despues un
+    # encargado valida si todo esta bien y activa, que pasa a cliente». El
+    # 12/11 se habia medido que Rapilink casi no usaba ese modulo; ahora es el
+    # proceso. La activa `activar_servicio_en_wisphub`, cuando una persona la
+    # aprobo en Dexter.
+    endpoint: /api/clientes/agregar-cliente/{id_zona}/?instalacion
     metodo: POST
     auth_ref: WISPHUB_API_KEY
     auth_esquema: Api-Key
@@ -6482,6 +6486,8 @@ herramientas:
     # en todos los equipos. La CLAVE no va aca: es un secreto (ver `secretos`).
     argumentos_fijos:
       usuario_router_wifi: admin
+      # La instalacion nace «Nueva» (1, segun la documentacion de WispHub).
+      estado_instalacion: 1
     parametros_de_alta:
       zona: id_zona
       # El nombre del cliente en el router de red es su nombre completo: asi
@@ -6507,6 +6513,9 @@ herramientas:
         barrio: localidad
         coordenadas: coordenadas
         nota: comentarios
+        # 26/11/2026: lo que cobro el tecnico y la ONU que instalo.
+        costo_instalacion: costo_instalacion
+        serial_onu: sn_onu
       # campo de WispHub -> NOMBRE del secreto de la empresa (Configuracion ->
       # Credenciales). Si no esta cargado, el campo no se manda y el resultado
       # del alta lo dice.
@@ -6545,6 +6554,55 @@ herramientas:
       # agosto creando un cliente de prueba). Por eso son dos nombres.
       campo_nombre_en_router: servicio
       campo_documento: cedula
+
+  - nombre: buscar_instalacion_por_ip
+    tipo: http
+    descripcion: >
+      Dice que INSTALACION de WispHub tiene una direccion IP. Las instalaciones
+      son otra lista: no salen en la de clientes. La usa el alta para no pisar
+      una IP tomada por una instalacion y para confirmar que la suya quedo
+      creada, y la activacion para encontrarla. No la llama el modelo.
+    solo_lectura: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    endpoint: /api/instalaciones/
+    metodo: GET
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    busca_cliente_por_ip: true
+    parametros_de_busqueda_por_ip:
+      # VERIFICADO el 26/11/2026 con el valor imposible: `ip=203.0.113.250` da
+      # 0, y la IP de la unica instalacion da 1. La fila tiene los mismos
+      # campos que la de un cliente (id_servicio, servicio, cedula, ip).
+      ip: ip
+      campo_id: id_servicio
+      campo_nombre_en_router: servicio
+      campo_documento: cedula
+      son_instalaciones: true
+
+  - nombre: activar_servicio_en_wisphub
+    tipo: http
+    descripcion: >
+      Pasa a cliente la instalacion de un contrato, cuando una persona la valido
+      en Dexter. Da servicio: sale solo por la puerta humana. No la llama el
+      modelo.
+    solo_lectura: false
+    requiere_confirmacion: true
+    roles_permitidos: [administracion]
+    base_url: https://api.wisphub.io
+    # Segun la documentacion de WispHub, «Activar / Desactivar servicios» con
+    # el permiso «Activar y Desactivar Clientes». Que convierta una
+    # INSTALACION en cliente NO esta verificado: lo dice la prueba vigilada.
+    endpoint: /api/clientes/activar/
+    metodo: POST
+    auth_ref: WISPHUB_API_KEY
+    auth_esquema: Api-Key
+    auth_header: Authorization
+    timeout_segundos: 60
+    activa_servicio: true
+    parametros_de_activacion:
+      campo_servicios: servicios
 
   - nombre: leer_tarea_de_wisphub
     tipo: http

@@ -147,6 +147,16 @@ R2_REGISTRO_EXTERNO = {
     #  por empresa hasta que la enciende. Si R2 es la clase correcta queda
     #  abierto para el dueño del producto, igual que con el alta.
     "autorizar_onu_en_smartolt",
+    #  26/11/2026: pasar a cliente la INSTALACION de un contrato, cuando una
+    #  persona la valido en Dexter (el usuario: «un encargado valida si todo
+    #  esta bien y activa, que pasa a cliente»). R2 con los asteriscos del
+    #  alta: da servicio y abre la relacion de cobro, y la deshace otra
+    #  operacion del mismo proveedor (desactivar). Barreras en codigo: solo
+    #  por su ruta y la puerta HUMANA de quien valido, solo si la instalacion
+    #  existe y es de ese contrato, no invocable por un servicio, fuera del
+    #  catalogo de todo rol. Si R2 es la clase correcta queda abierto para el
+    #  dueño del producto, igual que con el alta.
+    "activar_servicio_en_wisphub",
     #  30/09/2026. El nombre invita a leerla como R3 y no lo es: NO actua sobre
     #  la ONT/ONU en la casa del cliente. Escribe UN campo --'sn_onu'-- en la
     #  ficha del cliente de WispHub, con 'PUT /api/clientes/{id_servicio}/'. Es

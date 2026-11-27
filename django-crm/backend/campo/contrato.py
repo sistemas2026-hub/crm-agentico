@@ -156,6 +156,10 @@ class ConfiguracionDeContrato(BaseModel):
     #  alta: escribe en el sistema del proveedor. La VLAN de cada servidor va
     #  en `servidores` (`vlan`). Ver `campo/activacion_onu.py`.
     activar_onu = models.BooleanField(default=False)
+    #  LA INSTALACION LA VALIDA UNA PERSONA ANTES DE ACTIVARLA (26/11/2026).
+    #  Encendido: el alta se pide al «Finalizar trabajo» y COMO INSTALACION, y
+    #  una persona la aprueba en Dexter, que la activa. Ver campo/instalacion.py.
+    validar_antes_de_activar = models.BooleanField(default=False)
 
     class Meta:
         db_table = "campo_configuracion_contrato"
@@ -169,13 +173,15 @@ class ConfiguracionDeContrato(BaseModel):
                 "digitos_del_telefono": self.digitos_del_telefono,
                 "abreviaturas_de_direccion": list(self.abreviaturas_de_direccion or []),
                 "crear_en_el_isp": self.crear_en_el_isp,
-                "activar_onu": self.activar_onu}
+                "activar_onu": self.activar_onu,
+                "validar_antes_de_activar": self.validar_antes_de_activar}
 
 
 VACIA = {"nit": "", "servidores": [], "texto_condiciones": "",
          "datos_en_mayusculas": False, "barrio_en_la_direccion": False,
          "digitos_del_telefono": 0, "abreviaturas_de_direccion": [],
-         "crear_en_el_isp": False, "activar_onu": False}
+         "crear_en_el_isp": False, "activar_onu": False,
+         "validar_antes_de_activar": False}
 
 #: Tope de `digitos_del_telefono`: ningun pais pasa de 15 (E.164).
 MAXIMO_DIGITOS_DE_TELEFONO = 15
@@ -193,8 +199,11 @@ class ContratoDeServicio(BaseModel):
     FIRMADO = "firmado"            # existe y tiene firma; el alta en el ISP falta
     EN_EL_ISP = "en_el_isp"        # el cliente quedo creado en WispHub
     ANULADO = "anulado"            # se dejo sin efecto; la orden puede firmar otro
-    ESTADOS = ((FIRMADO, "Firmado"), (EN_EL_ISP, "Creado en el ISP"),
-               (ANULADO, "Anulado"))
+    #  26/11/2026: creada en el proveedor como INSTALACION; falta que una
+    #  persona la valide y la active (campo/instalacion.py).
+    INSTALACION = "instalacion"
+    ESTADOS = ((FIRMADO, "Firmado"), (INSTALACION, "Instalación creada en el ISP"),
+               (EN_EL_ISP, "Creado en el ISP"), (ANULADO, "Anulado"))
 
     org = models.ForeignKey(Org, on_delete=models.CASCADE,
                             related_name="contratos_de_servicio")
@@ -278,6 +287,25 @@ class ContratoDeServicio(BaseModel):
     #: duplicado: con esto en True, una IP «ocupada» puede estar ocupada por
     #: ESTE cliente, y no se le dice a nadie que elija otra.
     alta_emitida = models.BooleanField(default=False)
+
+    #  EL ALTA COMO INSTALACION Y SU ACTIVACION (26/11/2026). Ver
+    #  campo/instalacion.py.
+    alta_como_instalacion = models.BooleanField(default=False)
+    ACTIVACION_PEDIDA = "pedida"
+    ACTIVACION_EN_CURSO = "en_curso"
+    ACTIVACION_POR_REVISAR = "por_revisar"
+    ACTIVACION_FALLIDA = "fallida"
+    #  Lo que esta en vuelo: no se pide otra encima. «Por revisar» NO: una
+    #  persona vuelve a aprobar y el motor empieza mirando si ya es cliente.
+    ACTIVACION_SIN_RESOLVER = (ACTIVACION_PEDIDA, ACTIVACION_EN_CURSO)
+    activacion_estado = models.CharField(max_length=20, blank=True, default="")
+    activacion_detalle = models.CharField(max_length=300, blank=True, default="")
+    activacion_intento = models.PositiveSmallIntegerField(default=0)
+    activacion_actualizada_en = models.DateTimeField(null=True, blank=True)
+    activado_por = models.ForeignKey("common.Profile", on_delete=models.SET_NULL,
+                                     null=True, blank=True,
+                                     related_name="instalaciones_activadas")
+    activado_en = models.DateTimeField(null=True, blank=True)
     #: Quien pidio el ultimo pedido, cuando lo pidio una persona. Vacio = salio
     #: de la firma, y entonces es quien firmo.
     alta_pedida_por = models.ForeignKey("common.Profile", on_delete=models.SET_NULL,
@@ -342,6 +370,17 @@ class ContratoDeServicio(BaseModel):
                 #  NADIE SABE si quedo creado: lo dice una persona de gestion.
                 "por_revisar": (self.estado == self.FIRMADO
                                 and self.alta_estado == self.ALTA_POR_REVISAR),
+            },
+            #  LA INSTALACION Y SU ACTIVACION (26/11/2026).
+            "instalacion": {
+                "es_instalacion": bool(self.alta_como_instalacion),
+                "activacion": self.activacion_estado or None,
+                "detalle": self.activacion_detalle or None,
+                "actualizada_en": (self.activacion_actualizada_en.isoformat()
+                                   if self.activacion_actualizada_en else None),
+                "activada_en": self.activado_en.isoformat() if self.activado_en else None,
+                "se_puede_activar": (self.estado == self.INSTALACION
+                                     and self.activacion_estado not in self.ACTIVACION_SIN_RESOLVER),
             },
             "anulado_en": self.anulado_en.isoformat() if self.anulado_en else None,
             "motivo_anulacion": self.motivo_anulacion or None,

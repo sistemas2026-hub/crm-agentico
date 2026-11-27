@@ -321,6 +321,12 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
           return 'OT #$sinReporte: $minutos min sin reportar';
         }
         return titulo.isEmpty ? 'Sin reporte' : titulo;
+      //  LA INSTALACIÓN APROBADA (26/11/2026): que valide el servicio y la
+      //  entregue. Con el número, por lo mismo que arriba.
+      case 'instalacion_aprobada':
+        final Object? aprobada = datos['orden_numero'];
+        if (aprobada != null) return 'OT #$aprobada aprobada: valida el servicio y entrégalo';
+        return titulo.isEmpty ? 'Instalación aprobada' : titulo;
       default:
         return titulo.isEmpty ? 'Aviso' : titulo;
     }

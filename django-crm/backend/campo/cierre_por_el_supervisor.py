@@ -439,6 +439,11 @@ def atender_la_que_no_cierra(orden, revision) -> str:
     #  Lo de siempre lo sigue filtrando el `if not requisitos` de abajo: una
     #  duda sin nada concreto que pedir --la medicion que no llego todavia,
     #  una foto que el modelo no supo leer-- sale por ahi y no se devuelve.
+    from campo.instalacion import requiere_validacion_humana
+
+    #  Una instalacion la devuelve o la aprueba una PERSONA (26/11/2026).
+    if requiere_validacion_humana(orden):
+        return "nada"
     veredicto = (revision or {}).get("veredicto")
     if veredicto not in (RC.NO_CERRAR, RC.REVISAR):
         return "nada"
@@ -512,9 +517,14 @@ def _intentar(orden, revision, ahora) -> str:
     comparten la fase horaria y el disparo inmediato: un camino nuevo que
     repitiera estos pasos a mano es como se pierde una de las guardas.
     """
+    from campo.instalacion import requiere_validacion_humana
     from campo.models import EventoTrabajo
     from campo.services import cierre_en_isp
 
+    #  UNA INSTALACION LA APRUEBA UNA PERSONA (26/11/2026): aprobarla es darle
+    #  servicio. El Supervisor no la cierra.
+    if requiere_validacion_humana(orden):
+        return "salteada"
     if not _reclamar(orden, ahora):
         return "salteada"
     #  CON LO QUE VALIDO (06/11/2026): el usuario pidio que el Supervisor

@@ -901,7 +901,10 @@ class ParametrosDeCoordenada(Base):
 #: defecto (asi aparecio una quinta contrasena el 14/11/2026).
 DATOS_DEL_ALTA = ("nombre_en_router", "ip", "plan", "nombre", "apellido",
                   "documento", "correo", "telefono", "direccion", "barrio",
-                  "coordenadas", "nota")
+                  "coordenadas", "nota",
+                  #  26/11/2026: el alta como INSTALACION lleva lo que cobro el
+                  #  tecnico y el serial de la ONU que instalo.
+                  "costo_instalacion", "serial_onu")
 
 #: Sin estos tres no hay cliente que crear.
 DATOS_OBLIGATORIOS_DEL_ALTA = ("nombre_en_router", "ip", "plan")
@@ -960,6 +963,25 @@ class ParametrosDeOnu(Base):
         if faltan:
             raise ValueError(f"'fila' no dice donde vienen {faltan}: sin eso no se sabe "
                              f"en que puerto espera la ONU.")
+        return self
+
+
+class ParametrosDeActivacion(Base):
+    """Como se pasa a cliente una instalacion en ESTE proveedor -- 26/11/2026.
+
+    En la primera empresa el alta crea una INSTALACION y una persona la
+    activa despues de validar los documentos. El motor sabe QUE es activar
+    (un numero de servicio que deja de ser instalacion); como se le dice en
+    cada proveedor va aca.
+    """
+
+    #: El campo del pedido que lleva la LISTA de numeros de servicio.
+    campo_servicios: str
+
+    @model_validator(mode="after")
+    def _con_nombre(self):
+        if not self.campo_servicios.strip():
+            raise ValueError("falta 'campo_servicios': donde va la lista de servicios")
         return self
 
 
@@ -1051,6 +1073,12 @@ class ParametrosDeBusquedaPorIp(Base):
     campo_nombre_en_router: str = ""
     #: Donde se lee el documento del cliente. Vacio = no se puede comparar.
     campo_documento: str = ""
+    #: ESTA LISTA ES DE INSTALACIONES, no de clientes (26/11/2026). En la
+    #: primera empresa las instalaciones son otra lista del proveedor: una IP
+    #: puede estar tomada por una instalacion que la de clientes no muestra, y
+    #: la instalacion recien creada se confirma aca. Que una ya es CLIENTE lo
+    #: dice solo la lista que no lleva esta marca.
+    son_instalaciones: bool = False
 
     @model_validator(mode="after")
     def _con_nombre(self):
@@ -1631,6 +1659,10 @@ class Herramienta(Base):
     parametros_de_busqueda_por_ip: ParametrosDeBusquedaPorIp | None = None
     lee_tarea: bool = False
     parametros_de_tarea: ParametrosDeTarea | None = None
+    #: Pasa a cliente una instalacion (26/11/2026). La escritura que da
+    #: servicio: solo por la puerta humana, la de quien valido.
+    activa_servicio: bool = False
+    parametros_de_activacion: ParametrosDeActivacion | None = None
     #: Crea el ticket del ISP que respalda una escalada. La usa la cola de
     #: efectos externos (B4), que le embebe un DEXTER_REF en la descripcion
     #: para poder recuperarlo si el id se pierde (Q2.1).
@@ -2414,17 +2446,19 @@ class Herramienta(Base):
                 ("crea_cliente", "parametros_de_alta", "crea un cliente"),
                 ("busca_cliente_por_ip", "parametros_de_busqueda_por_ip",
                  "busca un cliente por su IP"),
-                ("lee_tarea", "parametros_de_tarea", "lee una tarea")):
+                ("lee_tarea", "parametros_de_tarea", "lee una tarea"),
+                ("activa_servicio", "parametros_de_activacion",
+                 "pasa una instalacion a cliente")):
             if getattr(self, marca) != (getattr(self, parametros) is not None):
                 raise ValueError(
                     f"'{self.nombre}': '{marca}' y '{parametros}' van juntos. "
                     f"Una herramienta que {que} sin decir como se llaman sus "
                     f"campos no se puede usar, y los parametros sin la marca no "
                     f"los lee nadie.")
-        if self.crea_cliente and self.solo_lectura:
+        if (self.crea_cliente or self.activa_servicio) and self.solo_lectura:
             raise ValueError(
-                f"'{self.nombre}' crea un cliente y se declara de solo lectura: "
-                f"asi saldria sin pasar por la frontera.")
+                f"'{self.nombre}' crea o activa un cliente y se declara de solo "
+                f"lectura: asi saldria sin pasar por la frontera.")
         #  NINGUNA DE LAS TRES ES INVOCABLE POR UN SERVICIO  --  auditoria de
         #  frontera y revision de PII, 25/11/2026. Con esa bandera, la ruta
         #  generica de herramientas las admite: la que crea, por la puerta
@@ -2432,7 +2466,8 @@ class Herramienta(Base):
         #  por IP devolveria la ficha cruda de un cliente a cualquier
         #  servicio. El alta no la necesita: llama al ejecutor directo, desde
         #  su propia ruta.
-        if ((self.crea_cliente or self.busca_cliente_por_ip or self.lee_tarea)
+        if ((self.crea_cliente or self.busca_cliente_por_ip or self.lee_tarea
+             or self.activa_servicio)
                 and self.invocable_por_servicio):
             raise ValueError(
                 f"'{self.nombre}' es una herramienta del alta y no puede ser "
@@ -5186,6 +5221,7 @@ class TenantConfig(Base):
             # identidad verificada, a quien elija la IP.
             del_alta = sorted(h.nombre for h in self.herramientas
                               if (h.crea_cliente or h.busca_cliente_por_ip or h.lee_tarea
+                                  or h.activa_servicio
                                   or h.busca_onu_sin_autorizar or h.autoriza_onu
                                   or h.lee_onu or h.lista_zonas_de_red)
                               and h.nombre in rol.puede_consultar)

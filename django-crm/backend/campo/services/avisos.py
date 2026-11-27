@@ -115,6 +115,37 @@ def avisar_devolucion(orden, requisitos: list[str], observacion: str = "") -> No
 
 
 #: El trabajo estaba detenido y alguien lo destrabo (20/11/2026).
+VERBO_INSTALACION_APROBADA = "instalacion_aprobada"
+
+
+def avisar_instalacion_aprobada(orden) -> bool:
+    """La instalacion quedo aprobada y activada: el tecnico valida el servicio
+    y la entrega al cliente (26/11/2026). Solo al telefono, sin datos del
+    cliente. Devuelve si habia a quien avisarle."""
+    perfiles = [p for p in _asignados(orden) if p is not None]
+    if not perfiles:
+        return False
+    contenido = {"orden_numero": orden.numero, "que_sigue": "validar_y_entregar"}
+    avisos_por_perfil = _notificar(
+        perfiles, VERBO_INSTALACION_APROBADA, entity=orden,
+        entity_name=f"OT #{orden.numero}", link=f"/ot/{orden.id}", contenido=contenido)
+    _despachar(
+        org=orden.org,
+        clave=f"instalacion_aprobada|{orden.id}|{orden.vuelta}",
+        asunto=f"OT #{orden.numero}: instalación aprobada",
+        texto=(f"✅ La OT #{orden.numero} quedó aprobada y activada. Valida que el "
+               f"servicio funcione, entrégalo al cliente y confirma la entrega en la app."),
+        enlace_a=orden.id,
+        perfiles=perfiles,
+        enlace_interno=f"/ot/{orden.id}",
+        avisos_por_perfil=avisos_por_perfil,
+        contenido=contenido,
+        verbo=VERBO_INSTALACION_APROBADA,
+        solo_telefono=True,
+    )
+    return True
+
+
 VERBO_DESTRABADO = "trabajo_destrabado"
 
 

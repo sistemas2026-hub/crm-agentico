@@ -117,6 +117,9 @@ def revisar(orden, *, pendientes=None) -> dict | None:
                           #  trabajo que se pidio. Ver `_cuadra_con_el_ticket`.
                           _cuadra_con_el_ticket(orden))
               if p is not None]
+    #  LA INSTALACION QUE VALIDA UNA PERSONA (26/11/2026): lo que ella mira
+    #  ademas, ya revisado. Solo en ese modo: en otra empresa no cambia nada.
+    puntos += _de_la_instalacion(orden)
     if any(p["ok"] is False for p in puntos):
         veredicto = NO_CERRAR
     elif any(p["ok"] is None for p in puntos):
@@ -570,6 +573,65 @@ def guardar_foto(orden, revision, profile=None) -> None:
 
 def _punto(clave, ok, texto, **extra) -> dict:
     return {"clave": clave, "ok": ok, "texto": texto, **extra}
+
+
+def _de_la_instalacion(orden) -> list:
+    """Lo que revisa Dexter de una instalacion que valida una persona
+    (26/11/2026): el contrato firmado, la ONU activada en la red y el dinero
+    anotado. Los HECHOS pueden decir que no (no hay contrato); lo que falta de
+    anotar o confirmar queda en duda (None) para que la persona lo mire. Nunca
+    levanta: un punto que no se pudo calcular no se inventa."""
+    from campo import activacion_onu, dinero
+    from campo.contrato import configuracion_de, vigente_de
+    from campo.instalacion import requiere_validacion_humana
+
+    try:
+        if not requiere_validacion_humana(orden):
+            return []
+        puntos = []
+        contrato = vigente_de(orden)
+        if contrato is None:
+            puntos.append(_punto("contrato", False, "No hay un contrato firmado."))
+        else:
+            d = contrato.datos or {}
+            if d.get("documento_cambiado"):
+                puntos.append(_punto("contrato", None,
+                                     f"Contrato {contrato.numero} firmado, con un documento distinto "
+                                     "al de la solicitud: revisa la cédula."))
+            elif d.get("otro_titular"):
+                puntos.append(_punto("contrato", True,
+                                     f"Contrato {contrato.numero} firmado a nombre de otra persona, "
+                                     "que aceptó sus datos al firmar."))
+            else:
+                puntos.append(_punto("contrato", True, f"Contrato {contrato.numero} firmado."))
+        if configuracion_de(orden.org).get("activar_onu"):
+            u = activacion_onu.ultima(orden)
+            estado = getattr(u, "estado", "") if u is not None else ""
+            if estado in ("activada", "ya_estaba"):
+                lugar = " · ".join(x for x in (f"OLT {u.olt}" if u.olt else "",
+                                               f"placa {u.placa}" if u.placa else "",
+                                               f"puerto {u.puerto}" if u.puerto else "") if x)
+                puntos.append(_punto("onu", True, "ONU activada en la red"
+                                     + (f" ({lugar})." if lugar else ".")))
+            elif estado in ("pedida", "en_curso"):
+                puntos.append(_punto("onu", None, "La ONU se está activando en la red."))
+            else:
+                puntos.append(_punto("onu", None, "La ONU no aparece activada desde la app: "
+                                                  "revísala en SmartOLT."))
+        campos = dinero.campos_de_dinero(getattr(orden.tipo_trabajo_version, "esquema", None) or {})
+        if campos:
+            datos = orden.datos or {}
+            anotados = [(c["titulo"], datos.get(c["id"])) for c in campos
+                        if datos.get(c["id"]) not in (None, "")]
+            if anotados:
+                total = sum((dinero._monto(v) for _, v in anotados), dinero.Decimal(0))
+                puntos.append(_punto("dinero", True, f"Dinero anotado: ${dinero._numero(total):,}"
+                                     .replace(",", ".") + " en efectivo."))
+            else:
+                puntos.append(_punto("dinero", None, "El técnico no anotó el dinero que cobró."))
+        return puntos
+    except Exception:                                            # noqa: BLE001
+        return []
 
 
 def _fotos(orden):

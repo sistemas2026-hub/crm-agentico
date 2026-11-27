@@ -41,8 +41,24 @@
   const hrefDe = (p) =>
     p.estado ? `?estado=${p.estado}${p.automatica ? '&automatica=1' : ''}` : '/instalaciones';
   const esActiva = (p) =>
+    data.vista !== 'por_activar' &&
     (data.estado || '') === p.estado && Boolean(data.automatica) === Boolean(p.automatica);
-  import { CheckCircle2, AlertTriangle, MapPin, FileText, Inbox } from '@lucide/svelte';
+  import { CheckCircle2, AlertTriangle, MapPin, FileText, Inbox, BadgeCheck } from '@lucide/svelte';
+
+  //  POR ACTIVAR (26/11/2026): cual tarjeta tiene abierto el «Devolver».
+  let devolviendo = $state('');
+  const MARCA = /** @type {Record<string, string>} */ ({ true: '✔', false: '✖', null: '?' });
+  /** @param {any} i */
+  const queEspera = (i) =>
+    i.espera === 'entrega_del_tecnico'
+      ? 'Aprobada y activa: espera que el técnico valide el servicio y la entregue.'
+      : i.contrato?.instalacion?.activacion === 'pedida' || i.contrato?.instalacion?.activacion === 'en_curso'
+        ? 'Activándose en el proveedor…'
+        : i.contrato?.estado === 'instalacion'
+          ? 'Instalación creada en el proveedor. Revísala y apruébala para activarla.'
+          : i.contrato?.alta?.estado === 'pedida' || i.contrato?.alta?.estado === 'en_curso'
+            ? 'Creando la instalación en el proveedor…'
+            : 'La instalación todavía no está en el proveedor.';
 
   /** @type {{ data: any, form: any }} */
   let { data, form } = $props();
@@ -122,6 +138,8 @@
         aria-current={esActiva(p) ? 'page' : undefined}
       >{p.texto}</a>
     {/each}
+    <a href="?vista=por_activar" class="pestana" class:activa={data.vista === 'por_activar'}
+       aria-current={data.vista === 'por_activar' ? 'page' : undefined}>Por activar</a>
   </nav>
 
   {#if data.sinPermiso}
@@ -185,7 +203,122 @@
     </div>
   {/if}
 
-  {#if !data.solicitudes?.length && !data.sinPermiso}
+  {#if data.vista === 'por_activar'}
+    <!-- LA INSTALACIÓN QUE VALIDA UNA PERSONA (26/11/2026). El técnico finalizó;
+         aquí se revisa lo que dejó y se aprueba —eso la activa en el proveedor—
+         o se devuelve. Lo que se puede hacer lo decide el servidor
+         (`se_puede_activar`); la pantalla solo lo muestra. -->
+    {#if form?.de === 'instalacion' && form?.hecho}
+      <div class="ok"><CheckCircle2 size={16} /><span>{form.hecho}</span></div>
+    {/if}
+    {#if form?.de === 'instalacion' && form?.error}
+      <div class="alerta"><AlertTriangle size={16} /><span>{form.error}</span></div>
+    {/if}
+    {#if !data.error && !(data.instalaciones ?? []).length}
+      <section class="vacio">
+        <BadgeCheck size={26} />
+        <h2>No hay instalaciones esperando validación</h2>
+        <p>Cuando un técnico finalice una instalación, aparece aquí para revisarla y activarla.</p>
+      </section>
+    {/if}
+    {#each data.instalaciones ?? [] as i (i.orden_id)}
+      {@const c = i.contrato}
+      {@const r = i.revision}
+      <article class="tarjeta">
+        <div class="encabezado">
+          <div>
+            <h2>OT-{i.numero} · {i.cliente}</h2>
+            <p class="meta">
+              Contrato {c?.numero ?? '—'}{#if c?.servicio_isp}{' · '}N.º en el proveedor {c.servicio_isp}{/if}
+            </p>
+          </div>
+          <span class="cuando">{fecha(i.finalizada_en)}</span>
+        </div>
+        <p class="origen"><span>{queEspera(i)}</span></p>
+        {#if c?.instalacion?.detalle}
+          <p class="fallo"><AlertTriangle size={14} /><span>{c.instalacion.detalle}</span></p>
+        {/if}
+        {#if c?.alta?.estado === 'fallida' || c?.alta?.por_revisar}
+          <p class="fallo"><AlertTriangle size={14} /><span>La instalación no quedó creada en el proveedor. {c.alta.detalle ?? ''}</span></p>
+        {/if}
+
+        {#if r}
+          <div class="revision">
+            <div class="grupo-titulo">Lo que revisó Dexter</div>
+            <ul class="puntos">
+              {#each r.puntos ?? [] as pt (pt.clave)}
+                <li class:mal={pt.ok === false} class:duda={pt.ok === null}>
+                  <span class="marca" aria-hidden="true">{MARCA[String(pt.ok)]}</span>
+                  <span>{pt.texto}</span>
+                </li>
+              {/each}
+            </ul>
+            {#if (r.evidencias ?? []).length}
+              <div class="fotos">
+                {#each r.evidencias as e (e.id)}
+                  <figure class:falta={!e.evidencia_id}>
+                    {#if e.evidencia_id}
+                      <a href={`/api/supervisor-noc/evidencias/${e.evidencia_id}/archivo`} target="_blank" rel="noopener" title="Abrir la foto">
+                        <img src={`/api/supervisor-noc/evidencias/${e.evidencia_id}/archivo`} alt={e.titulo} loading="lazy" />
+                      </a>
+                    {:else}
+                      <span class="sin-foto" aria-hidden="true">—</span>
+                    {/if}
+                    <figcaption>{e.titulo}{#if e.pide_atencion}{' · '}<b>mirar</b>{/if}</figcaption>
+                  </figure>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <p class="origen"><span class="tenue">La revisión automática no se pudo calcular: revisa las fotos en la orden.</span></p>
+        {/if}
+
+        {#if i.espera === 'validacion'}
+          <div class="botones">
+            <form method="POST" action="?/aprobarInstalacion" use:enhance={() => {
+              enviando = i.orden_id;
+              return async ({ update }) => { await update({ reset: false }); enviando = ''; };
+            }}>
+              <input type="hidden" name="orden" value={i.orden_id} />
+              <button type="submit" class="aprobar" disabled={!c?.instalacion?.se_puede_activar || enviando === i.orden_id}
+                      title={c?.instalacion?.se_puede_activar ? '' : 'Primero tiene que estar creada la instalación en el proveedor'}>
+                {enviando === i.orden_id ? 'Aprobando…' : 'Aprobar y activar'}
+              </button>
+            </form>
+            <button type="button" class="cancelar" onclick={() => (devolviendo = devolviendo === i.orden_id ? '' : i.orden_id)}>
+              Devolver al técnico
+            </button>
+          </div>
+          {#if devolviendo === i.orden_id}
+            <form method="POST" action="?/devolverInstalacion" class="decision" use:enhance={() => {
+              enviando = i.orden_id;
+              return async ({ update }) => { await update({ reset: false }); enviando = ''; devolviendo = ''; };
+            }}>
+              <input type="hidden" name="orden" value={i.orden_id} />
+              <input type="hidden" name="vuelta" value={i.vuelta ?? 1} />
+              <fieldset class="rehacer">
+                <legend>Qué tiene que volver a tomar</legend>
+                {#each r?.evidencias ?? [] as e (e.id)}
+                  <label><input type="checkbox" name="requisito" value={e.id} /> {e.titulo}</label>
+                {:else}
+                  <p class="tenue">Esta plantilla no pide fotos.</p>
+                {/each}
+              </fieldset>
+              <label class="nota">Por qué
+                <textarea name="observacion" rows="2" placeholder="Lo lee el técnico tal cual."></textarea>
+              </label>
+              <div class="botones">
+                <button type="submit" class="rechazar" disabled={enviando === i.orden_id}>Devolver</button>
+              </div>
+            </form>
+          {/if}
+        {/if}
+      </article>
+    {/each}
+  {/if}
+
+  {#if data.vista !== 'por_activar' && !data.solicitudes?.length && !data.sinPermiso}
     <section class="vacio">
       <Inbox size={26} />
       <h2>No hay solicitudes esperando</h2>
@@ -585,6 +718,22 @@
   .origen { margin: 0; font-size: .82rem; display: flex; flex-wrap: wrap; gap: 6px; }
   .origen a { color: var(--v2-ember-text); }
   .tenue { color: var(--v2-slate); }
+
+  /* POR ACTIVAR (26/11/2026) */
+  .revision { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--v2-line); border-radius: 8px; background: var(--v2-paper); }
+  .puntos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: .85rem; }
+  .puntos li { display: flex; gap: 8px; align-items: flex-start; color: var(--v2-ink); }
+  .puntos .marca { width: 1.1em; flex: none; font-weight: 700; color: var(--v2-moss); }
+  .puntos li.mal .marca, .puntos li.mal { color: var(--v2-rust); }
+  .puntos li.duda .marca { color: var(--v2-clay); }
+  .fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .fotos figure { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+  .fotos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid var(--v2-line); }
+  .fotos .sin-foto { display: grid; place-items: center; aspect-ratio: 1; border-radius: 6px; border: 1px dashed var(--v2-line-strong); color: var(--v2-slate); }
+  .fotos figcaption { font-size: .74rem; color: var(--v2-slate); line-height: 1.25; }
+  .fotos figure.falta figcaption { color: var(--v2-rust); }
+  .rehacer { border: 1px solid var(--v2-line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; font-size: .86rem; }
+  .rehacer legend { font-weight: 600; padding: 0 4px; }
 
   /* El motivo de cancelacion se lee como una cita, porque lo es: son las
      palabras del cliente sin resumir ni corregir (ver CancelarSolicitudView). */

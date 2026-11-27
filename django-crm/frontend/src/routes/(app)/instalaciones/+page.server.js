@@ -7,9 +7,18 @@
  */
 import { fail } from '@sveltejs/kit';
 import { crearEnElIsp, decidir, leerBandeja, reintentar, resolverAlta } from '$lib/server/v2/solicitudes.js';
+import { aprobarInstalacion, leerPorActivar } from '$lib/server/v2/instalaciones-por-activar.js';
+import { devolverAlTecnico } from '$lib/server/v2/revision-del-cierre.js';
+import { mensajeDeError } from '$lib/server/v2/mensaje-de-error.js';
 
 /** @type {import('./$types').PageServerLoad} */
 export async function load({ cookies, url }) {
+  //  LA PESTAÑA «POR ACTIVAR» (26/11/2026): las instalaciones que finalizó el
+  //  técnico y esperan a una persona. Ver campo/instalacion.py.
+  if (url.searchParams.get('vista') === 'por_activar') {
+    const { instalaciones, error } = await leerPorActivar(cookies);
+    return { vista: 'por_activar', instalaciones, error, solicitudes: [], estado: '', automatica: false, sinPermiso: false };
+  }
   const estado = url.searchParams.get('estado') ?? '';
   // Las aprobadas por Dexter (pre-factibilidad) son su propia pestaña.
   const automatica = url.searchParams.get('automatica') === '1';
@@ -21,6 +30,40 @@ export async function load({ cookies, url }) {
 
 /** @type {import('./$types').Actions} */
 export const actions = {
+  //  APROBAR UNA INSTALACIÓN = ACTIVARLA en el proveedor (26/11/2026). El
+  //  servidor decide si se puede; acá solo se pide y se dice qué contestó.
+  async aprobarInstalacion({ request, cookies }) {
+    const form = await request.formData();
+    const orden = form.get('orden')?.toString() ?? '';
+    if (!orden) return fail(400, { error: 'Falta la orden.', de: 'instalacion' });
+    try {
+      await aprobarInstalacion(cookies, orden);
+      return { de: 'instalacion', orden, hecho: 'Aprobada. Se está activando en el proveedor: al quedar activa, al técnico le llega que valide el servicio y la entregue.' };
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      return fail(err?.status === 409 ? 409 : 400, { de: 'instalacion', orden, error: mensajeDeError(err) });
+    }
+  },
+
+  //  DEVOLVERLA AL TÉCNICO: lo mismo que en Programación (la vuelta es la
+  //  clave de idempotencia).
+  async devolverInstalacion({ request, cookies }) {
+    const form = await request.formData();
+    const orden = form.get('orden')?.toString() ?? '';
+    const vuelta = form.get('vuelta')?.toString() ?? '1';
+    const requisitos = form.getAll('requisito').map(String).filter(Boolean);
+    const observacion = form.get('observacion')?.toString()?.trim() ?? '';
+    if (!orden) return fail(400, { de: 'instalacion', error: 'Falta la orden.' });
+    if (!requisitos.length) return fail(400, { de: 'instalacion', orden, error: 'Marca qué foto tiene que volver a tomar.' });
+    if (!observacion) return fail(400, { de: 'instalacion', orden, error: 'Escribe por qué la devuelves: es lo que lee el técnico.' });
+    try {
+      await devolverAlTecnico({ cookies }, { orden, vuelta, requisitos, observacion });
+      return { de: 'instalacion', orden, hecho: 'Devuelta al técnico, con lo que tiene que rehacer.' };
+    } catch (e) {
+      return fail(400, { de: 'instalacion', orden, error: mensajeDeError(e) });
+    }
+  },
+
   async decidir({ request, cookies }) {
     const form = await request.formData();
     const id = form.get('id')?.toString();

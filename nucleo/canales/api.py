@@ -6085,6 +6085,8 @@ _CODIGOS_DEL_ALTA = {
     alta_de_cliente.NO_RECONOCIDO: 202,
     alta_de_cliente.DATOS_INVALIDOS: 400,
     alta_de_cliente.FALLO: 502,
+    alta_de_cliente.ACTIVADO: 200,
+    alta_de_cliente.NO_ENCONTRADA: 409,
 }
 
 #: Cuantos pedidos admite un mismo contrato. Cada numero es una clave
@@ -6095,7 +6097,8 @@ _PEDIDOS_POR_CONTRATO = 20
 #: Lo unico que estas dos rutas aceptan de un alta. Ni un campo mas: como se
 #: llama cada dato en el proveedor, y cualquier otro campo que su API acepte
 #: (cinco contrasenas, entre ellos), lo dice la configuracion, no quien llama.
-_DATOS_DEL_ALTA = {"zona", "ip", "plan", "cliente", "coordenadas", "nota"}
+_DATOS_DEL_ALTA = {"zona", "ip", "plan", "cliente", "coordenadas", "nota",
+                   "costo_instalacion", "serial_onu"}
 _DATOS_DEL_CLIENTE = {"nombre", "apellido", "documento", "correo", "telefono",
                       "direccion", "barrio"}
 
@@ -6174,6 +6177,77 @@ def interno_crear_cliente_del_contrato(contrato_id: str):
     resultado = alta_de_cliente.crear(
         config, tenant, actor=actor, datos=datos,
         origen=f"alta_de_contrato:{contrato_id}:{intento}")
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
+
+
+@app.post("/interno/contrato/<contrato_id>/activar-cliente")
+def interno_activar_cliente_del_contrato(contrato_id: str):
+    """
+    Pasa a cliente la INSTALACION de un contrato, cuando una persona la
+    aprobo en Dexter (26/11/2026). Mismo contrato angosto y misma puerta
+    humana que `crear-cliente`: el `actor` es quien valido, el `origen` lo
+    arma el motor con el contrato y el numero de pedido. Ver
+    nucleo/seguimiento/alta_de_cliente.py → `activar`.
+    """
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    permitidos = {"actor", "datos", "intento", "id_servicio"}
+    sobra = sorted(set(cuerpo) - permitidos)
+    if sobra:
+        return jsonify({"error": f"esta ruta solo acepta {sorted(permitidos)}. "
+                                 f"No acepta {sobra}."}), 400
+    actor = str(cuerpo.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "Falta 'actor': la puerta humana necesita "
+                                 "saber quien valido la instalacion."}), 400
+    intento = cuerpo.get("intento", 1)
+    if (isinstance(intento, bool) or not isinstance(intento, int)
+            or not 1 <= intento <= _PEDIDOS_POR_CONTRATO):
+        return jsonify({"error": f"'intento' es un numero de 1 a "
+                                 f"{_PEDIDOS_POR_CONTRATO}."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = alta_de_cliente.activar(
+        config, tenant, actor=actor, datos=datos, id_servicio=cuerpo.get("id_servicio"),
+        origen=f"activacion_de_contrato:{contrato_id}:{intento}")
+    return (jsonify(resultado.como_dict()),
+            _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
+
+
+@app.post("/interno/contrato/<contrato_id>/comprobar-activacion")
+def interno_comprobar_activacion_del_contrato(contrato_id: str):
+    """Si la instalacion de un contrato ya es cliente. SOLO LEE."""
+    tenant = request.args.get("tenant")
+    if not tenant:
+        return jsonify({"error": "Falta el parametro 'tenant'."}), 400
+    cuerpo = request.get_json(silent=True) or {}
+    if not isinstance(cuerpo, dict):
+        return jsonify({"error": "El cuerpo tiene que ser un objeto JSON."}), 400
+    sobra = sorted(set(cuerpo) - {"datos", "id_servicio"})
+    if sobra:
+        return jsonify({"error": f"esta ruta solo acepta ['datos', 'id_servicio']. "
+                                 f"No acepta {sobra}."}), 400
+    datos, error = _datos_del_alta(cuerpo)
+    if error:
+        return error
+    try:
+        config = _config_de(tenant)
+    except Exception as e:                                    # noqa: BLE001
+        return fallo(500, "config_no_cargada", "No se pudo cargar la configuracion.",
+                     componente="interno", e=e)
+    resultado = alta_de_cliente.comprobar_activacion(
+        config, tenant, datos=datos, id_servicio=cuerpo.get("id_servicio"))
     return (jsonify(resultado.como_dict()),
             _CODIGOS_DEL_ALTA.get(resultado.estado, 409))
 
