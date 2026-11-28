@@ -107,8 +107,12 @@ def revisar(orden, *, pendientes=None) -> dict | None:
     if not aplica(orden):
         return None
     cierre = _cierre_de_esta_vuelta(orden)
-    puntos = [p for p in (_checklist(orden), _reporte(cierre), _servicio(cierre),
-                          _medicion(orden, pendientes), _material(orden, cierre),
+    #  LA INSTALACION QUE VALIDA UNA PERSONA (27/11/2026): el material y el
+    #  reporte de cierre se registran DESPUES de aprobar. Antes, que falten no
+    #  es una falta: se dice que se piden al finalizar.
+    reporte, material = _reporte_y_material(orden, cierre)
+    puntos = [p for p in (_checklist(orden), reporte, _servicio(cierre),
+                          _medicion(orden, pendientes), material,
                           _fotos(orden), _origen(orden),
                           _potencia(orden, cierre),
                           _en_rango(orden, cierre),
@@ -1713,6 +1717,29 @@ def _checklist(orden):
     faltan = sorted({e["requisito_id"] for e in errores if e.get("requisito_id")})
     return _punto("checklist", False, "Falta en el checklist: "
                   + "; ".join(e.get("mensaje", "") for e in errores[:3]), faltan=faltan)
+
+
+def _reporte_y_material(orden, cierre):
+    """Los puntos del reporte de cierre y del material. En una instalacion que
+    valida una persona, sin cierre todavia, no son una falta: se piden al
+    finalizar, despues de aprobar (27/11/2026)."""
+    if cierre is None and _cierre_despues_de_aprobar(orden):
+        return (_punto("reporte", None, "El reporte de cierre se manda al finalizar, después "
+                                        "de aprobar."),
+                _punto("material", None, "El material se registra al finalizar, después de "
+                                         "aprobar."))
+    return _reporte(cierre), _material(orden, cierre)
+
+
+def _cierre_despues_de_aprobar(orden) -> bool:
+    """Si en esta orden el material y el cierre van despues de aprobar: una
+    instalacion que valida una persona (27/11/2026). Ante la duda, no."""
+    try:
+        from campo.instalacion import requiere_validacion_humana
+
+        return requiere_validacion_humana(orden)
+    except Exception:                                            # noqa: BLE001
+        return False
 
 
 def _reporte(cierre):

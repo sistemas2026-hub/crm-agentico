@@ -55,6 +55,8 @@ class EntregaDeLaInstalacion extends StatefulWidget {
     required this.validacion,
     this.api = const ApiDeLaEntrega(),
     this.alEntregar,
+    this.alAbrirMaterialYCierre,
+    this.antesDeFinalizar,
   });
 
   final String ordenId;
@@ -63,6 +65,14 @@ class EntregaDeLaInstalacion extends StatefulWidget {
 
   /// Después de entregar: que la pantalla vuelva a leer la orden.
   final Future<void> Function()? alEntregar;
+
+  /// «MATERIAL Y CIERRE» (27/11/2026): abre la pantalla donde se registran,
+  /// después de aprobar. Sin esto no se dibuja el botón.
+  final Future<void> Function()? alAbrirMaterialYCierre;
+
+  /// Antes de finalizar, que suban el material y el cierre que estén en la
+  /// cola: el servidor no deja finalizar sin el reporte de cierre.
+  final Future<void> Function()? antesDeFinalizar;
 
   @override
   State<EntregaDeLaInstalacion> createState() => _EstadoEntrega();
@@ -78,6 +88,12 @@ class _EstadoEntrega extends State<EntregaDeLaInstalacion> {
       _enviando = true;
       _error = null;
     });
+    try {
+      await widget.antesDeFinalizar?.call();
+    } catch (_) {
+      //  Sin señal la cola no sube: el servidor lo dirá si falta el cierre.
+    }
+    if (!mounted) return;
     final String? error = await widget.api.entregar(widget.ordenId);
     if (!mounted) return;
     setState(() {
@@ -124,10 +140,20 @@ class _EstadoEntrega extends State<EntregaDeLaInstalacion> {
       separacion: AppSpacing.sm,
       children: <Widget>[
         Text(
-          'Valida que el servicio funcione y entrégalo al cliente. Al tocar '
-          '«Finalizar trabajo» se cierran la orden y el ticket.',
+          'Valida que el servicio funcione con el cliente, registra el material y el '
+          'cierre, y toca «Finalizar trabajo»: se cierran la orden y el ticket.',
           style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
         ),
+        //  27/11/2026: el material y el cierre van DESPUÉS de aprobar.
+        if (widget.alAbrirMaterialYCierre != null)
+          SizedBox(
+            height: AppSpacing.objetivoTactilAmplio,
+            child: OutlinedButton.icon(
+              onPressed: _enviando ? null : widget.alAbrirMaterialYCierre,
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: const Text('Material y cierre'),
+            ),
+          ),
         if (_error != null)
           Text(_error!, style: AppTypography.cuerpoChico.copyWith(color: AppColors.error)),
         SizedBox(

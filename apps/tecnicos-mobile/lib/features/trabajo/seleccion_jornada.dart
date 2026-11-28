@@ -14,7 +14,7 @@ class SeleccionJornada {
 
   /// Lo que todavía le toca hacer al técnico.
   static List<TrabajoVista> activos(List<TrabajoVista> trabajos) =>
-      trabajos.where((TrabajoVista t) => t.estado.leTocaAlTecnico).toList();
+      trabajos.where((TrabajoVista t) => t.leTocaAlTecnico).toList();
 
   /// Empezados: en camino o en sitio.
   static List<TrabajoVista> enCurso(List<TrabajoVista> trabajos) =>
@@ -29,7 +29,7 @@ class SeleccionJornada {
 
   /// Terminados, enviados o no, más los cancelados.
   static List<TrabajoVista> terminados(List<TrabajoVista> trabajos) =>
-      trabajos.where((TrabajoVista t) => t.estado.terminada).toList();
+      trabajos.where((TrabajoVista t) => t.terminada).toList();
 
   /// Cuál es *el* trabajo en curso.
   ///
@@ -62,7 +62,8 @@ class SeleccionJornada {
     int cuantos = 3,
   }) {
     final candidatos = trabajos
-        .where((TrabajoVista t) => !t.estado.terminada && !t.estado.enMarcha)
+        .where((TrabajoVista t) =>
+            !t.terminada && !t.estado.enMarcha && !t.faltaFinalizar)
         .where((TrabajoVista t) => t.compromiso != null)
         .toList();
 

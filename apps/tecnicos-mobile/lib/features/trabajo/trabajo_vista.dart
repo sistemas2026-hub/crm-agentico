@@ -216,6 +216,31 @@ class TrabajoVista {
   /// (27/11/2026). Ver [validaUnaPersona] en `como_se_cierra.dart`.
   final bool validaUnaPersona;
 
+  /// LA INSTALACIÓN QUE VALIDA UNA PERSONA Y TODAVÍA NO SE FINALIZÓ (27/11/2026).
+  ///
+  /// Enviada a validación queda `completada_campo`, y la app la tomaba por
+  /// terminada: se iba a «Finalizadas» aunque faltaban la aprobación, el
+  /// material, el cierre y «Finalizar trabajo» (el usuario, con la OT-502:
+  /// «el técnico envió a validación pero salió cerrado»).
+  bool get faltaFinalizar =>
+      estado == EstadoTrabajo.completadaCampo && validaUnaPersona;
+
+  /// Si ya no le queda nada: terminada, salvo la que falta finalizar.
+  bool get terminada => estado.terminada && !faltaFinalizar;
+
+  /// Si le toca al técnico. La que falta finalizar le toca cuando la
+  /// aprobaron: ahí registra el material y el cierre, y la finaliza.
+  bool get leTocaAlTecnico =>
+      estado.leTocaAlTecnico ||
+      (faltaFinalizar && estadoValidacion == EstadoValidacion.aprobado);
+
+  /// Lo que dice la tarjeta de su estado.
+  String get etiquetaDeEstado => !faltaFinalizar
+      ? estado.etiqueta
+      : estadoValidacion == EstadoValidacion.aprobado
+          ? 'Aprobada · falta finalizar'
+          : 'En validación';
+
   factory TrabajoVista.desdeOrden(Map<String, dynamic> orden) {
     final id = orden['id']?.toString() ?? '';
     final tipoCodigo = orden['tipo_codigo']?.toString() ?? '';

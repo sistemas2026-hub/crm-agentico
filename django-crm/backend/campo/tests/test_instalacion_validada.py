@@ -278,8 +278,13 @@ def test_c1_ANTES_de_aprobar_no_se_entrega(user_client, orden, config, user_prof
 
 
 def test_c2_ENTREGADA_se_cierra_la_orden_y_AHI_el_ticket(user_client, orden, config, user_profile, tickets):
+    from campo.models import EventoTrabajo
+
     _contrato(_finalizada(orden), user_profile, estado=ContratoDeServicio.EN_EL_ISP, servicio_isp="7000")
     OrdenTrabajo.objects.filter(pk=orden.pk).update(estado_validacion=OrdenTrabajo.APROBADO)
+    #  27/11/2026: el material y el cierre van DESPUES de aprobar, y sin el
+    #  reporte de cierre no se finaliza (`test_cierre_despues_de_aprobar`).
+    EventoTrabajo.objects.create(org=orden.org, orden=orden, tipo="cierre_campo", datos={})
     r = user_client.post(_url_entregar(orden), {}, format="json")
     assert r.status_code == 200, r.content
     orden.refresh_from_db()

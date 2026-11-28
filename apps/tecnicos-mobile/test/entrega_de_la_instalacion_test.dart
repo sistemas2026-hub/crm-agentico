@@ -58,4 +58,32 @@ void main() {
     expect(find.textContaining('Todavía no está aprobada'), findsOneWidget);
     expect(find.text('Finalizar trabajo'), findsOneWidget);
   });
+
+  testWidgets('APROBADA: «Material y cierre» antes de finalizar, y lo pendiente sube primero (27/11/2026)',
+      (WidgetTester t) async {
+    final _Api api = _Api();
+    final List<String> orden = <String>[];
+    int abiertas = 0;
+    await t.pumpWidget(_app(EntregaDeLaInstalacion(
+        ordenId: 'ot-1', validacion: EstadoValidacion.aprobado, api: api,
+        alAbrirMaterialYCierre: () async => abiertas++,
+        antesDeFinalizar: () async => orden.add('subir'))));
+    await t.tap(find.text('Material y cierre'));
+    await t.pumpAndSettle();
+    expect(abiertas, 1);
+    await t.tap(find.text('Finalizar trabajo'));
+    await t.pumpAndSettle();
+    expect(orden, <String>['subir'], reason: 'antes de finalizar sube lo que esté en la cola');
+    expect(api.pedidas, <String>['ot-1']);
+  });
+
+  testWidgets('si el servidor dice que falta el cierre, se lee tal cual', (WidgetTester t) async {
+    final _Api api = _Api(error: 'Falta el material y el cierre: regístralos en «Material y cierre».');
+    await t.pumpWidget(_app(EntregaDeLaInstalacion(
+        ordenId: 'ot-1', validacion: EstadoValidacion.aprobado, api: api,
+        alAbrirMaterialYCierre: () async {})));
+    await t.tap(find.text('Finalizar trabajo'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('Falta el material y el cierre'), findsOneWidget);
+  });
 }

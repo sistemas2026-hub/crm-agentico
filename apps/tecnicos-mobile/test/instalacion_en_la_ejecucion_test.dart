@@ -280,6 +280,57 @@ void main() {
         reason: 'enviar a validación es la misma transición: la decide el servidor');
     expect(find.text('Enviada a validación'), findsOneWidget);
     expect(find.textContaining('«Finalizar trabajo»'), findsOneWidget);
+    //  27/11/2026: el material y el cierre van DESPUÉS de aprobar.
+    expect(f.reportes.where((Map<String, dynamic> r) => r['momento'] == 'cierre'), isEmpty,
+        reason: 'enviar a validación no manda el reporte de cierre');
+  });
+
+  testWidgets('ENVIAR A VALIDACIÓN NO PREGUNTA POR EL MATERIAL aunque no haya ninguno',
+      (WidgetTester t) async {
+    _pantallaAlta(t);
+    final FuenteDeEjecucionFalsa f = FuenteDeEjecucionFalsa(
+      tipoCodigo: 'traslado_servicio', labor: 'instalacion', validaUnaPersona: 1,
+      campos: <Map<String, dynamic>>[_campo('a', 'paso_1')],
+      requisitos: const <Map<String, dynamic>>[],
+    );
+    await t.pumpWidget(_app(f));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Enviar a validación'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Está bien, enviar'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('No hay materiales registrados'), findsNothing);
+    expect(f.transiciones, hasLength(1));
+  });
+
+  testWidgets('MATERIAL Y CIERRE (después de aprobar): guarda el cierre y NO cambia el estado',
+      (WidgetTester t) async {
+    _pantallaAlta(t);
+    final FuenteDeEjecucionFalsa f = sinNadaQueFalte(valida: 1)..seguimientoDado = _seguimiento();
+    await t.pumpWidget(MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: EjecucionScreen(
+        ordenId: 'ot-1', fuente: f, apiDelContrato: const _SinContrato(),
+        soloMaterialYCierre: true,
+        resumenDeSync: const SyncSummary(
+          status: SyncStatus.idle, isSyncing: false, hasConnectionError: false,
+          mutacionesPendientes: 0, mutacionesConflicto: 0, evidenciasPendientes: 0, datosDirty: 0),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    expect(find.textContaining('Material y cierre · OT #'), findsOneWidget);
+    expect(find.text('Material utilizado'), findsOneWidget);
+    expect(find.text('Dato a'), findsNothing, reason: 'los datos ya aprobados no se muestran');
+    await t.tap(find.text('Guardar material y cierre'));
+    await t.pumpAndSettle();
+    expect(find.text('Antes de finalizar, revisá'), findsOneWidget);
+    await t.tap(find.text('Está bien, guardar'));
+    await t.pumpAndSettle();
+
+    expect(f.transiciones, isEmpty, reason: 'la orden la cierra «Finalizar trabajo», no esto');
+    expect(f.reportes.where((Map<String, dynamic> r) => r['momento'] == 'cierre'), hasLength(1));
+    expect(find.text('Material y cierre guardados'), findsOneWidget);
   });
 
   testWidgets('EL CONTROL: si el servidor dice que no la revisa nadie, sigue «Finalizar»',

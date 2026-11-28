@@ -44,4 +44,28 @@ void main() {
     expect(t.validaUnaPersona, isTrue);
     expect(TrabajoVista.desdeOrden(_orden(labor: 'correctivo', valida: 0)).validaUnaPersona, isFalse);
   });
+
+  //  27/11/2026: enviada a validación no está terminada hasta finalizarla.
+  test('LA QUE FALTA FINALIZAR no cuenta como terminada ni va a «Finalizadas»', () {
+    final TrabajoVista enValidacion = TrabajoVista.desdeOrden(
+        <String, dynamic>{..._orden(valida: 1), 'estado_validacion': 'pendiente'});
+    final TrabajoVista aprobada = TrabajoVista.desdeOrden(
+        <String, dynamic>{..._orden(valida: 1), 'estado_validacion': 'aprobado'});
+    final TrabajoVista otra = TrabajoVista.desdeOrden(_orden(labor: 'correctivo', valida: 0));
+
+    expect(enValidacion.faltaFinalizar && !enValidacion.terminada, isTrue);
+    expect(enValidacion.leTocaAlTecnico, isFalse, reason: 'mientras la revisan, espera');
+    expect(enValidacion.etiquetaDeEstado, 'En validación');
+    expect(aprobada.leTocaAlTecnico, isTrue, reason: 'aprobada, le toca finalizarla');
+    expect(aprobada.etiquetaDeEstado, 'Aprobada · falta finalizar');
+    expect(otra.faltaFinalizar || !otra.terminada, isFalse, reason: 'una completada común sí terminó');
+
+    final DateTime ahora = DateTime(2026, 11, 27);
+    expect(perteneceA(PestanaTrabajo.finalizadas, aprobada.estado, null, ahora: ahora,
+        faltaFinalizar: aprobada.faltaFinalizar), isFalse);
+    expect(perteneceA(PestanaTrabajo.enProceso, aprobada.estado, null, ahora: ahora,
+        faltaFinalizar: aprobada.faltaFinalizar), isTrue);
+    expect(perteneceA(PestanaTrabajo.finalizadas, otra.estado, null, ahora: ahora,
+        faltaFinalizar: otra.faltaFinalizar), isTrue);
+  });
 }

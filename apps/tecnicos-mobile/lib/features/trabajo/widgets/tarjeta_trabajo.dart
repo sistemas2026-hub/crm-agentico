@@ -110,7 +110,7 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
       ));
     }
   }
-  bool get _terminado => trabajo.estado.terminada;
+  bool get _terminado => trabajo.terminada;
   bool get _incidencia => trabajo.familia == FamiliaTrabajo.incidencia;
 
   @override
@@ -278,7 +278,7 @@ class _TarjetaTrabajoState extends State<TarjetaTrabajo> {
             const SizedBox(width: 6),
           ],
           Text(
-            trabajo.estado.etiqueta,
+            trabajo.etiquetaDeEstado,
             style: AppTypography.etiquetaChica.copyWith(color: texto),
           ),
         ],

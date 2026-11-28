@@ -20,6 +20,8 @@ TrabajoVista _ot(String estado) => TrabajoVista.desdeOrden(<String, dynamic>{
       'telefono': '',
       'tipo_nombre': 'Instalación',
       'tipo_codigo': 'ftth_instalacion',
+      //  Lo que dice el servidor (27/11/2026): esta no la valida una persona.
+      'valida_una_persona': 0,
       'schema_version': 1,
       'revision': 1,
       'diagnostico_previo_ia': '',

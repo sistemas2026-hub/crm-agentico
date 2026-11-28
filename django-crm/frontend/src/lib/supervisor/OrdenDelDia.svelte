@@ -218,7 +218,11 @@
   {#if orden.estado === 'completada_campo' && !orden.revision}
     <div class="od-validacion">
       <span>Validación: <strong>{orden.validacion_texto || orden.validacion || '—'}</strong></span>
-      {#if orden.validacion === 'aprobado'}
+      {#if orden.validacion === 'aprobado' && orden.la_cierra_el_tecnico}
+        <!-- 27/11/2026: la cierra el técnico con «Finalizar trabajo», que cierra
+             también el ticket. Cerrarla aquí dejaba el ticket abierto. -->
+        <span class="snoc-body-sm snoc-secundario">Falta que el técnico registre el material y el cierre, y toque «Finalizar trabajo».</span>
+      {:else if orden.validacion === 'aprobado'}
         <form method="POST" action="?/cerrar">
           <input type="hidden" name="orden" value={orden.id} />
           <input type="hidden" name="vuelta" value={orden.vuelta ?? 1} />

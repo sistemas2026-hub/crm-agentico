@@ -201,7 +201,8 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
         // equipo no sabe si es soporte o instalación.
         .where((TrabajoVista t) => texto.isNotEmpty || _enElSegmento(t))
         .where((TrabajoVista t) =>
-            perteneceA(_pestana, t.estado, t.compromiso, ahora: ahora))
+            perteneceA(_pestana, t.estado, t.compromiso, ahora: ahora,
+                faltaFinalizar: t.faltaFinalizar))
         .where((TrabajoVista t) => texto.isEmpty || _coincide(t, texto))
         .toList();
 
@@ -545,7 +546,8 @@ class _TrabajoScreenState extends State<TrabajoScreen> {
       return widget.ordenes.trabajos
           .where(_enElSegmento)
           .where((TrabajoVista t) =>
-              perteneceA(filtro, t.estado, t.compromiso, ahora: ahora))
+              perteneceA(filtro, t.estado, t.compromiso, ahora: ahora,
+                  faltaFinalizar: t.faltaFinalizar))
           .length;
     }
 

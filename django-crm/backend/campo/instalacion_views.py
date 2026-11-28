@@ -140,14 +140,38 @@ class InstalacionEntregadaView(APIView):
             return Response({"detail": "Todavía no está aprobada: espera el aviso de que "
                                        "quedó activada."},
                             status=status.HTTP_409_CONFLICT)
+        #  EL MATERIAL Y EL CIERRE VAN DESPUES DE APROBAR (27/11/2026). El
+        #  usuario: «enviar a validación» sin ellos, y «después de aprobar se
+        #  registra el material y el cierre, y ahí finaliza». Sin el reporte
+        #  de cierre de esta vuelta no se cierra: el ticket quedaria cerrado
+        #  sin decir que se hizo ni con que material. Llega por la cola del
+        #  telefono; si todavia no subio, se dice.
+        from campo.revision_del_cierre import _cierre_de_esta_vuelta
+
+        if _cierre_de_esta_vuelta(orden) is None:
+            return Response({"detail": "Falta el material y el cierre: regístralos en «Material "
+                                       "y cierre». Si ya los registraste, espera a tener señal "
+                                       "para que suban y vuelve a tocar «Finalizar trabajo»."},
+                            status=status.HTTP_409_CONFLICT)
         try:
             orden = cerrar_orden(orden, profile=request.profile,
                                  metadatos={"entregada_al_cliente": True})
         except TransicionInvalidaError as e:
             return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        #  La nota que cierra el ticket lleva el reporte y el material: con el
+        #  cierre despues de aprobar, son lo unico que todavia no llego al
+        #  ticket (27/11/2026).
+        from campo.services.cierre_en_isp import resumen_de
+
+        quien = (getattr(getattr(request.profile, "user", None), "name", "") or "").strip()
+        try:
+            resumen = resumen_de(orden, quien or "Oficina de operaciones")
+        except Exception:                                        # noqa: BLE001
+            resumen = ""
         ticket_isp = cerrar_ticket_al_validar(
             orden, request.profile,
-            extra="Instalación validada, activada y entregada al cliente.")
+            extra="Instalación validada, activada y entregada al cliente."
+                  + (f"\n\n{resumen}" if resumen else ""))
         orden.refresh_from_db()
         return Response({"orden": OrdenTrabajoDetailSerializer(orden).data,
                          "ticket_isp": ticket_isp, "server_time": timezone.now().isoformat()})

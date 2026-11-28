@@ -2233,3 +2233,46 @@ El pedido de la primera fila se repite cada 15 s por cada pestaña a la vista.
 - web: `page-server.test.js` (la carga trae las trabadas; los dos botones funcionan sin solicitud) y `trabadas-render.test.js` (la página dibuja la OT-502 con «No quedó creado», y la fallida con «Volver a crear»). 21 en verde y ningún error de tipos.
 
 **NO VERIFICADO:** que el aviso llegue de verdad a los canales de la oficina en producción. Depende de que la empresa tenga un canal de avisos encendido, igual que el de pedidos de material.
+
+### 8.51 DECISIÓN — El material y el cierre de una instalación validada van después de aprobar, y la cierra el técnico (27/11/2026)
+
+**La prueba vigilada de la OT-502 (27/11/2026, en producción, de punta a punta).** El contrato salió «Del ticket». Después del arreglo de §8.47 se hicieron, en orden:
+- la creación de la instalación y el contrato de WispHub;
+- la activación de la ONU con el ancho de banda del plan: SmartOLT quedó con `PLAN_500MB`/`PLAN_250MB` para ULTRA, leído en vivo, lo que verifica §8.49;
+- «Enviar a validación» y las fotos;
+- la aprobación: activó el servicio y completó la ficha. El precinto quedó en «Usuario Antena» y la caja en «Password Antena», confirmado por el usuario en WispHub, lo que verifica §8.47;
+- «Finalizar trabajo»: cerró el ticket (`cerrar_ticket_operativo`, 19:09:53), lo que verifica §8.48.
+
+**Lo que mostró la prueba.** El usuario:
+- La orden, enviada a validación, aparecía **cerrada** en la app: el estado `completada_campo` se clasificaba como terminado, en «Finalizadas».
+- En Programación salía «Lista para cerrar» con un botón «Cerrar» para la oficina. Ese cierre **no toca el proveedor**: el ticket quedaba abierto y el técnico ya no podía finalizarla.
+- «Seria mejor habilitar otro paso más, que es donde se registra material y cierre». Decidió que va **después de aprobar**.
+
+**Qué se decidió.**
+1. **«Enviar a validación» no pide el material ni el reporte de cierre**, solo el resumen sin las declaraciones del cierre. La transición es la misma.
+2. **Después de aprobar, «Material y cierre»** (app 1.0.35, `EjecucionScreen(soloMaterialYCierre: true)`):
+   - muestra solo el material; los datos y las fotos ya aprobados no se muestran ni se tocan;
+   - guarda el reporte de cierre con las declaraciones (servicio funcionando) y no cambia el estado de la orden.
+   - Después, «Finalizar trabajo» sube primero lo que esté en la cola y cierra.
+3. **El servidor no deja finalizar sin el reporte de cierre de esta vuelta** (`InstalacionEntregadaView`, 409 con qué hacer). La nota que cierra el ticket lleva el reporte y el material (`resumen_de`).
+4. **La app no la da por terminada antes de tiempo.** Una instalación que valida una persona y no se finalizó va en «En proceso», con la etiqueta «En validación» o «Aprobada · falta finalizar» (`TrabajoVista.faltaFinalizar`). Cuenta como del técnico cuando está aprobada.
+5. **La oficina no la cierra.** El «Cerrar» de Programación devuelve 409 `LA_CIERRA_EL_TECNICO` para estas instalaciones. La tarjeta dice «Falta que el técnico finalice» en vez de «Lista para cerrar / Cerrar» (`dia_publicado.la_cierra_el_tecnico`). Además muestra el cliente del contrato, no el de paso.
+6. **La revisión que ve quien aprueba** no marca como falta el reporte ni el material antes de aprobar: dice que se piden al finalizar (`revision_del_cierre._reporte_y_material`).
+
+**VERIFICADO:**
+- backend: `test_cierre_despues_de_aprobar` (8):
+  - sin el reporte de esta vuelta no se finaliza, y uno de una vuelta anterior no cuenta;
+  - con él se cierra, y la nota lleva el material;
+  - la oficina no cierra estas instalaciones, y sin la validación de una persona sí;
+  - la regla de los dos puntos de la revisión.
+- `test_instalacion_validada` ajustado: la entrega ahora lleva el cierre.
+- Las suites de Programación, despacho y cerradas: 126 en verde. Las 9 que fallan ya fallaban antes de hoy, porque la base de pruebas es SQLite.
+- web: `filas-de-ordenes.test.js` («Falta que el técnico finalice») más las de Programación (67).
+- app: 1.524 en verde, entre ellas:
+  - la que falta finalizar no es terminada, no va a «Finalizadas» y cuenta como del técnico al aprobarse;
+  - «Enviar a validación» no manda el cierre ni pregunta por el material;
+  - «Material y cierre» guarda el reporte sin cambiar el estado;
+  - el recuadro abre «Material y cierre» y sube la cola antes de finalizar.
+- APK 1.0.35 firmada con la llave de siempre.
+
+**NO VERIFICADO:** el recorrido nuevo con la 1.0.35 en un teléfono: enviar sin cierre, aprobar, «Material y cierre», finalizar. Va en la próxima instalación vigilada.

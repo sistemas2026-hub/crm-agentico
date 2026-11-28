@@ -987,6 +987,13 @@ Para ponerle a la ONU el ancho de banda del plan al autorizarla (el usuario:
 | `authorize_onu` (OpenAPI) | Acepta `download_speed_profile_name` y `upload_speed_profile_name`. `custom_profile` **no** es el de velocidad («the default speed profiles will be used»). **No probado en vivo todavía** |
 | La velocidad de cada plan, del lado de WispHub | `GET /api/plan-internet/queue/{id}/` trae `bajada` y `subida`: «700M», «215040k» (unidades k/M de MikroTik) |
 
+**VERIFICADO EN VIVO el 27/11/2026 (OT-502, ONU de prueba, con permiso del
+usuario):** `authorize_onu` con `download_speed_profile_name=PLAN_500MB` y
+`upload_speed_profile_name=PLAN_250MB` los APLICA. Leído después con
+`GET /api/onu/get_onu_speed_profiles/{external_id}` (el SN sirvió de external
+ID): 200, `{"status": true, ..., "download_speed_profile_name": "PLAN_500MB",
+"upload_speed_profile_name": "PLAN_250MB"}`. Esa lectura solo trae los perfiles.
+
 Qué hace Dexter con esto (PRD §8.49): la empresa elige por plan el perfil de
 bajada y el de subida (sugerido: el más chico que alcanza la velocidad del
 plan), y antes de autorizar el motor comprueba que el nombre exista en esa

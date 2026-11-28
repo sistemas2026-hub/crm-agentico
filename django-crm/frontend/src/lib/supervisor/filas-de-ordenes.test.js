@@ -19,6 +19,9 @@ describe('lo que pide atención se nombra en la fila', () => {
     expect(motivosDeAtencion(o({ devolucion: { quien: 'Ana' } }))).toEqual(['Devuelta']);
     expect(motivosDeAtencion(o({ estado: 'completada_campo', revision: { id: 'r' } }))).toEqual(['Por revisar']);
     expect(motivosDeAtencion(o({ estado: 'completada_campo', validacion: 'aprobado' }))).toEqual(['Lista para cerrar']);
+    //  27/11/2026: una instalación que valida una persona la cierra el técnico.
+    expect(motivosDeAtencion(o({ estado: 'completada_campo', validacion: 'aprobado', la_cierra_el_tecnico: true })))
+      .toEqual(['Falta que el técnico finalice']);
     expect(motivosDeAtencion(o({ seguimiento: { tipo: 'vencido' } }))).toEqual(['Sin reporte']);
     expect(motivosDeAtencion(o({ aviso: 'no_llego' }))).toEqual(['No llegó al teléfono']);
   });

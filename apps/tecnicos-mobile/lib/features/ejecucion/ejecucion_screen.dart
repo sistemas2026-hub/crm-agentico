@@ -73,10 +73,17 @@ class EjecucionScreen extends StatefulWidget {
     this.acciones,
     this.apiDelContrato = const ApiDelContrato(),
     this.apiDeLaOnu = const ApiDeLaOnu(),
+    this.soloMaterialYCierre = false,
   });
 
   /// De dónde se busca y se activa la ONU (26/11/2026). Reemplazable en pruebas.
   final ApiDeLaOnu apiDeLaOnu;
+
+  /// «MATERIAL Y CIERRE» (27/11/2026): la instalación que valida una persona,
+  /// ya aprobada. Solo el material y el reporte de cierre: los datos y las
+  /// fotos ya los revisó la oficina y no se tocan. No cambia el estado de la
+  /// orden; la cierra «Finalizar trabajo», en la ficha.
+  final bool soloMaterialYCierre;
 
   /// De dónde se lee el contrato firmado, para mostrar la IP que asignó el
   /// sistema (26/11/2026). Reemplazable en pruebas.
@@ -491,15 +498,15 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     //    quedo funcionando-- va dentro del resumen; lo que el resumen ya
     //    responde se llena con el; y si la empresa declaro alguna pregunta
     //    que no es ni una cosa ni la otra, esa se sigue pidiendo en su hoja.
+    //  ENVIAR A VALIDACIÓN NO PIDE EL MATERIAL NI EL CIERRE (27/11/2026). El
+    //  usuario: se registran DESPUÉS de aprobar, en «Material y cierre», y
+    //  ahí se finaliza. El resumen sí: es lo que el técnico revisa antes de
+    //  mandarla, pero sin las declaraciones del cierre.
+    final bool aValidacion = _vaAValidacion;
     final Map<String, dynamic>? formularioDeCierre = _formularioDe('cierre');
-    final PreguntasDelCierre preguntas = repartirElCierre(
-      formularioDeCierre == null
-          ? const <CampoDelFormulario>[]
-          : CampoDelFormulario.normalizar(
-              _listaDe(formularioDeCierre, 'campos'),
-              const <String, dynamic>{},
-            ),
-    );
+    final PreguntasDelCierre preguntas = aValidacion
+        ? repartirElCierre(const <CampoDelFormulario>[])
+        : _preguntasDelCierre(formularioDeCierre);
 
     final Map<String, dynamic>? delResumen = await _revisarElResumen(preguntas);
     if (delResumen == null) return;
@@ -508,18 +515,57 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     // Todo satisfecho: transicionar localmente a completada_pendiente_sync.
     final revisionBase = _orden!['revision'] as int? ?? 0;
 
+    if (!aValidacion &&
+        !await _registrarMaterialYCierre(formularioDeCierre, preguntas, delResumen)) {
+      return;
+    }
+    if (!mounted) return;
+    final idempotencyKey = const Uuid().v4();
+
+    await _fuente.transicionar(
+      orgId: _orgId!,
+      profileId: _profileId!,
+      ordenId: widget.ordenId,
+      nuevoEstadoLocal: 'completada_pendiente_sync',
+      tipoAccion: 'completar',
+      revisionBase: revisionBase,
+      idempotencyKey: idempotencyKey,
+    );
+    await _despuesDeEnviar(aValidacion);
+  }
+
+  /// Las preguntas del cierre, repartidas (ver `repartirElCierre`).
+  PreguntasDelCierre _preguntasDelCierre(Map<String, dynamic>? formularioDeCierre) =>
+      repartirElCierre(
+        formularioDeCierre == null
+            ? const <CampoDelFormulario>[]
+            : CampoDelFormulario.normalizar(
+                _listaDe(formularioDeCierre, 'campos'),
+                const <String, dynamic>{},
+              ),
+      );
+
+  /// El material y el reporte de cierre. Devuelve `false` si el técnico se
+  /// fue a registrar material o cerró la hoja: no se sigue.
+  Future<bool> _registrarMaterialYCierre(
+    Map<String, dynamic>? formularioDeCierre,
+    PreguntasDelCierre preguntas,
+    Map<String, dynamic> delResumen,
+  ) async {
+    final revisionBase = _orden!['revision'] as int? ?? 0;
+
     // 1. SIN MATERIAL REGISTRADO SE PREGUNTA, UNA VEZ (decisión del usuario,
     //    17/10/2026). Sin pantalla nueva y sin bloquear un trabajo que de
     //    verdad no usa material, como cambiar una clave.
     bool sinMaterialConfirmado = false;
     if (_materialesUsados.isEmpty) {
       final String? eleccion = await _confirmarSinMaterial();
-      if (!mounted) return;
+      if (!mounted) return false;
       if (eleccion == 'registrar') {
         await _abrirConsumoDeMaterial();
-        return;
+        return false;
       }
-      if (eleccion != 'si') return;
+      if (eleccion != 'si') return false;
       sinMaterialConfirmado = true;
     }
 
@@ -537,8 +583,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
         if (!preguntas.alcanzaConElResumen) {
           final Map<String, dynamic>? extra =
               await _pedirCierre(formularioDeCierre);
-          if (!mounted) return;
-          if (extra == null) return;
+          if (!mounted) return false;
+          if (extra == null) return false;
           respuestas = <String, dynamic>{...delResumen, ...extra};
         }
         await _encolarPorDefecto(
@@ -554,28 +600,54 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
           },
           idFijo: idCierre,
         );
-        if (!mounted) return;
+        if (!mounted) return false;
       }
     }
-    final idempotencyKey = const Uuid().v4();
+    return true;
+  }
 
-    await _fuente.transicionar(
-      orgId: _orgId!,
-      profileId: _profileId!,
-      ordenId: widget.ordenId,
-      nuevoEstadoLocal: 'completada_pendiente_sync',
-      tipoAccion: 'completar',
-      revisionBase: revisionBase,
-      idempotencyKey: idempotencyKey,
+  /// «Guardar material y cierre» (27/11/2026): la instalación ya aprobada.
+  /// No toca el estado de la orden: la cierra «Finalizar trabajo».
+  Future<void> _guardarMaterialYCierre() async {
+    if (_orden == null || _orgId == null || _profileId == null) return;
+    final Map<String, dynamic>? formularioDeCierre = _formularioDe('cierre');
+    final PreguntasDelCierre preguntas = _preguntasDelCierre(formularioDeCierre);
+    final Map<String, dynamic>? delResumen = await _revisarElResumen(preguntas);
+    if (delResumen == null || !mounted) return;
+    if (!await _registrarMaterialYCierre(formularioDeCierre, preguntas, delResumen)) return;
+    _fuente.procesarCola();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.task_alt, color: AppColors.secondary, size: 48),
+        title: const Text('Material y cierre guardados'),
+        content: const Text(
+          'Quedaron en este teléfono y se envían solos cuando haya señal. '
+          'Valida el servicio con el cliente y, en la orden, toca «Finalizar trabajo»: '
+          'eso cierra la orden y el ticket.',
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop(true);
+            },
+            child: const Text('ENTENDIDO'),
+          ),
+        ],
+      ),
     );
+  }
 
+  Future<void> _despuesDeEnviar(bool aValidacion) async {
     // 4. Intentar sincronización en segundo plano
     _fuente.procesarCola();
 
     if (mounted) {
       //  Enviada a validación (27/11/2026): no está terminada todavía. Se
       //  dice qué sigue, con el nombre del botón que lo hace.
-      final bool aValidacion = _vaAValidacion;
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -594,7 +666,8 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               ? 'Quedó guardada en este teléfono y se envía sola cuando haya '
                   'señal. La oficina revisa la instalación y la activa; '
                   'cuando quede activa te avisamos para que valides el '
-                  'servicio, lo entregues y toques «Finalizar trabajo».'
+                  'servicio, registres el material y el cierre, y toques '
+                  '«Finalizar trabajo».'
               : 'Quedó guardado en este teléfono. Se envía solo cuando haya '
                   'señal, y después la oficina lo revisa: todavía puede volver '
                   'con observaciones.'),
@@ -668,7 +741,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                    _vaAValidacion
+                    _vaAValidacion && !widget.soloMaterialYCierre
                         ? 'Antes de enviar a validación, revisá'
                         : 'Antes de finalizar, revisá',
                     style: AppTypography.tituloChico),
@@ -739,9 +812,11 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
                     Expanded(
                       child: FilledButton(
                         onPressed: () => Navigator.of(hoja).pop(true),
-                        child: Text(_vaAValidacion
-                            ? 'Está bien, enviar'
-                            : 'Está bien, finalizar'),
+                        child: Text(widget.soloMaterialYCierre
+                            ? 'Está bien, guardar'
+                            : _vaAValidacion
+                                ? 'Está bien, enviar'
+                                : 'Está bien, finalizar'),
                       ),
                     ),
                   ],
@@ -1612,6 +1687,7 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
     }
 
     final numero = _orden?['numero'] ?? '---';
+    if (widget.soloMaterialYCierre) return _pantallaDeMaterialYCierre(numero);
     //  Una instalación lleva contrato, y su pantalla se ordena distinto: ver
     //  `_reportes` y `_accesoAlContrato`.
     final bool esInstalacion = llevaContrato(_orden);
@@ -2385,6 +2461,45 @@ class _EjecucionScreenState extends State<EjecucionScreen> {
   /// usuario: «el técnico termina y debe haber un botón de mandar a validar,
   /// y si confirman que está bien finaliza el trabajo».
   bool get _vaAValidacion => validaUnaPersona(_orden);
+
+  /// «MATERIAL Y CIERRE» (27/11/2026): solo el material y el botón que guarda
+  /// el material y el reporte de cierre. Los datos y las fotos no se muestran:
+  /// la oficina ya los aprobó.
+  Widget _pantallaDeMaterialYCierre(Object numero) {
+    return Scaffold(
+      backgroundColor: AppColors.surfaceDim,
+      appBar: AppBar(title: Text('Material y cierre · OT #$numero')),
+      body: ContenidoCentrado(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.margen, AppSpacing.lg, AppSpacing.margen, AppSpacing.lg),
+          children: <Widget>[
+            Text(
+              'La instalación ya está aprobada y activa. Registra el material que usaste; '
+              'al guardar te mostramos el resumen para que confirmes que el servicio quedó '
+              'funcionando.',
+              style: AppTypography.cuerpoChico.copyWith(color: AppColors.onSurfaceVariant),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _bloqueDeMateriales(),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.margen),
+          child: SizedBox(
+            height: AppSpacing.objetivoTactilAmplio,
+            child: FilledButton(
+              onPressed: _guardarMaterialYCierre,
+              child: const Text('Guardar material y cierre'),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _barraDeAcciones() {
     return Container(

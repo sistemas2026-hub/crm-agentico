@@ -46,6 +46,10 @@ export function motivosDeAtencion(o) {
   if (o.bloqueo) m.push('Detenida');
   if (o.devolucion) m.push('Devuelta');
   if (o.revision) m.push('Por revisar');
+  //  27/11/2026: una instalación que valida una persona la cierra el técnico
+  //  con «Finalizar trabajo» (que cierra también el ticket): no está «lista
+  //  para cerrar» por la oficina.
+  else if (o.estado === 'completada_campo' && o.validacion === 'aprobado' && o.la_cierra_el_tecnico) m.push('Falta que el técnico finalice');
   else if (o.estado === 'completada_campo' && o.validacion === 'aprobado') m.push('Lista para cerrar');
   if (o.seguimiento?.tipo === 'vencido') m.push('Sin reporte');
   if (o.aviso === 'no_llego') m.push('No llegó al teléfono');

@@ -634,6 +634,20 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       ordenId: widget.ordenId,
                       validacion: trabajo.estadoValidacion,
                       alEntregar: widget.ordenes.recargar,
+                      //  27/11/2026: el material y el cierre, después de aprobar.
+                      alAbrirMaterialYCierre: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => EjecucionScreen(
+                              ordenId: trabajo.id,
+                              acciones: widget.acciones,
+                              soloMaterialYCierre: true,
+                            ),
+                          ),
+                        );
+                        await widget.ordenes.recargar();
+                      },
+                      antesDeFinalizar: widget.acciones.sincronizar,
                     ),
                   ],
                   const SizedBox(height: AppSpacing.md),

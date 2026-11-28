@@ -604,7 +604,10 @@ def del_dia(org, fecha, *, con_revision=True) -> dict:
             "aviso": aviso,
             #  29/10/2026, pedido del usuario: el cliente, cuando vence y su
             #  lugar en el orden del dia (el que sigue la app).
-            "cliente": o.cliente_nombre or "",
+            #  27/11/2026: el del CONTRATO si la orden tiene uno. En el
+            #  proveedor la instalacion se abre sobre un cliente DE PASO, y la
+            #  tarjeta decia su nombre («MARIO SABANAGRANDE»).
+            "cliente": _cliente_del_contrato(o) or o.cliente_nombre or "",
             "asunto": asunto_de.get(o.id, ""),
             #  30/10/2026: el cuadro del seguimiento dice A DONDE va la
             #  cuadrilla (la orden en curso, o la que sigue).
@@ -645,7 +648,40 @@ def del_dia(org, fecha, *, con_revision=True) -> dict:
             #  La vuelta arma la clave de la decision: aprobar dos veces la
             #  misma vuelta es una sola decision; otra vuelta, otra.
             "vuelta": o.vuelta,
+            #  27/11/2026: una instalacion que valida una persona la cierra el
+            #  TECNICO con «Finalizar trabajo» (que cierra tambien el ticket).
+            #  La pantalla no le ofrece «Cerrar» a la oficina.
+            "la_cierra_el_tecnico": _la_cierra_el_tecnico(o),
         }
+
+    def _es_instalacion(o) -> bool:
+        version = getattr(o, "tipo_trabajo_version", None)
+        return (getattr(getattr(version, "work_type", None), "labor", "") or "") == "instalacion"
+
+    def _la_cierra_el_tecnico(o) -> bool:
+        if o.estado_operativo != "completada_campo" or not _es_instalacion(o):
+            return False
+        try:
+            from campo.instalacion import requiere_validacion_humana
+
+            return requiere_validacion_humana(o)
+        except Exception:                                        # noqa: BLE001
+            return False
+
+    def _cliente_del_contrato(o) -> str:
+        #  Solo en instalaciones: las demas no tienen contrato y no se gasta
+        #  una consulta por orden en preguntarlo.
+        if not _es_instalacion(o):
+            return ""
+        try:
+            from campo.contrato import vigente_de
+
+            c = vigente_de(o)
+        except Exception:                                        # noqa: BLE001
+            return ""
+        cliente = ((c.datos or {}).get("cliente") or {}) if c else {}
+        return " ".join(x for x in (str(cliente.get("nombre") or "").strip(),
+                                   str(cliente.get("apellido") or "").strip()) if x)
 
     def en_orden(lista):
         """EN EL ORDEN DE LA APP (29/10/2026): el que arma el Supervisor, con la

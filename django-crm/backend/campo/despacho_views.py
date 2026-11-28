@@ -495,6 +495,21 @@ class CerrarTrabajoView(APIView):
                              f"lo que ya fue aprobado."),
                  "pendiente": "VALIDACION"},
                 status=status.HTTP_409_CONFLICT)
+        #  LA INSTALACION QUE VALIDA UNA PERSONA LA CIERRA EL TECNICO (27/11/2026).
+        #  Este cierre no toca ningun sistema externo: cerrada aca, el ticket
+        #  del proveedor quedaba abierto y el tecnico ya no podia finalizarla
+        #  (OT-502, Programacion ofrecia «Cerrar»). La cierra «Finalizar
+        #  trabajo», que cierra tambien el ticket.
+        from campo.instalacion import requiere_validacion_humana
+
+        if requiere_validacion_humana(orden):
+            return Response(
+                {"error": "LA_CIERRA_EL_TECNICO",
+                 "detalle": ("Esta instalación la cierra el técnico con «Finalizar trabajo», "
+                             "después de registrar el material y el cierre: así se cierra "
+                             "también el ticket en el proveedor."),
+                 "pendiente": "ENTREGA_DEL_TECNICO"},
+                status=status.HTTP_409_CONFLICT)
 
         try:
             orden = cerrar_orden(

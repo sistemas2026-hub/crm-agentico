@@ -146,18 +146,23 @@ extension EtiquetaPestana on PestanaTrabajo {
 /// `compromiso` y `ahora` ya no deciden nada acá: el diseño filtra por estado y
 /// la fecha se muestra en la tarjeta. Se conservan en la firma porque la
 /// pantalla los pasa y un filtro por día vuelve a ser probable.
+///
+/// `faltaFinalizar` (27/11/2026): una instalación que valida una persona y
+/// todavía no se finalizó va «En proceso», no en «Finalizadas».
 bool perteneceA(
   PestanaTrabajo pestana,
   EstadoTrabajo estado,
   DateTime? compromiso, {
   required DateTime ahora,
+  bool faltaFinalizar = false,
 }) {
   return switch (pestana) {
     PestanaTrabajo.todos => true,
     PestanaTrabajo.pendientes => estado == EstadoTrabajo.asignada,
-    PestanaTrabajo.enProceso => estado.enMarcha,
+    PestanaTrabajo.enProceso => estado.enMarcha || faltaFinalizar,
     PestanaTrabajo.detenidas => estado == EstadoTrabajo.bloqueada,
-    PestanaTrabajo.finalizadas => estado.terminada && estado != EstadoTrabajo.cancelada,
+    PestanaTrabajo.finalizadas =>
+      estado.terminada && estado != EstadoTrabajo.cancelada && !faltaFinalizar,
     PestanaTrabajo.conNovedad => estado == EstadoTrabajo.correccionRequerida ||
         estado == EstadoTrabajo.cancelada ||
         estado == EstadoTrabajo.desconocido,

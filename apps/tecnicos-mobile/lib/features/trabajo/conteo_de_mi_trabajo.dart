@@ -48,7 +48,7 @@ class ConteoDeMiTrabajo {
   factory ConteoDeMiTrabajo.de(List<TrabajoVista> trabajos) {
     final int total = trabajos.length;
     final int listas =
-        trabajos.where((TrabajoVista t) => t.estado.terminada).length;
+        trabajos.where((TrabajoVista t) => t.terminada).length;
     return ConteoDeMiTrabajo(asignadas: total, terminadas: listas);
   }
 
