@@ -1,0 +1,515 @@
+"""
+================================================================================
+ AUTORIZAR LA ONU DE UNA INSTALACION, DESDE LA APP DE CAMPO  --  26/11/2026
+================================================================================
+El usuario: «en el paso 3, instalacion, cuando se ponga el serial, como se
+hace para que se active la ONU en SmartOLT enseguida». Decidio: un boton
+«Activar ONU» despues del serial, construido APAGADO y probado una vez con su
+permiso (es una escritura en un sistema externo que da servicio).
+
+Lo medido antes de escribir esto (skill `smartolt-api`, 26/11/2026): la ONU
+nueva aparece «esperando autorizacion» con su equipo central, placa, puerto y
+tipo; la empresa no usa presets, asi que la autorizacion lleva cada dato; y la
+VLAN y la zona las pone la empresa (la VLAN por el servidor del contrato, la
+zona sugerida por el barrio y confirmada por el tecnico: decisiones del
+usuario).
+
+EL CAMINO, Y POR QUE ASI
+------------------------
+1. ¿Ya esta autorizada?  -> no se manda nada (YA_ESTABA).
+2. ¿Esta ESPERANDO autorizacion?  -> SOLO se escribe si el proveedor la lista
+   ahi. Es la defensa principal: el puerto, la placa y el equipo central salen
+   de esa fila, nunca de lo que diga el telefono.
+3. El interruptor de la empresa, sin cache, pegado a la escritura.
+4. La autorizacion, por la puerta HUMANA (la pide un tecnico en la casa), con
+   la clave fija del pedido y sin «reintentar» lo que fallo.
+5. Confirmar LEYENDO la ONU autorizada. Si no aparece a tiempo, queda EN CURSO
+   y `comprobar` vuelve a mirar: una autorizacion que tarda no es una que fallo.
+
+El motor no sabe de SmartOLT: las cuatro herramientas se encuentran por su
+marca y los nombres de los campos los declara la empresa (`ParametrosDeOnu`).
+
+EL ANCHO DE BANDA DEL PLAN  --  27/11/2026
+-----------------------------------------
+El usuario: «en SmartOLT tambien hay que ponerle el ancho de banda de descarga
+y carga». La autorizacion lleva el perfil de bajada y el de subida que la
+empresa eligio para el plan del contrato. Antes de escribir se lee la lista de
+perfiles del proveedor y un nombre que no esta ahi NO SALE: un perfil mal
+escrito podria terminar en el perfil por defecto sin que nadie lo note.
+Para la pantalla de la empresa se sugiere, por plan, el perfil mas chico que
+alcanza su velocidad (`sugerir_perfil`): lo decidio el usuario ese dia.
+================================================================================
+"""
+from __future__ import annotations
+
+import re
+import time
+import unicodedata
+from dataclasses import dataclass, field
+
+from nucleo.observabilidad.registro import registrar
+
+ACTIVADA = "activada"                    # se autorizo en esta pasada, y se leyo
+YA_ESTABA = "ya_estaba"                  # ya estaba autorizada: no se mando nada
+NO_ESPERA = "no_espera"                  # no aparece esperando autorizacion
+EN_CURSO = "en_curso"                    # se pidio y todavia no se ve autorizada
+FALLO = "fallo"                          # el proveedor dijo que no
+DATOS_INVALIDOS = "datos_invalidos"
+SIN_HERRAMIENTA = "sin_herramienta"
+BLOQUEADO = "bloqueado"                  # el sistema decidio no escribir
+NO_SE_PUDO_COMPROBAR = "no_se_pudo_comprobar"
+
+#: «Tarda decenas de segundos», segun el proveedor.
+ESPERA_S = 45
+INTERVALO_S = 5
+
+_SERIAL = re.compile(r"^[A-Z0-9:-]{6,32}$")
+_LARGO_NOMBRE = 60
+#: Como puede llamarse un perfil de velocidad: «PLAN_200MB_SV», «1G», «10M».
+_PERFIL = re.compile(r"^[A-Za-z0-9 _.\-]{1,64}$")
+#: Una velocidad escrita como la escribe el proveedor de clientes: «700M»,
+#: «215040k», «1G». Unidades de red (k = 1000).
+_VELOCIDAD = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*([kmg])\s*$", re.IGNORECASE)
+_MULTIPLO_KBPS = {"k": 1, "m": 1_000, "g": 1_000_000}
+
+
+@dataclass
+class ResultadoOnu:
+    estado: str
+    motivo: str = ""
+    referencia: str = ""
+    olt: str = ""
+    placa: str = ""
+    puerto: str = ""
+    #: EL PEDIDO LLEGO HASTA EL REGISTRO DE OPERACIONES: desde ahi pudo salir.
+    emitido: bool = False
+
+    @property
+    def activada(self) -> bool:
+        return self.estado in (ACTIVADA, YA_ESTABA)
+
+    def como_dict(self) -> dict:
+        return {"estado": self.estado, "motivo": self.motivo,
+                "referencia": self.referencia, "olt": self.olt,
+                "placa": self.placa, "puerto": self.puerto,
+                "emitido": self.emitido}
+
+
+class _NoSePudoLeer(Exception):
+    """Una lectura fallo o contesto algo que no se entiende. Lleva el TIPO."""
+
+
+def _herramientas(config) -> dict:
+    hs = list(config.herramientas or [])
+    return {
+        "buscar": next((h for h in hs if getattr(h, "busca_onu_sin_autorizar", False)), None),
+        "autorizar": next((h for h in hs if getattr(h, "autoriza_onu", False)), None),
+        "leer": next((h for h in hs if getattr(h, "lee_onu", False)), None),
+        "zonas": next((h for h in hs if getattr(h, "lista_zonas_de_red", False)), None),
+        "perfiles": next((h for h in hs if getattr(h, "lista_perfiles_de_velocidad", False)),
+                         None),
+    }
+
+
+def serial_de(valor) -> str:
+    """El serial como lo guarda el proveedor: sin espacios y en mayusculas.
+    Vacio si no tiene forma de serial (no se pregunta con basura)."""
+    s = re.sub(r"\s+", "", str(valor or "")).upper()
+    return s if _SERIAL.match(s) else ""
+
+
+def nombre_para_la_red(valor) -> str:
+    """El nombre del cliente como lo acepta el proveedor: letras, numeros,
+    espacios, punto y guion. Sin tildes (una «Ñ» que el proveedor rechace
+    deja la ONU sin autorizar por un nombre)."""
+    t = unicodedata.normalize("NFKD", str(valor or ""))
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    t = re.sub(r"[^A-Za-z0-9 .\-]", " ", t)
+    return " ".join(t.upper().split())[:_LARGO_NOMBRE]
+
+
+def _filas(crudo) -> list[dict]:
+    """Estricto: una lista de objetos, o `_NoSePudoLeer`. Una respuesta que no
+    se entiende NO es «no hay ninguna esperando»."""
+    if isinstance(crudo, dict):
+        listas = [v for v in crudo.values() if isinstance(v, list)]
+        crudo = listas[0] if len(listas) == 1 else None
+    if not isinstance(crudo, list) or not all(isinstance(f, dict) for f in crudo):
+        raise _NoSePudoLeer("forma inesperada")
+    return crudo
+
+
+def _rechazo(e: BaseException) -> bool:
+    """Si ese error es el proveedor DICIENDO QUE NO (un 4xx que no es 408)."""
+    codigo = getattr(getattr(e, "response", None), "status_code", None)
+    return isinstance(codigo, int) and 400 <= codigo < 500 and codigo != 408
+
+
+#: Lo mas largo que se guarda del motivo de un rechazo.
+_LARGO_DEL_MOTIVO = 160
+
+
+def motivo_del_rechazo(e: BaseException) -> str:
+    """POR QUE dijo que no el proveedor, en una linea corta  --  26/11/2026.
+
+    En la primera prueba real (OT-18) el proveedor contesto 400 dos veces y lo
+    unico que quedo fue «rechazo la autorizacion»: sin el motivo no habia como
+    corregir el pedido sin adivinar. Se toma SOLO el texto del error de la
+    respuesta (las claves de siempre: error, message, detail, errors), nunca
+    la respuesta entera, y no va al log: va al registro del pedido, que el
+    tecnico y la oficina ya ven."""
+    import json as _json
+
+    r = getattr(e, "response", None)
+    try:
+        cuerpo = r.json() if r is not None else None
+    except Exception:                                          # noqa: BLE001
+        return ""
+    if not isinstance(cuerpo, dict):
+        return ""
+    for clave in ("error", "message", "detail", "errors"):
+        v = cuerpo.get(clave)
+        if isinstance(v, str) and v.strip():
+            texto = v
+            break
+        if isinstance(v, (list, dict)) and v:
+            texto = _json.dumps(v, ensure_ascii=False)
+            break
+    else:
+        return ""
+    #  TAPADO (revision de PII, 27/11/2026): el error del proveedor puede
+    #  repetir lo que le mandamos. Numeros largos y correos fuera, como los
+    #  avisos del panel.
+    texto = re.sub(r"[\w.+-]+@[\w.-]+", "<correo>", " ".join(str(texto).split()))
+    return re.sub(r"\d{5,}", "<n>", texto)[:_LARGO_DEL_MOTIVO]
+
+
+def _ejecutar(herr, args: dict, config, tenant: str):
+    from nucleo.herramientas import http as ejecutor_http
+
+    return ejecutor_http.ejecutar(herr, {**dict(getattr(herr, "argumentos_fijos", None) or {}),
+                                         **args},
+                                  tenant, variables_tenant=config.variables_tenant)
+
+
+def _esperando(h: dict, config, tenant: str, serial: str) -> dict | None:
+    """La fila de la ONU que espera autorizacion con ESE serial, o None."""
+    herr = h["buscar"]
+    po = h["autorizar"].parametros_de_onu
+    try:
+        crudo = _ejecutar(herr, {po.fila["serial"]: serial}, config, tenant)
+    except Exception as e:                                   # noqa: BLE001
+        raise _NoSePudoLeer(type(e).__name__) from None
+    #  El filtro del proveedor es «contiene»: se queda la que es IGUAL.
+    iguales = [f for f in _filas(crudo) if serial_de(f.get(po.fila["serial"])) == serial]
+    if len(iguales) > 1:
+        raise _NoSePudoLeer("mas de una ONU esperando con ese serial")
+    return iguales[0] if iguales else None
+
+
+def _autorizada(h: dict, config, tenant: str, serial: str) -> bool:
+    """Si la ONU ya esta autorizada. Un 4xx al leerla es «no existe»: no esta.
+    Cualquier otra falla es `_NoSePudoLeer`, no un «no»."""
+    herr = h["leer"]
+    po = h["autorizar"].parametros_de_onu
+    try:
+        crudo = _ejecutar(herr, {po.serial_en_la_lectura: serial}, config, tenant)
+    except Exception as e:                                   # noqa: BLE001
+        if _rechazo(e):
+            return False
+        raise _NoSePudoLeer(type(e).__name__) from None
+    if isinstance(crudo, dict):
+        return serial_de(crudo.get(po.campo_serial_autorizada)) == serial
+    raise _NoSePudoLeer("forma inesperada")
+
+
+# =============================================================================
+#  LOS PERFILES DE VELOCIDAD  --  27/11/2026
+# =============================================================================
+def velocidad_kbps(texto) -> int | None:
+    """«700M» -> 700000, «215040k» -> 215040, «1G» -> 1000000. None si no se
+    entiende: un numero sin unidad no dice si son bits o kilobits, y adivinar
+    elegiria un perfil mil veces mas chico o mas grande."""
+    m = _VELOCIDAD.match(str(texto or ""))
+    if not m:
+        return None
+    return int(round(float(m.group(1).replace(",", ".")) * _MULTIPLO_KBPS[m.group(2).lower()]))
+
+
+def _leer_perfiles(h: dict, config, tenant: str) -> dict:
+    """`{"bajada": [{"nombre", "kbps"}], "subida": [...]}`, del proveedor.
+    Estricto: una respuesta que no se entiende es `_NoSePudoLeer`, no «no hay
+    perfiles»."""
+    pp = h["autorizar"].parametros_de_onu.perfiles
+    try:
+        filas = _filas(_ejecutar(h["perfiles"], {}, config, tenant))
+    except _NoSePudoLeer:
+        raise
+    except Exception as e:                                   # noqa: BLE001
+        raise _NoSePudoLeer(type(e).__name__) from None
+    salida: dict = {"bajada": [], "subida": []}
+    sentidos = {pp.sentido_bajada: "bajada", pp.sentido_subida: "subida"}
+    for f in filas:
+        if pp.campo_clase and str(f.get(pp.campo_clase) or "") != pp.clase:
+            continue
+        sentido = sentidos.get(str(f.get(pp.campo_sentido) or ""))
+        nombre = str(f.get(pp.campo_nombre) or "").strip()
+        if not sentido or not nombre:
+            continue
+        try:
+            kbps = int(float(f.get(pp.campo_velocidad)))
+        except (TypeError, ValueError):
+            kbps = None
+        salida[sentido].append({"nombre": nombre, "kbps": kbps})
+    for lista in salida.values():
+        lista.sort(key=lambda p: (p["kbps"] is None, p["kbps"] or 0, p["nombre"]))
+    return salida
+
+
+def sugerir_perfil(kbps: int | None, perfiles: list[dict]) -> str:
+    """El perfil mas chico que alcanza esa velocidad, o "" si ninguno. Uno de
+    0 es «sin limite» y no se sugiere: eso lo decide la empresa a mano."""
+    if not kbps:
+        return ""
+    alcanzan = [p for p in perfiles if isinstance(p.get("kbps"), int) and p["kbps"] >= kbps]
+    return min(alcanzan, key=lambda p: (p["kbps"], p["nombre"]))["nombre"] if alcanzan else ""
+
+
+def _llano(texto) -> str:
+    return " ".join(str(texto or "").split()).casefold()
+
+
+def perfiles_para_los_planes(config, tenant: str) -> dict:
+    """Para la pantalla de la empresa: los perfiles del proveedor y, por cada
+    plan que vende, su velocidad y el perfil sugerido. SOLO LEE."""
+    h = _herramientas(config)
+    vacio = {"bajada": [], "subida": []}
+    if (h["perfiles"] is None or h["autorizar"] is None
+            or h["autorizar"].parametros_de_onu.perfiles is None):
+        return {"disponible": False, "error": "", "perfiles": vacio, "planes": []}
+    try:
+        perfiles = _leer_perfiles(h, config, tenant)
+    except _NoSePudoLeer as e:
+        registrar("activar_onu", "no se pudieron leer los perfiles de velocidad", error=e)
+        return {"disponible": True, "error": "no se pudieron leer los perfiles del proveedor",
+                "perfiles": vacio, "planes": []}
+    velocidades = {_llano(p.nombre): p for p in (getattr(config, "precios_de_planes", None) or [])}
+    planes = []
+    for pv in (getattr(config, "planes_venta", None) or []):
+        pr = velocidades.get(_llano(pv.nombre_wisphub))
+        bajada = (getattr(pr, "bajada", "") or "") if pr else ""
+        subida = (getattr(pr, "subida", "") or "") if pr else ""
+        planes.append({"nombre": pv.nombre_wisphub, "bajada": bajada, "subida": subida,
+                       "sugerido": {
+                           "bajada": sugerir_perfil(velocidad_kbps(bajada), perfiles["bajada"]),
+                           "subida": sugerir_perfil(velocidad_kbps(subida), perfiles["subida"])}})
+    return {"disponible": True, "error": "", "perfiles": perfiles, "planes": planes}
+
+
+def zonas(config, tenant: str) -> list[str]:
+    """Los nombres de las zonas de la red, para que el tecnico elija."""
+    h = _herramientas(config)
+    if h["zonas"] is None or h["autorizar"] is None:
+        return []
+    po = h["autorizar"].parametros_de_onu
+    try:
+        filas = _filas(_ejecutar(h["zonas"], {}, config, tenant))
+    except Exception as e:                                   # noqa: BLE001
+        registrar("activar_onu", "no se pudieron leer las zonas", error=e)
+        return []
+    return sorted({str(f.get(po.campo_nombre_de_zona) or "").strip()
+                   for f in filas} - {""})
+
+
+def buscar(config, tenant: str, serial) -> dict:
+    """SOLO LEE: si la ONU esta esperando, ya autorizada o no aparece.
+
+    Es lo que ve el tecnico antes de tocar «Activar»: en que puerto la ve el
+    equipo central. No escribe nada, ni por error.
+    """
+    h = _herramientas(config)
+    if None in (h["buscar"], h["autorizar"], h["leer"]):
+        return {"estado": SIN_HERRAMIENTA}
+    s = serial_de(serial)
+    if not s:
+        return {"estado": DATOS_INVALIDOS, "motivo": "ese serial no tiene forma de serial"}
+    po = h["autorizar"].parametros_de_onu
+    try:
+        if _autorizada(h, config, tenant, s):
+            return {"estado": YA_ESTABA}
+        fila = _esperando(h, config, tenant, s)
+    except _NoSePudoLeer as e:
+        return {"estado": NO_SE_PUDO_COMPROBAR, "motivo": str(e)}
+    if fila is None:
+        return {"estado": NO_ESPERA}
+    return {"estado": "esperando",
+            "olt": str(fila.get(po.fila["olt"]) or ""),
+            "placa": str(fila.get(po.fila["placa"]) or ""),
+            "puerto": str(fila.get(po.fila["puerto"]) or ""),
+            "tipo": str(fila.get(po.fila.get("tipo", "")) or "") if po.fila.get("tipo") else ""}
+
+
+def activar(config, tenant: str, *, actor: str, origen: str, datos: dict,
+            espera_s: float = ESPERA_S, intervalo_s: float = INTERVALO_S) -> ResultadoOnu:
+    """Autoriza la ONU, una sola vez, y confirma leyendola.
+
+    `datos`: `serial` (obligatorio), `zona`, `vlan`, `nombre`, `direccion`,
+    `perfil_bajada`, `perfil_subida`.
+    `origen` identifica EL PEDIDO y es la base de la clave idempotente: lo
+    arma la ruta, no quien llama.
+    """
+    from nucleo.herramientas import http as ejecutor_http
+    from nucleo.seguridad import frontera, idempotencia, interruptor
+
+    h = _herramientas(config)
+    if None in (h["buscar"], h["autorizar"], h["leer"]):
+        return ResultadoOnu(SIN_HERRAMIENTA, "la empresa no declara como se autoriza una ONU",
+                            referencia=origen)
+    herr = h["autorizar"]
+    po = herr.parametros_de_onu
+    serial = serial_de((datos or {}).get("serial"))
+    if not serial:
+        return ResultadoOnu(DATOS_INVALIDOS, "ese serial no tiene forma de serial",
+                            referencia=origen)
+    vlan = (datos or {}).get("vlan")
+    if vlan not in (None, ""):
+        try:
+            vlan = int(vlan)
+        except (TypeError, ValueError):
+            return ResultadoOnu(DATOS_INVALIDOS, "la VLAN no es un numero", referencia=origen)
+        if not 1 <= vlan <= 4094:
+            return ResultadoOnu(DATOS_INVALIDOS, "la VLAN va de 1 a 4094", referencia=origen)
+    #  EL ANCHO DE BANDA (27/11/2026): un perfil pedido tiene que poder ir
+    #  (la empresa dice en que campo y como se lista) y tener forma de nombre.
+    perfiles_pedidos: dict = {}
+    for dato, sentido in (("perfil_bajada", "bajada"), ("perfil_subida", "subida")):
+        valor = " ".join(str((datos or {}).get(dato) or "").split())
+        if not valor:
+            continue
+        if not _PERFIL.match(valor):
+            return ResultadoOnu(DATOS_INVALIDOS, f"el perfil de {sentido} no tiene forma de "
+                                                 f"nombre de perfil", referencia=origen)
+        if not po.campos.get(dato) or po.perfiles is None or h["perfiles"] is None:
+            return ResultadoOnu(DATOS_INVALIDOS, "la empresa no declara como se manda el perfil "
+                                                 "de velocidad", referencia=origen)
+        perfiles_pedidos[dato] = valor
+
+    #  1 y 2. ¿Ya esta? ¿Esta esperando? Antes de cualquier escritura.
+    try:
+        if _autorizada(h, config, tenant, serial):
+            return ResultadoOnu(YA_ESTABA, "la ONU ya estaba autorizada", referencia=origen)
+        fila = _esperando(h, config, tenant, serial)
+    except _NoSePudoLeer as e:
+        return ResultadoOnu(NO_SE_PUDO_COMPROBAR, f"no se pudo leer la ONU ({e})",
+                            referencia=origen)
+    if fila is None:
+        return ResultadoOnu(NO_ESPERA, "la ONU no aparece esperando autorizacion: revisa que "
+                                       "este conectada y el serial bien escrito",
+                            referencia=origen)
+    lugar = {"olt": str(fila.get(po.fila["olt"]) or ""),
+             "placa": str(fila.get(po.fila["placa"]) or ""),
+             "puerto": str(fila.get(po.fila["puerto"]) or "")}
+
+    #  2b. EL PERFIL EXISTE EN EL PROVEEDOR, en ese sentido. Si la lista no se
+    #      puede leer, no sale: un perfil que no existe podria terminar en el
+    #      de por defecto sin que nadie se entere.
+    if perfiles_pedidos:
+        try:
+            disponibles = _leer_perfiles(h, config, tenant)
+        except _NoSePudoLeer as e:
+            return ResultadoOnu(NO_SE_PUDO_COMPROBAR, f"no se pudieron leer los perfiles de "
+                                                      f"velocidad ({e})", referencia=origen,
+                                **lugar)
+        for dato, valor in perfiles_pedidos.items():
+            sentido = "bajada" if dato == "perfil_bajada" else "subida"
+            if valor not in {p["nombre"] for p in disponibles[sentido]}:
+                return ResultadoOnu(DATOS_INVALIDOS, f"el perfil de {sentido} «{valor}» no "
+                                                     f"existe en el proveedor",
+                                    referencia=origen, **lugar)
+
+    #  3. EL INTERRUPTOR, sin cache y pegado a la escritura. Falla cerrado.
+    try:
+        veredicto = interruptor.veredicto(tenant)
+    except Exception as e:                                   # noqa: BLE001
+        registrar("activar_onu", "no se pudo leer el interruptor: NO se autoriza", error=e)
+        return ResultadoOnu(BLOQUEADO, "no se pudo comprobar el interruptor",
+                            referencia=origen, **lugar)
+    if not veredicto.permitido:
+        interruptor.anotar_bloqueo(tenant, actor=actor, recurso="activar_onu",
+                                   motivo=f"{veredicto.estado}: {veredicto.motivo}")
+        return ResultadoOnu(BLOQUEADO, "el interruptor de la empresa esta detenido",
+                            referencia=origen, **lugar)
+
+    #  4. EL PEDIDO: el lugar sale de la FILA del proveedor; la zona, la VLAN y
+    #     el nombre, de quien llama. Un dato vacio no viaja.
+    valores = {"olt": fila.get(po.fila["olt"]), "tipo_pon": fila.get(po.fila["tipo_pon"]),
+               "serial": serial, "placa": fila.get(po.fila["placa"]),
+               "puerto": fila.get(po.fila["puerto"]),
+               "tipo": fila.get(po.fila["tipo"]) if po.fila.get("tipo") else None,
+               "zona": " ".join(str((datos or {}).get("zona") or "").split()),
+               "vlan": vlan,
+               "nombre": nombre_para_la_red((datos or {}).get("nombre")),
+               "direccion": nombre_para_la_red((datos or {}).get("direccion")),
+               **perfiles_pedidos}
+    args = {campo: valores[dato] for dato, campo in po.campos.items()
+            if valores.get(dato) not in (None, "")}
+
+    def _fin(estado: str, motivo: str = "") -> ResultadoOnu:
+        return ResultadoOnu(estado, motivo, referencia=origen, emitido=True, **lugar)
+
+    def _hacer():
+        _ejecutar(herr, args, config, tenant)
+        #  Un acuse, no la respuesta del proveedor (puede traer la ficha).
+        return {"pedido": True}
+
+    try:
+        with frontera.humana(tenant, herr.nombre, actor=actor, evidencia=origen, origen=origen):
+            #  CLAVE FIJA POR PEDIDO y SIN `reintentar_fallida`, como el alta.
+            res = idempotencia.ejecutar(tenant, herr.nombre, args, origen, _hacer,
+                                        clave=f"{origen}|{herr.nombre}")
+    except ejecutor_http.ErrorHerramientaHttp as e:
+        registrar("activar_onu", "el ejecutor no dejo salir la autorizacion", error=e)
+        return _fin(BLOQUEADO, "la autorizacion no salio: el ejecutor la freno antes de "
+                               "llegar al proveedor")
+    except frontera.AccionExternaNoAutorizada as e:
+        registrar("activar_onu", "la frontera no autorizo la ONU", error=e)
+        return _fin(BLOQUEADO, "la frontera no autorizo la ONU")
+    except Exception as e:                                   # noqa: BLE001
+        registrar("activar_onu", "el pedido de autorizacion volvio con error", error=e)
+        if _rechazo(e):
+            por_que = motivo_del_rechazo(e)
+            return _fin(FALLO, "el proveedor rechazo la autorizacion"
+                               + (f": {por_que}" if por_que else ""))
+        #  SALIO Y NO SE SABE SI LLEGO: se mira, como si hubiera contestado.
+        res = None
+    if res is not None and not res.ejecutada and res.decision not in (
+            "repetida", "en_curso", "fallida"):
+        return _fin(BLOQUEADO, "el registro de operaciones no dejo salir este pedido")
+
+    #  5. CONFIRMAR LEYENDO, hasta `espera_s`.
+    limite = time.monotonic() + max(0.0, float(espera_s))
+    while True:
+        try:
+            if _autorizada(h, config, tenant, serial):
+                registrar("activar_onu", "la ONU quedo autorizada")
+                return _fin(ACTIVADA)
+        except _NoSePudoLeer:
+            pass
+        if time.monotonic() >= limite:
+            return _fin(EN_CURSO, "se pidio y la ONU todavia no aparece autorizada")
+        time.sleep(max(0.0, float(intervalo_s)))
+
+
+def comprobar(config, tenant: str, serial) -> ResultadoOnu:
+    """Como quedo una autorizacion que ya se pidio. SOLO LEE."""
+    h = _herramientas(config)
+    if None in (h["leer"], h["autorizar"]):
+        return ResultadoOnu(SIN_HERRAMIENTA, "la empresa no declara como se lee una ONU")
+    s = serial_de(serial)
+    if not s:
+        return ResultadoOnu(DATOS_INVALIDOS, "ese serial no tiene forma de serial")
+    try:
+        return (ResultadoOnu(ACTIVADA) if _autorizada(h, config, tenant, s)
+                else ResultadoOnu(EN_CURSO, "todavia no aparece autorizada"))
+    except _NoSePudoLeer as e:
+        return ResultadoOnu(NO_SE_PUDO_COMPROBAR, f"no se pudo leer la ONU ({e})")

@@ -1,0 +1,154 @@
+# Las guardas, corridas por alguien que no se olvida.
+#
+# POR QUE EN LA RAIZ
+# ------------------
+# GitHub Actions solo lee `.github/workflows` del RAIZ del repositorio. Los dos
+# workflows que viven en `django-crm/.github/workflows/` vinieron con el
+# proyecto vendorizado y **nunca corrieron**: no es que fallaran, es que nadie
+# los miraba. Hasta hoy este repositorio no tenia ninguna verificacion
+# automatica (D1 de CLAUDE.md).
+#
+# QUE CORRE, Y QUE NO
+# -------------------
+# Las que no necesitan Postgres ni salir a la red. Las que piden base quedan
+# afuera y el corredor las nombra al final: un verde que no dice cuantas
+# quedaron sin correr es el falso verde que D1 existe para no tener.
+#
+# Los numeros: hoy son 160 aisladas + 88 de base + 8 de red = 256. El
+# comentario anterior decia 95 de 145; era de septiembre y se leia como
+# verdad.
+#
+# POR QUE LAS 88 DE BASE SIGUEN AFUERA  --  medido el 12/11/2026
+# --------------------------------------------------------------
+# "Levantar un Postgres de servicio" parecia una linea de YAML. Se armo la
+# cadena entera contra una base vacia de verdad y se corrieron las 88:
+#
+#       50 en verde * 38 en rojo * 48 minutos
+#
+# Levantar la base y migrarla SE PUDO, y hace falta saber como porque ninguna
+# de estas seis condiciones falla con un error que nombre lo que falta:
+#
+#   1. `postgres:16` pelado no sirve -- el esquema usa pgvector:
+#      'extension "vector" is not available'. La imagen es
+#      `pgvector/pgvector:pg16`.
+#   2. Las migraciones de DJANGO van PRIMERO: el esquema del motor referencia
+#      `public.organization`. Sin eso: 'relation "public.organization" does
+#      not exist'.
+#   3. `pgcrypto` tiene que estar en el schema `extensions` --convencion de
+#      Supabase--, no en `public`.
+#   4. Los roles `crm_user` y `motor_user` tienen que PREEXISTIR: son
+#      credenciales de despliegue (B-7) y ninguna migracion las crea, pero
+#      `202609141110_roles_operativos_public.sql` les hace GRANT.
+#   5. Quien aplica el ledger necesita CREATEROLE (el esquema crea
+#      `app_backend`); quien corre Django NO puede ser superusuario o las
+#      afirmaciones de RLS quedan vacias (lo dice
+#      `crm/test_settings_postgres.py`). Son dos privilegios distintos: la
+#      misma separacion migrador/runtime de B-7.
+#   6. `create schema extensions` antes que todo lo demas.
+#
+# Con esas seis, las 78 migraciones aplican. Y AHI APARECE LO QUE FRENA ESTO,
+# que no es de CI:
+#
+#   * ~28 pruebas insertan en `public.organization` nombrando solo `name`, y
+#     un esquema recien migrado por Django lo RECHAZA: 'null value in column
+#     "created_at" violates not-null constraint'. `auto_now_add=True` llena esa
+#     columna en Python, no en la base. Esas mismas pruebas pasan contra la
+#     base de produccion -- o sea que PRODUCCION TIENE UN DEFAULT QUE LAS
+#     MIGRACIONES DEL REPO NO CREAN. Es "lo que el repo declara no es lo que
+#     esta desplegado" (CLAUDE.md §6) una capa mas abajo, y arreglarlo de
+#     verdad es decidir cual de los dos lados tiene razon.
+#   * ~10 crean su PROPIA base (`test_rutas_sql` es la de D8) y contra esta
+#     cadena mueren con 'schema "asistente" does not exist' y despues se
+#     cuelgan a los 120s.
+#
+# O sea: el paso que falta NO es este workflow. Es que las 88 puedan correr
+# contra un esquema construido desde el repo. Mientras eso no se decida, un
+# job con base pondria cada push en rojo por 38 motivos de entorno, y un job
+# que corriera solo las 50 que pasan seria exactamente el falso verde que
+# este archivo existe para no producir.
+#
+# DECIDIDO EL 12/11/2026: NO SE TOCA EL ESQUEMA DE PRODUCCION POR ESTO.
+# El usuario lo cerro con un dato que ningun archivo del repo dice: la
+# aplicacion de Django no se usa, asi que como llena ESA columna no es un
+# problema de nadie. Queda entonces UN solo camino abierto para CI, y no toca
+# produccion: que las ~28 pruebas pasen `created_at` al insertar su empresa de
+# mentira. Son ~2 h. Mientras eso no se haga, las 88 NO corren en CI y este
+# archivo lo dice en vez de taparlo.
+#
+# No reabrir proponiendo el default en una migracion: ya se decidio que no.
+#
+# Para repetir la medicion: `cli/correr_pruebas.py --solo-base` corre solo
+# esas 88.
+#
+# Lo que NO hace, a proposito: desplegar. El despliegue lo dispara un push a
+# la rama de produccion, y eso lo decide una persona.
+
+name: guardas
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'nucleo/**'
+      - 'cli/**'
+      - 'tests/**'
+      - 'tenants/**'
+      - 'conectores/**'
+      - 'requirements.txt'
+      - '.github/workflows/pruebas.yml'
+  pull_request:
+    paths:
+      - 'nucleo/**'
+      - 'cli/**'
+      - 'tests/**'
+      - 'tenants/**'
+      - 'conectores/**'
+      - 'requirements.txt'
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior: lo que importa
+# es si el ULTIMO commit esta en verde.
+concurrency:
+  group: guardas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guardas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # La historia entera, no el clon superficial que trae por defecto.
+          # test_ledger_checksum compara contra el blob de un commit FIJADO
+          # (f60beda) como referencia dorada del checksum. Con profundidad 1
+          # ese commit no esta, `git show` devuelve vacio y la prueba salia en
+          # ROJO diciendo que el hash no cuadraba -- cuando lo que pasaba era
+          # que no habia con que compararlo. Costo la primera corrida en la
+          # rama de despliegue, el 24/09/2026.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Primero y aparte: es la unica regla de arquitectura del proyecto y
+      # corre en segundos. Si el nucleo aprendio a distinguir un cliente, eso
+      # no se discute en una revision.
+      - name: El nucleo no conoce a ningun cliente
+        run: python tests/test_nucleo_sin_tenants.py
+
+      - name: Las guardas que no necesitan base ni red
+        run: python cli/correr_pruebas.py --sin-base --sin-red
+
+      # Informativo: el repositorio declarando algo que no existe. No frena la
+      # corrida porque compara contra la base y aca no hay ninguna.
+      - name: Que quedo sin correr
+        if: always()
+        run: python cli/correr_pruebas.py --listar

@@ -1,0 +1,81 @@
+- generic [ref=f19e2]:
+  - generic [ref=f19e58]:
+    - navigation "Principal" [ref=f19e59]:
+      - generic [ref=f19e60]:
+        - generic [ref=f19e61]: Q
+        - generic [ref=f19e62]: QA BANDEJA (datos de prueba)
+      - generic [ref=f19e63]: Vender
+      - link "Hoy" [ref=f19e64] [cursor=pointer]:
+        - /url: /
+      - link "Negociaciones" [ref=f19e66] [cursor=pointer]:
+        - /url: /pipeline
+      - link "Prospectos" [ref=f19e68] [cursor=pointer]:
+        - /url: /leads
+      - link "Cuentas" [ref=f19e70] [cursor=pointer]:
+        - /url: /accounts
+      - link "Contactos" [ref=f19e72] [cursor=pointer]:
+        - /url: /contacts
+      - link "Objetivos" [ref=f19e74] [cursor=pointer]:
+        - /url: /goals
+      - generic [ref=f19e76]: Atender
+      - link "Tareas" [ref=f19e77] [cursor=pointer]:
+        - /url: /tasks
+      - link "Tickets" [ref=f19e79] [cursor=pointer]:
+        - /url: /tickets
+      - link "Asistente" [ref=f19e81] [cursor=pointer]:
+        - /url: /asistente
+      - link "Conversaciones" [ref=f19e83] [cursor=pointer]:
+        - /url: /conversaciones
+      - link "Simulador WhatsApp" [ref=f19e85] [cursor=pointer]:
+        - /url: /simulador-whatsapp
+      - link "Agentes" [ref=f19e87] [cursor=pointer]:
+        - /url: /agentes
+      - link "Manual" [ref=f19e89] [cursor=pointer]:
+        - /url: /manual
+      - link "Instalaciones" [ref=f19e91] [cursor=pointer]:
+        - /url: /instalaciones
+      - link "Base de conocimiento" [ref=f19e93] [cursor=pointer]:
+        - /url: /solutions
+      - link "Documentos" [ref=f19e95] [cursor=pointer]:
+        - /url: /documents
+      - generic [ref=f19e97]: Facturar
+      - link "Facturas" [ref=f19e98] [cursor=pointer]:
+        - /url: /invoices
+      - link "Registro de horas" [ref=f19e100] [cursor=pointer]:
+        - /url: /timesheet
+      - generic [ref=f19e102]: Administrar
+      - link "Equipo y accesos" [ref=f19e103] [cursor=pointer]:
+        - /url: /team
+      - link "Configuración" [ref=f19e105] [cursor=pointer]:
+        - /url: /settings
+      - link "Conectar sistema" [ref=f19e107] [cursor=pointer]:
+        - /url: /conectores
+      - link "Conectar API nueva" [ref=f19e109] [cursor=pointer]:
+        - /url: /configuracion-guiada
+      - link "Habilidades" [ref=f19e111] [cursor=pointer]:
+        - /url: /habilidades
+      - link "Consumo" [ref=f19e113] [cursor=pointer]:
+        - /url: /consumo
+      - generic [ref=f19e115]:
+        - button "Buscar ⌘K" [ref=f19e116] [cursor=pointer]:
+          - text: Buscar
+          - generic [ref=f19e118]: ⌘K
+        - link "Notificaciones" [ref=f19e119] [cursor=pointer]:
+          - /url: /notifications
+        - link "Tu perfil" [ref=f19e121] [cursor=pointer]:
+          - /url: /profile
+        - link "Ayuda" [ref=f19e123] [cursor=pointer]:
+          - /url: /support
+        - link "Descargar app" [ref=f19e125] [cursor=pointer]:
+          - /url: https://play.google.com/store/apps/details?id=io.bottlecrm&hl=en
+        - link "Cerrar sesión" [ref=f19e127] [cursor=pointer]:
+          - /url: /logout
+    - generic [ref=f19e129]:
+      - banner [ref=f19e130]:
+        - generic [ref=f19e131]:
+          - heading "Hoy" [level=1] [ref=f19e132]
+          - generic [ref=f19e133]: "No necesitás hacer nada por ahora: estás al día."
+      - generic [ref=f19e137]:
+        - generic [ref=f19e138]: Nada pendiente por hoy
+        - generic [ref=f19e139]: Sin tickets vencidos, facturas, negociaciones frías ni tareas pendientes. Lo que se viene está abajo.
+  - generic [ref=f19e57]: BottleCRM v2

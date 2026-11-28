@@ -1,0 +1,75 @@
+- generic [ref=f11e3]:
+  - banner [ref=f11e5]:
+    - link "Volver a la lista" [ref=f11e6] [cursor=pointer]:
+      - /url: /conversaciones
+    - generic [aria-hidden] [ref=f11e9]: MQ
+    - generic [ref=f11e10]:
+      - generic [ref=f11e11]:
+        - heading "Mario QA" [level=2] [ref=f11e12]
+        - generic [ref=f11e13]: 573 000 0001
+        - generic [ref=f11e14]: WhatsApp
+        - generic [ref=f11e15]: abierta
+      - generic [ref=f11e16]: ISP 5832
+    - generic [ref=f11e21]:
+      - generic [ref=f11e22]: Control humano
+      - generic [ref=f11e23]: Sin asignar
+    - button "Contexto" [ref=f11e24] [cursor=pointer]
+  - paragraph [ref=f11e28]:
+    - strong [ref=f11e32]: Escalada · IA no responde
+    - button "Tomar" [ref=f11e33] [cursor=pointer]
+    - generic [ref=f11e37]:
+      - button "Marcar como resuelta" [ref=f11e38] [cursor=pointer]
+      - tooltip "Usá esto si el caso se resolvió por teléfono, presencialmente o por otro canal. Abajo elegís en qué terminó y se cierra la conversación; el próximo mensaje del cliente abre una nueva."
+  - generic [ref=f11e39]:
+    - button "Por qué llegó acá 1 de 3" [expanded] [ref=f11e40] [cursor=pointer]:
+      - generic [ref=f11e43]: Por qué llegó acá
+      - generic [ref=f11e44]: 1 de 3
+    - generic [ref=f11e45]:
+      - generic [ref=f11e46]:
+        - term [ref=f11e47]: Que quiere
+        - definition [ref=f11e48]: "QA: hola"
+      - generic [ref=f11e49]:
+        - term [ref=f11e50]: Que se le dijo
+        - definition [ref=f11e51]: Sin dato
+      - generic [ref=f11e52]:
+        - term [ref=f11e53]: Que falta
+        - definition [ref=f11e54]:
+          - generic [ref=f11e55]: Sin dato
+      - generic [ref=f11e58]:
+        - term [ref=f11e59]: Qué hizo la IA
+        - definition [ref=f11e60]: No consultó ningún sistema antes de derivar.
+  - generic [ref=f11e63]:
+    - generic [ref=f11e64]: Hoy
+    - generic [ref=f11e66]:
+      - generic [ref=f11e67]:
+        - generic [ref=f11e68]: Mario QA
+        - generic [ref=f11e69]: 23:30
+      - generic [ref=f11e70]: "QA: hola"
+    - generic [ref=f11e72]:
+      - generic [ref=f11e73]:
+        - generic [ref=f11e74]: Ana QA
+        - generic [ref=f11e76]: 23:31
+      - generic [ref=f11e77]:
+        - generic [ref=f11e78]: "QA: tu plan si incluye TV, y del lado nuestro todo esta bien: el equipo esta en linea, la señal llega bien y el puerto de TV esta encendido."
+        - img "Leído" [ref=f11e79]
+  - generic [ref=f11e85]:
+    - generic [ref=f11e86]:
+      - generic [ref=f11e88]:
+        - strong [ref=f11e89]: Se envía directo al cliente
+        - text: · no pasa por el asistente
+      - generic [ref=f11e90]: Canal directo del operador
+    - generic [ref=f11e91]:
+      - generic [ref=f11e92]:
+        - button "Emoji" [ref=f11e94] [cursor=pointer]
+        - button "Adjuntar" [ref=f11e99] [cursor=pointer]
+        - button "Grabar una nota de voz" [ref=f11e102] [cursor=pointer]
+      - group "Qué estás escribiendo" [ref=f11e107]:
+        - button "Al cliente" [pressed] [ref=f11e108] [cursor=pointer]
+        - button "Nota interna" [ref=f11e109] [cursor=pointer]
+        - button "Devolver a la IA" [ref=f11e110] [cursor=pointer]
+      - button "Plantillas" [ref=f11e114] [cursor=pointer]
+      - generic [ref=f11e118]: WhatsApp · ventana abierta
+    - textbox "Escribí tu respuesta…" [ref=f11e119]
+    - generic [ref=f11e120]:
+      - generic [ref=f11e121]: Enter envía · Shift+Enter salto de línea
+      - button "Enviar" [disabled] [ref=f11e122]

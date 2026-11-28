@@ -1,0 +1,283 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e11]:
+        - generic [ref=e12]: DEXTER
+        - generic [ref=e13]: ·
+        - generic [ref=e14]: COMMAND CENTER
+      - generic [ref=e16]:
+        - generic [ref=e18]: RAPILINK S.A.S.
+        - generic [ref=e19]: ISP CORE
+    - generic [ref=e20]:
+      - generic [ref=e22]: SISTEMA OPERATIVO · 6 AGENTES EN LÍNEA
+      - generic [ref=e23]: "| SWARM v4.9.2"
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - generic [ref=e26]: "TURNO:"
+        - generic [ref=e27]: Alfa (NOC Principal)
+      - generic [ref=e28]:
+        - generic [ref=e32]: 10:43:27
+        - generic [ref=e33]: (America/Bogotá)
+      - generic [ref=e34]: MODO DEMOSTRACIÓN · DATOS SIMULADOS
+  - generic [ref=e37]:
+    - generic [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e40]: "27"
+        - generic [ref=e41]: +14% pico
+      - generic [ref=e42]: CONVERSACIONES ACTIVAS
+    - generic [ref=e46]:
+      - generic [ref=e47]:
+        - generic [ref=e48]: "18"
+        - generic [ref=e49]: 100% DISP
+      - generic [ref=e50]: AGENTES IA TRABAJANDO
+    - generic [ref=e54]:
+      - generic [ref=e55]:
+        - generic [ref=e56]: "1.240"
+        - generic [ref=e57]: "Meta: 1.500"
+      - generic [ref=e58]: CLIENTES ATENDIDOS HOY
+    - generic [ref=e62]:
+      - generic [ref=e63]:
+        - generic [ref=e64]: 1,2 s
+        - generic [ref=e65]: ÓPTIMO
+      - generic [ref=e66]: LATENCIA IA PROMEDIO
+    - generic [ref=e70]:
+      - generic [ref=e71]:
+        - generic [ref=e72]: "3.812"
+        - generic [ref=e73]: SmartOLT/WA
+      - generic [ref=e74]: HERRAMIENTAS EJECUTADAS
+    - generic [ref=e78]:
+      - generic [ref=e79]:
+        - generic [ref=e80]: "2"
+        - generic [ref=e81]: Baja severidad
+      - generic [ref=e82]: ALERTAS ACTIVAS
+  - main [ref=e86]:
+    - generic [ref=e87]:
+      - generic:
+        - generic:
+          - generic:
+            - generic: TOPOLOGÍA OLT
+            - generic: 12 PON ACT
+          - generic:
+            - generic: ANILLO METROPOLITANO SUR
+            - generic: "Trafico agregado: 48.2 Gbps · BER < 10⁻¹²"
+        - generic:
+          - generic: SALA DE OPERACIONES DE AGENTES SINTÉTICOS
+          - generic: "ORQUESTACIÓN NEURAL EN TIEMPO REAL · LATENCIA SINAPSIS: 14ms"
+        - generic:
+          - generic:
+            - generic: CAPACIDAD CORE
+            - generic: "TX: 38.4 Gbps | RX: 12.1 Gbps"
+      - generic [ref=e90]:
+        - generic [ref=e91]: "TOOL: SmartOLT"
+        - generic [ref=e92]: consultar_olt (342ms)
+      - generic [ref=e95]:
+        - generic [ref=e96]: "CANAL: WhatsApp API"
+        - generic [ref=e97]: Webhook activo · 18ms
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - generic [ref=e103]:
+            - generic [ref=e104]:
+              - img "ROUTER IA" [ref=e107]
+              - generic [ref=e108]: ⚡
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - heading "ROUTER IA" [level=3] [ref=e111]
+                - generic [ref=e112]: PROCESANDO
+              - paragraph [ref=e115]: Clasificación y enrutamiento
+              - generic [ref=e116]: "\"Clasificando mensaje de WhatsApp\""
+              - generic [ref=e117]:
+                - generic [ref=e118]:
+                  - text: "Conv:"
+                  - strong [ref=e119]: "24"
+                - generic [ref=e120]: "|"
+                - generic [ref=e121]:
+                  - text: "Resp:"
+                  - strong [ref=e122]: 0,8 s
+          - generic [ref=e126]:
+            - generic [ref=e127]:
+              - img "SOPORTE FIBRA" [ref=e130]
+              - generic [ref=e131]: 🔍
+            - generic [ref=e132]:
+              - generic [ref=e133]:
+                - heading "SOPORTE FIBRA" [level=3] [ref=e134]
+                - generic [ref=e135]: CONSULTANDO
+              - paragraph [ref=e138]: Diagnóstico técnico FTTH
+              - generic [ref=e139]: "\"Analizando potencia óptica de la ONU\""
+              - generic [ref=e140]:
+                - generic [ref=e141]:
+                  - text: "Tool:"
+                  - strong [ref=e142]: consultar_olt
+                - generic [ref=e143]: "|"
+                - generic [ref=e144]:
+                  - text: "Conv:"
+                  - strong [ref=e145]: "12"
+          - generic [ref=e147]:
+            - generic [ref=e148]:
+              - img "FACTURACIÓN" [ref=e151]
+              - generic [ref=e152]: ✓
+            - generic [ref=e153]:
+              - generic [ref=e154]:
+                - heading "FACTURACIÓN" [level=3] [ref=e155]
+                - generic [ref=e156]: DISPONIBLE
+              - paragraph [ref=e159]: Cartera y pagos
+              - generic [ref=e160]: "\"Sin tareas pendientes\""
+              - generic [ref=e161]:
+                - generic [ref=e162]:
+                  - text: "Cola:"
+                  - strong [ref=e163]: "0"
+                - generic [ref=e164]: "|"
+                - generic [ref=e165]:
+                  - text: "Resueltas:"
+                  - strong [ref=e166]: 96%
+        - generic [ref=e167]:
+          - generic [ref=e170]:
+            - generic [ref=e171]:
+              - img "VENTAS" [ref=e174]
+              - generic [ref=e175]: 📈
+            - generic [ref=e176]:
+              - generic [ref=e177]:
+                - heading "VENTAS" [level=3] [ref=e178]
+                - generic [ref=e179]: PROCESANDO
+              - paragraph [ref=e182]: Planes y contratación
+              - generic [ref=e183]: "\"Cotizando plan 300 Mbps en Sabanalarga\""
+              - generic [ref=e184]:
+                - generic [ref=e185]:
+                  - text: "Conv:"
+                  - strong [ref=e186]: "5"
+                - generic [ref=e187]: "|"
+                - generic [ref=e188]:
+                  - text: "Cotiz. hoy:"
+                  - strong [ref=e189]: "3"
+          - generic [ref=e194]:
+            - generic [ref=e195]:
+              - img "SUPERVISOR IA" [ref=e198]
+              - generic [ref=e199]: 👁️
+            - generic [ref=e200]:
+              - generic [ref=e201]:
+                - generic [ref=e202]:
+                  - heading "SUPERVISOR IA" [level=3] [ref=e203]
+                  - generic [ref=e204]: SWARM MASTER
+                - generic [ref=e205]: SUPERVISANDO
+              - paragraph [ref=e208]: Orquestación y auditoría de enjambre
+              - generic [ref=e209]: "\"Auditando 27 conversaciones en curso\""
+              - generic [ref=e210]:
+                - generic [ref=e211]:
+                  - text: "Escaladas:"
+                  - strong [ref=e212]: 2 a humano
+                - generic [ref=e213]: "|"
+                - generic [ref=e214]:
+                  - text: "Errores:"
+                  - strong [ref=e215]: 0 errores
+          - generic [ref=e217]:
+            - generic [ref=e218]:
+              - img "AGENTE CAMPO" [ref=e221]
+              - generic [ref=e222]: ⏱️
+            - generic [ref=e223]:
+              - generic [ref=e224]:
+                - heading "AGENTE CAMPO" [level=3] [ref=e225]
+                - generic [ref=e226]: ESPERANDO
+              - paragraph [ref=e229]: Instalaciones y visitas
+              - generic [ref=e230]: "\"Esperando checklist del técnico\""
+              - generic [ref=e231]:
+                - generic [ref=e232]:
+                  - text: "Órdenes abiertas:"
+                  - strong [ref=e233]: "4"
+                - generic [ref=e234]: "|"
+                - generic [ref=e235]:
+                  - text: "Zona:"
+                  - strong [ref=e236]: Norte
+    - complementary [ref=e237]:
+      - generic [ref=e238]:
+        - generic [ref=e239]: EVENTOS EN TIEMPO REAL
+        - generic [ref=e242]: EN VIVO
+      - generic [ref=e243]:
+        - generic [ref=e247]:
+          - generic [ref=e248]:
+            - generic [ref=e249]: 10:43:02
+            - generic [ref=e250]: NUEVO
+          - generic [ref=e251]: SOPORTE FIBRA
+          - paragraph [ref=e252]: Respuesta generada y enviada a WhatsApp
+        - generic [ref=e255]:
+          - generic [ref=e256]:
+            - generic [ref=e257]: 10:43:00
+            - generic [ref=e258]: 342 ms
+          - generic [ref=e259]: SMARTOLT
+          - paragraph [ref=e260]: Consulta de ONU completada (-19.2 dBm OK)
+        - generic [ref=e263]:
+          - generic [ref=e264]:
+            - generic [ref=e265]: 10:42:51
+            - generic [ref=e266]: CC# 1042***
+          - generic [ref=e267]: IDENTIDAD
+          - paragraph [ref=e268]: Cliente verificado por cédula en CRM
+        - generic [ref=e271]:
+          - generic [ref=e272]:
+            - generic [ref=e273]: 10:42:47
+            - generic [ref=e274]: Triaje
+          - generic [ref=e275]: ROUTER IA
+          - paragraph [ref=e276]: "Derivado a Soporte Fibra (intención: falla LOS)"
+        - generic [ref=e279]:
+          - generic [ref=e280]:
+            - generic [ref=e281]: 10:42:44
+            - generic [ref=e282]: +57 312***
+          - generic [ref=e283]: ROUTER IA
+          - paragraph [ref=e284]: Nueva conversación de WhatsApp entrante
+        - generic [ref=e287]:
+          - generic [ref=e288]:
+            - generic [ref=e289]: 10:42:31
+            - generic [ref=e290]: Escalado L3
+          - generic [ref=e291]: SUPERVISOR IA
+          - paragraph [ref=e292]: Conversación escalada a operador humano
+        - generic [ref=e295]:
+          - generic [ref=e296]:
+            - generic [ref=e297]: 10:41:58
+            - generic [ref=e298]: Pago OK
+          - generic [ref=e299]: FACTURACIÓN
+          - paragraph [ref=e300]: Acuerdo de pago registrado y servicio activo
+      - generic [ref=e301]:
+        - generic [ref=e302]: WSS://DEXTER.STREAM
+        - generic [ref=e305]: 0 DROPS
+  - contentinfo [ref=e306]:
+    - generic [ref=e307]:
+      - generic [ref=e308]:
+        - generic [ref=e309]: TRAZA DE CONVERSACIÓN EN VIVO
+        - generic [ref=e317]: FLUJO ACTIVO EN TIEMPO REAL
+      - generic [ref=e318]:
+        - generic [ref=e319]: "ID CONVERSACIÓN: #TRZ-9842-CO"
+        - generic [ref=e321]: "CLIENTE: Carlos E. Mendoza (Sabanalarga)"
+        - generic [ref=e323]: "TIEMPO TOTAL: 4,2 s"
+        - generic [ref=e325]: "HERRAMIENTAS: 3 EJECUTADAS"
+    - generic [ref=e326]:
+      - generic [ref=e328]:
+        - generic [ref=e332]: Cliente WhatsApp
+        - generic [ref=e333]: 0 ms
+        - generic [ref=e334]: COMPLETADO
+      - generic [ref=e335]: ➔
+      - generic [ref=e336]:
+        - generic [ref=e340]: Router IA
+        - generic [ref=e341]: 810 ms
+        - generic [ref=e342]: COMPLETADO
+      - generic [ref=e343]: ➔
+      - generic [ref=e344]:
+        - generic [ref=e348]: Verificación ID
+        - generic [ref=e349]: 420 ms
+        - generic [ref=e350]: COMPLETADO
+      - generic [ref=e351]: ➔
+      - generic [ref=e352]:
+        - generic [ref=e356]: Soporte Fibra
+        - generic [ref=e357]: 1.100 ms
+        - generic [ref=e358]: COMPLETADO
+      - generic [ref=e359]: ➔
+      - generic [ref=e360]:
+        - generic [ref=e364]: SmartOLT (consultar_olt)
+        - generic [ref=e365]: 342 ms (en curso)
+        - generic [ref=e366]: EJECUTANDO...
+      - generic [ref=e367]: ➔
+      - generic [ref=e368]:
+        - generic [ref=e372]: Respuesta Enviada
+        - generic [ref=e373]: Estim. 350 ms
+        - generic [ref=e374]: EN COLA
+    - generic [ref=e375]:
+      - generic [ref=e376]:
+        - generic [ref=e377]: "SEGURIDAD:"
+        - generic [ref=e378]: E2E Encriptado SSL · TLS 1.3 · Cumplimiento Ley 1581 (Habeas Data)
+      - generic [ref=e379]: DEXTER COMMAND CENTER · EDICIÓN TELECOM B2B

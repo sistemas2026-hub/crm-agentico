@@ -1,0 +1,7 @@
+# Contraseñas: nunca al repositorio.
+cuentas.json
+# Los secretos y cuentas al azar del laboratorio local.
+.laboratorio/
+# Lo que deja cada corrida.
+resultados/*
+!resultados/.gitkeep

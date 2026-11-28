@@ -1,0 +1,269 @@
+- generic [active] [ref=f12e1]:
+  - banner [ref=f12e2]:
+    - generic [ref=f12e3]:
+      - generic [ref=f12e4]:
+        - generic [ref=f12e5]: D
+        - generic [ref=f12e6]: Dexter
+        - generic [ref=f12e7]: ·
+        - generic [ref=f12e8]: Conversations
+      - generic [ref=f12e9]: WhatsApp
+    - generic [ref=f12e14]:
+      - textbox "Search conversations, phones, DNI or tickets..." [ref=f12e15]
+      - generic [ref=f12e16]: ⌘K
+    - generic [ref=f12e17]:
+      - generic [ref=f12e18]:
+        - generic [ref=f12e20]: Ana Pérez
+        - generic [ref=f12e21]: ·
+        - generic [ref=f12e22]: Support
+      - button "Notifications" [ref=f12e24] [cursor=pointer]
+      - button "Settings" [ref=f12e27] [cursor=pointer]
+  - main [ref=f12e31]:
+    - complementary [ref=f12e32]:
+      - generic [ref=f12e33]:
+        - generic [ref=f12e34]:
+          - generic [ref=f12e35]:
+            - generic [ref=f12e36]: Priority Queue
+            - generic [ref=f12e37]: "18"
+          - generic [ref=f12e38]: "ORDER: RECOMMENDED"
+        - generic [ref=f12e39]:
+          - button "Needs Attn (2)" [ref=f12e40] [cursor=pointer]
+          - button "In Progress (11)" [ref=f12e41] [cursor=pointer]
+          - button "Resolved (42)" [ref=f12e42] [cursor=pointer]
+          - button "All" [ref=f12e43] [cursor=pointer]
+      - generic [ref=f12e44]:
+        - article [ref=f12e45] [cursor=pointer]:
+          - generic [ref=f12e46]:
+            - generic [ref=f12e47]: "[HUMAN ACTIVE]"
+            - generic [ref=f12e50]: "Wait: 6m"
+          - generic [ref=f12e51]:
+            - heading "Carlos Pérez" [level=2] [ref=f12e52]
+            - generic [ref=f12e53]: 10:14 AM
+          - paragraph [ref=f12e54]: "\"Internet service still offline after restarting ONT\""
+          - generic [ref=f12e55]:
+            - generic [ref=f12e56]: "Owner: Ana P. (you)"
+            - generic [ref=f12e59]: GPON-Belgrano
+        - article [ref=f12e60] [cursor=pointer]:
+          - generic [ref=f12e61]:
+            - generic [ref=f12e62]: "[AI HANDLING]"
+            - generic [ref=f12e65]: "Wait: 4m"
+          - generic [ref=f12e66]:
+            - heading "Javier Silva" [level=2] [ref=f12e67]
+            - generic [ref=f12e68]: 10:17 AM
+          - paragraph [ref=f12e69]: "\"Ya reinicié el módem desenchufando 30 segundos y sigue la luz...\""
+          - generic [ref=f12e70]:
+            - generic [ref=f12e71]: Dexter AI · step 4/5 diagnostic
+            - generic [ref=f12e72]: Plan 300M
+        - article [ref=f12e73] [cursor=pointer]:
+          - generic [ref=f12e74]:
+            - generic [ref=f12e75]: "[CUSTOMER REPLIED]"
+            - generic [ref=f12e76]: "Wait: 12m"
+          - generic [ref=f12e77]:
+            - heading "María Fernández" [level=2] [ref=f12e78]
+            - generic [ref=f12e79]: 10:06 AM
+          - paragraph [ref=f12e80]: "\"No, todavía sigo sin internet ni luz de PON fija en la terminal...\""
+          - generic [ref=f12e81]:
+            - generic [ref=f12e82]: "Owner: Ana P."
+            - generic [ref=f12e83]: Plan 500M
+        - article [ref=f12e84] [cursor=pointer]:
+          - generic [ref=f12e85]:
+            - generic [ref=f12e86]: "[HUMAN ACTION REQUIRED]"
+            - generic [ref=f12e87]: "Wait: 28m"
+          - generic [ref=f12e88]:
+            - heading "Roberto Gómez" [level=2] [ref=f12e89]
+            - generic [ref=f12e90]: 09:50 AM
+          - paragraph [ref=f12e91]: "\"Envié el comprobante de transferencia bancaria para reconexión\""
+          - generic [ref=f12e92]:
+            - generic [ref=f12e93]: "Owner: Luis V."
+            - generic [ref=f12e94]: Billing Desk
+        - article [ref=f12e95] [cursor=pointer]:
+          - generic [ref=f12e96]:
+            - generic [ref=f12e97]: "[INTERNAL WORK PENDING]"
+            - generic [ref=f12e98]: "Wait: 45m"
+          - generic [ref=f12e99]:
+            - heading "Tech Services S.A." [level=2] [ref=f12e100]
+            - generic [ref=f12e101]: 09:32 AM
+          - paragraph [ref=f12e102]: "\"Esperando confirmación de guardias nocturnas en nodo Belgrano\""
+          - generic [ref=f12e103]:
+            - generic [ref=f12e104]: "Owner: Ana P."
+            - generic [ref=f12e105]: NOC L2
+        - article [ref=f12e106] [cursor=pointer]:
+          - generic [ref=f12e107]:
+            - generic [ref=f12e108]: "[LEGACY · REVIEW]"
+            - generic [ref=f12e109]: "Wait: 1h 20m"
+          - generic [ref=f12e110]:
+            - heading "Coop San Telmo" [level=2] [ref=f12e111]
+            - generic [ref=f12e112]: 08:45 AM
+          - paragraph [ref=f12e113]: "\"Viene del sistema CRM v1 anterior para reasignación manual\""
+          - generic [ref=f12e114]:
+            - generic [ref=f12e115]: "[NO DEXTER OWNER]"
+            - generic [ref=f12e116]: Manual Ingest
+    - generic [ref=f12e117]:
+      - generic [ref=f12e119]:
+        - generic [ref=f12e120]:
+          - generic [ref=f12e121]: CP
+          - generic [ref=f12e122]:
+            - generic [ref=f12e123]:
+              - heading "Carlos Pérez" [level=1] [ref=f12e124]
+              - generic [ref=f12e125]: +54 9 11 4820-9912
+              - generic [ref=f12e126]: WhatsApp
+            - generic [ref=f12e127]:
+              - generic [ref=f12e128]: DNI 28.491.022
+              - generic [ref=f12e129]: ·
+              - generic [ref=f12e130]: "Account: #CX-90214"
+              - generic [ref=f12e131]: ·
+              - generic [ref=f12e132]: Fibra 300 Mbps Residencial
+          - generic [ref=f12e136]:
+            - generic [ref=f12e137]: HUMAN CONTROL
+            - generic [ref=f12e138]: Assigned to you
+        - generic [ref=f12e139]:
+          - button "Release" [ref=f12e140] [cursor=pointer]
+          - button "Return to AI" [ref=f12e141] [cursor=pointer]
+          - button "More options" [ref=f12e145] [cursor=pointer]
+      - generic [ref=f12e148]:
+        - generic [ref=f12e149]:
+          - generic [ref=f12e150]: WHY DEXTER ESCALATED
+          - generic [ref=f12e151]: LOS optical alarm triggered (-32.4 dBm). Automated ONT reboot loop unsuccessful.
+        - generic [ref=f12e153]:
+          - text: "Diag:"
+          - strong [ref=f12e154]: "#DIAG-8821"
+      - generic [ref=f12e155]:
+        - generic [ref=f12e156]: Today · Ingested via WhatsApp Gateway
+        - generic [ref=f12e158]:
+          - generic [ref=f12e159]:
+            - generic [ref=f12e160]: Carlos Pérez
+            - generic [ref=f12e161]: 10:14 AM
+            - generic [ref=f12e162]: · Delivered to WhatsApp
+          - generic [ref=f12e163]: Hola, buen día. Se me cortó internet hace unos 25 minutos acá en Belgrano. La luz de PON en el módem está titilando en rojo y la de LOS prendida fija. ¿Podrán chequear si es problema del barrio o de mi equipo?
+        - generic [ref=f12e164]:
+          - generic [ref=f12e165]:
+            - generic [ref=f12e166]: DEXTER AI · Diagnostic Engine
+            - generic [ref=f12e168]: 10:15 AM
+          - generic [ref=f12e169]: Hola Carlos, detectamos una pérdida de sincronismo en tu enlace de fibra óptica. Estoy iniciando una rutina de verificación sobre el puerto OLT correspondiente a tu nodo y ejecutando una prueba de atenuación remota. ¿Podrías confirmar si tu equipo ONT Huawei tiene cables doblados o desconectados?
+          - generic [ref=f12e170]: 10:15 AM · Automated Diagnostic Loop · Delivered
+        - generic [ref=f12e171]:
+          - generic [ref=f12e172]: Iniciando loop de reinicio remoto para ONT 4857544321A890...
+          - generic [ref=f12e173]: Discarded — a human took control
+        - generic [ref=f12e174]: 10:19 · Ana Pérez took the conversation
+        - generic [ref=f12e178]:
+          - generic [ref=f12e179]:
+            - generic [ref=f12e180]: Ana Pérez · Operator
+            - generic [ref=f12e182]: 10:20 AM
+          - generic [ref=f12e183]: Hola Carlos, tomo tu caso personalmente. Ya verifiqué la telemetría del puerto OLT-BELGRANO-02 y el nivel de señal está en -31.8 dBm por un fallo de atenuación en la acometida externa. Estoy despachando la cuadrilla técnica.
+          - generic [ref=f12e184]: Delivered · 10:20 AM
+        - generic [ref=f12e185]:
+          - generic [ref=f12e186]:
+            - generic [ref=f12e187]: INTERNAL NOTE · TEAM ONLY
+            - generic [ref=f12e191]: 10:21 AM · Ana Pérez (NOC L2)
+          - paragraph [ref=f12e192]: "Escalado a cuadrilla técnica Belgrano por atenuación crítica (-31.8 dBm en CTO-BEL-114). Orden #TEC-8842 generada en sistema de despacho externo."
+        - generic [ref=f12e193]:
+          - generic [ref=f12e194]:
+            - generic [ref=f12e195]: Ana Pérez · Operator
+            - generic [ref=f12e197]: 10:21 AM
+          - generic [ref=f12e198]: "La orden de servicio asignada es #TEC-8842. La ventana de visita estimada es entre las 11:30 y 13:00 hs."
+          - generic [ref=f12e199]: Read · 10:21 AM
+        - generic [ref=f12e200]:
+          - generic [ref=f12e201]: ¿Hay alguien en el domicilio para recibir al técnico?
+          - generic [ref=f12e202]:
+            - generic [ref=f12e203]: Failed — WhatsApp rejected it
+            - button "Retry" [ref=f12e204] [cursor=pointer]
+        - generic [ref=f12e205]:
+          - generic [ref=f12e206]: Reenviando confirmación de contacto por SMS alternativo...
+          - generic [ref=f12e207]: Sent · 10:22 AM
+      - generic [ref=f12e208]:
+        - generic [ref=f12e209]:
+          - generic [ref=f12e210]: Sent directly to the customer · does not pass through AI
+          - generic [ref=f12e213]: OPERATOR DIRECT CHANNEL
+        - generic [ref=f12e214]:
+          - generic [ref=f12e215]:
+            - button "Attach file" [ref=f12e216] [cursor=pointer]
+            - button "Insert image" [ref=f12e219] [cursor=pointer]
+            - button "Record voice note" [ref=f12e222] [cursor=pointer]
+            - button "Templates" [ref=f12e226] [cursor=pointer]
+            - button "Internal Note Mode" [ref=f12e230] [cursor=pointer]
+          - generic [ref=f12e234]: WhatsApp Business API · Online
+        - textbox "Reply to the customer — goes out as Ana Pérez" [ref=f12e236]
+        - generic [ref=f12e237]:
+          - generic [ref=f12e238]: Enter sends · Shift+Enter new line
+          - button "Send" [ref=f12e240] [cursor=pointer]
+    - complementary [ref=f12e244]:
+      - generic [ref=f12e245]:
+        - button "Customer" [ref=f12e246] [cursor=pointer]
+        - button "Network" [ref=f12e247] [cursor=pointer]
+        - button "Case" [ref=f12e248] [cursor=pointer]
+        - button "Activity" [ref=f12e249] [cursor=pointer]
+        - button "Tools" [ref=f12e250] [cursor=pointer]
+      - generic [ref=f12e252]:
+        - generic [ref=f12e253]:
+          - generic [ref=f12e254]: IDENTITY
+          - generic [ref=f12e255]:
+            - generic [ref=f12e256]:
+              - generic [ref=f12e257]: "Full name:"
+              - generic [ref=f12e258]: Carlos Pérez
+            - generic [ref=f12e259]:
+              - generic [ref=f12e260]: "Phone:"
+              - generic [ref=f12e261]: +54 9 11 4820-9912
+            - generic [ref=f12e262]:
+              - generic [ref=f12e263]: "Customer ID / DNI:"
+              - generic [ref=f12e264]: CX-90214/DNI 28.491.022
+            - generic [ref=f12e265]: Identity verified in this conversation
+        - generic [ref=f12e269]:
+          - generic [ref=f12e270]: LOCATION
+          - generic [ref=f12e271]:
+            - generic [ref=f12e272]:
+              - generic [ref=f12e273]:
+                - generic [ref=f12e274]: "Address:"
+                - generic [ref=f12e275]: MOCK
+              - generic [ref=f12e276]: Av. Cabildo 2410, 4° B
+            - generic [ref=f12e277]:
+              - generic [ref=f12e278]:
+                - generic [ref=f12e279]: "Locality:"
+                - generic [ref=f12e280]: MOCK
+              - generic [ref=f12e281]: Belgrano, CABA
+        - generic [ref=f12e282]:
+          - generic [ref=f12e283]: SERVICE
+          - generic [ref=f12e284]:
+            - generic [ref=f12e285]:
+              - generic [ref=f12e286]: "Plan:"
+              - generic [ref=f12e287]: Fibra 300 Residencial
+            - generic [ref=f12e288]:
+              - generic [ref=f12e289]: "Service State:"
+              - generic [ref=f12e290]: Active
+            - generic [ref=f12e292]:
+              - generic [ref=f12e293]:
+                - generic [ref=f12e294]: "Speed Profiles:"
+                - generic [ref=f12e295]: MOCK
+              - generic [ref=f12e296]: Down 300 Mbps / Up 150 Mbps
+        - generic [ref=f12e297]:
+          - generic [ref=f12e298]: BILLING
+          - generic [ref=f12e299]:
+            - generic [ref=f12e300]:
+              - generic [ref=f12e301]:
+                - generic [ref=f12e302]: "Balance Due:"
+                - generic [ref=f12e303]: MOCK
+              - generic [ref=f12e304]: $ 0.00 ARS
+            - generic [ref=f12e305]:
+              - generic [ref=f12e306]:
+                - generic [ref=f12e307]: "Last Invoice:"
+                - generic [ref=f12e308]: MOCK
+              - generic [ref=f12e309]:
+                - text: "#INV-2024-0412"
+                - generic [ref=f12e310]: 10/05/2024 · $ 14.850 ARS
+            - generic [ref=f12e311]:
+              - generic [ref=f12e312]:
+                - generic [ref=f12e313]: "Last Payment:"
+                - generic [ref=f12e314]: MOCK
+              - generic [ref=f12e315]: 12/05/2024 via MercadoPago
+        - paragraph [ref=f12e317]: Read live from the ISP when this tab is opened — not stored by Dexter.
+  - contentinfo [ref=f12e318]:
+    - generic [ref=f12e319]:
+      - generic [ref=f12e320]: Dexter Operations Console
+      - generic [ref=f12e321]: ·
+      - generic [ref=f12e322]: v4.2.1-isp
+      - generic [ref=f12e323]: ·
+      - generic [ref=f12e324]: WebSocket Live Sync
+    - generic [ref=f12e327]:
+      - generic [ref=f12e328]: "ACTIVE AI SESSIONS: 8"
+      - generic [ref=f12e329]: "|"
+      - generic [ref=f12e330]: "HUMAN QUEUE: 4"
+      - generic [ref=f12e331]: "|"
+      - generic [ref=f12e332]: "AVG RESPONSE: 1m 45s"

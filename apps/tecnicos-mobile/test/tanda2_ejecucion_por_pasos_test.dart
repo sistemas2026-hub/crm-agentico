@@ -1,0 +1,591 @@
+/// TANDA 2 (17/10/2026): la ejecución por pasos de la plantilla, «Comprobar
+/// conexión» dentro de la intervención, y un solo cierre.
+///
+///   A  la regla que reparte campos y fotos en los pasos de la plantilla real
+///   B  la pantalla por pasos: uno a la vez, con anterior y siguiente; sin
+///      pasos, la de siempre
+///   C  «Finalizar» es el único cierre: pregunta por el material si no hay,
+///      pide el reporte de cierre y no lo duplica en un reintento
+///   D  «Comprobar conexión»: la ficha es «Al despachar», la medición es
+///      «Ahora», y sin serial se puede volver a pedir la ficha
+///   E  el dato «no usé materiales» viaja aparte de las respuestas
+///   F  el reporte de cierre con id fijo no se duplica en la cola del teléfono
+library;
+
+import 'dart:convert';
+
+import 'package:campo/core/storage/local_database.dart';
+import 'package:campo/core/sync/sync_queue_service.dart';
+import 'package:campo/core/theme/app_theme.dart';
+import 'package:campo/features/detalle_orden/acciones_orden.dart';
+import 'package:campo/features/detalle_orden/comprobar_conexion.dart';
+import 'package:campo/features/ejecucion/datos_de_ejecucion.dart';
+import 'package:campo/features/ejecucion/ejecucion_screen.dart';
+import 'package:campo/features/trabajo/trabajo_vista.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' show join;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'apoyo/fuente_de_ejecucion_falsa.dart';
+
+const List<Map<String, dynamic>> _pasos = <Map<String, dynamic>>[
+  <String, dynamic>{'id': 'paso_1', 'titulo': 'Diagnóstico'},
+  <String, dynamic>{'id': 'paso_2', 'titulo': 'Solución'},
+];
+
+Map<String, dynamic> _campo(String id, String titulo, {String paso = '', bool req = true}) =>
+    <String, dynamic>{
+      'id': id,
+      'titulo': titulo,
+      'tipo': 'texto',
+      'reglas': <String, dynamic>{'required': req},
+      if (paso.isNotEmpty) 'paso': paso,
+    };
+
+void _pantallaAlta(WidgetTester t) {
+  t.view.physicalSize = const Size(1000, 4200);
+  t.view.devicePixelRatio = 1.0;
+  addTearDown(t.view.resetPhysicalSize);
+  addTearDown(t.view.resetDevicePixelRatio);
+}
+
+Widget _app(FuenteDeEjecucionFalsa fuente, {AccionesOrden? acciones}) => MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: EjecucionScreen(
+        ordenId: 'ot-1',
+        fuente: fuente,
+        acciones: acciones,
+        resumenDeSync: const SyncSummary(
+          status: SyncStatus.idle,
+          isSyncing: false,
+          hasConnectionError: false,
+          mutacionesPendientes: 0,
+          mutacionesConflicto: 0,
+          evidenciasPendientes: 0,
+          datosDirty: 0,
+        ),
+      ),
+    );
+
+Map<String, dynamic> _seguimientoConCierre() => <String, dynamic>{
+      'eventos': <dynamic>[],
+      'momentos_registrados': <String>[],
+      'formularios': <String, dynamic>{
+        for (final String m in <String>['inicio', 'avance', 'bloqueo', 'cierre'])
+          m: <String, dynamic>{
+            'momento': m,
+            'campos': <Map<String, dynamic>>[
+              _campo('nota_$m', m == 'cierre' ? 'Qué se hizo para resolverlo' : 'Nota'),
+            ],
+            'evidencias': <dynamic>[],
+          },
+      },
+    };
+
+/// Aprueba el resumen que «Finalizar» muestra desde el 09/11/2026.
+///
+/// Tolerante: si el resumen no salió --el checklist bloqueó antes, o la hoja
+/// ya se cerró-- no hace nada, así una prueba que verifica que NO se cierra
+/// no se vuelve verde por accidente.
+Future<void> confirmarElResumen(WidgetTester t) async {
+  final Finder ok = find.text('Está bien, finalizar');
+  if (ok.evaluate().isEmpty) return;
+  await t.tap(ok);
+  await t.pumpAndSettle();
+}
+
+void main() {
+  group('A · los pasos son los de la plantilla', () {
+    test('a1 · en orden del protocolo; lo suelto va a «Otros datos»; la firma no', () {
+      final List<PasoDeEjecucion> p = pasosDeEjecucion(
+        campos: <dynamic>[
+          _campo('sol', 'Qué se cambió', paso: 'paso_2'),
+          _campo('med', 'Medición al llegar', paso: 'paso_1'),
+          _campo('obs', 'Observaciones'),
+        ],
+        requisitos: <dynamic>[
+          <String, dynamic>{'id': 'f1', 'titulo': 'Foto caja', 'paso': 'paso_1'},
+          <String, dynamic>{'id': 'firma', 'tipo': 'firma', 'paso': 'paso_2'},
+        ],
+        pasos: <dynamic>[
+          ..._pasos,
+          <String, dynamic>{'id': 'paso_3', 'titulo': 'Sin nada'},
+        ],
+      );
+      expect(p.map((PasoDeEjecucion x) => x.titulo),
+          <String>['Diagnóstico', 'Solución', 'Otros datos']);
+      expect(p[0].campos.single['id'], 'med');
+      expect(p[0].evidencias.single['id'], 'f1');
+      expect(p[1].evidencias, isEmpty, reason: 'la firma es del cierre');
+      expect(p[2].campos.single['id'], 'obs');
+    });
+
+    test('a2 · si nadie declara un paso que exista, no hay pasos: la pantalla de siempre', () {
+      expect(
+        pasosDeEjecucion(
+          campos: <dynamic>[_campo('a', 'A'), _campo('b', 'B', paso: 'inventado')],
+          requisitos: const <dynamic>[],
+          pasos: _pasos,
+        ),
+        isEmpty,
+      );
+    });
+  });
+
+  group('B · la pantalla por pasos', () {
+    FuenteDeEjecucionFalsa porPasos() => FuenteDeEjecucionFalsa(
+          campos: <Map<String, dynamic>>[
+            _campo('med', 'Medición al llegar', paso: 'paso_1'),
+            _campo('sol', 'Qué se cambió', paso: 'paso_2'),
+          ],
+          requisitos: const <Map<String, dynamic>>[],
+          pasos: _pasos,
+        );
+
+    testWidgets('UN CAMPO OPCIONAL VACIO NO ES UNA DEUDA',
+        (WidgetTester t) async {
+      //  Si contara, un paso con un comentario opcional en blanco diria
+      //  «faltan 1 dato» para siempre y el tecnico lo buscaria sin encontrar
+      //  nada que llenar -- el campo no traba el cierre.
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(FuenteDeEjecucionFalsa(
+        campos: <Map<String, dynamic>>[
+          _campo('med', 'Medición al llegar', paso: 'paso_1'),
+          _campo('sol', 'Qué se cambió', paso: 'paso_2'),
+          _campo('obs', 'Observaciones', paso: 'paso_2', req: false),
+        ],
+        requisitos: const <Map<String, dynamic>>[],
+        pasos: _pasos,
+      )));
+      await t.pumpAndSettle();
+
+      //  Se llena SOLO el obligatorio del paso 2 y se vuelve al 1.
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField).first, 'Cambié la roseta');
+      await t.pumpAndSettle();
+      await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')));
+      await t.pumpAndSettle();
+
+      expect(find.bySemanticsLabel('Paso 2, completo'), findsOneWidget,
+          reason: 'el opcional en blanco no es una deuda: el paso 2 queda completo');
+    });
+
+    testWidgets('UN SOLO CONTEO: los círculos, sin la lista de pasos de abajo',
+        (WidgetTester t) async {
+      //  El usuario, probando una instalacion (26/11/2026): «sale un conteo
+      //  de paso hacia la derecha y otro conteo de paso hacia abajo». La
+      //  lista de los otros pasos con su resumen (14/11/2026) se quito; el
+      //  paso completo se ve en su circulo, con ✓.
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(porPasos()));
+      await t.pumpAndSettle();
+
+      //  Se llena el paso 2 y se vuelve al 1: el 2 queda cerrado CON su dato.
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      //  El campo por su tipo y no por su etiqueta: en esta pantalla el
+      //  titulo va FUERA del TextField, asi que `widgetWithText` no lo
+      //  encuentra. Es el mismo patron de `ejecucion_formulario_test`.
+      await t.enterText(find.byType(TextField).last, 'Cambié la roseta');
+      await t.pumpAndSettle();
+      await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')));
+      await t.pumpAndSettle();
+
+      expect(find.bySemanticsLabel('Paso 2, completo'), findsOneWidget,
+          reason: 'el paso hecho se ve en su círculo');
+      expect(find.text('2. Solución'), findsNothing, reason: 'sin la lista de abajo');
+      expect(find.textContaining('Cambié la roseta'), findsNothing,
+          reason: 'el resumen de los otros pasos era la lista que se quitó');
+      expect(find.textContaining(RegExp(r'Paso \d de \d')), findsNothing,
+          reason: 'ni la pastilla «Paso 1 de 2»: el conteo son los círculos');
+      expect(find.text('1. Diagnóstico'), findsOneWidget,
+          reason: 'el número y el nombre del paso abierto, en el título de su bloque');
+    });
+
+    testWidgets('un paso a la vez, con siguiente y anterior; Finalizar en el último',
+        (WidgetTester t) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(porPasos()));
+      await t.pumpAndSettle();
+
+      //  La linea de pasos (09/11/2026): un circulo por paso, y el nombre
+      //  del que esta abierto.
+      //
+      //  LOS OTROS TITULOS AHORA SI SE ESCRIBEN  --  14/11/2026, y es una
+      //  vuelta atras con motivo. La regla del 09/11 era «no entran en un
+      //  renglon, y cortarlos no dice nada», y eso valia porque iban EN FILA
+      //  al lado de los circulos. Desde hoy van en una LISTA VERTICAL, uno
+      //  por renglon y con lo que cada paso ya tiene adentro: la razon que
+      //  cerraba la decision --el ancho-- dejo de existir.
+      //
+      //  El pedido del usuario, con la pantalla de una instalacion delante:
+      //  «es muy confuso para el tecnico; tiene que [ser] un tipo formulario
+      //  para que sea mas facil y que muestre lo que esta llenado».
+      expect(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Paso 2(, completo)?$')), findsOneWidget);
+      expect(find.text('1. Diagnóstico'), findsOneWidget);
+      //  26/11/2026: la lista vertical se quito (salian dos conteos).
+      expect(find.text('2. Solución'), findsNothing,
+          reason: 'el paso que no está abierto es solo su círculo');
+      expect(find.textContaining('Medición al llegar'), findsWidgets);
+      expect(find.textContaining('Qué se cambió'), findsNothing);
+      expect(find.text('Finalizar'), findsNothing);
+
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('Qué se cambió'), findsWidgets);
+      expect(find.textContaining('Medición al llegar'), findsNothing);
+      expect(find.text('Finalizar'), findsOneWidget);
+
+      await t.tap(find.text('Anterior'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('Medición al llegar'), findsWidgets);
+    });
+
+    testWidgets('tocar un paso lo abre', (WidgetTester t) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(porPasos()));
+      await t.pumpAndSettle();
+      //  Se toca el circulo del paso, no su titulo: el titulo del paso que
+      //  no esta abierto ya no se dibuja.
+      await t.tap(find.bySemanticsLabel(RegExp(r'^Paso 2(, completo)?$')));
+      await t.pumpAndSettle();
+      expect(find.text('2. Solución'), findsOneWidget);
+      expect(find.textContaining('Qué se cambió'), findsWidgets);
+    });
+
+    /// EL PEDIDO, EN LA PANTALLA (09/11/2026): «si le dan en 1 diagnostico,
+    /// que solo le muestre lo que esta en diagnostico; quitar la comprobacion
+    /// de conexion y materiales en esta orden».
+    testWidgets('en el primer paso no salen los bloques del final', (WidgetTester t) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(porPasos()));
+      await t.pumpAndSettle();
+
+      //  Paso 1: solo lo del paso 1.
+      expect(find.text('1. Diagnóstico'), findsOneWidget);
+      expect(find.text('Material utilizado'), findsNothing);
+      expect(find.text('Comprobar conexión'), findsNothing);
+
+      //  Y en el ultimo si: es cuando se sabe que material se uso.
+      await t.tap(find.text('Siguiente paso'));
+      await t.pumpAndSettle();
+      expect(find.text('Material utilizado'), findsOneWidget);
+    });
+
+    testWidgets('sin pasos en la plantilla, la pantalla de siempre', (WidgetTester t) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(FuenteDeEjecucionFalsa()));
+      await t.pumpAndSettle();
+      expect(find.bySemanticsLabel(RegExp(r'^Paso 1(, completo)?$')), findsNothing);
+      // El encabezado, y la línea del checklist que lleva el mismo nombre.
+      expect(find.text('Datos del trabajo'), findsWidgets);
+      expect(find.text('Finalizar'), findsOneWidget);
+    });
+  });
+
+  group('C · un solo cierre', () {
+    FuenteDeEjecucionFalsa lista({bool conMaterial = false}) {
+      final FuenteDeEjecucionFalsa f = FuenteDeEjecucionFalsa(
+        valores: <String, dynamic>{
+          'tipo_intervencion': 'Roseta / Conector',
+          'potencia_rx': '-18.4',
+        },
+        evidencias: <Map<String, dynamic>>[
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_power_meter'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'foto_roseta'),
+          FuenteDeEjecucionFalsa.evidencia(requisitoId: 'firma_cliente'),
+        ],
+        materiales: conMaterial
+            ? <Map<String, dynamic>>[FuenteDeEjecucionFalsa.material()]
+            : <Map<String, dynamic>>[],
+      );
+      f.seguimientoDado = _seguimientoConCierre();
+      return f;
+    }
+
+    testWidgets('sin material: pregunta, pide el cierre, y lo guarda con el dato', (WidgetTester t) async {
+      _pantallaAlta(t);
+      final FuenteDeEjecucionFalsa f = lista();
+      await t.pumpWidget(_app(f));
+      await t.pumpAndSettle();
+
+      expect(find.text('Reporte de cierre'), findsNothing,
+          reason: 'el cierre ya no es un botón aparte');
+      expect(find.text('Bloqueo'), findsOneWidget);
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await confirmarElResumen(t);
+      expect(find.text('No hay materiales registrados en esta orden'), findsOneWidget);
+      await t.tap(find.text('Sí, no utilicé materiales'));
+      await t.pumpAndSettle();
+
+      //  LA HOJA DEL CIERRE YA NO SALE (09/11/2026, el usuario: «ese
+      //  ultimo formulario no deberia salir»). Su unica pregunta era de
+      //  texto, y eso el resumen ya lo responde.
+      expect(find.text('Cierre del trabajo'), findsNothing);
+
+      expect(f.reportes, hasLength(1));
+      expect(f.reportes.single['id'], 'seg-ot-1-cierre-r7');
+      expect(f.reportes.single['momento'], 'cierre');
+      final Map<String, dynamic> r = f.reportes.single['respuestas'] as Map<String, dynamic>;
+      //  El reporte viaja igual, con lo que el tecnico aprobo en el resumen.
+      expect(r['nota_cierre'], contains('Roseta / Conector'));
+      expect((r['__plataforma'] as Map)['sin_material_confirmado'], isTrue);
+      expect(f.transiciones, hasLength(1), reason: 'y la orden queda finalizada');
+    });
+
+    testWidgets('con material registrado no pregunta, y no afirma nada del material', (WidgetTester t) async {
+      _pantallaAlta(t);
+      final FuenteDeEjecucionFalsa f = lista(conMaterial: true);
+      await t.pumpWidget(_app(f));
+      await t.pumpAndSettle();
+
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await confirmarElResumen(t);
+      expect(find.text('No hay materiales registrados en esta orden'), findsNothing);
+      expect((f.reportes.single['respuestas'] as Map).containsKey('__plataforma'), isFalse);
+    });
+
+    /// Antes esto cerraba la hoja del cierre con su ✕. Esa hoja ya no sale
+    /// cuando el resumen responde todo, asi que lo que se mide ahora es su
+    /// equivalente: «Corregir» no escribe nada ni finaliza.
+    testWidgets('corregir el resumen no finaliza', (WidgetTester t) async {
+      _pantallaAlta(t);
+      final FuenteDeEjecucionFalsa f = lista(conMaterial: true);
+      await t.pumpWidget(_app(f));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Corregir'));
+      await t.pumpAndSettle();
+      expect(f.reportes, isEmpty);
+      expect(f.transiciones, isEmpty);
+    });
+
+    testWidgets('un reintento de finalizar no pide ni escribe otro cierre', (WidgetTester t) async {
+      _pantallaAlta(t);
+      final FuenteDeEjecucionFalsa f = lista(conMaterial: true);
+      // El cierre de esta vuelta ya está en el teléfono (un intento anterior).
+      f.reportes.add(<String, dynamic>{'id': 'seg-ot-1-cierre-r7', 'momento': 'cierre'});
+      await t.pumpWidget(_app(f));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await confirmarElResumen(t);
+      expect(find.text('Cierre del trabajo'), findsNothing);
+      expect(f.reportes, hasLength(1));
+      expect(f.transiciones, hasLength(1));
+    });
+
+    testWidgets('sin el seguimiento en el teléfono, finaliza igual', (WidgetTester t) async {
+      // El trabajo no puede quedar trabado porque el formulario del cierre no
+      // bajó: se finaliza, y la bitácora queda sin ese reporte.
+      _pantallaAlta(t);
+      final FuenteDeEjecucionFalsa f = lista(conMaterial: true)..seguimientoDado = null;
+      await t.pumpWidget(_app(f));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Finalizar'));
+      await t.pumpAndSettle();
+      await confirmarElResumen(t);
+      expect(f.transiciones, hasLength(1));
+    });
+  });
+
+  group('D · Comprobar conexión', () {
+    TrabajoVista trabajo({bool conSerial = true, bool conLectura = true}) =>
+        TrabajoVista.desdeOrden(<String, dynamic>{
+          'id': 'ot-1',
+          'numero': 1849,
+          'estado': 'en_sitio',
+          'cliente_nombre': 'Cliente',
+          'telefono': '3001234567',
+          'contexto_json': jsonEncode(<String, dynamic>{
+            'contexto_disponible': conLectura || conSerial,
+            'capturado_en': '2026-10-17T13:10:00+00:00',
+            if (conSerial) 'sn_onu': 'ZTEGC0A1B2C3',
+            if (conLectura)
+              'equipo': <String, dynamic>{
+                'onu_status': 'Online',
+                'onu_signal_1490': '-21.19 dBm',
+                'onu_signal_1490_veredicto': 'aceptable',
+              },
+          }),
+        });
+
+    AccionesOrden acciones({
+      List<String>? llamadas,
+      ResultadoRefresco refresco = const ResultadoRefresco(ok: true),
+    }) =>
+        AccionesOrden(
+          transicionar: ({
+            required String ordenId,
+            required String nuevoEstadoLocal,
+            required String tipoAccion,
+            required int revisionBase,
+          }) async {},
+          sincronizar: () async {},
+          medirSenal: (String _) async {
+            llamadas?.add('medir');
+            return MedicionDeSenal(
+              medido: true,
+              medidoEn: DateTime(2026, 10, 17, 11, 42),
+              senal1490: -19.4,
+              veredicto: 'aceptable',
+              estadoOnu: 'Online',
+            );
+          },
+          probarConexion: (String _, int n) async => ResultadoPing(
+            medido: true,
+            paquetes: <PaqueteDePing>[
+              for (int i = 1; i <= n; i++) PaqueteDePing(n: i, respondio: i != 2),
+            ],
+          ),
+          refrescarFicha: (String _) async {
+            llamadas?.add('refrescar');
+            return refresco;
+          },
+        );
+
+    Future<void> montar(WidgetTester t, Widget w) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: Scaffold(body: SingleChildScrollView(child: w)),
+      ));
+      await t.pumpAndSettle();
+    }
+
+    testWidgets('la ficha dice «Al despachar»; medir dice «Ahora»', (WidgetTester t) async {
+      await montar(t, ComprobarConexion(
+        ordenId: 'ot-1', trabajo: trabajo(), acciones: acciones()));
+
+      expect(find.textContaining('AL DESPACHAR'), findsOneWidget);
+      expect(find.text('Rx ONU -21.19 dBm'), findsOneWidget);
+      expect(find.textContaining('no confirma que el cliente tenga internet'), findsOneWidget);
+      expect(find.text('Consultar'), findsNothing,
+          reason: 'con ficha completa no hace falta');
+
+      await t.tap(find.text('Medir'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('AHORA · 11:42'), findsOneWidget);
+      expect(find.text('Rx ONU -19.40 dBm'), findsOneWidget);
+    });
+
+    testWidgets('el ping dice cuántos respondieron, y no dictamina', (WidgetTester t) async {
+      await montar(t, ComprobarConexion(
+        ordenId: 'ot-1', trabajo: trabajo(), acciones: acciones()));
+      await t.tap(find.text('Ping'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('respondieron 3 de 4'), findsOneWidget);
+      expect(find.textContaining('caído'), findsNothing);
+      expect(find.textContaining('funciona'), findsNothing);
+    });
+
+    testWidgets('sin serial no se ofrece medir, pero sí volver a pedir la ficha', (WidgetTester t) async {
+      final List<String> llamadas = <String>[];
+      int recargas = 0;
+      await montar(t, ComprobarConexion(
+        ordenId: 'ot-1',
+        trabajo: trabajo(conSerial: false, conLectura: false),
+        acciones: acciones(llamadas: llamadas),
+        alActualizarFicha: () async => recargas++,
+      ));
+
+      expect(find.text('Medir'), findsNothing);
+      expect(find.textContaining('no llegó cuando se creó la orden'), findsOneWidget);
+      await t.tap(find.text('Consultar'));
+      await t.pumpAndSettle();
+      expect(llamadas, <String>['refrescar']);
+      expect(recargas, 1, reason: 'con éxito, quien la muestra relee la orden');
+    });
+
+    testWidgets('si no se pudo, lo dice y no promete un reintento solo', (WidgetTester t) async {
+      int recargas = 0;
+      await montar(t, ComprobarConexion(
+        ordenId: 'ot-1',
+        trabajo: trabajo(conSerial: false, conLectura: false),
+        acciones: acciones(
+            refresco: const ResultadoRefresco(ok: false, motivo: 'sin_conexion')),
+        alActualizarFicha: () async => recargas++,
+      ));
+      await t.tap(find.text('Consultar'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('Sin señal no se puede consultar'), findsOneWidget);
+      expect(recargas, 0);
+    });
+
+    testWidgets('en Ejecutar está, sin salir de la intervención', (WidgetTester t) async {
+      _pantallaAlta(t);
+      await t.pumpWidget(_app(FuenteDeEjecucionFalsa(), acciones: acciones()));
+      await t.pumpAndSettle();
+      expect(find.text('Comprobar conexión'), findsOneWidget);
+    });
+  });
+
+  group('E · «no usé materiales» viaja aparte', () {
+    test('se saca de las respuestas y va como dato del cierre', () {
+      final Map<String, dynamic> c = SyncQueueService.cuerpoDelReporte(
+        momento: 'cierre',
+        respuestas: <String, dynamic>{
+          'solucion': 'x',
+          '__plataforma': <String, dynamic>{'sin_material_confirmado': true, 'otro': 1},
+        },
+      );
+      expect(c['sin_material_confirmado'], isTrue);
+      expect((c['respuestas'] as Map).containsKey('__plataforma'), isFalse);
+      expect(c.containsKey('otro'), isFalse, reason: 'solo pasa lo nombrado');
+    });
+
+    test('fuera del cierre no viaja', () {
+      final Map<String, dynamic> c = SyncQueueService.cuerpoDelReporte(
+        momento: 'avance',
+        respuestas: <String, dynamic>{
+          'nota': 'x',
+          '__plataforma': <String, dynamic>{'sin_material_confirmado': true},
+        },
+      );
+      expect(c.containsKey('sin_material_confirmado'), isFalse);
+      expect((c['respuestas'] as Map).containsKey('__plataforma'), isFalse);
+    });
+  });
+
+  group('F · el cierre con id fijo no se duplica en el teléfono', () {
+    setUpAll(() {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      LocalDatabase.usarBaseDePruebas('pruebas_tanda2_cierre.db');
+    });
+    tearDown(() async {
+      LocalDatabase.resetForTesting();
+      await databaseFactory.deleteDatabase(
+        join(await databaseFactory.getDatabasesPath(), 'pruebas_tanda2_cierre.db'),
+      );
+    });
+
+    test('dos veces el mismo id: una sola fila', () async {
+      LocalDatabase.resetForTesting();
+      final LocalDatabase base = LocalDatabase();
+      Future<String> encolar(String texto) => base.encolarSeguimiento(
+            ordenId: 'ot-1',
+            orgId: 'org-1',
+            profileId: 'prof-1',
+            momento: 'cierre',
+            respuestas: <String, dynamic>{'solucion': texto},
+            idFijo: 'seg-ot-1-cierre-r7',
+          );
+      expect(await encolar('primera'), 'seg-ot-1-cierre-r7');
+      expect(await encolar('segunda'), 'seg-ot-1-cierre-r7');
+      final List<Map<String, dynamic>> pend =
+          await base.seguimientosPendientes(orgId: 'org-1', profileId: 'prof-1');
+      expect(pend, hasLength(1));
+      expect(jsonDecode(pend.single['respuestas_json'] as String)['solucion'], 'primera');
+      expect(await base.existeSeguimiento('seg-ot-1-cierre-r7'), isTrue);
+      expect(await base.existeSeguimiento('seg-ot-1-cierre-r8'), isFalse);
+    });
+  });
+}

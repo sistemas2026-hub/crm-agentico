@@ -1,0 +1,65 @@
+# =============================================================================
+#  PREPRODUCCIÓN EN TU PC  --  25/11/2026
+# =============================================================================
+#  NO se usa solo: va SIEMPRE encima de docker-compose.prod.yml, el mismo que
+#  despliega Dokploy. Lo maneja scripts/preproduccion.sh:
+#
+#     bash scripts/preproduccion.sh arriba      # la primera vez (~10 min)
+#     bash scripts/preproduccion.sh actualizar  # después de cada cambio
+#     bash scripts/preproduccion.sh abajo       # borra todo, base incluida
+#
+#  Por qué encima del de producción y no un compose propio: así se prueba el
+#  archivo que de verdad se despliega. Si alguien agrega un servicio o una
+#  variable obligatoria a docker-compose.prod.yml, revienta acá primero y no en
+#  el VPS. Un compose aparte se desactualizaría sin que nadie lo note.
+#
+#  Lo único que este archivo agrega:
+#    - 'db': un Postgres local (en producción la base es el Supabase del VPS);
+#    - puertos publicados SOLO en 127.0.0.1, para abrirlo en el navegador
+#      (en producción nadie publica puertos: entra todo por Traefik);
+#    - ORIGIN del frontend, porque acá se entra por http y no por https.
+#
+#  Las variables salen de .preproduccion/variables.env, que el script genera
+#  con secretos al azar, WispHub simulado y claves de modelo FALSAS. Nada de lo
+#  que pase acá sale de tu PC: ni WhatsApp (la config del tenant no trae las
+#  credenciales de Meta), ni WispHub, ni correos con enlaces válidos.
+# =============================================================================
+
+name: dexter-preprod
+
+services:
+  db:
+    #  pg17: la versión del Supabase de producción. Una copia de sus datos
+    #  (copiar-produccion) se restaura con la misma versión que la escribió.
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DBPASSWORD:?}
+      POSTGRES_DB: crm_db
+    volumes:
+      - preprod_db:/var/lib/postgresql/data
+      - ./django-crm/docker/postgres/init-rls-user.sql:/docker-entrypoint-initdb.d/init-rls-user.sql:ro
+    ports:
+      - "127.0.0.1:${PUERTO_BASE:-54330}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    ports:
+      - "127.0.0.1:${PUERTO_BACKEND:-8300}:8000"
+
+  frontend:
+    ports:
+      - "127.0.0.1:${PUERTO_FRONTEND:-3300}:3000"
+    environment:
+      #  Sin ORIGIN, adapter-node arma el origen con 'https' (no hay
+      #  PROTOCOL_HEADER): en producción coincide, porque Traefik sirve https.
+      #  Acá se entra por http y todo formulario rebota con 403 «Cross-site
+      #  POST form submissions are forbidden» (medido el 25/11/2026: el login).
+      ORIGIN: http://localhost:${PUERTO_FRONTEND:-3300}
+
+volumes:
+  preprod_db:
